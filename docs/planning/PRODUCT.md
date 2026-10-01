@@ -1,25 +1,25 @@
 # Ariadne product plan
 
-Planning baseline: 1 October 2026. This document defines intended behavior; it does not claim that the application exists.
+Planning baseline: 1 October 2026; managed-session revision: 2 October 2026. This document defines intended behavior; it does not claim that the application exists.
 
 ## The product
 
-Ariadne is a quiet second screen for a long coding conversation. It answers three questions: **What have we decided? What needs my answer? Where did this come from?** The agent maintains a tree of understandable sentences. The owner reads, answers, and returns to the terminal. Claude Code and Codex remain the places where the work happens.
+Ariadne is a quiet second screen and session controller for a long coding conversation. It answers three questions: **What have we decided? What needs my answer? Where did this come from?** The agent maintains a tree of understandable sentences. Ariadne runs the official coding agent locally and lets the owner answer directly. **Claude Code is primary; Codex also supports the full workflow.**
 
-The first release includes every required capability in `BUILD_PROMPT.md`. Milestones are increments toward that release, not permission to stop at a prototype. Product and behavior follow `BUILD_PROMPT.md`, then `DESIGN_PROMPT.md`; visual decisions follow the supplied HTML mockups. This session produces plans and a local planning history only.
+The first release covers the build prompt with the owner's later correction: answers must reach managed agents without another terminal message. This supersedes the prompt's hook-only/next-turn baseline and adds minimal conversation controls. Other behavior follows `BUILD_PROMPT.md`, then `DESIGN_PROMPT.md`; visual decisions follow the supplied HTML mockups. This session produces plans and a local planning history only.
 
 ## Primary journey
 
 1. Install Ariadne and run project setup for Claude Code, Codex, or both.
-2. Start a coding conversation. Its Ariadne session becomes visible in the project/session picker.
+2. Choose New session in Ariadne, select the project, review its launch configuration, and enter a task. Claude Code is selected by default; Codex is available. The app launches the installed CLI using its existing authentication.
 3. The agent records topics, questions, decisions, findings, explanations, and tasks as it works. Follow-ups attach to the item that caused them.
 4. The owner glances at the tree and the persistent **Waiting on me** panel.
 5. Selecting a waiting item reveals its ancestors, options, consequences, recommendation, and relevant message excerpts.
 6. The owner chooses an option, adds optional text, or writes a free-form answer, then explicitly submits it.
-7. The item immediately leaves the waiting queue and displays **Answered · awaiting agent**. On the next owner turn, the agent receives the answer, acknowledges receipt, does the work, and records the outcome and reason.
+7. The item immediately leaves the waiting queue. Ariadne sends the saved answer to the bound conversation when idle, or automatically after its active turn finishes. The agent acknowledges receipt, does the work, and records outcome and reason. No extra terminal message is required.
 8. Closed branches become visually quieter while remaining inspectable. Replacement links and the message timeline preserve the path back to the original question.
 
-An answer in Ariadne does not independently start an agent turn or approve an external action. For example, answering the demo's PR question records the owner's choice; Ariadne does not call GitHub or approve a PR.
+Submitting an answer authorizes its delivery and a follow-up agent turn in the managed conversation. Host tool permissions remain separate. For example, the PR answer becomes input for the agent; any tool permission needed to act still uses the host's approval path. Demo sessions never launch a real agent or perform external actions.
 
 ## Release scope
 
@@ -32,10 +32,13 @@ An answer in Ariadne does not independently start an agent turn or approve an ex
 | Navigation | Tree and graph, search, status/topic/owner filters, keyboard navigation |
 | Live state | Changes from agents appear without refresh; drafts survive unrelated updates |
 | macOS | Tray count and quick list, native notification with item navigation, pin window, terminal open/focus |
-| Agents | Shared rules, Claude plugin, Codex instructions and hook where supported, reliable answer pickup |
+| Agents | Managed Claude Code first, managed Codex, shared MCP rules/tools, optional external CLI/plugin/hooks |
+| Conversation control | Initial/follow-up prompt, live activity, permissions, Stop/Resume, honest connection and delivery states |
 | Lifecycle | Repeatable setup/uninstall, demo command, one-command local build/install, README |
 
-The optional message rail, transcript ingestion, automatic AI summaries, collaboration, cloud sync, accounts, embedded chat, PR actions, and cross-platform packaging are outside release one. The item timeline supplies message provenance without the optional rail.
+The optional message rail, private transcript ingestion, automatic AI summaries, collaboration, cloud sync, account management, a full IDE/terminal emulator, automatic worktree creation, direct PR actions, and cross-platform packaging are outside release one. A collapsible Conversation panel supplies the controls needed to operate managed sessions. The item timeline remains the durable provenance view.
+
+One managed conversation can run in each project root at a time; separate existing worktrees can run independently. Existing arbitrary terminal processes cannot be taken over. Optional external sessions are labelled **External session · manual pickup**. Managed sessions, process ownership and authentication are specified in [AGENT_RUNTIME](AGENT_RUNTIME.md).
 
 ## Interaction contract
 
@@ -55,9 +58,9 @@ The optional message rail, transcript ingestion, automatic AI summaries, collabo
 - Sort by when an item most recently entered **Waiting on me**, then stable item order. Show the plain-language topic/ancestor path.
 - A recommendation is visual guidance, never an already-submitted answer. Allow exactly one selected option plus optional explanatory text, or nonempty free text alone.
 - Submit once and show progress; retain the draft and show an inline explanation if submission fails.
-- Keep answered items in a **Sent** subsection until receipt is acknowledged, then display the item's real working/terminal state. **Answered · awaiting agent** is an answer-delivery label, not an eighth item status.
+- Keep answered items in **Sent** until receipt is acknowledged. Distinguish Saved, Queued · agent busy, Sent · awaiting acknowledgment, Received, and Delivery uncertain. Stopped agents show Resume; an explicit Stop is never reversed by a new answer. These are delivery labels, not extra item statuses.
 - Preserve a draft when unrelated changes arrive. If the question/options change or the item closes while the owner is typing, preserve the text and require review against the refreshed item before sending.
-- Corrections are new answers while the question is still active; never silently edit an answer already delivered. A correction arriving during agent work must remain visible for its next turn.
+- Corrections are new answers while the question is still active; never silently edit an answer already delivered. A correction arriving during agent work queues automatically for its next turn.
 - Answering one item does not close its siblings or its parent.
 
 ### Search, filters, and graph
@@ -97,3 +100,5 @@ Keep the seven specified statuses: `open`, `waiting_on_me`, `in_progress`, `deci
 Measure these on a documented reference Mac rather than treating them as guarantees before measurement: external writes visible within one second; answer submission acknowledged by the local store within 250 ms at p95; first usable session view within two seconds; search within 150 ms at p95 for a 2,000-item / 5,000-message fixture. Graph may initially show a selected topic for large sessions, with an explicit all-topics action and a visible scope label.
 
 The app must remain useful with an empty session, denied notifications, an unavailable project, a malformed file, and an agent that has not picked up an answer. These states need explicit UI, not a spinner that never finishes.
+
+Target dispatch within one second of durable save when the managed agent is idle; provider response time is excluded. Busy, stopped, permission-blocked, signed-out, rate-limited, incompatible, and uncertain-delivery states require specific actions/status. Permission cards remain visible outside the Conversation panel and cannot be answered by selecting an ordinary task option.

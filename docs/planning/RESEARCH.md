@@ -1,6 +1,17 @@
 # Platform research ledger
 
-**Checked:** 2026-10-01. This records official documentation and release evidence for planning; documented support has not been exercised in this workspace unless explicitly stated. Links below point to upstream official sources.
+**Checked:** 2026-10-01; managed runtime sources rechecked 2026-10-02. This records documentation evidence, not working integration tests. Links below point to official sources.
+
+## Managed-runtime revision
+
+The chosen design is [AGENT_RUNTIME](AGENT_RUNTIME.md). Original hook/plugin findings below now support the optional external-terminal mode. They are not the primary delivery mechanism.
+
+- Local read-only observations: Claude Code **2.1.287**, Codex **0.159.3**. Version/help output was inspected; no paid model invocation or login-token access was performed.
+- Claude's programmatic interface and control flags support the proposed proof: [programmatic use](https://code.claude.com/docs/en/headless) and [CLI reference](https://code.claude.com/docs/en/cli-reference). Persistent input, permission result schemas, acceptance correlation and process cleanup remain M0 executable tests.
+- Codex's official client protocol is the basis of the second adapter: [app-server](https://learn.chatgpt.com/docs/app-server). Record tested schemas and supported versions rather than assuming forward compatibility.
+- Conductor confirms CLI-auth/provider configuration and bundled or user-selected Claude executables: [providers](https://www.conductor.build/docs/guides/providers) and [Claude harness](https://www.conductor.build/docs/reference/harnesses/claude-code). Its exact internal transport implementation was not established from those pages.
+- Authentication design follows the distinction in [Claude's current legal/authentication documentation](https://code.claude.com/docs/en/legal-and-compliance). Ariadne does not intermediate credentials. No claim about a June billing change or its alleged pause is adopted from secondary reports.
+- The intermediate Claude Channels / pending MCP question proposal is superseded. It is unnecessary for the chosen managed-session workflow and creates no release dependency.
 
 ## Observed official documentation
 
@@ -14,20 +25,22 @@
 - **Single instance/focus:** The official plugin lists macOS support. Its second-instance callback receives app handle, arguments and cwd; docs show focusing the existing `main` webview window with `set_focus()`. The plugin docs say it must be registered first among plugins. [Single-instance plugin](https://v2.tauri.app/plugin/single-instance/)
 - **WebDriver:** Tauri’s recommended WebdriverIO Tauri service supports macOS through its embedded WebDriver server. Direct `tauri-driver` desktop use supports Windows/Linux only because macOS has no WKWebView driver tool. [WebDriver testing](https://v2.tauri.app/develop/tests/webdriver/)
 
-### Claude Code local plugins, hooks, and settings
+### Optional external Claude Code plugins, hooks, and settings
 
 - **Plugin layout and scopes:** A plugin directory packages skills, hooks and optional other components. User, project and local scopes respectively enable plugins across the machine, across repository collaborators, or for one user in one repository. Settings are `~/.claude/settings.json`, `.claude/settings.json`, and `.claude/settings.local.json`; local overrides project, which overrides user. Disabling/uninstalling is documented. [Plugin install and scopes](https://code.claude.com/docs/en/plugins/install#choose-an-install-scope) · [Manage installed plugins](https://code.claude.com/docs/en/plugins/install#manage-installed-plugins)
 - **Local, no-publish paths:** `--plugin-dir` loads a local plugin for one session only. The docs also say a plugin directory in `~/.claude/skills/` containing `.claude-plugin/plugin.json` loads every session without a marketplace or install step; `claude plugin init` scaffolds there. A repository can also use standalone project skills/hooks or a local marketplace path. [Create plugins](https://code.claude.com/docs/en/plugins/create#develop-without-a-marketplace) · [Persistent personal plugin](https://code.claude.com/docs/en/plugins/create#make-a-plugin-load-in-every-session) · [Local marketplace source](https://code.claude.com/docs/en/plugins/install#add-a-marketplace)
 - **Project skills-directory plugins:** `.claude/skills/<name>/.claude-plugin/plugin.json` is also supported. The project must be trusted, and discovery uses the primary working directory rather than searching parent directories; launch from the project root for this plan's project setup. [Plugin loading reference](https://code.claude.com/docs/en/plugins/loading#plugins-shared-through-a-repository)
 - **UserPromptSubmit hook:** Runs before Claude processes each prompt. The hook receives the submitted prompt and can return JSON `hookSpecificOutput.additionalContext`; that context is added alongside the prompt. Default command-hook timeout is 30 seconds; timeout discards output/context while the prompt continues. [Hooks reference](https://code.claude.com/docs/en/hooks#userpromptsubmit-input) · [Context output](https://code.claude.com/docs/en/hooks#add-context-for-claude)
 
-### Codex CLI local findings and official docs
+### Optional external Codex CLI findings and official docs
 
 - **Local version observation supplied by the main agent:** codex-cli `0.159.3`. This is a local environment observation, not verified here as the current public release.
 - **Hooks:** Official Codex documentation lists both user (`~/.codex/hooks.json`) and repository (`<repo>/.codex/hooks.json`) hook configuration, and supports `UserPromptSubmit` JSON output with `hookSpecificOutput.additionalContext`. Non-managed hooks require trust/review; `/hooks` lets users inspect, trust, or disable them. [Codex hooks](https://learn.chatgpt.com/docs/hooks)
 - **AGENTS.md precedence:** Global instructions load first; project instructions are discovered from project root down to cwd. Closer instructions are appended later and override broader guidance; `AGENTS.override.md` replaces `AGENTS.md` within the same directory. [AGENTS.md configuration](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
 
 ## Not yet exercised / planning spikes
+
+- Prove Claude managed multi-turn input, answer-only continuation, permissions and stop/resume first; then Codex parity. Prove app death, worker cleanup, duplicate-run prevention and uncertain-dispatch recovery. These are release gates, not optional investigations.
 
 - Test macOS notification delivery, permission denial, app foreground/background behavior, and click-to-route with a packaged app; current Tauri docs only document notification action callbacks on mobile.
 - Test whether a dynamic numeric tray title is legible and stable under menu-bar crowding, notch layouts, and common menu-bar managers; official docs specify a macOS title but no count/badge behavior.

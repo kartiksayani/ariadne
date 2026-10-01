@@ -6,7 +6,7 @@ These are implementation contracts. Examples below specify the intended CLI; the
 
 | Entity | Required fields and semantics |
 | --- | --- |
-| Session | `schema_version: 1`, `id`, `project_id`, `title`, `revision`, `created_at`, `updated_at`, `topics`, `items`, `messages`, `answers`, `consumers`, `operation_receipts` |
+| Session | `schema_version: 1`, `id`, `project_id`, `title`, `revision`, `created_at`, `updated_at`, `topics`, `items`, `messages`, `answers`, `consumers`, `runs`, `outbox`, `host_requests`, `operation_receipts` |
 | Topic | `id`, `name`, `order`, `created_at`; exists in one session |
 | Item | `id`, `topic_id`, `parent: null\|id`, `question`, `type`, `status`, `owner`, `created_at`, `updated_at`, `revision`, `created_in_message`, `updated_in_messages`, `links`, `options`, `status_history` |
 | Conditional item fields | `outcome`, `why` for terminal states; `replaced_by` for replaced; `waiting_since` and `recipient_consumer_id` for waiting; `last_answer_seq` when answered |
@@ -15,7 +15,11 @@ These are implementation contracts. Examples below specify the intended CLI; the
 | Link | `kind: pr\|file\|doc`, `label`, `target` (display/copy only in v1) |
 | Message | Monotonic `number`, `author: me\|agent`, optional `consumer_id`, `timestamp`, `excerpt`, `items_touched` |
 | Answer | Monotonic `seq`, UUID `id`, `item_id`, `question_revision`, copied question/options, `selected_option_id?`, `text?`, `recipient_consumer_id`, `created_at`, `message_number`, `supersedes_answer_id?` |
-| Consumer | `id`, `agent: claude\|codex`, host session identifier, optional human label, `created_at`, `last_seen_at`, issued and acknowledged answer sequences |
+| Consumer | `id`, `agent: claude\|codex`, `mode: managed\|external`, host session/thread identifier (unset until initialization), optional human label, `created_at`, `last_seen_at`, issued and acknowledged answer sequences |
+| Run | UUID `id`, `consumer_id`, executable path/version, non-secret launch profile reference, host conversation ID, process state, start/end time and terminal reason; persisted process state is historical after disconnect |
+| Outbox entry | UUID `id`, `consumer_id`, `kind: answers\|prompt`, `route: turn\|host_response\|external_fetch`, optional request/run ID for host response, monotonic per-consumer `input_seq`, ordered `answer_ids` or bounded owner prompt, creation time, `state`, send attempts, host acceptance reference, last error; one logical entry per submitted input |
+| Send attempt | UUID `id`, `run_id`, exact payload digest/answer IDs, prepared time, accepted time/reference if proven, rejection/uncertainty reason; retain attempts rather than overwriting uncertainty |
+| Host request | Opaque request ID scoped by run, `kind: permission\|user_input`, bounded tool/operation display data, optional related item, `pending\|decided\|returned\|expired`, owner response/time, response evidence; permission and answer responses have separate typed commands |
 | Status history entry | Previous/new status, time, message number, previous outcome/why when applicable; immutable |
 | Operation receipt | Client operation key, canonical input digest, resulting IDs/revision; persistent for the session lifetime |
 
@@ -57,9 +61,10 @@ Global flags: `--project PATH`, `--session ID`, `--consumer ID`, `--json`. Mutat
 | `apply --input FILE` or `apply --stdin` | One atomic message plus multiple item operations, using local refs for new IDs |
 | `answer submit ITEM --input FILE`, `answer fetch`, `answer ack --ids ID,...` | Shared UI/CLI answer protocol; fetch is non-destructive |
 | `hook claude`, `hook codex` | Read host JSON on stdin; emit only host-compatible context output on stdout |
-| `setup --agent claude\|codex\|both [--global] [--dry-run]` | Install owned integration resources and print exact changes |
+| `mcp serve` | Local stdio protocol server; requires fixed launch binding; diagnostics only on stderr |
+| `setup --agent claude\|codex\|both [--global] [--external-terminal] [--dry-run]` | Default managed-launch resources; opt-in external host files; print exact changes |
 | `uninstall [--agent ...] [--global] [--dry-run]` | Reverse integration changes; preserve session history |
-| `demo [--project PATH]`, `open [--item ID]` | Seed isolated demo, open/focus app |
+| `demo [--project PATH]`, `open [--item ID]` | Seed isolated demo, open/focus app; demo never launches a provider |
 | `doctor`, `session validate ID`, `session repair ID --from-backup` | Diagnose store/discovery/integration; deliberate backup recovery |
 
 Simple item mutations take `--message NUMBER` or `--excerpt TEXT`. If no message is supplied, the CLI creates a truthful operation excerpt from the provided item text, rather than leaving provenance missing. `message add` deduplicates touched IDs and updates backlinks. `apply` is the preferred agent path: one call per meaningful reply instead of one process per field.
@@ -95,33 +100,59 @@ Default stdout is compact line-oriented text: predictable verb/IDs/status plus e
 
 Exit codes: `0` success, `2` usage/validation, `3` unknown project/session/item, `4` conflict or store busy, `5` I/O/corruption/unsupported schema, `6` integration/install failure. Include field paths and corrective examples. A no-answer fetch succeeds with an empty array. Hook adapters deliberately translate internal errors into non-blocking host behavior; they do not reuse ordinary CLI exit codes blindly.
 
+## Managed session and MCP interfaces
+
+Tauri exposes typed `agent_start`, `agent_resume`, `agent_stop`, `agent_send`, `agent_status`, `permission_respond`, `user_input_respond`, and `delivery_resolve` commands. Each resolves backend-owned project/session/run IDs; none accepts an arbitrary shell string or executable from the renderer. New/resumed sessions pass validated launch profiles and project trust. `agent_send` persists the owner prompt and outbox entry before returning. `delivery_resolve` permits explicit resend of an uncertain input or marking it reviewed without claiming agent receipt.
+
+MCP tool names below are Ariadne's application contract; wire names are generated by the selected MCP SDK:
+
+| Tool | Behavior |
+| --- | --- |
+| `session_read` | Bounded state/query for the launch-bound session; no arbitrary project path |
+| `apply` | Same atomic message/item operations, revisions, limits and receipts as CLI apply |
+| `answer_fetch` | Non-destructive answers for the launch-bound consumer, with explicit pagination |
+| `answer_ack` | Acknowledge exact fully issued IDs; cannot acknowledge another consumer's answers |
+| `permission_prompt` | Claude-specific permission bridge: validate host payload, persist request, wait without holding store lock, return only matching live owner decision |
+
+There is no general `send_message` MCP tool: the Rust runtime sends owner input through the agent's conversation protocol. Ordinary domain MCP calls finish promptly. `permission_prompt` is the sole waiting bridge; disconnect/timeout expires the request. Agent domain tools cannot write permission decisions, run state, or outbox acceptance. The same OS account is a trust boundary, not an adversarial multi-tenant sandbox.
+
+No full transcript is required for these contracts. Streamed conversation activity is a bounded runtime view; stored excerpts remain the durable item history. Bound owner prompts to 16 KiB, protocol frames initially to 8 MiB, in-memory activity to 2 MiB per run, and host-request display payloads to 64 KiB. Over-limit protocol input produces an explicit error and stops dispatch; never truncate an operation presented for approval. All persisted fields count toward the session's 20 MiB bound. Verify these provisional limits against M0 host fixtures.
+
 ## Session and recipient resolution
 
-An Ariadne session represents one working conversation by default. A host's stable session ID binds to exactly one Ariadne session and one consumer for that project. Resuming the same host session reuses it; a new conversation creates a new Ariadne session unless explicitly attached. UI tab selection never changes this routing. Binding lookup is project-local, with a lock around creation so duplicate hook calls cannot create duplicate sessions.
+An Ariadne session represents one working conversation by default. Allocate its session and consumer before managed launch, then bind the host ID returned by initialization in a transaction. No answer is dispatched before this binding is known. A host's stable session/thread ID binds to exactly one Ariadne session and consumer for the project. Resuming reuses it; a new conversation creates a new Ariadne session unless explicitly attached. UI tab selection never changes routing. Binding lookup/creation is serialized so retries cannot create duplicate sessions. A project runtime lease prevents concurrent managed writers in the same root.
 
 For ordinary terminal commands: explicit session wins, then explicit consumer binding, then project convenience default, then the only session if there is exactly one. If several sessions exist with no unambiguous choice, fail and list the choices; never pick “most recently modified.” Agent rules always use the returned session and consumer IDs explicitly. Hooks receive the host session identifier and working directory; they do not inspect private transcript formats.
 
-Each waiting item has one recipient consumer. Two agents may share a session when explicitly bound, but their answer queues remain distinct. Transferring answers between agents or continuing a topic into another session is not automatic in v1. A stopped agent's answers stay queued for its bound conversation; the UI states this plainly.
+Each waiting item has one recipient consumer. Consumers can share a session through explicit CLI binding, but their answer queues remain distinct and only one managed run is allowed per project. Transferring answers between agents or continuing a topic into another session is not automatic in v1. A stopped managed run's answers stay queued for its bound conversation until Resume. External answers remain available through `external_fetch` until acknowledged; they never require or trigger managed Resume.
 
-## Answer delivery: at least once, explicit receipt
+## Answer delivery: durable dispatch and explicit receipt
 
 ```mermaid
 sequenceDiagram
     participant U as Owner / app
     participant S as Shared store
-    participant H as Turn-start hook
+    participant R as Rust session worker
     participant A as Coding agent
     U->>S: Submit answer + expected item revision + operation ID
-    S-->>U: Saved answer ID; item in progress
-    H->>S: Fetch unacknowledged answers for bound consumer
-    S-->>H: Ordered answers and stable IDs
-    H-->>A: Inject attributed question + answer context
-    A->>S: Acknowledge exact answer IDs after reading
-    A->>S: Apply resulting changes + message + outcome/why
+    S-->>U: Saved answer and queued outbox entry
+    R->>S: Claim next input for bound consumer
+    Note over R,A: Wait for active turn to finish, if busy
+    R->>A: Send attributed answer using host conversation protocol
+    A-->>R: Host acceptance when observable
+    R->>S: Record acceptance evidence
+    A->>S: MCP acknowledge exact answer IDs after reading
+    A->>S: MCP apply changes + message + outcome/why
 ```
 
-Fetching does **not** advance a destructive cursor. Until acknowledged, an answer may appear again on a subsequent fetch; this is deliberate protection against hook failure, process termination, or context delivery failure. `answer ack` is idempotent and records that the agent received the answer, not that the requested work completed. Repeated answers carry the same ID so the agent can recognize them. Successive fetches after acknowledgment return only newer/unacknowledged answers, satisfying “since last fetch” without a silent loss window.
+Outbox transitions are `queued → sending → accepted → acknowledged` for answers; prompts finish at accepted. Explicit `uncertain`, `failed`, and `cancelled` branches preserve unresolved outcomes. Persist a send attempt before writing; only protocol evidence establishes acceptance. On restart, interrupted `sending` becomes uncertain unless supported host evidence resolves it. Never blindly retry an uncertain dispatch. A known pre-acceptance rejection may return to queued. Preserve answer IDs on owner-authorized resend. An accepted input is not automatically resent merely because the agent omitted an ack.
 
-Fetch pages by sequence with an explicit continuation token, maximum 50 answers and 16 KiB returned content per hook payload. If a single answer plus context does not fit, emit its ID and a command to fetch it in full; do not acknowledge or pretend a preview is complete. Host rules must finish fetching pending pages before proceeding with dependent work. A fetch records the fully returned answer IDs in the consumer's issued set under the store lock before emitting output; issuance does not remove them from pending. Acknowledgment checks consumer ownership and issued answer IDs; acknowledgments cannot skip unseen future IDs. The CLI's explicit single-answer/full-page fetch may use a larger documented output bound than hook injection.
+Acknowledgment remains a separate per-answer receipt; once every answer in an entry is acknowledged, mark that entry acknowledged atomically. A recovery/external fetch can lead directly from queued or uncertain to acknowledged. Before dispatch, omit IDs already acknowledged so a fetch race cannot later resend them. External-consumer entries use `external_fetch` and never launch a worker. A native user-input answer uses `host_response`, bound to its request/run; if the request expires, retain the answer and require review/resume rather than quietly starting another turn. Permission decisions have no answer outbox entry.
 
-Submitting records an owner message, the answer, the change to `in_progress`, and owner `agent` with the designated consumer in one commit. A correction appends a new sequence and points to the prior answer. An answer already acknowledged remains immutable. The agent includes `handled_through_answer_seq` when closing an answered item; if a newer answer exists, reject closure and ask it to fetch again. The UI can therefore distinguish **Saved**, **Awaiting agent**, **Received**, and **Resolved** without claiming that file delivery equals task completion. A plain `in_progress` status created by answer submission does not justify “Agent is working” copy; that requires a subsequent agent-authored progress message.
+Fetching does **not** advance a destructive cursor. Until acknowledged, an answer may appear again on a recovery fetch; this protects against process termination or context delivery failure. `answer ack` is idempotent and records receipt, not work completion. Successive fetches after acknowledgment return only newer/unacknowledged answers. This is at-least-once availability with deduplicated receipts, not exactly-once external execution.
+
+Fetch pages by sequence with an explicit continuation token: at most 50 answers and 64 KiB per full MCP/CLI page; managed input envelopes and external hook payloads are bounded to 16 KiB. If a full answer/context does not fit, deliver its ID with an instruction to fetch it in full; never acknowledge a preview as complete. Record fully issued IDs under the store lock before dispatch/fetch output. Issuance does not prove receipt. Acknowledgment checks consumer ownership and issued IDs and cannot skip unseen future IDs. A native user-input response, where used, remains scoped to its live host request and must not also create a competing turn.
+
+Submitting records an owner message, answer, outbox entry, change to `in_progress`, and owner `agent` with the designated consumer in one commit. A correction appends a sequence and references the previous answer. Answers remain immutable. The agent includes `handled_through_answer_seq` when closing an answered item; a newer answer rejects closure. UI delivery states distinguish saved, busy queue, host acceptance, agent receipt, uncertainty, and resolution. Item `in_progress` alone does not establish a live agent; current process state and agent activity provide that evidence.
+
+Permission decisions never use `answer submit` or change task ownership/status. They expire when their run/request is no longer live. `permission_respond` requires the exact request ID, run ID, expected request revision, and Allow once/Deny choice. Returning a decision and recording its delivery are distinct; an uncertain permission response is never reused for a different run. See [AGENT_RUNTIME](AGENT_RUNTIME.md) for scheduling, crash handling and authentication.
