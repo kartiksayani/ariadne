@@ -4,6 +4,8 @@
 
 ## Managed-runtime revision
 
+Low-level evidence added 2 October: read-only `codex app-server generate-json-schema` for local0.159.3 using an isolated temporary CODEX_HOME; inspected Anthropic's published0.3.287 SDK type declarations alongside Claude2.1.287 help. No provider process/inference/login was run. The [process specification](low-level/PROCESS_AND_PROTOCOLS.md) distinguishes local schema fields from assumptions requiring live proof; the [verification ledger](low-level/VERIFICATION.md) names those tests.
+
 The chosen design is [AGENT_RUNTIME](AGENT_RUNTIME.md). Original hook/plugin findings below now support the optional external-terminal mode. They are not the primary delivery mechanism.
 
 - Local read-only observations: Claude Code **2.1.287**, Codex **0.159.3**. Version/help output was inspected; no paid model invocation or login-token access was performed.

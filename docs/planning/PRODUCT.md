@@ -2,6 +2,8 @@
 
 Planning baseline: 1 October 2026; managed-session revision: 2 October 2026. This document defines intended behavior; it does not claim that the application exists.
 
+Implementation behavior is specified in [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md), including queues, live protocol evidence, APIs and recovery.
+
 ## The product
 
 Ariadne is a quiet second screen and session controller for a long coding conversation. It answers three questions: **What have we decided? What needs my answer? Where did this come from?** The agent maintains a tree of understandable sentences. Ariadne runs the official coding agent locally and lets the owner answer directly. **Claude Code is primary; Codex also supports the full workflow.**
@@ -16,7 +18,7 @@ The first release covers the build prompt with the owner's later correction: ans
 4. The owner glances at the tree and the persistent **Waiting on me** panel.
 5. Selecting a waiting item reveals its ancestors, options, consequences, recommendation, and relevant message excerpts.
 6. The owner chooses an option, adds optional text, or writes a free-form answer, then explicitly submits it.
-7. The item immediately leaves the waiting queue. Ariadne sends the saved answer to the bound conversation when idle, or automatically after its active turn finishes. The agent acknowledges receipt, does the work, and records outcome and reason. No extra terminal message is required.
+7. The item immediately leaves the waiting queue. Ariadne sends the saved answer in submission order, with one turn per submission, when earlier turns finish successfully. Host permission responses can unblock an active turn independently. The agent acknowledges receipt, does the work, and records outcome and reason. No extra terminal message is required.
 8. Closed branches become visually quieter while remaining inspectable. Replacement links and the message timeline preserve the path back to the original question.
 
 Submitting an answer authorizes its delivery and a follow-up agent turn in the managed conversation. Host tool permissions remain separate. For example, the PR answer becomes input for the agent; any tool permission needed to act still uses the host's approval path. Demo sessions never launch a real agent or perform external actions.

@@ -2,6 +2,8 @@
 
 Decision baseline: **2 October 2026**. Claude Code is the primary integration; Codex is also required for release. This replaces the earlier hook-only proposal and the intermediate MCP-wait/Channels proposal. It is an implementation design, not a claim that a live integration has been tested.
 
+Detailed interfaces/algorithms are in [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md). This document is the overview; read the process, queue and API specifications before implementing adapters.
+
 ## The chosen approach
 
 Ariadne launches the user's installed, unmodified agent CLI, keeps its input/output channels open, and manages the conversation. The owner can start a task, answer questions, send follow-ups, review permission requests, stop work, and resume from Ariadne. The task tree remains the main view.
@@ -44,7 +46,7 @@ Use direct process I/O from Rust so the chosen Tauri/Rust stack needs no product
 
 ```text
 claude -p --input-format stream-json --output-format stream-json
-  --verbose --replay-user-messages --permission-mode default
+  --verbose --include-partial-messages --replay-user-messages --permission-mode default
 ```
 
 The official CLI documents streaming input, acknowledgment echoes, resume, and a permission-prompt MCP hook. Validate exact message and approval schemas against the supported binary during M0. Use `--resume` with the recorded ID; never rely on “most recent conversation.” [Claude CLI reference](https://code.claude.com/docs/en/cli-reference)
@@ -83,9 +85,9 @@ Read stdout and stderr concurrently. Parse partial UTF-8/JSON lines across arbit
 2. The session worker watches and periodically reconciles the outbox. Only it can dispatch for its bound consumer. While idle, send promptly. While a turn is active, show **Queued · agent busy** and dispatch automatically at its completion. No additional terminal message is needed. A correction follows the same ordering.
 3. Ordinary MCP question creation returns promptly. Rules direct the agent to finish independent work and yield the turn when blocked on the owner. Permission/native-input requests use their matching response path; an ordinary answer never counts as tool permission.
 4. Before writing to the pipe, persist `sending` with delivery/run IDs and the precise answer IDs. Host acceptance records `accepted`; a pipe write alone does not. The agent acknowledges exact answer IDs through MCP after reading, producing **Received**. An outcome produces **Resolved**.
-5. Coalesce queued answers for the same consumer within a bounded envelope, preserving sequence and correction links. Record which IDs were actually sent. Direct follow-up prompts use the same ordered outbox so they cannot race answers into the host.
+5. Each owner submission creates one input sequence and one host turn. Never coalesce distinct messages/answers. Send the lowest queued input only after the previous turn completes successfully; host acceptance or answer acknowledgment alone does not advance the queue. Direct follow-ups use this same FIFO. Permission/native-request responses resolve the active request separately.
 6. A transport rejection before acceptance can return to `queued` with a reason. A crash between send and acceptance is **uncertain**: neither silently resend nor mark received. On resume, use supported host evidence when available; otherwise show the delivery and offer an explicit resend with the same answer IDs. There is no exactly-once guarantee for arbitrary tool side effects.
-7. Host acceptance without an agent receipt stays **Awaiting acknowledgment**. Do not continuously start turns resending it. A later owner turn/resume includes a concise reminder to acknowledge/fetch outstanding IDs; receipts remain non-destructive and idempotent.
+7. Host acceptance without an agent receipt stays **Awaiting acknowledgment**. Do not continuously start turns resending it. A later input/resume can remind the agent about previously delivered IDs. Managed fetch never exposes future queued answers before their turn; receipts are non-destructive and idempotent.
 8. Stopped, disconnected, authentication-failed, quota-limited, or incompatible hosts leave answers saved. Explain the specific state and offer the corresponding Resume/sign-in/retry action. No unbounded retry loops or automatic provider/model switching.
 
 Target idle dispatch latency: within one second after a durable save on the reference Mac, excluding provider response time. Busy turns and approvals show their actual wait reason. Store polling is not model polling and never starts a turn without owner input queued for that conversation.

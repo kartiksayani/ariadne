@@ -23,7 +23,7 @@ Planning decisions made 2026-10-01, revised 2026-10-02 under the owner's delegat
 | D17 | Managed process/protocol evidence drives liveness; external sessions show last activity | File writes alone cannot establish a running agent; live managed state comes from the runtime |
 | D18 | Defer optional rail, topic sharing/handoff, archive/close-session and extra owner actions | Required release centers on reading, answering, and provenance; full discrepancies listed in DESIGN |
 | D19 | Simple per-topic SVG graph; no diagram editor framework initially | Tree data has deterministic layout; overview does not need freeform authoring |
-| D20 | Prove native notification routing and both managed host protocols before UI polish | Claude multi-turn input, approvals, resume and cleanup first; native notification adapter remains the fallback |
+| D20 | Prove native notification routing and both managed host protocols before UI polish | Claude multi-turn input, approvals, resume and cleanup first; single native UserNotifications bridge is now the selected macOS implementation |
 | D21 | macOS WebdriverIO service proof plus deterministic core/browser tests | Current docs offer embedded macOS support; test-only listener must never ship in release |
 | D22 | Local `make install`, unsigned app, explicit PATH preflight | Required install experience without publishing/signing or silent shell-profile edits |
 | D23 | Ariadne UI/store/MCP stays local; provider child processes use their normal network services | Offline history and answer saving; no offline inference promise. No app telemetry, updater, remote assets, direct model API, or network listener |
@@ -37,13 +37,21 @@ Planning decisions made 2026-10-01, revised 2026-10-02 under the owner's delegat
 | D31 | Queue owner input while busy; dispatch automatically when idle | Consistent behavior across Claude/Codex. Explicit Stop remains respected; no active-turn steering in v1 |
 | D32 | Existing official CLI authentication; no app credential collection or automatic provider installation | Provider handles login and billing. Detect configuration conflicts; make no blanket SDK/subscription-billing promise |
 | D33 | One managed run per project root; independent existing worktrees may run concurrently | Avoid two managed writers in one checkout without adding worktree automation; runtime lease prevents duplicate launches |
+| D34 | Each owner submission gets one FIFO host turn; no cross-submission coalescing | Makes the N-message promise precise. Separate permission/native response lane unblocks the active turn |
+| D35 | Persist dispatch status separately from turn status; restrict managed fetch to eligible inputs | Host acceptance/answer receipt cannot advance the queue; fetching a future answer would violate FIFO |
+| D36 | Concrete Rust modules, rmcp, Tokio pipes and versioned worker JSONL protocol | The communication mechanism is an implementation contract, not a future discovery task. See [low-level design](docs/planning/LOW_LEVEL_DESIGN.md) |
+| D37 | Stable flock + keyed in-process mutex, full atomic transaction algorithm and control-capacity reserve | Specifies concurrency/crash behavior down to write/rename boundaries; record uncertain commits explicitly |
+| D38 | Distinct question revision, immutable answers, strict actor-bound APIs | Unrelated activity must not invalidate an answer draft; agent tools cannot impersonate owner decisions |
+| D39 | Bounded transient Conversation activity; durable owner inputs and agent-authored excerpts | No private transcript ingestion or unbounded stream history; truncation/restart behavior is visible |
+| D40 | Compatibility ledger separates inspected schemas, specified design and executed proof | Corrects earlier overstatement of architectural completeness; live Claude/Codex/native gates remain pending |
+| D41 | Failed inputs remain FIFO barriers until explicit retry or owner resolution | Proven pre-execution rejection can retry the original input; possibly executed work needs a reviewed resend/skip decision. Resume alone cannot silently lose failed work |
 
 ## Decisions awaiting evidence, not owner preference
 
 - Exact toolchain/package versions, macOS deployment baseline, and supported host minimum versions: record in M0 after scaffolding and smoke tests.
 - Managed conversation control: prove persistent Claude input, permissions and resume first, then Codex equivalents. Pin parser fixtures to tested versions. No next-message-only fallback passes acceptance.
 - Parent death, interrupted send and protocol rejection: prove owned-process cleanup and honest uncertain-delivery recovery in M0/M3. A pipe write is not agent acknowledgment.
-- Notification implementation: use the plugin only if the required macOS click-routing proof passes; otherwise use a minimal native adapter.
+- Notification behavior: implement the chosen single native bridge and prove M01 packaged click/permission/cold-start paths.
 - Real-app test harness: use the documented embedded WebdriverIO path if the M0 proof passes; otherwise use the build prompt's permitted mocked UI approach plus explicit native manual gates.
 
 These are bounded implementation investigations. Product scope, storage location, delivery semantics, and build order are already decided.

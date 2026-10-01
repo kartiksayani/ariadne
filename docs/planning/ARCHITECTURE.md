@@ -2,6 +2,8 @@
 
 Status: chosen implementation design, pending the explicitly named platform proofs in the roadmap. No application code has been built. See [DECISIONS](../../DECISIONS.md) for reasons and alternatives.
 
+For concrete module interfaces, fields, algorithms and error policies, use [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md). This file summarizes those contracts.
+
 ## System boundaries
 
 ```mermaid
@@ -50,7 +52,7 @@ Use the current official Tauri 2 React/TypeScript template at implementation sta
 
 Core crates: `serde`/`serde_json`, `clap`, `thiserror`, `notify`, an OS-backed file-lock implementation, UUID generation for session/operation identifiers, and test-only temporary-directory/property-test utilities. Use plain CSS with extracted design tokens; React context/reducer and pure selectors suffice initially. Graph uses a dedicated React SVG component with a deterministic tree layout, avoiding a full diagram editor dependency. Use inline/local SVG icons. Rust types own the wire model; generate TypeScript DTOs and JSON Schema from those types and check generated files for drift. Validate semantic invariants in Rust, beyond what JSON Schema can express.
 
-The runtime uses an async Rust process/I/O layer and a maintained Rust MCP protocol implementation selected and pinned in M0. Keep host event parsing behind adapter traits and fixture tests. Bundle the Ariadne worker with the app; use the user's installed provider executables. No production Node/Python runtime is required by this choice.
+The runtime uses Tokio process/pipes and the official Rust `rmcp` server/stdio implementation, with exact compatible versions locked in M0. Keep host event parsing behind adapter traits and fixture tests. Bundle the Ariadne worker with the app; use the user's installed provider executables. No production Node/Python runtime is required.
 
 Keep platform code in the desktop host and behind a small interface so the store and CLI have no Tauri dependency. This makes race and crash tests fast and leaves future portability possible without implementing other platforms now.
 
@@ -124,7 +126,7 @@ Managed runtime events are a separate typed stream for activity/progress; author
 - Tray uses a template icon and adjacent count title. Its oldest waiting items include project/session names. Include open app, pin toggle, and quit. Cap the menu list with **Show all** while the count remains exact.
 - `ariadne open` launches the installed app executable with structured project/session/item arguments. Register Tauri's single-instance plugin first; route arguments to the existing window or queue them until the first window is ready. All navigation sources share one routing function.
 - A notification is produced when an item enters waiting while the app runs, including re-entering after new agent information. Deduplicate by item plus waiting-entry revision; coalesce bursts without dropping items from the tray. Initial load and answer-acknowledgment writes do not notify.
-- Prove notification click routing in a packaged app during M0. If the stock plugin cannot route macOS clicks, implement a minimal Rust/Objective-C bridge using Apple's UserNotifications delegate and notification payload IDs. Choose one notification owner to avoid competing delegates. This is required work, not a dropped feature.
+- Implement one Rust/Objective-C UserNotifications bridge for notification delivery and click routing, with a single delegate and ID-only route payloads. Prove foreground/hidden/cold-launch behavior in M0. Do not install a competing notification plugin delegate. See the native interface in LOW_LEVEL_DESIGN.
 - Ask notification permission through the app's normal first-use flow. Denial leaves the waiting panel and tray fully usable. Default native text can say a project has a question; full question previews are an explicit preference.
 
 ## Local security and privacy

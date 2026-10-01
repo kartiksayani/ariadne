@@ -1,6 +1,6 @@
 # Implementation roadmap
 
-**Planning complete; implementation not started.** Checkboxes below describe future work. Read [PRODUCT](PRODUCT.md), [AGENT_RUNTIME](AGENT_RUNTIME.md), [ARCHITECTURE](ARCHITECTURE.md), [CONTRACTS](CONTRACTS.md), [DESIGN](DESIGN.md), and [INTEGRATIONS](INTEGRATIONS.md) before changing a contract. Record significant changes in [DECISIONS](../../DECISIONS.md).
+**Design specified; implementation and live compatibility proofs pending.** Start with [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md) and its [verification ledger](low-level/VERIFICATION.md). Checkboxes below describe future work; each gate needs evidence. PRODUCT/AGENT_RUNTIME/ARCHITECTURE/CONTRACTS/DESIGN/INTEGRATIONS are overviews of the detailed contracts. Record significant changes in [DECISIONS](../../DECISIONS.md).
 
 ## Build sequence
 
@@ -29,11 +29,12 @@ Rough sizing for an experienced engineer using agents: M0 3–5 focused days; M1
 
 - [ ] **P0.1** Check current official Tauri docs/releases again, scaffold React + TypeScript from the official template, establish workspace/package scripts, pin toolchains and lockfiles. Record macOS deployment target, CPU architecture, host versions, and reference hardware.
 - [ ] **P0.2** Extract the mockup ZIP into a reference-only directory with checksums. Map CSS/tokens/components; package font/icon licenses and remove network imports from production assets.
-- [ ] **P0.3** Prove a minimal packaged macOS notification opens a named item route, with the window visible, hidden, and app relaunched after a delivered notification. Test denied permission. If the Tauri plugin cannot provide routing, implement the minimal native delegate adapter now.
+- [ ] **P0.3** Implement the single native UserNotifications delegate bridge and run M01: packaged click routes with visible/hidden/cold-launch window, denied permission and stale/already-answered item. No competing notification-plugin delegate.
 - [ ] **P0.4** Prove dynamic tray title/count, single-instance launch argument forwarding, window focus, and always-on-top on the target Mac.
 - [ ] **P0.5** Prove the persistent Claude `-p` stream-json child lifecycle from launch through initial prompt, multiple turns, idle answer delivery, Stop/Resume, permission-prompt MCP tool UI, and parent-pipe EOF/owned-child cleanup. Use harmless fixed prompts; exercise allow, deny, and cancel.
 - [ ] **P0.6** Prove the owned local Codex stdio app-server handshake, thread/turn lifecycle, approval requests, and Stop/Resume. Pin the supported version for fixtures; do not assume hook availability.
 - [ ] **P0.7** Prove the documented WebdriverIO embedded macOS route in a dedicated test build. Verify an ordinary release build excludes the driver plugin/listener. If it is impractical in this environment, choose the permitted mocked-frontend route and record precisely which native checks stay manual.
+- [ ] **P0.8** Record C01–C05, N01–N04 and M01–M03 from the verification ledger, with exact CLI/build/OS versions, schema/type checksums, redacted fixtures, outcomes and explicit resolutions. A generated schema is not a live proof. Do not proceed past a failing required communication/permission control.
 
 **Gate (mandatory before M1):** evidence records Claude multi-turn stream-json, permission allow/deny/cancel, idle answer wake and resume; Codex app-server handshake/thread/turn/approval behavior; macOS launch/notification routing and chosen test driver. Unknowns have concrete outcomes or an implementation fallback. Do not make model calls during planning; implementation-stage M0 proofs use the version-pinned real hosts in scratch sessions with fixed harmless prompts, plus fixtures for failure paths. No polished UI work should hide unresolved required platform capabilities.
 
@@ -48,6 +49,7 @@ Rough sizing for an experienced engineer using agents: M0 3–5 focused days; M1
 - [ ] **P1.3** Implement project/session creation, project-local binding, registry reconciliation, root relocation and unavailable-root diagnostics. Ensure registration failures cannot undo a saved session.
 - [ ] **P1.4** Implement answers, corrections, recipient-specific fetch/ack, pagination, and protection against closing over a newer answer. Persist answer outbox delivery state, runtime binding, and permission-request state in the same session JSON transaction model; do not create competing authoritative state files.
 - [ ] **P1.5** Add the failure tests listed below, including actual child processes sharing the same store and fault injection around commit boundaries.
+- [ ] **P1.6** Implement separate dispatch/turn states, question revisions, counters, actor-scoped receipts and answer eligibility. Prove D01–D11 ordering/ack/permission invariants plus control-capacity reserve; generated types match the complete field inventory.
 
 **Gate:** no lost updates in repeatable multi-process tests; every persisted result validates; retries allocate no duplicate item/message/answer/run; uncertain child dispatch is represented explicitly and is never blindly replayed; malformed/future-schema files remain unchanged; backup recovery preserves damaged input. Core tests run without Tauri or a graphical session.
 
@@ -78,6 +80,7 @@ Rough sizing for an experienced engineer using agents: M0 3–5 focused days; M1
 - [ ] **P3.5** Implement permission-prompt MCP tool UI with Allow once, Deny, and Cancel. Keep provider tool approval requests distinct from owner answers and from Ariadne domain writes; bind each decision to the live run/request and record lifecycle state durably.
 - [ ] **P3.6** Keep the runtime alive when the window hides. On Quit, let the owner cancel quitting or stop Ariadne-owned runs and quit gracefully; Stop cancels the selected run. Test initial subscription races, partial stream chunks, atomic store replacement, concurrent updates while typing, stale question rejection, outbox retry, and switching sessions with drafts.
 - [ ] **P3.7** Implement typed Tauri store commands, project/session discovery, global summaries, snapshot load, directory watching, revision events, focus/wake/error reconciliation, and polling recovery. Prove a CLI/MCP mutation appears without refresh and survives missed watcher events.
+- [ ] **P3.8** Prove N-message FIFO with one turn per submission, future-answer fetch exclusion, failed-turn queue pause and permission/native response lane. Wire recovery recheck/cleanup, proven-rejection retry, explicit resend/skip and Resume; no duplicate launch on worker SIGKILL. Use D06–D14/D23 fixtures and real C02.
 
 **Gate:** an installed Claude CLI completes multiple turns in the same persistent process; MCP changes update the session; allow/deny/cancel behave as proven in M0; a waiting owner answer is stored while busy and sent when idle; sent, received, pending, and uncertain states are understandable after restart. Stop never silently restarts work; Resume is explicit. Host process status comes from the runtime adapter, not guessed UI timers.
 
@@ -190,7 +193,7 @@ All tests use dedicated temporary project roots/configuration homes and determin
 
 | Risk | Response / decision point |
 | --- | --- |
-| Notification plugin displays but cannot route clicks | Native adapter proof in M0; required feature stays in scope |
+| Native notification delivery works but click route fails | Fix the single native delegate against M01; required feature stays in scope |
 | Provider protocol or version changes | Pin supported versions in fixtures; detect unsupported versions, provide diagnostics, and do not automatically install providers |
 | Child process exits or Ariadne restarts during a turn | Persist run and dispatch state with session data; stopped runs require Resume; uncertain dispatch is surfaced for deliberate recovery and never blindly replayed |
 | Owner answer races with a busy provider turn | Durable outbox sends when runtime is idle or after busy turn completes; expose queued/sent/received/uncertain states and keep provider permission approvals separate |

@@ -1,14 +1,14 @@
 # Data, command, and answer contracts
 
-These are implementation contracts. Examples below specify the intended CLI; they are not commands available today.
+This is the contract overview. Exhaustive fields/algorithms are in [Domain and storage](low-level/DOMAIN_AND_STORAGE.md), [API and MCP](low-level/API_AND_MCP.md), and [Queues and recovery](low-level/QUEUES_AND_RECOVERY.md). Examples specify intended interfaces, not commands available today.
 
 ## Session schema v1
 
 | Entity | Required fields and semantics |
 | --- | --- |
-| Session | `schema_version: 1`, `id`, `project_id`, `title`, `revision`, `created_at`, `updated_at`, `topics`, `items`, `messages`, `answers`, `consumers`, `runs`, `outbox`, `host_requests`, `operation_receipts` |
+| Session | `schema_version: 1`, `id`, `project_id`, `title`, `revision`, `created_at`, `updated_at`, `counters`, `topics`, `items`, `messages`, `answers`, `consumers`, `runs`, `outbox`, `host_requests`, `operation_receipts` |
 | Topic | `id`, `name`, `order`, `created_at`; exists in one session |
-| Item | `id`, `topic_id`, `parent: null\|id`, `question`, `type`, `status`, `owner`, `created_at`, `updated_at`, `revision`, `created_in_message`, `updated_in_messages`, `links`, `options`, `status_history` |
+| Item | `id`, `topic_id`, `parent: null\|id`, `question`, `type`, `status`, `owner`, `created_at`, `updated_at`, `revision`, `question_revision`, `next_child`, `created_in_message`, `updated_in_messages`, `links`, `options`, `status_history` |
 | Conditional item fields | `outcome`, `why` for terminal states; `replaced_by` for replaced; `waiting_since` and `recipient_consumer_id` for waiting; `last_answer_seq` when answered |
 | Owner | Tagged value `me`, `agent` with consumer ID, or `other` with display name; ownership is independent of who created an item |
 | Option | Stable item-local `id`, `label`, `consequence`, `recommended: boolean` |
@@ -17,9 +17,9 @@ These are implementation contracts. Examples below specify the intended CLI; the
 | Answer | Monotonic `seq`, UUID `id`, `item_id`, `question_revision`, copied question/options, `selected_option_id?`, `text?`, `recipient_consumer_id`, `created_at`, `message_number`, `supersedes_answer_id?` |
 | Consumer | `id`, `agent: claude\|codex`, `mode: managed\|external`, host session/thread identifier (unset until initialization), optional human label, `created_at`, `last_seen_at`, issued and acknowledged answer sequences |
 | Run | UUID `id`, `consumer_id`, executable path/version, non-secret launch profile reference, host conversation ID, process state, start/end time and terminal reason; persisted process state is historical after disconnect |
-| Outbox entry | UUID `id`, `consumer_id`, `kind: answers\|prompt`, `route: turn\|host_response\|external_fetch`, optional request/run ID for host response, monotonic per-consumer `input_seq`, ordered `answer_ids` or bounded owner prompt, creation time, `state`, send attempts, host acceptance reference, last error; one logical entry per submitted input |
+| Outbox entry | UUID `id`, `consumer_id`, `kind: answers\|prompt`, `route: turn\|host_response\|external_fetch`, request/run ID when relevant, monotonic `input_seq`, answer IDs or prompt, `dispatch_status`, independent `turn_status`, attempts and completion evidence; one entry/turn per ordinary submission |
 | Send attempt | UUID `id`, `run_id`, exact payload digest/answer IDs, prepared time, accepted time/reference if proven, rejection/uncertainty reason; retain attempts rather than overwriting uncertainty |
-| Host request | Opaque request ID scoped by run, `kind: permission\|user_input`, bounded tool/operation display data, optional related item, `pending\|decided\|returned\|expired`, owner response/time, response evidence; permission and answer responses have separate typed commands |
+| Host request | Local UUID plus opaque provider ID/run/epoch, `kind: permission\|user_input`, bounded display data, ordered native questions linked to item/answer IDs, `pending\|decided\|returned\|expired`, owner response/time and return evidence; native groups submit atomically |
 | Status history entry | Previous/new status, time, message number, previous outcome/why when applicable; immutable |
 | Operation receipt | Client operation key, canonical input digest, resulting IDs/revision; persistent for the session lifetime |
 
@@ -134,7 +134,7 @@ sequenceDiagram
     participant S as Shared store
     participant R as Rust session worker
     participant A as Coding agent
-    U->>S: Submit answer + expected item revision + operation ID
+    U->>S: Submit answer + expected question revision + operation ID
     S-->>U: Saved answer and queued outbox entry
     R->>S: Claim next input for bound consumer
     Note over R,A: Wait for active turn to finish, if busy
@@ -145,13 +145,13 @@ sequenceDiagram
     A->>S: MCP apply changes + message + outcome/why
 ```
 
-Outbox transitions are `queued → sending → accepted → acknowledged` for answers; prompts finish at accepted. Explicit `uncertain`, `failed`, and `cancelled` branches preserve unresolved outcomes. Persist a send attempt before writing; only protocol evidence establishes acceptance. On restart, interrupted `sending` becomes uncertain unless supported host evidence resolves it. Never blindly retry an uncertain dispatch. A known pre-acceptance rejection may return to queued. Preserve answer IDs on owner-authorized resend. An accepted input is not automatically resent merely because the agent omitted an ack.
+Dispatch transitions are `queued → sending → accepted → acknowledged` for answers; prompt delivery finishes at accepted. Independent `turn_status` records execution completion. **Only successful turn completion drains the next FIFO input; host acceptance and answer acknowledgment do not.** Each submission has its own turn; no coalescing. Explicit uncertain/failed/cancelled branches preserve unresolved outcomes. Persist before writing; protocol evidence establishes acceptance. On restart interrupted sending becomes uncertain unless evidence resolves it. Never blindly retry an uncertain send. A pre-execution rejection pauses the queue for explicit retry; retain answer IDs. Missing ack alone never resends an accepted input.
 
 Acknowledgment remains a separate per-answer receipt; once every answer in an entry is acknowledged, mark that entry acknowledged atomically. A recovery/external fetch can lead directly from queued or uncertain to acknowledged. Before dispatch, omit IDs already acknowledged so a fetch race cannot later resend them. External-consumer entries use `external_fetch` and never launch a worker. A native user-input answer uses `host_response`, bound to its request/run; if the request expires, retain the answer and require review/resume rather than quietly starting another turn. Permission decisions have no answer outbox entry.
 
-Fetching does **not** advance a destructive cursor. Until acknowledged, an answer may appear again on a recovery fetch; this protects against process termination or context delivery failure. `answer ack` is idempotent and records receipt, not work completion. Successive fetches after acknowledgment return only newer/unacknowledged answers. This is at-least-once availability with deduplicated receipts, not exactly-once external execution.
+Fetching does **not** advance a destructive cursor. Managed fetch returns only eligible dispatched/current-input answers, never future queued answers ahead of FIFO order. Until acknowledged, eligible answers may appear on recovery fetch. `answer ack` is idempotent and records receipt, not completion. This gives non-destructive answer availability with deduplicated receipts, not exactly-once external execution.
 
-Fetch pages by sequence with an explicit continuation token: at most 50 answers and 64 KiB per full MCP/CLI page; managed input envelopes and external hook payloads are bounded to 16 KiB. If a full answer/context does not fit, deliver its ID with an instruction to fetch it in full; never acknowledge a preview as complete. Record fully issued IDs under the store lock before dispatch/fetch output. Issuance does not prove receipt. Acknowledgment checks consumer ownership and issued IDs and cannot skip unseen future IDs. A native user-input response, where used, remains scoped to its live host request and must not also create a competing turn.
+Fetch pages by sequence with continuation: at most 50 answers/64 KiB of serialized application result per MCP/CLI page. A fixed answer/item/message projection must fit 60 KiB including escaping; validate at mutation time, and page growing item histories/links/backlinks separately. Owner text is ≤16 KiB UTF-8; managed formatted input content is ≤32 KiB before JSON escaping, with a separate 256 KiB cap on the complete serialized outbound frame; external hook context remains 16 KiB. Oversized managed-input answer context is referenced for full fetch, never acknowledged as a preview. Record fully issued IDs before output. Ack verifies consumer/eligibility/issuance. Native input responds only to its live host request and never creates a competing turn.
 
 Submitting records an owner message, answer, outbox entry, change to `in_progress`, and owner `agent` with the designated consumer in one commit. A correction appends a sequence and references the previous answer. Answers remain immutable. The agent includes `handled_through_answer_seq` when closing an answered item; a newer answer rejects closure. UI delivery states distinguish saved, busy queue, host acceptance, agent receipt, uncertainty, and resolution. Item `in_progress` alone does not establish a live agent; current process state and agent activity provide that evidence.
 

@@ -2,13 +2,15 @@
 
 The primary integration is [managed agent sessions](AGENT_RUNTIME.md): Claude Code first, then Codex. The plugin, CLI, and external-terminal hooks reuse the same rules/store but are not the mechanism that wakes a managed conversation.
 
+Exact launch/configuration, journal and install algorithms are in [Setup and delivery](low-level/SETUP_AND_DELIVERY.md); exact host frames/flags are in [Processes and protocols](low-level/PROCESS_AND_PROTOCOLS.md).
+
 ## One behavioral rule source
 
 Maintain `packages/agent-rules/RULES.md` as the only authored behavioral source. Generate the Claude skill body, managed-session bootstrap and Codex instruction section from it; a test compares normalized content. Platform adapters contain only host-specific discovery, invocation, and protocol details.
 
 The shared rules must instruct both agents to:
 
-1. Use the supplied project/session/consumer binding. Read attributed owner answers delivered in the conversation, fetch any referenced full answers/pages, then acknowledge the exact IDs read through MCP. Fetch pending answers at resume as recovery.
+1. Use the supplied binding. Read delivered owner answers, fetch referenced full answers/pages, and acknowledge exact IDs. Resume recovery fetch is limited to eligible previously dispatched/current-input answers in managed mode; it never reads future queued input ahead of FIFO order.
 2. Record each meaningful question, decision, finding, task, and explanation in a full sentence. Avoid tool-call noise and duplicate items for repeated discussion of the same point.
 3. Record follow-up questions as children of the causal item. Refining the same question may remain on that item, with a new message and preserved prior answers.
 4. Put an item in waiting only when the owner's input is needed. Supply options with consequences when useful, identify at most one recommendation, and allow free text. The recording tool returns immediately; continue independent work, then finish the turn if blocked. Ariadne sends saved answers as subsequent input. Do not spin or hold a question tool open waiting for the owner.
@@ -24,7 +26,7 @@ The shared rules must instruct both agents to:
 
 For Claude, launch the installed binary with the generated plugin/rules, MCP server and permission-prompt tool configuration. For Codex, configure the same MCP server and canonical bootstrap through supported app-server launch/thread settings. Exact configuration precedence and schemas must pass M0 on the selected versions. Managed policies remain authoritative. Enumerate effective configuration sources, preserve existing instructions, and detect conflicts instead of replacing project policy to make setup work.
 
-Both adapters receive a fixed binding and run ID. MCP mutations cannot override that binding through tool arguments. Validate required MCP initialization before starting work. An unavailable Ariadne tool or permission bridge is a launch failure for a managed session, with a repair hint; do not silently fall back and claim full integration.
+Both adapters receive a fixed binding and run ID. MCP mutations cannot override that binding through tool arguments. Require confirmed MCP readiness for a successful managed launch. Claude may need the first input before init appears, so validate its permission-server startup gate in C04; a failed init does not prove that input was never consumed. Missing required tools/bridge stops the run, pauses dispatch and preserves uncertain-input evidence with a repair hint. Do not silently fall back and claim full integration.
 
 ## Optional external Claude Code adapter
 
