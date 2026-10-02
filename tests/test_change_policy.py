@@ -97,8 +97,9 @@ class GitFunctionalTests(unittest.TestCase):
 
     def test_generated_docs_binary_and_app_sources_classify_distinctly(self):
         result = change.classify("2\t1\tapps/page.html\0" "4\t1\tdocs/notes.md\0"
-                                 "6\t2\tpackage-lock.json\0" "-\t-\timage.png\0")
-        self.assertEqual(result, {"handwritten": 3, "docs": 5, "generated": 8,
+                                 "6\t2\tpackage-lock.json\0" "-\t-\timage.png\0"
+                                 "2\t0\tdocs/delivery/tasks.json\0" "1\t0\tapps/tasks.json\0")
+        self.assertEqual(result, {"handwritten": 4, "docs": 7, "generated": 8,
                                   "binary_files": ["image.png"]})
 
     def test_foreign_hook_environment_preserves_outer_head_index_and_config(self):

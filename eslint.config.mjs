@@ -9,6 +9,9 @@ export default [
       ecmaVersion: 2022,
       sourceType: 'module',
       globals: {
+        document: 'readonly', window: 'readonly', ResizeObserver: 'readonly',
+        requestAnimationFrame: 'readonly', FileReader: 'readonly', Blob: 'readonly',
+        URL: 'readonly',
         console: 'readonly', process: 'readonly', Buffer: 'readonly',
         setTimeout: 'readonly', clearTimeout: 'readonly',
         setInterval: 'readonly', clearInterval: 'readonly',

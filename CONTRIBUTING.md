@@ -19,7 +19,8 @@ Use `rtk proxy` before shell commands when working in the owner's agent environm
 1. One useful behavior per PR, with its task ID and exact spec section. Prefer about
    200 changed handwritten lines; maximum 400 per commit and 800 per PR, including
    tests/config. Docs, original assets and generated lockfiles are counted separately;
-   their exemption is not permission to hide application code there.
+   the task catalogue `docs/delivery/tasks.json` is documentation too.
+   Their exemption is not permission to hide application code there.
 2. Run all lint and tests on every commit. The hook refuses unstaged/untracked changes
    so it tests exactly what is committed. Use a clean worktree, no automatic stash.
    CI repeats checks for every PR commit and GitHub's integrated merge result.
@@ -40,7 +41,8 @@ Use `rtk proxy` before shell commands when working in the owner's agent environm
 
 ## Checks
 
-Ruff covers maintained Python; ESLint covers maintained JavaScript. Both allow zero
+Ruff covers maintained Python; ESLint covers maintained JavaScript, including
+inline JavaScript in the interactive planning diagrams. Both allow zero
 reported violations. Python tests include real temporary Git repositories and CLI
 processes. Application gates additionally require rustfmt, Clippy with warnings as
 errors, frontend/Mod lint and type checking, cargo-llvm-cov, frontend coverage, and
