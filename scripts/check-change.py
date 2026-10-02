@@ -26,7 +26,8 @@ def classify(numstat):
         count = int(added) + int(removed)
         if any(fnmatch.fnmatchcase(path, pattern) for pattern in GENERATED):
             category = "generated"
-        elif path.endswith((".md", ".html")) and not path.startswith(("apps/", "crates/", "integrations/")):
+        elif path == "docs/delivery/tasks.json" or (path.endswith((".md", ".html"))
+                and not path.startswith(("apps/", "crates/", "integrations/"))):
             category = "docs"
         else:
             category = "handwritten"
