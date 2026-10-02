@@ -102,7 +102,8 @@ Resolve addressed GitHub review threads only after the reviewer has verified the
 fix or the maintainer has recorded a justified rejection/deferral.
 The merge command re-reads GitHub, checks ownership/reviews/CI/head/base, publishes
 the durable maintainer record and `maintainer-spec-review` status, and requests a
-rebase merge with the exact head. It never uses force/admin overrides.
+squash merge with the exact head. Always squash and merge PRs into main.
+It never uses force/admin overrides.
 
 Only an actual merged PR with valid recorded evidence satisfies a dependency.
 Fetch main and confirm its post-merge CI before merging another PR. A failed main
@@ -162,6 +163,6 @@ Post `maintainer-spec-review` SUCCESS for that exact head using
 The JSON body contains `state`, `context`, `description`, and the final comment's
 `target_url`. Re-read head/base/checks, then request
 `gh api repos/kartiksayani/ariadne/pulls/PR_NUMBER/merge --method PUT --input FILE`
-with JSON `sha` set to the reviewed head and `merge_method` set to `rebase`.
+with JSON `sha` set to the reviewed head and `merge_method` set to `squash`.
 Use real values and body files, prefix shell commands with `rtk proxy`, and
 confirm the actual merged state/main CI. No task-completion receipt is emitted.

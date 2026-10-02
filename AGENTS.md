@@ -10,6 +10,7 @@ read [ORCHESTRATOR.md](ORCHESTRATOR.md). The product contracts start at
   exclusively. Do not silently substitute a model or effort level.
 - Work in an isolated worktree with one bounded task and declared owned paths.
   You are not alone in the repository. Preserve others' changes and adapt to them.
+- Always squash merge PRs into main.
 - Follow the supplied mockups and current personal release contracts. Do not
   enlarge the scope to solve hypothetical scale or exotic recovery problems.
 - Every commit runs the installed hook; every behavior change carries tests.

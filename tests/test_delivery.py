@@ -33,9 +33,12 @@ else:
  elif '/statuses/' in endpoint:
   s['data']['repository']['pullRequest']['commits']['nodes'][0]['commit']['statusCheckRollup']['contexts']['nodes'].append({'__typename':'StatusContext','context':'maintainer-spec-review','state':'SUCCESS'}); result={}
  else:
-  p=s['data']['repository']['pullRequest']; p.update(state='MERGED',mergedAt='2026-10-02T01:00:00Z',mergeCommit={'oid':p['headRefOid']}); result={'merged':True}
-  s['data']['repository']['defaultBranchRef']['target']['oid']=p['headRefOid']
-  subprocess.run([os.environ['REAL_GIT'],'--git-dir',os.environ['FIXTURE_ORIGIN'],'update-ref','refs/heads/main',p['headRefOid']],check=True)
+  p=s['data']['repository']['pullRequest']; base=s['data']['repository']['defaultBranchRef']['target']['oid']
+  assert body=={'sha':p['headRefOid'],'merge_method':'squash'}
+  merged=subprocess.run([os.environ['REAL_GIT'],'commit-tree',p['headRefOid']+'^{tree}','-p',base],input='Squash PR 1\\n',text=True,capture_output=True,check=True).stdout.strip()
+  p.update(state='MERGED',mergedAt='2026-10-02T01:00:00Z',mergeCommit={'oid':merged}); result={'merged':True}
+  s['data']['repository']['defaultBranchRef']['target']['oid']=merged
+  subprocess.run([os.environ['REAL_GIT'],'push',os.environ['FIXTURE_ORIGIN'],merged+':refs/heads/main'],check=True,capture_output=True)
 path.write_text(json.dumps(s)); print(json.dumps({'data':result} if args[:2]==['api','graphql'] else result))
 '''
 
@@ -154,6 +157,14 @@ class AdapterTests(unittest.TestCase):
         proof = self.invoke("merge", "1")
         self.assertEqual(proof["state"], "MERGED")
         self.state = json.loads(self.state_path.read_text())
+        request = self.state["mutations"][-1]
+        self.assertEqual(request, ["repos/kartiksayani/ariadne/pulls/1/merge",
+                                   {"sha": self.record["head"], "merge_method": "squash"}])
+        merged = self.state["data"]["repository"]["pullRequest"]["mergeCommit"]["oid"]
+        self.assertNotEqual(merged, self.record["head"])
+        self.assertEqual(self.git("rev-parse", merged + "^"), self.record["base"])
+        self.assertEqual(self.git("rev-parse", merged + "^{tree}"),
+                         self.git("rev-parse", self.record["head"] + "^{tree}"))
         self.state["list"]["nodes"] = [dict(number=1, body=self.pr["body"], state="MERGED")]
         self.assertEqual(self.invoke("export")["tasks"], [proof])
         self.assertEqual(self.invoke("ready"), [])
