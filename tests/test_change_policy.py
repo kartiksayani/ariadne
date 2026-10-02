@@ -2,11 +2,13 @@
 import contextlib
 import importlib.util
 import io
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("check_change", ROOT / "scripts/check-change.py")
@@ -16,6 +18,14 @@ SPEC.loader.exec_module(change)
 
 class GitFunctionalTests(unittest.TestCase):
     def setUp(self):
+        # Git exports repository/index variables while executing commit hooks.
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+                           GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_COUNT="1",
+                           GIT_CONFIG_KEY_0="core.hooksPath", GIT_CONFIG_VALUE_0=os.devnull)
+        patch = mock.patch.dict(os.environ, environment, clear=True)
+        patch.start()
+        self.addCleanup(patch.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
@@ -90,6 +100,31 @@ class GitFunctionalTests(unittest.TestCase):
                                  "6\t2\tpackage-lock.json\0" "-\t-\timage.png\0")
         self.assertEqual(result, {"handwritten": 3, "docs": 5, "generated": 8,
                                   "binary_files": ["image.png"]})
+
+    def test_foreign_hook_environment_preserves_outer_head_index_and_config(self):
+        head = self.add_commit("outer.py", 1)
+        (self.root / "pending.py").write_text("pending change\n")
+        self.git("add", "pending.py")
+        index = (self.root / ".git/index").read_bytes()
+        config = (self.root / ".git/config").read_bytes()
+        global_config = self.root / "foreign-global"
+        global_config.write_text("[core]\n\tbare = true\n")
+        foreign = {**os.environ, "GIT_DIR": str(self.root / ".git"),
+                   "GIT_WORK_TREE": str(self.root), "GIT_INDEX_FILE": str(self.root / ".git/index"),
+                   "GIT_CONFIG_GLOBAL": str(global_config), "GIT_CONFIG_VALUE_0": str(self.root / ".git/hooks")}
+        # A separate process must restore its inherited environment after cleanup.
+        probe = ("import importlib.util, os, sys, unittest; before = dict(os.environ); "
+                 f"spec = importlib.util.spec_from_file_location('probe', {str(Path(__file__).resolve())!r}); "
+                 "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+                 "suite = unittest.TestSuite([module.GitFunctionalTests('test_initial_zero_base_and_normal_base_enforce_each_commit_and_pr')]); "
+                 "result = unittest.TextTestRunner().run(suite); "
+                 "assert dict(os.environ) == before; sys.exit(not result.wasSuccessful())")
+        result = subprocess.run([sys.executable, "-c", probe], env=foreign,
+                                cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+        self.assertEqual((self.root / ".git/index").read_bytes(), index)
+        self.assertEqual((self.root / ".git/config").read_bytes(), config)
 
 
 if __name__ == "__main__":
