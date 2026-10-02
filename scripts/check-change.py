@@ -11,7 +11,7 @@ GENERATED = (
     "Cargo.lock", "package-lock.json", "contracts/generated/*",
     "contracts/providers/*/schema/*", "*/src/generated/*",
 )
-LIMITS = {"commit": 800, "pr": 1600}
+LIMITS = {"commit": 800, "pr": 1600, "squash": 1600}
 
 
 def classify(numstat):
@@ -51,16 +51,18 @@ def check(args, kind):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--staged", action="store_true")
+    parser.add_argument("--main", action="store_true",
+                        help="Check each integrated squash commit in a main push range")
     parser.add_argument("--base")
     parser.add_argument("--head", default="HEAD")
     args = parser.parse_args(argv)
     if args.staged:
-        if args.base:
-            parser.error("--staged and --base are mutually exclusive")
+        if args.base or args.main:
+            parser.error("--staged cannot be combined with --base or --main")
         check(["--cached"], "commit")
         return
     if not args.base:
-        parser.error("--base is required for PR checks")
+        parser.error("--base is required for range checks")
     # Resolve untrusted input as an object name, never pass it as a Git option.
     head = git("rev-parse", "--verify", "--end-of-options", args.head + "^{commit}").strip()
     initial = args.base in {"0" * 40, "0" * 64}
@@ -69,16 +71,20 @@ def main(argv=None):
     else:
         base = git("rev-parse", "--verify", "--end-of-options", args.base + "^{commit}").strip()
         ancestor = git("merge-base", base, head).strip()
-    check([ancestor, head], "pr")
+        if args.main and ancestor != base:
+            raise ValueError("Main push base must be an ancestor of its head")
+    if not args.main:
+        check([ancestor, head], "pr")
+    kind = "squash" if args.main else "commit"
     commits = git("rev-list", "--reverse", head if initial else f"{ancestor}..{head}").splitlines()
     for commit in commits:
         parents = git("rev-list", "--parents", "-n", "1", commit).split()[1:]
         if not parents and initial:
-            check([ancestor, commit], "commit")
+            check([ancestor, commit], kind)
         elif len(parents) != 1:
-            raise ValueError("Use a linear PR branch; refresh with rebase before review")
+            raise ValueError("Use linear history; refresh PR branches with rebase before review")
         else:
-            check([parents[0], commit], "commit")
+            check([parents[0], commit], kind)
 
 
 if __name__ == "__main__":
