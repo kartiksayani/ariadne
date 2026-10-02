@@ -154,9 +154,7 @@ pub fn run() {
     let (state, owner) = PingState::ordinary().expect("Cannot create private diagnostic directory");
     #[cfg(not(feature = "e2e"))]
     let owner = Some(owner);
-    let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .manage(state);
+    let builder = tauri::Builder::default().manage(state);
     #[cfg(feature = "e2e")]
     let builder = builder
         .plugin(tauri_plugin_wdio::init())

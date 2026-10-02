@@ -1,0 +1,9 @@
+[package]
+name = "ariadne-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ariadne"
+path = "src/main.rs"

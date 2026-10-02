@@ -15,5 +15,42 @@
     "apps/desktop/vite.config.ts",
     "apps/desktop/wdio.native.conf.mjs",
     "apps/desktop/src-tauri/build.rs"
+  ],
+  "non_executable_sources": [
+    {
+      "path": "crates/ariadne-domain/src/lib.rs",
+      "sha256": "7dc84c61d61b99d5f8a7bf295543b581550554f6a52a21f4ea099a2cf5d77750",
+      "reason": "comment-only-rust-package-boundary"
+    },
+    {
+      "path": "crates/ariadne-store/src/lib.rs",
+      "sha256": "7be5252d02fe0df85c9332ab518e10538eaf13e5d879b33675ad25d8bf78c232",
+      "reason": "comment-only-rust-package-boundary"
+    },
+    {
+      "path": "crates/ariadne-core/src/lib.rs",
+      "sha256": "3462fe590c5897505c0b159b06f59cd9553ef5f1b6689a87d97f8411f58af16c",
+      "reason": "comment-only-rust-package-boundary"
+    },
+    {
+      "path": "crates/ariadne-agent-protocol/src/lib.rs",
+      "sha256": "d75f6ad074159a648e295c25082f63e8df446f09a1161f2e7a35504927d14149",
+      "reason": "comment-only-rust-package-boundary"
+    },
+    {
+      "path": "crates/ariadne-runtime/src/lib.rs",
+      "sha256": "1493a1fdc182233727c5b0791dbe5404783a26c8042b86531d711a7721794175",
+      "reason": "comment-only-rust-package-boundary"
+    },
+    {
+      "path": "crates/ariadne-adapter-claude/src/lib.rs",
+      "sha256": "8438cce61934a490cec7c89097b4c4abd09fd084a89671be9b9e059af881b8bc",
+      "reason": "comment-only-rust-package-boundary"
+    },
+    {
+      "path": "crates/ariadne-adapter-codex/src/lib.rs",
+      "sha256": "8bb31e4cde3c8b4468965cc8b9a63614e26b8e9f683756dd0289b0f363090446",
+      "reason": "comment-only-rust-package-boundary"
+    }
   ]
 }

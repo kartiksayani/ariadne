@@ -5,8 +5,8 @@ import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/pro
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop } from '../../../scripts/run-native-e2e.mjs';
-import { resolvedNames, verifyGraph, mergedConfig, buildArtifacts, frontendModules } from '../../../scripts/check-release-boundary.mjs';
+import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative } from '../../../scripts/run-native-e2e.mjs';
+import { resolvedNames, verifyGraph, mergedConfig, buildArtifacts, frontendModules, checkRelease } from '../../../scripts/check-release-boundary.mjs';
 test('selectors are explicit and default runs the complete gate', () => {
   assert.equal(selector([]), 'all');
   for (const name of ['all', 'native', 'process-contract']) assert.equal(selector(['--suite', name]), name);
@@ -132,4 +132,20 @@ test('release proof rejects activated dependencies, inline permissions, globals 
   assert.throws(() => verifyGraph([], config, {}, { test: { permissions: ['wdio-webdriver:default'] } }, modules));
   assert.throws(() => verifyGraph([], config, {}, {}, [...modules, '/node_modules/@wdio/tauri-plugin/index.js']));
   assert.throws(() => verifyGraph([], config, {}, {}, []));
+});
+test('invalid or occupied preflight allocates no native root and leaves unrelated listener alive', async () => {
+  const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const original = process.env.ARIADNE_E2E_PORT;
+  const ownedRoots = async () => (await readdir('/private/tmp')).filter(name => /^ariadne-(e2e|release)-/.test(name)).sort();
+  const before = await ownedRoots();
+  try {
+    for (const value of ['0', String(server.address().port)]) {
+      process.env.ARIADNE_E2E_PORT = value;
+      for (const gate of [runNative, checkRelease]) await assert.rejects(gate(), /Invalid|occupied/);
+      assert.deepEqual(await ownedRoots(), before); assert.ok(server.listening && alive(process.pid));
+    }
+  } finally {
+    if (original === undefined) delete process.env.ARIADNE_E2E_PORT; else process.env.ARIADNE_E2E_PORT = original;
+    await new Promise(resolve => server.close(resolve));
+  }
 });

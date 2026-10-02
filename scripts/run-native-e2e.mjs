@@ -15,6 +15,7 @@ export function toolchain() {
     ['cargo', ['llvm-cov', '--version']], ['npm', ['--version']],
     ['/usr/bin/sw_vers', []], ['/usr/bin/uname', ['-m']],
     ['/usr/bin/xcode-select', ['-p']], ['/usr/bin/xcodebuild', ['-version']],
+    ['/usr/bin/xcrun', ['--show-sdk-version']], ['/usr/bin/xcrun', ['--show-sdk-path']],
   ];
   return { node: process.version,
     versions: versions.map(([binary, args]) => ({ binary, args, output: execFileSync(binary, args, { encoding: 'utf8' }).trim() })),
@@ -116,14 +117,14 @@ export function buildEnv(target, e2e = false) {
 }
 export async function runNative() {
   if (process.platform !== 'darwin') throw new Error('Native E2E requires a logged-in macOS GUI session');
+  const port = Number(process.env.ARIADNE_E2E_PORT || '4445'); await portFree(port);
   const run = randomUUID(), evidence = join(repo, 'coverage/native-e2e', run);
   await mkdir(evidence, { recursive: true });
   const root = await mkdtemp('/private/tmp/ariadne-e2e-'); await chmod(root, 0o700);
-  const port = Number(process.env.ARIADNE_E2E_PORT || '4445'), nonce = randomBytes(32).toString('hex');
+  const nonce = randomBytes(32).toString('hex');
   const binary = join(repo, 'target/native-e2e/debug/ariadne-desktop');
   let failure, owned;
   try {
-    await portFree(port);
     const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--no-bundle', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
     const runtimeCommand = [process.execPath, join(repo, 'node_modules/@wdio/cli/bin/wdio.js'), 'run', 'wdio.native.conf.mjs'];
     const details = { root, port, nonce, binary, toolchain: toolchain(), buildCommand, runtimeCommand, cwd: desktop };

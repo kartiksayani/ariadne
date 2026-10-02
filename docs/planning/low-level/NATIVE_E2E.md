@@ -119,7 +119,7 @@ The test overlay is:
         {
           "identifier": "native-e2e",
           "windows": ["main"],
-          "permissions": ["core:default", "opener:default", "wdio:default", "wdio-webdriver:default"]
+          "permissions": ["core:default", "wdio:default", "wdio-webdriver:default"]
         }
       ]
     }

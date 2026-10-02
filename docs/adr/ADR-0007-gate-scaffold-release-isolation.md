@@ -20,7 +20,9 @@ features with Cargo metadata and fresh compiler events. Read the desktop build
 script's actual OUT_DIR ACL artifacts and fingerprint-recorded TAURI_CONFIG.
 Allow only the known base JSON configuration and identical CLI bundle overrides;
 reject alternate/platform sources, unexpected overrides, features or permissions.
-Verify fresh frontend module inventory against emitted chunk hashes.
+Verify fresh frontend module inventory against emitted chunk hashes. Remove the
+unused template opener plugin and permission; retain the core capability and
+scaffold ping command. The scaffold never launches link navigation.
 
 Launch the exact packaged executable with hostile E2E root/nonce/driver switches.
 Observe its live OS PID and executable for ten seconds, with no driver listener

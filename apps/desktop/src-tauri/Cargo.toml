@@ -13,7 +13,6 @@ tauri-build.workspace = true
 
 [dependencies]
 tauri.workspace = true
-tauri-plugin-opener.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

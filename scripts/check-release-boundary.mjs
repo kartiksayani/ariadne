@@ -58,6 +58,7 @@ export function verifyGraph(names, config, acl, capabilities, modules) {
 }
 export async function checkRelease() {
   if (process.platform !== 'darwin') throw new Error('Packaged boundary requires macOS');
+  const port = Number(process.env.ARIADNE_E2E_PORT || '4445'); await portFree(port);
   const target = join(repo, 'target/release-boundary'), evidence = join(repo, 'coverage/release-boundary', randomUUID());
   await rm(target, { recursive: true, force: true }); await rm(join(repo, 'target/desktop-dist'), { recursive: true, force: true });
   await rm(join(repo, 'target/desktop-modules.json'), { force: true }); await mkdir(evidence, { recursive: true });
@@ -79,14 +80,14 @@ export async function checkRelease() {
   const config = mergedConfig(base, value === null ? null : JSON.parse(value));
   const acl = await readJson(join(out, 'acl-manifests.json')), capabilities = await readJson(join(out, 'capabilities.json'));
   assert.deepEqual(Object.keys(capabilities), ['default']);
-  assert.deepEqual(capabilities.default.permissions, ['core:default', 'opener:default']);
+  assert.deepEqual(capabilities.default.permissions, ['core:default']);
   assert.equal(config.build.frontendDist, '../../../target/desktop-dist');
   const inventory = await readJson(join(repo, 'target/desktop-modules.json'));
   const modules = await frontendModules(inventory, join(repo, 'target/desktop-dist'), started);
   const names = resolvedNames(metadata); verifyGraph(names, config, acl, capabilities, modules);
   const binary = join(target, 'release/bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop');
-  const root = await mkdtemp('/private/tmp/ariadne-release-'), port = Number(process.env.ARIADNE_E2E_PORT || '4445');
   await portFree(port);
+  const root = await mkdtemp('/private/tmp/ariadne-release-');
   const child = spawn(binary, [], { env: { ...env, WDIO_EMBEDDED_SERVER: 'true', TAURI_WEBDRIVER_PORT: String(port), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: '0'.repeat(64) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '', observed, spawnError;
   child.once('error', error => { spawnError = error; });
@@ -98,7 +99,7 @@ export async function checkRelease() {
       observed = identity(child.pid); assert.equal(observed.exe, binary);
       await portFree(port); assert.equal(listeners(port), ''); assert.deepEqual(await readdir(root), []);
     }
-    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
+    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, runtimeCommand: [binary], binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
   } finally {
     await stop(child); await portFree(port); await json(join(evidence, 'cleanup.json'), { pid: child.pid, pidExited: !alive(child.pid), portFree: true, logs });
     await rm(root, { recursive: true });
