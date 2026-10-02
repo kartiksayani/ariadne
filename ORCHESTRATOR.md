@@ -84,8 +84,9 @@ At most **three review rounds** per PR. Stop early when no findings remain.
 After round three, unresolved required work stays unmerged. Continue independent
 tasks and rework/split the blocked task when there is a concrete new approach.
 Carry unresolved finding IDs and exhausted-round history forward; reopening a PR
-does not reset review limits to bypass a bad result. Ask the owner only when a
-real access, destructive-action or unresolved product decision requires them.
+does not reset review limits to bypass a bad result. Decide implementation
+trade-offs from the accepted spec and record necessary clarifications in a small
+reviewed spec PR. Ask the owner for missing access or a destructive action.
 
 ### 4. Maintain and merge
 
@@ -97,6 +98,8 @@ changed commits need fresh final-head review. Do not merge concurrently.
 Create the small `.delivery/` record described in the helper reference, listing
 all author/patcher context IDs, every structured review, dispositions and the
 final spec conclusion. Run `delivery.py verify`, then `delivery.py merge`.
+Resolve addressed GitHub review threads only after the reviewer has verified the
+fix or the maintainer has recorded a justified rejection/deferral.
 The merge command re-reads GitHub, checks ownership/reviews/CI/head/base, publishes
 the durable maintainer record and `maintainer-spec-review` status, and requests a
 rebase merge with the exact head. It never uses force/admin overrides.

@@ -22,7 +22,9 @@ There is no background service to install for the delivery workflow.
 
 ## Commands
 
-Run from an Ariadne checkout with `origin` pointing to `kartiksayani/ariadne`:
+Run the reviewed helper from the maintainer's clean checkout of current `main`,
+with `origin` pointing to `kartiksayani/ariadne`. Keep its catalogue current after
+each merge; do not run a worker's unreviewed copy as the merge authority:
 
 ```sh
 rtk proxy .venv-quality/bin/python scripts/delivery.py ready
@@ -64,6 +66,17 @@ human-readable independent review findings plus one fenced block labelled
 `ariadne-review` to each GitHub COMMENT review. Publish it with the **current
 `commit_id`**, so GitHub independently records which commit was reviewed.
 Issue comments alone are not independent review evidence.
+
+Write `.delivery/review.json` with the GitHub request fields `commit_id` (the
+actual full head SHA), `event: "COMMENT"`, and `body` (readable review plus the
+fenced block), then publish it:
+
+```sh
+rtk proxy gh api repos/kartiksayani/ariadne/pulls/123/reviews --method POST --input .delivery/review.json
+```
+
+Save the returned `node_id` as the review ID in the maintainer record. The helper
+will fetch that review again through GraphQL before trusting it.
 
 The JSON inside that fenced block has this shape (illustrative, not evidence):
 
