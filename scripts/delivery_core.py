@@ -5,6 +5,11 @@ import re
 from datetime import datetime
 from functools import lru_cache
 
+if __package__:
+    from .delivery_adrs import ADR_PATH
+else:
+    from delivery_adrs import ADR_PATH
+
 
 def require(condition, message):
     if not condition:
@@ -105,6 +110,26 @@ def review_payload(review):
     return data
 
 
+def decision_paths(task, record):
+    """Explicit Markdown exceptions never grant ownership of arbitrary code or specs."""
+    adrs, specs = record.get("architecture_decisions", []), record.get("spec_updates", [])
+    for values in (adrs, specs):
+        require(isinstance(values, list) and all(text(path) for path in values)
+                and len(values) == len(set(values)), "Invalid/duplicate architecture declarations")
+        for path in values:
+            parts(path)
+    require(all(ADR_PATH.fullmatch(path) for path in adrs), "Only canonical ADR paths may be declared")
+    references = {reference.split("#", 1)[0] for reference in task["spec"]}
+    require(all(path.endswith(".md") and path in references for path in specs)
+            and (not specs or adrs), "Spec updates require ADRs and exact task spec files")
+    return adrs, specs
+
+
+def owns_change(path, task, record):
+    adrs, specs = decision_paths(task, record)
+    return owns_path(path, task["paths"]) or path in adrs + specs
+
+
 def validate_gate(task, snapshot, record):
     """Return None before merge or chart evidence after an actual merge; otherwise raise ValueError."""
     require(all(isinstance(value, dict) for value in (task, snapshot, record)), "Expected object inputs")
@@ -122,9 +147,12 @@ def validate_gate(task, snapshot, record):
     for name in ("quality", "change-policy"):
         matches = [check for check in checks if check.get("name") == name]
         require(matches and all(check.get("state") == "SUCCESS" for check in matches), "Missing/failed CI: " + name)
+    adrs, specs = decision_paths(task, record)
     files = snapshot.get("files", [])
-    require(isinstance(files, list) and files and all(owns_path(path, task["paths"]) for path in files),
+    require(isinstance(files, list) and files and all(owns_change(path, task, record) for path in files),
             "Out-of-scope or missing changed files")
+    require(set(adrs) == {path for path in files if ADR_PATH.fullmatch(path)} and set(specs) <= set(files),
+            "ADR/spec declarations must match changed files")
     authors = record.get("authors", [])
     require(isinstance(authors, list) and authors and all(text(agent) for agent in authors), "Missing author/patcher contexts")
     reviews = snapshot.get("reviews", [])
@@ -148,6 +176,8 @@ def validate_gate(task, snapshot, record):
         findings.update(f'{event["id"]}:{finding["id"]}' for finding in data["findings"])
     require(rounds == sorted(rounds) and set(rounds) == set(range(1, max(rounds) + 1)), "Nonconsecutive review rounds")
     require(data["head"] == head and not data["findings"], "Final current-head review must have no findings")
+    require(data.get("architecture_decisions", []) == adrs and data.get("spec_updates", []) == specs,
+            "Final reviewer must acknowledge the same ADR/spec declarations")
     decisions = record.get("decisions", [])
     require(isinstance(decisions, list), "Invalid finding decisions")
     resolved = set()
@@ -160,7 +190,8 @@ def validate_gate(task, snapshot, record):
     require(findings == resolved, "Finding dispositions must exactly match review findings")
     spec = record.get("spec_review", {})
     require(isinstance(spec, dict) and isinstance(spec.get("sections"), list) and all(text(section) for section in spec["sections"])
-            and set(task["spec"]) <= set(spec["sections"]) and text(spec.get("conclusion")), "Missing final spec adjudication")
+            and set(task["spec"] + adrs + specs) <= set(spec["sections"])
+            and text(spec.get("conclusion")), "Missing final spec adjudication")
     if state == "OPEN":
         return None
     timestamp(snapshot.get("merged_at"))

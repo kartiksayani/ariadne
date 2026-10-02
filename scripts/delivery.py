@@ -10,7 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from delivery_core import owns_path, ready, validate_gate
+from delivery_adrs import validate_changes
+from delivery_core import decision_paths, owns_change, ready, validate_gate
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "kartiksayani/ariadne"
@@ -101,7 +102,29 @@ def check_catalog(catalog):
         raise ValueError("Task catalogue differs from current main; refresh the maintainer checkout before continuing")
 
 
-def ancestor(snap, task, catalog):
+def architecture(snap, task, record):
+    """Inspect immutable Git objects, including the original reviewed head after squash."""
+    adrs, specs = decision_paths(task, record)
+    base = record.get("base", snap["base"])
+    paths = [path for path in run("git", "diff", "--no-renames", "--name-only", "-z",
+                                 base, snap["head"]).split("\0") if path]
+    if not all(owns_change(path, task, record) for path in paths):
+        raise ValueError("Git diff includes changed/deleted paths outside task ownership")
+    if not set(specs) <= set(paths):
+        raise ValueError("Declared spec updates must actually change")
+    for path in specs:
+        run("git", "show", f"{base}:{path}")
+        run("git", "show", f"{snap['head']}:{path}")
+
+    def documents(revision):
+        names = run("git", "ls-tree", "-r", "--name-only", revision, "--", "docs/adr").splitlines()
+        return {path: run("git", "show", f"{revision}:{path}")
+                for path in names if path.startswith("docs/adr/ADR-")}
+
+    validate_changes(documents(base), documents(snap["head"]), adrs, specs)
+
+
+def ancestor(snap, task, catalog, record=None):
     number = snap["number"]
     run("git", "fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main",
         f"+refs/pull/{number}/head:refs/delivery/{number}")
@@ -111,9 +134,7 @@ def ancestor(snap, task, catalog):
     if run("git", "rev-parse", f"refs/delivery/{number}").strip() != snap["head"]:
         raise ValueError("PR head changed while fetching")
     run("git", "merge-base", "--is-ancestor", snap["base"], snap["head"])
-    paths = run("git", "diff", "--no-renames", "--name-only", "-z", snap["base"], snap["head"]).split("\0")
-    if not all(owns_path(path, task["paths"]) for path in paths if path):
-        raise ValueError("Git diff includes changed/deleted paths outside task ownership")
+    architecture(snap, task, record or {})
 
 
 def receipt(task, snap, catalog):
@@ -125,11 +146,15 @@ def receipt(task, snap, catalog):
     for record in reversed(records):
         if record.get("head") == snap["head"] and record.get("task_id") == task["id"]:
             proof = validate_gate(task, snap, record)
-            run("git", "fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main")
+            run("git", "fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main",
+                f"+refs/pull/{snap['number']}/head:refs/delivery/{snap['number']}")
             check_catalog(catalog)
             if run("git", "rev-parse", "refs/remotes/origin/main").strip() != snap["base"]:
                 raise ValueError("Main changed while verifying merged evidence")
             run("git", "merge-base", "--is-ancestor", snap["merged_commit"], snap["base"])
+            if run("git", "rev-parse", f"refs/delivery/{snap['number']}").strip() != snap["head"]:
+                raise ValueError("Original reviewed PR head changed")
+            architecture(snap, task, record)
             return proof
     raise ValueError("Merged task lacks a genuine final-head delivery receipt")
 
@@ -185,7 +210,7 @@ def merge(tasks, task, number, record, catalog):
         if snap["viewer"] != "kartiksayani" or snap["state"] != "OPEN":
             raise ValueError("Only the maintainer may merge an open task PR")
         eligible(tasks, task, catalog)
-        ancestor(snap, task, catalog)
+        ancestor(snap, task, catalog, record)
         comment = mutate(f"issues/{number}/comments", {"body": "```ariadne-delivery\n" + json.dumps(record, indent=2) + "\n```"})
         mutate(f"statuses/{snap['head']}", {"state": "success", "context": "maintainer-spec-review",
                "description": "Independent final-head review adjudicated against the task spec", "target_url": comment["html_url"]})
@@ -245,7 +270,7 @@ def main(argv=None):
             if snap["state"] != "OPEN":
                 raise ValueError("Verify expects an open PR; export rechecks merged evidence")
             eligible(tasks, task, catalog)
-            ancestor(snap, task, catalog)
+            ancestor(snap, task, catalog, record)
             result = {"pr": args.pr, "head": snap["head"], "base": snap["base"], "passed": True}
         else:
             result = merge(tasks, task, args.pr, record, catalog)

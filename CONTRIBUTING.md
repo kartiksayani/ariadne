@@ -41,6 +41,14 @@ Use `rtk proxy` before shell commands when working in the owner's agent environm
 6. Quality-policy changes are separate reviewed PRs. Never lower thresholds, disable
    tests, widen exclusions or bypass hooks merely to get another change through.
 
+## Architecture questions
+
+Send implementation architecture gaps or conflicts to the orchestrator; routine
+choices within settled specs remain worker autonomy. Every resulting decision
+ships as a short [ADR](docs/adr/README.md) with the affected implementation PR.
+Update affected canonical contracts together and preserve deprecated decisions
+with reciprocal replacement links. Review decisions at the final code head.
+
 ## Checks
 
 Ruff covers maintained Python; ESLint covers maintained JavaScript, including

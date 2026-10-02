@@ -20,3 +20,6 @@ Task ID and spec section:
 ## Review notes
 
 List risks or decisions that need maintainer attention.
+
+- Architecture decisions (exact changed ADR paths, or []):
+- Spec updates (exact additional task-referenced Markdown paths, or []):

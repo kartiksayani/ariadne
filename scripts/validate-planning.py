@@ -11,6 +11,8 @@ import tempfile
 from urllib.parse import unquote
 import zipfile
 
+from delivery_adrs import validate_documents
+
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs/planning"
 checks = {}
@@ -45,7 +47,13 @@ bad_links = []
 json_blocks = 0
 markdown_files = [ROOT / "README.md", ROOT / "DECISIONS.md", *DOCS.rglob("*.md"),
                   *ROOT.glob("AGENTS.md"), *ROOT.glob("ORCHESTRATOR.md"),
-                  *(ROOT / "docs/delivery").glob("*.md")]
+                  *(ROOT / "docs/delivery").glob("*.md"), *(ROOT / "docs/adr").glob("*.md")]
+try:
+    validate_documents({str(path.relative_to(ROOT)): path.read_text()
+                        for path in (ROOT / "docs/adr").glob("ADR-*")})
+    check("architecture_decisions", True)
+except ValueError as error:
+    check("architecture_decisions", False, str(error))
 for path in markdown_files:
     content = path.read_text()
     for block in re.findall(r"```json\s*\n(.*?)\n```", content, re.S):

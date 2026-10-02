@@ -37,7 +37,16 @@ Use a fresh worktree/branch from current `origin/main`. Give the implementer:
 task ID, goal, owned paths, dependencies, exact spec references, acceptance,
 required checks, worktree/branch, model/effort, and the reminder that other agents
 are working nearby. `delivery.py brief TASK` provides the catalogue details.
-The worker chooses implementation details within those boundaries.
+The worker chooses routine implementation details within those boundaries.
+Implementers, reviewers and patchers must send architecture questions to this
+maintainer session before dependent work, following the [ADR contract](docs/adr/README.md).
+Resolve gaps/conflicts with context, options and a reasoned choice; allocate a
+stable ADR ID and exact document reservations. Every resulting architecture
+decision, including an existing interpretation chosen to resolve ambiguity,
+ships in the affected implementation PR. Keep independent work moving while
+a question is pending; the owner need not adjudicate routine architecture.
+Reserve additional ADR/spec paths against all running owners before authorizing
+them. Update affected canonical contracts so accepted ADRs and specs agree.
 
 Tell the worker to commit small changes through the hook and open a PR containing
 the marker `<!-- ariadne-task:P0.1 -->` with the actual task ID. The PR must explain
@@ -57,7 +66,9 @@ Spawn a reviewer in a **fresh separate context** using Sol 6.1 High. It must not
 have authored or patched this PR. Give it the PR, task/spec and concrete test
 evidence; let it inspect the latest `gh pr diff` and relevant code itself.
 It checks behavior against acceptance, design fidelity, ordinary failure paths,
-ownership, tests/coverage, lint and unnecessary complexity. Run relevant checks;
+ownership, tests/coverage, lint and unnecessary complexity. Review declared ADRs
+and spec updates with the code, including reciprocal deprecation links and
+preserved old prose. Record the same exact declarations in the final review. Run relevant checks;
 do not replace evidence with the author's summary.
 
 The reviewer posts a real GitHub **COMMENT review bound to `commit_id`**. Include
@@ -85,8 +96,10 @@ After round three, unresolved required work stays unmerged. Continue independent
 tasks and rework/split the blocked task when there is a concrete new approach.
 Carry unresolved finding IDs and exhausted-round history forward; reopening a PR
 does not reset review limits to bypass a bad result. Decide implementation
-trade-offs from the accepted spec and record necessary clarifications in a small
-reviewed spec PR. Ask the owner for missing access or a destructive action.
+trade-offs against owner requirements and the accepted spec. Record every
+resulting architecture decision as an ADR with its affected implementation;
+unowned contracts beyond the narrow ADR/spec declaration rules require a small
+reviewed planning PR first. Ask the owner for missing access or a destructive action.
 
 ### 4. Maintain and merge
 
@@ -96,8 +109,9 @@ that the final head includes current main. Rebase and rerun checks if main moved
 changed commits need fresh final-head review. Do not merge concurrently.
 
 Create the small `.delivery/` record described in the helper reference, listing
-all author/patcher context IDs, every structured review, dispositions and the
-final spec conclusion. Run `delivery.py verify`, then `delivery.py merge`.
+all author/patcher context IDs, every structured review, dispositions, exact
+`architecture_decisions`/`spec_updates` paths and the final spec conclusion. Check
+these decisions against the implementation and current owner requirements. Run `delivery.py verify`, then `delivery.py merge`.
 Resolve addressed GitHub review threads only after the reviewer has verified the
 fix or the maintainer has recorded a justified rejection/deferral.
 The merge command re-reads GitHub, checks ownership/reviews/CI/head/base, publishes
@@ -157,6 +171,11 @@ mergeability state, review heads, unresolved threads and final-head check rollup
 Require actual successful `quality` and `change-policy` GitHub Actions checks.
 Fetch main/PR refs and verify main is an ancestor of the reviewed head. Publish
 the maintainer's final conclusion with the head/base, review links and test results.
+For architecture decisions, use the same exact ADR/spec declarations in the PR
+and final independent review. The planning gate validates the ADR collection;
+the maintainer directly checks base-to-head preservation, replacement links,
+reservations and spec consistency as described in the [ADR contract](docs/adr/README.md).
+The task receipt helper does not validate unmarked maintenance PRs.
 
 Post `maintainer-spec-review` SUCCESS for that exact head using
 `gh api repos/kartiksayani/ariadne/statuses/ACTUAL_HEAD_SHA --method POST --input FILE`.

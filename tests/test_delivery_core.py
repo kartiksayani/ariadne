@@ -30,6 +30,32 @@ def fixture():
 
 
 class GateTests(unittest.TestCase):
+    def test_declared_adrs_specs_and_review_are_exact_narrow_exceptions(self):
+        adr, spec = "docs/adr/ADR-0001-choice.md", "docs/spec.md"
+        snapshot, record = fixture()
+        record.update(architecture_decisions=[adr], spec_updates=[spec])
+        snapshot["files"] += [adr, spec]
+        payload = json.loads(snapshot["reviews"][0]["body"].split("```ariadne-review\n")[1].split("\n```")[0])
+        payload.update(architecture_decisions=[adr], spec_updates=[spec])
+        snapshot["reviews"][0]["body"] = "```ariadne-review\n" + json.dumps(payload) + "\n```"
+        record["spec_review"]["sections"] = [*TASK["spec"], adr, spec]
+        self.assertIsNone(validate_gate(TASK, snapshot, record))
+        mutations = [lambda s, r: r.update(architecture_decisions=[]),
+                     lambda s, r: r.update(architecture_decisions=[adr, adr]),
+                     lambda s, r: r.update(spec_updates=["other.md"]),
+                     lambda s, r: r.update(architecture_decisions=["src/other.rs"]),
+                     lambda s, r: r.update(spec_updates="docs/spec.md"),
+                     lambda s, r: r.update(architecture_decisions=["docs/adr/../other.md"]),
+                     lambda s, r: s["files"].append("src-independent/other.rs"),
+                     lambda s, r: s["files"].remove(adr), lambda s, r: s["files"].remove(spec),
+                     lambda s, r: s["reviews"][0].update(body=review()[0]["body"]),
+                     lambda s, r: r["spec_review"].update(sections=TASK["spec"])]
+        for mutate in mutations:
+            s, r = copy.deepcopy(snapshot), copy.deepcopy(record)
+            mutate(s, r)
+            with self.subTest(mutate=mutate), self.assertRaises(ValueError):
+                validate_gate(TASK, s, r)
+
     def test_open_and_actual_merge(self):
         snapshot, record = fixture()
         self.assertIsNone(validate_gate(TASK, snapshot, record))

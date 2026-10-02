@@ -66,6 +66,8 @@ human-readable independent review findings plus one fenced block labelled
 `ariadne-review` to each GitHub COMMENT review. Publish it with the **current
 `commit_id`**, so GitHub independently records which commit was reviewed.
 Issue comments alone are not independent review evidence.
+The final review also acknowledges the exact `architecture_decisions` and
+`spec_updates` declarations described in the [ADR contract](../adr/README.md).
 
 Write `.delivery/review.json` with the GitHub request fields `commit_id` (the
 actual full head SHA), `event: "COMMENT"`, and `body` (readable review plus the
@@ -124,6 +126,8 @@ example when making a record. Do not copy these dummy IDs as real evidence.
     {"id": "PRR_first", "head": "cccccccccccccccccccccccccccccccccccccccc", "agent": "review-P0.1", "round": 1},
     {"id": "PRR_final", "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "agent": "review-P0.1", "round": 1}
   ],
+  "architecture_decisions": [],
+  "spec_updates": [],
   "decisions": [
     {"finding": "PRR_first:F1", "disposition": "fixed", "reason": "Verified the correction and its regression test at the final head", "spec": "Exact task spec section"}
   ],
@@ -137,7 +141,16 @@ example when making a record. Do not copy these dummy IDs as real evidence.
 Reviews and CI must match the current final head; open PRs must also match the
 recorded current base. The final review must have no remaining findings. The
 helper validates file ownership and at most three consecutive review rounds,
-including targeted verification in a round. A reviewer cannot be an author or
+including targeted verification in a round. Exact declared ADR files are narrow
+ownership exceptions. Additional declared spec updates must be existing Markdown
+files in this task's `spec`, changed and referenced/explained by a new accepted ADR.
+List all these paths in final `spec_review.sections` and in the final review
+block using the same two declaration arrays (defaults are [] for older records).
+The maintainer reserves these exact extra paths and checks conflicts; `ready`
+only schedules the catalogue globs. The helper reads ADRs at the actual reviewed
+base/head, preserves superseded prose, and validates historical receipts at the
+original PR head rather than today's main. See the [ADR contract](../adr/README.md)
+for asking questions, supersession, precedence and unmarked maintenance PRs. A reviewer cannot be an author or
 patcher. All workers' model/effort settings are part of the actual delegation;
 structured review evidence additionally records the reviewer's settings.
 
