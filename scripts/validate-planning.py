@@ -43,7 +43,9 @@ check("all_30_design_frames_mapped", len(frame_ids) == 30 and frame_ids == mappe
 
 bad_links = []
 json_blocks = 0
-markdown_files = [ROOT / "README.md", ROOT / "DECISIONS.md", *DOCS.rglob("*.md")]
+markdown_files = [ROOT / "README.md", ROOT / "DECISIONS.md", *DOCS.rglob("*.md"),
+                  *ROOT.glob("AGENTS.md"), *ROOT.glob("ORCHESTRATOR.md"),
+                  *(ROOT / "docs/delivery").glob("*.md")]
 for path in markdown_files:
     content = path.read_text()
     for block in re.findall(r"```json\s*\n(.*?)\n```", content, re.S):
