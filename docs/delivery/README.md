@@ -1,5 +1,8 @@
 # Delivery helper
 
+Start with the [harness overview](HARNESS_OVERVIEW.md) for the roles, workflow,
+enforcement limits and repository file guide.
+
 [ORCHESTRATOR.md](../../ORCHESTRATOR.md) defines the autonomous workflow. The
 helper performs repeatable GitHub checks; the live maintainer session delegates
 and judges the work. It never starts an agent, stores credentials or enables MCP.
