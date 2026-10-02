@@ -95,10 +95,17 @@ def task_id(body):
     return ids[0] if ids else None
 
 
-def ancestor(snap, task):
+def check_catalog(catalog):
+    current = json.loads(run("git", "show", "refs/remotes/origin/main:docs/delivery/tasks.json"))
+    if catalog != current:
+        raise ValueError("Task catalogue differs from current main; refresh the maintainer checkout before continuing")
+
+
+def ancestor(snap, task, catalog):
     number = snap["number"]
     run("git", "fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main",
         f"+refs/pull/{number}/head:refs/delivery/{number}")
+    check_catalog(catalog)
     if run("git", "rev-parse", "refs/remotes/origin/main").strip() != snap["base"]:
         raise ValueError("Main changed while fetching; verify the new base")
     if run("git", "rev-parse", f"refs/delivery/{number}").strip() != snap["head"]:
@@ -109,7 +116,7 @@ def ancestor(snap, task):
         raise ValueError("Git diff includes changed/deleted paths outside task ownership")
 
 
-def receipt(task, snap):
+def receipt(task, snap, catalog):
     if not snap["spec_status"]:
         raise ValueError("Merged task lacks maintainer-spec-review SUCCESS")
     records = [json.loads(body) for comment in snap["comments"]
@@ -119,6 +126,7 @@ def receipt(task, snap):
         if record.get("head") == snap["head"] and record.get("task_id") == task["id"]:
             proof = validate_gate(task, snap, record)
             run("git", "fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main")
+            check_catalog(catalog)
             if run("git", "rev-parse", "refs/remotes/origin/main").strip() != snap["base"]:
                 raise ValueError("Main changed while verifying merged evidence")
             run("git", "merge-base", "--is-ancestor", snap["merged_commit"], snap["base"])
@@ -126,7 +134,7 @@ def receipt(task, snap):
     raise ValueError("Merged task lacks a genuine final-head delivery receipt")
 
 
-def discover(tasks):
+def discover(tasks, catalog):
     completed, running, evidence, cursor = set(), set(), [], None
     for _ in range(20):
         data = graphql(LIST_QUERY, **({"cursor": cursor} if cursor else {}))["repository"]["pullRequests"]
@@ -141,7 +149,7 @@ def discover(tasks):
                 running.add(identifier)
             else:
                 snap = snapshot(pr["number"])
-                proof = receipt(task, snap)
+                proof = receipt(task, snap, catalog)
                 if identifier in completed:
                     raise ValueError("Task has multiple validated merged PRs")
                 completed.add(identifier)
@@ -161,14 +169,14 @@ def mutate(endpoint, payload, method="POST"):
         return json.loads(run("gh", "api", f"repos/{REPO}/{endpoint}", "--method", method, "--input", path))
 
 
-def eligible(tasks, task):
-    completed, running, _ = discover(tasks)
+def eligible(tasks, task, catalog):
+    completed, running, _ = discover(tasks, catalog)
     candidates = ready(list(tasks.values()), completed, running - {task["id"]})
     if task["id"] not in {candidate["id"] for candidate in candidates}:
         raise ValueError("Task prerequisites, completion or running ownership forbid this PR")
 
 
-def merge(tasks, task, number, record):
+def merge(tasks, task, number, record, catalog):
     common = Path(run("git", "rev-parse", "--git-common-dir").strip())
     with (ROOT / common / "ariadne-delivery.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -176,12 +184,12 @@ def merge(tasks, task, number, record):
         validate_gate(task, snap, record)
         if snap["viewer"] != "kartiksayani" or snap["state"] != "OPEN":
             raise ValueError("Only the maintainer may merge an open task PR")
-        eligible(tasks, task)
-        ancestor(snap, task)
+        eligible(tasks, task, catalog)
+        ancestor(snap, task, catalog)
         comment = mutate(f"issues/{number}/comments", {"body": "```ariadne-delivery\n" + json.dumps(record, indent=2) + "\n```"})
         mutate(f"statuses/{snap['head']}", {"state": "success", "context": "maintainer-spec-review",
                "description": "Independent final-head review adjudicated against the task spec", "target_url": comment["html_url"]})
-        eligible(tasks, task)
+        eligible(tasks, task, catalog)
         fresh = snapshot(number)
         validate_gate(task, fresh, record)
         if (fresh["head"], fresh["base"]) != (snap["head"], snap["base"]):
@@ -193,7 +201,7 @@ def merge(tasks, task, number, record):
             merged = snapshot(number)
             if merged["state"] != "MERGED":
                 raise ValueError("GitHub has not confirmed merged state")
-            return receipt(task, merged)
+            return receipt(task, merged, catalog)
         except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
             raise ValueError(f"PR already merged; post-merge evidence verification failed: {error}") from error
 
@@ -213,11 +221,15 @@ def main(argv=None):
     origin = run("git", "remote", "get-url", "origin").strip()
     if origin not in {f"git@github.com:{REPO}.git", f"https://github.com/{REPO}.git", f"https://github.com/{REPO}"}:
         raise ValueError("Origin must be kartiksayani/ariadne on GitHub")
-    tasks = {task["id"]: task for task in json.loads((ROOT / "docs/delivery/tasks.json").read_text())["tasks"]}
+    catalog = json.loads((ROOT / "docs/delivery/tasks.json").read_text())
+    tasks = {task["id"]: task for task in catalog["tasks"]}
+    if args.command != "brief":
+        run("git", "fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main")
+        check_catalog(catalog)
     if args.command == "brief":
         result = tasks[args.task]
     elif args.command in {"ready", "export"}:
-        completed, running, evidence = discover(tasks)
+        completed, running, evidence = discover(tasks, catalog)
         if args.command == "ready":
             if set(args.running) - tasks.keys():
                 raise ValueError("Unknown reserved task")
@@ -232,11 +244,11 @@ def main(argv=None):
         if args.command == "verify":
             if snap["state"] != "OPEN":
                 raise ValueError("Verify expects an open PR; export rechecks merged evidence")
-            eligible(tasks, task)
-            ancestor(snap, task)
+            eligible(tasks, task, catalog)
+            ancestor(snap, task, catalog)
             result = {"pr": args.pr, "head": snap["head"], "base": snap["base"], "passed": True}
         else:
-            result = merge(tasks, task, args.pr, record)
+            result = merge(tasks, task, args.pr, record, catalog)
     print(json.dumps(result, indent=2))
 
 
