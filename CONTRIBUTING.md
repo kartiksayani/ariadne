@@ -3,6 +3,8 @@
 ## Setup
 
 Use Node 22.23.2 and Python 3.12 (minimum 3.11).
+For native application prerequisites and the difference between WebView and OS
+automation, read [macOS testing setup](docs/development/MACOS_TEST_SETUP.md).
 
 ```sh
 python3 -m venv .venv-quality

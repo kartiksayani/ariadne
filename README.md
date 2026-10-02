@@ -28,6 +28,8 @@ Start with the [build handoff](docs/planning/BUILD_HANDOFF.md),
 [roadmap](docs/planning/ROADMAP.md). The [planning index](docs/planning/README.md)
 links the full specification and all 30 design frames.
 Every application commit must pass the [development checks](docs/planning/DEVELOPMENT_CHECKS.md).
+The [macOS testing setup](docs/development/MACOS_TEST_SETUP.md) explains the native
+test path and records machine prerequisites before application implementation.
 
 For autonomous implementation, start an Astra High session with
 [ORCHESTRATOR.md](ORCHESTRATOR.md). The [delivery helper guide](docs/delivery/README.md)
