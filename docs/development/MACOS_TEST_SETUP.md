@@ -36,13 +36,13 @@ check; the scaffold must commit reproducible project dependencies and lockfiles.
 | Prerequisite | Observed version/state | Purpose |
 | --- | --- | --- |
 | macOS / architecture | 26.7 / arm64 | Native execution host |
-| Full Xcode | 26.5 installed; first-launch resources need administrator authorization | Mac2's XCTest build/runner |
+| Full Xcode | 26.5; first-launch resources installed, WDA test build passed | Mac2's XCTest build/runner |
 | Rust stable | 1.98.1 | Tauri/Rust compilation |
 | rustfmt, Clippy, llvm-tools-preview | Installed on that stable toolchain | Format, lint and coverage |
 | cargo-llvm-cov | 0.9.1 | Measured Rust coverage |
 | Node / npm | 22.23.2 / 10.9.8 | Frontend and WebDriver tools |
 | Python | 3.12.9 available; quality venv 3.11.15 | Repository quality checks; minimum 3.11 |
-| Appium / Mac2 | 3.8.0 / 4.3.6 installed; OS proof blocked by Xcode setup | Genuine OS automation supplement |
+| Appium / Mac2 | 3.8.0 / 4.3.6; disposable OS input probe passed | Genuine OS automation supplement |
 | Embedded WDIO native smoke | 1 of 1 spec passed | Disposable Tauri compatibility check |
 
 The installed Rust tooling passed format, Clippy with warnings denied and
@@ -63,6 +63,31 @@ The retained `README.md` explains reproduction in a fresh temporary root;
 `manifest.json` hashes the retained artifacts. Binaries, `.app`, build outputs
 and dependency caches are excluded from this evidence archive.
 This proves the named prerequisite path, not production Ariadne or OS input.
+
+The separate Appium/Mac2 probe also passed on this Mac. XCTest clicked the
+disposable app's accessible fields, typed literal numeric nonce/payload values,
+and clicked its button. Rust wrote the matching receipt; the probe checked
+native PID 12342 against the disposable executable. OS Command+A/Delete replaced
+the nonce, and the next click correctly rejected the mismatch without changing
+the saved receipt. No additional permission grants or security bypasses were
+needed for this run; another Mac must still satisfy its runtime prompts.
+Cleanup confirmed that the run's Appium, WDA build/runner and disposable app
+processes exited and ports 4723, 10100 and 4446 were free.
+
+Final evidence in the macOS UI tooling project's `logs/` directory:
+
+- `xcode-firstlaunch-completion.json` and `wda-build-after-firstlaunch.log`:
+  successful setup and real WDA test build.
+- `mac2-smoke-result.json`, `mac2-command-trace-attempt3.json` and
+  `mac2-final-app-source-attempt3.xml`: passed OS actions, receipt and AX state.
+- `cleanup-after-native-smoke.json`: owned process and port cleanup.
+
+An earlier attempt was correctly rejected after macOS autocorrection capitalized
+the nonce's leading letter on blur. That failure remains in the evidence; numeric
+literal fixture data allowed the OS input test to preserve the exact nonce.
+`logs/mac2-failed-attempts.json` links the earlier traces and AX captures.
+This does not establish Ariadne's tray, native dialogs, notification routing,
+production coverage or any product-task completion.
 
 Full Xcode is needed for Mac2; Command Line Tools alone are sufficient for
 desktop Tauri compilation. Compare [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
@@ -121,24 +146,12 @@ rtk proxy ./appium-local driver doctor mac2
 rtk proxy ./appium-local --address 127.0.0.1 --port 4723 --use-drivers mac2 --log-no-colors
 ```
 
-The doctor passed Xcode discovery, but the subsequent real XCTest build exposed
-a missing `DVTDownloads.framework`. The attempted Xcode first-launch setup is
-blocked awaiting administrator authorization while installing
-`XcodeSystemResources.pkg` / `MobileDeviceDevelopment.pkg`; process samples show
-`PKInstallRequest` / `AuthorizationCopyRights`, with no observed progress.
-Do not treat doctor success as native execution readiness.
-
-The owner must accept the visible Xcode administrator prompt. If it is inaccessible,
-resolve or cancel that in-progress installation before running this in the owner's
-Terminal, so two installers do not race:
-
-```sh
-rtk proxy sudo /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -runFirstLaunch
-```
-
-After setup finishes, rerun the WDA build and real OS probe. Permission grants and
-native input remain unproved; no authorization or security settings were bypassed.
-Diagnosis and build logs are retained under the tooling project's `logs/` directory.
+The initial real XCTest build exposed a missing `DVTDownloads.framework`, despite
+doctor success. Xcode first-launch installation waited for administrator approval;
+after the owner accepted the prompt it exited successfully and the framework was
+present. The subsequent WDA `build-for-testing` succeeded, its loopback runner
+became ready, and the real OS input probe passed. The earlier diagnosis and final
+build/probe logs are retained under the tooling project's `logs/` directory.
 
 Start the Appium server with `--address 127.0.0.1 --port 4723`. Run one test worker
 in the logged-in GUI session, use bounded readiness/command deadlines, and stop
