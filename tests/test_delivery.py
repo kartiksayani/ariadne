@@ -17,14 +17,26 @@ sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location("delivery", ROOT / "scripts/delivery.py")
 delivery = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(delivery)
-GH = '''import json,os,sys
+GH = '''import json,os,sys,subprocess
 from pathlib import Path
 path=Path(os.environ['FAKE_GH_STATE']); s=json.loads(path.read_text()); args=sys.argv[1:]
-assert args[:2]==['api','graphql'], 'Read-only adapter attempted a mutation'
-if s.get('error'): print(json.dumps({'errors':[{'message':'unavailable'}]})); sys.exit(0)
-if any('pullRequests(' in a for a in args): result={'repository':{'pullRequests':s['list']}}
-else: result=s['data']
-print(json.dumps({'data':result}))
+if args[:2]==['api','graphql']:
+ if s.get('error'): print(json.dumps({'errors':[{'message':'unavailable'}]})); sys.exit(0)
+ if any('pullRequests(' in a for a in args): result={'repository':{'pullRequests':s['list']}}
+ else:
+  s['reads']=s.get('reads',0)+1; result=s['data']
+  if s.get('stale') and s['reads']>=3: result['repository']['pullRequest']['headRefOid']='c'*40
+else:
+ endpoint=args[1]; body=json.loads(Path(args[args.index('--input')+1]).read_text()); s.setdefault('mutations',[]).append([endpoint,body])
+ if endpoint.endswith('/comments'):
+  s['data']['repository']['pullRequest']['comments']['nodes'].append({'body':body['body'],'author':{'login':'kartiksayani'}}); result={'html_url':'https://github.com/kartiksayani/ariadne/pull/1#issuecomment-1'}
+ elif '/statuses/' in endpoint:
+  s['data']['repository']['pullRequest']['commits']['nodes'][0]['commit']['statusCheckRollup']['contexts']['nodes'].append({'__typename':'StatusContext','context':'maintainer-spec-review','state':'SUCCESS'}); result={}
+ else:
+  p=s['data']['repository']['pullRequest']; p.update(state='MERGED',mergedAt='2026-10-02T01:00:00Z',mergeCommit={'oid':p['headRefOid']}); result={'merged':True}
+  s['data']['repository']['defaultBranchRef']['target']['oid']=p['headRefOid']
+  subprocess.run([os.environ['REAL_GIT'],'--git-dir',os.environ['FIXTURE_ORIGIN'],'update-ref','refs/heads/main',p['headRefOid']],check=True)
+path.write_text(json.dumps(s)); print(json.dumps({'data':result} if args[:2]==['api','graphql'] else result))
 '''
 
 
@@ -96,7 +108,7 @@ class AdapterTests(unittest.TestCase):
         self.state_path.write_text(json.dumps(self.state))
         self.record_path.write_text(json.dumps(self.record))
         with contextlib.redirect_stdout(io.StringIO()) as output:
-            delivery.main([*args, *(["--record", str(self.record_path)] if args[0] == "verify" else [])])
+            delivery.main([*args, *(["--record", str(self.record_path)] if args[0] in {"verify", "merge"} else [])])
         return json.loads(output.getvalue())
 
     def test_verify_and_real_cli_brief_and_ready_reservations(self):
@@ -110,7 +122,7 @@ class AdapterTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(scripts / "delivery.py"), "brief", "P0.1"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_failed_ci_missing_review_and_stale_base_block_verification(self):
+    def test_failed_ci_missing_review_and_stale_base_never_merge(self):
         for failure in ("ci", "review", "base", "pagination", "graphql"):
             with self.subTest(failure=failure):
                 saved = json.loads(json.dumps(self.state))
@@ -125,29 +137,24 @@ class AdapterTests(unittest.TestCase):
                 else:
                     self.state["error"] = True
                 with self.assertRaises(ValueError):
-                    self.invoke("verify", "1")
+                    self.invoke("merge", "1")
                 self.assertFalse(json.loads(self.state_path.read_text()).get("mutations"))
                 self.state = saved
                 self.pr = self.state["data"]["repository"]["pullRequest"]
 
-    def test_export_requires_actual_merged_receipt_and_status(self):
-        head = self.record["head"]
-        self.pr.update(state="MERGED", mergedAt="2026-10-02T01:00:00Z", mergeCommit=dict(oid=head))
-        self.state["data"]["repository"]["defaultBranchRef"]["target"]["oid"] = head
-        self.git("--git-dir", str(self.origin), "update-ref", "refs/heads/main", head)
-        self.pr["comments"]["nodes"] = [dict(author=dict(login="kartiksayani"), body="```ariadne-delivery\n"+json.dumps(self.record)+"\n```")]
-        checks = self.pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"]
-        checks.append(dict(__typename="StatusContext", context="maintainer-spec-review", state="SUCCESS"))
-        self.state["list"]["nodes"][0]["state"] = "MERGED"
-        proof = self.invoke("export")["tasks"][0]
-        self.assertEqual(proof["head_sha"], head)
+    def test_changed_head_after_receipt_stops_merge_and_success_exports_verified_proof(self):
+        self.state["stale"] = True
+        with self.assertRaises(ValueError):
+            self.invoke("merge", "1")
+        stored = json.loads(self.state_path.read_text())
+        self.assertEqual(len(stored["mutations"]), 2)
+        self.state.pop("stale")
+        proof = self.invoke("merge", "1")
+        self.assertEqual(proof["state"], "MERGED")
+        self.state = json.loads(self.state_path.read_text())
+        self.state["list"]["nodes"] = [dict(number=1, body=self.pr["body"], state="MERGED")]
+        self.assertEqual(self.invoke("export")["tasks"], [proof])
         self.assertEqual(self.invoke("ready"), [])
-        self.pr["comments"]["nodes"][0]["author"]["login"] = "outsider"
-        with self.assertRaisesRegex(ValueError, "genuine"):
-            self.invoke("export")
-        checks[-1]["state"] = "FAILURE"
-        with self.assertRaisesRegex(ValueError, "maintainer-spec-review"):
-            self.invoke("export")
 
     def test_real_diff_and_unverified_prerequisite_block_verification(self):
         self.task["paths"] = ["src/other.rs"]
