@@ -1,0 +1,6 @@
+[tool.ruff]
+target-version = "py311"
+exclude = [".venv-quality", "node_modules", "target", ".cache"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
