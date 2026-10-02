@@ -18,6 +18,10 @@ export function mergedConfig(base, override) {
   }
   return { ...base, bundle: { ...base.bundle, ...override.bundle } };
 }
+export function verifyCleanup(record) {
+  assert.equal(record.pidExited, true, 'Packaged PID did not exit');
+  assert.equal(record.portFree, true, 'Packaged driver port is not free');
+}
 export function verifyProductionSecurity(config) {
   assert.deepEqual(config.app.security.csp, {
     'default-src': "'self'", 'script-src': "'self'", 'style-src': "'self'",
@@ -100,7 +104,7 @@ export async function checkRelease() {
   assert.equal(minimumSystemVersion, '13.0', 'Packaged minimum macOS differs from deployment target');
   const root = await mkdtemp('/private/tmp/ariadne-release-');
   const child = spawn(binary, [], { env: { ...env, WDIO_EMBEDDED_SERVER: 'true', TAURI_WEBDRIVER_PORT: String(port), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: '0'.repeat(64) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let logs = '', observed, spawnError;
+  let logs = '', observed, spawnError, failure, cleanupError;
   child.once('error', error => { spawnError = error; });
   for (const stream of [child.stdout, child.stderr]) stream.on('data', value => { logs += value; });
   try {
@@ -111,10 +115,19 @@ export async function checkRelease() {
       await portFree(port); assert.equal(listeners(port), ''); assert.deepEqual(await readdir(root), []);
     }
     await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, runtimeCommand: [binary], minimumSystemVersion, binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
-  } finally {
-    await stop(child); await portFree(port); await json(join(evidence, 'cleanup.json'), { pid: child.pid, pidExited: !alive(child.pid), portFree: true, logs });
-    await rm(root, { recursive: true });
+  } catch (error) { failure = error; }
+  finally {
+    let portReleased = false;
+    try {
+      if (observed && alive(child.pid)) assert.deepEqual(identity(child.pid), observed, 'Packaged process identity changed');
+      await stop(child); await portFree(port); portReleased = true;
+    } catch (error) { cleanupError = error; }
+    const cleanup = { pid: child.pid, pidExited: !alive(child.pid), portFree: portReleased, exitCode: child.exitCode, signal: child.signalCode, logs, error: cleanupError?.message, failure: failure?.message };
+    await json(join(evidence, 'cleanup.json'), cleanup);
+    if (!cleanupError) { verifyCleanup(cleanup); await rm(root, { recursive: true }); }
   }
+  if (cleanupError) throw cleanupError;
+  if (failure) throw failure;
   console.log(`Release isolation evidence: ${evidence}`);
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) checkRelease().catch(error => { console.error(error.message); process.exitCode = 1; });

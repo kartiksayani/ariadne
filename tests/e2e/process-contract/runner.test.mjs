@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay } from '../../../scripts/run-native-e2e.mjs';
-import { resolvedNames, verifyGraph, mergedConfig, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity } from '../../../scripts/check-release-boundary.mjs';
+import { resolvedNames, verifyGraph, mergedConfig, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup } from '../../../scripts/check-release-boundary.mjs';
 async function assertExited(pid) {
   const end = Date.now() + 1000;
   while (alive(pid) && Date.now() < end) await delay(10);
@@ -162,4 +162,9 @@ test('production CSP and minimum macOS reject unsafe template defaults and broad
   }
   assert.throws(() => verifyProductionSecurity({ ...config, app: { ...config.app, security: { ...config.app.security, dangerousDisableAssetCspModification: true } } }), /hashes/);
   assert.throws(() => verifyProductionSecurity({ ...config, bundle: { ...config.bundle, macOS: { minimumSystemVersion: '10.13' } } }));
+});
+test('release gate rejects a recorded cleanup failure instead of reporting success', () => {
+  verifyCleanup({ pidExited: true, portFree: true });
+  assert.throws(() => verifyCleanup({ pidExited: false, portFree: true }), /PID did not exit/);
+  assert.throws(() => verifyCleanup({ pidExited: true, portFree: false }), /port is not free/);
 });

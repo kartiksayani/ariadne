@@ -80,7 +80,7 @@ export async function observeOwned(root, binary, nonce, launcher, timeout = 6000
 }
 export async function stop(child, grace = 10000) {
   if (!Number.isInteger(child.pid) || child.pid < 2) return;
-  if (!groupAlive(child.pid)) return;
+  if (!groupAlive(child.pid) && !alive(child.pid)) return;
   try { process.kill(-child.pid, 'SIGINT'); } catch { /* Already exited. */ }
   const end = Date.now() + grace;
   while (groupAlive(child.pid) && Date.now() < end) await delay(50);
@@ -90,6 +90,9 @@ export async function stop(child, grace = 10000) {
     while (groupAlive(child.pid) && Date.now() < killed) await delay(50);
   }
   if (groupAlive(child.pid)) throw new Error('Owned process group did not exit');
+  const reaped = Date.now() + 1000;
+  while (alive(child.pid) && Date.now() < reaped) await delay(10);
+  if (alive(child.pid)) throw new Error('Owned launcher PID did not exit');
 }
 export async function command(binary, args, { cwd = repo, env = process.env, timeout = 900000, log, onStart } = {}) {
   const child = spawn(binary, args, { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
