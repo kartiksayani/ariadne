@@ -95,8 +95,9 @@ Use an async bootstrap function if the configured frontend target disallows
 top-level await. Ordinary development and packaging build with the variable
 unset; the production bundle must exclude the import and plugin code.
 
-Vite emits the desktop frontend to repository-root `target/desktop-dist`.
-Use that output for the test overlay and ordinary Tauri configuration, so build
+Vite emits ordinary/production frontend to repository-root `target/desktop-dist`
+and E2E frontend to `target/native-e2e/desktop-dist`, selected only by the scoped
+test environment. Keep actual module inventories outside both outputs, so build
 artifacts stay outside recursively inventoried application source roots. Do not
 add a broad `dist` coverage exclusion. The narrow build/test tooling and verified
 comment-only Rust boundaries are defined in
@@ -109,17 +110,16 @@ The test overlay is:
 {
   "build": {
     "beforeBuildCommand": "npm run build",
-    "frontendDist": "../../../target/desktop-dist"
+    "frontendDist": "../../../target/native-e2e/desktop-dist"
   },
   "app": {
     "withGlobalTauri": true,
     "security": {
       "capabilities": [
-        "default",
         {
           "identifier": "native-e2e",
           "windows": ["main"],
-          "permissions": ["wdio:default", "wdio-webdriver:default"]
+          "permissions": ["core:default", "opener:default", "wdio:default", "wdio-webdriver:default"]
         }
       ]
     }
@@ -139,7 +139,7 @@ The runner executes the pinned local Tauri CLI with working directory
 `apps/desktop`, using an argument array:
 
 ```text
-tauri build --debug --features e2e --no-bundle --config src-tauri/tauri.e2e.conf.json
+tauri build --debug --features e2e --no-bundle --config src-tauri/tauri.e2e.conf.json -- --locked
 ```
 
 Set `VITE_ARIADNE_E2E=1` and `CARGO_TARGET_DIR=<repo>/target/native-e2e` only in
@@ -203,6 +203,10 @@ use a global process-name kill. Retain failed-run evidence under
 `coverage/native-e2e/<run-id>/`, then remove the private temporary root once
 processes are gone. Forward the nonzero failure/cleanup result to the commit
 checker. Build has its own bounded cold-start budget, initially 15 minutes.
+The runner observes the startup PID, executable, birth and exact launched WDIO
+ancestry before UI bridge assertions; failed bridge/spec readiness cannot bypass
+owned-process cleanup. A launcher exiting does not imply its process group exited.
+Process-helper regression tests exercise descendant cleanup, deadline and SIGINT.
 
 ## First scaffold smoke, then real store acceptance
 
@@ -221,6 +225,18 @@ rejects a missing/invalid root or mismatched nonce, and uses only a canonical
 private temporary root created by the runner. The renderer cannot choose a
 filesystem path. A startup witness under that root records the run nonce and
 `std::process::id()` from the Tauri process.
+
+[ADR-0006](../../adr/ADR-0006-isolate-scaffold-ping-storage.md) settles ordinary
+startup: a process-owned private `tempfile` directory lives with the app and is
+removed by RAII cleanup. Ordinary builds ignore E2E environment variables and
+use the same handler. Retain the guard outside managed state across `App::run_return`, dropping it
+before `process::exit` on graceful shutdown; managed-state destruction after
+`Builder::run` is insufficient. Crash/forced-signal recovery is outside this scaffold.
+This temporary diagnostic is not saved session/domain data.
+E2E validates an exact canonical `/private/tmp/ariadne-e2e-*` directory, 0700
+permissions and 64 hexadecimal nonce characters; missing, aliased or invalid
+roots fail startup before Tauri. Payloads are nonempty, control-free and at most
+128 UTF-8 bytes; validation precedes every write, and acknowledgement follows it.
 
 The native test must:
 
@@ -281,8 +297,12 @@ ownership. Fail if a required port is occupied by an unrelated listener.
 
 ## Commit and release gates
 
-From the first app commit, `npm run test:e2e` invokes this wrapper and fails
-closed. Every app commit also runs all maintained-code lint, meaningful unit
+From the first app commit, default `npm run test:e2e` invokes both the embedded
+native wrapper and production boundary checker and fails closed. `--suite all`
+is equivalent; `--suite native` selects the embedded proof only and
+`--suite process-contract` selects the real Node process-helper suite. Invalid or
+extra selectors fail. `npm run test:native` is the explicit embedded-only command;
+the installed gate always uses the complete default. Every app commit also runs all maintained-code lint, meaningful unit
 and functional tests, fresh Rust/TypeScript LCOV and >=80% weighted overall
 application coverage, including untested production files. A native test pass
 does not imply a coverage percentage. Missing reports or native prerequisites
@@ -303,7 +323,21 @@ The release boundary checker verifies resolved production Cargo dependencies
 exclude both WDIO crates, merged capability/config excludes WDIO permissions
 and global Tauri, frontend output excludes the WDIO module, and the launched
 packaged binary never opens the embedded driver port even when supplied
-`TAURI_WEBDRIVER_PORT`. Do not infer exclusion from a filename grep alone.
+`TAURI_WEBDRIVER_PORT` and `WDIO_EMBEDDED_SERVER=true`. Do not infer exclusion
+from a filename grep alone.
+
+[ADR-0007](../../adr/ADR-0007-gate-scaffold-release-isolation.md) requires a clean
+production target/frontend, sanitized inherited test/config/compiler switches,
+CLI-matching locked metadata and fresh compiler-artifact features. The checker
+uses the exact desktop build-script event OUT_DIR for ACL/capability files and
+its fingerprint-recorded TAURI_CONFIG. Filesystem capabilities do not include
+inline configuration; verify the known base JSON plus recorded identical CLI
+bundle overrides, rejecting alternate/platform configuration inputs, unexpected
+overrides, feature activation or permissions. Verify fresh actual Vite module
+inventory against emitted chunk bytes, outside packaged assets. Launch the exact
+packaged executable under hostile test environment and observe its OS PID/executable
+continuously for ten seconds, with no listener or E2E-root writes and bounded
+cleanup. This is test-service exclusion evidence, not native UX acceptance.
 
 Organization security guidance was not fetched under the owner's explicit
 Seezo/MCP waiver. The disposable native proof does not claim Seezo review or

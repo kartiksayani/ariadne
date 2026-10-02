@@ -3,7 +3,8 @@ import { readFile, readdir, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { join, resolve, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { repo, desktop, command, buildEnv, json, digest, portFree, listeners, identity, alive, delay, stop } from './run-native-e2e.mjs';
+import { randomUUID } from 'node:crypto';
+import { repo, desktop, command, buildEnv, json, digest, toolchain, portFree, listeners, identity, alive, delay, stop } from './run-native-e2e.mjs';
 export function resolvedNames(metadata) {
   const packages = new Map(metadata.packages.map(pkg => [pkg.id, pkg.name]));
   return metadata.resolve.nodes.map(node => packages.get(node.id));
@@ -57,10 +58,11 @@ export function verifyGraph(names, config, acl, capabilities, modules) {
 }
 export async function checkRelease() {
   if (process.platform !== 'darwin') throw new Error('Packaged boundary requires macOS');
-  const target = join(repo, 'target/release-boundary'), evidence = join(repo, 'coverage/release-boundary');
+  const target = join(repo, 'target/release-boundary'), evidence = join(repo, 'coverage/release-boundary', randomUUID());
   await rm(target, { recursive: true, force: true }); await rm(join(repo, 'target/desktop-dist'), { recursive: true, force: true });
   await rm(join(repo, 'target/desktop-modules.json'), { force: true }); await mkdir(evidence, { recursive: true });
   const env = buildEnv(target), cli = join(repo, 'node_modules/@tauri-apps/cli/tauri.js');
+  await json(join(evidence, 'run.json'), { toolchain: toolchain(), buildCommand: [process.execPath, cli, 'build', '--ci', '--bundles', 'app', '--', '--locked', '--no-default-features', '--target-dir', target, '--message-format=json-render-diagnostics'], cwd: desktop });
   const source = join(desktop, 'src-tauri'), started = Date.now();
   const metadata = JSON.parse((await command('cargo', ['metadata', '--locked', '--offline', '--format-version', '1', '--filter-platform', 'aarch64-apple-darwin', '--no-default-features', '--features', 'tauri/custom-protocol'], { cwd: source, env })).stdout);
   const build = await command(process.execPath, [cli, 'build', '--ci', '--bundles', 'app', '--', '--locked', '--no-default-features', '--target-dir', target, '--message-format=json-render-diagnostics'], { cwd: desktop, env, log: join(evidence, 'build.log') });

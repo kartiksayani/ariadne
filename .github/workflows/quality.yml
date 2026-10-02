@@ -41,6 +41,7 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
+      CARGO_TARGET_DIR: "${{ github.workspace }}/target/native-e2e"
     name: quality
     runs-on: macos-26
     steps:
@@ -63,10 +64,20 @@ jobs:
           npm install --global npm@10.9.8
           integration=$(git rev-parse HEAD)
           check_snapshot() {
+            local snapshot="$1"
+            archive_reports() {
+              mkdir -p "coverage/snapshots/$snapshot"
+              if [[ -f coverage/rust.lcov ]]; then cp coverage/rust.lcov "coverage/snapshots/$snapshot/rust.lcov"; fi
+              if [[ -f coverage/web/lcov.info ]]; then cp coverage/web/lcov.info "coverage/snapshots/$snapshot/web.lcov"; fi
+            }
+            trap archive_reports EXIT
             git checkout --detach "$1"
             python -m venv .venv-quality
             .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
-            sw_vers; uname -m; xcode-select -p; xcodebuild -version
+            sw_vers
+            uname -m
+            xcode-select -p
+            xcodebuild -version
             if [[ -f Cargo.toml ]]; then
               rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
               cargo install cargo-llvm-cov --version 0.9.1 --locked
@@ -74,9 +85,11 @@ jobs:
             npm ci --ignore-scripts --engine-strict
             if [[ -f Cargo.toml ]]; then
               npm run build
-              cargo build --workspace --locked
+              cargo build --workspace --locked --all-features
             fi
             .venv-quality/bin/python scripts/check-commit.py --ci
+            archive_reports
+            trap - EXIT
           }
           if [[ -n "$HEAD_SHA" ]]; then
             while IFS= read -r revision; do
@@ -84,6 +97,14 @@ jobs:
             done < <(git rev-list --reverse "$BASE_SHA..$HEAD_SHA")
           fi
           check_snapshot "$integration"
+      - name: Preserve native and coverage evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: warn
       - name: Record result
         if: always()
         env:

@@ -1,0 +1,13 @@
+{
+  "build": { "frontendDist": "../../../target/native-e2e/desktop-dist" },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [{
+        "identifier": "native-e2e",
+        "windows": ["main"],
+        "permissions": ["core:default", "opener:default", "wdio:default", "wdio-webdriver:default"]
+      }]
+    }
+  }
+}

@@ -51,5 +51,8 @@
   },
   "stylelint": {
     "extends": "stylelint-config-standard"
-  }
+  },
+  "workspaces": [
+    "apps/desktop"
+  ]
 }

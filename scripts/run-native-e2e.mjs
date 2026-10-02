@@ -9,6 +9,21 @@ export const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const desktop = join(repo, 'apps/desktop');
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export const digest = async path => createHash('sha256').update(await readFile(path)).digest('hex');
+export function toolchain() {
+  const versions = [
+    ['rustc', ['--version']], ['cargo', ['--version']],
+    ['cargo', ['llvm-cov', '--version']], ['npm', ['--version']],
+    ['/usr/bin/sw_vers', []], ['/usr/bin/uname', ['-m']],
+    ['/usr/bin/xcode-select', ['-p']], ['/usr/bin/xcodebuild', ['-version']],
+  ];
+  return { node: process.version,
+    versions: versions.map(([binary, args]) => ({ binary, args, output: execFileSync(binary, args, { encoding: 'utf8' }).trim() })),
+    source: {
+    head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
+    indexTree: execFileSync('git', ['write-tree'], { cwd: repo, encoding: 'utf8' }).trim(),
+    dirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }).trim()),
+  } };
+}
 export async function json(path, value) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(value, null, 2));
@@ -40,9 +55,10 @@ export function identity(pid) {
 }
 export function alive(pid) { try { process.kill(pid, 0); return true; } catch { return false; } }
 export function groupAlive(pid) { try { process.kill(-pid, 0); return true; } catch { return false; } }
-export async function observeOwned(root, binary, nonce, launcher, timeout = 60000) {
+export async function observeOwned(root, binary, nonce, launcher, timeout = 60000, signal) {
   const end = Date.now() + timeout;
   while (Date.now() < end) {
+    if (signal?.aborted) throw signal.reason;
     let startup;
     try { startup = JSON.parse(await readFile(join(root, 'startup.json'), 'utf8')); }
     catch (error) { if (error.code !== 'ENOENT') throw error; await delay(50); continue; }
@@ -108,16 +124,21 @@ export async function runNative() {
   let failure, owned;
   try {
     await portFree(port);
-    await command(process.execPath, [join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--no-bundle', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'], { cwd: desktop, env: buildEnv(join(repo, 'target/native-e2e'), true), log: join(evidence, 'build.log') });
-    await json(join(evidence, 'run.json'), { root, port, nonce, binary, binarySha256: await digest(binary), node: process.version });
+    const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--no-bundle', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
+    const runtimeCommand = [process.execPath, join(repo, 'node_modules/@wdio/cli/bin/wdio.js'), 'run', 'wdio.native.conf.mjs'];
+    const details = { root, port, nonce, binary, toolchain: toolchain(), buildCommand, runtimeCommand, cwd: desktop };
+    await json(join(evidence, 'run.json'), details);
+    await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: buildEnv(join(repo, 'target/native-e2e'), true), log: join(evidence, 'build.log') });
+    await json(join(evidence, 'run.json'), { ...details, binarySha256: await digest(binary) });
     const env = { ...buildEnv(join(repo, 'target/native-e2e')), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: nonce, ARIADNE_E2E_BINARY: binary, ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: evidence };
     let launcher;
-    const execution = command(process.execPath, [join(repo, 'node_modules/@wdio/cli/bin/wdio.js'), 'run', 'wdio.native.conf.mjs'], { cwd: desktop, env, timeout: 180000, log: join(evidence, 'wdio.log'), onStart: child => {
+    const execution = command(runtimeCommand[0], runtimeCommand.slice(1), { cwd: desktop, env, timeout: 180000, log: join(evidence, 'wdio.log'), onStart: child => {
       launcher = child; writeFileSync(join(root, 'launcher.json'), JSON.stringify({ pid: child.pid }));
     } });
-    execution.catch(() => {});
+    const controller = new globalThis.AbortController();
+    execution.then(() => controller.abort(new Error('WDIO exited before startup observation')), error => controller.abort(error));
     try {
-      owned = await observeOwned(root, binary, nonce, launcher.pid);
+      owned = await observeOwned(root, binary, nonce, launcher.pid, 60000, controller.signal);
       await json(join(evidence, 'observed.json'), owned); await execution;
     }
     catch (error) { await stop(launcher); await execution.catch(() => {}); throw error; }

@@ -36,6 +36,19 @@ test('leader exit does not leave its native descendant behind', async () => {
   const result = await command(process.execPath, ['-e', source]);
   assert.ok(!alive(Number(result.stdout.trim()))); assert.ok(alive(process.pid));
 });
+test('launcher failure before bridge/witness readiness aborts observation and cleans descendants', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-startup-failure-'));
+  const controller = new globalThis.AbortController();
+  let launcher;
+  try {
+    const source = 'const {spawn}=require("node:child_process"); const child=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"ignore"}); child.unref(); console.log(child.pid)';
+    const execution = command(process.execPath, ['-e', source], { onStart: child => { launcher = child; } });
+    execution.then(() => controller.abort(new Error('launcher exited before readiness')), error => controller.abort(error));
+    await assert.rejects(observeOwned(root, process.execPath, 'nonce', launcher.pid, 1000, controller.signal), /exited before readiness/);
+    const result = await execution;
+    assert.ok(!alive(Number(result.stdout.trim())));
+  } finally { await rm(root, { recursive: true }); }
+});
 test('SIGINT and deadline clean owned descendants while preserving the test parent', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-signal-'));
   const runner = new URL('../../../scripts/run-native-e2e.mjs', import.meta.url).href;
