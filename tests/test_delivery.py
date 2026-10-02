@@ -176,6 +176,7 @@ class AdapterTests(unittest.TestCase):
         catalog = self.root / "docs/delivery/tasks.json"
         updated = json.loads(catalog.read_text())
         updated["tasks"][0].update(depends_on=["P0.2"], paths=["other/**"])
+        updated["tasks"].append(dict(id="P0.2", depends_on=[], paths=["dependency/**"], spec=["docs/spec.md"]))
         catalog.write_text(json.dumps(updated))
         self.git("add", str(catalog))
         self.git("commit", "-qm", "new task constraints")
