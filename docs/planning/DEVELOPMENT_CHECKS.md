@@ -12,7 +12,8 @@ source is `scripts/check-commit.py`; CI and the local hook run the same gate.
 - Every application commit: Rust format/Clippy, TS/JS/CSS lint and type checks, unit
   and integration tests, deterministic UI-to-Rust E2E, weighted Rust+TS/JS coverage
   of at least 80%, including untested production files. Live hosts are milestone tests.
-- Maximum 400 handwritten changed lines per commit, 800 per PR, including tests.
+- Prefer about 500 handwritten changed lines per PR; maximum 800 per commit and
+  1600 per PR, including tests/config.
   Original design/spec imports and generated lockfiles are reported separately.
 - Every PR commit and the integrated result run CI. Independent review and final
   spec adjudication belong to the maintainer, tied to the exact current head.
