@@ -178,7 +178,7 @@
         "crates/ariadne-domain/src/models/**",
         "crates/ariadne-domain/src/lib.rs",
         "crates/ariadne-domain/tests/schema.rs",
-        "contracts/domain/**",
+        "contracts/generated/domain/**",
         "apps/desktop/src/generated/**",
         "fixtures/domain/**",
         "tools/xtask/**",
@@ -318,7 +318,8 @@
       "title": "Implement stable locks and atomic session transactions",
       "phase": "M1",
       "depends_on": [
-        "P0.3"
+        "P0.3",
+        "P1.1"
       ],
       "paths": [
         "crates/ariadne-store/src/session/**",
