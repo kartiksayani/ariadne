@@ -11,6 +11,10 @@ Run live/billable host acceptance only at the explicit M7 milestone.
    [low-level design index](LOW_LEVEL_DESIGN.md), and
    [implementation roadmap](ROADMAP.md). The low-level domain, API, queue,
    process, adapter, UI, and setup documents are the implementation authority.
+   Read applicable [accepted ADRs](../adr/README.md) and their replacement links.
+   Owner requirements remain binding; ADRs and updated canonical contracts must
+   agree. Send an architecture gap/conflict to the orchestrator before dependent
+   work and commit every resulting decision with its affected implementation.
 2. Check `git status --short`. Preserve all existing local edits and untracked
    user data; do not reset or clean the checkout.
 3. Start at roadmap **P0.1**. Scaffold the required Tauri 2, Rust, and React +

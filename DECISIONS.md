@@ -6,6 +6,11 @@ requirements. Start implementation with [BUILD_HANDOFF](docs/planning/BUILD_HAND
 the [low-level contracts](docs/planning/LOW_LEVEL_DESIGN.md) own detailed behavior.
 Production application code has not been built.
 
+Later implementation decisions live in [short ADRs](docs/adr/README.md). Owner
+requirements remain binding; accepted ADRs and affected canonical specs must
+agree. A replacement ADR marks its predecessor deprecated with reciprocal links
+while preserving its original decision. Follow those links for current authority.
+
 | Area | Current decision |
 |---|---|
 | Product | Local macOS companion for existing coding conversations. Claude Code is primary; Codex is required. Use the supplied screens and complete item history. |

@@ -11,6 +11,9 @@ read [ORCHESTRATOR.md](ORCHESTRATOR.md). The product contracts start at
 - Work in an isolated worktree with one bounded task and declared owned paths.
   You are not alone in the repository. Preserve others' changes and adapt to them.
 - Always squash merge PRs into main.
+- Implementers, reviewers and patchers must send architecture gaps/conflicts to
+  the orchestrator before dependent work. Every resulting architecture decision
+  gets a short [ADR](docs/adr/README.md) in the affected implementation PR.
 - Follow the supplied mockups and current personal release contracts. Do not
   enlarge the scope to solve hypothetical scale or exotic recovery problems.
 - Every commit runs the installed hook; every behavior change carries tests.
