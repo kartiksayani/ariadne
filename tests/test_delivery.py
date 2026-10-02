@@ -53,7 +53,12 @@ class AdapterTests(unittest.TestCase):
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.name", "Fixture")
         self.git("config", "user.email", "fixture@example.invalid")
-        self.git("commit", "-qm", "base", "--allow-empty")
+        self.task = dict(id="P0.1", depends_on=[], paths=["src/**"], spec=["docs/spec.md"])
+        self.catalog = dict(tasks=[self.task])
+        (self.root / "docs/delivery").mkdir(parents=True)
+        (self.root / "docs/delivery/tasks.json").write_text(json.dumps(self.catalog))
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
         base = self.git("rev-parse", "HEAD")
         self.git("checkout", "-qb", "task")
         (self.root / "src").mkdir()
@@ -65,7 +70,6 @@ class AdapterTests(unittest.TestCase):
         self.git("clone", "-q", "--bare", str(self.root), str(self.origin))
         self.git("--git-dir", str(self.origin), "update-ref", "refs/pull/1/head", head)
         self.git("remote", "add", "origin", "git@github.com:kartiksayani/ariadne.git")
-        self.task = dict(id="P0.1", depends_on=[], paths=["src/**"], spec=["docs/spec.md"])
         event = dict(id="R1", head=head, agent="independent", round=1)
         self.record = dict(task_id="P0.1", head=head, base=base, authors=["author"], reviews=[event], decisions=[],
                            spec_review=dict(sections=self.task["spec"], conclusion="Accepted behavior checked."))
@@ -93,8 +97,6 @@ class AdapterTests(unittest.TestCase):
         patch = mock.patch.object(delivery, "ROOT", self.root)
         patch.start()
         self.addCleanup(patch.stop)
-        (self.root / "docs/delivery").mkdir(parents=True)
-        (self.root / "docs/delivery/tasks.json").write_text(json.dumps(dict(tasks=[self.task])))
         self.record_path = self.root / "record.json"
 
     def git(self, *args):
@@ -159,17 +161,35 @@ class AdapterTests(unittest.TestCase):
     def test_real_diff_and_unverified_prerequisite_block_verification(self):
         self.task["paths"] = ["src/other.rs"]
         self.pr["files"]["nodes"] = [dict(path="src/other.rs")]
-        catalog = self.root / "docs/delivery/tasks.json"
-        catalog.write_text(json.dumps(dict(tasks=[self.task])))
+        self.invoke("brief", "P0.1")
         with self.assertRaisesRegex(ValueError, "outside task ownership"):
-            self.invoke("verify", "1")
+            delivery.ancestor(delivery.snapshot(1), self.task, json.loads((self.root / "docs/delivery/tasks.json").read_text()))
         self.task["paths"] = ["src/**"]
         self.task["depends_on"] = ["P0.2"]
         dependency = dict(id="P0.2", paths=["other/**"], depends_on=[], spec=["docs/spec.md"])
-        catalog.write_text(json.dumps(dict(tasks=[self.task, dependency])))
         with self.assertRaisesRegex(ValueError, "prerequisites"):
-            self.invoke("verify", "1")
+            delivery.eligible({task["id"]: task for task in [self.task, dependency]}, self.task, self.catalog)
         self.assertFalse(json.loads(self.state_path.read_text()).get("mutations"))
+
+    def test_stale_catalog_rejects_readiness_merge_and_later_fetch(self):
+        self.git("checkout", "main")
+        catalog = self.root / "docs/delivery/tasks.json"
+        updated = json.loads(catalog.read_text())
+        updated["tasks"][0].update(depends_on=["P0.2"], paths=["other/**"])
+        catalog.write_text(json.dumps(updated))
+        self.git("add", str(catalog))
+        self.git("commit", "-qm", "new task constraints")
+        self.git("push", str(self.origin), "main")
+        self.git("checkout", "task")
+        original = catalog.read_text()
+        self.state["list"]["nodes"] = []
+        for command in [("ready",), ("export",), ("verify", "1"), ("merge", "1")]:
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, "refresh the maintainer checkout"):
+                self.invoke(*command)
+            self.assertFalse(json.loads(self.state_path.read_text()).get("mutations"))
+        with self.assertRaisesRegex(ValueError, "refresh the maintainer checkout"):
+            delivery.ancestor(delivery.snapshot(1), self.task, self.catalog)
+        self.assertEqual(catalog.read_text(), original)
 
 
 if __name__ == "__main__":
