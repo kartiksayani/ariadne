@@ -22,8 +22,12 @@ client as a bounded supplement for genuine OS window and keyboard actions and
 native accessible menus/dialogs on a logged-in Mac. Verify the application's
 actual accessibility hierarchy before claiming a tray or dialog test works.
 Own the WebDriverAgentMac lifecycle and connect using supported
-`webDriverAgentMacUrl`; Mac2's default agent startup performs global cleanup.
-Stop only this test's processes, preserving unrelated test agents.
+`webDriverAgentMacUrl` from a fresh Appium process. In
+[Mac2 4.3.6](https://github.com/appium/appium-mac2-driver/blob/v4.3.6/lib/wda-mac.ts),
+process cleanup kills only tracked PIDs, but default startup sends `DELETE /` to
+an occupied configured WDA host/port assuming an obsolete agent, without proving
+ownership. The external URL avoids that occupied-port takeover. Stop only this
+test's processes, preserving unrelated listeners and test agents.
 
 Keep measured Rust/frontend coverage and native behavioral results separate.
 Native success implies no coverage percentage. External native-process profiling

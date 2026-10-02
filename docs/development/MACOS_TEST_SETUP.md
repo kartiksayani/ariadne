@@ -143,10 +143,15 @@ Diagnosis and build logs are retained under the tooling project's `logs/` direct
 Start the Appium server with `--address 127.0.0.1 --port 4723`. Run one test worker
 in the logged-in GUI session, use bounded readiness/command deadlines, and stop
 only the server/app processes created by that run. Own WebDriverAgentMac startup
-and connect with `webDriverAgentMacUrl` to avoid the default driver's global agent
-cleanup. Do not enable relaxed security,
-insecure AppleScript, Full Disk Access or recording by default. Use private
-disposable app data so tests never touch the owner's project history or settings.
+and connect with `webDriverAgentMacUrl` from a fresh Appium process. In
+[Mac2 4.3.6](https://github.com/appium/appium-mac2-driver/blob/v4.3.6/lib/wda-mac.ts),
+process cleanup kills only tracked PIDs. Default startup separately sends
+`DELETE /` to an occupied configured WDA host/port, assuming an obsolete agent
+without proving ownership; the external URL avoids that occupied-port takeover.
+Fail if a required port is occupied by an unrelated listener. Do not enable
+relaxed security, insecure AppleScript, Full Disk Access or recording by default.
+Use private disposable app data so tests never touch the owner's project history
+or settings.
 
 Build the driver's `WebDriverAgentMac.xcodeproj` with scheme
 `WebDriverAgentRunner`, `build-for-testing`, `-destination platform=macOS` and a
@@ -159,7 +164,8 @@ readiness/cleanup. A fresh Appium session must specify
 explicit bundle ID, app path and private environment. See the
 [Mac2 capability reference](https://appium.github.io/appium-mac2-driver/latest/reference/capabilities/)
 for external WDA and application options. Never use Finder or the owner's app as
-the fixture, and never omit the external WDA option to fall back to global cleanup.
+the fixture, and never omit the external WDA option to fall back to the default
+occupied-port takeover.
 
 ## What remains at scaffold time
 

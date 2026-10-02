@@ -262,9 +262,14 @@ required Accessibility/XCTest permissions manually; missing permission is a
 specific blocker, never a passing skip. Do not bypass TCC, automate security
 settings, enable insecure AppleScript, or require Full Disk Access/recording by
 default. Bound startup, action and cleanup waits and stop only run-owned processes.
-Own WebDriverAgentMac startup and connect through supported
+Own WebDriverAgentMac startup. Connect from a fresh Appium process through
+supported
 [`appium:webDriverAgentMacUrl`](https://appium.github.io/appium-mac2-driver/latest/reference/capabilities/#webdriveragentmacurl),
-avoiding Mac2's default global agent cleanup.
+avoiding default startup's occupied-port takeover. In
+[Mac2 4.3.6](https://github.com/appium/appium-mac2-driver/blob/v4.3.6/lib/wda-mac.ts),
+process cleanup kills only tracked PIDs, but default startup sends `DELETE /` to
+an occupied configured WDA host/port assuming an obsolete agent, without proving
+ownership. Fail if a required port is occupied by an unrelated listener.
 
 ## Commit and release gates
 
