@@ -2,6 +2,7 @@
 """Local commit gates. Planning checks never substitute for application coverage."""
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,12 @@ def require_staged_tree():
     untracked = run("git", "ls-files", "--others", "--exclude-standard", capture=True).stdout
     if unstaged or untracked:
         raise ValueError("Stage intended changes first. Commit checks require the tested tree to match the index; no automatic stash is used.")
+
+
+def require_modern_npm():
+    version = run("npm", "--version", capture=True).stdout.strip()
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version) or tuple(map(int, version.split("."))) < (10, 9, 8):
+        raise ValueError(f"Application gates require npm >=10.9.8; received {version!r}")
 
 
 def application_present(root, config):
@@ -115,6 +122,8 @@ def main(argv=None):
         run(sys.executable, "scripts/check-change.py", "--staged")
     config = json.loads((ROOT / "quality-gates.json").read_text())
     validate_phase(config, application_present(ROOT, config))
+    if config["phase"] == "application":
+        require_modern_npm()
     run("git", "diff", "--check")
     run("git", "diff", "--cached", "--check")
     local_ruff = ROOT / ".venv-quality/bin/ruff"
@@ -122,7 +131,7 @@ def main(argv=None):
     if not ruff:
         raise ValueError("Install requirements-dev.txt into .venv-quality; Ruff is required, not skipped.")
     run(ruff, "check", ".")
-    run("npm", "run", "lint:planning")
+    run("node", ROOT / "node_modules/eslint/bin/eslint.js", ".", "--max-warnings=0")
     python = ROOT / ".venv-quality/bin/python"
     if not python.exists():
         python = sys.executable
