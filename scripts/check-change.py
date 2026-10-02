@@ -11,7 +11,7 @@ GENERATED = (
     "Cargo.lock", "package-lock.json", "contracts/generated/*",
     "contracts/providers/*/schema/*", "*/src/generated/*",
 )
-LIMITS = {"commit": 400, "pr": 800}
+LIMITS = {"commit": 800, "pr": 1600}
 
 
 def classify(numstat):

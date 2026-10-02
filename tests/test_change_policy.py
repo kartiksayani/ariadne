@@ -38,6 +38,7 @@ class GitFunctionalTests(unittest.TestCase):
                               capture_output=True, text=True).stdout.strip()
 
     def add_commit(self, name, lines):
+        (self.root / name).parent.mkdir(parents=True, exist_ok=True)
         (self.root / name).write_text("line\n" * lines)
         self.git("add", ".")
         self.git("commit", "-qm", name)
@@ -48,25 +49,34 @@ class GitFunctionalTests(unittest.TestCase):
             change.main(args)
 
     def test_staged_boundaries_work_in_unborn_repository(self):
-        for lines, fails in ((400, False), (401, True)):
+        for lines, fails in ((800, False), (801, True)):
             (self.root / "file with spaces.py").write_text("line\n" * lines)
             self.git("add", ".")
             if fails:
-                with self.assertRaisesRegex(ValueError, "commit exceeds 400"):
+                with self.assertRaisesRegex(ValueError, "commit exceeds 800"):
                     self.check(["--staged"])
             else:
                 self.check(["--staged"])
 
     def test_initial_zero_base_and_normal_base_enforce_each_commit_and_pr(self):
-        base = self.add_commit("first.py", 400)
+        base = self.add_commit("first.py", 800)
         self.check(["--base", "0" * 40])
-        self.add_commit("second.py", 400)
+        self.add_commit("tests/test_feature.py", 800)
+        self.check(["--base", "0" * 40])
         self.check(["--base", base])
-        self.add_commit("third.py", 401)
-        with self.assertRaisesRegex(ValueError, "pr exceeds 800"):
+        self.add_commit("config/settings.toml", 800)
+        self.check(["--base", base])
+        self.add_commit("last.py", 1)
+        with self.assertRaisesRegex(ValueError, "pr exceeds 1600"):
             self.check(["--base", base])
-        with self.assertRaisesRegex(ValueError, "commit exceeds 400"):
+
+    def test_pr_rejects_oversized_individual_commit_below_aggregate_limit(self):
+        self.add_commit("base.py", 1)
+        self.add_commit("too-large.py", 801)
+        with self.assertRaisesRegex(ValueError, "commit exceeds 800"):
             self.check(["--base", "HEAD~1"])
+        with self.assertRaisesRegex(ValueError, "commit exceeds 800"):
+            self.check(["--base", "0" * 40])
 
     def test_merge_and_option_injection_are_rejected(self):
         base = self.add_commit("base.py", 1)
@@ -88,7 +98,7 @@ class GitFunctionalTests(unittest.TestCase):
         for args in ([], ["--staged", "--base", "HEAD"]):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 self.check(args)
-        (self.root / "too-large.py").write_text("line\n" * 401)
+        (self.root / "too-large.py").write_text("line\n" * 801)
         self.git("add", ".")
         result = subprocess.run([sys.executable, str(ROOT / "scripts/check-change.py"), "--staged"],
                                 cwd=self.root, capture_output=True, text=True)

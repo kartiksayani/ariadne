@@ -188,8 +188,8 @@ checker. Build has its own bounded cold-start budget, initially 15 minutes.
 Budget the initial implementation as one focused day: approximately half for
 the scaffold/typed ping and half for native macOS build, coverage, driver and
 cleanup evidence. This is an estimate, not an executed benchmark. Complete the
-smoke before the first scaffold commit; keep commits <=400 handwritten lines
-and PRs <=800. Allocate the harness with that slice rather than deferring E2E
+smoke before the first scaffold commit; keep commits <=800 handwritten lines
+and PRs <=1600. Allocate the harness with that slice rather than deferring E2E
 until the domain store is complete.
 
 The minimal native command is typed `native_ping(request: PingRequest) ->

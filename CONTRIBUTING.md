@@ -17,7 +17,7 @@ Use `rtk proxy` before shell commands when working in the owner's agent environm
 ## Six rules
 
 1. One useful behavior per PR, with its task ID and exact spec section. Prefer about
-   200 changed handwritten lines; maximum 400 per commit and 800 per PR, including
+   500 changed handwritten lines; maximum 800 per commit and 1600 per PR, including
    tests/config. Docs, original assets and generated lockfiles are counted separately;
    the task catalogue `docs/delivery/tasks.json` is documentation too.
    Their exemption is not permission to hide application code there.
@@ -54,7 +54,8 @@ they are not application tests. No app code may be committed in planning mode.
 ## GitHub enforcement
 
 Repository: private `kartiksayani/ariadne`. Rebase merging is enabled; other merge
-methods are disabled. This preserves each reviewed commit under the 400-line cap. Keep branches for traceability; do not auto-delete them.
+methods are disabled. This preserves each reviewed commit under the 800-line cap.
+Keep branches for traceability; do not auto-delete them.
 
 **GitHub rejected branch protection with HTTP 403 on this private repository's
 current plan (2026-10-02).** CI and the autonomous maintainer enforce the workflow,
