@@ -108,6 +108,10 @@ with tempfile.TemporaryDirectory(prefix="ariadne-planning-") as tmp:
     (tmp / "engine.js").write_text(engine)
     (tmp / "check.cjs").write_text(test)
     prefix = ["rtk", "proxy"] if shutil.which("rtk") else []
+    lint = subprocess.run([*prefix, "npm", "exec", "--", "eslint", "--stdin",
+                           "--stdin-filename", "docs-inline.mjs", "--max-warnings=0"],
+                          input=script, capture_output=True, text=True, cwd=ROOT)
+    check("explorer_javascript_lint", lint.returncode == 0, lint.stdout + lint.stderr)
     syntax = subprocess.run([*prefix, "node", "--check", str(tmp / "explorer.js")],
                             capture_output=True, text=True)
     check("explorer_javascript_syntax", syntax.returncode == 0, syntax.stderr)
