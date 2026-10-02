@@ -17,8 +17,10 @@ Use `rtk proxy` before shell commands when working in the owner's agent environm
 ## Six rules
 
 1. One useful behavior per PR, with its task ID and exact spec section. Prefer about
-   500 changed handwritten lines; maximum 800 per commit and 1600 per PR, including
-   tests/config. Docs, original assets and generated lockfiles are counted separately;
+   500 changed handwritten lines; maximum 800 per authored commit and 1600 per PR,
+   including tests/config. Main's integrated squash commits have the 1600-line PR
+   cap; push checks enforce it separately for every commit in the event range.
+   Docs, original assets and generated lockfiles are counted separately;
    the task catalogue `docs/delivery/tasks.json` is documentation too.
    Their exemption is not permission to hide application code there.
 2. Run all lint and tests on every commit. The hook refuses unstaged/untracked changes
@@ -53,8 +55,11 @@ they are not application tests. No app code may be committed in planning mode.
 
 ## GitHub enforcement
 
-Repository: private `kartiksayani/ariadne`. Rebase merging is enabled; other merge
-methods are disabled. This preserves each reviewed commit under the 800-line cap.
+Repository: private `kartiksayani/ariadne`. Always squash and merge PRs into main;
+other merge methods are disabled. PR checks and the local hook retain the 800-line
+cap for each authored source commit; main checks allow each resulting squash
+commit up to the 1600-line PR cap. Main push ranges may contain multiple squashes.
+Refresh feature branches with rebase when needed before final-head review.
 Keep branches for traceability; do not auto-delete them.
 
 **GitHub rejected branch protection with HTTP 403 on this private repository's

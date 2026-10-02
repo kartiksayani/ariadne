@@ -38,7 +38,7 @@ rtk proxy .venv-quality/bin/python scripts/delivery.py export
 `123` and the record path are examples. `ready`/`export` derive completion from
 fresh GitHub reads, actual merged PRs and validated records. `brief` prints a
 task's owned paths, spec, acceptance and planned checks. `verify` is read-only;
-`merge` publishes the maintainer record/status and requests the exact-head rebase
+`merge` publishes the maintainer record/status and requests the exact-head squash
 merge. Save `export` stdout to a JSON file to import into the
 [interactive chart](../planning/roadmap.html). Chart imports do not authorize work.
 

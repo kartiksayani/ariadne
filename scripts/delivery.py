@@ -194,9 +194,9 @@ def merge(tasks, task, number, record, catalog):
         validate_gate(task, fresh, record)
         if (fresh["head"], fresh["base"]) != (snap["head"], snap["base"]):
             raise ValueError("Head or main changed immediately before merge")
-        result = mutate(f"pulls/{number}/merge", {"sha": snap["head"], "merge_method": "rebase"}, "PUT")
+        result = mutate(f"pulls/{number}/merge", {"sha": snap["head"], "merge_method": "squash"}, "PUT")
         if not result.get("merged"):
-            raise ValueError("GitHub refused the exact-head rebase merge")
+            raise ValueError("GitHub refused the exact-head squash merge")
         try:
             merged = snapshot(number)
             if merged["state"] != "MERGED":
