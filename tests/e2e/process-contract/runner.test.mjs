@@ -5,8 +5,13 @@ import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/pro
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative } from '../../../scripts/run-native-e2e.mjs';
-import { resolvedNames, verifyGraph, mergedConfig, buildArtifacts, frontendModules, checkRelease } from '../../../scripts/check-release-boundary.mjs';
+import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay } from '../../../scripts/run-native-e2e.mjs';
+import { resolvedNames, verifyGraph, mergedConfig, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity } from '../../../scripts/check-release-boundary.mjs';
+async function assertExited(pid) {
+  const end = Date.now() + 1000;
+  while (alive(pid) && Date.now() < end) await delay(10);
+  assert.ok(!alive(pid), 'Owned descendant did not exit within one second');
+}
 test('selectors are explicit and default runs the complete gate', () => {
   assert.equal(selector([]), 'all');
   for (const name of ['all', 'native', 'process-contract']) assert.equal(selector(['--suite', name]), name);
@@ -34,7 +39,7 @@ test('nonzero and unavailable commands fail, timeout stops only its spawned proc
 test('leader exit does not leave its native descendant behind', async () => {
   const source = 'const {spawn}=require("node:child_process"); const child=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"ignore"}); child.unref(); console.log(child.pid)';
   const result = await command(process.execPath, ['-e', source]);
-  assert.ok(!alive(Number(result.stdout.trim()))); assert.ok(alive(process.pid));
+  await assertExited(Number(result.stdout.trim())); assert.ok(alive(process.pid));
 });
 test('launcher failure before bridge/witness readiness aborts observation and cleans descendants', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-startup-failure-'));
@@ -46,7 +51,7 @@ test('launcher failure before bridge/witness readiness aborts observation and cl
     execution.then(() => controller.abort(new Error('launcher exited before readiness')), error => controller.abort(error));
     await assert.rejects(observeOwned(root, process.execPath, 'nonce', launcher.pid, 1000, controller.signal), /exited before readiness/);
     const result = await execution;
-    assert.ok(!alive(Number(result.stdout.trim())));
+    await assertExited(Number(result.stdout.trim()));
   } finally { await rm(root, { recursive: true }); }
 });
 test('SIGINT and deadline clean owned descendants while preserving the test parent', async () => {
@@ -59,7 +64,7 @@ test('SIGINT and deadline clean owned descendants while preserving the test pare
       const fixture = `import {command} from ${JSON.stringify(runner)}; ${interrupt ? 'setTimeout(()=>process.kill(process.pid,"SIGINT"),200);' : ''} try { await command(process.execPath,['-e',${JSON.stringify(source)},${JSON.stringify(pidFile)}],{timeout:300}); } catch(error) { console.log(error.message); }`;
       const result = await command(process.execPath, ['--input-type=module', '-e', fixture]);
       assert.match(result.stdout, /deadline\/interruption/);
-      assert.ok(!alive(Number(await readFile(pidFile, 'utf8'))));
+      await assertExited(Number(await readFile(pidFile, 'utf8')));
     }
     assert.ok(alive(process.pid));
   } finally { await rm(root, { recursive: true }); }
@@ -148,4 +153,13 @@ test('invalid or occupied preflight allocates no native root and leaves unrelate
     if (original === undefined) delete process.env.ARIADNE_E2E_PORT; else process.env.ARIADNE_E2E_PORT = original;
     await new Promise(resolve => server.close(resolve));
   }
+});
+test('production CSP and minimum macOS reject unsafe template defaults and broadened resources', async () => {
+  const config = JSON.parse(await readFile(new URL('../../../apps/desktop/src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
+  verifyProductionSecurity(config);
+  for (const csp of [null, { ...config.app.security.csp, 'script-src': "'self' 'unsafe-eval'" }, { ...config.app.security.csp, 'img-src': 'https://images.example.test' }]) {
+    assert.throws(() => verifyProductionSecurity({ ...config, app: { ...config.app, security: { ...config.app.security, csp } } }), /CSP/);
+  }
+  assert.throws(() => verifyProductionSecurity({ ...config, app: { ...config.app, security: { ...config.app.security, dangerousDisableAssetCspModification: true } } }), /hashes/);
+  assert.throws(() => verifyProductionSecurity({ ...config, bundle: { ...config.bundle, macOS: { minimumSystemVersion: '10.13' } } }));
 });

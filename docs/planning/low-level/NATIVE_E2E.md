@@ -333,7 +333,11 @@ uses the exact desktop build-script event OUT_DIR for ACL/capability files and
 its fingerprint-recorded TAURI_CONFIG. Filesystem capabilities do not include
 inline configuration; verify the known base JSON plus recorded identical CLI
 bundle overrides, rejecting alternate/platform configuration inputs, unexpected
-overrides, feature activation or permissions. Verify fresh actual Vite module
+overrides, feature activation or permissions. Require bundled-only production CSP
+plus required Tauri IPC, automatic bundled code hashes/nonces, and minimum macOS
+13.0; reject null/unsafe/external policies.
+The E2E overlay inherits that CSP unless a demonstrated plugin requirement is
+explicitly confined to its test configuration. Verify fresh actual Vite module
 inventory against emitted chunk bytes, outside packaged assets. Launch the exact
 packaged executable under hostile test environment and observe its OS PID/executable
 continuously for ten seconds, with no listener or E2E-root writes and bounded

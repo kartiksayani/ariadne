@@ -66,11 +66,11 @@ jobs:
           check_snapshot() {
             local snapshot="$1"
             archive_reports() {
-              mkdir -p "coverage/snapshots/$snapshot"
-              if [[ -f coverage/rust.lcov ]]; then cp coverage/rust.lcov "coverage/snapshots/$snapshot/rust.lcov"; fi
-              if [[ -f coverage/web/lcov.info ]]; then cp coverage/web/lcov.info "coverage/snapshots/$snapshot/web.lcov"; fi
+              mkdir -p "$RUNNER_TEMP/ariadne-quality-evidence/$snapshot"
+              if [[ -d coverage ]]; then cp -R coverage/. "$RUNNER_TEMP/ariadne-quality-evidence/$snapshot/"; fi
             }
             trap archive_reports EXIT
+            rm -rf coverage
             git checkout --detach "$1"
             python -m venv .venv-quality
             .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
@@ -102,7 +102,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: coverage/
+          path: ${{ runner.temp }}/ariadne-quality-evidence/
           retention-days: 14
           if-no-files-found: warn
       - name: Record result

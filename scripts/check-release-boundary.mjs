@@ -18,6 +18,15 @@ export function mergedConfig(base, override) {
   }
   return { ...base, bundle: { ...base.bundle, ...override.bundle } };
 }
+export function verifyProductionSecurity(config) {
+  assert.deepEqual(config.app.security.csp, {
+    'default-src': "'self'", 'script-src': "'self'", 'style-src': "'self'",
+    'font-src': "'self'", 'img-src': "'self'", 'connect-src': 'ipc: http://ipc.localhost',
+    'object-src': "'none'", 'base-uri': "'none'", 'form-action': "'none'", 'frame-src': "'none'",
+  }, 'Production CSP must confine resources to bundled content and required IPC');
+  assert.ok(!config.app.security.dangerousDisableAssetCspModification, 'Bundled CSP hashes/nonces must remain enabled');
+  assert.equal(config.bundle.macOS.minimumSystemVersion, '13.0');
+}
 export function buildArtifacts(stdout, metadata) {
   const desktop = metadata.packages.find(pkg => pkg.name === 'ariadne-desktop');
   const tauri = metadata.packages.find(pkg => pkg.name === 'tauri');
@@ -84,9 +93,11 @@ export async function checkRelease() {
   assert.equal(config.build.frontendDist, '../../../target/desktop-dist');
   const inventory = await readJson(join(repo, 'target/desktop-modules.json'));
   const modules = await frontendModules(inventory, join(repo, 'target/desktop-dist'), started);
-  const names = resolvedNames(metadata); verifyGraph(names, config, acl, capabilities, modules);
+  const names = resolvedNames(metadata); verifyGraph(names, config, acl, capabilities, modules); verifyProductionSecurity(config);
   const binary = join(target, 'release/bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop');
   await portFree(port);
+  const minimumSystemVersion = (await command('/usr/libexec/PlistBuddy', ['-c', 'Print :LSMinimumSystemVersion', join(dirname(dirname(binary)), 'Info.plist')])).stdout.trim();
+  assert.equal(minimumSystemVersion, '13.0', 'Packaged minimum macOS differs from deployment target');
   const root = await mkdtemp('/private/tmp/ariadne-release-');
   const child = spawn(binary, [], { env: { ...env, WDIO_EMBEDDED_SERVER: 'true', TAURI_WEBDRIVER_PORT: String(port), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: '0'.repeat(64) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '', observed, spawnError;
@@ -99,7 +110,7 @@ export async function checkRelease() {
       observed = identity(child.pid); assert.equal(observed.exe, binary);
       await portFree(port); assert.equal(listeners(port), ''); assert.deepEqual(await readdir(root), []);
     }
-    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, runtimeCommand: [binary], binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
+    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, runtimeCommand: [binary], minimumSystemVersion, binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
   } finally {
     await stop(child); await portFree(port); await json(join(evidence, 'cleanup.json'), { pid: child.pid, pidExited: !alive(child.pid), portFree: true, logs });
     await rm(root, { recursive: true });

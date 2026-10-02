@@ -24,6 +24,15 @@ Verify fresh frontend module inventory against emitted chunk hashes. Remove the
 unused template opener plugin and permission; retain the core capability and
 scaffold ping command. The scaffold never launches link navigation.
 
+Production CSP permits bundled script/style/font/image resources and required
+Tauri IPC only, with no unsafe eval or external origins. Keep Tauri's automatic
+bundled-code hashes/nonces enabled; enforce this exact configuration in the
+release gate. The test overlay inherits it unless an actual plugin incompatibility
+requires an explicitly documented test-only exception. Bundle minimum macOS is
+13.0, matching the compiler deployment target. See the official
+[CSP guidance](https://v2.tauri.app/security/csp/) and
+[macOS configuration](https://v2.tauri.app/reference/config/#macconfig).
+
 Launch the exact packaged executable with hostile E2E root/nonce/driver switches.
 Observe its live OS PID and executable for ten seconds, with no driver listener
 or E2E writes. Retain logs, hashes, features, permissions and bounded cleanup proof.
