@@ -57,3 +57,8 @@ of storage engine, delivery transport, reply path, graph library or UI framework
 Native platform behavior and production domain-tool integration still need
 execution tests. A failed compatibility test is a recorded build blocker with
 an explicit diagnosis; it is not permission to silently switch architectures.
+
+## Native test implementation
+
+[Native macOS E2E](low-level/NATIVE_E2E.md) pins the embedded driver, test-only
+build configuration, actual UI-to-Rust proof, cleanup, and release exclusion checks.
