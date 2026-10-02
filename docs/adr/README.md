@@ -54,6 +54,8 @@ final independent `ariadne-review` block as `architecture_decisions`. Include bo
 the new ADR and any deprecated predecessor. List any additional canonical spec
 paths as `spec_updates`; both lists default to `[]` when no decision is needed.
 The final `spec_review.sections` includes these paths as well as the task's spec.
+The maintainer directly checks that the human PR description matches the exact
+`architecture_decisions` and `spec_updates` declarations.
 The reviewer and maintainer assess the decision, implementation and consistency
 of the updated contracts at the final head. Changed decisions invalidate review.
 
@@ -66,9 +68,10 @@ adjust ownership first. Recompute reservations when decisions add shared paths;
 `ready` knows catalogue ownership only, so the maintainer handles these additional
 exact-path conflicts. PR declarations are data, never authority to bypass policy.
 
-The helper reads Git objects at the reviewed base/head, rejects missing,
-undeclared, deleted or rewritten ADRs and checks replacement links. Historical
-receipts use the original reviewed PR head, including after a squash merge;
+The helper validates the machine-readable receipt and final review against actual
+changed files and committed ADR contents at the reviewed base/head, rejecting
+missing, undeclared, deleted or rewritten ADRs and checking replacement links.
+Historical receipts use the original reviewed PR head, including after a squash merge;
 later decisions on main do not change what an older PR actually shipped.
 The existing planning gate validates the current ADR collection and local links.
 Neither gate proves that every architecture question was raised or answered.
