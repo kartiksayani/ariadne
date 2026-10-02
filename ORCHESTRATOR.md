@@ -145,3 +145,23 @@ The helper validates evidence structure and current GitHub state. The maintainer
 still judges correctness, spec adherence, review independence and valid deferrals.
 The repository lock serializes local harness merges; it cannot lock out an owner
 writing through GitHub. Keep one maintainer and recheck state after every mutation.
+
+## Small maintenance PRs
+
+The task helper intentionally rejects PRs without a catalogue marker; a harness
+fix does not complete a product task. For these PRs, perform the same independent
+review, dispositions, three-round limit, full hook/CI, size checks and final spec
+check directly. Fetch the PR with GraphQL, including current head/base, draft and
+mergeability state, review heads, unresolved threads and final-head check rollup.
+Require actual successful `quality` and `change-policy` GitHub Actions checks.
+Fetch main/PR refs and verify main is an ancestor of the reviewed head. Publish
+the maintainer's final conclusion with the head/base, review links and test results.
+
+Post `maintainer-spec-review` SUCCESS for that exact head using
+`gh api repos/kartiksayani/ariadne/statuses/ACTUAL_HEAD_SHA --method POST --input FILE`.
+The JSON body contains `state`, `context`, `description`, and the final comment's
+`target_url`. Re-read head/base/checks, then request
+`gh api repos/kartiksayani/ariadne/pulls/PR_NUMBER/merge --method PUT --input FILE`
+with JSON `sha` set to the reviewed head and `merge_method` set to `rebase`.
+Use real values and body files, prefix shell commands with `rtk proxy`, and
+confirm the actual merged state/main CI. No task-completion receipt is emitted.
