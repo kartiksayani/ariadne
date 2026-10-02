@@ -1,38 +1,46 @@
-# Ariadne planning package
+# Ariadne build-ready planning package
 
-**Status: low-level design specified; basic Claude transport proved; application implementation and remaining compatibility proofs pending.** Prepared 1 October 2026 and expanded 2 October after the owner identified insufficient integration detail. Evidence includes generated Codex schemas, Claude's published types and an owner-requested [live two-turn Claude test](evidence/CLAUDE_STREAM_SMOKE.md).
+**First-release scope:** [Personal release decisions](PERSONAL_RELEASE.md) and
+[commit quality checks](DEVELOPMENT_CHECKS.md) govern what ships now. Public
+plugin installation and exotic-failure recovery are deferred; organized crates,
+discovery/liveness and optimized graphs remain required.
 
-Ariadne will be a local macOS app plus a Rust CLI that turns agent conversations into a navigable tree of decisions, questions, findings and tasks. **Claude Code is primary; Codex also supports the complete workflow.** Answering in the global waiting queue must deliver the answer to an available agent without another terminal message.
+Revision3 · 2 October 2026. The original designs and all later owner requirements
+are reconciled in the architecture/LLD. Production code is not built. Claude and
+Codex existing-session transport POCs passed; remaining tests are implementation
+acceptance, not assumed successes.
 
-**Read [Low-level design](LOW_LEVEL_DESIGN.md) first.** Its seven specifications define process/wire contracts, storage/transactions, FIFO inputs, permissions/recovery, APIs/MCP, frontend/native behavior and installation. [Managed agent sessions](AGENT_RUNTIME.md) remains the architecture overview. Each owner submission gets one ordered turn; MCP records structured tree changes through the same Rust core used directly by the UI.
+## Start here
 
-## Read in this order
+1. [Build handoff](BUILD_HANDOFF.md) — next session's starting point and build order.
+2. [Architecture](ARCHITECTURE.md) — modules, processes, storage and ownership.
+3. [Interactive architecture](communication-explorer.html) — both agents, domain
+   reply path, FIFO, persistence and failure scenarios; simulation, no live agent.
+4. [Low-level contracts](LOW_LEVEL_DESIGN.md) — authoritative specifications.
+5. [Design traceability](DESIGN_TRACEABILITY.md) — all30 mockup frames, actions,
+   state/read models and acceptance checks.
+6. [Roadmap](ROADMAP.md) and [Verification](low-level/VERIFICATION.md).
 
-| Document | What it settles |
-| --- | --- |
-| [Low-level design](LOW_LEVEL_DESIGN.md) | Implementation choices, ownership map and seven detailed contracts |
-| [Product](PRODUCT.md) | Release scope, user journeys, states, keyboard behavior, quality targets |
-| [Design translation](DESIGN.md) | Actual dimensions/tokens, reference screenshots, component mapping, explicit mockup deviations |
-| [Architecture](ARCHITECTURE.md) | Modules, storage, concurrency, discovery, live updates, native features, local security |
-| [Agent runtime](AGENT_RUNTIME.md) | Claude-first process control, Codex adapter, MCP boundary, permissions, delivery, auth and recovery |
-| [Contracts](CONTRACTS.md) | Schema, CLI, state transitions, routing, answer delivery and acknowledgment |
-| [Integrations](INTEGRATIONS.md) | Shared rules, both hosts, reversible setup/uninstall, build/install |
-| [Roadmap](ROADMAP.md) | Ordered tasks, dependencies, milestone gates, tests and requirement traceability |
-| [Decisions](../../DECISIONS.md) | Chosen approach and reasons, plus bounded platform investigations |
-| [Research](RESEARCH.md) | Dated upstream facts, direct official sources and untested assumptions |
+The [gap audit](ARCHITECTURE_AUDIT.md) records what was missing, where each gap was
+closed, and which execution gates remain. [Decisions](../../DECISIONS.md) records
+current choices and historical revisions separately.
 
-## Recommended implementation order
+## Core choices
 
-Prove Claude/Codex and macOS platform edges → durable store/outbox → CLI/MCP/demo → managed Claude answer loop → full UI → graph → native integration → Codex parity and setup → install/release verification. An ordinary implementation session can follow the milestones sequentially.
+- Existing Claude/Codex conversations; no new/resumed-session substitute.
+- Pluggable adapters; Claude Mod and Codex native queue plus read-only history.
+- One JSON snapshot per project session, shared Rust core/CLI/MCP/Tauri commands.
+- Full explicit item replies/rounds/forks; agent controls statuses and branches.
+- Durable FIFO; successful host turn + committed domain result resolves an input.
+- Real mockup tree/detail/waiting/graph/rail/owner actions, with explicit deviations.
+- Manual connection baseline; optional discovery/hooks/heartbeat/PID evidence.
 
-The first usable internal build is **M3**, where a real managed Claude conversation updates the tree and receives an app answer without another terminal message. The full requested release is **M8**, after both agents, native behavior, visual fidelity, repeatability and installation pass.
+## Evidence and boundaries
 
-## Planning evidence and limits
-
-- Reviewed the original ZIP and inspected representative dark tree/detail and light graph/detail screens. Screenshots here are **mockup references**, not an implemented app.
-- Verified official documentation for Tauri/macOS and host integrations; observed Claude Code `2.1.287` and Codex `0.159.3` locally through version/help commands. No model sessions were launched. Platform capabilities still require M0 executable proofs.
-- Each major flow now has an owner, API contract, persistence/ordering rule, recovery policy and a named test in the [verification ledger](low-level/VERIFICATION.md). Live provider/native proof results remain explicitly pending.
-- Organization security guidance was not checked, as explicitly authorized by the owner. No the review tool/MCP connector was used.
-- No app scaffold, dependencies, agent settings, installed application, or external publication was created during this planning session.
-
-Start implementation with **P0.1 in [ROADMAP](ROADMAP.md)**. Preserve the prompts and original design archive as source inputs.
+[Claude seven-check proof](../../poc/claude-mods/RESULTS.md),
+[Codex eight-check proof](../../poc/codex-queue/RESULTS.md). Both used existing
+conversations; production domain tools/store/native app remain to be implemented.
+Original ZIP has a [verified member checksum manifest](assets/design-manifest.json).
+Provider research files and older smoke reports are historical evidence; use the
+LLD for implementation. No external publication or provider permission change
+was made. Organization security guidance was not checked under the owner's waiver.

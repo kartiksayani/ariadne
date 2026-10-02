@@ -1,121 +1,162 @@
-# Ordered input, approvals, and recovery
+# FIFO delivery, explicit results and recovery
 
-## 1. Three independent state machines
+Scope: normal quit/reopen, dropped connections, duplicate submissions and uncertain
+sends remain covered. Machine crashes, disk exhaustion, corrupted/lost data and
+exhaustive fault-injection recovery are deferred by [PERSONAL_RELEASE](../PERSONAL_RELEASE.md).
+Keep safe errors and avoid automatic resends; do not build recovery machinery for
+those deferred scenarios.
 
-1. **Item state:** open/waiting_on_me/in_progress/decided/done/dropped/replaced — meaning of the work.
-2. **Input delivery + turn state:** queued/sending/accepted/uncertain/etc. and not_started/running/completed/etc. — transport and execution evidence.
-3. **Run/request state:** live process and pending host interactions — whether a conversation can accept more work.
+## 1. Save, claim, join
 
-Do not derive any one from another. A received answer may have an unfinished turn. An item in progress may belong to a stopped agent. An idle process may have a question waiting for the owner.
+One active binding per Ariadne session; many sessions may share a project.
+Save all owner submissions immediately, assigning increasing input sequence under
+session lock. Clear draft only after durable receipt. Message any status through
+an appropriate intent; answer validates question revision/options. Saving never
+changes agent-owned item status. Reply or follow-up on terminal items is allowed.
 
-## 2. Exact N-message contract
-
-Each explicit Send creates one durable `Input` and one per-consumer `input_seq` under the session lock. UI submission order is the order commits receive those sequences; simultaneous sends from different views are ordered by the store. A renderer retries the same op ID until it learns the result, never creates a second input for an uncertain save.
-
-**One submission → one host turn.** Never combine separate prompts or answer submissions on a timer, even if several are already queued. A future explicit multi-answer Submit action could contain several answers in one input, but v1 sends one item answer per submission. The provider only receives the next input after successful completion of the preceding turn. Claude's ability to queue/coalesce messages internally is deliberately unused.
-
-Example: owner submits P1, P2, A3 while P0 is active. Queue stores seq 11/12/13. On P0 success send P1 only; await its result; then P2; then A3. Each input retains its ID and sequence through Stop, restart and resume. Cross-project workers can progress independently. There is no global total ordering across conversations.
-
-The UI shows queue position, submitted text/answer, and states. Allow cancellation of queued **prompts** only. No drag-to-reorder or in-place edit in v1; Cancel + Send creates a later sequence with a new message. Answers use the explicit correction flow instead of cancellation, preserving the invariant that closing an item accounts for its latest owner answer. Already-sending input requires Stop/recovery, not queue cancellation.
-
-## 3. Scheduler algorithm
-
-Only the worker holding the project lease dispatches managed inputs. Store change events wake it; a 500 ms reconciliation timer covers missed events. Timer execution never calls a model unless a real eligible input is queued.
+Scheduler eligibility: connected compatible binding + enabled dispatch + desktop
+lease + no unresolved earlier input + no other active attempt. Items, timestamps,
+UI selection and presence labels do not determine queue order. A stale/offline
+host leaves saved messages queued. No automatic alternate-agent routing.
 
 ```text
-on wake:
-  if parent pipe closed: stop and clean up
-  if an unanswered permission/native request blocks active turn:
-      return matching decided responses; do not submit a new turn
-  if stopping, dispatch paused, active turn, or recovery unresolved: return
-  inspect earliest unresolved route=turn input for this consumer
-  if failed/interrupted/uncertain without owner resolution: pause and return
-  skip completed turns, cancelled prompts, owner-reviewed do_not_resend entries
-  choose earliest queued input; omit already satisfied answer IDs
-  if no remaining payload: mark satisfied; repeat without provider call
-  validate current binding, run epoch, trust/config digest and capacity
-  transact: mark sending, allocate attempt and input UUID, set active_input_id,
-            issue exact full answer IDs included, record payload digest
-  write exactly one newline-terminated host user-input/request frame
-  wait for host acceptance and turn events while serving other event channels
+claim(binding, generation, request_id):
+  under session transaction:
+    return existing receipt for the same binding/generation/request_id first
+    verify current generation, app supervisor lease and dispatch enabled
+    reject if active input or earlier needs_attention barrier
+    choose smallest seq among queued, skipping only cancelled/explicitly skipped
+    validate request bounds; snapshot current target context
+    allocate attempt; persist claim_request_id and exact payload/digest + marker
+    set input=in_flight, acceptance=prepared, active_input_id=input.id
+    advance issued_through_message_number to this input owner message number
+  return that same attempt to adapter
+submit outside filesystem locks
+report facts under normal core transactions (deduplicated):
+  acceptance, host turn and result may arrive in either order
+  never regress a started turn because acceptance was late
+join(input, attempt):
+  if turn==completed and result==committed and no contradictory evidence:
+    seal attempt; input=handled; clear active_input_id
+    next input becomes eligible
+  if turn==failed/interrupted or conflicting/uncertain delivery:
+    input=needs_attention; dispatch=recovery_required
 ```
 
-The persisted payload is constructed from immutable prompt/answers and a versioned formatter; retry on the same formatter version reproduces the same text. The envelope identifies input ID, item IDs, question snapshot, selected label/ID, free text, correction reference, and instructions to acknowledge the listed answer IDs. It never invents owner text. Size overflow uses explicit fetch references instead of truncating content.
+A successful result may say deferred/unable; that handles this owner message but
+leaves domain items exactly as the agent explicitly set them. Parent/children
+never close because a host turn ended. No receipt is a tool approval.
 
-Acceptance and turn-completion handlers run through core transactions with deduplication keys `(run,epoch,event identity)`. Replayed host events cannot create a second provenance message or complete a newer turn. A host response with a mismatched session/thread/input/turn ID is a protocol error and pauses dispatch.
+## 2. Race and failure table
 
-Completion success: persist completed turn, clear active_input_id, set run idle, then loop once for the next queued input. Failure/interruption/quota/auth/protocol error: pause dispatch, retain later inputs, require Retry/Resume action. Do not proceed to P2 when P1 failed and P2 may depend on it. Agent omitting an answer receipt is different: a successful turn can drain the next input, showing the old answer as awaiting acknowledgment with one contextual reminder.
+| Observed condition | Persist / UI | Next dispatch |
+|---|---|---|
+| saved, no available desktop/host | queued / Queued · waiting for connection | wait |
+| submit returned acceptance, no turn yet | in_flight / Sent · waiting to start | wait |
+| matching host turn observed | running / Received · agent working | wait |
+| result committed, host still running | result committed / Reply published · agent working | wait |
+| completed, no result | wait up to5s to reconcile core/report ordering; then result_missing | pause |
+| completed + result arrives late | join and seal; preserve warning history | resume only if paused solely for result_missing |
+| domain call validation fails | agent sees typed error; no partial batch | same turn may repair |
+| domain result committed then host fails | retain domain data, mark needs_attention | pause |
+| submit timeout/connection lost mid-send | uncertain; never label failed-unsent | pause |
+| proven rejection before any host delivery | rejected; no turn | owner Prepare retry then Resume |
+| app quits or crashes after acceptance | host may still run; no new app dispatch | reconcile on reopen |
+| unrelated terminal or subagent turn | activity/presence only | never consume pending input |
+| disk/lock/capacity failure | no successful save receipt; retain draft/event evidence | pause until writable |
+| user pause/disconnect | explicit persisted pause | no implicit restart |
 
-`input_retry` is available only for an input with authoritative proof of rejection before execution. It appends a resolution, resets that same logical input to queued/not_started, preserves sequence/content/answer IDs and all previous attempts, and leaves dispatch paused. The next explicit Resume creates the next send attempt at the original FIFO position. It does not create another owner Message. An ordinary provider error is insufficient proof of non-execution.
+A5s missing-result grace is UI policy, not proof a late result cannot arrive.
+Process deaths and expiry never authorize resending. Changing bindings or moving
+projects requires reconciliation of outstanding attempts first.
 
-For a failed/interrupted turn that may already have done work, or an uncertain send, use `delivery_resolve`: **Resend this input** (with the displayed risk of repeated work) or **Do not resend; continue later inputs**. Store the owner's decision and reason; never label the failed turn completed. Both choices still require explicit Resume. If later input has already begun after a skip, recovering that old work requires a new follow-up input rather than inserting an old sequence ahead of work in progress. Neither skip nor resend fabricates acknowledgment of an answer, and skipped answers remain available as eligible previously dispatched answers. Resume alone cannot bypass an unresolved earlier failure.
+## 3. Idempotency and exactly-once limits
 
-An acknowledgment may arrive through MCP before a host replay/acceptance event. It establishes that the answer was read; store that evidence without inferring turn success. The worker still waits for the matching result. Similarly, a result correlated to the input can establish acceptance if a replay event was omitted; a raw successful pipe write never can.
+Ariadne guarantees one stored effect for the same validated operation ID/digest.
+It cannot guarantee exactly-once provider execution across a lost queue receipt.
+Persist before send, correlate actual host evidence and leave uncertainty visible.
+Internal event IDs and immutable payload digests deduplicate lifecycle replay.
+Native queue IDs are not assumed idempotency keys. Do not automatically drain,
+reorder or delete user/provider queue entries belonging to other clients.
 
-## 4. Answer eligibility and concurrent changes
+On reconnect, same-host identity is checked, generation rotates, old attempts
+remain blocked until current adapter reconciles them. Codex polls its exact known
+thread history; Claude uses persisted events and current Mod-local facts. No
+private transcript recovery is assumed. 'No evidence found yet' is uncertain,
+not proof that work never ran. A snapshot unavailable during result lookup does
+not mean result_missing; it means store unavailable.
 
-For managed consumers, `answer_fetch` exposes only dispatched/accepted answers and the currently sending input's referenced full answers, plus previously delivered unacknowledged answers. It **does not expose later queued submissions**. Otherwise a fetch during P1 could read A3 before P2, breaking FIFO. External consumers have no scheduler and fetch all unacknowledged answers.
+## 4. Owner recovery commands
 
-The fetch tool records fully issued IDs before returning; reading a summary/reference is not a full issue. Ack checks consumer, eligibility and full issuance. If a late fetch satisfies an unsent batch, dispatcher removes those satisfied IDs before constructing a frame. The per-consumer active-input pointer and worker lease prevent a second active send race.
+All require expected current revision/attempt, reason, operation ID, and no
+currently observed running turn. Unknown host liveness prevents resend until
+owner confirms the terminal is stopped/idle; record this as owner attestation,
+not machine-proven absence. Show target identity and prior result/side effects.
 
-If question/options changed before answer commit, core rejects with current question revision and preserves the draft. If the item closes after a committed answer, close must incorporate/acknowledge that answer. If an item is replaced after answer commit, the answer remains scoped to the original item; never reroute it silently. A correction queued behind an active answer is available only at its own turn; close protection still prevents resolving over the newer committed correction.
+- **Prepare retry:** only proven pre-execution rejection; new attempt on same
+  immutable input, same queue position. Resume is a separate explicit action.
+- **Resend:** potentially repeats work; owner reviews warning. Retain old attempt;
+  new attempt ID/marker, same logical input/content. Never automatic.
+- **Request missing result:** after known completed host turn, new attempt with
+  `purpose=result_repair`, `repair_for_attempt_id` and an instruction to inspect
+  prior committed work and publish a result only. It is an explicit new model
+  turn, not a repeat of the original action prompt. Still use normal result/turn
+  join. Preserve original evidence; do not promise the model cannot make mistakes.
+- **Skip and continue:** records skipped, not handled; releases barrier, retains
+  prior results/replies; user Resume enables later inputs. No late operation may
+  mutate a sealed/skipped attempt except an exact receipt replay.
+- **Confirm evidence:** owner supplies explicit known outcome to reconciliation;
+  store owner attribution. This never fabricates an agent result or successful
+  turn. Owner may then skip; automatic 'handled' still needs host/domain evidence.
 
-## 5. Host interaction lane
+Queue cancel is only before attempt preparation. Once delivered into the host's
+native queue, Pause means no additional sends and does not retract it. Release1
+has no 'Stop agent' button. UI tells the owner to interrupt in the terminal.
 
-Permissions are **responses to the active turn**, not queued ordinary messages. They bypass the FIFO of future prompts solely to unblock that turn. They cannot start another turn.
+## 5. Desktop shutdown and worker recovery
 
-1. Provider produces a permission request. Claude uses `permission_prompt`; Codex sends a server RPC request. Normalize IDs/kind/display data and commit HostRequest pending.
-2. UI displays project/session, exact operation and affected paths, plus Allow once / Deny. No recommendation is a preselected approval. If full operation cannot fit safely, deny with an explanation rather than showing a truncated approval target.
-3. UI invokes `permission_respond` with request revision and current run/epoch. Core rejects stale, expired, different-run or already-differently-decided responses.
-4. Waiting bridge or worker re-reads the decided record and sends the host-specific response. Record returned evidence. Duplicate UI submits are idempotent; never answer a provider request twice.
-5. Provider continues the same turn or reports denial/error. A permission decision does not imply the tool completed successfully.
+Quit never disconnects or rotates the binding generation: registered bound
+domain and lifecycle writes stay eligible. Only explicit host disconnect/rebind
+changes those states; shutdown of the observer alone does not imply host exit.
 
-Initial permission timeout: 10 minutes of wall time; show deadline. Claude's Ariadne MCP server uses an 11-minute timeout and disabled auto-background, as specified in SETUP_AND_DELIVERY; C03 must verify that a pending decision stays blocking beyond two minutes. A timer/cancellation expires the local request and returns deny. Sleep/wake rechecks expiry; expired approvals cannot become valid again. Ordinary domain tools have a 5-second service budget, including the 2-second lock budget. Do not hold a transaction lock while waiting for UI.
+App emits a clear Quit note when a delivered turn remains active: that host work
+continues and queued unsent inputs wait until reopen. Flush already-observed
+lifecycle events, stop own adapter helpers, release socket/leases. Never signal
+external PID or kill daemon. A forced shutdown can lose transient diagnostics;
+source domain history persists through independent CLI/MCP writes. On startup
+subscribe/watch, read all active bindings, run reconcile, then enable eligible
+previously-enabled queues. Explicit pauses remain paused.
 
-Native `requestUserInput` is also a response lane. Create one waiting item per question with a unique source key `(run,epoch,request,question_id)`; persist the ordered question/item mapping in HostRequest, so duplicate notifications reuse it. Selecting any of these items opens one grouped form. V1 requires an answer for every displayed question before Submit answers (an Ariadne UI policy; the provider schema has no required flag). Keep partial drafts in preferences. Submit stores all answers, one owner message and one host_response input/map atomically; return it to the exact live request without a new turn.
+Multiple desktop-start attempts converge via single-instance + OS binding lease.
+A killed dispatcher releases OS lease but a prepared attempt remains on disk;
+replacement cannot send it until reconciliation. Never let a time-based lease
+alone declare the provider never received the message.
 
-Native answered IDs become eligible for MCP fetch after response dispatch; the agent must fetch/ack them before closing their items. Do not alter the provider's answer labels to smuggle in IDs. The canonical rules direct the agent to read eligible native-question records after receiving a native response. Native receipt can therefore remain pending if the agent omits that step, with the same honest UI as ordinary answers.
+## 6. Delivery labels and full history
 
-`isBlocking:false` does not justify assuming the host will keep the request alive. If completion/interruption/serverRequest-resolved clears it first, expire the local request and preserve drafts/committed answers for review; never return into a newer turn or automatically turn that answer into another message. N03 must prove this lifecycle. Ariadne-created questions use ordinary MCP logging and the turn queue instead.
+Saved/Queued, Sent, Received, Published, Handled, Missing result, Failed,
+Uncertain, Cancelled and Skipped are derived delivery labels, not new persisted
+Input.state values or item statuses. The mockup
+stepper's 'Resolved' means this submission handled; display separate item status.
+A result published while the turn continues is immediately visible on its target
+item; full body persists. The rail uses excerpts derived from full Messages.
+A terminal summary captured by the bridge remains bounded diagnostic activity.
+All corrections, rounds, branches and superseded answers remain inspectable.
 
-Claude's built-in question UI is not assumed available via the permission bridge. The canonical rules use Ariadne question items. If a host emits an unsupported interactive control, show a specific unsupported-operation error and deny/cancel it; never treat it as an ordinary permission approval or hang silently.
+### Derived label precedence
 
-## 6. Stop, close, quit, and resume
+Read in this order: input cancelled→Cancelled; skipped→Skipped; handled→Handled;
+attempt uncertain→Uncertain; failed/interrupted turn→Failed; result missing→Missing
+result; result committed and turn not completed→Published; running→Received;
+accepted→Sent; prepared→Sending; queued with unavailable/busy host→Queued;
+otherwise queued→Saved. Set input needs_attention and recovery_required when the
+missing-result grace expires, retaining its unsealed attempt. If a late result
+joins successfully, clear only that automatic pause, never an explicit owner pause.
+Store independent owner_paused plus automatic pause_reason (`result_missing`, `uncertain`, `host_failure`,
+`store_error`, `incompatible`) beside dispatch_state so that distinction is durable.
 
-| Action | Semantics |
-| --- | --- |
-| Close window | Hide UI; worker, store watcher, tray, permissions and dispatch keep running |
-| Close tab | View change only; never stop its run or hide its questions |
-| Stop | Atomically pause consumer dispatch first; interrupt active turn; expire pending requests; gracefully close provider and worker; keep all unsent inputs |
-| Quit with no active runs | Flush owned UI preferences and exit |
-| Quit with active runs | Dialog lists runs; Cancel quitting or Stop all and quit; no automatic answer/approval |
-| Resume | Preflight/trust/version/lease checks; reconcile prior uncertainty; resume exact host ID with same consumer; owner elects Continue queued inputs |
-| New session | New consumer/host ID; never substitute for a broken Resume without explicit owner choice |
-
-Stop latency budgets: send host interrupt, allow 5 s for a terminal event; request graceful exit/EOF and allow 5 s; SIGTERM owned process group and allow 2 s; SIGKILL only the still-owned verified group if necessary. Record interruption versus uncertain completion honestly. A closed worker stdin is the parent-death signal and invokes the same cleanup path. An app restart must not auto-resume queued paid work.
-
-If initial launch failed before any host conversation was created and that absence is established, retry can initialize the same Ariadne session/consumer with its existing queued first input. This is an initialization retry, not a replacement for a known host conversation. An unknown host ID after a possibly consumed first input remains uncertain and requires owner resolution.
-
-Do not clear a project lease file to unblock startup. A live holder reports **Another Ariadne run owns this project**; focus the existing app/run if it belongs to this instance. A worker killed with SIGKILL may leave provider descendants alive despite releasing the lease, so a nonterminal stored run still requires reconciliation.
-
-## 7. Failure matrix
-
-| Failure point | Durable observation | Required recovery |
-| --- | --- | --- |
-| UI dies before submit commit | No receipt or input | Restore local draft if available; no claimed send |
-| Commit happened, response lost | Receipt + queued input | Retry same op ID returns saved IDs |
-| Worker dies before preparing send | queued | Explicit Resume can send it |
-| Marked sending, no acceptance captured | sending | Convert to uncertain; inspect supported host evidence; no blind resend |
-| Acceptance captured, no terminal result | accepted/running | Interrupted/uncertain turn; show evidence and require Resume/recovery before later inputs |
-| Result captured, UI misses event | completed in store | Reload revision; do not repeat provider work |
-| Agent ack captured but result missing | receipt + unfinished turn | Received answer, unresolved turn; never infer completion |
-| Provider rejects before execution | failed/rejection evidence | Pause queue, fix cause, input_retry then explicit Resume; preserve original input order |
-| Turn fails after possible work | failed/interrupted with effects possible | Pause; owner chooses resend or do_not_resend with reason, then Resume; never silently skip |
-| Permission response write lost | decided, no return evidence | Never carry allow to a new run; expire on disconnect; re-request if needed |
-| Core write fails during host work | Last committed snapshot | Pause dispatch, surface store failure; stop/deny new operations |
-| Parent app dies | Pipe EOF at worker | Cancel dispatch and owned child cleanup; next app reconciles |
-| Worker/provider ownership uncertain | stale nonterminal run | Recovery view; no new writer in that project |
-
-Recovery view shows non-secret run/host/input IDs, timestamps, last confirmed events and cleanup evidence. Actions: **Recheck**, **Retry owned cleanup** when identity is provable, **Resume conversation**, and for uncertain input **Resend this input** or **Do not resend** with an explicit record. The latter marks transport resolution reviewed; it never fabricates an agent receipt or successful turn. Require process absence/termination evidence before starting another managed writer. If escaped/orphaned process identity is unprovable, show manual inspection instructions and remain blocked; do not kill an unrelated process based on a recycled PID.
-
-Provider history reconciliation uses supported APIs only. Codex can inspect the recorded thread's user items/turns. Claude uses known echoed/correlated input IDs captured while running; no private transcript scraper is introduced for recovery. If evidence cannot settle whether input was consumed, tell the owner that explicitly. Exactly-once arbitrary external actions cannot be guaranteed by local JSON receipts.
+A queued answer retains the exact question/option snapshot it was saved against.
+If the agent later changes the item before dispatch, show the changed-question
+context alongside the immutable original answer in the payload; do not reinterpret
+an old option ID against new options. Revisions are checked when the owner saves
+and when the agent mutates, while a saved owner message is not silently discarded.

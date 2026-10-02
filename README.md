@@ -1,13 +1,22 @@
 # Ariadne
 
-A local macOS companion for long conversations with Claude Code and Codex: see what was decided, what needs your answer, and where each question came from.
+A local macOS companion for coding conversations: see what was decided, what
+needs your answer, and where each question came from.
 
-Claude Code is the primary integration. Ariadne will [manage official agent CLI sessions](docs/planning/AGENT_RUNTIME.md), use MCP for structured tree updates, and deliver answers without an extra terminal message. Codex will support the same workflow through app-server.
+**Current state:** architecture, design-grounded LLD and implementation roadmap;
+production app not yet built. Existing-session communication passed live POCs
+for both Claude Code and Codex.
 
-**Current state: low-level design specified; [basic Claude conversation transport passed a live test](docs/planning/evidence/CLAUDE_STREAM_SMOKE.md). Application implementation and the remaining compatibility proofs are pending.**
+Start with the [build handoff](docs/planning/BUILD_HANDOFF.md),
+[architecture](docs/planning/ARCHITECTURE.md), and
+[interactive explorer](docs/planning/communication-explorer.html).
+The [planning index](docs/planning/README.md) links the complete specification,
+all30 design frames, implementation gates and proof limits.
 
-Start with the [low-level design](docs/planning/LOW_LEVEL_DESIGN.md) and [planning package](docs/planning/README.md), then follow the [implementation roadmap](docs/planning/ROADMAP.md). Significant choices and reasons are recorded in [DECISIONS.md](DECISIONS.md).
+Source inputs: [build prompt](BUILD_PROMPT.md), [design brief](DESIGN_PROMPT.md),
+[UI mockups](<designs/Ariadne UI mockups.zip>). Original inputs are preserved.
 
-Source inputs: [build prompt](BUILD_PROMPT.md), [design brief](DESIGN_PROMPT.md), and [UI mockups](<designs/Ariadne UI mockups.zip>).
-
-The plan covers the full required release: shared JSON storage, Rust CLI, Tauri/React app, both agent integrations, native macOS features, reversible setup, demo, installation and verification. Build/install commands will be added when they work.
+Claude Code is primary; Codex and future compatible CLI adapters use the same
+core. Agents publish full item replies and tree decisions through CLI/MCP;
+bridges deliver owner messages to existing conversations and track lifecycle.
+Build/install commands will be exposed when the implementation exists.

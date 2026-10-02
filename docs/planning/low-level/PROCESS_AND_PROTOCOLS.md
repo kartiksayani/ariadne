@@ -1,162 +1,268 @@
-# Processes, interfaces, and provider adapters
+# Processes and agent protocols — existing-session baseline
 
-## 1. Executables and ownership
+## 1. Ownership, leases and app control
 
-`Ariadne.app` bundles the desktop binary, version-matched `ariadne` CLI/helper, generated rules/plugin resources, frontend and local fonts/icons. The helper exposes internal `agent-worker` and public `mcp serve`; those subcommands reuse workspace crates. A PATH-installed CLI is for terminal use. Managed launches always use the bundled helper, avoiding a mismatched PATH binary.
+Desktop single-instance owns a Tokio runtime, one dispatch supervisor per active
+binding, and a local Unix listener `~/.ariadne/run/control.sock`. Directory0700,
+socket0600; verify peer UID on accepted connections, bound request size1MiB and
+idle timeout5s. Only local IPC, no TCP listener. Check macOS Unix path byte limit
+before binding; return `control_path_too_long` with a shorter ARIADNE_HOME remedy.
+Never unlink an endpoint until the single-instance/runtime lock proves no prior
+Ariadne instance owns it; validate owner/type before removing a stale socket.
 
-Per active project: desktop → one worker → one provider process → its Ariadne MCP process. Every process has separate stdin/stdout/stderr pipes; MCP stdout is exclusively protocol. The worker places the provider in an owned process group, uses close-on-exec for unrelated FDs, and monitors parent stdin EOF. It never shells out through `sh -c`. Launch uses explicit executable/cwd/argv/environment, not a login shell or sourced rc file.
+Each supervisor holds `run/leases/<binding>.lock` (nonblocking `flock`) until it
+stops. Session file writes use different locks. One desktop process can supervise
+many bindings/projects. No lease authorizes signalling a Claude/Codex process.
+The app can spawn its own external adapter executables and short-lived CLI queue
+senders. It may stop those helpers, but an interrupted sender means uncertain
+submission, not cancellation at the host.
 
-The runtime lease is `locks/runtime.lock`, nonblocking exclusive OS lock held by the worker. Start serializes in the desktop with a project-keyed mutex, but only the OS lease is authoritative across processes. The worker confirms lease acquisition and checks nonterminal previous runs before any provider launch. UUID run/worker identities supplement PID/start-time evidence. Failure to acquire the lease creates no provider process.
+`ariadne bridge claim` uses this socket, never directly claims from disk. Desktop
+validates generation, its lease, enabled dispatch and FIFO eligibility under the
+session transaction, persists the attempt, then returns the exact payload. A
+lost claim response retains the prepared attempt; the same claim request ID
+recovers its receipt, never claims another input. Prepared is not proof the host
+received it; if the adapter may have submitted before dying, reconciliation must
+classify host-delivery uncertainty before any new send. CLI `bridge report` persists
+normalized events through core directly, so current-turn completion can be saved
+when desktop is closed. Hook/report retries reuse event IDs.
 
-## 2. Desktop ↔ worker protocol (Ariadne-owned v1)
+Control envelope: `{v:1,kind:"request",id,method,params}`; response
+`{v:1,kind:"response",id,result}` or `error`. Methods: `ping`, `claim`,
+`connection_status`; domain bootstrap and event persistence use ordinary CLI core
+commands. Requests include binding/generation. stdout is structured JSON only.
+Startup drains persisted state before enabling dispatch. Window close hides;
+Quit pauses scheduling in memory and releases leases. New saved messages wait
+until reopening; already accepted turns can still run. User pause persists and
+is never undone by app restart. No provider launch/resume is performed.
 
-UTF-8 newline-delimited JSON, one object per line, versioned envelope. The first parent frame includes IDs and a reference to already-validated launch configuration; no owner prompt text or secrets are passed through argv. Worker stores/retrieves input through core.
+## 2. Shared adapter contract
+
+See [Agent adapters](../AGENT_ADAPTERS.md) for the shared interface and later
+executable-extension design. Public registration/negotiation is deferred. Rust trait
+uses owned DTOs and async operations `probe`, `connect`, `submit`, `observe`,
+`reconcile`, `disconnect`. Reserve `hello` for the later executable protocol;
+first-party adapters and their in-process test fake do not need a plugin loader.
+First-party Claude submit is pull-driven: scheduler supplies work in response to
+the Mod claim. Codex submit is push-driven through its native CLI. Both use the
+same core attempt/result state machine, not a mandatory artificial push socket.
+
+Normalize `connected`, `accepted`, `turn_started`, `visible_output`,
+`turn_finished`, `rejected`, `uncertain`, `presence`, `disconnected`.
+Event: `{event_id,binding_id,generation,input_id?,attempt_id?,host_turn_id?,
+observed_at,kind,payload}`. Deterministic IDs for terminal events use source event
+identity where supplied, else hash(binding,generation,attempt,turn,kind). Presence
+is ephemeral and need not have a persistent event receipt. Do not deduplicate
+legitimately different output chunks using identical text hashes.
+
+New work requires current generation. Reconciliation can report historical
+attempt evidence only through the current supervisor after verifying exact
+host identity; it cannot reopen old dispatch or rewrite a sealed attempt.
+Repeated consistent facts are no-ops. Conflicting turn IDs or outcomes pause
+with `protocol_conflict`; arrival order must not regress progress.
+
+Provider frames max8MiB; control/executable-adapter JSONL frames max1MiB. Drain
+stdout/stderr concurrently. Frame before UTF8/JSON decoding, reject malformed
+required fields, split Unicode safely, bound unterminated lines. Unknown optional
+events may be ignored; unknown requests return unsupported. Use bounded channels
+256 events; lifecycle events backpressure/pause dispatch rather than drop.
+Transient visible text may coalesce33ms/8KiB or drop with explicit gap notice.
+Diagnostics ring max2MiB/binding in memory, individual displayed text64KiB with
+truncation label; no private reasoning/raw tool args/env/auth payloads.
+
+## 3. Claude Code 2.1.287 adapter
+
+Live starting point: `poc/claude-mods/plugin/hooks/register.js` and its tests.
+Ship JavaScript Mod + shared rule skill with the plugin; replace Python/SQLite
+broker calls with the installed version-matched Rust CLI. No Node daemon or
+Python runtime dependency. Use `$.process.run([absolute_helper,"bridge",...],
+{stdin:JSON.stringify(payload),timeoutMs:5000})`; never interpolate owner text
+into shell commands. Helper resolves state via explicit binding handles.
+
+1. On `session.start`, register `/ariadne-connect`, `/ariadne-status`,
+   `/ariadne-disconnect`; install a1s `$.clock.every` poll with reentrancy guard.
+2. Connect gets `$.session.id()` and `$.session.cwd()`, registers/validates project
+   and host binding through CLI, returns IDs/instruction snippet and generation.
+   Reconnect with outstanding work is recovery_required, not an automatic replay.
+3. When no local active claim, poll desktop through `bridge claim`. Desktop alone
+   decides eligibility; no claim if app absent, paused or incompatible.
+4. Set local active attempt BEFORE `$.prompt.submit({text})`. Submit detached
+   from the timer callback; promise may resolve before or after turn.start.
+5. Record `{drop}` as rejection only if no turn evidence exists. Late rejection
+   conflicting with a started turn is uncertain. Preserve captured binding/claim
+   in callbacks, never use a newly connected global variable for old work.
+6. On main `turn.start`, match the full input marker at its defined envelope
+   position and verify text digest/identity; bind `e.turnId`. Check current session
+   equals bound external ID. Unrelated terminal/subagent turns cannot consume a
+   claim. Session switch pauses and invalidates the old connection.
+7. On matching main `turn.complete`, report turnId, reason, isAborted and bounded
+   visible text diagnostic. Core records lifecycle only; agent CLI/MCP results
+   supply actual item messages. Locally clear active after durable report receipt;
+   next claim still waits for core's domain-result/turn join.
+8. On `session.end`, stop polling and report disconnected best-effort. Missing
+   end event is handled by stale heartbeat/reconciliation, never assumed clean.
+
+Identity uses `[ARIADNE_INPUT:<input_uuid>:<attempt_uuid>]` plus binding/generation
+in the injected envelope. Payload contains exact owner text, kind, item path,
+question revision/snapshot, references to bounded recent item messages, and
+instructions for `apply.input_result`. Escape owner content as a JSON value or
+clearly delimited data block; it cannot change envelope routing. Total prompt
+content≤64KiB; include recent context≤16KiB and tool read references for older
+history. Owner text is never silently shortened.
+
+Helpers may fail; retain unsaved events in a bounded memory retry queue and stop
+new claims. If the host exits before evidence can persist, core remains uncertain.
+Do not claim a durable recovery guarantee from hook delivery. No blocking Stop
+hook to force another inference, permission changes, hidden transcript read or
+next-user-message dependency. Exact Mod APIs above were live-proven; transport
+POC did not exercise production domain tools or full recovery.
+
+## 4. Codex 0.160.0 adapter
+
+Use installed `codex`, existing shared daemon, and selected known thread. Resolve
+socket from configured endpoint or `$CODEX_HOME/app-server-control/app-server-control.sock`
+(default `~/.codex/...`). Resolve socket symlink (the POC needed this), require
+local Unix socket owned by current user and validate peer UID. This exception
+for provider sockets does not permit symlinked Ariadne data files. Record resolved
+endpoint identity; daemon replacement reconnects require fresh initialize/probe.
+Do not read auth files, reset config home or spawn an unrelated app-server.
+
+Open WebSocket over Unix with standard HTTP Upgrade, validated accept response,
+masked client frames, ping/pong and bounded fragmented-text handling. Use Rust
+tungstenite on UnixStream; the Python `unix_websocket.py` is the proven framing
+reference. This endpoint is NOT JSONL. Application requests inside WS messages
+are JSON-RPC-shaped without a `jsonrpc` member.
 
 ```json
-{"v":1,"kind":"request","id":"req-1","method":"start","params":{"project_id":"<uuid>","session_id":"<uuid>","consumer_id":"<uuid>","run_id":"<uuid>","launch_profile_id":"<uuid>","mode":"new"}}
+{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ariadne","version":"0.1.0"},"capabilities":{"experimentalApi":true}}}
 ```
 
-Worker result: `{v:1,kind:"response",id,result:{worker_instance_id,run_id,state}}` or `error:{code,message,retryable}`. IDs in this section are schematic placeholders, not valid domain fixtures.
+After successful response send `{"method":"initialized"}`. Probe `thread/read`
+with `{threadId,includeTurns:false}`, `thread/queue/list`, and
+`thread/turns/list` with `{threadId,limit:20,sortDirection:"desc",itemsView:"full"}`.
+Validate returned identity, loaded/available state and readable full items.
+Initialize userAgent + CLI version are compatibility evidence, not identity alone.
+Manual thread ID comes from Codex `/status` (session ID); connection UI explains it.
 
-| Direction | Message | Semantics |
-| --- | --- | --- |
-| Parent → worker | `start` (exactly once) | Acquire lease, preflight, initialize new/resumed provider; respond when worker has accepted lifecycle ownership, not when inference finished |
-| Parent → worker | `wake` | Hint that durable queue/request state changed; contains revision, never replacement state |
-| Parent → worker | `stop` | Idempotent run-scoped stop; dispatch pause was already committed by parent |
-| Parent → worker | `ping` | Liveness check only; no model call |
-| Worker → parent | `ready`, `run_state`, `input_state` | Run/epoch scoped facts; persisted transitions include session revision |
-| Worker → parent | `activity` | Bounded transient text/tool events with monotonically increasing event_seq |
-| Worker → parent | `request_changed` | Permission/native input invalidation; UI reloads canonical request |
-| Worker → parent | `diagnostic`, `fatal`, `stopped` | Redacted error or final cleanup evidence |
-
-Parent request IDs deduplicate per worker lifetime. Durable side effects also have core operation IDs. Events contain `{v,kind:"event",run_id,worker_instance_id,connection_epoch,event_seq,event,payload}`. Parent ignores events for old epochs, detects gaps, and reloads authoritative state. Activity gaps are marked visibly; no implication of missing saved domain data.
-
-Parent and worker continuously drain both stdout/stderr to avoid pipe deadlock. Incoming provider frames: 8 MiB maximum; helper frames: 256 KiB maximum, activity payloads ≤16 KiB. Owner text is ≤16 KiB UTF-8; the formatted input content is ≤32 KiB before JSON escaping, and its complete serialized outbound frame is ≤256 KiB. Measure both limits explicitly: escaping can expand control characters sixfold. Oversized answer context becomes a fetch reference; never silently truncate owner text. Parse bytes through newline framing before UTF-8/JSON decoding; handle split Unicode, CRLF, partial final frames and long lines. An unterminated frame at EOF is a protocol error if nonempty. Keep at most one max-size pending frame per stream.
-
-Use a bounded event channel of 256 entries. Coalesce text deltas for the same block every 33 ms/8 KiB and drop only transient activity with an explicit gap event when needed. Lifecycle/permission/result events bypass that lossy buffer through a separate bounded priority channel; inability to service it pauses dispatch. No UI consumer may block provider pipe draining indefinitely.
-
-## 3. Adapter interface
+Persist attempt, then spawn explicit argv:
 
 ```text
-trait AgentAdapter:
-  preflight(profile) -> Capabilities
-  launch_or_resume(binding, owned_process) -> connection
-  send_input(input_id, formatted_payload) -> transport request identity
-  respond_host_request(request_id, typed_response)
-  interrupt(active_turn)
-  graceful_close()
-  decode_frame(bytes) -> list<ProviderEvent>
-
-ProviderEvent:
-  Initialized(host_id, reported_model, tool_inventory)
-  InputAccepted(input_id, evidence)
-  TurnStarted(input_id, host_turn_id)
-  TextBlockDelta / TextBlockComplete / ToolActivity
-  HostRequest / HostRequestResolved
-  TurnCompleted(input_id, host_turn_id, success|failed|interrupted, error)
-  ProviderError / Exited
+codex queue --remote unix://<resolved_socket> --thread <exact_id> --message <payload>
 ```
 
-Scheduler owns state transitions; adapters translate protocol only. `Capabilities` includes exact tested protocol baseline, per-input correlation, permissions, native input, cancellation, resume, and optional model metadata. Unknown optional notifications are ignored with sampled metadata diagnostics. Unknown server requests receive a method/unsupported error or a safe denial; they are never left waiting without UI explanation. Malformed required response is fatal to that connection.
+No shell. One command timeout20s; exit0 is queue acceptance only. CLI text receipt
+is optional diagnostics, not a stable parser dependency. A nonzero exit or timeout
+after spawn is uncertain unless the adapter can prove rejection before delivery.
+No retry by default. Marker in the original user message binds the actual turn.
 
-## 4. Claude Code wire contract
+While outstanding: poll full turn pages every250ms, back off to1s on transient
+read errors while showing reconnecting. Traverse newest-first until the saved
+pre-submit turn anchor, retaining cursor; cap work at1000 turns/poll and schedule
+remaining pages without starving the UI. No POC's100-turn production restriction.
+On missing anchor perform bounded multi-pass reconciliation; never interpret an
+incomplete search as 'not sent'. Match exact input marker and payload in
+`userMessage` content only; zero matches stays unresolved, multiple matches pause.
+Keep user-message `clientId` as evidence, not Ariadne ID (CLI chooses it).
 
-Evidence: installed CLI **2.1.287** help/version; Anthropic's published SDK **0.3.287** type declarations; official [CLI reference](https://code.claude.com/docs/en/cli-reference), [streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode), and [streaming output](https://code.claude.com/docs/en/agent-sdk/streaming-output). SDK types are protocol evidence, not a decision to ship that SDK. Raw CLI behavior must pass C01–C05 in VERIFICATION.
+Read matching turn status and timestamps and visible agent-message IDs/phases.
+Persist lifecycle; text is diagnostic only. Store checkpoint after core commits
+all durable effects in that batch. Restart can re-read/replay safely. Do not
+write notifications subscription state, claim approval requests, call thread/start,
+thread/resume, turn/start or queue/start. `thread/queue/add` is not production v1;
+its equivalence and caller-client-ID mapping were not proved.
 
-Planned argv (each displayed token/value is a separate argument):
+## 5. Session discovery and presence — included in v1
 
-```text
-claude -p
-  --input-format stream-json --output-format stream-json
-  --verbose --include-partial-messages --replay-user-messages
-  --permission-mode manual
-  --strict-mcp-config --mcp-config <generated-mcp-config>
-  --settings <generated-settings-overlay>
-  --permission-prompt-tool mcp__ariadne__permission_prompt
-  --append-system-prompt-file <canonical-managed-rules>
+Claude's Mod session.start/end and turn.start/complete are lifecycle sources.
+Traditional `SessionStart`, `UserPromptSubmit`, `Stop`, `StopFailure`, `SessionEnd`
+hooks may supply supplemental hints when explicitly installed by setup. They
+return success without blocking/injecting prompts. Deduplicate against Mod facts;
+Stop means a response ended, not that the process exited or input was handled.
+Official hook semantics: https://code.claude.com/docs/en/hooks .
+
+Use Mod heartbeat every30s, stale after90s. A heartbeat reports bridge presence,
+not activity. Ignore stale timestamps after app/machine wake until refreshed.
+Record actual observed turn state separately. Codex known-thread read-only state
+poll every30s while idle; active-delivery polling already supplies freshness.
+Discovery is included in the first version. Claude's installed Mod announces
+session ID, cwd and Mod version to the app's private control socket on session
+start and every 30 seconds, even before binding. This only advertises a candidate;
+it never claims work, submits a prompt or writes domain data. Failed announcements
+are ignored until the next timer; no inference is triggered. The app keeps these
+candidates in memory, expires their freshness after 90 seconds and offers Connect.
+A fresh announcement after app launch makes an already-open session discoverable.
+
+For Codex, enumerate the existing daemon's loaded-thread IDs and join read-only
+thread metadata to get cwd/title. Probe the pinned schema's thread/loaded/list
+and thread/read; paginate and refresh every 30 seconds while the connection UI is
+open. Loaded means available in the daemon, not proof of a visible terminal or
+active inference. Do not start a daemon or resume a thread for discovery. Manual
+ID entry remains available. If a provider capability is unsupported, display the
+specific limitation and discuss pruning with the owner if solving it becomes
+complex; do not silently remove discovery from the release. No transcript crawler.
+Never infer idle from an absence of events.
+PID+process-start identity may support connection evidence but not per-thread
+activity, especially for shared daemons. Lost heartbeat marks stale, not dead.
+
+## 6. Compatibility and permissions
+
+Release allowlist begins with the live-tested host versions above; ship exact
+fixtures and `doctor` checks. New versions require conformance fixtures plus live
+existing-session test before widening the allowlist; no automatic CLI downloads.
+At app startup and binding connect, resolve the configured executable to its
+canonical path, run its version command with a five-second timeout, and match
+the adapter compatibility manifest. Recheck after executable identity/mtime
+changes and after daemon reconnect. For Codex, require the initialized daemon's
+reported version to match the tested CLI/daemon pair; an unparseable or mismatched
+version disables dispatch with `unsupported_host_version`. History already in
+Ariadne remains readable and owner inputs may still be saved. Do not auto-upgrade,
+silently fall back to another endpoint or treat a newer semver as compatible.
+
+The [official Codex app-server documentation](https://learn.chatgpt.com/docs/app-server)
+describes experimental WebSocket transport and version-specific schema output.
+Our existing Unix-socket proof demonstrates the selected primitive, not upstream
+production support or future compatibility. Claude's Mod is similarly isolated
+behind a version gate. It is required because it actively invokes
+`$.prompt.submit()` in the existing conversation. Traditional lifecycle hooks
+can supplement observation; they do not provide that proven inbound mechanism.
+
+### Codex wire schema and code generation
+
+During M0, generate with the exact tested CLI, never a downloaded floating version:
+
+```sh
+rtk proxy codex --version
+rtk proxy codex app-server generate-json-schema --experimental --out contracts/providers/codex/0.160.0/schema
 ```
 
-For resumed runs add `--resume <recorded-host-id>`. A fresh run uses a fresh Ariadne binding and captures the provider's init ID. Do not assume init appears before the first input: allow the **initial prompt** to be sent while awaiting initialization; bind the returned ID before any later input or receipt is routed. The pre-created MCP binding uses Ariadne IDs and does not require the host ID. Initial crash before the ID is known is recovery_required, never automatic “new session” retry.
+This command generates files only; it does not start a daemon or model turn.
+Record executable version, command, schema file SHA-256 inventory and fixture
+provenance in a sibling `manifest.json`. Keep original generated files unchanged.
+The experimental flag includes the history methods this adapter consumes.
+The CLI's schema is separate from Ariadne's Rust-authored domain/adapter schemas.
 
-Set `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` in this child only. The generated Ariadne MCP server has `timeout:660000` milliseconds; its permission request expires locally after 600000 milliseconds. These settings prevent a pending approval from being automatically backgrounded at the host's default two-minute threshold. `MCP_TIMEOUT` is a separate connection/startup budget, not the permission deadline. The official [environment variable reference](https://code.claude.com/docs/en/env-vars) documents these controls; their combined raw-CLI behavior is still C03/C04 evidence to collect.
+Implement `cargo xtask gen-codex-wire --version 0.160.0` using pinned `typify`
+and `schemars` in the build tooling. Starting from the generated individual
+InitializeParams/Response and ThreadRead, ThreadQueueList and ThreadTurnsList
+Params/Response schemas, generate each root in its own Rust module (its local
+definitions remain scoped there). This avoids name collisions from independently
+generated roots. Include referenced definitions without hand-changing their
+types. Rustfmt output into `crates/ariadne-adapter-codex/src/generated/v0_160_0/`.
+Keep the small transport envelope and provider-to-Ariadne translation handwritten;
+all method payload/result fields come from generated types. No generated provider
+DTO appears in the public core or renderer contracts.
 
-Validate that init reports the sole configured Ariadne server connected and the required tools available. Missing integration stops the run and pauses the input; it is never a successful managed launch. Since the first prompt may precede init, do not claim that failure proves no execution occurred. C04 must establish the permission server's startup wait and failure path; preserve any uncertain first-turn evidence rather than silently resending it.
+Check generated files into source control. `cargo xtask gen-codex-wire --check`
+regenerates from vendored schemas into a temporary directory and fails on drift;
+ordinary builds use checked-in code and do not need Codex installed. M0 gates
+generator compilation; M3 fixtures gate decoding the live POC's full item views,
+queue and initialization, explicit nulls, unknown optional fields and required
+field failures. Unknown turn/item variants stop reconciliation with a compatibility
+error, never imply successful completion. A schema alone cannot verify endpoint
+semantics: extending the manifest still requires a live existing-session test.
 
-Input frame seed:
-
-```json
-{"type":"user","uuid":"11111111-1111-4111-8111-111111111111","message":{"role":"user","content":"<formatted owner input>"},"parent_tool_use_id":null}
-```
-
-Use a fresh attempt UUID and persist it before writing. Top-level owner input has null parent_tool_use_id. Do not fabricate a `session_id` in the first input. Preserve stdin between turns. Correlate only the one Ariadne input currently in flight.
-
-| Claude output | Adapter action |
-| --- | --- |
-| `system` / `init` | Capture session_id, validate reported cwd/MCP readiness/permission mode; accept repeated consistent init on later turns, reject changed session identity; launch `manual` was observed as reported `default` |
-| `user` replay with matching uuid / `isReplay` | InputAccepted evidence, no new owner Message |
-| `stream_event` text delta | Append block text, keyed by message/block identity; do not display thinking or tool JSON fragments |
-| `assistant` complete text block | Finalize/replace matching streamed block; do not append the same text twice |
-| Complete tool_use/tool_result metadata | Tool name/status summary; domain mutation is performed only by actual MCP call |
-| `result` success | Correlate user_message_uuid when present; complete active turn, even though process stays open |
-| `result` error subtype | Fail current turn and pause queue; keep result/usage as bounded diagnostics, not billing truth |
-| EOF/exit before result | Interrupted/uncertain active turn; preserve pending input |
-
-Published types expose user-message correlation on first response/result and possible multiple correlated inputs. Our scheduler never deliberately sends multiple inputs concurrently. If a result reports unexpected multiple inputs, stop dispatch and diagnose protocol/order violation rather than silently merging turns. Correlation assumptions are live-test gates. Explicit UUID reuse has no claimed server deduplication guarantee.
-
-### Claude permission tool
-
-Candidate compatibility schema: `{tool_name:string,input:object}`; allow result `{behavior:"allow",updatedInput:<exact original input>}`; deny result `{behavior:"deny",message:<reason>}` encoded in an MCP text content block as JSON. This shape is shown in Anthropic's [published CLI SDK permission example](https://docs.anthropic.com/fr/docs/claude-code/sdk); the current SDK [approval guide](https://code.claude.com/docs/en/agent-sdk/user-input) documents the related callback result shape. **Treat raw CLI compatibility as C03, not as already executed evidence.**
-
-The permission tool creates a local request UUID because this payload need not provide a host request ID. The pending MCP invocation is the return channel. It polls/watches that exact store record and sends its result only on the same invocation. Timeout/EOF expires the request; a replacement invocation receives a new request. The tool may return allow only after the matching owner decision and must not alter tool input. Auto-allow only Ariadne's enumerated domain tools and bridge entry; no wildcard Bash/Edit allowance. Existing host rules may decide operations before the bridge; Ariadne does not promise to display preauthorized requests.
-
-Stop sends SIGINT to the owned provider as the first cancellation step, then uses the common cleanup deadlines. The CLI's EOF behavior and child cleanup require executable proof. Do not use undocumented SDK control frames in the direct adapter. If C03 or cancellation cannot meet requirements, an SDK sidecar is a deliberate revised design with packaging/auth impact, not a silent fallback.
-
-## 5. Codex wire contract
-
-Evidence: installed **0.159.3** schema generated read-only with an isolated temporary CODEX_HOME; [official app-server documentation](https://learn.chatgpt.com/docs/app-server). Newline JSON-RPC-shaped frames omit `jsonrpc`. Provider process is `codex app-server --listen stdio://` with generated command-line configuration overrides. Use one app-server process for one Ariadne consumer.
-
-```json
-{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ariadne","title":"Ariadne","version":"0.1.0"},"capabilities":{"experimentalApi":true}}}
-```
-
-The pinned baseline opts into experimentalApi for native user-input handling; enable no unrelated experimental features. Verify this capability in N03. After response send `{"method":"initialized"}`. Then:
-
-```json
-{"id":2,"method":"thread/start","params":{"cwd":"<canonical-project>","approvalPolicy":"on-request","sandbox":"workspace-write","developerInstructions":"<canonical Ariadne rules>"}}
-```
-
-Use `thread/resume` with `threadId` and validated equivalent launch settings on Resume. Preserve normal host base instructions (`baseInstructions` unset). Managed policy can restrict the requested profile; do not retry by weakening it. Record returned `thread.id` before input. Native model/provider defaults stay inherited unless the owner chose a supported override.
-
-```json
-{"id":3,"method":"turn/start","params":{"threadId":"<recorded-thread>","clientUserMessageId":"<attempt-uuid>","input":[{"type":"text","text":"<formatted owner input>"}]}}
-```
-
-`turn/start` response supplies turn.id and establishes acceptance. Stream item/agentMessage/delta into text blocks. `turn/completed` with status `completed` advances FIFO; `failed`/`interrupted` pauses. Never equate request ID with turn ID. An `error` response contains no proof of side effects unless protocol evidence establishes pre-execution rejection; otherwise remain conservative.
-
-Input UUID field is present in the local schema; no deduplication guarantee was found. On uncertain recovery, `thread/read` with `includeTurns:true` may establish persisted user-item and turn evidence; match by supported IDs, not merely coincidental text. If no unique match exists, remain uncertain. Do not inspect rollout files privately.
-
-### Codex requests and responses
-
-| Server method | Response on same JSON-RPC request ID |
-| --- | --- |
-| `item/commandExecution/requestApproval` | `{decision:"accept"}` for Allow once, `decline` for Deny, `cancel` for cancellation |
-| `item/fileChange/requestApproval` | Same limited decision set; Ariadne intentionally does not offer session-wide grants or policy amendments |
-| `item/tool/requestUserInput` | `{answers:{"question-id":{answers:["selected label or owner text"]}}}` per generated schema |
-
-These objects go under `result`. The provider protocol supports more approval variants than Ariadne offers; intersect each request's availableDecisions with Allow once/Deny/Cancel and do not send a disallowed choice. If no safe supported choice exists, show the incompatibility and cancel safely. Preserve opaque IDs without casting. `serverRequest/resolved` may mean response, interruption or cleanup; it clears that request but does not imply allow. Native question support is experimental; test N03 and use Ariadne MCP for normal questions. Unsupported native requests fail explicitly.
-
-`turn/interrupt` uses the exact recorded threadId and active turnId. Close stdin/process only after allowing completion/cancellation events. Optional `account/read` with `refreshToken:false` returns sanitized auth readiness (`requiresOpenaiAuth` and account presence); discard identifying account fields. Ariadne never calls login with token payloads.
-
-## 6. Configuration and authentication boundaries
-
-Provider CLIs read their normal user authentication. Ariadne never reads credential files/keychain, collects keys, changes config homes silently or promises subscription billing. Launch profiles hold executable paths, model/permission choices and non-secret config references. Scan only configuration necessary to determine sources/overrides; redact known sensitive fields before diagnostics. Never print full inherited environment.
-
-Claude `--strict-mcp-config` fixes the MCP list for the managed run. Generated owned external hooks check `ARIADNE_MANAGED_RUN_ID` and return no answer injection when set. Other configured hooks require project trust and remain visible in the launch manifest; do not globally disable them or use bare/safe mode that would change required authentication/tool behavior. The marker cannot suppress unrelated hooks. A hook that independently fetches/injects Ariadne answers conflicts with managed FIFO: resolve that hook configuration before launch. Duplicate-free delivery assumes this reviewed hook inventory; it is not a guarantee against arbitrary hook programs. CLI flags and environment are tested against effective configuration in C04.
-
-Codex uses spawn-time `-c` overrides for the Ariadne stdio MCP definition and `enabled=false` overrides for other discovered MCP entries in the default profile. No guessed per-thread `config.mcp_servers` behavior is required. Config names are serialized with TOML-safe quoting into individual argv values; no shell interpolation. Whether merge/precedence honors this profile is N02. If policy/config cannot be represented safely, block launch and explain the conflict; never silently enable extra services or write global config.
-
-Provider auth/model errors pause the queue; they do not trigger a new account home or provider switch. Auth checks performed during real startup may contact the provider through its own process. After the initial planning work, the owner explicitly requested a live test: [two-turn Claude transport passed](../evidence/CLAUDE_STREAM_SMOKE.md) with existing CLI authentication and tools/MCP/hooks disabled. Full managed configuration/auth/permission compatibility remains C03/C04.
-
-## 7. Version gate
-
-Initially allow only versions that pass the recorded compatibility suite (starting candidates Claude 2.1.287, Codex 0.159.3). Exact-match allowlist is acceptable for local v1; broad minimum-version claims require testing. `doctor` reports selected executable, detected version, supported versions and corrective instruction. Do not auto-update/downgrade or download provider binaries. Store baseline schema/type evidence with checksums in implementation fixtures so a provider upgrade produces a reviewable diff.
+Both hosts keep their existing authentication, sandbox and approvals. Ariadne
+can show 'Check terminal' when the adapter observes approval waiting, but cannot
+approve or deny host work. Missing observation displays unknown, not a invented
+permission state. Optional future managed-launch/approval capabilities require
+separate contracts and proofs; they are not release-one tasks.

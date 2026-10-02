@@ -1,3 +1,6 @@
+> Historical research/evidence, not the current implementation contract. Use
+> [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md) and [BUILD_HANDOFF](BUILD_HANDOFF.md).
+
 # Platform research ledger
 
 **Checked:** 2026-10-01; managed runtime sources rechecked 2026-10-02. This records documentation evidence, not working integration tests. Links below point to official sources.
@@ -52,3 +55,31 @@ The chosen design is [AGENT_RUNTIME](AGENT_RUNTIME.md). Original hook/plugin fin
 - Exercise Codex user/project hook precedence, trust prompts, `/hooks` disable/re-enable, and context injection in the target local CLI build.
 - Exercise Claude Code persistent local plugin loading and update/reload behavior under the chosen user or repository scope; session-only `--plugin-dir` behavior is documented but does not prove persistent setup.
 - The organization-specific the review tool security guidance was not fetched for this evidence ledger; security guidance review is tracked by the main planning work.
+
+
+## Revision3 implementation source checks — 2 October 2026
+
+These primary references were fetched during the architecture audit. They support
+specific chosen mechanisms; none substitutes for compiling/testing the product.
+
+- [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) and
+  [official project template](https://v2.tauri.app/start/create-project/): use the
+  official React/TypeScript starter and the macOS toolchain.
+- [Tauri WebDriver](https://v2.tauri.app/develop/tests/webdriver/): choose
+  WebdriverIO's embedded Tauri service for packaged macOS tests; compile the test
+  plugin only into test builds. The browser route covers renderer fixtures.
+- [Tauri capabilities](https://v2.tauri.app/security/capabilities/): explicit
+  per-webview command permissions, with no remote origin or shell/file plugin.
+- [Tauri single-instance](https://v2.tauri.app/plugin/single-instance/): one
+  desktop host and queued launch routes.
+- [Claude hook reference](https://code.claude.com/docs/en/hooks): session-start/end
+  and turn/tool events are available; these provide observations, not guaranteed
+  crash notification or proof the model is currently running.
+- [tungstenite custom-stream handshake](https://docs.rs/tungstenite/latest/tungstenite/client/fn.client.html):
+  accepts a Read+Write stream, suitable for the selected UnixStream transport.
+- [fs2 FileExt](https://docs.rs/fs2/latest/fs2/trait.FileExt.html): chosen
+  cross-process advisory file locking; pair it with an intra-process keyed mutex.
+- [Official Rust MCP SDK](https://github.com/modelcontextprotocol/rust-sdk):
+  stdio tool facade using rmcp; expose only bounded domain tools, no HTTP/sampling.
+- [Apple notification delegate](https://developer.apple.com/documentation/usernotifications/unusernotificationcenterdelegate):
+  chosen native response routing API; packaged execution remains a release gate.

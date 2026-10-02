@@ -1,106 +1,128 @@
 # Verification and implementation evidence
 
-This is the acceptance ledger for the design. **C01's basic Claude two-turn transport passed a live test on 2 October 2026.** See the [recorded exchange and evidence](../evidence/CLAUDE_STREAM_SMOKE.md). Application tests and the remaining managed-provider/native proofs are pending. Schema inspection alone cannot establish running behavior or subscription billing.
+This ledger distinguishes transport evidence from product behavior. The
+existing-session transports have passed bounded live proofs: Claude Mods on
+Claude Code **2.1.287** and the native queue/history adapter on Codex **0.160.0**.
+Neither proof implements Ariadne's store, CLI/MCP, result join, UI, recovery, or
+release packaging. No application implementation has started.
 
-## 1. Evidence already obtained during planning
+Organization security guidance was not checked under the owner's explicit
+waiver. This ledger records project evidence only.
 
-| Evidence | What it establishes | What it does not establish |
-| --- | --- | --- |
-| BUILD_PROMPT, DESIGN_PROMPT, supplied ZIP/source/screenshots | Required domain/UI/install behavior and visual baseline | Working app |
-| Claude2.1.287 version/help + published SDK0.3.287 declarations | Candidate flags, input/output type shapes and correlation fields | Raw CLI permission bridge and persistent-session behavior on this machine |
-| Claude2.1.287 live two-turn subprocess smoke test | Same-process/same-session input, replay/result UUID correlation, streamed text, remembered context, clean EOF exit | MCP tree tools, permissions, durable queue, new-process resume, production configuration |
-| Codex0.159.3 locally generated JSON Schema in isolated temp home | Exact installed request/response field names | Effective configuration precedence, live approval behavior or idempotent input replay |
-| Official Tauri/macOS docs | Selected framework APIs and need for packaged native checks | Notification click routing in the built bundle |
-| Local Markdown/link/JSON example checks | Structural design consistency | Domain/protocol implementation correctness |
+## Evidence vocabulary
 
-The implementation must vendor the relevant redacted protocol fixtures/schema excerpts with provenance (CLI/package version, generation command, capture date, SHA-256). Do not depend on temporary planning paths such as `/tmp/ariadne-codex-schema-01593` surviving into implementation.
-
-## 2. Compatibility proofs that gate dependent implementation
-
-Each proof has a small scratch harness and a written record. Use owner-approved provider access only during implementation; a few harmless fixed prompts suffice. No uncontrolled retry loops, benchmarks or paid evaluation campaigns. A schema fixture does not count as a live proof.
-
-| ID | Exercise and observable pass criteria | If it fails |
-| --- | --- | --- |
-| C01 | **Passed, basic transport, Claude2.1.287:** send input UUID A, observe initialization/session ID, correlated replay/response and success result; keep stdin open; send B only afterward; same session accepts it. [Evidence](../evidence/CLAUDE_STREAM_SMOKE.md); tools/MCP/hooks disabled | Re-run in the integrated configuration during M0; a smoke pass does not cover C03/C04 |
-| C02 | Queue A/B/C outside host; prove three distinct ordered turns and no coalescing; answer an MCP question from UI only; finish independent work before input drain | Scheduler contract is mandatory; do not use host internal queue/coalescing or revert to next-terminal-message pickup |
-| C03 | Permission tool receives actual host payload; Allow once permits exactly requested harmless operation; Deny/timeout/Cancel/disconnect do not execute it; ordinary Ariadne tools do not recurse through permission prompts; pending approval remains blocking beyond two minutes with auto-background disabled and expires at the local ten-minute deadline | Correct current raw-CLI contract; if unsupported, evaluate SDK sidecar as a named architecture change with auth/packaging impact |
-| C04 | Strict managed MCP inventory, existing CLI login, settings overlay, generated rules, default permissions and managed-hook no-op work together; init confirms readiness; failed permission-server startup preserves honest first-input state; disallowed extra MCP remains inactive; conflicting answer-injection hooks block launch; settings digest changes require review | Block unsupported configuration; do not weaken policy, use bare mode blindly or collect credentials |
-| C05 | Stop, stdin EOF, parent app death, worker SIGKILL, child tools and resume: cleanup/evidence is accurate and same recorded session resumes without automatic duplicate input | Implement reliable owned cleanup; otherwise project remains recovery_required and cannot start another writer |
-| N01 | Codex initialize/initialized, thread/start/resume, turn/start accept, deltas, completed/interrupted, three ordered inputs | Fix adapter against pinned generated schema; no terminal scraping fallback |
-| N02 | Spawn-only MCP overrides and canonical rules load; only allowed server inventory; normal login/configured provider stays CLI-owned; `account/read` sanitized if used | Fix supported launch config or block conflicting profile; do not invent per-thread config behavior |
-| N03 | Command/file offered allow-once/deny/cancel; experimental native grouped response, duplicate/replayed multi-question request, preserved partial drafts, nonblocking resolution/expiry; exact opaque request IDs | Keep ordinary questions via domain MCP; unsupported native controls must fail clearly, never hang |
-| N04 | Crash around turn/start response; thread/read evidence distinguishes known consumed input from unresolved input; no assumed dedupe by clientUserMessageId | Keep uncertain UI and explicit resend choice; do not promise exactly-once work |
-| M01 | Packaged native notification permission/denial, foreground/hidden/cold-click route, changed/already-answered item | Fix single native delegate bridge; notification routing remains required |
-| M02 | Packaged single instance, CLI open path with spaces, tray task count/permission indicator, pin and monitor changes | Fix native routing/window lifecycle before polish |
-| M03 | Test-only WebdriverIO works and is absent from release | Use mocked React suite plus explicit packaged manual native checklist permitted by prompt |
-
-M0 can use minimal UI/fixture storage for these proofs. It is not a requirement to build the full domain store first. M1–M3 replace temporary harnesses with production services, preserving proof fixtures. Record pass/fail, exact CLI/build/OS versions, inputs, expected outputs, redacted observations and chosen resolution. A pending proof is not a passed milestone.
-
-## 3. Deterministic scenario matrix
-
-| ID | Scenario | Required assertions | Milestone |
-| --- | --- | --- | --- |
-| D01 | Atomic two-child batch (Open + Waiting) | One message/revision; IDs4.1/4.2; parent allocation/backlinks; invalid child rejects entire batch | M1/M2 |
-| D02 | Duplicate op/same vs different body | Same IDs/result for same digest; operation_reused for different body | M1 |
-| D03 | Concurrent writers, same/different items | No lost unrelated updates; same-item conflict explicit; counters unique | M1 |
-| D04 | Answer vs changed question/close/correction | Draft conflict only for changed question; no terminal close over newer unhandled answer | M1/M3 |
-| D05 | External terminal answer delivery | Non-destructive fetch/ack, no worker launch, manual-pickup label | M2/M7 |
-| D06 | Input P1/P2/A3 and fetch during P1 | Exactly FIFO turns; fetch cannot expose future A3; no auto-coalescing | M1/M3/M7 |
-| D07 | Receipt before result | UI says Received; next input waits for result | M3 |
-| D08 | Stop with queue and then new answer | All saved; no silent restart; explicit Resume preserves order | M3/M7 |
-| D09 | Native request while P2 queued | Response returns into current turn; P2 does not starve/replace request; expiry preserves owner text | M3/M7 |
-| D10 | Permission replay/stale epoch | Old allow never grants a new request; duplicate click idempotent | M1/M3/M7 |
-| D11 | Worker SIGKILL then free lease | Stale active-run evidence blocks duplicate writer until reconciled | M3 |
-| D12 | Unicode frame split/malformed JSON/oversize frame/escaped read size | Correct incremental parse; bounded memory; explicit protocol error; accepted answers fit full fetch and growing item collections paginate | M0/M1/M3/M7 |
-| D13 | UI cannot drain activity | Lifecycle/results persist; transient gap shown; no provider pipe deadlock | M3/M4 |
-| D14 | App watcher lost / reordered revisions | Reconcile recovers; no stale snapshot replacing new one; drafts/focus retained | M3 |
-| D15 | Full disk /19MiB threshold/20MiB hard cap mid-turn | No claimed successful save; control reserve or explicit store failure; queue pauses | M1/M3 |
-| D16 | Missing/duplicate/moved project root | Correct index identity handling; no home scan or silent root merge | M1/M4 |
-| D17 | Corrupt/future schema/migration interrupted | No overwrite/reset; backup/damaged bytes preserved; repair explicit | M1 |
-| D18 | Setup crash, repeat, foreign/edited files | Owned-only rollback/uninstall, idempotence, unrelated edits survive | M7 |
-| D19 | Draft edits while child/tool updates arrive | No focus/scroll/text loss; stale question requires review | M3/M4 |
-| D20 | Graph/tree/filter/reveal consistency | Same selected item, ancestors visible, global waiting unaffected | M4/M5 |
-| D21 | Notification bursts/reopen/already-answered click | Deduplicated episode alerts, no backlog replay, current detail opens | M6 |
-| D22 | Release offline / provider error | History/demo/save work; inference error pauses honestly; no app network/listener/telemetry | M8 |
-| D23 | Rejection retry vs possibly executed failure | Proven rejection retries same ID/seq with new attempt; failure blocks later inputs until explicit resolution; skip never fabricates success/ack; Resume alone cannot bypass failure | M1/M3/M7 |
-
-Inject store failures before temp write, after temp fsync, after backup rename, after live rename and before directory sync. Use actual separate processes for lock tests. Inject runtime failures before prepare, after prepare, after write, after acceptance, after MCP receipt and after result commit. Fake provider fixtures cover these cheaply; live providers cover semantics that fixtures cannot establish.
-
-## 4. Requirement ownership
-
-| Requirement | Design owner | Implementation evidence |
-| --- | --- | --- |
-| Versioned concurrent JSON/session, recovery | DOMAIN_AND_STORAGE §§2–6 | D01–D04, D15–D17 |
-| Cheap CLI + shared agent rules | API_AND_MCP §§1,3,5 | CLI subprocess suite and generated-rule parity |
-| Owner sends N messages | QUEUES_AND_RECOVERY §§2–4 | C02/N01/D06–D08 |
-| Agent expands tree with Open/Waiting children | API_AND_MCP §4 | D01 + live MCP tool call |
-| Automatic answer-to-agent path | PROCESS_AND_PROTOCOLS + QUEUES_AND_RECOVERY | C01–C05/N01–N04 |
-| Tree/waiting/detail/answer/timeline | UI_AND_NATIVE §§1–3,5–7 | D19/D20, supplied reference comparison |
-| Graph/search/filter/keyboard/themes | UI_AND_NATIVE §§3–4,7 | Component E2E and screenshot matrix |
-| Tray/notification/open/pin | UI_AND_NATIVE §8 | M01/M02/D21 |
-| Reversible project/global setup, both external integrations | SETUP_AND_DELIVERY §§3–5 | D05/D18 and real scratch-host scripts |
-| Canonical demo | Existing PRODUCT normalization + core operations | Fixture matches example hierarchy/status language; no provider launch |
-| One-command local install/uninstall | SETUP_AND_DELIVERY §6 | Clean checkout packaged install record |
-| Local data/no telemetry/no unwanted settings writes | SETUP_AND_DELIVERY §§1–5,7; UI_AND_NATIVE §9 | Release permission/bundle/settings/network observation |
-
-## 5. Milestone implementation outputs
-
-These supplement existing ROADMAP task IDs rather than create an unrelated second backlog.
-
-| Milestone | Concrete new artifacts required |
+| Label | Meaning |
 | --- | --- |
-| M0 | Workspace/toolchain lockfiles; platform-proofs ledger; tested provider schema/type snapshots; minimal protocol/native harnesses; version capability table |
-| M1 | Rust entities/command enums + generated schema/TS; transaction/OS lock layer; runtime/input/request state commands; deterministic demo and fault fixtures |
-| M2 | CLI parsing/help/errors; rmcp server/tool schemas; canonical rules + generated artifacts; two-child tool example tested through stdio |
-| M3 | Worker protocol + Claude adapter; FIFO scheduler; watcher/snapshot bridge; minimum tree/answer/composer/permission/recovery UI |
-| M4 | Complete selectors/components/drafts; native-question mapping; queue controls; accessible state gallery and reference screenshots |
-| M5 | Deterministic graph algorithm + performance measurements |
-| M6 | Native bridge/tray/routes/window settings + packaged checklist |
-| M7 | Codex adapter parity; setup planner/journal/rollback; optional external hooks; real-host acceptance evidence |
-| M8 | Locked build/install scripts/manifests; release checks; user README; local commits and final evidence report |
+| `specified` | Required behavior and pass condition are written in the authoritative design. |
+| `mocked` | Exercised against a deterministic fake host/store/UI. This does not prove a live adapter or packaged macOS behavior. |
+| `proved primitive` | A bounded live POC establishes only the named host transport behavior. |
+| `implemented pending` | Production code exists; required automated/live gate has not passed. |
+| `proved on <version>` | The named executable gate passed on that exact host/toolchain/OS version, with evidence recorded. |
+| `blocked: <reason>` | A concrete external prerequisite prevents that gate. State the missing tool, permission, or service and the affected test. This is not an architecture placeholder. |
 
-## 6. Completion language
+Never promote evidence from one label to another by inference. Record command,
+version, OS/architecture, fixture or harmless input, expected result, observed
+result, redacted evidence path, and any resolution. Do not put secrets or full
+private host transcripts in evidence files.
 
-Use **design specified** for decisions written here. Use **schema inspected** for protocol fields examined without running a session. Use **proved on version X** only after the corresponding executable proof passes. Use **implemented** only after production code exists and its gate passes. The final release still requires both Claude and Codex, packaged native behavior, supplied visual fidelity, repeatable tests and installation.
+## Existing evidence
 
-The planning deliverable is complete when every flow has a specified owner, input/output contract, persistence/ordering rule, error/recovery behavior and assigned proof. It is not a claim that all upstream capabilities have already been executed, and an implementation must not fill a failing integration gap by silently weakening the user interaction contract.
+| Subject | Evidence | Establishes | Does not establish |
+| --- | --- | --- | --- |
+| Claude Mods transport | [POC results](../../../poc/claude-mods/RESULTS.md), Claude Code 2.1.287 | Three external inputs reached an already-running interactive Claude session; busy ordering, retained context and lifecycle replies were observed | Production bridge, durable queue, Ariadne domain results, recovery, installation, or Claude versions outside 2.1.287 |
+| Codex native queue/history | [POC results](../../../poc/codex-queue/RESULTS.md), Codex 0.160.0 | Eight checks passed for idle/busy ordered delivery, retained context, and full reply retrieval without start/resume | Production adapter contract, durable Ariadne queue/results, crash recovery, direct queue API, or Codex versions outside 0.160.0 |
+| Basic Claude stream transport | [Recorded exchange](../evidence/CLAUDE_STREAM_SMOKE.md), Claude Code 2.1.287 | A separate same-process, two-turn transport smoke test | The primary Mods path or any product acceptance row |
+| Design and protocol documents | Current low-level specifications and adapter POCs | Specified contracts and observed protocol facts as labelled above | Implemented application behavior |
+
+Keep redacted protocol fixtures with provenance in the repository: source host
+version, capture/generation command, date, and SHA-256. Do not depend on an
+ephemeral planning directory. Use only the pinned Claude 2.1.287 and Codex
+0.160.0 as release-1 live baselines unless an implementation-time compatibility
+change is explicitly recorded in `DECISIONS.md` and retested.
+
+## Required acceptance matrix
+
+Rows below remain `specified` until implementation evidence is linked here.
+Rows marked **deferred** are explicitly outside this personal release and do
+not block acceptance. Row owners and implementation stages are in the
+[roadmap](../ROADMAP.md).
+
+| ID | Scenario | Required pass evidence | Stage |
+| --- | --- | --- | --- |
+| V01 | Schema, IDs, transitions and bounded content | Generated Rust/JSON Schema/TypeScript agree; valid fixture loads; invalid refs, cycles, illegal status transitions, oversize text and future schema are rejected without writes | M0–M1 |
+| V02 | Concurrent app and CLI/MCP writes | Separate processes write different items without lost updates; same stale item revision conflicts; counters and operation receipts remain unique | M1 |
+| V03 | Ordinary atomic storage behavior | Concurrent writers serialize through the stable lock; ordinary write/retry and stale-revision conflict behavior is correct; a replacement failure does not silently report success | M1 |
+| V04 | Project registry and binding | Register/locate known roots, reject duplicate project identity, rebuild the small index, and keep bindings explicit, versioned, generation-bound and isolated | M1–M2 |
+| V05 | Item conversation history | Owner message and full agent replies persist by target item with provenance, including a message to a closed item; private provider transcript is absent; cursor paging returns every stored entry | M1–M4 |
+| V06 | Idempotent domain batch | Two child additions, topic creation, explicit replies/status edits and `input_result` commit atomically; same op retry returns same refs; changed payload under same op ID fails | M2 |
+| V07 | Input result/completion join | Test result-before-completion and completion-before-result; both seal exactly once only after successful turn plus valid result; result missing pauses; failed/interrupted turn preserves explicit updates and pauses; terminal text never creates a duplicate item reply | M2–M3 |
+| V08 | Five-message FIFO per binding | Five owner inputs create five distinct host turns in order with no coalescing; each result joins its matching attempt; input 2 does not start until input 1 completes and publishes a result | M3, M7 |
+| V09 | Same-project parallel bindings | Two bound sessions in one project progress concurrently, each at most one in-flight input; no answer, result, event or reply crosses binding ID/generation | M1–M3, M7 |
+| V10 | Adapter event replay and day-to-day recovery | Duplicate events deduplicate; checkpoint advances only after durable effects; app quit/relaunch, ordinary host disconnect and malformed input retain queued/accepted state; no blind replay | M3, M7 |
+| V11 | App lifecycle with external host | App alive dispatches through private local socket; app quit starts no new dispatch and does not stop the already-running host; CLI/MCP can still read/write; relaunch reconciles before sending | M3, M7 |
+| V12 | Agent domain choices | On both first-party adapters, the agent explicitly chooses reply targets, statuses, topic/children and input result through the shared domain API; bridge lifecycle alone causes no item change | M2–M3, M7 |
+| V13 | Missing result recovery | Successful host turn without result visibly marks `result_missing`, pauses only its binding, preserves terminal output as bounded diagnostic, and offers audited inspect/repair/resend/skip; no automatic prose inference | M2–M4, M7 |
+| V14 | CLI/MCP contract and bootstrap | Text/JSON/error/exit contracts are stable; bootstrap registers and binds an existing host conversation without launching it; repeat is idempotent; stale, conflicting and unknown binding errors give corrective hints | M2 |
+| V15 | Full mockup and owner actions | Screens cover required mockup inventory; five rounds, multi-item replies, closed-item messages, answer/revise and reopen/drop request intents, drafts, filters, Later preference, rail, themes, accessibility, keyboard and live updates pass; capture reference comparisons. Reopen/drop enqueue intents and never directly change agent-controlled item status. | M4 |
+| V16 | Graph and guarded session actions | Graph/tree selection agree; archive rejects active topic items or unresolved topic inputs; session close rejects active items, unresolved inputs, or enabled dispatch bindings; history remains readable; topic continue previews then atomically copies provenance and queues one handoff to an existing bound session, leaving source unchanged | M5 |
+| V17 | Claude first-party adapter | Live scratch session on Claude Code 2.1.287 completes five ordered inputs with explicit domain results/replies, busy queuing, app disconnect/reconcile, missing-result handling and binding isolation | M3, M7 |
+| V18 | Codex first-party adapter | Live scratch session on Codex 0.160.0 completes the same five-input/result/recovery/isolation path through native queue CLI and read-only history | M3, M7 |
+| V19 | Third executable adapter (**deferred**) | Public plugin registration and a third executable adapter are outside this personal release; keep the internal adapter seam provider-neutral and document how a future adapter fits | Deferred |
+| V20 | Known-metadata discovery and liveness | Implement bounded read-only discovery/liveness from known host metadata where available; report unsupported metadata as a limitation; manual binding works; PID alone never proves a conversation is live | M3, M7 |
+| V21 | Native macOS app | Packaged notification permission/denial, foreground/hidden/cold click route, tray count/list, single-instance open, path with spaces, pin, quit/wake and monitor changes pass on recorded OS | M6 |
+| V22 | Simple setup, install and uninstall | Setup repeat is a no-op; packaged local install succeeds; uninstall removes only owned artifacts and preserves unrelated config and project history | M6, M8 |
+| V23 | Offline and release boundary | History/demo/message browsing and owner edits work offline; no host transcript, provider credential, telemetry, updater, remote assets or Ariadne TCP/HTTP listener ships (private Unix IPC is required) | M8 |
+| V24 | Full release journey | Clean checkout installs on the recorded Mac; acceptance flow works for Claude and Codex; every non-deferred row has evidence or a concrete external blocker; README instructions match packaged app | M8 |
+| V25 | Waiting episode and counts | An unanswered waiting episode contributes once to Waiting; after answer it appears in Sent and not Waiting while status remains waiting; a new agent ask increments the episode and returns it to Waiting; corrections and unrelated replies do not corrupt counts | M1, M4 |
+| V26 | Provider compatibility and generated wire DTOs | Vendored exact-version schema hashes and regenerated Rust have no drift; recorded payloads decode; unknown variants, CLI/daemon version mismatch and replaced binaries disable dispatch without losing saved inputs | M0, M3 |
+| V27 | SVG viewport culling | On a 2,000-node fixture, off-screen elements are culled, crossing edges remain visible, focus/selection survive pan/zoom and Fit uses full layout bounds; graph/tree counts and selection agree | M5 |
+| V28 | Thin entry points | Desktop, CLI and standalone MCP share core/store; standalone MCP and CLI alias expose identical tools and outcomes; diagnostics stay off MCP stdout; simple install provides all entry points | M2, M6 |
+| V29 | Per-commit quality gate | Every code commit passes all maintained-code lint and test checks, including functional and E2E checks, and at least 80% overall coverage. Coverage is N/A only while there is no production app code; once code exists, absent coverage tooling/results fail closed. Live/billable host runs are reserved for M7. | Every code milestone |
+
+## Cross-cutting failure fixtures
+
+Implement focused deterministic fixtures for ordinary user-visible failure
+paths:
+
+- partial UTF-8/JSON frame boundaries, malformed or over-limit messages,
+  unknown protocol version, duplicate event ID with same/different body, and
+  out-of-order sequence;
+- host accepted input but no completion, completion with no result, result
+  before completion, completion before result, and exact operation retry after
+  a lost response;
+- ordinary validation/size-limit failures and a stale revision conflict;
+- two in-process and two separate-process writers, same-item conflict,
+  cross-binding recipient/result attack, stale binding generation and host ID
+  reuse;
+- answered waiting item versus a new waiting episode; item still waiting does
+  not remain counted in Waiting while its current episode has an answer;
+- session close with active item, unresolved input, enabled binding, and valid
+  all-terminal/paused state; only the last case closes;
+- quit/relaunch with queued inputs, live external host, known-metadata
+  discovery unavailable, manual binding fallback, and no adapter PID evidence.
+
+Do not add exhaustive machine-crash, full-disk, arbitrary-corruption,
+transaction-boundary kill, or lost-data recovery matrices to this release.
+
+The fixture must assert persistent state and public UI/API result, not only
+adapter logs. Real host tests cover only semantics that fakes cannot establish.
+Use disposable projects and test configuration; never use the owner's active
+agent settings or project history.
+
+## Milestone artifacts
+
+| Stage | Evidence to save |
+| --- | --- |
+| M0 | Platform/toolchain ledger, lockfiles, mockup/asset manifest, schema/protocol fixture provenance, clean scaffold build |
+| M1 | Generated schema and type parity, canonical session fixture, ordinary store/race logs, registry/binding fixtures |
+| M2 | CLI help/error examples, machine-readable envelopes, MCP stdio traces, reply/result schema and retry fixtures, bootstrap transcript |
+| M3 | Adapter compatibility table, Claude/Codex event fixtures, fake-adapter tests, five-input queue/join/recovery logs |
+| M4–M5 | Mockup reference captures, UI/domain acceptance results, graph and archive/continue fixtures |
+| M6 | Packaged native checklist, simple install/uninstall manifest and unrelated-setting preservation evidence |
+| M7 | Redacted live Claude/Codex acceptance evidence, discovery/liveness behavior or limitations, day-to-day recovery and isolation results |
+| M8 | Final platform ledger, clean install record, suite seeds/logs, README review, local source revision and artifact paths |
+
+The implementation is complete only when every non-deferred row is `proved on
+<version>` (or has a concrete documented environment blocker), not merely
+`specified`, `mocked`, or `proved primitive`. Deferred rows do not block this
+personal release.

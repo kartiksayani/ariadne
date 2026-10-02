@@ -1,100 +1,224 @@
-# Domain model and storage algorithms
+# Domain model and storage — schema v1
 
-This document fixes schema semantics before Rust/TypeScript/schema generation. Field names are snake_case on Ariadne interfaces. Provider wire formats keep their own names inside adapters.
+Revision 3. This replaces the earlier consumer/run/host-request model before any
+production schema has shipped. Prototype SQLite and host transcripts are not
+migration inputs. Rust serde types are canonical; generate JSON Schema and
+TypeScript types from them in M0/M1, checked into `contracts/generated/`.
+
+## Storage format decision
+
+Keep the build prompt's one-JSON-file-per-session requirement. All app, CLI and
+MCP writes use `ariadne-store`; no transport writes JSON directly. The stable
+cross-process lock and atomic commit protocol in section 4 are mandatory, with
+ordinary concurrent-writer and save/read checks before integrations depend on the store.
+Exotic-failure recovery is deferred by [PERSONAL_RELEASE](../PERSONAL_RELEASE.md).
+Human readability does not make manual edits during a running writer safe.
+
+JSONL is not the canonical store: a single operation may change replies, tree
+structure, statuses, queue attempts and idempotency receipts together. An append
+log would require transaction records, serialization, torn-tail detection,
+replay, snapshots and compaction; simple append does not solve those problems.
+Do not add a parallel authoritative log that can diverge from the snapshot.
+
+SQLite is the preferred alternative if the file-format requirement is later
+relaxed or measured write latency/capacity fails the stated targets. It would
+replace storage behind the core command/query boundary, with a separately
+specified and tested migration; JSON export could retain human-readable sharing.
+It is not silently introduced by this plan. SQLite WAL permits readers alongside
+a writer but still serializes writers ([SQLite WAL documentation](https://sqlite.org/wal.html)).
 
 ## 1. Primitive conventions
 
-- UUID v4 lower-case strings: project/session/consumer/run/input/answer/operation/request IDs. Host IDs are opaque strings, never filesystem names. Host request IDs may be string or integer; preserve their JSON type and namespace by run/connection epoch.
-- Persist sequence numbers/revisions as unsigned integers capped at `2^53-1` so TypeScript represents them exactly. Checked increment fails on exhaustion. Sequences start at 1. UI time is never an ordering source.
-- RFC3339 UTC timestamps assigned by core clock; persisted precision milliseconds. Timeouts use monotonic clocks while a process lives; expiry after restart cancels requests instead of extending them accidentally.
-- Empty collections are present; optional scalars use null. Unknown fields in application commands fail validation. Unsupported snapshot schema versions are read errors; no best-effort writeback.
-- Text is preserved as UTF-8, apart from rejecting NUL/invalid encoding and treating whitespace-only required content as empty. Never normalize an owner's text or interpolate it into shell commands. Sizes mean UTF-8 bytes.
-- Named IDs such as `4.2` are item references, not paths. Root number is unique across the entire session, even across topics. Roots and each parent's child suffixes increase monotonically; numeric segment ordering, never lexicographic ordering.
+UUID v4 lowercase strings for project/session/topic/binding/input/attempt/message/
+round/operation IDs; host IDs and adapter IDs are opaque bounded strings. Item
+references `1`, `1.2` are session-local display IDs, never paths. Parent is an
+explicit field: never infer ancestry by parsing an ID. Root/suffix counters never
+reuse numbers. Sort siblings by assigned numeric ordinal, not string comparison.
+All counters/revisions are integers in 1..2^53-1 with checked increments. Timestamp
+is RFC3339 UTC milliseconds assigned by core; ordering uses sequences/revisions.
+Optional scalar fields serialize as null; collections are present. Reject unknown
+command fields, duplicate map keys, invalid UTF-8/NUL and whitespace-only required
+text. Preserve actual text, including newlines; no normalization of stored prose.
 
-## 2. Persistent session shape
+## 2. Files and entity inventory
 
-One `<project>/.ariadne/sessions/<session_uuid>.json` contains the fields below. Maps keyed by ID avoid ambiguous duplicate entries; serialize in deterministic key order. Ordered views use explicit numeric order/sequence, not JSON map order.
+```text
+<project>/.ariadne/
+  project.json                   # schema_version, id, display_name
+  sessions/<session_uuid>.json    # canonical domain + delivery snapshot
+  locks/<session_uuid>.lock       # never renamed/deleted
+  backups/<session>.previous.json
+  backups/<session>.v<old>.<uuid>.json
+~/.ariadne/
+  projects.json                  # registered canonical roots + IDs
+  bindings.json                  # host identity → session/binding index, repairable
+  adapters/                      # explicit trusted executable registrations
+  ui.json                        # preferences, drafts, tabs, local Later flags
+  run/                           # private control socket, leases, presence
+```
 
-| Field | Shape and ownership |
-| --- | --- |
-| `schema_version`, `id`, `project_id` | `1`, UUID, UUID; immutable |
-| `title`, `created_at`, `updated_at`, `revision` | Human title (256 bytes), timestamps, transaction revision |
-| `counters` | `next_root`, `next_topic_order`, `next_message`, `next_answer`; allocated only in core |
-| `topics` | ID → `{id,name,order,created_at}`; name ≤256 bytes |
-| `items` | Hierarchical ID → Item below |
-| `messages` | Array ordered by `number`; Message below |
-| `answers` | Array ordered by `seq`; Answer below |
-| `consumers` | UUID → Consumer below |
-| `runs` | UUID → Run below; old run metadata retained |
-| `outbox` | UUID → Input below; input sequence scoped to consumer |
-| `host_requests` | Local UUID → HostRequest below |
-| `operation_receipts` | `(actor_scope,op_id)` → `{input_sha256,result,committed_revision,created_at}` |
+Session: `{schema_version:1,id,project_id,title,state,created_at,updated_at,
+revision,closed_at,counters,active_binding_id,topics,items,messages,rounds,
+answers,bindings,inputs,operation_receipts,continuations}`.
+`state=active|closed`. Counters: `next_root,next_topic_order,next_message,
+next_input,next_answer`. Collections except messages/answers are ID-keyed maps;
+messages and answers are ordered arrays. Binding, not provider name, routes work.
+An active session has at most one dispatch-enabled binding. Historical bindings
+remain for provenance; multiple sessions in one project may run concurrently.
 
-### Item
+### Topic and item
 
-`id`, `topic_id`, `parent`, `question`, `type`, `status`, `owner`, `revision`, `question_revision`, `next_child`, `created_at`, `updated_at`, `created_in_message`, `updated_in_messages`, `links`, `options`, `status_history`, `outcome`, `why`, `replaced_by`, `waiting_since`, `recipient_consumer_id`, `last_answer_seq`.
+Topic: `{id,name,order,revision,created_at,archived_at,origin}`. `origin` is null or
+`{project_id,session_id,topic_id,source_revision,continued_at}` for a snapshot copy.
 
-`owner` is `{kind:"me"}`, `{kind:"agent",consumer_id}`, or `{kind:"other",name}`. Types and statuses stay exactly those in PRODUCT. `question_revision` changes only when question/options/recipient or answerability changes, not when delivery receipts or unrelated children change. Item `revision` changes for every item mutation. A waiting re-entry increments question revision even if wording matches an earlier question. This prevents accepting an old draft in a new waiting episode.
+Item: `{id,ordinal,topic_id,parent,question,type,status,owner,revision,
+question_revision,next_child,ask,note,options,links,outcome,why,replaced_by,
+created_at,updated_at,created_message_id,updated_message_ids,status_history,
+waiting_since,recipient_binding_id,current_round_id,origin}`.
+`type=question|decision|finding|task|explanation`;
+`status=open|waiting_on_me|in_progress|decided|done|dropped|replaced`.
+`owner={kind:me}|{kind:agent,binding_id}|{kind:other,name}`.
+`ask` is the agent's current concrete request (nullable); `note` is a progress
+sentence, not the reply thread. Links: `{kind:pr|file|doc,label,target}`.
+Options: `{id,label,consequence,recommended}`; no scripts or response templates.
+At most one recommendation; choosing it is still an explicit owner action.
 
-Options are `{id,label,consequence,recommended}` with item-local stable string IDs. Replacing an option set preserves previous options in answer snapshots/history. Links are `{kind,label,target}` and are display/copy-only. Terminal state fields are nullable on active items and mandatory on terminal items. `status_history` holds `{from,to,at,message_number,previous_outcome,previous_why,previous_replaced_by}`; changes are append-only. `waiting_since` exists only during the current waiting episode.
+Terminal statuses require nonempty outcome + why. Replaced requires a different
+existing item in the same session and acyclic replacement links; parent/topic
+and IDs are immutable. Parents may be terminal with active children. No implicit
+cascade. Reopening decided/done/dropped requires reason; preserve previous
+status/outcome/why in append-only history before clearing terminal fields.
+Replaced items accept follow-up messages but cannot be reopened in place.
 
-### Message and answer
+`question_revision` increments when question, ask, options, recipient or the
+waiting episode changes. Ordinary replies/notes/children change item revision,
+not question revision. `waiting_since` is the UTC timestamp of the current
+waiting episode, null outside waiting; its identity is item_id + question_revision.
+The ask round/opening message supplies asked-in-message provenance. History entries include old/new status, previous terminal
+fields, cause message ID, time, acting binding, and handled owner-message number.
+Only the agent's validated domain operation changes an item status. Owner input
+save, transport acknowledgement and host completion never do so.
 
-Message: `{number,author,consumer_id,run_id,host_turn_id,source_input_id,timestamp,excerpt,items_touched}`. All IDs except number/author/time/excerpt/items are nullable where inapplicable. Author is `me|agent`; permission audit records do not masquerade as conversation messages. One agent `apply` creates one message; retries create none. `items_touched` is a deduplicated set rendered in numeric ID order.
+### Full messages, answers and rounds
 
-Answer: `{id,seq,item_id,question_revision,question_snapshot,options_snapshot,selected_option_id,text,recipient_consumer_id,created_at,message_number,supersedes_answer_id,input_id}`. At least one of selected option/nonempty text. Both may coexist. The answer references its owner's submission input. An answer never changes after creation; a correction is another answer with its own input and sequence. Corrections are allowed while the item is active and target the latest answer in that correction chain. Terminal items require explicit agent reopening first.
+Message: `{id,number,author,kind,body,created_at,item_id,topic_id,items_touched,
+binding_id,input_id,attempt_id,host_turn_id,round_id,origin}`.
+`author=owner|agent|system`; `kind=owner_input|reply|activity|lifecycle`.
+`body` is the complete submitted text, not an excerpt. Excerpts for rail/search
+are derived views. A reply has exactly one `item_id`; `topic_id` is derived.
+Activity summaries may touch several items but are not copied into every item's
+conversation. System lifecycle records describe close/archive/recovery, not agent
+speech. Message bodies are append-only; corrections create new messages.
+`items_touched` and item backlinks are core-derived from operations, deduplicated.
 
-### Consumer and run
+Answer: `{id,seq,item_id,question_revision,question_snapshot,ask_snapshot,
+options_snapshot,selected_option_id,text,message_id,input_id,
+supersedes_answer_id,created_at}`. At least one valid option/nonempty text.
+Selected option and explanation are preserved together. Correction appends a
+new answer linked to a prior answer; it never edits an accepted payload. If the
+question changed, offer a generic follow-up instead of mislabelling it an answer.
 
-Consumer: `{id,agent,mode,label,created_at,last_seen_at,host_conversation_id,next_input_seq,active_run_id,active_input_id,dispatch_state,issued_answer_ids,acknowledged_answer_ids}`. `agent=claude|codex`; `mode=managed|external`; `dispatch_state=enabled|paused|recovery_required`. Host conversation ID may be null only before initialization. A consumer's agent/mode never changes in-place. Sets are arrays in JSON with uniqueness validation. Receipt timestamps/evidence can be stored in keyed companion `answer_receipts` within the consumer.
+Round: `{id,item_id,ordinal,opened_message_id,ask_snapshot,question_revision,
+owner_message_ids,agent_message_ids,result_input_ids,fork_item_ids,closed_at}`.
+Agent `item.ask` starts a new round and freezes question/options/ask snapshots.
+A generic owner message uses the current round, or creates one with the current
+question when none is open. Agent replies reference the current/explicit valid
+round. A completed input result can close a round only explicitly; an answered
+input need not end ongoing discussion. A new ask starts a new round after closing
+the earlier round with history intact. New child operations can carry
+`source_round_id`; core validates the round belongs to their parent and records
+the fork both ways. This renders the mockup's ask → owner response → result →
+branches cards without guessing from chronology. Unrelated messages stay in the
+ordinary timeline. Imported round/message IDs are remapped on topic continuation.
 
-Run: `{id,consumer_id,worker_instance_id,connection_epoch,executable_path,executable_version,launch_profile_id,launch_profile_digest,host_conversation_id,state,started_at,ended_at,terminal_reason,process_identity,active_host_turn_id,cleanup_confirmed}`. `process_identity` contains pid, process start-time identity, process group and executable identity for diagnostics/reconciliation; a pid alone never authorizes a signal. No credentials or inherited environment dump.
+### Binding and presence
 
-Live states: starting/idle/running/awaiting_permission/stopping/stopped/failed/recovery_required. An outstanding native question is represented by a `host_request`; it pauses ordinary dispatch while the run remains running. On restart persisted liveness is historical, pending reconciliation. Connection epoch is fresh per provider connection; old responses cannot cross epochs.
+Binding: `{id,adapter_id,adapter_version,protocol_major,config_version,
+external_session_id,endpoint,endpoint_fingerprint,generation,created_at,
+dispatch_state,owner_paused,pause_reason,connection_state,capabilities,active_input_id,issued_through_message_number,adapter_config}`.
+`dispatch_state=enabled|paused|recovery_required|disconnected`.
+`owner_paused` persists independently of automatic pause_reason; no result or
+reconnect can clear it. Dispatch state is recomputed with disconnected/recovery
+barriers first, then owner pause, then enabled. Explicit Resume clears the owner
+flag only after blockers are resolved.
+`endpoint` is a validated local connection reference, not credentials.
+`adapter_config` is namespaced JSON validated against the adapter's configuration
+schema and contains no credentials/tokens/environment dumps. Session host identity is `(adapter_id,endpoint_fingerprint,external_id)`;
+one live binding per identity across registered roots. Generation is a fresh UUIDv4 on a
+validated reconnect; prior attempts retain their originating generation.
 
-### Input/outbox
+High-frequency presence is ephemeral in `run/presence/<binding>.json` with
+`instance_id,generation,connection_state,execution_state,last_seen_at,source,
+process_identity?`. Do not rewrite the whole session for every heartbeat. On app
+restart it is historical until revalidated. Session stores only meaningful
+connection/dispatch transitions. Detailed presence algorithm: process spec.
 
-Input: `{id,consumer_id,input_seq,kind,route,prompt,answer_ids,related_item_ids,host_request_id,request_run_id,created_at,message_number,dispatch_status,turn_status,attempts,host_turn_id,completed_at,cancellation_reason,resolutions}`.
+### Input, attempt and result
 
-- `kind=prompt|answers`; prompt payload or answer IDs, never conflicting payloads.
-- `route=turn|host_response|external_fetch`. Ordinary owner messages and Ariadne answers use turn; native host input uses host_response; terminal integrations use external_fetch.
-- `dispatch_status=queued|sending|accepted|uncertain|failed|cancelled|acknowledged`. `acknowledged` applies only after all included answers have receipts. It does **not** mean the host turn finished.
-- `turn_status=not_started|running|completed|failed|interrupted|uncertain|not_applicable`. Only successful completion permits automatic next ordinary input. Native responses/external fetch have not_applicable.
-- Attempt: `{id,run_id,connection_epoch,prepared_at,wire_input_id,payload_sha256,answer_ids,accepted_at,acceptance_evidence,error}`. Do not store another copy of text. Every retry attempt is recorded; owner-approved resend retains the same logical input/answer IDs.
-- Resolution: `{operation_id,kind,at,reason,previous_dispatch_status,previous_turn_status,attempt_id}`; append-only, `kind=retry_unexecuted|resend|do_not_resend`. These owner decisions never create an agent acknowledgment or turn success. A do_not_resend resolution removes that input's FIFO barrier while retaining its actual failure/uncertainty. A later resend reopens it explicitly and is forbidden after a subsequent input has begun.
+Input: `{id,seq,binding_id,kind,target,message_id,answer_id,created_at,
+expected_question_revision,payload,reservation_bytes,state,attempts,
+active_attempt_id,resolution_history}`.
+`kind=answer|bring|reply|note|followup|reopen|drop|continue`;
+`target={topic_id,item_id?}`; topic-only is allowed only for continue.
+`payload` is immutable owner text + optional option snapshot/intent + context
+references. Do not treat the user's text as permission to run arbitrary tools.
+`state=queued|in_flight|handled|cancelled|needs_attention|skipped`.
 
-### HostRequest
+Attempt: `{id,purpose,repair_for_attempt_id,claim_request_id,binding_generation,prepared_at,formatted_payload,payload_sha256,wire_marker,
+acceptance,host_turn_id,turn_state,turn_observed_at,domain_result,
+result_state,sealed_at,error,reconciliation_checkpoint}`.
+`purpose=work|result_repair`; repair_for_attempt_id is null for work, otherwise
+references an earlier completed attempt of the same input. The new attempt keeps
+its own host turn and result. Its formatted_payload is persisted independently of
+the immutable original Input.payload: a repair payload includes original attempt
+ID, committed effects and repair-only instruction. payload_sha256 covers exactly
+that submitted payload. Normal attempts render the original input plus context. A repair may reference verified original-attempt
+replies/children without repeating their mutations. claim_request_id persists
+the mapping (binding,generation,request_id) → exact attempt/payload receipt.
+`acceptance=prepared|accepted|rejected|uncertain`;
+`turn_state=unknown|running|completed|failed|interrupted`;
+`result_state=pending|committed|missing`.
+Receipt metadata includes provider reference and observed time where available.
+`domain_result` is null or `{operation_id,outcome,explanation,reply_message_ids,
+followup_item_ids,handled_through_message_number,committed_revision,committed_at}`;
+`outcome=answered|deferred|unable`. It belongs to one input+attempt, and becomes
+immutable after first commit. Exact operation replay returns its receipt.
 
-`{id,consumer_id,run_id,connection_epoch,provider_request_id,provider_request_kind,kind,questions,display_payload,payload_sha256,created_at,expires_at,revision,state,response,responded_at,return_evidence}`. Native `questions` is an ordered array of `{provider_question_id,header,prompt,options,allow_free_text,item_id,answer_id}`; it is empty for permissions. IDs are unique within a request, max8 questions. Preserve provider choice labels and question IDs exactly. `answer_id` starts null and is assigned on grouped owner submission. This maps each source question to one item and makes duplicate notifications idempotent without text matching.
+Core seals when turn=completed AND result=committed. Until then it can accept the
+late domain result for that same still-open attempt; a wall-clock timeout alone
+cannot seal. Host failures retain committed domain work. Resolutions are
+append-only `{op_id,kind,reason,at,attempt_id}` with
+`kind=retry_unexecuted|resend|skip|request_result_repair|confirm_evidence`.
+Recovery rules, including repair without redoing business work, are in queues.
+No `received` bool or answer-fetch cursor controls dispatch.
 
-`kind=permission|user_input`; `state=pending|decided|returned|expired`. Permission response is `{decision:allow_once|deny}`; Cancel maps to deny/cancel plus Stop only when the owner chooses Stop. Native user input uses a distinct typed answer map. The request display payload and response are bounded; no arbitrary raw protocol object is persisted. A returned response records transport evidence, not proof that the tool succeeded.
+## 3. Domain invariants and transitions
 
-For native multi-question input, v1 UI requires an answer to every displayed question before a single Submit answers action. This is Ariadne policy, not an invented provider `required` field. Drafts persist in UI preferences; no partial answer is sent. `user_input.respond` validates request/epoch plus all item question revisions, then atomically creates all Answer records, one owner Message, one `host_response` Input containing all answer IDs, and the complete HostRequest response map; sets question items in_progress and request decided. Duplicate operation returns the same group. Native question items reject ordinary `answer.submit` and route the UI to this grouped form.
-
-## 3. Mutations and conflicts
-
-| Command | Preconditions and atomic effects |
-| --- | --- |
-| `topic.add` | Unique operation; allocate UUID + order |
-| `item.add` | Topic/parent exist and agree; allocate root/child suffix; validate type/status/options/recipient; add creation message backlink |
-| `item.update` | Expected item revision; patch only question/type/owner/options/links through allowed transitions; cannot change id/topic/parent |
-| `item.wait` | Active item, prompt/options/recipient valid; set me/waiting_on_me and new question revision/episode |
-| `item.close/drop` | Expected revision, terminal outcome + why, no unhandled answer; append history |
-| `item.replace` | Target exists or batch local ref, same session, not self/cycle; preserve old meaning, record replacement |
-| `item.reopen` | Terminal decided/done/dropped; nonempty reason, history snapshot, clear current terminal fields; replaced cannot reopen |
-| `answer.submit` | Waiting item + expected question revision; validate chosen option; create answer/message/input and transfer item to in_progress with designated agent owner |
-| `answer.correct` | Active item, latest answer + expected question revision; append correction/message/input; never silently overwrite |
-| `answer.ack` | Bound consumer, eligible fully issued IDs; idempotent receipts; advance related outbox receipt state without implying turn completion |
-| `permission.respond` | Owner actor, exact run/epoch/request revision, pending + unexpired; commit decision only |
-| `input.cancel` | Owner actor, queued/not_started prompt only; terminal tombstone remains; answer correction uses answer.correct instead; already sending requires Stop/recovery |
-| `input.retry` | Owner actor, exact failed input/attempt/revision, authoritative pre-execution rejection, no active turn or unresolved process; append retry_unexecuted resolution, reset delivery to queued and turn to not_started, retain IDs/seq/content/old attempts; dispatch remains paused |
-| `delivery.resolve` | Owner actor, unresolved uncertain/failed/interrupted input, no active turn or unresolved process; explicit resend or do_not_resend plus reason. Resend resets queued/not_started while retaining attempts and IDs; do_not_resend preserves factual states but releases its FIFO barrier. Both retain paused dispatch |
-
-All transitions from CONTRACTS apply. A parent may close while descendants remain active; UI derives active-descendant counts. An agent cannot close an item over a newer answer: `handled_through_answer_seq` must equal its latest answer sequence and the consumer must have acknowledged it. A generic update cannot bypass close/replace/answer invariants.
-
-MCP `apply` is one message and at most 100 operations/256 KiB. Resolve local refs in deterministic topological order, ties in submitted order; reject cycles/unknown refs. Validate the *final* candidate state before allocating committed counters. A validation failure commits nothing, including no message/counter increments. Dry-run allocation is local to the candidate snapshot.
-
-Expected-revision map covers each existing item touched. An unrelated item change does not reject the batch. Explicit omission is allowed only for new items and read commands; agent updates must supply revisions. Answer submission uses the narrower question revision so a child addition does not invalidate the owner's draft.
+- Topic and parent exist, agree, and are in this session; allocated hierarchical
+  references and parent links agree. No parent cycles, orphans or duplicate IDs.
+- Agent mutations require a registered non-disconnected binding and current
+  generation. Source input/attempt must match that binding; closed attempts allow
+  exact replay only. Terminal-originated updates have null input/attempt, but
+  still require a binding. Cwd or 'most recent session' is never a routing rule.
+- Agent operations with an Ariadne input must acknowledge that input's owner
+  message number. Closing/replacing an item cannot skip a newer unhandled owner
+  message targeting it. Return `unhandled_owner_message` with IDs; agent can reply
+  now but must handle the newer message before terminalizing the item.
+- Owner can message any unarchived item in an active session, including terminal
+  items. Drop/reopen/bring are requests; only the agent decides the transition.
+- Waiting selects waiting items with no Answer for the current question_revision
+  whose input is neither cancelled nor skipped. An answered episode stays out of
+  Waiting even after handling; only a new ask/revision makes it unanswered again.
+  Sent shows inputs in queued/in_flight/needs_attention, one row per input, with
+  links to its original question snapshot. A new ask on the same item can be in
+  Waiting while an older input is in Sent. This never changes the item status.
+- Item timelines deduplicate by message ID and include parent-creation context
+  separately; rounds, replies, status history and references never silently prune.
+- Archive requires every topic item terminal and no queued/in-flight/unresolved
+  input targeting it. Close session requires all items terminal, no unresolved
+  inputs and dispatch paused. Restore/reopen changes presentation lifecycle only.
+- Full validation runs for every commit; expected revisions are per touched item,
+  question, topic or session lifecycle, not unrelated snapshot edits.
 
 ## 4. Transaction and lock algorithm
 
@@ -109,35 +233,74 @@ All writers call `Store.transact(SessionRef, ActorContext, op_id, command)`:
 7. Rename candidate over live file and sync sessions directory. If rename succeeded but sync failed, return `commit_uncertain` with op ID. Retry re-reads receipt to resolve it. It must not blindly repeat the mutation.
 8. Release lock; publish invalidation hints only after commit. Slow UI or dead watchers do not roll back a saved command.
 
-One store transaction lock at a time. Metadata/registry updates follow the same atomic-file pattern with their own locks, outside a session transaction. Worker project lease is acquired first and held separately. OS `flock` is cross-process; intra-process callers also serialize through a keyed mutex so threads cannot defeat the intended exclusion. Readers validate an atomic snapshot without taking writer locks.
+One session lock at a time; intra-process keyed mutex plus OS `flock`. Registry
+and binding setup use global-registry → project-metadata → session lock order.
+Keep registration simple: under the registry lock, validate existing project
+metadata, locate an existing matching binding in its session files, then write
+missing metadata/session/index entries using atomic file replacement. Persist
+binding identity in the session before updating the rebuildable index. Repeat
+connect checks existing identities before creating another binding. No bootstrap
+journal, automatic interrupted-setup repair or distributed transaction is required.
+If metadata is inconsistent, stop connection and show the affected path; do not
+route messages by guessing. No lock is held across a host call or inference.
 
-Receipt results contain small IDs/revisions, not entire snapshots. No pruning of domain receipts/history in v1. When sessions reach bounds, new work must move to a new session; no automatic SQLite migration, history deletion or topic transfer.
+## 5. Capacity, queries and errors
 
-## 5. Limits and capacity
+Warn at 16 MiB per session to surface unexpectedly large personal history. There
+is no first-version snapshot hard cap, item/message quota or reserved-byte ledger.
+Keep bounded individual requests/messages below, and never silently truncate saved
+history. Add scale limits only with a demonstrated need and a clear user flow.
+Questions/ask/outcome/why each ≤4 KiB; note ≤4 KiB; owner input ≤16 KiB; full agent
+reply ≤64 KiB; 12 options each label/consequence≤1 KiB; 32 links/item each target
+≤4 KiB. 100 pending inputs/session. Operation batch≤100, serialized request≤512
+KiB. Response page≤100 entities/1 MiB; a single fixed entity projection≤768 KiB
+including escaping. Large histories/backlinks are separate paginated queries.
+No silent truncation of durable content. Diagnostic output is separately bounded.
 
-| Limit | Value/action |
-| --- | --- |
-| Snapshot | 20 MiB hard limit; reject new ordinary work above 19 MiB, reserving 1 MiB for active-turn receipts/decisions/stop metadata |
-| Items/messages/depth | 10,000 / 50,000 / 32; explicit error |
-| Question/outcome/why | 4 KiB each |
-| Owner prompt/answer/excerpt | 16 KiB each |
-| Options | 12; label/consequence each ≤1 KiB |
-| Links | 32/item; target ≤4 KiB, label ≤256 bytes |
-| Pending ordinary inputs | 100/consumer; preserve unsent composer draft when full |
-| Pending host requests | 8/run, 64 KiB display payload each; excess requests deny with a reason |
-| Read page | ≤50 entities and ≤64 KiB; cursor required for remainder |
-| Fixed item/answer/message read projection | ≤60 KiB of serialized JSON, including escaping; validate before accepting the mutation, preserving the draft on error |
+No result/control capacity reservations. A write error returns failure, keeps
+the last saved data, and pauses dispatch until writes succeed. Keep unsent drafts;
+do not acknowledge a save that exists only in memory. No full-disk remediation,
+automatic lost-data recovery or deliberate power-loss testing is required now.
 
-The fixed item read projection excludes growing `status_history`, `updated_in_messages` and `links` collections; return their counts and dedicated continuation cursors instead. History entries, backlink IDs and links are independently paginated. Full UI snapshots still contain these arrays. Answers include their complete immutable question/options/text snapshot, so a response-size validation runs at submission as well as the individual text limits; accepting an answer that cannot be fully fetched is forbidden. Message `items_touched` is limited to 100 IDs. Option IDs and owner display names are bounded at 128 and 256 bytes respectively. This second encoded-size bound handles JSON escaping expansion explicitly and leaves space for the 64 KiB response envelope.
+Queries use sequence/keyset cursors `{schema,view,filter_digest,after,revision}`.
+Reject mismatched filters. Current-page consistency is one snapshot; if revision
+changes between pages, return `snapshot_changed` so UI restarts rather than
+mixing histories. `session_get` may return the full validated snapshot to local
+Tauri; agent tools use bounded projections.
 
-Reserve space for an input's core control metadata at acceptance. If even control writes cannot commit (full disk/permissions/hard cap), stop dispatch and deny/cancel outstanding host permissions; report store failure. Never tell the user a response is durably saved when it is only in memory. Test capacity exhaustion mid-turn.
+## 6. Continuation, repair and migration
 
-## 6. Discovery, repair and migration
+Item/Message/Round `origin`, when copied, is
+`{project_id,session_id,topic_id,entity_id,source_revision}`; original entities
+have null origin. `continuations[op_id]` stores source IDs/revision/hash, target
+topic/input IDs, immutable old→new maps for items/messages/rounds/answers, and
+confirmed summary text/time. Origin routes retain IDs when the source is offline;
+the UI displays unavailable-source metadata and the complete local copy. Copied
+messages preserve original author identity in origin metadata and do not claim
+the target agent authored them. Live target binding IDs are not retroactively
+substituted for source authors. Round has an origin field as well.
 
-`project.json` owns project UUID, session summaries and explicit convenience default. Session files remain authoritative. Global `~/.ariadne/projects.json` is a rebuildable registered-root index; do not scan home. Reconcile missing summaries by scanning only each registered root's sessions directory. Two roots with the same copied project UUID produce `duplicate_project_identity`; require explicit adopt-as-new-project (new UUID and validated session references) or Locate original. Never silently merge copies.
+Continue is a **copy**, not shared mutable topic membership. Read a validated
+source snapshot and include source revision/hash in preview. Owner chooses an
+existing bound target session and confirms. Under target lock allocate new topic,
+items, messages and rounds; remap all internal refs in two passes; preserve full
+bodies and origin references. External replacement links remain provenance links,
+not invalid live replacement edges (copy terminal replaced items as dropped with
+explicit imported outcome if target is outside copied topic; show preview).
+Atomically add continuation receipt and a topic-targeted input containing the
+approved summary. Source remains untouched; no two-session transaction or hidden
+retargeting. Duplicate operation returns the original mapping. Source changed
+since preview returns `preview_stale` before any target mutation; origin is the
+validated snapshot revision even if source changes just after that check.
 
-Relocation changes the global canonical-path mapping after validating project UUID; it does not rewrite historical paths in every item. Unavailable root remains listed. Forget removes the index entry only. Runtime lease prevents relocation while that project has an active managed run.
+Unavailable projects stay registered and show their missing path. Initial
+registration/forget and reconnect to a known project are enough for normal use.
+Automatic relocation, copied-project identity remapping, registry-repair UI and
+cross-file crash recovery are later work. Never silently merge matching UUIDs.
 
-Corrupt live data never silently falls back. Keep last valid in-memory view marked stale; disable writes. `session repair --from-backup` under lock first preserves damaged bytes in a timestamp/UUID recovery file, validates backup, and commits it with an explicit repair record. Opened temp files are cleaned only if the transaction is known abandoned and owned; no broad directory deletion.
-
-Schema migration: lock → copy original into `backups/<session>.v<old>.<uuid>.json` → pure migration chain → validate → normal atomic commit. Failed migration leaves original untouched. Future schema is read-only error, never reset. Backup files share privacy permissions and count as retained local history; uninstall never deletes them.
+Invalid data returns an error and is not overwritten. A previous validated
+snapshot may be kept by the write algorithm, but no repair wizard or automatic
+restoration is required. Keep schema_version and reject unknown future versions
+for writes. Add a concrete migration and its test when the first real stored
+schema changes; no generic migration registry is needed beforehand. Uninstall
+preserves session files and backups.

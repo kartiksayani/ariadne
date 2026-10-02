@@ -1,107 +1,304 @@
 # Configuration, setup, installation and operations
 
-## 1. Files and scopes
+This is the setup contract for the existing-terminal production workflow. Ariadne
+does not launch, resume, kill, or change the permissions of a provider terminal.
+Claude's installed Mod submits into its already-open conversation through the
+local bridge. Codex's desktop adapter queues through the existing Codex daemon and
+reads that thread's history over the same Unix socket. See [Integrations](../INTEGRATIONS.md)
+for the end-to-end user flow and [POC results](../INTEGRATIONS.md#live-evidence-and-limits).
+
+## 1. Installed files, project data, and bindings
 
 ```text
-<root>/.ariadne/
-  project.json                       # identity, session catalog/convenience default
-  sessions/<uuid>.json                # authoritative domain + outbox/runtime records
-  locks/<session>.lock                # stable transactional locks
-  locks/runtime.lock                  # one managed worker per project
-  backups/                            # previous snapshot, migration/repair originals
-  setup-manifest.json                 # reversible project setup journal
-  integrations/<resource-version>/    # canonical rules, plugin variants, launch templates
-  runtime/<run-id>/                    # transient binding/config files, no credentials
+~/.local/share/ariadne/
+  versions/<version>/bin/ariadne       # immutable versioned CLI/helper
+  versions/<version>/bin/ariadne-mcp   # thin standalone stdio server
+  versions/<version>/integrations/     # matching rules and Claude Mod
+  current -> versions/<version>        # atomically replaced install pointer
+~/.local/bin/ariadne -> ../share/ariadne/current/bin/ariadne
+~/.local/bin/ariadne-mcp -> ../share/ariadne/current/bin/ariadne-mcp
+~/Applications/Ariadne.app              # personal app install
 ~/.ariadne/
-  projects.json                       # rebuildable registered project index
-  preferences.json                    # UI/window/drafts, notification watermark
-  launch-profiles.json                 # non-secret executable/model/config references
-  trust.json                          # reviewed project/configuration digests
-  integrations/                       # optional global resources + ownership journal
-  install-manifest.json                # installed paths/versions/checksums
-  logs/                               # bounded redacted operational metadata
+  projects.json                        # rebuildable canonical project registry
+  registry.lock                        # stable global registry lock
+  run/control.sock                     # desktop-owned private Unix control socket
+  run/                                 # owner-only directory, mode 0700
+  ui.json                     # UI/window state and drafts
+  logs/                                # bounded redacted diagnostics
+<project>/.ariadne/
+  project.json                         # immutable project UUID and metadata
+  sessions/<uuid>.json                 # authoritative domain, binding and outbox state
+  locks/<session-uuid>.lock             # stable session transaction lock
+  backups/                              # previous snapshots and repair originals
 ```
 
-All directories0700/files0600 where supported, executable bits only on owned binaries. Runtime files are written atomically and referenced by immutable run IDs. Delete a run's transient files only after cleanup confirmed, retaining needed hashed metadata in its session. Stale runtime directories with uncertain runs remain available for diagnosis; they do not authorize process relaunch.
+Directories are mode 0700 and data files mode 0600 where supported. Executable
+bits belong only on package-owned binaries. Session data is one JSON snapshot per
+session and remains the authority; the global registry is a rebuildable index.
+Multiple bindings and independent queues may exist in one project. Dispatch is
+serialized per binding, not per project. Store writes remain serialized by the
+session transaction lock.
 
-## 2. Launch profile and preflight
+A binding persists `binding_id`, arbitrary `adapter_id`, opaque
+`external_session_id`, project and Ariadne session IDs, endpoint fingerprint,
+generation, capabilities, connection facts, and timestamps. External IDs are
+opaque and need not be UUIDs. Every CLI/MCP request names its `binding_id`; core
+resolves that binding to project/session and validates the generation. There is
+no mutable current-session pointer derived from cwd, process state, or whichever
+terminal most recently connected. A random binding ID prevents accidental routing
+but is not a security boundary against another process running as the same OS user.
 
-Profile fields: ID, agent, executable path, tested version, optional model/effort, permission profile, config-home reference when explicitly set, normal provider-auth mode description, expected non-secret configuration sources. No secret values, OAuth copy, arbitrary launch args, or shell snippets.
+Binding creation/removal takes locks in this order: global registry lock, then
+project metadata lock. Release the registry lock before host I/O. Reconcile a
+committed binding against the registry at startup, so an interrupted bind is
+repairable. Normal domain mutations take only the session lock; no host or
+socket wait may occur while holding a store lock. Never wait for an adapter
+lease while holding a session lock.
 
-Default Claude launch permission mode is `manual` (observed init metadata calls it `default`), Codex workspace-write with on-request approvals. Plan mode is an optional explicit profile. No bypass/auto-approval profile in initial UI. Provider's existing stricter policy always wins; setup must not loosen it to make a launch succeed.
+The private desktop control endpoint is `~/.ariadne/run/control.sock`. Create the
+parent directory mode 0700 and the socket mode 0600, verify the owning UID, and
+fail with an actionable path/permission error if the OS path limit is exceeded.
+The Claude Mod uses the installed bridge CLI to contact this endpoint for input
+claims. If the desktop is closed, no new Claude input is dispatched. The Mod and
+provider CLI can still perform explicitly bound domain CLI operations against
+the project store while the desktop is closed. The Codex adapter is owned by the
+desktop and stops observation/dispatch when it exits; it never stops the Codex
+daemon or terminal.
 
-Resolve executable from explicit saved path first, then PATH as seen by the app, then known user installation locations discovered during setup; verify executable/version and show chosen path. A macOS GUI's PATH may differ from the terminal's. Never source shell rc files to discover it. If unresolved, let the owner choose an executable file and run only its version check before saving. An unrelated named executable collision requires owner correction.
+Reject symlinked project data, settings, lock and temporary targets. The
+installer's `current` and PATH symlinks may point only inside Ariadne's version
+directory. Canonicalize project roots and verify every data operation remains
+contained. Codex's existing daemon socket is the exception: resolve its final
+target deliberately, permit a symlinked endpoint, and verify socket type and
+owner UID before connecting. These checks prevent ordinary path mistakes; they
+do not isolate Ariadne from hostile processes under the same OS account.
 
-Preflight returns a structured manifest:
+## 2. Supported hosts and preflight
 
-1. Project available, initialized, safe filesystem, unique project identity, no competing runtime/uncertain child.
-2. Bundled helper/resource version matches desktop; selected provider version is in compatibility allowlist.
-3. Current configuration source paths/digests, non-secret provider override variable **names**, selected model/permission profile, MCP inventory, inherited hooks and instructions.
-4. Required domain MCP tool/permission bridge configuration is representable without editing global settings; managed policy conflicts are actionable failures.
-5. Sufficient disk/capacity; prompts within bounds; owner-auth readiness checked through documented CLI behavior during startup, not credential file inspection.
+The initial compatibility baseline is Claude Code **2.1.287** and Codex CLI
+**0.160.0**, the versions used for the live existing-session proofs. These are
+tested candidates, not broad minimum-version guarantees. `doctor` reports the
+detected version and whether the matching adapter gate is passed. Unknown
+versions may be inspected but cannot be advertised as supported without running
+the compatibility acceptance suite. Ariadne never downloads or updates provider
+CLIs.
 
-The initial project launch requires explicit trust of the reviewed configuration. Digest hashes canonical root, executable identity/version, relevant settings/plugin/hook/MCP definitions, canonical rules version and policy choices. A change to executable/configuration that adds executable hooks/services invalidates trust; changing an ordinary source code file does not. Instructions can influence the agent, so changes to instruction sources are shown on resume even when they do not add a local hook. TOCTOU check: rehash executable configuration just before spawn; mismatch aborts preflight. This does not claim a sandbox against a hostile same-user process modifying files afterward.
+`ariadne doctor` is read-only and reports:
 
-## 3. Managed MCP/config generation
+1. Canonical project path, project UUID, filesystem support, permissions, session
+   schema/backup health, and whether the requested binding exists and is current.
+2. Ariadne app, helper, rules, and integration resource versions and checksums.
+3. Provider version, adapter capability result, external session ID, and endpoint
+   fingerprint. For Codex, validate the configured/default `CODEX_HOME`, socket
+   owner UID and live daemon handshake. For Claude, validate the installed Mod
+   resources and binding heartbeat/claim path when the session is connected.
+4. Whether the Claude plugin needs host-side trust or reload, and whether Codex
+   discovery/liveness is available from its running daemon.
+5. Outbox counts and any unresolved or uncertain input attempts. No unresolved
+   attempt is silently resent during preflight.
 
-Claude generated configuration contains only Ariadne by default:
+Do not read provider credential files, keychains, OAuth data, or environment
+values for diagnostics. Provider authentication remains inside its own CLI and
+host UI. Ariadne does not edit provider permission settings, loosen policy, or
+add automatic approvals. Claude and Codex tool approvals remain visible and
+decided in the host terminal. An Ariadne item answer is never a permission
+decision.
 
-```json
-{
-  "mcpServers": {
-    "ariadne": {
-      "command": "<absolute-bundled-ariadne>",
-      "args": ["mcp", "serve", "--binding-file", "<absolute-run-binding.json>"],
-      "timeout": 660000
-    }
-  }
-}
+## 3. Claude Mod installation and binding
+
+Install the generated Mod at the stable resource path under
+`~/.local/share/ariadne/current/integrations/claude-mod/`. The path stays stable
+across upgrades; the installer atomically advances `current` only after the new
+version is complete. Do not require `--plugin-dir` or a development checkout.
+Package this stable root with `.claude-plugin/marketplace.json` named
+`ariadne-local` listing plugin `ariadne` at `./plugin`; plugin resources include
+`.claude-plugin/plugin.json`, hooks/register.js and shared rule skill. Setup
+prints these exact commands with the absolute installed root substituted:
+
+```text
+/plugin marketplace add /absolute/home/.local/share/ariadne/current/integrations/claude-mod
+/plugin install ariadne@ariadne-local
+/reload-plugins
+/ariadne-connect
 ```
 
-Pass it with strict MCP mode and pass the generated overlay through `--settings`. The overlay's `permissions.allow` contains only `mcp__ariadne__session_read`, `mcp__ariadne__apply`, `mcp__ariadne__answer_fetch`, `mcp__ariadne__answer_ack` and `mcp__ariadne__permission_prompt`. It does not auto-allow Bash/Edit or override policy deny rules. Disable auto-background in the child with `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`. The per-server `timeout` is 660000 milliseconds, above the bridge's 600000-millisecond local deadline; domain tools enforce 5 seconds internally. These configuration controls are documented in the [official environment reference](https://code.claude.com/docs/en/env-vars). Their raw-CLI schema/precedence and long-wait behavior must pass C03/C04. Earlier host cancellation expires the request; a late owner click cannot authorize it.
+The placeholder /absolute/home is replaced with the resolved user's directory;
+quote spaces for the host command parser. Record observed installed plugin version
+and require reload after upgrades; a stale cached plugin fails doctor instead of
+silently mixing wire versions. The owner runs them in Claude's supported host UI/command flow and
+starts or reloads the Mod in the target terminal. Setup must not rewrite unrelated
+Claude settings or host trust records.
 
-Codex spawn-time overrides set the Ariadne server command/args and supported timeout settings using `-c key=value`; disable every other discovered MCP entry for the default managed profile. Use a TOML serializer for values/key segments, then pass each full assignment as one argv element. Confirm effective inventory in N02. The profile does not rely on undocumented `thread/start.config` merging. Other MCP services are a later explicitly authorized profile feature, not automatic inherited activation.
+In the already-open target conversation, `/ariadne-connect` explicitly creates
+or selects a binding and returns its `binding_id`, external session ID, project
+identity, current connection state, and a short usage instruction. It does not
+send a model prompt. The owner can copy/paste the printed Ariadne connection
+instruction into the existing conversation to record original terminal work;
+this is explicit and never an automatic boot prompt. Each Ariadne-dispatched
+prompt includes the binding ID, input ID and attempt ID in its correlation marker.
+The Mod polls the bridge CLI for claims. One input per binding may be in flight;
+the next Ariadne input waits for the correlated turn to finish successfully and
+for its explicit domain result to commit.
 
-Both providers inherit existing authentication configuration. Do not remove API/cloud variables silently; if the requested CLI/subscription profile conflicts with an API/provider override, show its name and require profile correction before inference. Do not display its value or promise that deleting one variable guarantees a billing route. V1 has no account switching/key management UI. Official CLI login remains the prerequisite.
+On `/ariadne-connect`, validate that the running session ID and project match the
+chosen binding. Rebinding rotates the generation UUID and fences callbacks from the
+old connection. A reload or lost control socket marks the binding stale; it does
+not kill or restart Claude. A queued input stays saved until the app/bridge is
+available again. An input already claimed or submitted without conclusive host
+evidence becomes uncertain and requires reconciliation before resend.
 
-## 4. Rules, plugins and optional external mode
+The Mod announces its session ID, working directory, and Claude version to the
+private app control socket at startup and every 30 seconds, whether bound or not.
+Announcements do not claim input, prompt the model, or write domain data. Keep
+discovered candidates in memory for 90 seconds and let the owner choose a
+candidate to connect; expire it from the UI when its heartbeat goes stale.
 
-Generate artifacts from `packages/agent-rules/RULES.md`:
+Setup copies only Ariadne's plugin files into its own stable resource directory.
+If host registration is needed, add only Ariadne's named marketplace/plugin
+entry and preserve all other marketplace, plugin, skill, command, hook, and
+instruction entries. If Claude reports trust or plugin approval, show the host
+action and wait for the owner. Do not treat plugin installation as proof that a
+Mod is loaded in an existing terminal. Uninstall removes the Ariadne-owned entry
+only while it still matches the value Ariadne installed; otherwise preserve it
+and print its location for manual cleanup.
 
-- Managed Claude: append canonical rules; optional skill/plugin variant contains discovery/help but no duplicate answer-injection hook.
-- Managed Codex: append canonical developer instructions while preserving host base/project instructions.
-- External Claude opt-in: plugin skill + UserPromptSubmit hook + owned bootstrap in effective CLAUDE.md.
-- External Codex opt-in: owned effective AGENTS/override block + documented hook, with manual-fetch fallback.
+## 4. Codex existing-daemon binding
 
-All generated Ariadne hooks first check `ARIADNE_MANAGED_RUN_ID`; in managed runs they emit no answer context and do not create bindings. They do not disable unrelated user's hooks. External hooks have a3s budget, bounded16KiB context, non-destructive answer issue and no acknowledgment on successful stdout alone. Error returns a concise warning/manual-fetch hint without preventing the owner's terminal prompt. Global resources activate only inside initialized registered projects.
+Codex's desktop adapter connects to the already-running app-server over its Unix
+WebSocket endpoint. Respect `CODEX_HOME`; otherwise use the documented default
+Codex home. Resolve the endpoint without starting a daemon, starting/resuming a
+thread, or changing host configuration. Validate the target socket and daemon
+identity and perform the read-only handshake. V1 uses `thread/loaded/list` to
+discover loaded-thread IDs, then `thread/read` to retrieve available project
+metadata from the already-running app-server. Refresh this metadata every 30
+seconds while the connection UI is open. The owner selects a discovered thread
+to bind. Loaded does not mean terminal-visible or active. If metadata discovery
+is unavailable, allow manual binding using the thread ID from Codex `/status`
+and report that limitation. Never guess the selected target or discover private
+rollout/transcript files. Do not use `thread/list`, which enumerates persisted
+threads rather than currently loaded threads, as the open-session discovery
+source.
 
-Setup mode is explicit: `setup --agent claude|codex|both` defaults managed; `--external-terminal` adds those host files. Global mode installs availability/resources, not arbitrary project initialization. Setup twice must have an empty change set. `--dry-run` uses the same planner and performs no writes.
+Only one Ariadne input per binding is outstanding. The adapter submits through
+the installed `codex queue` CLI with the explicit socket and thread, then polls
+full thread history over the same daemon socket. Match the input marker in the
+original user-message item to exactly one turn and correlate its visible lifecycle
+and final output. Do not use `thread/start`, `thread/resume`, `turn/start`, or
+direct `thread/queue/add` as a substitute. The live POC did not prove caller-ID
+propagation or direct queue scheduling. Use explicit Ariadne domain CLI commands
+when Codex has no Ariadne MCP server; do not rewrite Codex's existing MCP config.
 
-## 5. Reversible setup algorithm
+The desktop worker may disconnect its observer and stop dispatch, but must not
+interrupt a turn, terminate the daemon, close the user's terminal, or respond to
+approval requests. On desktop restart it revalidates the same socket/thread and
+reconciles history. If it cannot determine whether an attempt was consumed, leave
+it uncertain and require an owner decision; never fall back to a different
+thread. Discovery and liveness are version-gated against the supported Codex
+daemon APIs; a daemon PID alone never proves that a particular thread is ready.
 
-1. Acquire scope-specific setup lock; resolve effective instruction/settings paths without following foreign symlinks into unexpected locations.
-2. Parse all targets and identify owned marker blocks/JSON entries/resource dirs. If malformed or foreign same-name content exists, return exact collision with no writes.
-3. Compute a change plan with old/new hashes and retained content. Print it. Record journal `prepared` plus backups of changed owned bytes before applying.
-4. Immediately before each edit verify current checksum still equals planned preimage; atomic-write that file; mark journal step applied. On conflict, stop and roll back only files whose current hash still matches this setup's written bytes.
-5. Mark committed, record resources/references, add marked ignore entry and register project. A registry failure is a discovery warning after session/project initialization, not a reason to erase data.
-6. On retry after interruption, inspect journal and checksums: resume deterministic remaining steps or restore owned matching writes. Never blindly restore a whole historical settings file over later user edits.
+## 5. Domain CLI and optional MCP
 
-Uninstall uses journal identity, markers and checksums. Remove only unchanged owned sections/entries/resources; preserve edited owned content and print manual cleanup instructions. Remove files created by setup only when they contain no foreign content. Keep global resources still referenced by another setup. Host trust databases and credentials are never edited. Retain session JSON, backups and ignore entry while data remains. User data deletion is outside uninstall and outside v1 UI.
+The installed CLI and optional MCP wrapper call the same core service. Baseline
+existing-terminal workflows require only the explicit domain CLI; no host MCP
+configuration change or terminal restart is required. When an MCP server is
+available, it is a thin generic wrapper over the same commands and every tool
+request includes an explicit `binding_id`. Resolve authority from the persisted
+binding, not model-provided project/session paths, current cwd, prompt text, or a
+global “active binding.” Reject missing, stale, cross-session, and wrong-generation
+bindings with typed errors.
 
-## 6. Build and installation
+Ship `ariadne-mcp` beside the CLI. `ariadne mcp serve` is an equivalent alias
+calling the same library entry, not spawning another writer/service. Both use
+stdio only, send logs to stderr, and expose identical tools. An explicit MCP
+configuration can reference the stable absolute `current/bin/ariadne-mcp` path;
+installation alone never enables a host MCP configuration. Build/install the MCP
+binary with the app/helper version and remove it with other Ariadne-owned CLI
+files on uninstall.
 
-`make install` is the future documented entry point. Tasks: preflight → locked dependency resolution → generate DTOs/schema/rules → Rust/TS build → app/helper packaging → verification → staged local install. Node is a build dependency only. Commit Cargo/npm locks, toolchain version, target architecture and deployment baseline in M0. Default target is current Mac architecture; no untested universal bundle.
+Every mutation has an operation ID and returns a durable receipt. Replies,
+status updates, topics, and children are explicit domain operations. A successful
+host turn does not create an item reply by itself. An input result record commits
+with its referenced domain mutations; queue advancement waits for both successful
+host completion and committed input result. Terminal prose remains diagnostic
+activity. Host turn completion, item status, answer acknowledgment, and explicit
+input result are distinct facts.
 
-Preflight checks macOS, Xcode command-line tools, Rust/Node/npm versions, free space, application destination writable, and selected CLI destination. It does not automatically install those toolchains or use sudo. If an install destination needs privileges, produce the finished artifacts and one exact remaining operation; no global permission changes.
+## 6. Simple personal setup and uninstall
 
-Install `/Applications/Ariadne.app`; choose explicit BIN_DIR else an existing writable user PATH directory, preferring `~/.local/bin`, then `~/.cargo/bin` when already on PATH. No shell startup edits. Before replacement, compare manifest ownership; never overwrite unrelated `ariadne` or a foreign app bundle. Quit/restart the owned app for upgrade; preserve old app/helper until staged replacement succeeds. Package manifest records previous/current versions and checksums for rollback. CLI/helper/app version mismatch makes managed launch fail before work.
+`ariadne setup --agent claude|codex|both` installs the selected resources and
+registers the explicitly selected project. It never initializes arbitrary
+repositories, launches a host, or changes permissions. Setup prints the files it
+creates and the host commands the owner needs to run. Running setup again is
+safe and reports resources that are already present.
 
-Bundle resources are signed consistently if local ad-hoc signing is used; no Developer ID/notarization/public distribution is promised. Document supported macOS Open Anyway steps for an unsigned local bundle. Never advise disabling Gatekeeper globally. Native notification and bundle identity are tested after installation, not inferred from a dev window. [Tauri macOS bundle guidance](https://v2.tauri.app/distribute/macos-application-bundle/)
+Keep integration resources under Ariadne-owned paths. For a required host
+registration, edit only the named Ariadne entry and preserve surrounding
+settings. If the host format cannot be updated without rewriting foreign
+content, print the exact manual step. Uninstall removes Ariadne's files and a
+named host entry only if it still matches the value Ariadne installed. Preserve
+all project data and history; deleting project data is a separate explicit
+owner action.
 
-`make uninstall` removes package-owned app/CLI artifacts only and leaves domain data/settings history. `ariadne uninstall` removes integrations first. Running workers must be stopped through the application's lifecycle; installer does not kill unknown same-name processes. No remote, auto-updater or publication step.
+## 7. Build and personal install
 
-## 7. Operational diagnostics and retention
+Use the installed Rust and Node toolchains. Commit `Cargo.lock` and
+`package-lock.json` and use locked dependencies. Generate schemas, DTOs, and
+rules from their authored sources and check generated files for drift. Node is a
+build dependency only; production does not bundle a language runtime.
 
-`doctor` is read-only and returns checks with `ok|warning|error`, code and actionable hint: executable resolution/version; bundled version parity; project path/identity/filesystem/permissions; schema/backup validity; lease/previous-run state; setup ownership/conflicts; configuration trust digest; managed/external mode; unacknowledged/uncertain input counts; notification authorization. Never fetch provider usage/billing or refresh tokens merely to inspect a project.
+`make install` builds the Tauri app, Rust CLI, MCP binary, and Claude Mod from
+this checkout, then installs them for the current user. Keep versioned helper
+files under `~/.local/share/ariadne/versions/<version>/`, update the `current`
+symlink, and install the app at `~/Applications/Ariadne.app`. Create
+`~/.local/bin/ariadne` and `ariadne-mcp` symlinks when that directory exists;
+otherwise print the PATH instruction. Do not edit shell startup files, use
+`sudo`, install toolchains, or download provider CLIs. Print the installed
+version and paths, then run `ariadne doctor`.
 
-Default logs store component/error code/run ID/sequence/timing, not prompt/answer/tool payloads or host environment. Rolling limit5 files×1MiB under owner-only log directory. A deliberate diagnostic export includes sanitized metadata and versions, not session contents unless explicitly selected. There is no automatic upload. Activity is in memory; authoritative session history is retained until the owner removes it intentionally. File size limits are explained before new work is accepted.
+Every commit runs the all-code linter and unit/integration suites. Keep overall
+test coverage at or above 80%. End-to-end tests for setup, both existing-session
+adapters, explicit domain results, and recovery are required release gates.
+
+`make uninstall` removes the personal app, Ariadne-owned versioned helpers, and
+CLI symlinks while preserving all project data and history. `ariadne uninstall`
+removes Ariadne's integration files and only an unchanged named host entry. Do
+not kill unknown processes or touch provider processes. Local unsigned builds may
+document macOS's Open Anyway flow; do not recommend disabling Gatekeeper or imply
+public distribution.
+
+## 8. `doctor`, diagnostics, and retention
+
+`ariadne doctor [--project PATH] [--json]` is read-only. Each check returns
+`status: ok|warning|error`, stable `code`, concise `message`, and actionable
+`hint`; JSON output also includes app/helper versions and check timestamps. It
+reports:
+
+- App/CLI/helper/plugin version parity and supported Claude/Codex baselines.
+- Project canonical path/identity, data permissions, symlink/path validation,
+  session schema/backups, and registry reconciliation state.
+- Binding adapter ID, external ID (redacted or truncated in summary), generation,
+  endpoint/socket health, last observation, and capability state. Unknown or
+  stale never means ready to dispatch.
+- Required Claude plugin reload/trust action and Codex socket/daemon/thread
+  compatibility.
+- Queued, claimed, uncertain, missing-result, and unresolved input counts;
+  explicit next recovery action. No automatic resend or host process cleanup.
+
+Example summary:
+
+```text
+Claude 2.1.287: supported
+Codex 0.160.0: supported
+Project: /work/payments (registered)
+Bindings: Claude connected; Codex stale (last seen 4m ago)
+Recovery: 1 uncertain input requires review; dispatch paused for that binding
+Result: warning — run `ariadne recovery show <binding-id>` to inspect
+```
+
+Logs retain component, error code, binding/run/operation IDs, sequence, timing,
+and redacted provenance only. Do not log prompt/answer/tool bodies, host
+environment, credentials, raw protocol payloads, or full host transcripts by
+default. Rotation is bounded to five 1 MiB files under owner-only storage.
+Diagnostic export includes sanitized versions and metadata; session contents are
+included only when explicitly selected. There is no telemetry or automatic
+upload. Explain storage limits before accepting work that cannot be persisted.

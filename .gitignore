@@ -1,0 +1,11 @@
+.ariadne-mods-poc/
+
+.DS_Store
+.venv-quality/
+__pycache__/
+*.pyc
+node_modules/
+.cache/
+coverage/
+.coverage*
+target/

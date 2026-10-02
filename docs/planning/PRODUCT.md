@@ -1,106 +1,101 @@
-# Ariadne product plan
+# Ariadne product contract
 
-Planning baseline: 1 October 2026; managed-session revision: 2 October 2026. This document defines intended behavior; it does not claim that the application exists.
+**First-release scope:** [Personal release decisions](PERSONAL_RELEASE.md) and
+[commit quality checks](DEVELOPMENT_CHECKS.md) govern what ships now. Public
+plugin installation and exotic-failure recovery are deferred; organized crates,
+discovery/liveness and optimized graphs remain required.
 
-Implementation behavior is specified in [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md), including queues, live protocol evidence, APIs and recovery.
-
-## The product
-
-Ariadne is a quiet second screen and session controller for a long coding conversation. It answers three questions: **What have we decided? What needs my answer? Where did this come from?** The agent maintains a tree of understandable sentences. Ariadne runs the official coding agent locally and lets the owner answer directly. **Claude Code is primary; Codex also supports the full workflow.**
-
-The first release covers the build prompt with the owner's later correction: answers must reach managed agents without another terminal message. This supersedes the prompt's hook-only/next-turn baseline and adds minimal conversation controls. Other behavior follows `BUILD_PROMPT.md`, then `DESIGN_PROMPT.md`; visual decisions follow the supplied HTML mockups. This session produces plans and a local planning history only.
+Revision 3 · 2 October 2026. Existing-terminal workflow; implementation pending.
+Ariadne is the second screen for questions, decisions, findings and tasks arising
+in coding conversations. Claude Code is primary; Codex is required; additional
+compatible agents use adapters. The supplied design ZIP determines appearance.
+Owner clarifications determine delivery, structured results and complete history.
 
 ## Primary journey
 
-1. Install Ariadne and run project setup for Claude Code, Codex, or both.
-2. Choose New session in Ariadne, select the project, review its launch configuration, and enter a task. Claude Code is selected by default; Codex is available. The app launches the installed CLI using its existing authentication.
-3. The agent records topics, questions, decisions, findings, explanations, and tasks as it works. Follow-ups attach to the item that caused them.
-4. The owner glances at the tree and the persistent **Waiting on me** panel.
-5. Selecting a waiting item reveals its ancestors, options, consequences, recommendation, and relevant message excerpts.
-6. The owner chooses an option, adds optional text, or writes a free-form answer, then explicitly submits it.
-7. The item immediately leaves the waiting queue. Ariadne sends the saved answer in submission order, with one turn per submission, when earlier turns finish successfully. Host permission responses can unblock an active turn independently. The agent acknowledges receipt, does the work, and records outcome and reason. No extra terminal message is required.
-8. Closed branches become visually quieter while remaining inspectable. Replacement links and the message timeline preserve the path back to the original question.
+1. Install app/CLI; register a project and set up the desired host integration.
+2. Connect the already-open Claude or Codex conversation. Claude's Mod obtains
+   its own session identity; Codex's manual path uses its displayed session ID.
+   Optional discovery reduces typing but is not required.
+3. Give the connected agent work in its terminal. Shared rules and the returned
+   connection instruction let it publish topics and items through CLI/MCP.
+4. Read the tree/global waiting panel. Open any item to see its complete thread,
+   prior decisions, rounds and children. Select an option plus optional explanation
+   or send any item a free-form message, even if it is Open or terminal.
+5. Ariadne saves immediately and delivers one input per turn in FIFO order to
+   that existing conversation. Five messages become five inputs, not a batch.
+6. The agent explicitly publishes replies, chooses statuses and creates follow-up
+   topics/children through Ariadne's domain tools. UI updates on each commit.
+7. The bridge records the host turn outcome. Core advances after both successful
+   completion and an explicit structured result. No extra terminal message is
+   required. Tool permissions remain in the host terminal.
 
-Submitting an answer authorizes its delivery and a follow-up agent turn in the managed conversation. Host tool permissions remain separate. For example, the PR answer becomes input for the agent; any tool permission needed to act still uses the host's approval path. Demo sessions never launch a real agent or perform external actions.
+## Required interface
 
-## Release scope
+Projects and All sessions; closable session tabs; persistent Waiting/Sent panel;
+Tree/Graph/Archive views; topic and status filters; sentence-based rows; question,
+outcome and why; complete item conversation and rounds/forks; optional-width
+message rail toggle; theme; keyboard navigation; search; tray count/quick list;
+native item notifications; pin-window; terminal open/focus; setup/uninstall/demo.
+Every mockup frame is mapped in [DESIGN_TRACEABILITY](DESIGN_TRACEABILITY.md).
 
-| Area | Required behavior |
-| --- | --- |
-| Sessions | Known projects and sessions, explicit switching, selected-session counts, retained history |
-| Tree | Expand/collapse, sentence-first rows, outcomes, type/status icons, selection, ancestor path |
-| Waiting | Persistent panel, oldest first, options/recommendation, free text, explicit send |
-| Detail | Question, outcome, why, ownership, links, replacements, related-message timeline |
-| Navigation | Tree and graph, search, status/topic/owner filters, keyboard navigation |
-| Live state | Changes from agents appear without refresh; drafts survive unrelated updates |
-| macOS | Tray count and quick list, native notification with item navigation, pin window, terminal open/focus |
-| Agents | Managed Claude Code first, managed Codex, shared MCP rules/tools, optional external CLI/plugin/hooks |
-| Conversation control | Initial/follow-up prompt, live activity, permissions, Stop/Resume, honest connection and delivery states |
-| Lifecycle | Repeatable setup/uninstall, demo command, one-command local build/install, README |
+Owner controls Bring it up / Reply / Add note / Follow up / Back to Open / Drop
+queue explicit intents. Only the agent changes item status. Later/Unpark is a
+local preference, never a hidden domain status or agent instruction. Answers do
+not automatically set In progress; Sent shows delivery independently.
+Archive is available for all-terminal topics without unresolved inputs. Close
+session requires all-terminal items, no unresolved inputs and paused dispatch;
+it never closes a terminal. Continue previews and copies a topic into a selected
+bound session with provenance, then queues the approved summary. Shared mutable
+cross-session topics are not used; the UI explicitly calls this a copy.
 
-The optional message rail, private transcript ingestion, automatic AI summaries, collaboration, cloud sync, account management, a full IDE/terminal emulator, automatic worktree creation, direct PR actions, and cross-platform packaging are outside release one. A collapsible Conversation panel supplies the controls needed to operate managed sessions. The item timeline remains the durable provenance view.
+## Identity, history and states
 
-One managed conversation can run in each project root at a time; separate existing worktrees can run independently. Existing arbitrary terminal processes cannot be taken over. Optional external sessions are labelled **External session · manual pickup**. Managed sessions, process ownership and authentication are specified in [AGENT_RUNTIME](AGENT_RUNTIME.md).
+Ariadne session ID, binding ID, host session ID, item reference and turn ID are
+separate. IDs are secondary/copyable; headings use plain sentences. One active
+binding per Ariadne session; many sessions in the same project are supported.
+Changing agents makes a new binding and preserves past authorship; no implicit
+context transfer. Terminal-originated updates require explicit binding too.
 
-## Interaction contract
+Types: question, decision, finding, task, explanation. Statuses: open,
+waiting_on_me, in_progress, decided, done, dropped, replaced. Explanation+done
+may display 'Explained'. Closed parents can have active descendants. Replacements
+have a target and their own history; never reuse an item's meaning silently.
 
-### Tree and detail
+Store the complete Ariadne item conversation, all rounds, option/question
+snapshots, explicit replies and branches. Keep unrelated terminal conversation
+and private reasoning out of the store. Captured visible terminal output is
+bounded diagnostics; it cannot create an item reply or status transition.
 
-- A topic is a named group; an item has at most one parent. Ordering remains stable as updates arrive.
-- Open branches are expanded initially. A fully closed subtree is collapsed and dimmed initially. A closed parent with an active descendant stays discoverable: show its active-descendant count and reveal the path when selecting that descendant.
-- Persist the owner's expansion choices per session; live updates never repeatedly reset them.
-- Show the question and the outcome as separate sentences for closed items. Do not replace the question with the outcome.
-- Selecting a waiting entry, search result, graph node, tray entry, or notification leads to the same item detail and reveals its ancestors.
-- Display replacement relationships explicitly. A replacement is a new item with its own history, not a relabelled old item.
-- Message numbers are local Ariadne provenance numbers. Do not imply they are the host application's complete transcript numbering.
+Waiting is global across registered accessible sessions, independent of tabs or
+filters. An unanswered current waiting episode appears in Waiting; an outstanding
+owner answer for that episode appears in Sent until its handling is resolved.
+Missing/corrupt project data marks counts incomplete, never zero. Questions from
+an unavailable host may still be answered and queued for that binding.
 
-### Waiting and answering
+## Operational boundaries
 
-- The panel and tray include waiting items across all topics and all known, accessible sessions, regardless of selected tab or tree filters. Each entry names its project/session. This follows the mockups' global queue. Selecting an entry opens its session without losing other sessions' drafts.
-- Sort by when an item most recently entered **Waiting on me**, then stable item order. Show the plain-language topic/ancestor path.
-- A recommendation is visual guidance, never an already-submitted answer. Allow exactly one selected option plus optional explanatory text, or nonempty free text alone.
-- Submit once and show progress; retain the draft and show an inline explanation if submission fails.
-- Keep answered items in **Sent** until receipt is acknowledged. Distinguish Saved, Queued · agent busy, Sent · awaiting acknowledgment, Received, and Delivery uncertain. Stopped agents show Resume; an explicit Stop is never reversed by a new answer. These are delivery labels, not extra item statuses.
-- Preserve a draft when unrelated changes arrive. If the question/options change or the item closes while the owner is typing, preserve the text and require review against the refreshed item before sending.
-- Corrections are new answers while the question is still active; never silently edit an answer already delivered. A correction arriving during agent work queues automatically for its next turn.
-- Answering one item does not close its siblings or its parent.
+Window close hides to tray. Quit stops new dispatch, not external agent work.
+Queued inputs survive; accepted work may finish and write results while app is
+off. Reopen reconciles before sending. Pause only affects later delivery; it does
+not retract a message already queued in Claude/Codex. Failed/uncertain/missing
+results have explicit recovery UI and no blind automatic resend.
 
-### Search, filters, and graph
+Hooks, Mod heartbeats and read-only host state can improve presence/discovery.
+Running, Connected idle, Last seen and Unknown are distinct observations. Never
+infer active work from PID existence or an open MCP connection alone. Optional
+presence failure cannot prevent manual connection and queue inspection.
 
-- Search question, outcome, why, topic name, and message excerpts. Search is local to the selected session; the picker searches project/session titles separately.
-- Combine status, topic, and owner filters with AND semantics. Multiple values within a filter use OR. Preserve ancestor context for matches and label contextual ancestors distinctly.
-- Show a clear-results action and a no-results state. Filtering does not mutate expansion preferences.
-- Graph displays the same items and statuses. Parent connections form the tree; replacement connections use a visually distinct edge. Support pan, zoom, fit, selection, and jumping to detail.
-- The tree is the full keyboard-accessible representation. Graph is a secondary overview; do not make any action graph-only.
+No accounts/cloud/telemetry, model API client, terminal emulator, private rollout
+parsing, automatic remote setup, provider downloads, automatic worktrees, PR
+execution UI or managed-host launching in release1. Adapter APIs permit later
+capabilities without promising unsupported controls today.
 
-### Keyboard and accessibility
+## Quality and acceptance
 
-| Key | Behavior outside text inputs |
-| --- | --- |
-| Up / Down | Previous / next visible tree row |
-| Right / Left | Expand or descend / collapse or ascend |
-| Enter | Open focused item's detail |
-| `a` | Focus the answer control when the item is waiting |
-| `/` or Cmd+F | Focus search |
-| Escape | Close overlay, clear search focus, or leave answer editing without discarding a draft |
-| Cmd+Enter | Submit a valid answer from its editor |
-| Tab / Shift+Tab | Predictable movement through controls and panels |
-
-Use visible focus, semantic buttons, tree semantics with level/expanded state, labelled controls, and status icon plus text. Respect reduced motion and system appearance. Ensure muted text remains readable in both themes. Announce important live changes without repeatedly interrupting typing or screen-reader focus.
-
-## State vocabulary and demo normalization
-
-Keep the seven specified statuses: `open`, `waiting_on_me`, `in_progress`, `decided`, `done`, `dropped`, `replaced`. Keep the five types: `question`, `decision`, `finding`, `task`, `explanation`. Type describes the item; status describes its progress.
-
-- Normalize the example's **Explained** to type `explanation`, status `done`, with the explanation as outcome.
-- Represent **Replaced, then dropped** as an original item in `replaced`, pointing to a replacement item in `dropped`. Both keep outcome and why. Label any extra demo sentence needed to make that relationship coherent as illustrative data.
-- Use the supplied SDK cache review, shared-cache service question, and duplicate-agent-rule question as the canonical demo. Preserve their language and hierarchy. Mockup-only scenarios may supply visual fixtures; they do not replace this demo.
-- Demo generation creates an isolated session and never changes a real PR, source file, or agent setting.
-
-## Quality targets
-
-Measure these on a documented reference Mac rather than treating them as guarantees before measurement: external writes visible within one second; answer submission acknowledged by the local store within 250 ms at p95; first usable session view within two seconds; search within 150 ms at p95 for a 2,000-item / 5,000-message fixture. Graph may initially show a selected topic for large sessions, with an explicit all-topics action and a visible scope label.
-
-The app must remain useful with an empty session, denied notifications, an unavailable project, a malformed file, and an agent that has not picked up an answer. These states need explicit UI, not a spinner that never finishes.
-
-Target dispatch within one second of durable save when the managed agent is idle; provider response time is excluded. Busy, stopped, permission-blocked, signed-out, rate-limited, incompatible, and uncertain-delivery states require specific actions/status. Permission cards remain visible outside the Conversation panel and cannot be answered by selecting an ordinary task option.
+Target on a documented reference Mac: normal external writes visible within1s,
+local save p95≤250ms, first usable view≤2s, local search p95≤150ms with2,000 items /
+5,000 messages. These are measurements to pass, not current performance claims.
+Both themes, keyboard/focus, errors/recovery and offline assets must pass. Use
+the canonical SDK-cache example from DESIGN_PROMPT and handoff scenario fixtures.
+The [verification ledger](low-level/VERIFICATION.md) specifies executable gates.

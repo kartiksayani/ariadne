@@ -1,87 +1,95 @@
-# Design translation and scope decisions
+# Design translation and release-one visual contract
 
-## Sources actually reviewed
+This document translates the supplied Ariadne UI handoff into the release-one interface. It is authoritative for layout, visual treatment, and which supplied controls appear. Product behavior comes from `PRODUCT.md`; storage, commands, queue semantics, and runtime ownership come from `LOW_LEVEL_DESIGN.md` and its linked low-level specifications. When a prototype differs from an explicit release-one decision below, preserve the prototype's visual language and apply the release-one behavior.
 
-- Repository `DESIGN_PROMPT.md`: short product/design brief and canonical SDK-cache example.
-- `designs/Ariadne UI mockups.zip`: 16 files, 382,719 uncompressed bytes. Its `design_handoff_ariadne/README.md` is the detailed 433-line handoff, distinct from the repository design prompt.
-- Main `Ariadne.dc.html`, board `Ariadne Mockups.dc.html`, component files, scenario entry pages, status diagram, and `_ds/.../styles.css` inspected as reference source.
-- Two representative prototype screens rendered in an isolated browser and visually inspected: [dark tree/detail](assets/mockup-dark-tree.png) and [light graph/detail](assets/mockup-light-graph.png). These show scripted mockup data, including the optional message rail; they are not screenshots of an implemented Ariadne app.
+## Reference package
 
-The export is HTML plus a custom component/template runtime. `support.js` loads React, ReactDOM, Babel, fonts, and icons to render demo behavior. Port reusable markup, CSS variables, dimensions, and SVG shapes into React components; do not ship its runtime compiler, CDN imports, fake agent timers, or hard-coded session data. Preserve the original ZIP unchanged. In M0, extract a reference directory with a manifest of source checksums and component mappings.
+The immutable source is [`designs/Ariadne UI mockups.zip`](../../designs/Ariadne%20UI%20mockups.zip). It contains the 433-line handoff README, main prototype, board, component sheets, status diagram, scenario pages, Nocturne stylesheet, and its prototype-only runtime. The source inventory, SHA-256 digests, and member sizes are in [`assets/design-manifest.json`](assets/design-manifest.json); frame-to-acceptance mapping is in [`DESIGN_TRACEABILITY.md`](DESIGN_TRACEABILITY.md).
 
-## Visual contract
+The existing `assets/mockup-dark-tree.png` and `assets/mockup-light-graph.png` are rendered design references, not Ariadne application screenshots. Port markup, dimensions, tokens, and SVG treatment. Do not ship `support.js`, its custom compiler, remote font/icon imports, fixture timers, or scripted agent behavior. Bundle required fonts and icons locally with their licenses.
 
-Target viewport: **1600 × 960**. Main frame rows: **48 px header, 38 px tabs, flexible body, 30 px footer**. Persistent left waiting column: **300 px**. Center: at least **560 px**. Detail: **400 px** when selected. The optional **240 px** message rail is deferred. Independent vertical scrolling preserves header and footer; maintain the waiting column on screen when the center/detail require horizontal overflow.
+## Product shape shown by the UI
 
-Keep the Projects tab, All sessions tab, closable session tabs, session header, view switch, status chips, topic picker, search, and footer keyboard hints. Only show controls and shortcut hints implemented in release one; omit Archive and Messages controls for their deferred features. Closing a tab only removes the tab. Projects are the known registered roots; All sessions lists every known session, not only open tabs. Restore tab order, selection, expansion, search/filter preferences, drafts, and scroll positions between launches.
+Ariadne is a local second-screen tree, history browser, and input queue for **existing terminal sessions**. The primary interface is the project/session navigator, persistent Waiting on me column, session tree or graph, item detail, and message rail. Claude Code Mod is the primary proven bridge; Codex uses its native queue/history bridge. Tree writes, replies, outcomes, and status changes use explicit agent CLI/MCP operations. The bridge reports delivery and lifecycle evidence; it is not a second item-authoring API.
 
-Minimum supported v1 window: 1000 × 700. At narrow widths, keep the waiting column pinned and let center/detail occupy a horizontally scrollable region. An item detail may be closed explicitly to recover width. No mobile layout or resizable panels in v1; neither is designed in the handoff.
+Release one does not launch agents, host their tool execution, present agent tool-approval cards, or provide a chat transcript composer. An owner can send an item-scoped bring-up, answer/reply, note, follow-up, drop, or reopen request from any item status; a Replaced item offers follow-up only and cannot be reopened in place. The request is stored and queued; only the agent changes item status. Saving a response does not move an item to In progress. The app shows `Saved`, queue/delivery state, and agent receipt only when supported by evidence. `Later` is a local view preference and never reaches the agent.
 
-| Token / component | Target |
-| --- | --- |
-| Dark background / surface / text / accent | `#161826` / `#232532` / `#e9e9ed` / `#9184d9` |
-| Light background / text / accent | `#f3f5fe` / `#292b31` / `#796cbf` |
-| Dividers | Dark text at 16%; light neutral-900 at 14% |
-| Typography | Inter 400/500, locally bundled with license; Menlo/system monospace for IDs/keycaps |
-| Detail / page title / item | 20 px / 18 px / 15 px with original line heights |
-| Metadata | 12–12.5 px; section labels 11 px, medium, tracked uppercase |
-| Radius | 4 px keycaps; 6 px badges; 8 px cards/buttons; 14 px dialogs |
-| Primary controls | Accent outline; preserve outline treatment rather than generic filled buttons |
-| Tree indentation | 24 px per level; neutral guides and accent selected ancestry |
-| Status badges | Distinct shape plus text/color; 22 px high pills |
-| Graph nodes | Approximately 190 × 66 px, two-line preview, full question in detail |
-| Graph edges | Curved tree edges; selected path accent; dashed labelled replacement links |
-| Focus | 2 px accent outline with `:focus-visible` |
+Project registration and session binding are explicit. Optional discovery may offer read-only candidates; it never silently binds a transcript or guesses which terminal owns it. Binding status is evidence-based and qualified when disconnected. Closing an Ariadne session is a guarded metadata operation and never terminates the host process. The complete item message history and round snapshots support the handoff's Back and forth detail; the message rail is included in release one.
 
-Port the complete ramps/status colors from the source CSS rather than inferring them from screenshots. Package Inter and the required Phosphor regular/fill icons locally, preserving their licenses. Use the spiral mark from the reference. Fonts/icons must render with the network disabled.
+Topics can be archived/restored only when all their items are terminal and no queued, in-flight, or needs-attention input targets them. Sessions can be closed only when all items are terminal, no input is unresolved, and dispatch is paused; the UI offers an explicit Pause then Close flow and displays blockers. They can be reopened without starting the host process. Continue in this session creates a snapshot copy in the target session, retains source references for copied topics, items, messages, rounds, and answers, previews the summary, and requires explicit send. The source topic is never modified and the copied topic is not a shared mutable cross-session object. These archive, close, reopen, continue, message-rail, and all-item owner-action decisions are deliberate release-one restorations of controls shown in the mockups.
 
-Use **System** as the initial theme preference, with Light and Dark overrides. Match each theme separately; contrast/focus fixes may adjust low-opacity text if measured accessibility would otherwise fail. Document such a change with before/after screenshots.
+## Layout and responsive behavior
 
-## UI component map
+Reference viewport is **1600 × 960**. The frame has a **48 px header**, **38 px tab bar**, flexible body, and **30 px footer**. The body uses a persistent **300 px** Waiting on me column, a center of at least **560 px**, a **400 px** detail column when open, and a **240 px** optional message rail. Panels scroll vertically independently; header, tab bar, footer, and waiting column remain available. At the supported minimum **1000 × 700**, center/detail/rail occupy a horizontally scrollable region; the waiting column remains pinned. Detail and rail can be closed explicitly to recover width. No mobile reflow or user-resizable panel dividers are specified by the handoff.
 
-| Reference source | Production responsibility |
-| --- | --- |
-| `Ariadne.dc.html` chrome | AppShell, Header, SessionTabs, Footer, ProjectList, SessionList |
-| `Item Row.dc.html` | TreeRow, ancestor guides, question/outcome, selection and status |
-| `Status Badge.dc.html` | StatusIcon, StatusBadge, shared status labels/colors |
-| `Answer Control.dc.html` | OptionChoice, recommendation, consequence, free-text editor, submit states |
-| `Message Excerpt.dc.html` | ItemTimeline with author/time and touched-item context |
-| Main detail markup | ItemDetail, breadcrumbs, outcome/why, replacement and children, answer receipt |
-| Main waiting markup | GlobalWaitingPanel, WaitingCard, SentSection |
-| Main graph markup | TopicGraph, GraphNode, replacement edges, overview controls |
-| `Component Sheet.dc.html` | Development-only component gallery for both themes and all states |
-| New managed-session controls | NewSession dialog, Conversation panel, prompt composer, activity summary, permission cards, Stop/Resume and delivery recovery; use the supplied tokens |
+Keep Projects, All sessions, and closable session tabs. Closing a tab changes only navigation state. Projects contains registered roots; All sessions lists all known sessions, including those not open as tabs. Project and session pages show active/closed groupings and binding evidence. Preserve tab order, selected tab/item, tree expansion, search and filter state, drafts, rail state, and scroll anchors across launch.
 
-## Explicit reconciliation of the sources
+### Shared visual tokens
 
-The owner's managed-session correction takes precedence over the build prompt's next-turn baseline. Other data/behavior follows the prompt. The following decisions make additions and deviations reviewable.
+The complete source ramps and Nocturne variables are documented in the zipped `design_handoff_ariadne/README.md` under Design tokens and in `_ds/nocturne-…/styles.css`. These summary values are anchors; use the manifest to locate the exact source file.
 
-| Mockup feature or assumption | Release-one decision | Reason |
+| Element | Dark | Light |
 | --- | --- | --- |
-| Global waiting queue and Sent section | Keep across known sessions | Makes unanswered work visible from every tab |
-| Project/session pages and tabs | Keep with explicit registration, New session and Resume | Required session switching plus managed conversation controls |
-| Transcript auto-discovery, “Connected,” “Agent running,” iTerm identity | Managed sessions show measured process state; external sessions show last activity | The runtime supplies liveness; no transcript scraping or guessed terminal ownership |
-| MCP integration / AppleScript typing | Managed CLI protocols carry owner input; local stdio MCP records tree changes | Meets automatic delivery requirement without terminal injection or preview Channels |
-| Preselected recommendation and Enter sends | Mark recommendation but require deliberate selection; Enter opens detail outside answer editing, Cmd+Enter sends from editor | Prevent a navigation key from committing an unchosen answer; visible recommendation styling is retained |
-| Full-mode answer treats option and free text as alternatives | Allow one selected option with optional explanation, or free text alone; show both parts in the submitted-answer summary | Lets the owner accept an option while adding a condition without losing the explicit selection |
-| Search question/outcome/short label | Search question/outcome/why/topic/message excerpts; no independently authored short-label field | Makes provenance and the reason for a decision discoverable without requiring another label to maintain |
-| Sending → Received → In progress → Resolved | Saved/busy queue/accepted/received/uncertain/resolved from persisted facts | Host acceptance and agent receipt are separate; provide Resume/recovery when required |
-| UI answer does not itself change status in handoff | Atomically move waiting to in_progress, labelled “Answered · awaiting agent” until receipt | Build prompt says answering moves the item along; the delivery label prevents implied execution |
-| Shared topics across sessions, Continue, reroute to a different running agent | Defer; session-bound topic and answer recipient | Avoid ambiguous recipients and multi-file transactions in the initial JSON store |
-| Archive topics / close sessions that hide waiting questions | Defer archive/session-closing actions; retain tab close and terminal item history | No owner question should disappear from the queue through an unrelated view action |
-| Bring it up / note / drop / park / follow-up owner controls | v1 UI supports answering and answer corrections; agent CLI supports reopen/drop/children | These extra submission types exceed the primary read/answer workflow; architecture preserves history for later additions |
-| Optional message rail | Defer; keep complete per-item timeline | Explicitly optional in the short design brief; limits default density |
-| “Explained” badge | Display “Explained” for explanation + done, persist done | Preserves design language without adding a status |
-| PR/file/doc links | Show labelled targets and copy action; no previews or automatic navigation | Keeps provenance UI local; provider processes handle their own network calls |
-| Native notification and pin-window controls absent from visual designs | Add compact native menu/settings controls using existing tokens | Required by build prompt |
-| Initial prompt, follow-ups and tool permissions absent from visual designs | Add a collapsible Conversation panel in the detail region plus global permission cards | Managed sessions need direct controls; preserve the main tree/queue layout |
+| Background / surface / text / accent | `#161826` / `#232532` / `#e9e9ed` / `#9184d9` | `#f3f5fe` / `#f3f5fe` / `#292b31` / `#796cbf` |
+| Divider | text at 16% | neutral-900 at 14% |
+| Status | Open neutral-400; Waiting accent-400; In progress `oklch(0.82 0.09 78)`; Decided `oklch(0.8 0.075 178)`; Done `oklch(0.8 0.085 148)`; Dropped/Replaced neutral-500 | Open neutral-600; Waiting accent-600; In progress `oklch(0.55 0.11 68)`; Decided `oklch(0.52 0.08 185)`; Done `oklch(0.52 0.1 148)`; Dropped/Replaced neutral-700 |
 
-Deferred entries are not silently part of the v1 acceptance list. If the owner later wants the extended handoff workflow, implement it as a separate expansion after the required release passes. The current user delegated these scope choices; no additional approval is pending.
+Use the entire neutral/accent ramps from the stylesheet. Use Inter 400/500 and system/Menlo monospace for keycaps and secondary IDs. Bundle Phosphor regular and fill icons, the spiral mark, and fonts so the application works offline. Initial theme is System with Light and Dark overrides. Status has a distinct shape and a text label, never color alone. Preserve the source's accent-outline primary buttons, readable dimmed terminal rows, visible focus, and icon-plus-text states.
 
-## Screens and states to implement and capture
+| Component | Source sizing and treatment |
+| --- | --- |
+| Detail title / page title / item sentence | 20 / 18 / 15 px; preserve source line-height and sentence wrapping |
+| Metadata / section label | 12–12.5 / 11 px; section labels medium, tracked uppercase |
+| Radius | 4 px keycap; 6 px badge; 8 px card/button/node; 14 px dialog |
+| Tree | 24 px per depth; neutral ancestry guides; accent selected path |
+| Status badge | 22 px high pill, icon plus label |
+| Graph node | 190 × 66 px, two-line preview; full item text in detail |
+| Graph edge | Curved parent edge; accent selected path; dashed, labelled replacement edge |
+| Focus | 2 px accent `:focus-visible` outline |
 
-Capture at 1600 × 960 in both themes: Projects, session tree, selected closed item, waiting-item detail, inline option/free-text answer, Sent state, graph, replacement detail, loading, empty session, all-clear, no results, stale/corrupt file, unavailable project, write failure with retained draft, question changed during an answer, New session (Claude default and Codex), Conversation panel, busy queue, permission allow/deny, stopped/resume, auth/compatibility error, uncertain delivery, and active-run quit prompt.
+## Screens and components
 
-Conversation and Item detail are mutually selectable panels within the existing detail region. Preserve a prompt draft when switching to inspect an item. Stream updates do not steal scroll/focus when the owner is reading older activity. A header permission indicator and global request cards remain reachable regardless of the selected project/tab; they are visually distinct from task questions. The mockup's deferred message rail remains deferred.
+| Screen or component | Required contents and behavior | Reference |
+| --- | --- | --- |
+| Global chrome | Ariadne spiral/name, registered project or session context, evidence-based binding state, search, Tree/Graph/Archive view, message-rail toggle, theme control; project/session tabs; footer with implemented keyboard hints and scoped counts | README `Global chrome`; board 1a, 1aa, 1ab, 1z |
+| Projects / project / all sessions | Registered-root cards and project/session groupings, active/closed sessions, topic counts, Open/Go to tab/Close/Reopen controls, first-launch empty-registration state | README `Projects screen`, `Project page`, `All sessions`; board 1p, 1ab, 1ac, 1z |
+| Waiting on me | Cross-session queue where item status is Waiting and there is no Answer for the current question revision whose input is not cancelled/skipped; oldest waiting episode first; plain-language path; question and ask; previous-round/earlier-session context; compact answer; Sent inputs; empty state. A new ask can be Waiting while an older input for that item remains Sent. Archived topics cannot contain waiting items because archive is guarded | README `Waiting on me`; board 1a, 1c, 1l |
+| Session tree | Session evidence bar; status chips and topic selector; topic counts/actions; 24 px nested rows with status, question, outcome/supporting line, selected ancestry, active-descendant summary, search/filter context and local Later marker | README `Session tab`; board 1a, 1n, 1t, 1u, 1w, 1aa |
+| Item row and status badge | Full question and closed outcome; one priority supporting line; descendants summary; hover actions; small/secondary item reference; unique status shape plus text; selected, focus, search, touched-message, open-answer states | README `Components`; `Item Row.dc.html`, `Status Badge.dc.html`; board 1j, 1k |
+| Item detail | Breadcrumbs, type/status/next actor, question, outcome, why/note, prior reopen snapshot, replacement, children, links, answer/delivery history, complete message timeline, and Back and forth rounds with answer/result/message references and child forks | README `Item detail`; board 1b, 1e, 1q, 1r, 1u, 1v |
+| Owner actions / answer | Any unarchived item in an active session can queue bring-up, answer/reply, note, follow-up, drop, or reopen intent; Replaced items offer follow-up only. Waiting choices show option consequence and recommendation; recommendation is not selected by default. One option plus optional text or nonempty free text alone. Save is explicit; local `Later` is separate. | README `Answering inline`; `Answer Control.dc.html`; board 1c, 1e, 1q, 1r, 1m |
+| Graph | One topic at a time with ordered nodes, statuses, parent paths, distinct replacement link, filters, pan/zoom/fit/reveal and selection shared with tree/detail | README `Graph view`; board 1d, 1f, 1aa |
+| Message rail | Current session's complete Ariadne message history, newest at bottom; hover highlights touched items, click pins highlight, selecting item highlights its messages; upward scroll pauses follow and exposes Jump to latest | README `Message rail`; board 1a, 1b, 1f, 1q, 1t, 1u, 1w, 1y |
+| Archive / continue | Archive list with restore; archive guard; continue dialog previews an immutable source snapshot and requires explicit submission into a chosen target session | README `Archive`, `Dialogs`; board 1x, 1y |
+| Loading, empty and failure states | Empty session, first registration, all-clear, loading, stale/unavailable binding, reconnecting, filter reveal, malformed/read-only and write/delivery recovery states preserve last-known content and unsent owner text | README `Empty, loading and edge states`; board 1g–1i, 1m–1p |
+| Component sheet | Both themes and all status/row/answer/message variants, including focus and disabled/error states | `Component Sheet.dc.html`; board 1j, 1k |
 
-Use deterministic demo clocks and the canonical fixture. Compare component dimensions, wrapping, indentation, icons, colors, focus, and selected ancestry with the reference. Antialiasing differences are acceptable; missing states, unreadable text, clipped controls, and spacing/layout drift are not. Keep a small screenshot-diff tolerance for rasterization and require human inspection of changed baselines.
+Full item history is not inferred from a single excerpt. Preserve each message's author, timestamp, excerpt/full recorded text, touched item references, and session-local message number. Preserve each item's rounds (agent ask, owner option/free text, result, messages and forked child IDs) as an ordered snapshot. Current status/outcome remain separate from historical rounds. A round can refine an item without creating a child; a new question creates a child while the parent continues. Reopen keeps the previous outcome/status snapshot. See `DESIGN_TRACEABILITY.md` and the domain specification for persistence details.
+
+## Input, state, and navigation rules
+
+- All owner actions, including messages on closed items, become durable session-scoped input requests. The UI labels the request kind and target; one FIFO queue preserves submission order. Delivery and receipt are separate from item status.
+- Waiting counts use `waiting_unanswered`: item status is Waiting and there is no Answer for the current question revision whose input is other than cancelled or skipped. Once answered, that episode stays out of Waiting even after the input is handled. Sent shows one row per queued, in-flight, or needs-attention input, including generic requests. A new ask can re-enter Waiting while an older input on the same item remains in Sent. Raw status counts remain separate from actionable Waiting counts.
+- Use API `SummaryCounts` consistently: global/project/tray Waiting count is `waiting_unanswered`; Sent counts inputs by queued/in-flight/needs-attention; `items_by_status` is the separate raw status count. Topic and selected-session chips count nonarchived items before local search/filter. Footer shows visible and total scope. Archive has separate topic counts. Partial/inaccessible sources show an incomplete marker, never a false zero. The UI/API mapping for design operation names such as `input.submit` to transport command names is in `low-level/API_AND_MCP.md`.
+- Only the agent updates status. An accepted answer remains visible in Sent until handled (successful matching host turn plus committed domain result), or explicitly cancelled/skipped. Received and Reply published are intermediate labels within Sent. Uncertain delivery blocks later queue work until explicitly resolved. Resend uses the same operation identity when the runtime proves the first delivery did not occur; uncertainty offers explicit recovery and a duplicate-work explanation.
+- `Later` only changes local visibility. It does not change owner/status fields or send a request.
+- Archive requires all topic items terminal and no queued, in-flight, or needs-attention input. Close session requires all items terminal, no unresolved inputs, and dispatch paused; show blockers and offer an explicit Pause then Close flow. Neither operation kills, closes, or types into a terminal process. Restore/reopen only restores Ariadne metadata.
+- Continue makes a copy in the target session with immutable source references. Preview and owner confirmation precede send. A failed target write leaves the source untouched.
+- Search is local to the selected session and includes question, outcome, why, topic, and message excerpts; it excludes provider raw activity and secrets. Status/topic/owner filters combine with AND; values within each filter combine with OR. A reveal temporarily expands ancestry and displays an outside-filter banner without clearing filters or overwriting the owner's saved expansion choices.
+- Use the same reveal route from Waiting, search, tree links, graph, tray, notifications, archive, and message timeline. Preserve selection, focus, scroll anchor, and drafts through live snapshots.
+
+Keyboard behavior is specified in `low-level/UI_AND_NATIVE.md`; the footer only advertises release-one bindings. A recommended option is visual guidance only. Number keys select; they never submit. Enter opens the selected item or activates ordinary navigation; Cmd+Enter submits the focused valid owner input. Escape closes the topmost detail/overlay while keeping drafts.
+
+## Native surface
+
+The tray count and quick list use `waiting_unanswered`, not raw items with Waiting status; oldest unanswered episodes appear first. Sent generic requests do not inflate that task-question count. Show separate lifecycle/binding indicators; do not expose host tool approval. Native notifications identify a waiting episode, contain IDs only by default, and route clicks through the same reveal action. Use the single Rust `objc2` UserNotifications delegate bridge already specified in `low-level/UI_AND_NATIVE.md`; do not add a competing delegate. Pin, window geometry, tray, notification, and `ariadne open` details are in that low-level spec.
+
+## Required visual states
+
+Capture at 1600 × 960 in both themes: Projects, project page, All sessions, session tree, selected terminal item, waiting detail, option answer, free-text answer, queued/sent/received and uncertain delivery, full Back and forth rounds with forks, graph, message rail hover/pin/follow-latest, archive/restore, continue preview/commit, session close/reopen guard, first registration, empty session, loading, all-clear, no results, filter reveal, stale/unavailable binding, malformed store, write failure with retained draft, changed question during an answer, and native-route recovery.
+
+Use deterministic clocks and the canonical fixture from `DESIGN_PROMPT.md`. Compare layout, text wrapping, indentation, icons, colors, focus, selected ancestry, rail interactions, and responsive overflow to the supplied references. Raster antialiasing differences are acceptable. Missing states, lost history, clipped controls, inaccurate status/delivery claims, and spacing drift are not. Trace each board frame and requirement to an acceptance ID in `DESIGN_TRACEABILITY.md`.
+
+## Security guidance provenance
+
+The owner explicitly waived the review tool organizational guidance for this task. It was not checked. Security boundaries in these documents are grounded in the approved local-only architecture and user-provided decisions; this note does not claim organizational guidance review.

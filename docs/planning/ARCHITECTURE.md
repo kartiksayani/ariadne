@@ -1,144 +1,155 @@
-# Architecture and persistence
+# Ariadne architecture — implementation baseline
 
-Status: chosen implementation design, pending the explicitly named platform proofs in the roadmap. No application code has been built. See [DECISIONS](../../DECISIONS.md) for reasons and alternatives.
+**First-release scope:** [Personal release decisions](PERSONAL_RELEASE.md) and
+[commit quality checks](DEVELOPMENT_CHECKS.md) govern what ships now. Public
+plugin installation and exotic-failure recovery are deferred; organized crates,
+discovery/liveness and optimized graphs remain required.
 
-For concrete module interfaces, fields, algorithms and error policies, use [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md). This file summarizes those contracts.
+Revision 3 · 2 October 2026. Planned product; two existing-session transport POCs
+have passed. [Build handoff](BUILD_HANDOFF.md) is the implementation entry point.
+[Design traceability](DESIGN_TRACEABILITY.md) maps the supplied screens to work.
+This revision replaces the earlier managed-process architecture in place.
 
-## System boundaries
+## Product boundary
+
+Ariadne is a local macOS Tauri 2 app and Rust CLI sharing a versioned JSON store.
+It adds a structured tree and complete item conversations to **existing** coding
+sessions. Claude Code is primary; Codex is equally required. No model client,
+provider credentials, terminal emulator, transcription service, or cloud backend
+is embedded. Ordinary provider inference/networking remains the user's host's
+responsibility. Ariadne uses local files, pipes and Unix-domain sockets only.
 
 ```mermaid
-flowchart LR
-    APP[Tauri Rust host] <-->|private pipes| RUN[Rust agent worker]
-    RUN <-->|structured process I/O| C[Claude Code / Codex]
-    C -->|stdio tools| MCP[Ariadne MCP]
-    C -->|external-session commands| CLI[ariadne CLI]
-    MCP --> CORE[Shared Rust domain + store]
-    CLI --> CORE[Shared Rust domain + store]
-    UI[React interface] -->|typed Tauri commands| APP
-    RUN --> CORE
-    APP --> CORE
-    CORE --> JSON[Project session JSON files]
-    JSON -->|directory watch + reconciliation| APP
-    APP -->|revision event| UI
-    APP --> MAC[Tray / notifications / window]
-    CORE --> REG[Local project registry]
+flowchart TB
+  UI[React: supplied mockup screens] <-->|typed Tauri commands + revision hints| APP[Tauri host]
+  APP --> CORE[ariadne-core: validated domain commands]
+  CLI[Rust CLI] --> CORE
+  MCP[Optional stdio MCP facade] --> CORE
+  CORE <-->|locked atomic transactions| STORE[One JSON file per project session]
+  APP --> INDEX[Project registry + validated summaries]
+  APP --> SCHED[One FIFO scheduler per binding]
+  SCHED <-->|versioned agent protocol| ADAPT[Adapter supervisor]
+  MOD[Claude Mod in existing process] <-->|bridge CLI + private app socket| ADAPT
+  ADAPT <-->|queue CLI + read-only Unix WebSocket history| CODEX[Existing Codex daemon / thread]
+  ADAPT <-->|private JSONL| FUTURE[Registered adapter executable]
+  MOD --> CLAUDE[Existing Claude conversation]
+  CLAUDE -->|explicit replies / tree edits / result| CLI
+  CLAUDE --> MCP
+  CODEX --> CLI
+  CODEX --> MCP
+  APP --> NATIVE[Window / tray / notifications / route service]
 ```
 
-The app owns managed conversations through a Rust worker and provider-specific process adapters: Claude Code first, Codex second. A local stdio MCP server exposes shared domain commands. There is no production network listener, detached daemon, database service, or private transcript parser. See [AGENT_RUNTIME](AGENT_RUNTIME.md) for process lifecycle, permission handling, and outbox scheduling.
+## Two independent contracts
 
-Ariadne's own UI/store/MCP components make no network calls. Managed provider children make their normal authenticated provider/tool calls; offline operation covers history, tree, and answer saving, not inference. Closing the window hides it and keeps managed work running. Quit stops owned runs after the active-run prompt; independent terminal agents can keep using the CLI. Reopening reconciles state without replaying notification backlogs. External links have copy actions, with no automatic previews or network navigation.
+**Transport:** app outbox → adapter → existing conversation; adapter reports
+acceptance, matching turn, outcome and presence. Captured host final text is
+bounded diagnostic activity, never an automatic item reply.
 
-## Repository and dependencies
+**Domain:** agent calls CLI/MCP with explicit binding, operation and input/attempt
+IDs to publish full item replies, statuses, topics and children. The core
+validates and commits. UI reads that same committed state. Neither prose parsing
+nor model-written IDs alone establish a session binding.
 
-```text
-Cargo.toml                         # workspace
-crates/ariadne-core/               # model, commands, validation, store, registry
-crates/ariadne-cli/                # clap commands and hook adapters
-crates/ariadne-mcp/                # stdio domain tools and permission bridge
-crates/ariadne-runtime/            # worker, Claude/Codex adapters, outbox dispatch
-apps/desktop/src-tauri/            # Tauri host, watcher, macOS adapters
-apps/desktop/src/                  # React / TypeScript UI
-packages/agent-rules/              # one canonical rule text
-integrations/claude/               # managed launch plugin + optional external hooks
-integrations/codex/                # app-server launch rules + optional external hooks
-fixtures/                         # canonical demo, migration and race cases
-tests/                            # process and integration scenarios
-scripts/                          # build, install, verification
-docs/planning/                    # this plan and acceptance contracts
-designs/                          # original archive and extracted reference assets
-```
+A message is handled after **both** a committed structured result and a successful
+matching host turn. A result may create more questions; handled does not mean the
+item is closed. Missing results, interrupted turns and uncertain sends stop that
+binding's FIFO pending reconciliation. See [queue algorithm](low-level/QUEUES_AND_RECOVERY.md).
 
-Use the current official Tauri 2 React/TypeScript template at implementation start. Keep its Vite frontend. Choose npm with `package-lock.json` and a Cargo workspace with `Cargo.lock`; commit both. Pin the actual Rust toolchain and Node version used in M0. Record versions after scaffolding instead of guessing compatible patch versions in this plan.
+## Ownership and implementation map
 
-Core crates: `serde`/`serde_json`, `clap`, `thiserror`, `notify`, an OS-backed file-lock implementation, UUID generation for session/operation identifiers, and test-only temporary-directory/property-test utilities. Use plain CSS with extracted design tokens; React context/reducer and pure selectors suffice initially. Graph uses a dedicated React SVG component with a deterministic tree layout, avoiding a full diagram editor dependency. Use inline/local SVG icons. Rust types own the wire model; generate TypeScript DTOs and JSON Schema from those types and check generated files for drift. Validate semantic invariants in Rust, beyond what JSON Schema can express.
+| Module / planned path | Owns | Does not own |
+|---|---|---|
+| `crates/ariadne-domain` | serde models, IDs, invariants, pure transitions | IO, provider enums |
+| `crates/ariadne-store` | locks, atomic JSON, migrations, registry, repair | agent scheduling |
+| `crates/ariadne-core` | commands, authorization by local actor scope, receipts, queries, result/turn join | renderer/provider protocol |
+| `crates/ariadne-agent-protocol` | adapter DTOs, capabilities, normalized events | host-specific formats |
+| `crates/ariadne-runtime` | supervisor, per-binding lease, dispatch, event reconciliation, local control socket | domain text inference |
+| `crates/ariadne-adapter-claude` + `integrations/claude` | Mod bridge translations and resources | permissions or ownership of Claude |
+| `crates/ariadne-adapter-codex` | native queue sender + daemon history observer | daemon startup, resume, tool approvals |
+| `crates/ariadne-cli` | thin `ariadne` binary: clap public commands, internal bridge, MCP alias | alternate storage implementation |
+| `crates/ariadne-mcp` | shared rmcp transport library + thin `ariadne-mcp` stdio binary | business rules, separate persistence |
+| `apps/desktop/src-tauri` | Tauri commands, lifecycle, watchers, native service | duplicate business rules |
+| `apps/desktop/src` | React components, selectors, drafts, navigation | filesystem/provider access |
 
-The runtime uses Tokio process/pipes and the official Rust `rmcp` server/stdio implementation, with exact compatible versions locked in M0. Keep host event parsing behind adapter traits and fixture tests. Bundle the Ariadne worker with the app; use the user's installed provider executables. No production Node/Python runtime is required.
+Use serde + serde_json, UUID, chrono UTC, sha2, thiserror, fs2 advisory locks,
+notify directory watching, Tokio runtime, clap CLI, schemars JSON Schema and
+ts-rs TypeScript generation. Use tungstenite over UnixStream for Codex framing;
+retain the Python POC as a fixture/reference, not a production dependency.
+Use the official Rust MCP SDK (`rmcp`) for its stdio framing/tools wrapper.
+Use one root Cargo workspace, resolver 2, workspace dependencies and Cargo.lock;
+the three entry points are the Tauri app, `ariadne`, and `ariadne-mcp`. Both MCP
+entry commands call the same `ariadne_mcp::serve_stdio()` library function.
+The Vite React/TypeScript frontend lives in the desktop npm workspace. Keep
+validation/transitions/transactions out of Tauri handlers and transport wrappers.
+Codex wire DTOs are generated from the pinned host's JSON Schema with typify;
+they remain private to its adapter. See the linked protocol-generation recipe in PROCESS_AND_PROTOCOLS section 6.
+Dependency resolution and exact lockfiles are a mechanical M0 task; see handoff.
+CSS modules + source design variables, React reducer/context, SVG graph; no
+remote fonts, UI framework redesign, graph service, Redux or database required.
 
-Keep platform code in the desktop host and behind a small interface so the store and CLI have no Tauri dependency. This makes race and crash tests fast and leaves future portability possible without implementing other platforms now.
+Integration maturity is a release constraint: Claude delivery needs the Mod's
+active prompt submission API; observational hooks cannot replace it. Codex's
+local protocol is version-gated and experimental. The shared store retains the
+required JSON snapshots with ordinary concurrency/save checks, not a second JSONL source of truth.
+See [protocol compatibility](low-level/PROCESS_AND_PROTOCOLS.md#6-compatibility-and-permissions)
+and [storage tradeoff](low-level/DOMAIN_AND_STORAGE.md#storage-format-decision).
 
-## Files and discovery
+## Processes and lifetime
 
-```text
-<project>/.ariadne/project.json         # immutable project UUID + session metadata
-<project>/.ariadne/sessions/<uuid>.json # one authoritative snapshot per session
-<project>/.ariadne/locks/<uuid>.lock    # stable lock inode, never rename/delete routinely
-<project>/.ariadne/backups/             # last known-good snapshot / migration backups
-<project>/.ariadne/setup-manifest.json  # project setup ownership journal
-<project>/.ariadne/integrations/       # generated non-secret managed launch resources
-<project>/.ariadne/locks/runtime.lock  # worker-held lease for one managed run per root
-~/.ariadne/projects.json               # rebuildable project-path index
-~/.ariadne/preferences.json            # appearance/window/UI preferences
-~/.ariadne/integrations/                # installed resources and global setup journal
-```
+One desktop instance supervises adapters for many sessions, including several
+sessions in the same project. Exclusivity is **per binding**, not per project.
+Project locks serialize filesystem mutations only. CLI and MCP calls are short
+lived or tool-server processes that reuse the same core even when the app is off.
 
-`setup` adds a marked `.ariadne/` entry to the project's `.gitignore`. Project-local storage keeps agent writes inside normal workspace boundaries and makes the history travel with an explicitly moved project. The global registry is an index, not the authority for session contents. Projects are identified by UUID, not basename; store canonical root paths in the registry. Separate worktrees are separate project roots by default.
+The desktop's private Unix control socket is the only way a Claude Mod claims
+new work. No desktop means no new dispatch for either provider. Closing the
+window hides to tray; Quit stops dispatch and its own workers, but never kills,
+interrupts, resumes or changes permissions of an external host. Already delivered
+work may finish and commit domain data while the app is closed. Claude lifecycle
+reports persist through the CLI; Codex reconciliation reads host history on reopen.
 
-Project resolution: explicit `--project`, then nearest ancestor containing `.ariadne/project.json`, then Git worktree root for initialization. Non-Git folders are supported through explicit setup. Never scan the whole home directory to discover sessions. Setup and **Add project** register a root; opening a project/session also reconciles its index. Missing roots remain visible as unavailable, with **Locate project** and **Forget from list** actions; forgetting does not delete session data.
+## Storage, trust and failure boundaries
 
-Creation commits the session first and updates project metadata/registry afterward. A crash between steps is repaired by enumerating the registered root's `sessions/` directory. External host binding creation is serialized under the project metadata lock; a new, unadvertised random-UUID session can be created exclusively without a second lock and published with its binding. Managed launch first publishes the Ariadne session/consumer, then records the host ID returned by initialization under the session lock; the project runtime lease prevents competing launches. Registry-write denial does not roll back a committed session: return a discovery warning and allow explicit app registration. External hooks need no writes outside the project.
+Canonical data is `<project>/.ariadne/sessions/<uuid>.json`, with project identity,
+locks and backups beside it. Global `~/.ariadne` holds project registration,
+adapter installation/configuration, UI preferences, binding index and private
+runtime files. Project roots are explicit or registered by a connection; no
+private transcript crawler. Global indexes are repairable, not the sole copy of
+session history. [Storage algorithms](low-level/DOMAIN_AND_STORAGE.md).
 
-No cross-file atomicity is assumed. Acquire only one transaction lock at a time. The worker's separate nonblocking runtime lease is obtained before any transaction and never awaited inside a store lock. Runtime binding, run records, outbox entries, and pending permission decisions live in the same authoritative session snapshot, so saving an answer and queuing delivery is one transaction. Metadata and registry use the same atomic-file discipline. User UI preferences are independent.
+The local OS account is the trust boundary. Binding handles prevent accidental
+cross-session routing, not malicious access by programs already running as that
+user. Validate scope and generations on every write. No remote API, automatic
+plugin downloads, token copying, HTML execution, hidden-reasoning capture, raw
+transcript imports or default payload logs. Desktop commands never accept an
+arbitrary write path; registered IDs resolve to validated roots.
 
-## Transaction algorithm
+Ariadne-owned adapter executables are trusted local code. They use the same
+capability contract as the first-party adapters; extension registration is
+explicit. Missing optional capabilities disable only their controls. A third
+fake executable must work without core/UI changes before extensibility passes.
 
-Every mutating entry point, including desktop answers, MCP calls, runtime delivery state, and CLI acknowledgments, calls the same core service:
+## Design grounding and scope
 
-1. Resolve a registered project/session from validated identifiers.
-2. Acquire an exclusive advisory lock on the session's stable sibling lock file. Bound the wait to two seconds and return `store_busy` with a retry hint on timeout. Process exit releases OS locks; never infer ownership from a PID file.
-3. Read the latest snapshot **after** acquiring the lock; enforce size limits, schema version, structural validation, and semantic invariants.
-4. Check the operation's idempotency key and relevant expected item revisions. If the operation was previously committed with the same input, return its prior result. Same key with different input is an error.
-5. Apply a domain command to a fresh in-memory snapshot, update backlinks/events, increment session revision once, and validate the complete result.
-6. Serialize to a uniquely named temporary file in the same directory, with restrictive permissions. Write completely and sync the file. Preserve the previous valid snapshot through an atomic backup update.
-7. Atomically rename the temporary snapshot over the live file, sync the containing directory using the supported macOS mechanism, and release the lock. Report success only after the commit finishes. If post-rename durability fails, return an explicit uncertain-commit error and let the caller query/retry by operation key.
+Implement the actual waiting panel, tabs/project lists, sentence-based tree,
+item detail, rounds/forks, message rail, graph, owner actions and edge states.
+Archive/close are guarded against hiding unresolved work. Continue creates a
+provenance-linked snapshot copy, not a cross-file shared mutable topic. Exact
+source-to-component mapping and intentional differences are in [DESIGN](DESIGN.md).
 
-All shipped writers cooperate on this lock. Atomic rename alone does not prevent lost updates. Readers need no lock for a consistent snapshot; they must validate before replacing their displayed state. Concurrent unrelated edits merge through rereading and domain commands; no caller sends a whole replacement snapshot from an old UI cache.
+Hooks complement host-state reads and periodic heartbeats: lifecycle events say
+what happened, heartbeat says the bridge is still reachable. Neither a PID nor
+an open MCP pipe alone means the model is running. Discovery/presence is included;
+known-session manual connection satisfies the primary workflow.
 
-Expected item revisions protect semantic conflicts: an answer made against yesterday's options must not land against new options. Unrelated changes to another item should not reject it. A close command also carries the latest answer sequence it has incorporated; a newly arrived answer prevents premature closure.
+## Evidence boundary
 
-The backup protects against accidental damage, not every possible hardware failure. Do not overwrite a malformed live file or silently substitute a backup. Show the last valid in-memory state with a stale-data banner; provide a deliberate `session repair --from-backup` action that preserves the damaged bytes. Unsupported future schemas open as an explanatory error without writes. Migrations run under the same lock, create a versioned backup, and are deterministic; no downgrade or silent reset.
+Live: Claude Code 2.1.287 Mod delivery/hooks; Codex 0.160.0 queue plus history; each
+completed three ordered same-session turns including busy submissions and context
+recall. Production domain results, storage, native packaging and recovery are
+specified below but unimplemented. No architecture decision depends on a future
+choice between unresearched transports. Compatibility tests have fixed inputs,
+expected outcomes and failure policy in [VERIFICATION](low-level/VERIFICATION.md).
 
-## Model invariants
-
-- Session/project UUIDs identify files. Human-friendly hierarchical item IDs (`1`, `1.1`, `1.1.1`) are allocated under the lock, never reused, and scoped to one session.
-- Topics have independent stable IDs and plain-language names. Every item belongs to one topic and has zero or one parent in that topic. Sibling suffixes are monotonic; gaps are allowed. Reparenting and cross-session topic sharing are outside v1.
-- Parents and replacements exist in the same session. No parent or replacement cycles, self-links, missing references, duplicate IDs, or duplicate message numbers.
-- Seven statuses and five types are exactly those in [PRODUCT](PRODUCT.md). Terminal statuses require nonempty `outcome` and `why`. `replaced` additionally requires a replacement ID and cannot be achieved with a generic status update.
-- `waiting_on_me` requires owner `me`, a clear question, and a delivery recipient. Options may be empty for a free-text question; otherwise option IDs are unique and at most one is recommended.
-- Every item records its creation message. Item/message backlinks must agree. Messages may touch multiple items; one transaction can create a message and the items it explains.
-- Never auto-close children when their parent closes. Preserve status history, answers, and replacement history.
-- An answer has an immutable ID/sequence, text or option selection, a copy of the question/options revision it answered, recipient, timestamp, and optional correction reference. Agent receipts are separate from the answer itself.
-
-Provisional v1 bounds: 20 MiB serialized session, 10,000 items, 50,000 messages, depth 32, 4 KiB question/outcome/why each, 16 KiB excerpt/answer, 12 options with 1 KiB label/consequence each, and 32 links per item. Enforce byte limits at command entry and total size before commit. On reaching a limit, explain which limit and how to start another session; never truncate stored content. Validate these choices with stress fixtures before release. Whole-file JSON intentionally prioritizes understandable local state over unlimited history.
-
-## App state and live updates
-
-Rust watches parent directories because atomic rename replaces file inodes. Coalesce bursts for roughly 75 ms, reread/validate, and publish `{session_id, revision}` events. Treat events as invalidation hints, never as the sole record of changes. Reconcile on app focus, wake, watcher error, and a two-second timer while the app runs. Poll registered roots for session additions/removals when native watching misses them.
-
-Frontend startup subscribes first, loads a snapshot second, then compares revisions to catch changes during loading. Ignore older/equal revisions. A selected-session store feeds tree, waiting panel, detail, and graph selectors. Store selection, expanded IDs, filters, and unsent drafts separately from persisted domain state. Reloading state must not reset focus or scroll unexpectedly.
-
-The host maintains lightweight validated summaries for all known sessions to drive tray counts. Missing/malformed sessions show an incomplete-count indicator instead of appearing to have zero waiting items. Selected-session UI reports its own load error. A refresh button and CLI diagnostic provide a recovery path.
-
-Managed runtime events are a separate typed stream for activity/progress; authoritative outbox, permission and lifecycle changes invalidate session snapshots through the same revision mechanism. A lost UI event cannot lose a saved answer or permission decision. The worker also reconciles the store when watcher events are missed.
-
-## macOS integration
-
-- Use one Tauri application instance. Window close hides it; Cmd+Q / Quit offers to stop active managed runs before exit. Persist geometry, screen placement, and always-on-top preference; recover offscreen windows after monitor changes.
-- Tray uses a template icon and adjacent count title. Its oldest waiting items include project/session names. Include open app, pin toggle, and quit. Cap the menu list with **Show all** while the count remains exact.
-- `ariadne open` launches the installed app executable with structured project/session/item arguments. Register Tauri's single-instance plugin first; route arguments to the existing window or queue them until the first window is ready. All navigation sources share one routing function.
-- A notification is produced when an item enters waiting while the app runs, including re-entering after new agent information. Deduplicate by item plus waiting-entry revision; coalesce bursts without dropping items from the tray. Initial load and answer-acknowledgment writes do not notify.
-- Implement one Rust/Objective-C UserNotifications bridge for notification delivery and click routing, with a single delegate and ID-only route payloads. Prove foreground/hidden/cold-launch behavior in M0. Do not install a competing notification plugin delegate. See the native interface in LOW_LEVEL_DESIGN.
-- Ask notification permission through the app's normal first-use flow. Denial leaves the waiting panel and tray fully usable. Default native text can say a project has a question; full question previews are an explicit preference.
-
-## Local security and privacy
-
-The owner explicitly authorized proceeding without the review tool on 1 October 2026. **Organization security guidance was not fetched or checked.** The following are project design decisions, not a claim of the review tool compliance.
-
-- Treat agent-written files, MCP and host protocol frames, hook stdin, question text, links, and answers as untrusted input. Bound and validate protocol input. Render through React escaping; no raw HTML, injected scripts, remote images/fonts, or automatic URL fetches.
-- Bundle assets and apply a restrictive production CSP allowing only Tauri's required IPC and bundled resources. Development hot reload permissions and test automation listeners must not ship in release builds.
-- Expose narrowly typed Tauri domain commands; no frontend arbitrary filesystem or shell execution. Resolve session IDs to backend-owned registered paths rather than accepting a write path from the renderer.
-- Create `.ariadne` directories with owner-only permissions and data files with owner-read/write permissions where supported. Validate path components and reject symlinked session/lock/temporary targets; canonicalize project roots and verify resolved operations remain contained. Do not claim protection against an attacker already controlling the same OS account.
-- Invoke programs with argument arrays; hook setup must safely quote executable paths containing spaces. Never interpolate answer text into a shell command. No downloaded runtime scripts.
-- Store domain provenance, prompt/answer outbox content, delivery evidence and permission decisions; keep streamed activity in a bounded in-memory buffer instead of copying complete host transcripts. Do not log raw protocol/hook payloads or answer bodies by default. History persists locally until explicitly removed; uninstall preserves it.
-- Provider authentication remains with official CLIs. Project trust review, scoped MCP configuration and ordinary tool permissions apply to managed launches; UI answers cannot grant tool permissions. Process cleanup, leases and uncertain delivery follow AGENT_RUNTIME.
-- Shared rules tell the agent that answers are attributed owner input scoped to an item. They do not grant permissions or override higher-priority host instructions.
-- No auto-updater, analytics SDK, remote crash reporter, notification push service, or production HTTP listener. Verify release behavior offline and inspect the bundle for test-only services.
+Organization security guidance was not checked under the owner's the review tool waiver.

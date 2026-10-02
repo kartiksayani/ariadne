@@ -1,0 +1,13 @@
+{
+  "name": "ariadne-poc-local",
+  "owner": { "name": "Ariadne" },
+  "metadata": { "description": "Local Ariadne Mods communication experiment" },
+  "plugins": [
+    {
+      "name": "ariadne-poc",
+      "source": "./plugin",
+      "description": "Local existing-session Mods communication POC",
+      "version": "0.1.0"
+    }
+  ]
+}

@@ -1,104 +1,167 @@
-# UI state, rendering, and macOS integration
+# UI state, item history, and macOS integration
 
-Use [DESIGN](../DESIGN.md) for exact source dimensions, colors and supplied reference screenshots. This document specifies component behavior and backend boundaries. New managed-session controls use the same tokens; they do not replace the primary tree with a chat-first layout.
+Use [DESIGN](../DESIGN.md) for the visual contract and [DESIGN_TRACEABILITY](../DESIGN_TRACEABILITY.md) for frame-to-component-to-acceptance mappings. `LOW_LEVEL_DESIGN.md` and the other low-level specifications own persistence, command validation, bridge protocol, and queue recovery. This document defines renderer state, interaction, and native UI behavior. Release one connects to existing terminal sessions; Ariadne does not launch or host agents or mediate host tool permissions.
 
-## 1. Components and state owners
+## 1. Component tree and state owners
 
 ```text
 AppShell
-  Header: project/session identity, New session, runtime/permission indicators
+  Header: project/session identity, binding evidence, search, theme, archive view
   SessionTabs: Projects / All sessions / opened sessions
   Workspace
-    GlobalWaitingPanel: permission cards, waiting questions, Sent
-    SessionWorkspace: toolbar, topic/filter/search, TreeView | TopicGraph
-    DetailRegion: ItemDetail | ConversationPanel
-  Footer: relevant shortcuts, store/agent availability
-  Dialogs: NewSession, ProjectTrust, Recovery, QuitActiveRuns, Settings
+    GlobalWaitingPanel: waiting questions, Sent
+    SessionWorkspace: session evidence, topic/status/filter/search, TreeView | TopicGraph
+    DetailRegion: ItemDetail
+      ItemActions / AnswerControl
+      BackAndForthRounds / ItemTimeline
+    MessageRail: complete current-session message history
+  Footer: implemented keyboard hints and scoped counts
+  Dialogs: RegisterProject, BindSession, ArchiveTopic, ContinueTopic, ResolveInput, Settings
 ```
 
-Header48px/tabs38px/footer30px; waiting300px, center≥560px, detail400px. Window minimum1000×700; reference1600×960. Waiting stays pinned; center/detail can overflow horizontally at narrow widths. Default detail opens for selected item; Conversation toggle swaps the same region. Project/all-session screens retain global queue and permission access.
+Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, detail 400 px, optional rail 240 px. The target is 1600x960; minimum window is 1000x700. Waiting stays pinned; center/detail/rail can overflow horizontally. Panels scroll independently. Detail and rail can close explicitly. There is no mobile layout or user-resizable split pane in v1.
 
-| State | Owner / persistence |
+| State | Owner and persistence |
 | --- | --- |
-| Session domain | Backend validated snapshots; frontend never saves a replacement snapshot |
-| Global summaries | Backend cache keyed by project/session revision; incomplete roots explicitly flagged |
-| Runtime status | Current worker events plus last persisted lifecycle state, with disconnected qualifier |
-| Activity text/tool summaries | In-memory bounded ring per run; no duplicate private transcript store |
-| Selection/expanded branches/tabs/filters | Per-session UI state in `~/.ariadne/preferences.json` |
-| Answer/prompt drafts | Backend preference draft records, debounced250ms, flushed on navigation/blur; owner-only file permissions |
-| Submission op IDs | Allocated once when Send is pressed, retained with draft until commit is resolved |
-| Theme/window geometry/pin | Global preferences, versioned independently of domain |
+| Session and item domain | Backend validated snapshots; renderer never writes a replacement snapshot |
+| Project registrations and session bindings | Backend registry with explicit project trust and bind/unbind lifecycle |
+| Global summaries | Backend cache keyed by root/session revision; inaccessible roots remain explicitly incomplete |
+| Binding/runtime evidence | Bridge events plus last persisted lifecycle fact, always qualified when disconnected |
+| Complete message/round history | Domain snapshot; includes item/message relations, answer/request entries, round snapshots, forks, reopen snapshots |
+| UI selection, tabs, tree expansion, filters, rail, scroll | Per-session preferences under `~/.ariadne/ui.json` |
+| Owner action drafts and operation IDs | Backend preferences; retain same operation ID while commit status is unresolved |
+| Theme, window geometry, pin, notification watermark | Versioned global preferences |
 
-Draft key: `(project_id,session_id,item_id,question_revision)` for answers; `(session_id,composer_kind)` for prompts. Preserve stale drafts with a changed-question banner; never automatically send after refresh. A draft is unsent data and is not visible to the agent. Cap total drafts at2MiB; on limit retain current in memory and explain persistence failure. No silent eviction of owner text. Closing a tab preserves its draft. Preferences corruption backs up the file and offers Reset UI preferences without touching sessions.
+Drafts are unsent and invisible to the agent. Preserve them across unrelated snapshots, tab close, and detail navigation. A changed target revision shows a review banner and requires renewed submission. Never auto-send a draft after restart. Preferences corruption backs up the file and allows resetting UI preferences without modifying session data. Follow exact caps, file modes, and write/atomicity behavior in the domain and storage specifications.
 
-## 2. Snapshot/event synchronization
+## 2. Snapshot and event synchronization
 
-Subscribe before loading. Maintain one external snapshot store per opened session, exposed through `useSyncExternalStore`; render selectors from immutable validated snapshots. Keep local view/draft reducer separate. Invalidation causes a coalesced reload; if revision≤current, ignore. During reload, show existing data with a subtle updating state; replace only after complete validation. Preserve selected item, scroll anchor and focused input.
+Subscribe before loading. Keep one immutable validated snapshot store per opened session and expose it through `useSyncExternalStore`; keep drafts/view state in a separate local reducer. Coalesce invalidations and ignore revisions no newer than the displayed revision. Replace displayed data only after a complete valid snapshot is available. Preserve selected item, focus, scroll anchor, filters, and draft. A failed read marks the root/session stale or inaccessible; it never looks like an empty queue.
 
-Backend watches parent directories, debounces75ms, validates changed snapshots and emits IDs/revisions. Reconcile on app focus, wake, watcher error and every2s. Normal watched updates target<1s; the2s fallback is explicitly degraded recovery. Summaries cache metadata and stat signatures rather than rereading every session on every React render. Selected session gets priority. A failed read marks that session stale/inaccessible; never silently resets count to zero.
+Watch registered session-store parent directories, debounce changes, validate snapshots in the backend, and emit IDs/revisions rather than file contents. Reconcile on app focus, wake, watcher error, and a bounded fallback poll. Selected session gets priority. External terminal transcript discovery is optional and read-only; it cannot write domain items, establish ownership, or be treated as proof that a terminal is live. Explicit CLI/MCP messages and bridge lifecycle evidence are authoritative.
 
-Global Waiting is all `waiting_on_me` items in accessible registered sessions, sorted by waiting_since then project/session ID and numeric item ID. Pending permission requests appear in a distinct section above task questions. Tray's numeric count remains **task questions**, with a separate permission menu entry, so it matches the build requirement and avoids counting one operation twice. Sent includes outstanding delivery/receipt and uncertain entries; received items leave Sent and remain in their normal tree/detail state.
+Global Waiting contains an item only when its status is `waiting_on_me` and it has no Answer for the current `question_revision` whose input is in any state other than `cancelled` or `skipped`. A handled answer continues to suppress that waiting episode until a new ask changes the question revision. Sort eligible rows by the current waiting-episode timestamp, then project/session and stable item order. Sent shows one row per input in `queued`, `in_flight`, or `needs_attention`, including generic non-answer requests, and links each row to its target question snapshot. A new ask on an item can appear in Waiting while an older input for that item remains in Sent.
 
-## 3. Tree/search/filter algorithms
+Use the API's `SummaryCounts` projection consistently: `waiting_unanswered` drives global/project Waiting counts and the tray; `sent_inputs` counts inputs by `queued`, `in_flight`, and `needs_attention`; `items_by_status` is the separate raw seven-status count. Topic/session chips count nonarchived items before local search/filter. Footer shows visible and total scope. Archived topic counts stay in Archive. Inaccessible roots make counts partial and display an incomplete marker, never zero. These counts are not recomputed from whatever rows happen to be visible after filtering.
 
-Build `childrenByParent`, `itemById`, `messagesByItem`, `activeDescendantCount` in one O(n) pass per changed snapshot, with post-order accumulation for descendant counts. Siblings sort by numeric suffix. Topic order is explicit. Never reassign IDs for sorting.
+## 3. Tree, detail, message rail, search, and filters
 
-Default expansion is determined once per session view: active branches expanded, fully closed subtrees collapsed. Stored explicit owner choices take precedence. An active descendant under a closed parent forces discoverable ancestry in a reveal operation, not a permanent reset of the owner's collapse choice. Rows show question and terminal outcome separately. Soft-wrap full sentences; no fixed-height clipping. Closed styling dims decoration while retaining readable text contrast.
+Build `childrenByParent`, `itemById`, `messagesByItem`, `roundsByItem`, and active-descendant counts once per changed snapshot. Sort siblings by stable numeric item reference while never reassigning references. Store topic order explicitly.
 
-Search uses NFKC + locale-independent lowercase for the **index only**, tokenized by whitespace; every token must match the concatenation of question/outcome/why/topic/excerpts. Stored text is unchanged. Debounce100ms; status/topic/owner filters combine AND, values within each filter OR. Results include matching items and their ancestors, labelled contextual when they do not match. Do not search provider raw activity or secrets. No results state includes Clear filters/search.
+Determine initial expansion once per session view: active branches expanded, fully terminal subtrees collapsed. Persist explicit owner changes. Selecting an item hidden under a collapsed parent uses a temporary reveal path; it does not permanently reset the saved collapse choice. Rows show question and terminal outcome separately, soft-wrap full sentences, and never clip to a fixed height. Dimming applies to decoration, not to the whole row text. If an active descendant is under a terminal ancestor, show its count and reveal ancestry on selection.
 
-Selecting from Waiting/search/tray/notification calls one `revealItem` action: switch project/session, load snapshot, select item, temporarily expose its ancestors, mark it outside current filters if needed, scroll nearest, open detail. Preserve filter values; offer Clear filters instead of silently clearing them. Replacement links navigate to target through the same route. A missing item route opens its session with an explanatory banner.
+Item detail renders full item history in two linked forms:
 
-Initial v1 uses ordinary variable-height DOM rows, memoized by item revision. If the2,000-item target fails, add virtualization only to the flattened visible list with measured row heights; keep keyboard/ARIA semantics and scroll anchoring. Tree layout itself must not depend on DOM geometry.
+- **Back and forth:** ordered round cards, each with agent ask, owner choice and optional text (or free-text-only reply), agent result, related messages, and child items forked during that round. A new question is a child; refinement of the same decision is another round on the existing item.
+- **Timeline:** deduplicated session-local messages with author, timestamp, excerpt, touched items, and origin/created/updated role. Message numbers are Ariadne provenance numbers, not host transcript line numbers.
 
-## 4. Graph algorithm
+The rail uses the same stored history, newest at bottom. Hovering a message highlights touched items; clicking pins that highlight. Selecting/hovering an item highlights its messages. Scrolling upward pauses follow; show `N new messages · Jump to latest`. Live updates never steal keyboard focus or scroll an owner away from older content.
 
-Use SVG per selected topic. Deterministic ordered tree layout: node width190px, height66px, horizontal depth step254px, minimum leaf center spacing94px. Lay out leaves in numeric tree order, place parent center midway between first/last child centers; separated roots have an extra32px gap. Parent edges are cubic curves from right-center to left-center. Replacement arcs are dashed, separately labelled and excluded from tree layout/cycle logic. No drag/reparent in v1.
+Search normalizes NFKC and locale-independent lowercase for indexing only; stored text is unchanged. Every whitespace token must match the combined question, outcome, why, topic name, or message excerpt. It excludes transient provider activity, raw tool input/result, and credentials. Debounce 100ms. Status/topic/owner filters combine with AND; choices within one filter combine with OR. Include matching items and labelled contextual ancestors. No-results offers Clear search/filters.
 
-Viewport transform is local `{x,y,scale}`, clamped scale0.25–2.0. Wheel zoom anchors the cursor; drag blank canvas pans; Fit computes bounds plus32px padding. Node selection updates the same selected item/detail as tree. Node preview may use two lines but detail always contains the full text. Graph filter/reveal scope matches tree semantics. Accessible HTML controls provide Fit/Zoom and Switch to tree; graph is never the sole path to an action.
+Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, scroll nearest, and open detail. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
 
-## 5. Conversation and input queue
+Start with variable-height DOM rows memoized by item revision. Add virtualization only if the documented 2,000-item performance target is missed; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
 
-Conversation panel contains current run state, latest assistant text/tool activity, queued owner submissions, composer and Stop/Resume. Cmd+Enter sends; Enter inserts a newline. There is no Send-on-every-key behavior. New session chooses Claude Code initially; Codex is explicit. A model override is optional, not an assumed list of latest models; provider configured default is labelled accurately.
+## 4. Graph
 
-Immediately after durable save, clear the committed draft and display queue position. Before save succeeds, preserve it. Show `Saved`, `Queued · agent busy`, `Sent · awaiting acknowledgment`, `Received`, `Turn failed`, `Delivery uncertain`, or `Stopped · Resume to continue` according to backend evidence. Do not show a fake agent typing timer when only the queue changed.
+Render SVG for the selected topic. Use deterministic ordered tree layout: 190x66 px nodes, 254 px horizontal depth step, minimum 94 px leaf-center spacing, 32 px extra spacing between roots. Leaves follow stable item order; parent center is midway between first and last child. Parent edges are cubic curves from right-center to left-center. Replacement edges are dashed and labelled and do not participate in parent layout or cycle checks.
 
-A proven pre-execution rejection offers **Prepare retry**, then **Resume**; preserve the original queue position. A failed/interrupted/uncertain input that may have executed opens Recovery with **Resend this input** or **Do not resend; continue later inputs**, an explanation of possible repeated work, and a required decision reason. Explicit Resume follows either decision. Keep the original failure visible; skipping is not success. Resume is disabled while an earlier input still has an unresolved barrier.
+Keep viewport transform `{x,y,scale}` local to the view; clamp scale to 0.25–2.0. Wheel zoom anchors cursor, dragging blank canvas pans, Fit adds 32 px bounds padding. Tree/graph share item selection and filters. Graph selection opens the same detail. A two-line node preview is allowed; detail always shows the complete sentence. Accessible Fit/Zoom/Switch to tree controls mean graph is never the only route to an action.
 
-Activity ring: max2MiB/run, keep latest complete records, evict oldest first, visible “Earlier live activity omitted” marker. Keep current text block in a bounded builder; blocks over64KiB are shown truncated in the transient view with explicit notice, not added to domain storage. Allowlisted content: owner-submitted text, assistant visible text, tool name, bounded path summary, running/completed/failed indicator, public usage estimate if available. Never persist/display hidden reasoning, raw tool inputs/results, arbitrary stderr, auth fields, headers or environment dumps in activity.
+Lay out the complete filtered topic when its structure or filter changes; pan/zoom
+does not recompute geometry. Above 300 layout nodes, cull SVG elements to the
+visible world rectangle expanded by 200 screen pixels divided by scale. Bucket
+node bounds into 512x512 world-coordinate cells; retain intersecting nodes plus
+the focused/selected node so focus survives a pan. For edges, use conservative
+Bezier control-point bounds and the same bucket query, retaining an edge whose
+bounds cross the viewport even if both endpoints are off screen. Deduplicate IDs
+from buckets. Update transform and visible IDs once per animation frame; Fit uses
+full layout bounds, never culled bounds. A remote selection first centers/reveals
+the node, then focuses it. Culling affects rendering only, not counts, search,
+ancestry or stored data. Test 2,000-node topics at multiple zoom levels, crossing
+edges, selection off screen and tree/graph parity before accepting M5.
 
-The owner may choose to inspect the full operation in a permission card, subject to request limits; that is a separate authorized display path. Diagnostic logs replace known credential values/fields and auth-looking strings with redaction markers. Visible assistant prose may itself contain sensitive project content; do not claim complete automatic redaction of arbitrary generated text. It stays local and is absent from default logs/telemetry.
+## 5. Owner input and delivery UI
 
-On app restart, show stored prompt/answer history, agent-authored excerpts and run outcomes. Full past stream text is not reconstructed. Label the Conversation panel's live-only history accurately. If the owner scrolls upward, do not auto-scroll on new text; show Jump to latest. Raw host IDs remain secondary diagnostics, not primary labels.
+The renderer uses these design operation symbols; the authoritative transport mapping (including snake_case Tauri/CLI names and continuation preview/commit) is in `API_AND_MCP.md`:
 
-## 6. Questions and permissions
+| Operation | Renderer use |
+| --- | --- |
+| `item_messages`, `item_rounds` | Load complete per-item timeline and round/fork history |
+| `input.submit` | Persist any owner intent; return durable save and queue position |
+| `input.resolve` | Resolve a delivery uncertainty barrier with an explicit choice and reason |
+| `topic.archive`, `topic.restore` | Guarded topic metadata controls |
+| `session.close`, `session.reopen` | Guarded Ariadne session metadata controls |
+| `topic.continue` | Submit previewed topic snapshot to the selected target session |
+| `binding.connect`, `binding.pause`, `binding.resume`, `binding.disconnect` | Display or request bridge lifecycle only |
+| agent CLI/MCP `apply` | Agent-authored item/message/round/result updates; only path that changes item status |
 
-Answer options are semantic radio choices/buttons with recommendation badge and consequence. No default answer is submitted. One selection plus optional free text, or free text alone. Send stays disabled until valid. Question revision changes preserve draft and require review. A double click reuses the op ID. Errors appear inline and focus stays in the editor.
+The owner can queue an intent against any unarchived item in an active session, including terminal items: `bring`, `answer`, `reply`, `note`, `followup`, `drop`, or `reopen`. These are input requests, not item status mutations. A Replaced item offers Follow up and does not expose Reopen because it cannot be reopened in place. `Later` is local view state and is not submitted. The UI captures operation kind, target reference/revision, chosen option if any, text, and the owner-visible summary. It displays exact queue/delivery evidence from the bridge.
 
-Permission cards are visually distinct, identify run/project and exact operation/path, and offer Allow once/Deny; Escape dismisses detail without deciding. A native multi-question request uses one grouped answer form opened from any linked item, preserves per-question drafts and submits all displayed questions together. It retains request lifetime/expiry; expired responses are rejected clearly. Global permission count remains visible even with a different project or Conversation panel closed.
+An answer has zero default selections. The owner may select exactly one option and add optional explanation, or submit nonempty free text alone. Recommendation is visually marked. Number keys select but do not send. `Cmd+Enter` submits the focused valid form. A button is always available. Double submission reuses the operation ID; the store serializes the operation. On save error, retain content and show an inline actionable error without moving focus.
+
+Queue and delivery labels are input lifecycle labels, separate from item status: `Saved`, `Queued`, `Delivering`, `Delivered · awaiting agent receipt`, `Received · agent working`, `Reply published · agent working`, `Handled`, `Missing result`, `Delivery uncertain`, `Rejected`, or `Resolved`. Keep the input in Sent through receipt and published-result intermediate states, including uncertainty. Remove it only on handling (successful matching turn plus committed domain result), cancellation or explicit skip. Preserve the full conversation afterward. Do not infer receipt, work or completion from local acceptance or a running process; a matching turn establishes receipt, and only explicit agent domain writes change item status.
+
+Per-session FIFO is maintained by the queue service. A definite pre-delivery rejection can be retried with its original operation identity. If delivery might have occurred, stop later inputs and require an explicit `input.resolve` choice; explain possible duplicate work, preserve the failed record, and resume only after resolution. Input resolution records the choice and reason. New owner inputs cannot silently reverse a Stop/pause state; binding resume remains explicit.
+
+Continue is a topic-level owner action, not a shared topic mutation: prepare a snapshot of source topic/items/history, preserve original references and origin metadata, preview the grouped summary, then explicitly `topic.continue` to send it in a selected target session. The target receives a new local topic copy; source IDs remain navigable and immutable. Failure to write target copy leaves source unchanged.
+
+## 6. Archive, sessions, and binding lifecycle
+
+Archive and close are guarded metadata operations. Render the returned blocking item/input IDs and dispatch state from guard errors, with actions to navigate to the blocker:
+
+- `topic.archive` is enabled only when every topic item is terminal and no `queued`, `in_flight`, or `needs_attention` input targets an item in it. Waiting items therefore cannot leave the global queue through archive. Handled, cancelled, and explicitly skipped inputs do not block. Restore uses `topic.restore` and preserves IDs/history.
+- `session.close` requires every item terminal, no `queued`, `in_flight`, or `needs_attention` input, and persisted dispatch state `paused`. If dispatch is enabled, show an explicit Pause dispatch step; wait until the paused state is confirmed, then offer a separately confirmed Close action. Keep close disabled and show blockers while active items or inputs remain. It marks Ariadne metadata only; it never signals or terminates the terminal process. `session.reopen` reactivates the record without changing its binding or implicitly resuming dispatch.
+- Tab close changes navigation only. It does not close a session, remove its project registration, or discard drafts.
+
+Automatic provider discovery and manual project/session connection are both first-version paths. Discovery presents candidates for owner review and binding; private transcripts are not scanned. Read-only provider session metadata never establishes ownership by itself. Claude Mod and Codex queue/history bridges deliver inputs and report lifecycle; the agent sends explicit item/message/result operations through CLI/MCP. `binding.connect`, `binding.pause`, `binding.resume`, and `binding.disconnect` describe bridge lifecycle only. Disconnected/external states remain labelled as such. Do not claim the UI controls a host process.
 
 ## 7. Keyboard and accessibility
 
-Roving tree focus by visible row ID: Up/Down traverse; Right expands or moves to first child; Left collapses or goes to parent; Home/End first/last visible row; Enter opens detail; `a` focuses answer; `/` or Cmd+F search. Ignore these shortcuts inside editable controls. Escape exits overlay/edit focus without discarding text. Cmd+Enter sends only the currently focused valid answer/composer. Stop has a labelled button, not an ambiguous single-letter destructive shortcut.
+Keyboard navigation works when focus is outside editable controls:
 
-Use aria-tree/treeitem levels/expanded/selected, labels for all icons, focus-visible outlines and status text beside shapes/colors. Loading/error notifications use polite live regions; permission/new-question notices are announced once, not for each stream delta. Dialogs trap focus and restore it to their opener. Respect reduced motion and system appearance changes while theme=System. Check text contrast and keyboard journey in both themes.
+| Key | Action |
+| --- | --- |
+| Up / Down or j / k | Previous / next visible tree row |
+| Right / l | Expand or move to first child |
+| Left / h | Collapse or move to parent |
+| Home / End | First / last visible row |
+| Enter | Open detail, expand/collapse topic, or activate focused navigation control |
+| `a` | Focus answer control for waiting item; otherwise oldest waiting item |
+| `1`–`9` | Select an answer option; never submit |
+| `b` | Queue bring-up intent |
+| `r` | Focus reply/note/follow-up editor based on item status |
+| `d` | Focus drop intent; require explicit submit |
+| `z` | Toggle local Later flag |
+| `o` | Focus reopen intent for eligible terminal item; Replaced items offer Follow up only |
+| `e` | Open guarded topic archive action |
+| `/` or Cmd+F | Focus search |
+| `g` | Switch tree/graph |
+| `m` | Toggle message rail |
+| Escape | Close top overlay/detail or leave editor without discarding draft |
+| Cmd+Enter | Submit the currently focused valid owner input |
 
-## 8. Native macOS design
+Roving tree focus uses visible row IDs and correct `aria-level`, `aria-expanded`, and `aria-selected`. All icons have labels; status always has adjacent text. Focus-visible is a 2 px accent outline. Dialogs trap and restore focus. Announce new waiting items and resolved inputs once through a polite live region; do not announce every message delta. Respect reduced motion and system appearance changes while theme is System. Verify contrast in both themes.
 
-`NativeService` owns window, tray and notifications through small interfaces. All native UI calls return to the app main thread. Single-instance handling is registered before other Tauri plugins and queues routes until the webview subscribes. [Tauri single-instance](https://v2.tauri.app/plugin/single-instance/)
+## 8. Native macOS service
 
-Tray: template icon, numeric task-waiting title (empty when zero), menu oldest10 waiting items with project/session labels, separate permission count/action, Show Ariadne, Pin toggle, Quit. Rebuild/coalesce at most every250ms. If some roots cannot be read, show an incomplete-state marker and a diagnostic row rather than a false precise total.
+`NativeService` owns window, tray, notifications, and open-route handling behind small interfaces. Native UI calls run on the app main thread. Register single-instance handling before other Tauri plugins and queue routes until the webview is ready. Window geometry, monitor identity, and pin are persisted and clamped to a reachable work area after display changes. Hide-on-close is distinct from Quit.
 
-Notifications use **one native UserNotifications bridge** in the macOS module, selected because click routing is required and Tauri's documented action callback is not established for macOS. Bind through maintained `objc2` framework crates; hold one delegate for app lifetime. The bridge owns permission request, schedule/remove, foreground policy and response routing. Do not also initialize a competing notification plugin delegate. Apple delegate API: [UNUserNotificationCenterDelegate](https://developer.apple.com/documentation/usernotifications/unusernotificationcenterdelegate).
+The tray uses a template icon, numeric `waiting_unanswered` count (blank at zero), oldest 10 eligible waiting entries with project/session labels, separate binding/lifecycle diagnostics, Show Ariadne, Pin, and Quit. Sent generic requests do not increment the task-question count. Coalesce rebuilds at most every 250 ms. If registered roots are inaccessible, show an incomplete count and diagnostic row rather than a false total. No approval action exists in the tray.
 
-Notification identifier is `ariadne:<session>:<item>:<waiting-episode>`. Payload is IDs only, resolved through registered projects at click. Default body is “A project has a question”; full question preview is opt-in. Deduplicate episodes in a bounded persisted preference ledger. Group arrivals within500ms into a summary if more than3; every item remains in tray/queue. First app load establishes a watermark and does not notify the entire backlog. Permission denial leaves in-app flow intact. Permission-request alerts use a separate category/count; never add approval buttons to OS notifications in v1.
+Use one native UserNotifications bridge in the macOS module with a single long-lived Rust `objc2` delegate. It owns permission request, schedule/remove, foreground policy, and click routing; do not initialize a second notification delegate. Notification identity is `ariadne:<session>:<item>:<waiting-episode>` and payload contains IDs resolved through the registry. Default body is generic; item text preview is opt-in. Deduplicate episodes in a bounded preference ledger. Establish a watermark on first launch rather than notifying the backlog. Group bursts over three arrivals within 500 ms; all entries remain in the queue. Denied notification permission leaves in-app queue working. Never put host permission approval controls in a notification.
 
-Click focuses/unhides, restores a minimized window and routes to item; cold launch stores the route until app readiness. If item already answered, open its current detail rather than fail. App quit cannot notify about future external changes until reopened; existing delivered notifications still must route correctly when clicked. Packaged click/cold-launch behavior is proof M01; fix native bridge if necessary, do not drop required routing.
+Click focuses/unhides, restores a minimized window, and calls the common reveal route. Cold launch stores the route until app readiness. If the item was answered, open its current detail; do not fail routing. A quit app cannot report new external changes until reopened, but already delivered notification routes must work. Packaged click and cold-launch routing have native proof acceptance coverage in `DESIGN_TRACEABILITY.md`.
 
-Persist window logical geometry, monitor identity and pin flag. On launch/screen change clamp to an available work area with a reachable title bar. Hide-on-close is separate from Quit. `ariadne open` resolves project/session explicitly, locates installed bundle from package manifest, and uses structured launch arguments; never interpolates item text into a command.
+`ariadne open` resolves project/session and optional item route explicitly, locates the installed app from its package manifest, and passes structured launch arguments. Never place user-authored item text in a command line or shell string.
 
-## 9. Renderer security and diagnostics
+## 9. Renderer boundary and diagnostics
 
-Single production webview `main`, explicit capability allowlist for named application commands/events and needed window/dialog/clipboard actions. Configure Tauri application-command permissions, not only plugin permissions; registered custom commands otherwise have broad defaults. No remote origin capability, shell/fs/http plugin, devtools, test-driver plugin, or localhost listener in release. [Tauri capabilities](https://v2.tauri.app/security/capabilities/)
+Use one production webview named `main` and an explicit capability allowlist for application commands/events and required window/dialog/clipboard actions. No remote origin capability, shell/fs/http plugin, devtools, test-driver plugin, or localhost listener in release. Production CSP allows bundled resources and required Tauri IPC only; no unsafe eval or external fonts/images. Render text as text, validate URLs/targets in Rust, and make links copy their target instead of launching navigation.
 
-Production CSP uses bundled resources and Tauri-required IPC origins only; no unsafe-eval, external fonts/images or HTML injection. Text/links are escaped; links copy their target. Rust validates every command even if the frontend already did. A frontend crash cannot clear pending answers or approve work. A backend/store outage shows last-known data with disabled mutation controls and a recoverable error, not endless loading.
+Rust validates every renderer command and enforces project/session/item membership, input kind, revision, request size, and allowed state transition. Scope every read/write to a registered project and bound session. Reject path traversal and symlink escapes at project registration/binding boundaries. Durable owner input is never removed by a renderer crash. Store/backend outage displays last-known data, disables mutations, retains draft, and offers recovery. Diagnostics redact known credential values/fields and auth-looking strings; default logs do not include owner text, raw provider activity, tool input/result, environment, or headers. Visible agent-authored sentences can contain project information; keep them local and do not promise arbitrary text redaction.
+
+## 10. Security guidance provenance
+
+The owner explicitly waived the review tool organizational guidance for this task. It was not checked. The renderer and storage constraints above are design requirements, not a claim that the guidance was reviewed.
