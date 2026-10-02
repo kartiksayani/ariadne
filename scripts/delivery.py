@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Fresh GitHub evidence for the Ariadne maintainer; no agent execution."""
 import argparse
+import fcntl
 import json
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from delivery_core import owns_path, ready, validate_gate
@@ -152,11 +154,48 @@ def discover(tasks):
     raise ValueError("GitHub PR listing exceeds 2000 entries")
 
 
+def mutate(endpoint, payload, method="POST"):
+    with tempfile.TemporaryDirectory(prefix="ariadne-delivery-") as directory:
+        path = Path(directory) / "body.json"
+        path.write_text(json.dumps(payload))
+        return json.loads(run("gh", "api", f"repos/{REPO}/{endpoint}", "--method", method, "--input", path))
+
+
 def eligible(tasks, task):
     completed, running, _ = discover(tasks)
     candidates = ready(list(tasks.values()), completed, running - {task["id"]})
     if task["id"] not in {candidate["id"] for candidate in candidates}:
         raise ValueError("Task prerequisites, completion or running ownership forbid this PR")
+
+
+def merge(tasks, task, number, record):
+    common = Path(run("git", "rev-parse", "--git-common-dir").strip())
+    with (ROOT / common / "ariadne-delivery.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        snap = snapshot(number)
+        validate_gate(task, snap, record)
+        if snap["viewer"] != "kartiksayani" or snap["state"] != "OPEN":
+            raise ValueError("Only the maintainer may merge an open task PR")
+        eligible(tasks, task)
+        ancestor(snap, task)
+        comment = mutate(f"issues/{number}/comments", {"body": "```ariadne-delivery\n" + json.dumps(record, indent=2) + "\n```"})
+        mutate(f"statuses/{snap['head']}", {"state": "success", "context": "maintainer-spec-review",
+               "description": "Independent final-head review adjudicated against the task spec", "target_url": comment["html_url"]})
+        eligible(tasks, task)
+        fresh = snapshot(number)
+        validate_gate(task, fresh, record)
+        if (fresh["head"], fresh["base"]) != (snap["head"], snap["base"]):
+            raise ValueError("Head or main changed immediately before merge")
+        result = mutate(f"pulls/{number}/merge", {"sha": snap["head"], "merge_method": "rebase"}, "PUT")
+        if not result.get("merged"):
+            raise ValueError("GitHub refused the exact-head rebase merge")
+        try:
+            merged = snapshot(number)
+            if merged["state"] != "MERGED":
+                raise ValueError("GitHub has not confirmed merged state")
+            return receipt(task, merged)
+        except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
+            raise ValueError(f"PR already merged; post-merge evidence verification failed: {error}") from error
 
 
 def main(argv=None):
@@ -166,9 +205,10 @@ def main(argv=None):
     select.add_argument("--running", action="append", default=[])
     commands.add_parser("export")
     commands.add_parser("brief").add_argument("task")
-    command = commands.add_parser("verify")
-    command.add_argument("pr", type=int)
-    command.add_argument("--record", type=Path, required=True)
+    for name in ("verify", "merge"):
+        command = commands.add_parser(name)
+        command.add_argument("pr", type=int)
+        command.add_argument("--record", type=Path, required=True)
     args = parser.parse_args(argv)
     origin = run("git", "remote", "get-url", "origin").strip()
     if origin not in {f"git@github.com:{REPO}.git", f"https://github.com/{REPO}.git", f"https://github.com/{REPO}"}:
@@ -189,11 +229,14 @@ def main(argv=None):
         task = tasks[task_id(snap["body"])]
         record = json.loads(args.record.read_text())
         validate_gate(task, snap, record)
-        if snap["state"] != "OPEN":
-            raise ValueError("Verify expects an open PR; export rechecks merged evidence")
-        eligible(tasks, task)
-        ancestor(snap, task)
-        result = {"pr": args.pr, "head": snap["head"], "base": snap["base"], "passed": True}
+        if args.command == "verify":
+            if snap["state"] != "OPEN":
+                raise ValueError("Verify expects an open PR; export rechecks merged evidence")
+            eligible(tasks, task)
+            ancestor(snap, task)
+            result = {"pr": args.pr, "head": snap["head"], "base": snap["base"], "passed": True}
+        else:
+            result = merge(tasks, task, args.pr, record)
     print(json.dumps(result, indent=2))
 
 
