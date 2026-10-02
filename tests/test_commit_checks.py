@@ -103,6 +103,7 @@ class OrchestrationTests(unittest.TestCase):
         self.config = {"phase": "planning", "minimum_line_coverage": 80}
         self.commands = []
         self.failure = None
+        self.npm_version = "10.9.8"
         self.hits = [1] * 4 + [0]
         (self.root / ".venv-quality/bin").mkdir(parents=True)
         (self.root / ".venv-quality/bin/ruff").touch()
@@ -119,7 +120,7 @@ class OrchestrationTests(unittest.TestCase):
             report(self.root, "coverage/rust.lcov", "crates/lib.rs", self.hits)
         if "test:coverage" in args:
             report(self.root, "coverage/web/lcov.info", "apps/main.ts", self.hits)
-        return subprocess.CompletedProcess(args, 0, stdout="")
+        return subprocess.CompletedProcess(args, 0, stdout=self.npm_version if args == ("npm", "--version") else "")
 
     def execute(self, args):
         (self.root / "quality-gates.json").write_text(json.dumps(self.config))
@@ -133,7 +134,8 @@ class OrchestrationTests(unittest.TestCase):
             flattened = " ".join(" ".join(command) for command in self.commands)
             self.assertIn("coverage run", flattened)
             self.assertIn("coverage report --fail-under=80", flattened)
-            self.assertIn("lint:planning", flattened)
+            self.assertIn("node_modules/eslint/bin/eslint.js . --max-warnings=0", flattened)
+            self.assertNotIn("npm run lint:planning", flattened)
             self.assertEqual("--staged" in flattened, not mode)
         for folder in ("docs/planning", "poc/claude-mods", "poc/codex-queue"):
             (self.root / folder).mkdir(parents=True)
@@ -143,7 +145,7 @@ class OrchestrationTests(unittest.TestCase):
             self.assertIn(expected, flattened)
 
     def test_missing_linter_and_tool_failures_cannot_pass(self):
-        for failure in ("check", "lint:planning", "coverage"):
+        for failure in ("check", "node", "coverage"):
             self.failure = failure
             with self.subTest(failure=failure), self.assertRaises(subprocess.CalledProcessError):
                 self.execute(["--ci"])
@@ -156,6 +158,15 @@ class OrchestrationTests(unittest.TestCase):
         with mock.patch.object(commit, "run", return_value=mock.Mock(stdout="changed.py\n")):
             with self.assertRaisesRegex(ValueError, "match the index"):
                 commit.require_staged_tree()
+
+    def test_old_or_invalid_npm_blocks_application_commands(self):
+        self.config["phase"] = "application"
+        for version in ("6.14.8", "10.9.7", "", "config failed", "10.9.8-preview"):
+            self.npm_version = version
+            self.commands = []
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "require npm >=10.9.8"):
+                self.execute(["--ci"])
+            self.assertEqual(self.commands, [("npm", "--version")])
 
     def test_application_gates_enforce_e2e_and_fresh_eighty_percent_reports(self):
         self.config["phase"] = "application"
