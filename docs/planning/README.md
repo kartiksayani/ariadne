@@ -1,6 +1,6 @@
 # Ariadne planning package
 
-**Status: low-level design specified; implementation and live compatibility proofs pending.** Prepared 1 October 2026 and expanded 2 October after the owner identified insufficient integration detail. Evidence now includes local generated Codex schemas and Claude's published message types, without live inference.
+**Status: low-level design specified; basic Claude transport proved; application implementation and remaining compatibility proofs pending.** Prepared 1 October 2026 and expanded 2 October after the owner identified insufficient integration detail. Evidence includes generated Codex schemas, Claude's published types and an owner-requested [live two-turn Claude test](evidence/CLAUDE_STREAM_SMOKE.md).
 
 Ariadne will be a local macOS app plus a Rust CLI that turns agent conversations into a navigable tree of decisions, questions, findings and tasks. **Claude Code is primary; Codex also supports the complete workflow.** Answering in the global waiting queue must deliver the answer to an available agent without another terminal message.
 

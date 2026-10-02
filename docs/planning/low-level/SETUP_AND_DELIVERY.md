@@ -28,7 +28,7 @@ All directories0700/files0600 where supported, executable bits only on owned bin
 
 Profile fields: ID, agent, executable path, tested version, optional model/effort, permission profile, config-home reference when explicitly set, normal provider-auth mode description, expected non-secret configuration sources. No secret values, OAuth copy, arbitrary launch args, or shell snippets.
 
-Default Claude permission mode is default/manual, Codex workspace-write with on-request approvals. Plan mode is an optional explicit profile. No bypass/auto-approval profile in initial UI. Provider's existing stricter policy always wins; setup must not loosen it to make a launch succeed.
+Default Claude launch permission mode is `manual` (observed init metadata calls it `default`), Codex workspace-write with on-request approvals. Plan mode is an optional explicit profile. No bypass/auto-approval profile in initial UI. Provider's existing stricter policy always wins; setup must not loosen it to make a launch succeed.
 
 Resolve executable from explicit saved path first, then PATH as seen by the app, then known user installation locations discovered during setup; verify executable/version and show chosen path. A macOS GUI's PATH may differ from the terminal's. Never source shell rc files to discover it. If unresolved, let the owner choose an executable file and run only its version check before saving. An unrelated named executable collision requires owner correction.
 

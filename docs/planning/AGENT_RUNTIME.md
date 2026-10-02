@@ -1,6 +1,6 @@
 # Managed agent sessions
 
-Decision baseline: **2 October 2026**. Claude Code is the primary integration; Codex is also required for release. This replaces the earlier hook-only proposal and the intermediate MCP-wait/Channels proposal. It is an implementation design, not a claim that a live integration has been tested.
+Decision baseline: **2 October 2026**. Claude Code is the primary integration; Codex is also required for release. This replaces the earlier hook-only proposal and the intermediate MCP-wait/Channels proposal. [Basic Claude two-turn transport has now passed a live test](evidence/CLAUDE_STREAM_SMOKE.md); the full managed integration remains unimplemented and unproved.
 
 Detailed interfaces/algorithms are in [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md). This document is the overview; read the process, queue and API specifications before implementing adapters.
 
@@ -46,7 +46,7 @@ Use direct process I/O from Rust so the chosen Tauri/Rust stack needs no product
 
 ```text
 claude -p --input-format stream-json --output-format stream-json
-  --verbose --include-partial-messages --replay-user-messages --permission-mode default
+  --verbose --include-partial-messages --replay-user-messages --permission-mode manual
 ```
 
 The official CLI documents streaming input, acknowledgment echoes, resume, and a permission-prompt MCP hook. Validate exact message and approval schemas against the supported binary during M0. Use `--resume` with the recorded ID; never rely on “most recent conversation.” [Claude CLI reference](https://code.claude.com/docs/en/cli-reference)

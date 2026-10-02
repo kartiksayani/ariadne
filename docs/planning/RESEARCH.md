@@ -2,6 +2,8 @@
 
 **Checked:** 2026-10-01; managed runtime sources rechecked 2026-10-02. This records documentation evidence, not working integration tests. Links below point to official sources.
 
+Subsequent execution evidence is separate: the owner explicitly requested a live test on 2 October and [basic Claude two-turn streaming transport passed](evidence/CLAUDE_STREAM_SMOKE.md). Earlier no-inference statements below describe the documentation research phase.
+
 ## Managed-runtime revision
 
 Low-level evidence added 2 October: read-only `codex app-server generate-json-schema` for local0.159.3 using an isolated temporary CODEX_HOME; inspected Anthropic's published0.3.287 SDK type declarations alongside Claude2.1.287 help. No provider process/inference/login was run. The [process specification](low-level/PROCESS_AND_PROTOCOLS.md) distinguishes local schema fields from assumptions requiring live proof; the [verification ledger](low-level/VERIFICATION.md) names those tests.

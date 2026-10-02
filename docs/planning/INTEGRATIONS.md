@@ -95,4 +95,4 @@ Run separately for Claude and Codex in disposable projects with dedicated test c
 7. Test opt-in external-terminal setup separately, including hook failure and explicit fetch. Its manual-pickup label must be visible. Managed conversations must not receive duplicate hook delivery.
 8. Change unrelated configuration after setup; uninstall and verify those changes survive. Confirm history is still readable and no Ariadne handler fires in an unconfigured project.
 
-Protocol and hook fixtures cannot replace this real-host exercise. Run live provider-backed sessions only in the implementation phase with the owner's available host access; no paid evaluation jobs are launched during planning.
+Protocol and hook fixtures cannot replace this real-host exercise. Planned live sessions belong to implementation unless the owner explicitly requests an earlier proof. The owner did request one on 2 October: [basic Claude two-turn transport passed](evidence/CLAUDE_STREAM_SMOKE.md). It does not establish the remaining integration exercises above or authorize an unrelated evaluation campaign.

@@ -1,6 +1,6 @@
 # Ariadne low-level design
 
-Design revision: **2 October 2026**. This is the implementation contract for the planned product. No application has been implemented or live provider integration proved. Earlier statements of “planning complete” overstated the detail available then.
+Design revision: **2 October 2026**. This is the implementation contract for the planned product. No application has been implemented. A subsequent owner-requested [live Claude transport test passed](evidence/CLAUDE_STREAM_SMOKE.md); full provider integration remains pending. Earlier statements of “planning complete” overstated the detail available then.
 
 ## What this design settles
 

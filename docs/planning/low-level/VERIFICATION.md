@@ -1,6 +1,6 @@
 # Verification and implementation evidence
 
-This is the acceptance ledger for the design. **No application tests or live provider proofs have passed yet.** Planning checks can validate document consistency and inspect published/generated schemas; they cannot prove subscription access, running CLI semantics or native app behavior.
+This is the acceptance ledger for the design. **C01's basic Claude two-turn transport passed a live test on 2 October 2026.** See the [recorded exchange and evidence](../evidence/CLAUDE_STREAM_SMOKE.md). Application tests and the remaining managed-provider/native proofs are pending. Schema inspection alone cannot establish running behavior or subscription billing.
 
 ## 1. Evidence already obtained during planning
 
@@ -8,6 +8,7 @@ This is the acceptance ledger for the design. **No application tests or live pro
 | --- | --- | --- |
 | BUILD_PROMPT, DESIGN_PROMPT, supplied ZIP/source/screenshots | Required domain/UI/install behavior and visual baseline | Working app |
 | Claude2.1.287 version/help + published SDK0.3.287 declarations | Candidate flags, input/output type shapes and correlation fields | Raw CLI permission bridge and persistent-session behavior on this machine |
+| Claude2.1.287 live two-turn subprocess smoke test | Same-process/same-session input, replay/result UUID correlation, streamed text, remembered context, clean EOF exit | MCP tree tools, permissions, durable queue, new-process resume, production configuration |
 | Codex0.159.3 locally generated JSON Schema in isolated temp home | Exact installed request/response field names | Effective configuration precedence, live approval behavior or idempotent input replay |
 | Official Tauri/macOS docs | Selected framework APIs and need for packaged native checks | Notification click routing in the built bundle |
 | Local Markdown/link/JSON example checks | Structural design consistency | Domain/protocol implementation correctness |
@@ -20,7 +21,7 @@ Each proof has a small scratch harness and a written record. Use owner-approved 
 
 | ID | Exercise and observable pass criteria | If it fails |
 | --- | --- | --- |
-| C01 | Claude: send input UUID A, observe initialization/session ID, correlated replay/response and success result; keep stdin open; send B only afterward; same session accepts it | Fix direct adapter flags/framing; if persistent protocol unavailable, record an explicit adapter redesign before M3 |
+| C01 | **Passed, basic transport, Claude2.1.287:** send input UUID A, observe initialization/session ID, correlated replay/response and success result; keep stdin open; send B only afterward; same session accepts it. [Evidence](../evidence/CLAUDE_STREAM_SMOKE.md); tools/MCP/hooks disabled | Re-run in the integrated configuration during M0; a smoke pass does not cover C03/C04 |
 | C02 | Queue A/B/C outside host; prove three distinct ordered turns and no coalescing; answer an MCP question from UI only; finish independent work before input drain | Scheduler contract is mandatory; do not use host internal queue/coalescing or revert to next-terminal-message pickup |
 | C03 | Permission tool receives actual host payload; Allow once permits exactly requested harmless operation; Deny/timeout/Cancel/disconnect do not execute it; ordinary Ariadne tools do not recurse through permission prompts; pending approval remains blocking beyond two minutes with auto-background disabled and expires at the local ten-minute deadline | Correct current raw-CLI contract; if unsupported, evaluate SDK sidecar as a named architecture change with auth/packaging impact |
 | C04 | Strict managed MCP inventory, existing CLI login, settings overlay, generated rules, default permissions and managed-hook no-op work together; init confirms readiness; failed permission-server startup preserves honest first-input state; disallowed extra MCP remains inactive; conflicting answer-injection hooks block launch; settings digest changes require review | Block unsupported configuration; do not weaken policy, use bare mode blindly or collect credentials |

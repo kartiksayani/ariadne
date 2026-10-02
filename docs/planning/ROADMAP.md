@@ -1,6 +1,6 @@
 # Implementation roadmap
 
-**Design specified; implementation and live compatibility proofs pending.** Start with [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md) and its [verification ledger](low-level/VERIFICATION.md). Checkboxes below describe future work; each gate needs evidence. PRODUCT/AGENT_RUNTIME/ARCHITECTURE/CONTRACTS/DESIGN/INTEGRATIONS are overviews of the detailed contracts. Record significant changes in [DECISIONS](../../DECISIONS.md).
+**Design specified; application implementation and remaining compatibility proofs pending.** The owner subsequently authorized a live test and [C01 basic Claude transport passed](evidence/CLAUDE_STREAM_SMOKE.md); this does not complete M0. Start with [LOW_LEVEL_DESIGN](LOW_LEVEL_DESIGN.md) and its [verification ledger](low-level/VERIFICATION.md). Checkboxes below describe future work; each gate needs evidence. PRODUCT/AGENT_RUNTIME/ARCHITECTURE/CONTRACTS/DESIGN/INTEGRATIONS are overviews of the detailed contracts. Record significant changes in [DECISIONS](../../DECISIONS.md).
 
 ## Build sequence
 

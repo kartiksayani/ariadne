@@ -69,7 +69,7 @@ Planned argv (each displayed token/value is a separate argument):
 claude -p
   --input-format stream-json --output-format stream-json
   --verbose --include-partial-messages --replay-user-messages
-  --permission-mode default
+  --permission-mode manual
   --strict-mcp-config --mcp-config <generated-mcp-config>
   --settings <generated-settings-overlay>
   --permission-prompt-tool mcp__ariadne__permission_prompt
@@ -92,7 +92,7 @@ Use a fresh attempt UUID and persist it before writing. Top-level owner input ha
 
 | Claude output | Adapter action |
 | --- | --- |
-| `system` / `init` | Capture session_id, validate reported cwd/MCP readiness/permission mode; allowlist non-secret metadata |
+| `system` / `init` | Capture session_id, validate reported cwd/MCP readiness/permission mode; accept repeated consistent init on later turns, reject changed session identity; launch `manual` was observed as reported `default` |
 | `user` replay with matching uuid / `isReplay` | InputAccepted evidence, no new owner Message |
 | `stream_event` text delta | Append block text, keyed by message/block identity; do not display thinking or tool JSON fragments |
 | `assistant` complete text block | Finalize/replace matching streamed block; do not append the same text twice |
@@ -155,7 +155,7 @@ Claude `--strict-mcp-config` fixes the MCP list for the managed run. Generated o
 
 Codex uses spawn-time `-c` overrides for the Ariadne stdio MCP definition and `enabled=false` overrides for other discovered MCP entries in the default profile. No guessed per-thread `config.mcp_servers` behavior is required. Config names are serialized with TOML-safe quoting into individual argv values; no shell interpolation. Whether merge/precedence honors this profile is N02. If policy/config cannot be represented safely, block launch and explain the conflict; never silently enable extra services or write global config.
 
-Provider auth/model errors pause the queue; they do not trigger a new account home or provider switch. Auth checks performed during real startup may contact the provider through its own process. No live provider process or auth operation was run during this planning work.
+Provider auth/model errors pause the queue; they do not trigger a new account home or provider switch. Auth checks performed during real startup may contact the provider through its own process. After the initial planning work, the owner explicitly requested a live test: [two-turn Claude transport passed](../evidence/CLAUDE_STREAM_SMOKE.md) with existing CLI authentication and tools/MCP/hooks disabled. Full managed configuration/auth/permission compatibility remains C03/C04.
 
 ## 7. Version gate
 
