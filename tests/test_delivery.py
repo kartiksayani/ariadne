@@ -122,10 +122,94 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(self.invoke("ready", "--running", "P0.1"), [])
         scripts = self.root / "scripts"
         scripts.mkdir()
-        for name in ("delivery.py", "delivery_core.py"):
+        for name in ("delivery.py", "delivery_core.py", "delivery_adrs.py"):
             shutil.copyfile(ROOT / "scripts" / name, scripts / name)
         result = subprocess.run([sys.executable, str(scripts / "delivery.py"), "brief", "P0.1"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def architecture_fixture(self):
+        first, second = "docs/adr/ADR-0001-first.md", "docs/adr/ADR-0002-second.md"
+        content = ("# ADR-0001: Existing choice\n\nStatus: accepted\nSupersedes: none\nSuperseded by: none\n\n"
+                   "## Context\nA gap.\n\n## Decision\nA choice.\n\n## Consequences\nA cost.\n\n"
+                   "## Spec references\n[Spec](../spec.md)\n")
+        (self.root / "docs/adr").mkdir()
+        (self.root / first).write_text(content)
+        (self.root / "docs/spec.md").write_text("Original behavior.\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "existing contract")
+        base = self.git("rev-parse", "HEAD")
+        self.git("--git-dir", str(self.origin), "fetch", "-q", str(self.root), "task")
+        self.git("--git-dir", str(self.origin), "update-ref", "refs/heads/main", base)
+        (self.root / first).write_text(content.replace("Status: accepted", "Status: deprecated").replace(
+            "Superseded by: none", "Superseded by: [ADR-0002](ADR-0002-second.md)"))
+        (self.root / second).write_text(content.replace("ADR-0001:", "ADR-0002:").replace(
+            "Supersedes: none", "Supersedes: [ADR-0001](ADR-0001-first.md)"))
+        (self.root / "docs/spec.md").write_text("Updated behavior.\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "decision and implementation")
+        head = self.git("rev-parse", "HEAD")
+        self.git("--git-dir", str(self.origin), "fetch", "-q", str(self.root), "task")
+        self.git("--git-dir", str(self.origin), "update-ref", "refs/pull/1/head", head)
+        self.state["data"]["repository"]["defaultBranchRef"]["target"]["oid"] = base
+        self.pr["headRefOid"] = head
+        self.pr["commits"]["nodes"][0]["commit"]["oid"] = head
+        fetched = self.pr["reviews"]["nodes"][0]
+        payload = dict(head=head, agent="independent", round=1, model="gpt-6.1-sol", effort="high", findings=[],
+                       architecture_decisions=[first, second], spec_updates=["docs/spec.md"])
+        fetched.update(commit=dict(oid=head), body="```ariadne-review\n" + json.dumps(payload) + "\n```")
+        self.pr["files"]["nodes"] = [dict(path=path) for path in [first, second, "docs/spec.md"]]
+        self.record.update(head=head, base=base, architecture_decisions=[first, second], spec_updates=["docs/spec.md"])
+        self.record["reviews"][0]["head"] = head
+        self.record["spec_review"]["sections"] = ["docs/spec.md", first, second]
+        return first, second
+
+    def test_committed_supersession_and_specs_are_verified_at_reviewed_head(self):
+        first, second = self.architecture_fixture()
+        self.assertTrue(self.invoke("verify", "1")["passed"])
+        # An unstaged local rewrite is not the reviewed tree.
+        (self.root / first).write_text("unreviewed local content\n")
+        self.assertTrue(self.invoke("verify", "1")["passed"])
+        self.record["architecture_decisions"].remove(first)
+        with self.assertRaises(ValueError):
+            self.invoke("merge", "1")
+        self.assertFalse(json.loads(self.state_path.read_text()).get("mutations"))
+        self.record["architecture_decisions"].insert(0, first)
+        self.pr["files"]["nodes"] = [dict(path=second), dict(path="docs/spec.md")]
+        # An omitted changed predecessor cannot pass the declaration/review gate.
+        with self.assertRaises(ValueError):
+            self.invoke("verify", "1")
+
+    def test_merged_receipt_uses_original_decision_before_later_supersession(self):
+        first, second = self.architecture_fixture()
+        proof = self.invoke("merge", "1")
+        self.state = json.loads(self.state_path.read_text())
+        self.pr = self.state["data"]["repository"]["pullRequest"]
+        self.git("fetch", "-q", str(self.origin), "main")
+        self.git("checkout", "-qb", "later-main", proof["merged_commit"])
+        third = "docs/adr/ADR-0003-third.md"
+        content = (self.root / second).read_text()
+        (self.root / second).write_text(content.replace("Status: accepted", "Status: deprecated").replace(
+            "Superseded by: none", "Superseded by: [ADR-0003](ADR-0003-third.md)"))
+        (self.root / third).write_text(content.replace("ADR-0002:", "ADR-0003:").replace(
+            "[ADR-0001](ADR-0001-first.md)", "[ADR-0002](ADR-0002-second.md)"))
+        self.git("add", ".")
+        self.git("commit", "-qm", "later decision")
+        later = self.git("rev-parse", "HEAD")
+        self.git("--git-dir", str(self.origin), "fetch", "-q", str(self.root), "later-main")
+        self.git("--git-dir", str(self.origin), "update-ref", "refs/heads/main", later)
+        self.state["data"]["repository"]["defaultBranchRef"]["target"]["oid"] = later
+        self.state["list"]["nodes"] = [dict(number=1, body=self.pr["body"], state="MERGED")]
+        self.assertEqual(self.invoke("export")["tasks"], [proof])
+
+    def test_rewritten_predecessor_in_actual_git_head_is_rejected(self):
+        first, _ = self.architecture_fixture()
+        path = self.root / first
+        path.write_text(path.read_text().replace("A choice.", "A rewritten choice."))
+        self.git("add", ".")
+        self.git("commit", "-qm", "invalid rewrite")
+        snapshot = dict(number=1, base=self.record["base"], head=self.git("rev-parse", "HEAD"))
+        with self.assertRaisesRegex(ValueError, "preserve its prose"):
+            delivery.architecture(snapshot, self.task, self.record)
 
     def test_failed_ci_missing_review_and_stale_base_never_merge(self):
         for failure in ("ci", "review", "base", "pagination", "graphql"):
