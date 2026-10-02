@@ -1,5 +1,6 @@
 """Unit and orchestration tests for fail-closed commit gates."""
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -25,6 +26,151 @@ def report(root, name, source, hits):
 
 
 class CoverageTests(unittest.TestCase):
+    def boundary(self, root, contents="// Package boundary.\n\n"):
+        path = root / "crates/core/src/lib.rs"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.parent.joinpath("Cargo.toml").write_text('[package]\nname = "core"\n')
+        path.write_text(contents)
+        return {"path": str(path.relative_to(root)), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "reason": "comment-only-rust-package-boundary"}
+
+    def test_verified_boundaries_need_zero_records_without_changing_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entry = self.boundary(root)
+            source = root / "crates/core/src/executable.rs"
+            source.write_text("fn run() {}\n")
+            rust = report(root, "rust.lcov", str(source.relative_to(root)), [1])
+            config = {"non_executable_sources": [entry]}
+            with self.assertRaisesRegex(ValueError, "omits application sources"):
+                commit.coverage_counts([rust], root, config)
+            commit.append_non_executable_records(rust, root, config)
+            self.assertIn(f'SF:{entry["path"]}\nLF:0\nLH:0\nend_of_record\n', rust.read_text())
+            self.assertEqual(commit.coverage_counts([rust], root, config), (1, 1))
+            with self.assertRaisesRegex(ValueError, "Missing executable line data"):
+                commit.coverage_counts([rust], root)
+
+    def test_only_verified_boundaries_may_have_exact_zero_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entry = self.boundary(root)
+            rust = root / "rust.lcov"
+            config = {"non_executable_sources": [entry]}
+            for fields in ("LF:0\nLH:0\n", "", "LF:1\nLH:0\n", "LF:0\nLH:1\n",
+                           "LF:0\nLH:0\nDA:1,1\n", "LF:0\nLH:0\nFN:1,fake\n"):
+                rust.write_text(f'SF:{entry["path"]}\n{fields}end_of_record\n')
+                with self.subTest(fields=fields), self.assertRaises(ValueError):
+                    commit.coverage_counts([rust], root, config)
+            with self.assertRaises(FileNotFoundError):
+                commit.append_non_executable_records(root / "missing", root, config)
+
+    def test_boundary_configuration_rejects_malformed_stale_and_executable_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entry = self.boundary(root)
+            invalid = [None, "crates/core/src/lib.rs", {}, {**entry, "extra": True},
+                       {**entry, "reason": "empty"}, {**entry, "path": "crates/core/lib.rs"},
+                       {**entry, "path": "crates/core/src/../src/lib.rs"},
+                       {**entry, "sha256": "bad"}, {**entry, "sha256": "a" * 64},
+                       {**entry, "path": None}, {**entry, "path": "crates/missing/src/lib.rs"}]
+            for value in invalid:
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    commit.coverage_policy(root, {"non_executable_sources": [value]})
+            for config in ({"non_executable_sources": {}}, {"coverage_tooling": {}},
+                           {"non_executable_sources": [entry, entry]}):
+                with self.subTest(config=config), self.assertRaises(ValueError):
+                    commit.coverage_policy(root, config)
+            for contents in ("fn run() {}\n", "#![allow(dead_code)]\n", "/* comment */\n", "// comment\npub mod code;\n"):
+                executable = self.boundary(root, contents)
+                with self.subTest(contents=contents), self.assertRaisesRegex(ValueError, "contains Rust code"):
+                    commit.coverage_policy(root, {"non_executable_sources": [executable]})
+            entry = self.boundary(root, "")
+            self.assertEqual(commit.coverage_policy(root, {"non_executable_sources": [entry]})[1], {entry["path"]})
+            root.joinpath("crates/core/Cargo.toml").unlink()
+            with self.assertRaisesRegex(ValueError, "package boundary"):
+                commit.coverage_policy(root, {"non_executable_sources": [entry]})
+
+    def test_hash_and_inventory_cannot_hide_new_executable_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entry = self.boundary(root)
+            config = {"non_executable_sources": [entry]}
+            root.joinpath(entry["path"]).write_text("fn new_behavior() {}\n")
+            with self.assertRaisesRegex(ValueError, "hash changed"):
+                commit.coverage_policy(root, config)
+            self.boundary(root)
+            source = root / "apps/main.ts"
+            source.parent.mkdir()
+            source.write_text("run();\n")
+            rust = report(root, "report", "apps/main.ts", [1])
+            commit.append_non_executable_records(rust, root, config)
+            for extension in ("mjs", "cjs", "mts", "cts", "rs", "tsx"):
+                added = root / f"integrations/mods/nested/future.{extension}"
+                added.parent.mkdir(parents=True, exist_ok=True)
+                added.write_text("new_behavior();\n")
+                with self.subTest(extension=extension), self.assertRaisesRegex(ValueError, "omits application sources"):
+                    commit.coverage_counts([rust], root, config)
+                added.unlink()
+
+    def test_tooling_allowlist_is_exact_and_does_not_disable_source_detection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in commit.COVERAGE_TOOLING:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("configure();\n")
+            config = {"coverage_tooling": sorted(commit.COVERAGE_TOOLING)}
+            self.assertTrue(commit.application_present(root, config))
+            source = root / "apps/desktop/src/main.ts"
+            source.parent.mkdir()
+            source.write_text("run();\n")
+            actual = report(root, "report", str(source.relative_to(root)), [1])
+            self.assertEqual(commit.coverage_counts([actual], root, config), (1, 1))
+            for names in (["apps/desktop/src/main.ts"], ["apps/**/*.ts"], [None], [{}],
+                          ["apps/desktop/vite.config.ts"] * 2):
+                with self.subTest(names=names), self.assertRaises(ValueError):
+                    commit.coverage_policy(root, {"coverage_tooling": names})
+            root.joinpath("apps/desktop/vite.config.ts").unlink()
+            with self.assertRaises(ValueError):
+                commit.coverage_policy(root, config)
+            with self.assertRaisesRegex(ValueError, "omits application sources"):
+                commit.coverage_counts([actual], root)
+
+    def test_symlink_escape_and_zero_executable_evidence_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as external:
+            root = Path(directory)
+            entry = self.boundary(root)
+            config = {"non_executable_sources": [entry]}
+            source = root / entry["path"]
+            source.unlink()
+            outside = Path(external) / "lib.rs"
+            outside.write_text("// Outside boundary.\n")
+            source.symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, "escapes repository"):
+                commit.coverage_policy(root, config)
+            source.unlink()
+            self.boundary(root)
+            link = root / "apps"
+            link.symlink_to(Path(external), target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "escapes repository"):
+                commit.coverage_policy(root, config)
+            outside.unlink()
+            with self.assertRaisesRegex(ValueError, "escapes repository"):
+                commit.coverage_policy(root, config)
+            link.unlink()
+            empty = root / "empty.lcov"
+            empty.write_text("")
+            commit.append_non_executable_records(empty, root, config)
+            with self.assertRaisesRegex(ValueError, "Missing executable line data"):
+                commit.coverage_counts([empty], root, config)
+            executable = root / "apps/main.ts"
+            executable.parent.mkdir()
+            executable.write_text("run();\n")
+            genuine = report(root, "genuine.lcov", "apps/main.ts", [1])
+            for reports in ([genuine, empty], [empty, genuine]):
+                with self.subTest(reports=reports), self.assertRaisesRegex(ValueError, "Missing executable line data"):
+                    commit.coverage_counts(reports, root, config)
+
     def test_weighted_counts_include_zero_hits_and_merge_duplicate_lines(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -185,6 +331,22 @@ class OrchestrationTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.execute(["--ci"])
         self.failure = None
+        with mock.patch(__name__ + ".report"), self.assertRaises(FileNotFoundError):
+            self.execute(["--ci"])
+
+    def test_application_boundary_evidence_is_added_only_after_real_rust_report(self):
+        entry = CoverageTests().boundary(self.root)
+        self.config.update(phase="application", non_executable_sources=[entry],
+                           coverage_tooling=["apps/desktop/vite.config.ts"])
+        for name in ("crates/lib.rs", "apps/main.ts", "apps/desktop/vite.config.ts"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("statement\n" * 5)
+        self.execute(["--ci"])
+        self.assertIn("LF:0\nLH:0", self.root.joinpath("coverage/rust.lcov").read_text())
+        flattened = " ".join(" ".join(command) for command in self.commands)
+        for expected in ("cargo fmt", "cargo clippy", "npm run lint", "test:coverage", "test:e2e"):
+            self.assertIn(expected, flattened)
         with mock.patch(__name__ + ".report"), self.assertRaises(FileNotFoundError):
             self.execute(["--ci"])
 
