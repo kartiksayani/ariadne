@@ -15,6 +15,10 @@ links the full specification and all 30 design frames. Explore the
 [interactive communication model](docs/planning/communication-explorer.html).
 Every application commit must pass the [development checks](docs/planning/DEVELOPMENT_CHECKS.md).
 
+For autonomous implementation, start an Astra High session with
+[ORCHESTRATOR.md](ORCHESTRATOR.md). The [delivery helper guide](docs/delivery/README.md)
+includes the startup prompt and commands; all subagents use Sol 6.1 High.
+
 Source inputs: [build prompt](BUILD_PROMPT.md), [design brief](DESIGN_PROMPT.md),
 [UI mockups](<designs/Ariadne UI mockups.zip>). The current personal release scope
 supersedes older exhaustive requirements in those inputs.

@@ -135,7 +135,7 @@ def main(argv=None):
     python = ROOT / ".venv-quality/bin/python"
     if not python.exists():
         python = sys.executable
-    run(python, "-m", "coverage", "run", "--include=scripts/check-commit.py,scripts/check-change.py",
+    run(python, "-m", "coverage", "run", "--include=scripts/check-commit.py,scripts/check-change.py,scripts/delivery*.py",
         "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py")
     run(python, "-m", "coverage", "report", "--fail-under=80")
     if (ROOT / "docs/planning").exists():
