@@ -17,7 +17,7 @@ class PlanningLintTests(unittest.TestCase):
             root = Path(directory) / "project"
             shutil.copytree(ROOT, root, ignore=shutil.ignore_patterns(
                 ".git", ".npmrc", ".env*", "secrets", "node_modules", ".venv-quality", ".cache",
-                "coverage", "target", "__pycache__", "*.pyc"))
+                "coverage", "target", ".worktrees", ".delivery", "__pycache__", "*.pyc"))
             (root / "node_modules").symlink_to((ROOT / "node_modules").resolve(), target_is_directory=True)
             fake_bin = Path(directory) / "bin"
             fake_bin.mkdir()
