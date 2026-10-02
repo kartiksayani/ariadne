@@ -34,6 +34,37 @@ round trip test. Generated contracts have drift checks. Type-only/empty source f
 must be represented explicitly by the coverage tooling; any instrumentation
 exception is a narrow reviewed policy change, never a blanket module exclusion.
 
+[ADR-0004](../adr/ADR-0004-account-for-scaffold-coverage-sources.md) permits only
+these explicit classifications in `quality-gates.json`:
+
+- `non_executable_sources`: objects with exactly `path`, `sha256` and `reason`.
+  The reason is `comment-only-rust-package-boundary`; the path must be an existing
+  `crates/<member>/src/lib.rs` with its package `Cargo.toml`. The SHA-256 covers
+  the exact file bytes. Only blank lines and `//` line comments qualify; code,
+  attributes and block comments fail even after a hash update. Adding executable
+  Rust requires removing the classification and measuring the source normally.
+- `coverage_tooling`: distinct exact paths from the fixed allowlist
+  `apps/desktop/vite.config.ts`, `apps/desktop/wdio.native.conf.mjs` and
+  `apps/desktop/src-tauri/build.rs`. These build/test configuration files remain
+  subject to lint, compilation and relevant tests; their lines do not enter
+  production coverage. Other paths and glob patterns fail.
+
+The gate checks classification types, duplicate entries, missing files, hashes
+and repository escapes. It recursively inventories canonical `apps`, `crates`
+and `integrations` sources, including shipped Mods and future `.mjs`/`.cjs` files.
+The existing generated/vendor/dependency/test/declaration classifications remain;
+there is no broad `dist` exclusion. Vite output belongs in repository-root
+`target/desktop-dist`, outside the production roots.
+
+Both canonical reports, `coverage/rust.lcov` and `coverage/web/lcov.info`, must
+be freshly produced and each must contain genuine executable `DA` line data.
+After Rust measurement, the gate adds explicit `SF`/`LF:0`/`LH:0` records only
+for verified comment-only boundaries. These records account for zero executable
+lines and add no covered lines. Every other production source needs executable
+line evidence; an omitted file, an unverified zero-line record or a zero-only
+report fails. The combined executable-line floor stays at least 80% from the
+first application commit.
+
 The full workflow acceptance matrix lives in
 [Verification](low-level/VERIFICATION.md). Planning checks validate the 30 mockup
 frames, linked specifications, and the interactive communication simulator; those

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local commit gates. Planning checks never substitute for application coverage."""
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -10,6 +11,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APPLICATION_ROOTS = ("apps", "crates", "integrations")
+SOURCE_EXTENSIONS = {".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"}
+COVERAGE_TOOLING = {
+    "apps/desktop/vite.config.ts",
+    "apps/desktop/wdio.native.conf.mjs",
+    "apps/desktop/src-tauri/build.rs",
+}
 APPLICATION_REPORTS = ("coverage/rust.lcov", "coverage/web/lcov.info")
 EXCLUDED_PARTS = {"generated", "vendor", "node_modules", "tests", "__tests__"}
 TEST_SUFFIXES = (".d.ts", ".d.mts", ".d.cts") + tuple(f".{kind}.{ext}" for kind in ("test", "spec") for ext in ("ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"))
@@ -38,38 +45,105 @@ def require_modern_npm():
 def application_present(root, config):
     if (root / "Cargo.toml").exists():
         return True
-    extensions = {".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"}
     return any(
-        path.suffix in extensions
+        path.suffix in SOURCE_EXTENSIONS
         for folder in APPLICATION_ROOTS
         for path in (root / folder).rglob("*")
         if path.is_file()
     )
 
 
-def coverage_counts(paths, root=None):
+def application_sources(root):
+    """Inventory recursively; never follow a source outside the repository."""
+    sources = set()
+    for folder in APPLICATION_ROOTS:
+        if not (root / folder).resolve().is_relative_to(root.resolve()):
+            raise ValueError(f"Application path escapes repository: {folder}")
+        for path in (root / folder).rglob("*"):
+            relative = path.relative_to(root)
+            if any(part in EXCLUDED_PARTS for part in relative.parts):
+                continue
+            if not path.resolve().is_relative_to(root.resolve()):
+                raise ValueError(f"Application path escapes repository: {relative}")
+            if path.is_file() and path.suffix in SOURCE_EXTENSIONS and not path.name.endswith(TEST_SUFFIXES):
+                sources.add(str(relative))
+    return sources
+
+
+def coverage_policy(root, config):
+    """Validate narrow classifications against the actual current source bytes."""
+    sources = application_sources(root)
+    boundaries = config.get("non_executable_sources", [])
+    tooling = config.get("coverage_tooling", [])
+    if not isinstance(boundaries, list) or not isinstance(tooling, list):
+        raise ValueError("Coverage classifications must be lists")
+    verified = set()
+    for entry in boundaries:
+        if (not isinstance(entry, dict) or set(entry) != {"path", "sha256", "reason"}
+                or not all(isinstance(value, str) for value in entry.values())
+                or entry["reason"] != "comment-only-rust-package-boundary"
+                or not re.fullmatch(r"crates/[A-Za-z0-9_-]+/src/lib\.rs", entry["path"])
+                or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])):
+            raise ValueError("Invalid non-executable source classification")
+        name = entry["path"]
+        if name in verified or name not in sources:
+            raise ValueError(f"Duplicate or missing non-executable source: {name}")
+        source = root / name
+        if not (source.parent.parent / "Cargo.toml").is_file():
+            raise ValueError(f"Non-executable source must be a Rust package boundary: {name}")
+        contents = source.read_bytes()
+        if hashlib.sha256(contents).hexdigest() != entry["sha256"]:
+            raise ValueError(f"Non-executable source hash changed: {name}")
+        if any(line.strip() and not line.lstrip().startswith("//") for line in contents.decode().splitlines()):
+            raise ValueError(f"Non-executable source contains Rust code: {name}")
+        verified.add(name)
+    if (any(not isinstance(name, str) or name not in COVERAGE_TOOLING or name not in sources for name in tooling)
+            or len(set(tooling)) != len(tooling)):
+        raise ValueError("Coverage tooling must name distinct existing allowlisted files")
+    return sources, verified, set(tooling)
+
+
+def append_non_executable_records(report, root, config):
+    """Add honest zero-line evidence after a fresh Rust report has been produced."""
+    _, verified, _ = coverage_policy(root, config)
+    # Opening an absent report must fail; do not manufacture an entire report.
+    contents = report.read_text()
+    records = "".join(f"SF:{name}\nLF:0\nLH:0\nend_of_record\n" for name in sorted(verified))
+    if records:
+        report.write_text(contents + ("\n" if contents and not contents.endswith("\n") else "") + records)
+
+
+def coverage_counts(paths, root=None, config=None):
     """Merge by source/line, so duplicated LCOV records never inflate coverage."""
-    lines = {}
+    expected, verified, tooling = coverage_policy(root, config or {}) if root is not None else (set(), set(), set())
+    lines, reported = {}, set()
     for path in paths:
         source = None
         report_lines = 0
+        record_lines = 0
+        fields = []
         for raw in path.read_text().splitlines():
             if raw.startswith("SF:"):
+                if source is not None:
+                    raise ValueError(f"Unterminated LCOV record: {path}")
                 source = raw[3:]
+                record_lines, fields = 0, []
                 if root is not None:
                     resolved = (root / source).resolve()
                     relative = resolved.relative_to(root.resolve())
-                    if (relative.parts[0] not in APPLICATION_ROOTS or not resolved.is_file()
-                            or resolved.suffix not in {".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"}
-                            or any(part in EXCLUDED_PARTS for part in relative.parts)
-                            or resolved.name.endswith(TEST_SUFFIXES)):
-                        raise ValueError(f"Coverage source is not application code: {source}")
                     source = str(relative)
+                    if source not in expected or source in tooling:
+                        raise ValueError(f"Coverage source is not application code: {source}")
             elif raw == "end_of_record":
+                if source is None or (not record_lines and (source not in verified or fields != ["LF:0", "LH:0"])):
+                    raise ValueError(f"Missing executable line data in LCOV record: {path}")
+                reported.add(source)
                 source = None
             elif raw.startswith("DA:"):
                 if not source:
                     raise ValueError(f"LCOV line without source: {path}")
+                if source in verified:
+                    raise ValueError(f"Non-executable source has executable line data: {source}")
                 number, hits, *_ = raw[3:].split(",")
                 number, hits = int(number), int(hits)
                 if number < 1 or hits < 0:
@@ -79,21 +153,16 @@ def coverage_counts(paths, root=None):
                 key = (source, number)
                 lines[key] = lines.get(key, False) or hits > 0
                 report_lines += 1
-        if not report_lines:
+                record_lines += 1
+            elif source is not None:
+                fields.append(raw)
+        if source is not None or not report_lines:
             raise ValueError(f"Missing executable line data: {path}")
     if not lines:
         raise ValueError("No coverage reports supplied")
-    if root is not None:
-        reported = {source for source, _ in lines}
-        expected = {
-            str(path.relative_to(root))
-            for folder in APPLICATION_ROOTS for path in (root / folder).rglob("*")
-            if path.is_file() and path.suffix in {".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"}
-            and not any(part in EXCLUDED_PARTS for part in path.relative_to(root).parts)
-            and not path.name.endswith(TEST_SUFFIXES)
-        }
-        if expected - reported:
-            raise ValueError(f"Coverage omits application sources: {', '.join(sorted(expected - reported))}")
+    missing = expected - tooling - reported
+    if missing:
+        raise ValueError(f"Coverage omits application sources: {', '.join(sorted(missing))}")
     return sum(lines.values()), len(lines)
 
 
@@ -122,6 +191,7 @@ def main(argv=None):
         run(sys.executable, "scripts/check-change.py", "--staged")
     config = json.loads((ROOT / "quality-gates.json").read_text())
     validate_phase(config, application_present(ROOT, config))
+    coverage_policy(ROOT, config)
     if config["phase"] == "application":
         require_modern_npm()
     run("git", "diff", "--check")
@@ -154,9 +224,10 @@ def main(argv=None):
         run("cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings")
         run("npm", "run", "lint")
         run("cargo", "llvm-cov", "--workspace", "--all-features", "--lcov", "--output-path", reports[0])
+        append_non_executable_records(reports[0], ROOT, config)
         run("npm", "run", "test:coverage")
         run("npm", "run", "test:e2e")
-        covered, total = coverage_counts(reports, ROOT)
+        covered, total = coverage_counts(reports, ROOT, config)
         percentage = 100 * covered / total
         print(f"Application line coverage: {covered}/{total} = {percentage:.2f}%")
         if 100 * covered < config["minimum_line_coverage"] * total:

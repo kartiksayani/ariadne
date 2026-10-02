@@ -95,13 +95,21 @@ Use an async bootstrap function if the configured frontend target disallows
 top-level await. Ordinary development and packaging build with the variable
 unset; the production bundle must exclude the import and plugin code.
 
+Vite emits the desktop frontend to repository-root `target/desktop-dist`.
+Use that output for the test overlay and ordinary Tauri configuration, so build
+artifacts stay outside recursively inventoried application source roots. Do not
+add a broad `dist` coverage exclusion. The narrow build/test tooling and verified
+comment-only Rust boundaries are defined in
+[Development checks](../DEVELOPMENT_CHECKS.md#application-scaffold-obligations)
+and [ADR-0004](../../adr/ADR-0004-account-for-scaffold-coverage-sources.md).
+
 The test overlay is:
 
 ```json
 {
   "build": {
     "beforeBuildCommand": "npm run build",
-    "frontendDist": "../dist"
+    "frontendDist": "../../../target/desktop-dist"
   },
   "app": {
     "withGlobalTauri": true,
