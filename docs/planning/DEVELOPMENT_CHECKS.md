@@ -38,3 +38,8 @@ The full workflow acceptance matrix lives in
 [Verification](low-level/VERIFICATION.md). Planning checks validate the 30 mockup
 frames, linked specifications, and the interactive communication simulator; those
 checks do not prove the application has been implemented.
+
+[Mac testing setup](../development/MACOS_TEST_SETUP.md) separates installed machine
+tools from application evidence. The embedded WebView-to-Rust gate runs on every
+application commit; Appium/Mac2 supplements genuine OS interaction checks as native
+features are built. Neither result substitutes for measured Rust/frontend coverage.
