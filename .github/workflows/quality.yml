@@ -16,7 +16,7 @@ concurrency:
 jobs:
   change-policy:
     name: change-policy
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -37,8 +37,12 @@ jobs:
           python3 scripts/check-change.py "${args[@]}"
 
   quality:
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
     name: quality
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -56,12 +60,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          npm install --global npm@10.9.8
           integration=$(git rev-parse HEAD)
           check_snapshot() {
             git checkout --detach "$1"
             python -m venv .venv-quality
             .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
-            npm ci --ignore-scripts
+            sw_vers; uname -m; xcode-select -p; xcodebuild -version
+            if [[ -f Cargo.toml ]]; then
+              rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
+              cargo install cargo-llvm-cov --version 0.9.1 --locked
+            fi
+            npm ci --ignore-scripts --engine-strict
+            if [[ -f Cargo.toml ]]; then
+              npm run build
+              cargo build --workspace --locked
+            fi
             .venv-quality/bin/python scripts/check-commit.py --ci
           }
           if [[ -n "$HEAD_SHA" ]]; then
