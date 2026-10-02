@@ -1607,7 +1607,9 @@
       node('p', task.phase + ' · ' + task.estimate_days + ' estimated work days · ' +
         (completed.has(task.id) ? 'imported merged evidence' :
           'projected day ' + record.start + '–' + record.end + ', worker ' + (record.lane + 1)), panel);
-      node('p', 'One small PR, ≤800 handwritten changed lines; each commit ≤400. Every application commit passes all gates and ≥80% weighted Rust+TS/JS coverage.', panel);
+      node('p', 'One small PR, preferably about 500 handwritten changed lines, ≤1600 total; ' +
+        'each commit ≤800. Every application commit passes all gates and ' +
+        '≥80% weighted Rust+TS/JS coverage.', panel);
       node('h3', 'Dependencies', panel);
       if (!task.depends_on.length) node('p', 'No prerequisite task.', panel);
       for (const id of task.depends_on) taskButton(byId.get(id), panel);
