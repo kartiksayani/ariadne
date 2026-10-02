@@ -1,0 +1,14 @@
+{
+  "phase": "planning",
+  "minimum_line_coverage": 80,
+  "application_reports": [
+    "coverage/rust.lcov",
+    "coverage/web/lcov.info"
+  ],
+  "production_roots": [
+    "apps",
+    "crates",
+    "integrations"
+  ],
+  "coverage_scope": "All hand-authored application Rust, TypeScript and shipped Mod JavaScript. Include untested source files. Exclude generated/vendor code, tests, documentation and research POCs."
+}
