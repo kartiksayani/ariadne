@@ -1,9 +1,11 @@
 # Native macOS E2E implementation contract
 
-Status: **specified; documentation and registry baseline verified 2026-10-02**.
-No Ariadne Tauri app or native E2E POC has been built or executed. This closes
-the setup gap for [V29](VERIFICATION.md), not its execution evidence. The first
-application commit must run this gate and meet the agreed 80% actual coverage.
+Status: **specified application gate; disposable native prerequisite smoke passed
+2026-10-03 on macOS 26.7 arm64**. No production Ariadne Tauri app has been built.
+The standalone probe passed the real WebView/invoke/Rust/disk path and cleanup
+with the pins below, as recorded in [Mac testing setup](../../development/MACOS_TEST_SETUP.md).
+This does not complete [V29](VERIFICATION.md): the first application commit must
+run its own gate and meet the agreed 80% actual coverage.
 
 Use WebdriverIO with the embedded WebDriver server inside the real Tauri app.
 Tauri's [official testing guide](https://v2.tauri.app/develop/tests/webdriver/)
@@ -11,24 +13,35 @@ documents this macOS route. `tauri-driver` alone supports Windows/Linux;
 the native macOS gate requires both WDIO plugins. Browser mode, intercepted
 command results, and a detached Rust test server cannot satisfy this gate.
 
+The embedded driver's element actions generate JavaScript events in the real
+WebView. They prove the UI/invoke/Rust/disk path, not OS mouse/keyboard delivery,
+native menus, dialogs or tray behavior. [ADR-0002](../../adr/ADR-0002-test-webview-and-macos-surfaces.md)
+retains this per-commit gate and adds a bounded Appium/Mac2 supplement for genuine
+OS interactions. [Mac testing setup](../../development/MACOS_TEST_SETUP.md) records
+machine prerequisites separately from application acceptance.
+
 ## Baseline and files
 
 Pin these exact dependencies and commit both lockfiles when implementation
-starts. Versions were checked in the primary registries; compatibility still
-requires the first native run.
+starts. Versions were checked in the primary registries and the standalone native
+probe; the scaffold must verify its own lockfile and runtime.
 
 | Dependency | Exact version | Primary source |
 | --- | --- | --- |
 | npm `@wdio/tauri-service`, `@wdio/tauri-plugin` | `1.4.0` each | [service](https://registry.npmjs.org/@wdio/tauri-service/1.4.0), [plugin](https://registry.npmjs.org/@wdio/tauri-plugin/1.4.0) |
 | Rust `tauri-plugin-wdio`, `tauri-plugin-wdio-webdriver` | `=1.4.0` each | [WDIO crate](https://crates.io/crates/tauri-plugin-wdio/1.4.0), [embedded crate](https://crates.io/crates/tauri-plugin-wdio-webdriver/1.4.0) |
 | Rust `tauri`, build dependency `tauri-build` | `=2.12.1`, `=2.7.1` | [Tauri](https://crates.io/crates/tauri/2.12.1), [build](https://crates.io/crates/tauri-build/2.7.1) |
-| npm `@tauri-apps/cli`, `@tauri-apps/api` | `2.12.1`, `2.11.1` | [CLI](https://registry.npmjs.org/@tauri-apps/cli/2.12.1), [API](https://registry.npmjs.org/@tauri-apps/api/2.11.1) |
+| npm `@tauri-apps/cli`, `@tauri-apps/api` | `2.12.1` each | [CLI](https://registry.npmjs.org/@tauri-apps/cli/2.12.1), [API](https://registry.npmjs.org/@tauri-apps/api/2.12.1) |
 | npm `@wdio/cli`, `@wdio/local-runner`, `@wdio/mocha-framework`, `@wdio/spec-reporter` | `9.30.1` each | [CLI](https://registry.npmjs.org/@wdio/cli/9.30.1), [runner](https://registry.npmjs.org/@wdio/local-runner/9.30.1), [Mocha](https://registry.npmjs.org/@wdio/mocha-framework/9.30.1), [reporter](https://registry.npmjs.org/@wdio/spec-reporter/9.30.1) |
 
 The embedded crate's published requirement is **Tauri >=2.10 within major 2**;
 do not use the generic Tauri 2.0 minimum in examples as the dependency floor.
 The service pins its internal `webdriverio` to 9.30.1 and native types to 2.5.0;
 retain the resolved dependency graph in `package-lock.json`.
+The app's top-level API must match Rust Tauri 2.12.1; CLI 2.12.1 rejects API
+2.11.1 after Cargo lock resolution. WDIO plugin 1.4.0 keeps its published nested
+API 2.11.1. Lock and verify that graph without `--ignore-version-mismatches`, as
+recorded in [ADR-0003](../../adr/ADR-0003-align-tauri-build-dependencies.md).
 
 | Planned path | Responsibility |
 | --- | --- |
@@ -206,8 +219,8 @@ The native test must:
 1. Read the startup witness from disk and verify the nonce, OS PID's exact
    executable path and ancestry under the launched WDIO process. Record these
    values; a PID field returned by JavaScript alone is insufficient evidence.
-2. Type nonce/payload into the real scaffold form and click its native-window
-   button with WebDriver element actions. The React click handler calls the
+2. Type nonce/payload into the real scaffold form and click its WebView button
+   with embedded WebDriver element actions. The React click handler calls the
    typed production `invoke('native_ping', { request })` boundary.
 3. Wait for the displayed receipt, then independently read
    `<test-root>/smoke/receipt.json`, written by that Rust handler before it
@@ -233,6 +246,31 @@ effects. Native `invoke` mocks and a detached backend are forbidden in this
 acceptance suite. Live Claude/Codex transport proof remains the separately
 budgeted M7 gate.
 
+## macOS interaction supplement
+
+Use Appium `3.8.0`, Mac2 driver `4.3.6` and the same WebDriver client for bounded
+tests of actual OS window/keyboard events and accessible native menus/dialogs.
+Run one worker on a logged-in Mac with full Xcode; inspect the app's accessibility
+hierarchy before claiming a tray or dialog is automatable. Add assertions as the
+required native features are implemented, retaining the embedded receipt gate.
+Mac2 installation or a disposable OS probe does not prove Ariadne's V21 behavior.
+The [Mac2 setup guide](https://appium.github.io/appium-mac2-driver/latest/getting-started/)
+documents its Xcode and Accessibility prerequisites.
+
+Bind Appium to loopback only and use private disposable app data. User grants
+required Accessibility/XCTest permissions manually; missing permission is a
+specific blocker, never a passing skip. Do not bypass TCC, automate security
+settings, enable insecure AppleScript, or require Full Disk Access/recording by
+default. Bound startup, action and cleanup waits and stop only run-owned processes.
+Own WebDriverAgentMac startup. Connect from a fresh Appium process through
+supported
+[`appium:webDriverAgentMacUrl`](https://appium.github.io/appium-mac2-driver/latest/reference/capabilities/#webdriveragentmacurl),
+avoiding default startup's occupied-port takeover. In
+[Mac2 4.3.6](https://github.com/appium/appium-mac2-driver/blob/v4.3.6/lib/wda-mac.ts),
+process cleanup kills only tracked PIDs, but default startup sends `DELETE /` to
+an occupied configured WDA host/port assuming an obsolete agent, without proving
+ownership. Fail if a required port is occupied by an unrelated listener.
+
 ## Commit and release gates
 
 From the first app commit, `npm run test:e2e` invokes this wrapper and fails
@@ -243,6 +281,11 @@ does not imply a coverage percentage. Missing reports or native prerequisites
 must block the commit/CI result. Record exact package/toolchain/macOS versions,
 command, binary hash, run nonce, PID witness and assertions in the verification
 ledger only after an actual run.
+
+Rust/frontend measured coverage remains independent of native behavioral proof.
+External native-process profiling is optional future work; contributing its
+counters requires a validated flush/shutdown recipe. This setup decision does
+not alter existing coverage commands, thresholds or gates.
 
 `cargo clippy --all-features` may compile the optional test plugins for lint;
 that artifact is never packaged. Packaging uses a separate clean target/dist
@@ -255,4 +298,5 @@ packaged binary never opens the embedded driver port even when supplied
 `TAURI_WEBDRIVER_PORT`. Do not infer exclusion from a filename grep alone.
 
 Organization security guidance was not fetched under the owner's explicit
-the review tool/MCP waiver. This plan does not claim the review tool review or native execution.
+the review tool/MCP waiver. The disposable native proof does not claim the review tool review or
+production application acceptance.
