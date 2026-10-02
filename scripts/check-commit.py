@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APPLICATION_ROOTS = ("apps", "crates", "integrations")
 APPLICATION_REPORTS = ("coverage/rust.lcov", "coverage/web/lcov.info")
 EXCLUDED_PARTS = {"generated", "vendor", "node_modules", "tests", "__tests__"}
-TEST_SUFFIXES = tuple(f".{kind}.{ext}" for kind in ("test", "spec") for ext in ("ts", "tsx", "js", "jsx"))
+TEST_SUFFIXES = (".d.ts", ".d.mts", ".d.cts") + tuple(f".{kind}.{ext}" for kind in ("test", "spec") for ext in ("ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"))
 
 
 def run(*args, capture=False):
@@ -31,7 +31,7 @@ def require_staged_tree():
 def application_present(root, config):
     if (root / "Cargo.toml").exists():
         return True
-    extensions = {".rs", ".ts", ".tsx", ".js", ".jsx"}
+    extensions = {".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"}
     return any(
         path.suffix in extensions
         for folder in APPLICATION_ROOTS
@@ -53,7 +53,7 @@ def coverage_counts(paths, root=None):
                     resolved = (root / source).resolve()
                     relative = resolved.relative_to(root.resolve())
                     if (relative.parts[0] not in APPLICATION_ROOTS or not resolved.is_file()
-                            or resolved.suffix not in {".rs", ".ts", ".tsx", ".js", ".jsx"}
+                            or resolved.suffix not in {".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"}
                             or any(part in EXCLUDED_PARTS for part in relative.parts)
                             or resolved.name.endswith(TEST_SUFFIXES)):
                         raise ValueError(f"Coverage source is not application code: {source}")
@@ -81,7 +81,7 @@ def coverage_counts(paths, root=None):
         expected = {
             str(path.relative_to(root))
             for folder in APPLICATION_ROOTS for path in (root / folder).rglob("*")
-            if path.is_file() and path.suffix in {".rs", ".ts", ".tsx", ".js", ".jsx"}
+            if path.is_file() and path.suffix in {".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"}
             and not any(part in EXCLUDED_PARTS for part in path.relative_to(root).parts)
             and not path.name.endswith(TEST_SUFFIXES)
         }
