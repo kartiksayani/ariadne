@@ -50,6 +50,7 @@ class CoverageTests(unittest.TestCase):
             source = root / "crates/a.rs"
             source.parent.mkdir()
             source.write_text("fn main() {}\n")
+            (source.parent / "types.d.ts").write_text("declare const label: string;\n")
             self.assertEqual(commit.coverage_counts([report(root, "report", "crates/a.rs", [1])], root), (1, 1))
             generated = root / "crates/generated/fake.rs"
             generated.parent.mkdir()
@@ -84,9 +85,9 @@ class PhaseTests(unittest.TestCase):
             (root / "docs").mkdir()
             (root / "docs/sample.ts").touch()
             self.assertFalse(commit.application_present(root, {}))
-            for folder, filename in (("apps", "main.tsx"), ("crates", "lib.rs"), ("integrations", "mod.js")):
+            for folder, filename in (("apps", "main.tsx"), ("crates", "lib.rs"), ("integrations", "mod.mjs"), ("integrations", "mod.cjs"), ("integrations", "mod.mts")):
                 path = root / folder / filename
-                path.parent.mkdir()
+                path.parent.mkdir(exist_ok=True)
                 path.touch()
                 self.assertTrue(commit.application_present(root, {"production_roots": []}))
                 path.unlink()
