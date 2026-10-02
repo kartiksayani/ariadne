@@ -126,3 +126,9 @@ The implementation is complete only when every non-deferred row is `proved on
 <version>` (or has a concrete documented environment blocker), not merely
 `specified`, `mocked`, or `proved primitive`. Deferred rows do not block this
 personal release.
+
+## Native test mechanism
+
+Execute [the native E2E contract](NATIVE_E2E.md) from the first application commit.
+It specifies the macOS driver and real invoke/receipt checks; its documented recipe
+is not execution evidence. Record actual results when the application is built.

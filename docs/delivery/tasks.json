@@ -1,0 +1,1293 @@
+{
+  "schema_version": 1,
+  "tasks": [
+    {
+      "id": "P0.1",
+      "title": "Pin platform and stage the exact scaffold template",
+      "phase": "M0",
+      "depends_on": [],
+      "paths": [
+        "docs/planning/evidence/platform-ledger.md",
+        ".node-version",
+        "rust-toolchain.toml"
+      ],
+      "spec": [
+        "docs/planning/BUILD_HANDOFF.md#mechanical-bootstrap-recipe-implementation-session",
+        "docs/planning/DEVELOPMENT_CHECKS.md#application-scaffold-obligations"
+      ],
+      "acceptance": [
+        "Record exact installed Rust/Node/npm/macOS/architecture and Claude 2.1.287/Codex 0.160.0 compatibility baselines; pin concrete generator and dependencies before scaffolding in a fresh temporary directory.",
+        "Save the generator command and pristine generated template provenance; execute the configured macOS embedded automation recipe in P0.2.",
+        "Keep this PR free of production application source and a root Cargo manifest; preserve the current planning gate until P0.2 activates every application check."
+      ],
+      "checks": [
+        "rtk proxy rustc --version; rtk proxy cargo --version; rtk proxy node --version; rtk proxy npm --version",
+        "rtk proxy sw_vers; rtk proxy uname -m; rtk proxy xcode-select -p",
+        "Review saved exact generator command/version, staged pristine template hash and pinned dependency ledger."
+      ],
+      "estimate_days": 0.5
+    },
+    {
+      "id": "P0.2",
+      "title": "Commit a compiling workspace with real gated Tauri round trip",
+      "phase": "M0",
+      "depends_on": [
+        "P0.1"
+      ],
+      "paths": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "package.json",
+        "package-lock.json",
+        "quality-gates.json",
+        ".github/workflows/quality.yml",
+        "eslint.config.mjs",
+        "apps/desktop/**",
+        "crates/**",
+        "scripts/run-native-e2e.mjs",
+        "scripts/check-release-boundary.mjs",
+        "tests/e2e/process-contract/**"
+      ],
+      "spec": [
+        "docs/planning/ARCHITECTURE.md#ownership-and-implementation-map",
+        "docs/planning/BUILD_HANDOFF.md#per-commit-quality-policy",
+        "docs/planning/DEVELOPMENT_CHECKS.md#application-scaffold-obligations",
+        "docs/planning/low-level/NATIVE_E2E.md#first-scaffold-smoke-then-real-store-acceptance",
+        "docs/planning/low-level/NATIVE_E2E.md#commit-and-release-gates"
+      ],
+      "acceptance": [
+        "Integrate the pinned staged template deliberately; compile the ten Rust workspace packages and three thin entry points: desktop, ariadne and ariadne-mcp.",
+        "Activate phase application before the first production source/Cargo commit; pin/install rustfmt, Clippy, coverage, browser/native automation and zero-warning TS/JS/CSS lint in CI.",
+        "A UI action in the actual Tauri test process invokes Rust and displays its nonce/result; failure to launch or missing Rust execution fails E2E. Release builds contain no test automation services.",
+        "Both canonical LCOV reports account for all production sources, with explicit narrowly reviewed treatment of nonexecutable/type-only files; weighted executable Rust+TS/JS line coverage, including shipped Mod .mjs/.cjs, is at least 80%. Keep bootstrap within the PR cap with generated template provenance and no hidden handwritten exclusions."
+      ],
+      "checks": [
+        "rtk proxy cargo build --workspace --locked",
+        "rtk proxy npm run test:e2e -- --suite process-contract",
+        "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree"
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P0.3",
+      "title": "Generate domain DTOs, schemas and canonical fixtures",
+      "phase": "M0",
+      "depends_on": [
+        "P0.2"
+      ],
+      "paths": [
+        "crates/ariadne-domain/src/models/**",
+        "crates/ariadne-domain/src/lib.rs",
+        "crates/ariadne-domain/tests/schema.rs",
+        "contracts/domain/**",
+        "apps/desktop/src/generated/**",
+        "fixtures/domain/**",
+        "tools/xtask/**",
+        ".cargo/config.toml"
+      ],
+      "spec": [
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#1-primitive-conventions",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#2-files-and-entity-inventory",
+        "docs/planning/low-level/VERIFICATION.md#required-acceptance-matrix"
+      ],
+      "acceptance": [
+        "Rust-authored schema version 1 includes complete Messages, Answers, Rounds, Binding, Input, Attempt, Result and receipts; DTO generation does not invent alternate renderer models.",
+        "Check in deterministic canonical demo plus invalid/future-schema fixtures; generated JSON Schema and TS agree with Rust and regenerate without drift.",
+        "Use a tooling-only cargo xtask alias/package without adding a product entry point or changing the ten production package boundaries."
+      ],
+      "checks": [
+        "rtk proxy cargo xtask gen-contracts --check",
+        "rtk proxy cargo test -p ariadne-domain --test schema"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P0.4",
+      "title": "Bundle source design assets and reference component gallery",
+      "phase": "M0",
+      "depends_on": [
+        "P0.2"
+      ],
+      "paths": [
+        "apps/desktop/src/styles/**",
+        "apps/desktop/src/components/reference/**",
+        "apps/desktop/public/**",
+        "tests/ui/reference/**",
+        "docs/planning/evidence/design-assets/**"
+      ],
+      "spec": [
+        "docs/planning/DESIGN.md#screens-and-components",
+        "docs/planning/DESIGN_TRACEABILITY.md#board-frame-mapping",
+        "docs/planning/DESIGN_TRACEABILITY.md#component-state-mapping",
+        "docs/planning/low-level/UI_AND_NATIVE.md#1-component-tree-and-state-owners"
+      ],
+      "acceptance": [
+        "Map all 30 board frames and component variants to existing immutable source assets; record hashes/licences and bundle fonts/icons with no remote runtime requests.",
+        "Implement source dimensions, status text/icons, typography and themes in a reference gallery; keep original ZIP/prompt unchanged."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project reference",
+        "Capture reference gallery at 1600x960 and 1000x700, light and dark, and compare against the supplied source."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P0.5",
+      "title": "Pin host schemas and provider-neutral adapter DTOs",
+      "phase": "M0",
+      "depends_on": [
+        "P0.3"
+      ],
+      "paths": [
+        "crates/ariadne-agent-protocol/**",
+        "crates/ariadne-adapter-codex/src/generated/**",
+        "crates/ariadne-adapter-codex/src/lib.rs",
+        "contracts/providers/**",
+        "tools/xtask/src/codex_wire.rs",
+        "fixtures/providers/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#2-shared-adapter-contract",
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#codex-wire-schema-and-code-generation",
+        "docs/planning/AGENT_ADAPTERS.md#required-in-v1"
+      ],
+      "acceptance": [
+        "Define owned provider-neutral DTOs and probe/connect/submit/observe/reconcile/disconnect seam; include an in-process fake with no public plugin loader.",
+        "Vendor schemas generated by exact Codex 0.160.0 --experimental command with hashes and fixture provenance; typify roots live in separate private modules.",
+        "Cover initialization, loaded discovery, read/history and queue payload roots actually consumed; generated provider types never enter core/store/renderer contracts."
+      ],
+      "checks": [
+        "rtk proxy codex app-server generate-json-schema --experimental --out contracts/providers/codex/0.160.0/schema",
+        "rtk proxy cargo xtask gen-codex-wire --check",
+        "rtk proxy cargo test -p ariadne-agent-protocol --test contract"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P1.1",
+      "title": "Implement item validation and pure transitions",
+      "phase": "M1",
+      "depends_on": [
+        "P0.3"
+      ],
+      "paths": [
+        "crates/ariadne-domain/src/validation/**",
+        "crates/ariadne-domain/src/transitions/**",
+        "crates/ariadne-domain/tests/transitions.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#3-domain-invariants-and-transitions",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#5-capacity-queries-and-errors"
+      ],
+      "acceptance": [
+        "Reject invalid refs, parent cycles, wrong topic/parent, invalid status transitions and over-limit content before mutation.",
+        "Waiting uses ask/new question revision; terminal outcome/why and replacement history are required; owner input never directly changes item status."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-domain --test transitions"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P1.2",
+      "title": "Persist complete item conversations and immutable rounds",
+      "phase": "M1",
+      "depends_on": [
+        "P0.3"
+      ],
+      "paths": [
+        "crates/ariadne-domain/src/history/**",
+        "crates/ariadne-domain/tests/history.rs",
+        "fixtures/domain/history/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#full-messages-answers-and-rounds",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#input-attempt-and-result",
+        "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks"
+      ],
+      "acceptance": [
+        "Persist full item-targeted owner messages and explicit replies with input/attempt/binding/message/round provenance, including closed-item messages.",
+        "Preserve ask/option snapshots, superseded answers, reopen outcomes and round fork links; five-round/multi-item fixture retains every body without host transcript import."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-domain --test history"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P1.3",
+      "title": "Implement stable locks and atomic session transactions",
+      "phase": "M1",
+      "depends_on": [
+        "P0.3"
+      ],
+      "paths": [
+        "crates/ariadne-store/src/session/**",
+        "crates/ariadne-store/tests/transactions.rs",
+        "crates/ariadne-store/tests/support/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#4-transaction-and-lock-algorithm",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#1-installed-files-project-data-and-bindings"
+      ],
+      "acceptance": [
+        "Use keyed in-process mutex plus stable sibling OS lock; reread and validate under lock before deterministic atomic replace and previous snapshot backup.",
+        "Separate-process writers do not lose different-item updates; stale same-item revisions conflict; replacement failure returns error and invalid/future data is not overwritten.",
+        "Canonical contained paths, owner-only modes and symlink checks apply; no store lock spans host/socket I/O."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-store --test transactions"
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P1.4",
+      "title": "Implement explicit project registry and generation-bound bindings",
+      "phase": "M1",
+      "depends_on": [
+        "P1.3"
+      ],
+      "paths": [
+        "crates/ariadne-store/src/registry/**",
+        "crates/ariadne-core/src/bindings/**",
+        "crates/ariadne-core/tests/bindings.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#binding-and-presence",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#4-transaction-and-lock-algorithm",
+        "docs/planning/low-level/API_AND_MCP.md#2-query-and-owner-command-inventory"
+      ],
+      "acceptance": [
+        "Register canonical project UUIDs; rebuild the small global index from registered roots and reject duplicate identity/conflicting metadata.",
+        "Connect explicitly chosen host identity; maintain one active binding per Ariadne session, independent same-project sessions, idempotent connect and generation fencing.",
+        "Rebind preserves history and requires outstanding inputs resolved; no current-tab/cwd/PID inferred routing."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-core --test bindings"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P1.5",
+      "title": "Save owner inputs with receipts and answer snapshots",
+      "phase": "M1",
+      "depends_on": [
+        "P1.1",
+        "P1.2",
+        "P1.4"
+      ],
+      "paths": [
+        "crates/ariadne-core/src/inputs/**",
+        "crates/ariadne-core/src/receipts/**",
+        "crates/ariadne-core/tests/owner_inputs.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/API_AND_MCP.md#1-envelope-actors-and-replay",
+        "docs/planning/low-level/API_AND_MCP.md#2-query-and-owner-command-inventory",
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#1-save-claim-join"
+      ],
+      "acceptance": [
+        "A deliberate submission atomically saves full owner Message, optional Answer and FIFO Input with increasing sequence; stale question fails before save.",
+        "Same op/digest returns its durable receipt before revision checks; changed payload under same op rejects; validate actor scope and keep terminal-item intents legal.",
+        "Cancellation is allowed only before preparation, keeps history and never mutates item status."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-core --test owner_inputs"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P1.6",
+      "title": "Implement bounded queries and Waiting/Sent projections",
+      "phase": "M1",
+      "depends_on": [
+        "P1.2",
+        "P1.4",
+        "P1.5"
+      ],
+      "paths": [
+        "crates/ariadne-core/src/queries/**",
+        "crates/ariadne-core/tests/projections.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/API_AND_MCP.md#summary-projections-and-command-naming",
+        "docs/planning/low-level/API_AND_MCP.md#agent-query-visibility",
+        "docs/planning/low-level/UI_AND_NATIVE.md#2-snapshot-and-event-synchronization"
+      ],
+      "acceptance": [
+        "Cursor pages expose every stored item message and round; agent reads hide later unissued owner bodies/options using issued watermark.",
+        "waiting_unanswered counts current unanswered episode; answered current episode moves to Sent without status change; a new ask can coexist with an older Sent input.",
+        "Counts are global/project/session consistent; unavailable roots report partial rather than zero."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-core --test projections"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P2.1",
+      "title": "Implement atomic agent apply with explicit replies and results",
+      "phase": "M2",
+      "depends_on": [
+        "P1.1",
+        "P1.2",
+        "P1.4",
+        "P1.5"
+      ],
+      "paths": [
+        "crates/ariadne-core/src/apply/**",
+        "crates/ariadne-core/tests/apply.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/API_AND_MCP.md#3-agent-api-explicit-results-and-tree-operations",
+        "docs/planning/low-level/API_AND_MCP.md#concrete-reply--two-children--result"
+      ],
+      "acceptance": [
+        "Resolve ordered request-local refs on a copy; topic/children/reply/status/round/result operations commit all or none with expected revisions.",
+        "Validate answered/deferred/unable reply and follow-up refs, provenance and handled watermark against exact binding/input/attempt; reject stale/cross-binding refs and post-result edits.",
+        "Exact retry returns original allocations/receipt; summary or terminal output never becomes an item reply."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-core --test apply"
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P2.2",
+      "title": "Implement FIFO claims and result/completion join",
+      "phase": "M2",
+      "depends_on": [
+        "P2.1",
+        "P1.6",
+        "P0.5"
+      ],
+      "paths": [
+        "crates/ariadne-core/src/delivery/**",
+        "crates/ariadne-core/tests/delivery_join.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#1-save-claim-join",
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#2-race-and-failure-table",
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#derived-label-precedence"
+      ],
+      "acceptance": [
+        "Persist claim receipt/payload/digest/marker before delivery and recover same claim request without choosing another input.",
+        "Either result/completion order seals once only after successful matching host turn plus valid result; duplicate/late events cannot regress progress.",
+        "Missing result after 5-second grace and uncertain/failed turn pause only that binding; late successful join clears automatic missing-result pause while preserving explicit owner pause."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-core --test delivery_join"
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P2.3",
+      "title": "Expose bounded agent queries and apply through thin CLI",
+      "phase": "M2",
+      "depends_on": [
+        "P2.1",
+        "P1.6"
+      ],
+      "paths": [
+        "crates/ariadne-cli/src/agent/**",
+        "crates/ariadne-cli/src/output.rs",
+        "crates/ariadne-cli/tests/agent_cli.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/API_AND_MCP.md#1-envelope-actors-and-replay",
+        "docs/planning/low-level/API_AND_MCP.md#3-agent-api-explicit-results-and-tree-operations",
+        "docs/planning/low-level/API_AND_MCP.md#5-events-and-errors"
+      ],
+      "acceptance": [
+        "Real ariadne process handles explicit binding/generation and stdin JSON batch; text output, single JSON envelope, stderr and exit 0/2/3/4/5 follow contract.",
+        "Queries and apply call shared core/store, with no alternate persistence or inferred session; help includes executable valid and invalid examples."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-cli --test agent_cli"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P2.4",
+      "title": "Expose owner/bootstrap CLI and one generated rule source",
+      "phase": "M2",
+      "depends_on": [
+        "P1.4",
+        "P1.5",
+        "P2.3"
+      ],
+      "paths": [
+        "crates/ariadne-cli/src/owner/**",
+        "crates/ariadne-cli/src/demo.rs",
+        "crates/ariadne-cli/tests/owner_cli.rs",
+        "integrations/rules/**",
+        "tools/xtask/src/rules.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/API_AND_MCP.md#4-bootstrap-and-tool-instructions",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#5-domain-cli-and-optional-mcp",
+        "docs/planning/BUILD_HANDOFF.md#mechanical-bootstrap-recipe-implementation-session"
+      ],
+      "acceptance": [
+        "Expose explicit project/session/binding/input owner commands and canonical demo; repeated bootstrap validates identity and returns same routing with a pasteable instruction snippet.",
+        "Generate Claude/Codex instructions from one source: full replies, rounds vs children, revisions, valid statuses and exactly one result per dispatched input.",
+        "Bootstrap never launches/resumes a provider and never silently changes existing MCP configuration."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-cli --test owner_cli",
+        "rtk proxy cargo xtask gen-rules --check"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P2.5",
+      "title": "Serve identical domain tools through rmcp and both MCP entry points",
+      "phase": "M2",
+      "depends_on": [
+        "P2.3"
+      ],
+      "paths": [
+        "crates/ariadne-mcp/**",
+        "crates/ariadne-cli/src/mcp.rs",
+        "crates/ariadne-cli/tests/mcp_alias.rs",
+        "tests/functional/mcp/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/API_AND_MCP.md#1-envelope-actors-and-replay",
+        "docs/planning/low-level/API_AND_MCP.md#3-agent-api-explicit-results-and-tree-operations",
+        "docs/planning/ARCHITECTURE.md#ownership-and-implementation-map"
+      ],
+      "acceptance": [
+        "rmcp stdio exports only bounded agent queries and apply; every request routes explicitly by binding/generation with domain errors marked isError.",
+        "Standalone ariadne-mcp and ariadne mcp serve call one serve_stdio library and return identical persisted outcomes; logs never contaminate stdout.",
+        "Separate real CLI and MCP processes race with store writers without lost updates or duplicate receipts."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-mcp --test stdio_contract",
+        "rtk proxy cargo test -p ariadne-cli --test mcp_alias"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P2.6",
+      "title": "Implement guarded history and continuation core operations",
+      "phase": "M2",
+      "depends_on": [
+        "P1.6",
+        "P2.1"
+      ],
+      "paths": [
+        "crates/ariadne-core/src/history_actions/**",
+        "crates/ariadne-core/tests/history_actions.rs",
+        "crates/ariadne-cli/src/history_actions.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#6-continuation-repair-and-migration",
+        "docs/planning/low-level/API_AND_MCP.md#restore-and-continue-guards",
+        "docs/planning/low-level/UI_AND_NATIVE.md#6-archive-sessions-and-binding-lifecycle"
+      ],
+      "acceptance": [
+        "Archive/close return blocking item/input IDs; close additionally requires persisted dispatch paused; restore/reopen preserve IDs, history and binding.",
+        "Continue preview fixes source revision/hash and target; commit copies full topic/item/message/round/answer provenance to new target IDs and enqueues exactly one handoff.",
+        "Target conflict/write failure commits nothing; source remains semantically byte-for-byte unchanged; archived/closed source is readable and target must be active and explicitly bound."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-core --test history_actions"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P3.1",
+      "title": "Implement desktop leases and private bridge control IPC",
+      "phase": "M3",
+      "depends_on": [
+        "P2.2",
+        "P0.5"
+      ],
+      "paths": [
+        "crates/ariadne-runtime/src/control/**",
+        "crates/ariadne-runtime/src/leases/**",
+        "crates/ariadne-runtime/tests/control.rs",
+        "crates/ariadne-cli/src/bridge/**",
+        "crates/ariadne-cli/tests/bridge_cli.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#1-ownership-leases-and-app-control",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#1-installed-files-project-data-and-bindings"
+      ],
+      "acceptance": [
+        "Only desktop holding nonblocking binding lease may claim; control socket checks UID, mode, owner/type, path length, 1MiB frames and 5-second timeout.",
+        "Bridge claim uses desktop socket; bridge report calls core and persists lifecycle after desktop exit; no TCP listener or store lock spans socket waits.",
+        "Same request recovers saved claim; concurrent desktop starts converge without deleting another owner socket."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-runtime --test control",
+        "rtk proxy cargo test -p ariadne-cli --test bridge_cli"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P3.2",
+      "title": "Run independent supervisors and reconcile normal quit/reopen",
+      "phase": "M3",
+      "depends_on": [
+        "P3.1"
+      ],
+      "paths": [
+        "crates/ariadne-runtime/src/supervisor/**",
+        "crates/ariadne-runtime/tests/supervisor.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#5-desktop-shutdown-and-worker-recovery",
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#2-shared-adapter-contract"
+      ],
+      "acceptance": [
+        "Run fake pull/push adapters across two bindings in one project plus another project; preserve FIFO and one active input per binding while independent sessions progress.",
+        "Normalize and persist bounded lifecycle with backpressure, dedupe/conflict handling and redacted bounded diagnostic output; checkpoint advances only after durable effects and terminal text never becomes a domain reply.",
+        "Quit stops own dispatch/helpers and releases leases without changing generation or killing hosts; independent CLI/MCP remains usable and startup reconciles before dispatch."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-runtime --test supervisor"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P3.3",
+      "title": "Ship Claude Mod claims and captured turn callbacks",
+      "phase": "M3",
+      "depends_on": [
+        "P2.4",
+        "P3.1",
+        "P0.5"
+      ],
+      "paths": [
+        "integrations/claude/**",
+        "tests/integrations/claude/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#3-claude-code-21287-adapter",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#3-claude-mod-installation-and-binding"
+      ],
+      "acceptance": [
+        "Installed version-matched Mod registers connect/status/disconnect and guarded 1-second claim poll; helper receives argv and stdin JSON, never shell interpolation.",
+        "Capture binding/generation/attempt before detached prompt.submit; match exact envelope marker/digest to main turn and ignore unrelated/subagent turns.",
+        "Persist accepted/start/end/reject/uncertain callbacks through CLI, including late acceptance/rejection and desktop closure; terminal text stays diagnostic."
+      ],
+      "checks": [
+        "rtk proxy npm run test:integration -- --suite claude-mod"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P3.4",
+      "title": "Implement Claude normalization and compatibility probe",
+      "phase": "M3",
+      "depends_on": [
+        "P3.3",
+        "P3.2"
+      ],
+      "paths": [
+        "crates/ariadne-adapter-claude/**",
+        "fixtures/providers/claude/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#3-claude-code-21287-adapter",
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#6-compatibility-and-permissions"
+      ],
+      "acceptance": [
+        "Claude first-party trait implementation translates Mod lifecycle with stable event identities and exact host/binding scope, preserving diagnostics bounds.",
+        "Probe pinned CLI/Mod versions and reload/cache parity; unsupported versions disable dispatch while saved inputs/history remain usable.",
+        "Test malformed/oversize Unicode frames, old-generation callbacks, conflicting turn facts and result/turn ordering against production core/runtime."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-adapter-claude --test conformance"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P3.5",
+      "title": "Read Codex daemon history using generated wire types",
+      "phase": "M3",
+      "depends_on": [
+        "P0.5"
+      ],
+      "paths": [
+        "crates/ariadne-adapter-codex/src/transport/**",
+        "crates/ariadne-adapter-codex/src/history/**",
+        "crates/ariadne-adapter-codex/tests/history.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#4-codex-01600-adapter",
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#codex-wire-schema-and-code-generation",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#4-codex-existing-daemon-binding"
+      ],
+      "acceptance": [
+        "Respect CODEX_HOME; resolve permitted socket symlink deliberately, verify final UID/socket and initialize over Unix WebSocket without launching daemon/thread.",
+        "Decode full item history/null/optional fields using private generated types; poll exact thread, preserve correlation and stop on unknown required variants.",
+        "CLI/daemon mismatch, changed executable identity or unsupported version disables dispatch and retains durable saved inputs."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-adapter-codex --test history",
+        "rtk proxy cargo xtask gen-codex-wire --check"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P3.6",
+      "title": "Submit Codex native queue and correlate exact marker turn",
+      "phase": "M3",
+      "depends_on": [
+        "P3.5",
+        "P3.2"
+      ],
+      "paths": [
+        "crates/ariadne-adapter-codex/src/queue/**",
+        "crates/ariadne-adapter-codex/src/adapter.rs",
+        "crates/ariadne-adapter-codex/tests/queue.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#4-codex-01600-adapter",
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#3-idempotency-and-exactly-once-limits"
+      ],
+      "acceptance": [
+        "Run installed codex queue with explicit endpoint/thread argv outside locks; never substitute thread/start, thread/resume, turn/start or direct thread/queue/add.",
+        "Match complete marker in original user-message item to exactly one host turn and normalize acceptance/start/completion with actual full item evidence.",
+        "Busy queue, lost sender receipt, ambiguous match and reconnect leave uncertainty visible; no clearing/reordering foreign provider queue entries or auto resend."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-adapter-codex --test queue"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P3.7",
+      "title": "Implement bounded host discovery and freshness observations",
+      "phase": "M3",
+      "depends_on": [
+        "P3.1",
+        "P3.3",
+        "P3.5"
+      ],
+      "paths": [
+        "crates/ariadne-runtime/src/discovery/**",
+        "crates/ariadne-adapter-codex/src/discovery.rs",
+        "integrations/claude/discovery.js",
+        "crates/ariadne-runtime/tests/discovery.rs",
+        "tests/integrations/claude/discovery.test.js"
+      ],
+      "spec": [
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#5-session-discovery-and-presence--included-in-v1",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#4-codex-existing-daemon-binding"
+      ],
+      "acceptance": [
+        "Claude announces ID/cwd/version at startup and every 30s without inference or domain write; in-memory candidates expire after 90s.",
+        "Codex paginates loaded-thread IDs and read-only thread metadata every 30s while connection UI is open; never use persisted thread/list as open-session discovery.",
+        "Manual binding remains available; stale/unknown/loaded/active are distinct and PID alone proves neither conversation identity nor liveness; refresh after wake."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-runtime --test discovery",
+        "rtk proxy npm run test:integration -- --suite claude-discovery"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P3.8",
+      "title": "Implement explicit day-to-day recovery and audited CLI actions",
+      "phase": "M3",
+      "depends_on": [
+        "P2.2",
+        "P3.2",
+        "P2.3"
+      ],
+      "paths": [
+        "crates/ariadne-core/src/recovery/**",
+        "crates/ariadne-core/tests/recovery.rs",
+        "crates/ariadne-cli/src/recovery.rs",
+        "crates/ariadne-cli/tests/recovery_cli.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#4-owner-recovery-commands",
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#derived-label-precedence"
+      ],
+      "acceptance": [
+        "Inspect/retry_unexecuted/resend/skip/request_result_repair/confirm_evidence require current revision/attempt/reason, no running host and explicit idle attestation when liveness is unknown.",
+        "Repair sends a result-only new attempt tied to original effects; skip preserves history and seals old attempt; exact old receipt replay alone remains legal.",
+        "Resume is separate and cannot silently skip/repeat work or clear owner pause; no corruption/full-disk/machine-crash recovery framework."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-core --test recovery",
+        "rtk proxy cargo test -p ariadne-cli --test recovery_cli"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P4.1",
+      "title": "Complete the first real UI-to-Rust domain vertical slice",
+      "phase": "M4",
+      "depends_on": [
+        "P0.4",
+        "P1.6",
+        "P2.2",
+        "P3.2"
+      ],
+      "paths": [
+        "apps/desktop/src-tauri/src/commands/**",
+        "apps/desktop/src-tauri/src/watchers/**",
+        "apps/desktop/src-tauri/tests/commands.rs",
+        "apps/desktop/src/data/**",
+        "apps/desktop/src/components/slice/**",
+        "tests/e2e/domain-slice/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/API_AND_MCP.md#5-events-and-errors",
+        "docs/planning/low-level/UI_AND_NATIVE.md#2-snapshot-and-event-synchronization",
+        "docs/planning/low-level/NATIVE_E2E.md#first-scaffold-smoke-then-real-store-acceptance",
+        "docs/planning/BUILD_HANDOFF.md#mechanical-bootstrap-recipe-implementation-session"
+      ],
+      "acceptance": [
+        "Actual Tauri commands resolve registered IDs, call core/store, validate renderer bounds and emit revision hints; subscribe-before-load, coalesce watch changes and keep last valid snapshot on read failure.",
+        "Real UI displays demo tree/detail/Waiting; submit writes real owner input; fake only at provider seam returns explicit reply/result plus host completion; UI refreshes committed conversation.",
+        "E2E proves UI action, actual Rust command receipt/nonce and on-disk snapshot from same Tauri process; mocked invoke, preloaded result and detached core bridge cannot satisfy this gate."
+      ],
+      "checks": [
+        "rtk proxy npm run test:e2e -- --suite domain-slice",
+        "rtk proxy cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test commands"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P4.2",
+      "title": "Build project/session navigation and qualified registration views",
+      "phase": "M4",
+      "depends_on": [
+        "P4.1",
+        "P3.7"
+      ],
+      "paths": [
+        "apps/desktop/src/components/navigation/**",
+        "apps/desktop/src/state/navigation/**",
+        "tests/ui/navigation/**",
+        "tests/e2e/navigation/**"
+      ],
+      "spec": [
+        "docs/planning/DESIGN_TRACEABILITY.md#board-frame-mapping",
+        "docs/planning/low-level/UI_AND_NATIVE.md#1-component-tree-and-state-owners",
+        "docs/planning/low-level/UI_AND_NATIVE.md#6-archive-sessions-and-binding-lifecycle"
+      ],
+      "acceptance": [
+        "Implement Projects, project detail, All sessions and tabs with explicit registered/bound/candidate/closed/unavailable states (D02; frames 1p/1w/1z/1aa/1ab/1ac).",
+        "Navigation preserves per-session selection/tabs/filters/drafts; tab close changes navigation only; candidate selection explicitly binds and no tab guesses host ownership."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project navigation",
+        "rtk proxy npm run test:e2e -- --suite navigation"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P4.3",
+      "title": "Build global Waiting and per-input Sent delivery views",
+      "phase": "M4",
+      "depends_on": [
+        "P4.1"
+      ],
+      "paths": [
+        "apps/desktop/src/components/waiting/**",
+        "apps/desktop/src/selectors/waiting/**",
+        "tests/ui/waiting/**",
+        "tests/e2e/waiting/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#2-snapshot-and-event-synchronization",
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#6-delivery-labels-and-full-history",
+        "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks"
+      ],
+      "acceptance": [
+        "Pinned 300px global Waiting sorts current unanswered episodes; Sent has one row per queued/in-flight/needs-attention input including terminal-item generic intents (D03/D12).",
+        "Use backend SummaryCounts and delivery facts; old Sent plus new Waiting episode coexist; partial roots show incomplete counts; labels never rewrite item status."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project waiting",
+        "rtk proxy npm run test:e2e -- --suite waiting"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P4.4",
+      "title": "Implement sentence tree, filters and one reveal route",
+      "phase": "M4",
+      "depends_on": [
+        "P4.1"
+      ],
+      "paths": [
+        "apps/desktop/src/components/tree/**",
+        "apps/desktop/src/selectors/tree/**",
+        "apps/desktop/src/routes/**",
+        "tests/ui/tree/**",
+        "tests/e2e/tree/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#3-tree-detail-message-rail-search-and-filters",
+        "docs/planning/low-level/UI_AND_NATIVE.md#7-keyboard-and-accessibility",
+        "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks"
+      ],
+      "acceptance": [
+        "Memoized variable-height rows preserve full question/outcome; stable sibling order and local collapse/Later state remain independent of domain.",
+        "NFKC/lowercase search and AND/OR filters retain contextual ancestors; keyboard/Waiting/Sent/rail/native routes share revealItem without clearing filters or saved expansion (D04).",
+        "Measure 2,000-item target before adding virtualization; preserve roving ARIA focus and scroll anchors."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project tree",
+        "rtk proxy npm run test:e2e -- --suite tree"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P4.5",
+      "title": "Render complete detail rounds, forks, timeline and message rail",
+      "phase": "M4",
+      "depends_on": [
+        "P4.1",
+        "P1.2",
+        "P4.4"
+      ],
+      "paths": [
+        "apps/desktop/src/components/history/**",
+        "apps/desktop/src/components/rail/**",
+        "tests/ui/history/**",
+        "tests/e2e/history/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#3-tree-detail-message-rail-search-and-filters",
+        "docs/planning/low-level/API_AND_MCP.md#summary-projections-and-command-naming",
+        "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks"
+      ],
+      "acceptance": [
+        "Render full messages, ask/choice/text/result cards, five rounds/two forks, closed-item follow-up and former outcome after reopen; page every body without duplicate summaries (D05).",
+        "Rail hover/pin and item cross-highlight share refs; upward scroll pauses follow, new messages increment Jump to latest without stealing focus/scroll (D08)."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project history",
+        "rtk proxy npm run test:e2e -- --suite history"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P4.6",
+      "title": "Implement owner answers/actions and durable draft preferences",
+      "phase": "M4",
+      "depends_on": [
+        "P4.1",
+        "P4.3",
+        "P4.4"
+      ],
+      "paths": [
+        "apps/desktop/src/components/inputs/**",
+        "apps/desktop/src/state/drafts/**",
+        "apps/desktop/src-tauri/src/preferences/**",
+        "apps/desktop/src-tauri/tests/preferences.rs",
+        "tests/e2e/owner-inputs/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#5-owner-input-and-delivery-ui",
+        "docs/planning/low-level/UI_AND_NATIVE.md#1-component-tree-and-state-owners",
+        "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks"
+      ],
+      "acceptance": [
+        "No default option; deliberate option or nonempty text and Cmd+Enter submits once with stable op ID; retries/double-click do not duplicate (D06).",
+        "Bring/answer/reply/note/followup/drop/reopen enqueue intents on eligible active-session items; Replaced exposes Follow up and no in-place reopen; Later stays local.",
+        "Drafts survive tab/detail/refresh/recoverable errors; changed target revision requires review; clear only after durable receipt and never auto-send after restart."
+      ],
+      "checks": [
+        "rtk proxy npm run test:e2e -- --suite owner-inputs",
+        "rtk proxy cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test preferences"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P4.7",
+      "title": "Show binding lifecycle, recovery and all ordinary edge states",
+      "phase": "M4",
+      "depends_on": [
+        "P4.2",
+        "P4.3",
+        "P4.6",
+        "P3.8"
+      ],
+      "paths": [
+        "apps/desktop/src/components/bindings/**",
+        "apps/desktop/src/components/recovery/**",
+        "apps/desktop/src/components/edge-states/**",
+        "tests/e2e/recovery/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#6-archive-sessions-and-binding-lifecycle",
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#4-owner-recovery-commands",
+        "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks"
+      ],
+      "acceptance": [
+        "Empty/loading/all-clear/no-results/stale/unavailable/malformed/write-error/reconnecting remain distinct and retain last valid data/drafts (D11).",
+        "Show explicit connect/pause/resume/disconnect with generation and qualified host freshness; uncertain/missing-result UI exposes audited recovery and duplicate-work warning (D12).",
+        "No host stop/permission/retarget control; owner pause survives refresh/relaunch and recovery selection cannot fabricate successful result."
+      ],
+      "checks": [
+        "rtk proxy npm run test:e2e -- --suite recovery"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P4.8",
+      "title": "Validate all mockup frames, themes and keyboard accessibility",
+      "phase": "M4",
+      "depends_on": [
+        "P4.2",
+        "P4.3",
+        "P4.4",
+        "P4.5",
+        "P4.6",
+        "P4.7"
+      ],
+      "paths": [
+        "apps/desktop/src/components/accessibility/**",
+        "tests/ui/accessibility/**",
+        "tests/visual/**",
+        "docs/planning/evidence/design-review/**"
+      ],
+      "spec": [
+        "docs/planning/DESIGN_TRACEABILITY.md#board-frame-mapping",
+        "docs/planning/DESIGN_TRACEABILITY.md#visual-regression-fixtures",
+        "docs/planning/low-level/UI_AND_NATIVE.md#7-keyboard-and-accessibility"
+      ],
+      "acceptance": [
+        "Capture every applicable frame and component variant in both themes at reference/minimum sizes; source reference sheets remain gallery states rather than new pages (D01/D14).",
+        "Verify roving focus, labels, non-color status, dialog focus trap/return, shortcuts outside editors, reduced motion and polite once-only announcements.",
+        "Resolve actual visual/interaction discrepancies with before/after evidence; raster-only tolerance cannot waive missing states or clipped/inaccessible controls."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project accessibility",
+        "rtk proxy npm run test:visual",
+        "rtk proxy npm run test:e2e -- --suite keyboard"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P5.1",
+      "title": "Implement deterministic graph geometry and shared selection",
+      "phase": "M5",
+      "depends_on": [
+        "P4.4",
+        "P0.4"
+      ],
+      "paths": [
+        "apps/desktop/src/graph/layout/**",
+        "apps/desktop/src/components/graph/**",
+        "tests/ui/graph-layout/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#4-graph",
+        "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks"
+      ],
+      "acceptance": [
+        "SVG uses fixed node/depth/leaf/root dimensions, stable ordered tree layout, cubic parent edges and distinct labelled dashed replacement edges (D07).",
+        "Shared filters/selection route to same detail; cursor-anchored zoom 0.25\u20132.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project graph-layout"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P5.2",
+      "title": "Cull graph viewport correctly on 2,000-node topics",
+      "phase": "M5",
+      "depends_on": [
+        "P5.1"
+      ],
+      "paths": [
+        "apps/desktop/src/graph/culling/**",
+        "tests/ui/graph-culling/**",
+        "tests/e2e/graph/**",
+        "docs/planning/evidence/graph-performance/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#4-graph",
+        "docs/planning/low-level/VERIFICATION.md#required-acceptance-matrix"
+      ],
+      "acceptance": [
+        "Above 300 nodes use 512-world-cell bounds index, 200-screen-pixel margin and conservative Bezier bounds; dedupe IDs and retain selected/focused nodes and crossing edges.",
+        "Pan/zoom updates once per animation frame without relayout; off-screen selection centers then focuses; culling cannot alter counts/search/ancestry or Fit full bounds.",
+        "Save deterministic 2,000-node correctness and measured render/performance evidence (V27)."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project graph-culling",
+        "rtk proxy npm run test:e2e -- --suite graph"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P5.3",
+      "title": "Build guarded archive/session and Continue preview dialogs",
+      "phase": "M5",
+      "depends_on": [
+        "P2.6",
+        "P4.5",
+        "P4.6",
+        "P4.7"
+      ],
+      "paths": [
+        "apps/desktop/src/components/history-actions/**",
+        "tests/e2e/history-actions/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#6-archive-sessions-and-binding-lifecycle",
+        "docs/planning/low-level/UI_AND_NATIVE.md#5-owner-input-and-delivery-ui",
+        "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks"
+      ],
+      "acceptance": [
+        "Render navigable guard blockers; Pause dispatch confirms first, Close confirms separately; archive/restore/close/reopen retain history and never signal host (D09).",
+        "Continue preview names source/target, grouped waiting/open/terminal summary and provenance; explicit Send creates target copy and one handoff, with source unchanged on forced target failure (D10).",
+        "Source links stay navigable through copied provenance if original project is unavailable."
+      ],
+      "checks": [
+        "rtk proxy npm run test:e2e -- --suite history-actions"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P6.1",
+      "title": "Implement window lifecycle and common native open routing",
+      "phase": "M6",
+      "depends_on": [
+        "P4.4",
+        "P3.2"
+      ],
+      "paths": [
+        "apps/desktop/src-tauri/src/native/window/**",
+        "apps/desktop/src-tauri/src/native/routes/**",
+        "crates/ariadne-cli/src/open.rs",
+        "tests/native/routes/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#8-native-macos-service",
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#5-desktop-shutdown-and-worker-recovery"
+      ],
+      "acceptance": [
+        "Single-instance registers before plugins and queues ID routes until webview ready; actual packaged CLI open handles paths with spaces and same revealItem route.",
+        "Pin/geometry/monitor clamping/hide vs Quit/wake reconciliation work on recorded Mac; Quit stops only Ariadne dispatch and explicitly preserves active external host turn."
+      ],
+      "checks": [
+        "rtk proxy npm run test:native -- --suite routes",
+        "Packaged manual native evidence: hidden/minimized/cold launch, monitor change, wake, pin, path with spaces and second-instance route."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P6.2",
+      "title": "Implement native tray counts and one notification delegate",
+      "phase": "M6",
+      "depends_on": [
+        "P6.1",
+        "P4.3"
+      ],
+      "paths": [
+        "apps/desktop/src-tauri/src/native/tray/**",
+        "apps/desktop/src-tauri/src/native/notifications/**",
+        "tests/native/notifications/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/UI_AND_NATIVE.md#8-native-macos-service",
+        "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks"
+      ],
+      "acceptance": [
+        "Tray waiting_unanswered count/oldest ten rows/partial-root marker match global queue, with 250ms coalescing and separate lifecycle diagnostics.",
+        "One long-lived objc2 UserNotifications delegate owns permission/schedule/click; bounded waiting-episode watermark dedupes/burst groups and generic text is default.",
+        "Packaged foreground/hidden/cold click and already-answered routes open current detail; permission denial leaves in-app answering usable (D13)."
+      ],
+      "checks": [
+        "rtk proxy npm run test:native -- --suite notifications",
+        "Record actual packaged macOS permission/denial, foreground/hidden/cold-click and tray parity evidence."
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P6.3",
+      "title": "Implement simple owned setup/uninstall and read-only doctor",
+      "phase": "M6",
+      "depends_on": [
+        "P2.4",
+        "P3.4",
+        "P3.6",
+        "P3.7"
+      ],
+      "paths": [
+        "crates/ariadne-cli/src/setup/**",
+        "crates/ariadne-cli/src/doctor/**",
+        "crates/ariadne-cli/tests/setup.rs",
+        "crates/ariadne-cli/tests/doctor.rs"
+      ],
+      "spec": [
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#6-simple-personal-setup-and-uninstall",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#8-doctor-diagnostics-and-retention",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#3-claude-mod-installation-and-binding"
+      ],
+      "acceptance": [
+        "Project/global setup prints owned resource changes and exact host marketplace/install/reload/connect commands; second setup is no-op and host trust remains explicit.",
+        "Uninstall removes only unchanged owned entries/resources, retaining edited/foreign host config and every session/backup; no credential/permission/shell-profile edits.",
+        "Doctor JSON reports stable ok/warning/error codes, parity/version/socket/root/schema/recovery facts and hints without credential reads or raw payload logs."
+      ],
+      "checks": [
+        "rtk proxy cargo test -p ariadne-cli --test setup",
+        "rtk proxy cargo test -p ariadne-cli --test doctor"
+      ],
+      "estimate_days": 1.5
+    },
+    {
+      "id": "P6.4",
+      "title": "Package locked local app/CLI/MCP install and owned uninstall",
+      "phase": "M6",
+      "depends_on": [
+        "P6.1",
+        "P6.2",
+        "P6.3",
+        "P2.5"
+      ],
+      "paths": [
+        "Makefile",
+        "scripts/install/**",
+        "tests/functional/install/**",
+        "docs/planning/evidence/install/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#7-build-and-personal-install",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#1-installed-files-project-data-and-bindings"
+      ],
+      "acceptance": [
+        "make install performs recorded OS/architecture/toolchain preflight, locked builds and package-owned manifest; installs app in ~/Applications and matching helpers/rules/Mod under versioned user path.",
+        "Only contained owned symlinks/current pointer are updated; missing PATH directory prints instruction without startup-file edit; no sudo/toolchain/provider download.",
+        "make uninstall removes only package-owned app/helpers/links and retains all history/unrelated edits; release bundle has no driver/devtools/test listener."
+      ],
+      "checks": [
+        "rtk proxy npm run test:install",
+        "From clean checkout on recorded Mac: rtk proxy make install; rtk proxy ariadne doctor --json; rtk proxy make uninstall"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P7.1",
+      "title": "Run complete deterministic UI/domain/adapter failure acceptance",
+      "phase": "M7",
+      "depends_on": [
+        "P3.4",
+        "P3.6",
+        "P3.7",
+        "P3.8",
+        "P4.8",
+        "P5.2",
+        "P5.3",
+        "P6.4"
+      ],
+      "paths": [
+        "tests/e2e/acceptance/**",
+        "tests/functional/acceptance/**",
+        "docs/planning/evidence/deterministic-acceptance/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/VERIFICATION.md#cross-cutting-failure-fixtures",
+        "docs/planning/low-level/VERIFICATION.md#required-acceptance-matrix"
+      ],
+      "acceptance": [
+        "Actual Tauri UI/core/store/CLI/MCP with fake only at provider seam passes five-input FIFO, same-project parallel isolation, duplicate/out-of-order events, missing result and ordinary quit/reopen.",
+        "Each fixture asserts persisted state and public UI/API result; retain reproducible seeds/logs and explicitly label mocked provider evidence.",
+        "Run required full per-commit gates; do not add exotic recovery matrices or live billable sessions to every commit."
+      ],
+      "checks": [
+        "rtk proxy npm run test:e2e -- --suite acceptance",
+        "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P7.2",
+      "title": "Prove five explicit-result inputs in existing Claude conversation",
+      "phase": "M7",
+      "depends_on": [
+        "P7.1"
+      ],
+      "paths": [
+        "docs/planning/evidence/live-claude/**",
+        "tests/live/claude/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/VERIFICATION.md#required-acceptance-matrix",
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#3-claude-code-21287-adapter"
+      ],
+      "acceptance": [
+        "On Claude Code 2.1.287 in disposable project, five distinct queued owner messages reach same existing conversation in FIFO without coalescing, each full item reply/result joined to matching input/attempt.",
+        "Include busy queue, terminal-item message, multi-item replies, status/topic/children chosen via CLI/MCP, both result/completion orders, missing-result repair/resend/skip and app quit/relaunch.",
+        "Run two sessions in same project plus another project for binding/generation isolation; record installed Mod versions, discovery/freshness/manual fallback and redacted actual evidence."
+      ],
+      "checks": [
+        "rtk proxy npm run test:live -- --host claude --inputs 5",
+        "Review saved live receipts, input/attempt/host-turn mapping and on-disk state; POC three-turn transport evidence cannot satisfy this gate."
+      ],
+      "estimate_days": 0.5
+    },
+    {
+      "id": "P7.3",
+      "title": "Prove five explicit-result inputs through Codex native queue",
+      "phase": "M7",
+      "depends_on": [
+        "P7.1"
+      ],
+      "paths": [
+        "docs/planning/evidence/live-codex/**",
+        "tests/live/codex/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/VERIFICATION.md#required-acceptance-matrix",
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#4-codex-01600-adapter"
+      ],
+      "acceptance": [
+        "On matching Codex CLI/daemon 0.160.0 in disposable project, five distinct native-queue messages reach exact already-running thread, preserving context and FIFO; full explicit item replies/results join each attempt.",
+        "Exercise busy queue, closed-item message, multi-item reply/topic/children/status, disconnect/relaunch, duplicates, both join orders and audited missing-result/uncertain recovery.",
+        "Prove same-project/cross-project isolation and loaded-thread discovery/manual fallback; record socket identity and precise observed limitations without private transcript import."
+      ],
+      "checks": [
+        "rtk proxy npm run test:live -- --host codex --inputs 5",
+        "Review saved live receipts, original user-item marker-to-turn map and persistent domain results; queue POC alone cannot satisfy acceptance."
+      ],
+      "estimate_days": 0.5
+    },
+    {
+      "id": "P8.1",
+      "title": "Ship clean-install release evidence and user handoff",
+      "phase": "M8",
+      "depends_on": [
+        "P7.2",
+        "P7.3"
+      ],
+      "paths": [
+        "README.md",
+        "DECISIONS.md",
+        "docs/planning/low-level/VERIFICATION.md",
+        "docs/planning/evidence/release/**"
+      ],
+      "spec": [
+        "docs/planning/low-level/VERIFICATION.md#milestone-artifacts",
+        "docs/planning/low-level/SETUP_AND_DELIVERY.md#7-build-and-personal-install",
+        "docs/planning/BUILD_HANDOFF.md#what-counts-as-complete"
+      ],
+      "acceptance": [
+        "Clean checkout builds/installs recorded source revision; packaged offline demo/history/owner edits, both supported integrations, native routing and owned uninstall pass on recorded Mac.",
+        "Every non-deferred V01\u2013V29 row links proved-on-version evidence or a concrete external blocker; distinguish mock/transport/production/live/native evidence and retain seeds/hashes/logs.",
+        "README covers install/unsigned Open Anyway/setup/both hosts/60-second tour/rules/recovery/uninstall/limits; record no remote assets, telemetry, updater, host transcript/credential handling or release test service.",
+        "Public plugin and exotic recovery remain deferred; reviewed repository changes are publishable under existing authorization, while signed public app distribution is a later decision."
+      ],
+      "checks": [
+        "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree",
+        "Clean-checkout make install, packaged offline/live/native acceptance and make uninstall; record exact version/platform/source/artifact evidence."
+      ],
+      "estimate_days": 1
+    }
+  ]
+}

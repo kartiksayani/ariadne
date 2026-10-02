@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from urllib.parse import unquote
 import zipfile
@@ -118,6 +119,11 @@ with tempfile.TemporaryDirectory(prefix="ariadne-planning-") as tmp:
     result = subprocess.run([*prefix, "node", str(tmp / "check.cjs"), str(tmp / "engine.js")],
                             capture_output=True, text=True)
     check("explorer_12_flow_cases", result.returncode == 0, result.stderr)
+
+if (ROOT / "docs/delivery/tasks.json").exists() or (DOCS / "roadmap.html").exists():
+    roadmap = subprocess.run([sys.executable, str(ROOT / "scripts/validate-roadmap.py")],
+                             capture_output=True, text=True)
+    check("roadmap_catalogue_and_schedule", roadmap.returncode == 0, roadmap.stdout + roadmap.stderr)
 
 report = {"scope": "planning artifacts; not production/native/browser-rendering tests",
           "checks": checks, "markdown_files": len(markdown_files),

@@ -23,3 +23,11 @@ Historical planning, research and POCs are preserved in the
 [immutable archive](https://github.com/kartiksayani/ariadne/tree/a5e306f)
 and `reference/planning-and-pocs`. Build/install commands will be documented
 when the application exists.
+
+## Interactive plans
+
+- [Implementation Gantt and dependency graph](docs/planning/roadmap.html)
+- [Communication architecture explorer](docs/planning/communication-explorer.html)
+
+Both are standalone HTML files: open them locally in a browser. The diagrams
+show the design and delivery plan; they do not claim the app is implemented.
