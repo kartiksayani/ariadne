@@ -5,6 +5,37 @@ use serde_json::json;
 
 const TIME: &str = "2026-10-03T12:34:56.789Z";
 
+#[test]
+fn merged_canonical_demo_and_source_sessions_pass_item_validation() {
+    for (name, text) in [
+        (
+            "demo",
+            include_str!("../../../fixtures/domain/demo/session.json"),
+        ),
+        (
+            "source",
+            include_str!("../../../fixtures/domain/demo/source-session.json"),
+        ),
+    ] {
+        let session: Session = serde_json::from_str(text).unwrap();
+        validate_session_items(&session).unwrap_or_else(|error| panic!("{name}: {error}"));
+    }
+}
+
+#[test]
+fn activity_round_context_can_touch_multiple_items_without_single_item_target() {
+    let mut s = session();
+    apply(&mut s, &ask(10));
+    s.counters.next_root = positive(3);
+    s.items.0.insert(reference("2"), item("2", None, 2));
+    s.messages[0].item_id = None;
+    s.messages[0].items_touched = vec![reference("1"), reference("2")];
+    s.messages[0].round_id = Some(uuid(10));
+    validate_session_items(&s).unwrap();
+    s.messages[0].item_id = Some(reference("2"));
+    invalid(&s, ValidationErrorKind::MissingReference);
+}
+
 fn uuid(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }

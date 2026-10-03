@@ -122,11 +122,12 @@ pub fn validate_session_items(session: &Session) -> Result<(), ValidationError> 
         }
         if let Some(id) = &message.round_id {
             require(
-                session
-                    .rounds
-                    .0
-                    .get(id)
-                    .is_some_and(|round| message.item_id.as_ref() == Some(&round.item_id)),
+                session.rounds.0.get(id).is_some_and(|round| {
+                    message
+                        .item_id
+                        .as_ref()
+                        .is_none_or(|item_id| item_id == &round.item_id)
+                }),
                 "messages.round_id",
                 ValidationErrorKind::MissingReference,
             )?;
