@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay } from '../../../scripts/run-native-e2e.mjs';
-import { resolvedNames, verifyGraph, mergedConfig, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup } from '../../../scripts/check-release-boundary.mjs';
+import { resolvedNames, verifyGraph, mergedConfig, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 async function assertExited(pid) {
   const end = Date.now() + 1000;
   while (alive(pid) && Date.now() < end) await delay(10);
@@ -137,6 +137,13 @@ test('release proof rejects activated dependencies, inline permissions, globals 
   assert.throws(() => verifyGraph([], config, {}, { test: { permissions: ['wdio-webdriver:default'] } }, modules));
   assert.throws(() => verifyGraph([], config, {}, {}, [...modules, '/node_modules/@wdio/tauri-plugin/index.js']));
   assert.throws(() => verifyGraph([], config, {}, {}, []));
+});
+test('reference isolation excludes only test mounts/runtime and allows reusable product primitives', () => {
+  const modules = ['/node_modules/react/index.js', '/apps/desktop/src/components/reference/StatusBadge.tsx', '/apps/desktop/src/components/reference/TreeRow.tsx', '/apps/desktop/src/components/reference/AnswerControl.tsx', '/apps/desktop/src/components/reference/MessageExcerpt.tsx'];
+  const files = ['index.html', 'assets/main.js', 'fonts/inter-latin.woff2', 'styles/design-tokens.css'];
+  verifyReferenceIsolation(modules, files);
+  for (const path of ['/tests/ui/reference/gallery.tsx', '/tests/ui/reference/cases.tsx', '/tests/ui/reference/source-runtime/node_modules/react/umd/react.production.min.js', '/node_modules/@babel/standalone/babel.min.js', '/node_modules/@playwright/test/index.js', '/node_modules/playwright-core/lib/index.js', '/designs/Ariadne UI mockups.zip']) assert.throws(() => verifyReferenceIsolation([...modules, path], files), /production modules/);
+  for (const path of ['gallery.html', 'source/support.js', 'source/Item Row.dc.html', 'source-runtime/react.js', 'tests/ui/reference/fixture.json', 'Ariadne UI mockups.zip']) assert.throws(() => verifyReferenceIsolation(modules, [...files, path]), /production files/);
 });
 test('invalid or occupied preflight allocates no native root and leaves unrelated listener alive', async () => {
   const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

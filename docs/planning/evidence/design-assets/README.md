@@ -1,4 +1,4 @@
-# P0.4a licensed asset foundation
+# Licensed assets and source reference components
 
 [source.json](source.json) maps every one of the 30 immutable board frames to its
 source member, board line, exact import props and component families. Its nine
@@ -52,7 +52,71 @@ No prototype scripts, timers, fixture behavior or remote imports are shipped.
 bytes, complete mappings, source token values, bundled hashes/licenses, face and
 glyph mappings, and every resource through a temporary loopback Vite server.
 The root reference tests are included in the desktop TypeScript check. Default
-UI/coverage runs still include the desktop scaffold tests. Rendering components,
-screenshots, font rasterization and packaged offline acceptance belong to
-P0.4b/P0.4 and later release checks. No native build was needed for asset extraction.
+UI/coverage runs still include the desktop scaffold tests. No native build was
+needed for asset extraction.
 Organization security guidance was not checked under the explicit session waiver.
+
+## P0.4b reusable presentation components
+
+`apps/desktop/src/components/reference/` ports StatusBadge (seven source statuses,
+pill/text/icon), TreeRow (nesting, focus, selection, search/context/touched,
+collapsed summary, Later/Explained, replacement, delivery and inline editor),
+AnswerControl (full/compact options, recommendation, selection, optional text,
+warning/blocked/saving/error/delivery labels), and MessageExcerpt (rail/timeline,
+owner/agent, created/updated/origin, hover/highlight). Component CSS preserves
+source dimensions, font weights, shapes and theme roles. Props are controlled
+presentation inputs; product routes, service contracts and application workflows
+remain unchanged. Message-follow/latest controls belong to the consuming rail.
+
+Release semantics qualify the prototype: recommendations never select an answer;
+number keys select without sending; a selected option and optional text, or text
+alone, form one submission. Escape retains the parent-owned draft. A Replaced
+row filters reopening while allowing Follow up. Answer delivery labels remain
+separate from item status. The text hint describes combined submission accurately;
+it does not retain the prototype's “reply instead of option” behavior.
+Plain Enter activates the focused button, selecting an option or activating its
+explicit Send control. Only Cmd+Enter in the focused valid text input submits via
+the editor shortcut; container/other-control key events do not send a prior choice.
+
+`tests/ui/reference/gallery.html`, `gallery.tsx` and `cases.tsx` mount fixtures only
+through the dedicated test server. The native/application entry does not import
+them. The private source-runtime workspace locks React/ReactDOM 18.3.1 and Babel
+standalone 7.29.0, exactly as immutable `support.js` requests, alongside application
+React 19. Their UMD SHA-384 bytes must match the archive's original SRI values.
+The runtime and original component/Nocturne files are read from the ZIP unchanged;
+exact CDN URLs are intercepted locally, font/icon requests use bundled licensed
+bytes, and all other external requests fail the capture. Theme roles come from
+the existing member/line source evidence. Nothing falls back to the network.
+
+`npm run capture:reference` compares 54 deterministic component cases at actual
+1600×960 and 1000×700 Chromium viewports, each dark/light: 216 source/app region
+pairs. The narrower viewport also narrows the fixture region. Geometry may differ
+by at most 1px; the pixel comparator allows 0.5% differing pixels with threshold
+0.2 for rasterization. Both independently rendered PNGs and source/browser/input/
+geometry provenance are attached to the report. Playwright emits real diff PNGs
+on mismatches. Each expected PNG is freshly rendered source, never an application
+golden. The qualified free-text region compares the actual textarea separately;
+the corrected submission hint is verified by product behavior tests.
+Two selected-answer cases qualify only the exact shortcut hint text: the full
+hint removes “Enter sends”; the compact hint changes it to “Enter activates the
+focused button”. Comparison screenshots hide that text alone, retaining its
+layout and all controls. Complete unmasked source/app PNGs and before-mask geometry
+remain attached, and provenance records the exact original/release strings.
+Keyboard tests independently assert the app's Cmd+Enter copy and ordinary button
+activation. Browser captures also Tab to the TreeRow and clickable MessageExcerpt
+roots and verify actual focus plus their 2px focus-visible outline.
+
+Playwright 1.63.0 pins its Chromium revision. Provision it explicitly with
+`PLAYWRIGHT_BROWSERS_PATH="$PWD/target/reference-browser" node node_modules/playwright/cli.js install chromium`
+before captures; missing browsers fail. CI uses that task directory, never the
+global cache, and uploads `coverage/reference/` with existing quality evidence.
+The HTML reporter uses an absolute repository `coverage/reference/report` path,
+so its app/source PNG attachments and provenance are included in that upload.
+No captures, production/native builds or full coverage runs are performed locally
+under the owner's current execution preference.
+
+The packaged release gate checks the fresh module graph and emitted file names
+for fixture mounts, archived prototypes and capture dependencies. Its focused
+regression proves those fail while reusable production component imports and
+bundled fonts/tokens remain allowed. Existing packaged/native checks provide
+release evidence in CI; test-only mounts are not application routes.
