@@ -7,8 +7,10 @@ discovery/liveness and optimized graphs remain required.
 
 Revision 3 · 2 October 2026. This revision replaces the earlier managed-launch
 specifications. Read [BUILD_HANDOFF](BUILD_HANDOFF.md), then the contracts below.
-No production application has been built. Proven transports and pending product
-tests are distinguished in the [verification ledger](low-level/VERIFICATION.md).
+The pinned scaffold and real native smoke are implemented (P0.1/P0.2); domain,
+provider integration and personal-release acceptance remain ahead. Proven
+transports and pending product tests are distinguished in the
+[verification ledger](low-level/VERIFICATION.md).
 
 ## Authoritative contracts
 
@@ -46,11 +48,12 @@ from prototype data. Generated models/fixtures must follow the current tables.
 
 ## What the next session must produce first
 
-Scaffold the chosen Tauri2/React/TypeScript/Rust workspace into `apps/desktop`
-without replacing this repository. Record exact installed toolchain/dependency
-versions, commit lockfiles, generate the v1 DTO/schema fixtures, extract source
-assets using the checked manifest and render the reference component gallery.
-Then implement the pure core/store and contract tests before provider adapters.
+Preserve the completed Tauri2/React/TypeScript/Rust scaffold, pinned versions and
+lockfiles. Resume the declared v1 domain/provider contracts, source assets and
+reference component work from current main, assessing preserved drafts within
+their original tasks. Implement pure core/store behavior and contract tests
+before dependent provider integration. Eligible independent modules may proceed
+in parallel with settled contracts and disjoint ownership.
 Exact commands and ordering are in BUILD_HANDOFF; there is no unresolved choice
 of storage engine, delivery transport, reply path, graph library or UI framework.
 

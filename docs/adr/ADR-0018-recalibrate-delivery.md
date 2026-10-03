@@ -1,13 +1,15 @@
 # ADR-0018: Recalibrate delivery around the first walking slice
 
-Status: accepted
+Status: accepted; product sequencing partially superseded by ADR-0019
 Supersedes: [ADR-0001](ADR-0001-record-architecture-decisions.md) (machine declarations),
 [ADR-0010](ADR-0010-classify-uninstrumented-rust-declarations.md) (coverage classifier),
 [ADR-0017](ADR-0017-increase-review-size-budgets.md) (caps),
 [ADR-0007](ADR-0007-gate-scaffold-release-isolation.md) (cadence only),
 [ADR-0002](ADR-0002-test-webview-and-macos-surfaces.md) (cadence only),
 [ADR-0014](ADR-0014-check-only-final-pr-snapshot-in-ci.md) (full local hooks/caps only)
-Superseded by: none
+Superseded by: [ADR-0019](ADR-0019-restore-module-delivery.md) (only the product
+sequencing paragraph beginning "Product work stays paused"; tooling, quality and
+review decisions remain accepted, with current enforcement documented in CONTRIBUTING)
 
 ## Context
 

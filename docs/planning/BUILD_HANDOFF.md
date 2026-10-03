@@ -8,40 +8,44 @@ The pinned scaffold and native smoke are already implemented (P0.1 #11, P0.2 #14
 
 ## Start here
 
-Fetch current main and declare one bounded task's owned paths in an isolated
-worktree. Read exact acceptance/spec sections. One implementer works until the
-walking slice; an independent reviewer joins when ready. Important architecture
-gaps go to the maintainer before dependent work. Routine ownership/spec updates
-can ship alongside product code. Use the short workflow in ORCHESTRATOR.
+Fetch current main and declare each bounded task's owned paths in an isolated
+worktree. Read the decision log, low-level contracts, applicable ADRs and exact
+acceptance/spec sections. Schedule dependency-eligible work in parallel only with
+settled contracts and disjoint paths; an independent reviewer joins when ready.
+Important architecture gaps go to the maintainer before dependent work. Routine
+ownership/spec updates can ship alongside product code. Use ORCHESTRATOR.
 
-## Thin first slice
+<a id="thin-first-slice"></a>
 
-Before completing all foundations, build one explicitly bound/manual Claude
-session flow using bounded portions of existing domain/store/core/CLI/runtime
-and Waiting UI tasks:
+## Implementation order
 
-1. An agent CLI publishes an item into durable JSON.
-2. The real Waiting UI displays it and the owner saves an answer to the queue.
-3. The real core/dispatcher crosses a fake-only provider boundary.
-4. The agent CLI explicitly commits a reply/result and the UI updates.
+The original plan builds domain contracts, licensed reference assets and provider
+contracts, then pure domain/store/core behavior and contract tests before their
+dependent entry points and provider integrations. Follow actual catalogue
+prerequisites through M0–M8; milestone numbering does not impose a barrier on
+independent work. Preserve and assess the paused P0.3a/P0.4a drafts within their
+original tasks. P0.1 and P0.2 are already merged and must not be repeated.
 
-Use the real CLI, atomic JSON store, file lock, core and UI. Retain binding
-identity/generation, operation deduplication and separate explicit domain result
-and matching host-completion semantics; turn completion alone never means a
-domain result. Do not substitute an append-only canonical store or PID routing.
-Tests fake only the provider and prove persistence, isolation and ordinary failure.
+Build the real UI-to-Rust domain slice at its declared P4.1 prerequisites before
+expanding dependent screens: demo session → tree/detail/Waiting from core → owner
+input saved → fake provider submits explicit reply/result → result/host-completion
+join → refreshed item conversation. This is an integration acceptance step within
+the roadmap. Preserve real CLI, locked atomic JSON, binding identity/generation,
+operation deduplication, provider neutrality and explicit results. Tests fake only
+the provider and prove persistence, isolation and ordinary failure.
 
-After this automated slice, an early paid/live run in the owner's already-open
-Claude session requires explicit owner approval. Pin and record the actual Claude
-version used. Do not launch a host or run a live call now. Final five-input Claude
-and Codex acceptance remains M7; early transport proof cannot replace it.
+Live/billable existing-session Claude and Codex acceptance remains the explicit
+M7 milestone, with owner approval and recorded host versions. Transport POCs do
+not replace five-input product acceptance. Do not launch a host or make a live
+call as part of this planning correction.
 
-Keep the existing ten product packages. Add no package until real code needs it.
-Defer full schema-generator and DTO edge-case work until the slice needs it;
-preserve paused P0.3a/P0.4a drafts. Assets resume with fonts/licenses and a short
-source table. Full Codex, MCP, discovery/liveness, graph, Continue and native
-features remain release scope after the first slice, not deleted features.
-This sequencing does not mark partial catalogue tasks complete.
+Keep the existing ten product packages and their contract boundaries. Implement
+the declared initial schema/generator and DTO acceptance before dependent work;
+do not replace it with partial cross-roadmap work or claim partial tasks complete.
+Assets retain fonts/licenses and a short source table. Full Codex, MCP,
+discovery/liveness, graph, Continue and native features remain release scope.
+[ADR-0019](../adr/ADR-0019-restore-module-delivery.md) supersedes the earlier
+first-slice sequencing; the legacy section anchor is retained for historical links.
 
 ## Decisions already made
 
