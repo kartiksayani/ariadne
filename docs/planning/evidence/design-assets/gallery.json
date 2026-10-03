@@ -39,7 +39,8 @@
       "evidence": {
         "source_whole": "1a-source-whole-unmasked",
         "app_whole": "1a-app-whole-unmasked",
-        "region_pairs": "1a-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1a-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1a-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -60,7 +61,8 @@
       "evidence": {
         "source_whole": "1b-source-whole-unmasked",
         "app_whole": "1b-app-whole-unmasked",
-        "region_pairs": "1b-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1b-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1b-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -80,7 +82,8 @@
       "evidence": {
         "source_whole": "1c-source-whole-unmasked",
         "app_whole": "1c-app-whole-unmasked",
-        "region_pairs": "1c-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1c-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1c-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -100,7 +103,8 @@
       "evidence": {
         "source_whole": "1d-source-whole-unmasked",
         "app_whole": "1d-app-whole-unmasked",
-        "region_pairs": "1d-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1d-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1d-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -121,7 +125,8 @@
       "evidence": {
         "source_whole": "1e-source-whole-unmasked",
         "app_whole": "1e-app-whole-unmasked",
-        "region_pairs": "1e-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1e-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1e-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -142,7 +147,8 @@
       "evidence": {
         "source_whole": "1f-source-whole-unmasked",
         "app_whole": "1f-app-whole-unmasked",
-        "region_pairs": "1f-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1f-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1f-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -162,7 +168,8 @@
       "evidence": {
         "source_whole": "1g-source-whole-unmasked",
         "app_whole": "1g-app-whole-unmasked",
-        "region_pairs": "1g-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1g-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1g-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -182,7 +189,8 @@
       "evidence": {
         "source_whole": "1h-source-whole-unmasked",
         "app_whole": "1h-app-whole-unmasked",
-        "region_pairs": "1h-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1h-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1h-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -201,7 +209,8 @@
       "evidence": {
         "source_whole": "1i-source-whole-unmasked",
         "app_whole": "1i-app-whole-unmasked",
-        "region_pairs": "1i-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1i-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1i-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -361,7 +370,8 @@
       "evidence": {
         "source_whole": "1l-source-whole-unmasked",
         "app_whole": "1l-app-whole-unmasked",
-        "region_pairs": "1l-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1l-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1l-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -381,7 +391,8 @@
       "evidence": {
         "source_whole": "1m-source-whole-unmasked",
         "app_whole": "1m-app-whole-unmasked",
-        "region_pairs": "1m-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1m-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1m-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -400,7 +411,8 @@
       "evidence": {
         "source_whole": "1n-source-whole-unmasked",
         "app_whole": "1n-app-whole-unmasked",
-        "region_pairs": "1n-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1n-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1n-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -422,7 +434,8 @@
       "evidence": {
         "source_whole": "1o-source-whole-unmasked",
         "app_whole": "1o-app-whole-unmasked",
-        "region_pairs": "1o-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1o-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1o-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -441,7 +454,8 @@
       "evidence": {
         "source_whole": "1p-source-whole-unmasked",
         "app_whole": "1p-app-whole-unmasked",
-        "region_pairs": "1p-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1p-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1p-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -462,7 +476,8 @@
       "evidence": {
         "source_whole": "1q-source-whole-unmasked",
         "app_whole": "1q-app-whole-unmasked",
-        "region_pairs": "1q-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1q-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1q-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -481,7 +496,8 @@
       "evidence": {
         "source_whole": "1r-source-whole-unmasked",
         "app_whole": "1r-app-whole-unmasked",
-        "region_pairs": "1r-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1r-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1r-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -526,7 +542,8 @@
       "evidence": {
         "source_whole": "1t-source-whole-unmasked",
         "app_whole": "1t-app-whole-unmasked",
-        "region_pairs": "1t-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1t-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1t-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -546,7 +563,8 @@
       "evidence": {
         "source_whole": "1u-source-whole-unmasked",
         "app_whole": "1u-app-whole-unmasked",
-        "region_pairs": "1u-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1u-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1u-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -566,7 +584,8 @@
       "evidence": {
         "source_whole": "1v-source-whole-unmasked",
         "app_whole": "1v-app-whole-unmasked",
-        "region_pairs": "1v-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1v-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1v-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -586,7 +605,8 @@
       "evidence": {
         "source_whole": "1w-source-whole-unmasked",
         "app_whole": "1w-app-whole-unmasked",
-        "region_pairs": "1w-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1w-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1w-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -605,7 +625,8 @@
       "evidence": {
         "source_whole": "1x-source-whole-unmasked",
         "app_whole": "1x-app-whole-unmasked",
-        "region_pairs": "1x-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1x-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1x-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -624,7 +645,8 @@
       "evidence": {
         "source_whole": "1y-source-whole-unmasked",
         "app_whole": "1y-app-whole-unmasked",
-        "region_pairs": "1y-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1y-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1y-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -643,7 +665,8 @@
       "evidence": {
         "source_whole": "1z-source-whole-unmasked",
         "app_whole": "1z-app-whole-unmasked",
-        "region_pairs": "1z-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1z-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1z-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -663,7 +686,8 @@
       "evidence": {
         "source_whole": "1aa-source-whole-unmasked",
         "app_whole": "1aa-app-whole-unmasked",
-        "region_pairs": "1aa-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1aa-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1aa-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -682,7 +706,8 @@
       "evidence": {
         "source_whole": "1ab-source-whole-unmasked",
         "app_whole": "1ab-app-whole-unmasked",
-        "region_pairs": "1ab-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1ab-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1ab-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -701,7 +726,8 @@
       "evidence": {
         "source_whole": "1ac-source-whole-unmasked",
         "app_whole": "1ac-app-whole-unmasked",
-        "region_pairs": "1ac-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1ac-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1ac-{region}-{index}-normalized-{source|app}"
       }
     },
     {
@@ -721,7 +747,8 @@
       "evidence": {
         "source_whole": "1ad-source-whole-unmasked",
         "app_whole": "1ad-app-whole-unmasked",
-        "region_pairs": "1ad-{region}-{index}-{source|app|provenance}"
+        "region_pairs": "1ad-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1ad-{region}-{index}-normalized-{source|app}"
       },
       "qualification": "No matching compliant crop: the supplied cross-agent reroute overlay shades the entire workspace. Retain both unmasked whole images; independently test the disconnected existing-session presentation and absence of rerouting."
     }
@@ -908,6 +935,7 @@
     "Continue source/release lead and send text are excluded by precisely cropping its unchanged grouped summary; exact strings live in assembled-regions.ts. New target-local IDs/immutable provenance/source-preserving error text is tested independently.",
     "The release footer advertises Cmd+Enter send and Enter details; prototype Enter-send copy/default recommendation is excluded from comparison crops. Source-derived answer cases start without a selection; retained-choice states are explicit target-only fixtures.",
     "Guarded archive/confirmed dispatch pause/target write failure have no supplied matching frame. Source dialog style is reused with honest application-only captures and meaningful interaction/geometry checks.",
-    "Reconnect retained-choice and nonempty-draft cases are deliberate controlled application states with no supplied matching frame. Waiting and detail share reconnect blocking; option/text Send and Cmd+Enter cannot submit. The prior nonrecommended choice is explicit, never a restored default recommendation."
+    "Reconnect retained-choice and nonempty-draft cases are deliberate controlled application states with no supplied matching frame. Waiting and detail share reconnect blocking; option/text Send and Cmd+Enter cannot submit. The prior nonrecommended choice is explicit, never a restored default recommendation.",
+    "Original unmasked whole-frame and region source/app PNGs retain actual composition and clipping. Separately labelled whole-component comparisons preserve measured dimensions and inherited styling while moving the existing DOM region to integer origin, recording original/normalized boxes and temporary/restored styles. Transparent regions preserve their independently resolved solid ancestor backdrop. A component’s own 7% accent layer stays unchanged over a recorded inert temporary backing with its actual solid ancestor color, removed in finally; images/gradients, opacity or translucent ancestor layers fail normalization. These comparisons do not prove original viewport visibility; unmodified canonical shell/pinned/overflow tests prove release geometry."
   ]
 }

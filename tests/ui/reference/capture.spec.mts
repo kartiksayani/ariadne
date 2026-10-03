@@ -1,4 +1,4 @@
-import { test as base, expect, type Page, type BrowserContext } from '@playwright/test';
+import { test as base, expect, type Page, type BrowserContext, type Locator } from '@playwright/test';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { execFileSync } from 'node:child_process';
@@ -88,6 +88,53 @@ async function routeSource(context: BrowserContext, origin: string, denied: stri
       }
       return route.continue();
     });
+}
+
+// Original screenshots prove the actual viewport. Compare component pixels at
+// a shared integer raster origin, retaining their inheritance and dimensions.
+async function normalizedComponent(region: Locator) {
+  const originalStyle = await region.getAttribute('style');
+  const originalBox = await region.boundingBox();
+  if (!originalBox) throw new Error('Missing component box before raster normalization');
+  try {
+    const placement = await region.evaluate((element, box) => {
+      const node = element as HTMLElement;
+      let backdrop = '', preserveBackdrop = false, backingLayer = false;
+      for (let ancestor: HTMLElement | null = node; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor), color = style.backgroundColor;
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1) throw new Error(`Unsupported component backdrop: image=${style.backgroundImage}, opacity=${style.opacity}`);
+        const match = color.match(/(?:rgba\([^)]*,\s*|\/\s*)([\d.]+)(%)?\s*\)$/);
+        const alpha = match ? Number(match[1]) / (match[2] ? 100 : 1) : 1;
+        if (alpha > 0 && alpha < 1) {
+          if (ancestor !== node) throw new Error(`Unsupported translucent ancestor backdrop: ${color}`);
+          backingLayer = true;
+        }
+        if (alpha === 1) { backdrop = color; preserveBackdrop = ancestor !== node; break; }
+      }
+      if (!backdrop) throw new Error('No solid component backdrop found');
+      const temporaryStyles = { position: 'fixed', left: '0px', top: '0px', width: `${box.width}px`, height: `${box.height}px`, margin: '0px', zIndex: '10000', ...(preserveBackdrop && !backingLayer ? { backgroundColor: backdrop } : {}) };
+      Object.assign(node.style, temporaryStyles);
+      const temporaryBacking = backingLayer ? { position: 'fixed', left: '0px', top: '0px', width: `${box.width}px`, height: `${box.height}px`, zIndex: '9999', backgroundColor: backdrop, pointerEvents: 'none' } : null;
+      if (temporaryBacking) {
+        const backing = document.createElement('div'); backing.dataset.referenceRasterBackdrop = ''; backing.inert = true; backing.setAttribute('aria-hidden', 'true');
+        Object.assign(backing.style, temporaryBacking); node.before(backing);
+      }
+      return { backdrop, preserveBackdrop, temporaryStyles, temporaryBacking };
+    }, originalBox);
+    const normalizedBox = await region.boundingBox();
+    expect(normalizedBox).not.toBeNull();
+    for (const dimension of ['width', 'height'] as const) expect(normalizedBox![dimension], `Normalization preserves ${dimension}`).toBeCloseTo(originalBox[dimension], 5);
+    expect(normalizedBox!.x).toBe(0); expect(normalizedBox!.y).toBe(0);
+    const png = await region.screenshot({ animations: 'disabled' });
+    return { png, provenance: { originalBox, normalizedBox, ...placement, purpose: 'Whole-component pixel comparison; does not prove original viewport visibility.' } };
+  } finally {
+    await region.evaluate((element, style) => {
+      const backing = element.previousElementSibling;
+      if (backing?.hasAttribute('data-reference-raster-backdrop')) backing.remove();
+      if (style === null) element.removeAttribute('style'); else element.setAttribute('style', style); }, originalStyle);
+    expect(await region.getAttribute('style'), 'Original inline styles restored').toBe(originalStyle);
+    expect(await region.page().locator('[data-reference-raster-backdrop]').count(), 'Temporary backing removed').toBe(0);
+  }
 }
 
 for (const component of ['Status Badge', 'Item Row', 'Answer Control', 'Message Excerpt']) {
@@ -211,14 +258,17 @@ test('assembled frame regions and canonical pinned geometry', async ({ page, con
       for (const dimension of ['width', 'height'] as const) expect.soft(Math.abs(sourceBox![dimension] - appBox![dimension]), `${frame.id}/${name} ${dimension}`).toBeLessThanOrEqual(1);
       const sourcePng = await sourceRegion.screenshot({ animations: 'disabled' });
       const appPng = await appRegion.screenshot({ animations: 'disabled' });
-      const snapshot = `${frame.id}-${name}-${index}.png`;
+      const normalizedSource = await normalizedComponent(sourceRegion), normalizedApp = await normalizedComponent(appRegion);
+      const snapshot = `${frame.id}-${name}-${index}-normalized.png`;
       const expected = testInfo.snapshotPath(snapshot);
-      await mkdir(dirname(expected), { recursive: true }); await writeFile(expected, sourcePng);
+      await mkdir(dirname(expected), { recursive: true }); await writeFile(expected, normalizedSource.png);
       await testInfo.attach(`${frame.id}-${name}-${index}-source`, { body: sourcePng, contentType: 'image/png' });
       await testInfo.attach(`${frame.id}-${name}-${index}-app`, { body: appPng, contentType: 'image/png' });
-      await testInfo.attach(`${frame.id}-${name}-${index}-provenance`, { body: JSON.stringify({ archive: sourceManifest.archive, member: frame.member, boardLine: frame.line, props, theme, viewport: page.viewportSize(), browser: browser.version(), sourceBox, appBox, dimensions, region, masks: [], wholeFrameParity: false }), contentType: 'application/json' });
+      await testInfo.attach(`${frame.id}-${name}-${index}-normalized-source`, { body: normalizedSource.png, contentType: 'image/png' });
+      await testInfo.attach(`${frame.id}-${name}-${index}-normalized-app`, { body: normalizedApp.png, contentType: 'image/png' });
+      await testInfo.attach(`${frame.id}-${name}-${index}-provenance`, { body: JSON.stringify({ archive: sourceManifest.archive, member: frame.member, boardLine: frame.line, props, theme, viewport: page.viewportSize(), browser: browser.version(), sourceBox, appBox, normalizedSource: normalizedSource.provenance, normalizedApp: normalizedApp.provenance, dimensions, region, masks: [], wholeFrameParity: false }), contentType: 'application/json' });
       // Keep the gate failing while retaining every downstream region pair.
-      expect.soft(appPng).toMatchSnapshot(snapshot, { threshold: 0.2, maxDiffPixelRatio: 0.005 });
+      expect.soft(normalizedApp.png).toMatchSnapshot(snapshot, { threshold: 0.2, maxDiffPixelRatio: 0.005 });
       }
     }
     await page.locator('.ref-workspace-scroll').evaluate(node => { node.scrollLeft = 400; });

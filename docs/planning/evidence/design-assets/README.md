@@ -194,3 +194,21 @@ matching frame, captured independently without claiming source parity. Actual
 user interactions verify option Send, text Send and Cmd+Enter cannot submit
 during reconnect; the choice and draft remain visible. This proves presentation
 blocking and retention, with backend persistence outside this gallery’s scope.
+
+Whole-component comparison uses a shared integer raster origin because equivalent
+regions can inherit different fractional document positions from the canonical
+release composition and prototype. Original unmasked whole-frame **and region**
+source/app PNGs remain attached. Separately labelled `normalized-source` and
+`normalized-app` PNGs compare the existing DOM region at `(0,0)`, preserving
+measured width/height, content and inherited fonts/styles without reparenting or
+cloning. Provenance records original/normalized boxes and temporary style changes;
+assertions check unchanged dimensions and reliable style restoration. Transparent
+regions preserve their own independently resolved solid ancestor backdrop.
+The current round’s own 7% accent layer stays unchanged over a temporary inert
+backing with its actual solid ancestor color, recorded and removed in `finally`.
+Gradients/images, partially transparent ancestor layers or opacity fail with a
+diagnostic instead of being flattened. Masks and thresholds remain unchanged.
+These whole-component images do not prove that the original viewport shows every
+pixel; original images retain clipping, and release shell/pinned/overflow checks
+run on the unmodified DOM. This addresses CI-observed fractional raster differences
+and graph canvases taller than the small viewport’s available body region.

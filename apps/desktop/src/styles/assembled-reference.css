@@ -801,7 +801,6 @@
 
 .ref-tag {
   font-size: 11px;
-  font-weight: 400;
   letter-spacing: 0.02em;
   padding: 3px 10px;
   display: inline-flex;
@@ -1360,4 +1359,13 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ref-session-heading .ref-ghost {
+  padding: var(--space-2) var(--space-1);
+}
+
+.ref-dialog-actions .ref-ghost {
+  padding: var(--space-2) var(--space-1);
+  font-size: 14px;
 }
