@@ -1,16 +1,15 @@
 [package]
-name = "ariadne-domain"
+name = "ariadne-xtask"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-serde.workspace = true
+ariadne-domain = { path = "../../crates/ariadne-domain" }
 schemars.workspace = true
+serde_json.workspace = true
 ts-rs.workspace = true
-uuid.workspace = true
-chrono.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+tempfile.workspace = true
 jsonschema.workspace = true

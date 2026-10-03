@@ -40,6 +40,31 @@ Optional scalar fields serialize as null; collections are present. Reject unknow
 command fields, duplicate map keys, invalid UTF-8/NUL and whitespace-only required
 text. Preserve actual text, including newlines; no normalization of stored prose.
 
+Validated wire primitives are `UuidV4`, `ItemRef`, `UtcMillis`, `SchemaVersion`,
+`PositiveSafeInteger`, `NonnegativeSafeInteger`, `Sha256` and `RequestRef`.
+UUIDs retain lowercase RFC4122 variant v4 spelling. `ItemRef` is dot-separated
+positive decimal segments without leading zeros, each in 1..9007199254740991;
+it supplies no inferred ancestry. `SchemaVersion` is exactly 1 for the initial
+schema. Positive safe integers are 1..9007199254740991; nonnegative safe integers
+are 0..9007199254740991. `RequestRef` uses `[A-Za-z][A-Za-z0-9_]{0,31}`;
+`Sha256` text uses 64 lowercase hexadecimal characters. Constructors and
+deserialization reject alternate spellings rather than normalizing them.
+
+`UtcMillis` accepts canonical RFC3339 UTC with uppercase T/Z and exactly three
+fractional digits. Pinned Chrono parsing and millisecond/Z formatting must
+round-trip to exactly the same string. Second 60 is accepted only at 23:59Z,
+matching the pinned JSON Schema `date-time` assertion. Calendar validity remains
+the pinned libraries' responsibility; no independent length cap, year range,
+month-end rule or historical leap-second table is added. Core assigns timestamps;
+sequence and revision determine ordering.
+
+`cargo xtask gen-contracts` generates Rust-authored primitive JSON Schema and
+TypeScript wire aliases; read-only `--check` rejects missing, stale or unexpected
+artifacts. TypeScript expresses scalar wire kinds and literal schema version 1;
+lexical forms, integrality and safe bounds require Rust or JSON Schema validation.
+Complete DTOs and fixtures remain P0.3b/P0.3. See
+[ADR-0013](../../adr/ADR-0013-validate-domain-primitives.md).
+
 ## 2. Files and entity inventory
 
 ```text

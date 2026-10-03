@@ -44,8 +44,13 @@ executable-line coverage. Fresh `coverage/rust.lcov` and `coverage/web/lcov.info
 include untested handwritten logic; missing/stale reports or omitted sources fail.
 Tool code never contributes to the application percentage. Ordinary helper tests remain.
 
-`quality-gates.json` explicitly excludes the seven current comment-only stub
+`quality-gates.json` explicitly excludes the six current comment-only stub
 files, declaration-only `dto.rs`/`dto/` paths and known build configuration.
+The exact domain `src/lib.rs` and `src/models/mod.rs` exclusions cover only module
+declarations/re-exports: real LLVM measurement produces no executable lines for
+these wiring files. Domain `src/models/primitives.rs` is fully measured. Remove
+either wiring exclusion in the same PR that adds its first executable logic;
+the independent reviewer checks both files and the real report.
 Generated/vendor/dependency/test sources are excluded by path. There is no blanket
 `crates/**/lib.rs` exemption, AST parser, source SHA or dependency-identity classifier.
 Remove a stub's exact exclusion when its first logic lands. Declaration paths must
