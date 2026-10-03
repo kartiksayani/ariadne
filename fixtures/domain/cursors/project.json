@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "view": "projects",
+  "filter_digest": "2577c0f557b2e4b591e9587374c6330c9c64de8017d5a848a682a135251a6f6f",
+  "after": {
+    "kind": "project",
+    "canonical_root": "/fixtures/ariadne-demo",
+    "id": "00000000-0000-4000-8000-000000000001"
+  },
+  "revision": 21
+}

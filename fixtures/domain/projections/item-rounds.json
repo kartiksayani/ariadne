@@ -1,0 +1,166 @@
+{
+  "item_id": "1",
+  "rounds": {
+    "items": [
+      {
+        "round": {
+          "id": "00000000-0000-4000-8000-000000000040",
+          "item_id": "1",
+          "ordinal": 1,
+          "opened_message_id": "00000000-0000-4000-8000-000000000101",
+          "question_snapshot": "Keep the full reply history?",
+          "ask_snapshot": "Choose whether to keep full history.",
+          "options_snapshot": [
+            {
+              "id": "keep",
+              "label": "Keep complete history",
+              "consequence": "Every reply and outcome stays readable.",
+              "recommended": true
+            }
+          ],
+          "question_revision": 1,
+          "closed_at": "2026-10-03T12:00:40.000Z",
+          "origin": null
+        },
+        "answers": {
+          "items": [
+            {
+              "id": "00000000-0000-4000-8000-000000000050",
+              "seq": 1,
+              "item_id": "1",
+              "question_revision": 1,
+              "question_snapshot": "Keep the full reply history?",
+              "ask_snapshot": "Choose whether to keep full history.",
+              "options_snapshot": [
+                {
+                  "id": "keep",
+                  "label": "Keep complete history",
+                  "consequence": "Every reply and outcome stays readable.",
+                  "recommended": true
+                }
+              ],
+              "selected_option_id": "keep",
+              "text": "Keep it.\nRetain the full history, including earlier outcomes.",
+              "message_id": "00000000-0000-4000-8000-000000000102",
+              "input_id": "00000000-0000-4000-8000-000000000070",
+              "supersedes_answer_id": null,
+              "created_at": "2026-10-03T12:00:02.000Z"
+            }
+          ],
+          "next_cursor": {
+            "schema": 1,
+            "view": "round_answers",
+            "filter_digest": "28f6e1490d032d4a2179f8972e0bddbcfc9d072cad96f2d12114dc37a3424899",
+            "after": {
+              "kind": "sequence",
+              "number": 1,
+              "id": "00000000-0000-4000-8000-000000000050"
+            },
+            "revision": 21
+          },
+          "snapshot_revision": 21
+        },
+        "owner_messages": {
+          "items": [
+            {
+              "id": "00000000-0000-4000-8000-000000000102",
+              "number": 2,
+              "author": "owner",
+              "kind": "owner_input",
+              "body": "Keep it.\nRetain the full history, including earlier outcomes.",
+              "created_at": "2026-10-03T12:00:02.000Z",
+              "item_id": "1",
+              "topic_id": "00000000-0000-4000-8000-000000000010",
+              "items_touched": [
+                "1"
+              ],
+              "binding_id": "00000000-0000-4000-8000-000000000020",
+              "input_id": "00000000-0000-4000-8000-000000000070",
+              "attempt_id": null,
+              "host_turn_id": null,
+              "round_id": "00000000-0000-4000-8000-000000000040",
+              "origin": null
+            }
+          ],
+          "next_cursor": {
+            "schema": 1,
+            "view": "round_owner_messages",
+            "filter_digest": "ffc0894cd88a1aa716610fe48179158d2daace8234d837ffd7b8fcc28db8d5ad",
+            "after": {
+              "kind": "sequence",
+              "number": 2,
+              "id": "00000000-0000-4000-8000-000000000102"
+            },
+            "revision": 21
+          },
+          "snapshot_revision": 21
+        },
+        "agent_messages": {
+          "items": [
+            {
+              "id": "00000000-0000-4000-8000-000000000103",
+              "number": 3,
+              "author": "agent",
+              "kind": "reply",
+              "body": "The full history is retained.\nA follow-up task covers receipt lookup.",
+              "created_at": "2026-10-03T12:00:18.000Z",
+              "item_id": "1",
+              "topic_id": "00000000-0000-4000-8000-000000000010",
+              "items_touched": [
+                "1",
+                "1.1"
+              ],
+              "binding_id": "00000000-0000-4000-8000-000000000020",
+              "input_id": "00000000-0000-4000-8000-000000000070",
+              "attempt_id": "00000000-0000-4000-8000-000000000060",
+              "host_turn_id": "demo-turn-60",
+              "round_id": "00000000-0000-4000-8000-000000000040",
+              "origin": null
+            }
+          ],
+          "next_cursor": null,
+          "snapshot_revision": 21
+        },
+        "results": {
+          "items": [
+            {
+              "input_id": "00000000-0000-4000-8000-000000000070",
+              "attempt_id": "00000000-0000-4000-8000-000000000061",
+              "result": {
+                "operation_id": "00000000-0000-4000-8000-000000000201",
+                "outcome": "answered",
+                "explanation": "Recorded the original reply and receipt-test follow-up.",
+                "reply_message_ids": [
+                  "00000000-0000-4000-8000-000000000103"
+                ],
+                "followup_item_ids": [
+                  "1.1"
+                ],
+                "handled_through_message_number": 2,
+                "committed_revision": 18,
+                "committed_at": "2026-10-03T12:00:40.000Z"
+              }
+            }
+          ],
+          "next_cursor": null,
+          "snapshot_revision": 21
+        },
+        "forks": {
+          "items": [
+            {
+              "project_id": "00000000-0000-4000-8000-000000000001",
+              "session_id": "00000000-0000-4000-8000-000000000002",
+              "item_id": "1.1",
+              "question": "Add the receipt lookup test",
+              "status": "open"
+            }
+          ],
+          "next_cursor": null,
+          "snapshot_revision": 21
+        }
+      }
+    ],
+    "next_cursor": null,
+    "snapshot_revision": 21
+  }
+}

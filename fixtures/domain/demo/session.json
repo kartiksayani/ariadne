@@ -1,0 +1,2033 @@
+{
+  "schema_version": 1,
+  "id": "00000000-0000-4000-8000-000000000002",
+  "project_id": "00000000-0000-4000-8000-000000000001",
+  "title": "Canonical domain v1 demo",
+  "state": "active",
+  "created_at": "2026-10-03T12:00:00.000Z",
+  "updated_at": "2026-10-03T12:00:50.000Z",
+  "revision": 21,
+  "closed_at": null,
+  "counters": {
+    "next_root": 9,
+    "next_topic_order": 3,
+    "next_message": 16,
+    "next_input": 10,
+    "next_answer": 3
+  },
+  "active_binding_id": "00000000-0000-4000-8000-000000000020",
+  "topics": {
+    "00000000-0000-4000-8000-000000000010": {
+      "id": "00000000-0000-4000-8000-000000000010",
+      "name": "Delivery decisions",
+      "order": 1,
+      "revision": 8,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "archived_at": null,
+      "origin": null
+    },
+    "00000000-0000-4000-8000-000000000011": {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "name": "Continued context",
+      "order": 2,
+      "revision": 1,
+      "created_at": "2026-10-03T12:00:26.000Z",
+      "archived_at": null,
+      "origin": {
+        "project_id": "00000000-0000-4000-8000-000000000901",
+        "session_id": "00000000-0000-4000-8000-000000000902",
+        "topic_id": "00000000-0000-4000-8000-000000000910",
+        "source_revision": 12,
+        "continued_at": "2026-10-03T12:00:26.000Z"
+      }
+    }
+  },
+  "items": {
+    "1": {
+      "id": "1",
+      "ordinal": 1,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "parent": null,
+      "question": "Keep the full reply history?",
+      "type": "decision",
+      "status": "done",
+      "owner": {
+        "kind": "me"
+      },
+      "revision": 3,
+      "question_revision": 1,
+      "next_child": 2,
+      "ask": null,
+      "note": null,
+      "options": [
+        {
+          "id": "keep",
+          "label": "Keep complete history",
+          "consequence": "Every reply and outcome stays readable.",
+          "recommended": true
+        }
+      ],
+      "links": [
+        {
+          "kind": "doc",
+          "label": "Storage design",
+          "target": "docs/storage.md"
+        },
+        {
+          "kind": "file",
+          "label": "Receipt module",
+          "target": "crates/ariadne-domain/src/models/receipts.rs"
+        },
+        {
+          "kind": "pr",
+          "label": "Recorded proposal",
+          "target": "https://github.com/kartiksayani/ariadne/pull/32"
+        }
+      ],
+      "outcome": "Recorded final decision.",
+      "why": "Explicit agent operation preserved its rationale.",
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:40.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000101",
+      "updated_message_ids": [
+        "00000000-0000-4000-8000-000000000103",
+        "00000000-0000-4000-8000-000000000111"
+      ],
+      "status_history": [
+        {
+          "old_status": "waiting_on_me",
+          "new_status": "done",
+          "previous_outcome": null,
+          "previous_why": null,
+          "previous_replaced_by": null,
+          "cause_message_id": "00000000-0000-4000-8000-000000000103",
+          "at": "2026-10-03T12:00:18.000Z",
+          "binding_id": "00000000-0000-4000-8000-000000000020",
+          "handled_through_message_number": 2,
+          "reason": "Owner selected complete history."
+        }
+      ],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": "00000000-0000-4000-8000-000000000040",
+      "source_round_id": null,
+      "origin": null
+    },
+    "2": {
+      "id": "2",
+      "ordinal": 2,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "parent": null,
+      "question": "Which delivery window?",
+      "type": "question",
+      "status": "waiting_on_me",
+      "owner": {
+        "kind": "agent",
+        "binding_id": "00000000-0000-4000-8000-000000000020"
+      },
+      "revision": 2,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": "Choose the next delivery window.",
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": null,
+      "why": null,
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:43.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000101",
+      "updated_message_ids": [
+        "00000000-0000-4000-8000-000000000115"
+      ],
+      "status_history": [],
+      "waiting_since": "2026-10-03T12:00:01.000Z",
+      "recipient_binding_id": "00000000-0000-4000-8000-000000000020",
+      "current_round_id": "00000000-0000-4000-8000-000000000041",
+      "source_round_id": null,
+      "origin": null
+    },
+    "3": {
+      "id": "3",
+      "ordinal": 3,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "parent": null,
+      "question": "Implement receipt lookup",
+      "type": "task",
+      "status": "in_progress",
+      "owner": {
+        "kind": "other",
+        "name": "Local reviewer"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": "Receipt lookup is underway.",
+      "options": [],
+      "links": [],
+      "outcome": null,
+      "why": null,
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:40.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000101",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": null,
+      "source_round_id": null,
+      "origin": null
+    },
+    "4": {
+      "id": "4",
+      "ordinal": 4,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "parent": null,
+      "question": "Record retry limits",
+      "type": "finding",
+      "status": "open",
+      "owner": {
+        "kind": "me"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": null,
+      "why": null,
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:40.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000101",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": null,
+      "source_round_id": null,
+      "origin": null
+    },
+    "5": {
+      "id": "5",
+      "ordinal": 5,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "parent": null,
+      "question": "Choose the storage format",
+      "type": "decision",
+      "status": "decided",
+      "owner": {
+        "kind": "agent",
+        "binding_id": "00000000-0000-4000-8000-000000000020"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": "Recorded final decision.",
+      "why": "Explicit agent operation preserved its rationale.",
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:40.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000101",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": null,
+      "source_round_id": null,
+      "origin": null
+    },
+    "6": {
+      "id": "6",
+      "ordinal": 6,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "parent": null,
+      "question": "Retire the old summary",
+      "type": "explanation",
+      "status": "dropped",
+      "owner": {
+        "kind": "other",
+        "name": "Local reviewer"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": "Recorded final decision.",
+      "why": "Explicit agent operation preserved its rationale.",
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:40.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000101",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": null,
+      "source_round_id": null,
+      "origin": null
+    },
+    "7": {
+      "id": "7",
+      "ordinal": 7,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "parent": null,
+      "question": "Replace the old retry question",
+      "type": "question",
+      "status": "replaced",
+      "owner": {
+        "kind": "me"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": "Replaced by the retry-limit finding.",
+      "why": "Explicit agent operation preserved its rationale.",
+      "replaced_by": "4",
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:40.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000101",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": null,
+      "source_round_id": null,
+      "origin": null
+    },
+    "8": {
+      "id": "8",
+      "ordinal": 8,
+      "topic_id": "00000000-0000-4000-8000-000000000011",
+      "parent": null,
+      "question": "Preserve continued context",
+      "type": "task",
+      "status": "open",
+      "owner": {
+        "kind": "me"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": null,
+      "why": null,
+      "replaced_by": null,
+      "created_at": "2026-10-02T12:00:00.000Z",
+      "updated_at": "2026-10-02T12:00:00.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000112",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": "00000000-0000-4000-8000-000000000042",
+      "source_round_id": null,
+      "origin": {
+        "project_id": "00000000-0000-4000-8000-000000000901",
+        "session_id": "00000000-0000-4000-8000-000000000902",
+        "topic_id": "00000000-0000-4000-8000-000000000910",
+        "source_revision": 12,
+        "entity_id": "2"
+      }
+    },
+    "1.1": {
+      "id": "1.1",
+      "ordinal": 1,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "parent": "1",
+      "question": "Add the receipt lookup test",
+      "type": "task",
+      "status": "open",
+      "owner": {
+        "kind": "me"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": null,
+      "why": null,
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:18.000Z",
+      "updated_at": "2026-10-03T12:00:40.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000103",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": null,
+      "source_round_id": "00000000-0000-4000-8000-000000000040",
+      "origin": null
+    }
+  },
+  "messages": [
+    {
+      "id": "00000000-0000-4000-8000-000000000101",
+      "number": 1,
+      "author": "agent",
+      "kind": "activity",
+      "body": "Choose whether to retain every reply.\nThis is the complete opening request.",
+      "created_at": "2026-10-03T12:00:01.000Z",
+      "item_id": null,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": null,
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": "00000000-0000-4000-8000-000000000040",
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000102",
+      "number": 2,
+      "author": "owner",
+      "kind": "owner_input",
+      "body": "Keep it.\nRetain the full history, including earlier outcomes.",
+      "created_at": "2026-10-03T12:00:02.000Z",
+      "item_id": "1",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "1"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": "00000000-0000-4000-8000-000000000070",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": "00000000-0000-4000-8000-000000000040",
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000103",
+      "number": 3,
+      "author": "agent",
+      "kind": "reply",
+      "body": "The full history is retained.\nA follow-up task covers receipt lookup.",
+      "created_at": "2026-10-03T12:00:18.000Z",
+      "item_id": "1",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "1",
+        "1.1"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": "00000000-0000-4000-8000-000000000070",
+      "attempt_id": "00000000-0000-4000-8000-000000000060",
+      "host_turn_id": "demo-turn-60",
+      "round_id": "00000000-0000-4000-8000-000000000040",
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000104",
+      "number": 4,
+      "author": "owner",
+      "kind": "owner_input",
+      "body": "Bring request for item 2.\nPreserve this complete owner text.",
+      "created_at": "2026-10-03T12:00:20.000Z",
+      "item_id": "2",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "2"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": "00000000-0000-4000-8000-000000000071",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": "00000000-0000-4000-8000-000000000041",
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000105",
+      "number": 5,
+      "author": "owner",
+      "kind": "owner_input",
+      "body": "Reply request for item 3.\nPreserve this complete owner text.",
+      "created_at": "2026-10-03T12:00:21.000Z",
+      "item_id": "3",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "3"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": "00000000-0000-4000-8000-000000000072",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": null,
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000106",
+      "number": 6,
+      "author": "owner",
+      "kind": "owner_input",
+      "body": "Note request for item 4.\nPreserve this complete owner text.",
+      "created_at": "2026-10-03T12:00:22.000Z",
+      "item_id": "4",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "4"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": "00000000-0000-4000-8000-000000000073",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": null,
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000107",
+      "number": 7,
+      "author": "owner",
+      "kind": "owner_input",
+      "body": "Followup request for item 7.\nPreserve this complete owner text.",
+      "created_at": "2026-10-03T12:00:23.000Z",
+      "item_id": "7",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "7"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000021",
+      "input_id": "00000000-0000-4000-8000-000000000074",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": null,
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000108",
+      "number": 8,
+      "author": "owner",
+      "kind": "owner_input",
+      "body": "Reopen request for item 6.\nPreserve this complete owner text.",
+      "created_at": "2026-10-03T12:00:24.000Z",
+      "item_id": "6",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "6"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000021",
+      "input_id": "00000000-0000-4000-8000-000000000075",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": null,
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000109",
+      "number": 9,
+      "author": "owner",
+      "kind": "owner_input",
+      "body": "Drop request for item 4.\nPreserve this complete owner text.",
+      "created_at": "2026-10-03T12:00:25.000Z",
+      "item_id": "4",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "4"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": "00000000-0000-4000-8000-000000000076",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": null,
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000110",
+      "number": 10,
+      "author": "owner",
+      "kind": "owner_input",
+      "body": "Continue the source topic here.\nKeep the original provenance.",
+      "created_at": "2026-10-03T12:00:26.000Z",
+      "item_id": null,
+      "topic_id": "00000000-0000-4000-8000-000000000011",
+      "items_touched": [],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": "00000000-0000-4000-8000-000000000077",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": null,
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000111",
+      "number": 11,
+      "author": "owner",
+      "kind": "owner_input",
+      "body": "Correction: keep the option and this explanation.\nThe earlier answer remains readable.",
+      "created_at": "2026-10-03T12:00:27.000Z",
+      "item_id": "1",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "1"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": "00000000-0000-4000-8000-000000000078",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": "00000000-0000-4000-8000-000000000040",
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000112",
+      "number": 12,
+      "author": "agent",
+      "kind": "reply",
+      "body": "Imported complete reply.\nIts source author and binding are preserved.",
+      "created_at": "2026-10-02T12:00:00.000Z",
+      "item_id": "8",
+      "topic_id": "00000000-0000-4000-8000-000000000011",
+      "items_touched": [
+        "8"
+      ],
+      "binding_id": null,
+      "input_id": null,
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": "00000000-0000-4000-8000-000000000042",
+      "origin": {
+        "project_id": "00000000-0000-4000-8000-000000000901",
+        "session_id": "00000000-0000-4000-8000-000000000902",
+        "topic_id": "00000000-0000-4000-8000-000000000910",
+        "source_revision": 12,
+        "entity_id": "00000000-0000-4000-8000-000000000903",
+        "author": "agent",
+        "binding_id": "00000000-0000-4000-8000-000000000920",
+        "adapter_id": "demo.source",
+        "external_session_id": "source-thread"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000113",
+      "number": 13,
+      "author": "system",
+      "kind": "lifecycle",
+      "body": "Recovery was explicitly requested by the owner.",
+      "created_at": "2026-10-03T12:00:34.000Z",
+      "item_id": null,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [],
+      "binding_id": null,
+      "input_id": "00000000-0000-4000-8000-000000000070",
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": null,
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000114",
+      "number": 14,
+      "author": "agent",
+      "kind": "activity",
+      "body": "Choose the next delivery window.",
+      "created_at": "2026-10-03T12:00:35.000Z",
+      "item_id": null,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "2"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": null,
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": "00000000-0000-4000-8000-000000000041",
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000115",
+      "number": 15,
+      "author": "agent",
+      "kind": "reply",
+      "body": "The delivery window remains open.\nChoose a window when you are ready.",
+      "created_at": "2026-10-03T12:00:43.000Z",
+      "item_id": "2",
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "items_touched": [
+        "2"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "input_id": "00000000-0000-4000-8000-000000000071",
+      "attempt_id": "00000000-0000-4000-8000-000000000065",
+      "host_turn_id": "demo-turn-65",
+      "round_id": "00000000-0000-4000-8000-000000000041",
+      "origin": null
+    }
+  ],
+  "rounds": {
+    "00000000-0000-4000-8000-000000000040": {
+      "id": "00000000-0000-4000-8000-000000000040",
+      "item_id": "1",
+      "ordinal": 1,
+      "opened_message_id": "00000000-0000-4000-8000-000000000101",
+      "question_snapshot": "Keep the full reply history?",
+      "ask_snapshot": "Choose whether to keep full history.",
+      "options_snapshot": [
+        {
+          "id": "keep",
+          "label": "Keep complete history",
+          "consequence": "Every reply and outcome stays readable.",
+          "recommended": true
+        }
+      ],
+      "question_revision": 1,
+      "owner_message_ids": [
+        "00000000-0000-4000-8000-000000000102",
+        "00000000-0000-4000-8000-000000000111"
+      ],
+      "agent_message_ids": [
+        "00000000-0000-4000-8000-000000000103"
+      ],
+      "result_input_ids": [
+        "00000000-0000-4000-8000-000000000070"
+      ],
+      "fork_item_ids": [
+        "1.1"
+      ],
+      "closed_at": "2026-10-03T12:00:40.000Z",
+      "origin": null
+    },
+    "00000000-0000-4000-8000-000000000041": {
+      "id": "00000000-0000-4000-8000-000000000041",
+      "item_id": "2",
+      "ordinal": 1,
+      "opened_message_id": "00000000-0000-4000-8000-000000000101",
+      "question_snapshot": "Which delivery window?",
+      "ask_snapshot": "Choose the next delivery window.",
+      "options_snapshot": [],
+      "question_revision": 1,
+      "owner_message_ids": [
+        "00000000-0000-4000-8000-000000000104"
+      ],
+      "agent_message_ids": [
+        "00000000-0000-4000-8000-000000000115"
+      ],
+      "result_input_ids": [
+        "00000000-0000-4000-8000-000000000071"
+      ],
+      "fork_item_ids": [],
+      "closed_at": null,
+      "origin": null
+    },
+    "00000000-0000-4000-8000-000000000042": {
+      "id": "00000000-0000-4000-8000-000000000042",
+      "item_id": "8",
+      "ordinal": 1,
+      "opened_message_id": "00000000-0000-4000-8000-000000000112",
+      "question_snapshot": "Preserve continued context",
+      "ask_snapshot": null,
+      "options_snapshot": [],
+      "question_revision": 1,
+      "owner_message_ids": [],
+      "agent_message_ids": [
+        "00000000-0000-4000-8000-000000000112"
+      ],
+      "result_input_ids": [],
+      "fork_item_ids": [],
+      "closed_at": "2026-10-02T12:00:00.000Z",
+      "origin": {
+        "project_id": "00000000-0000-4000-8000-000000000901",
+        "session_id": "00000000-0000-4000-8000-000000000902",
+        "topic_id": "00000000-0000-4000-8000-000000000910",
+        "source_revision": 12,
+        "entity_id": "00000000-0000-4000-8000-000000000940"
+      }
+    }
+  },
+  "answers": [
+    {
+      "id": "00000000-0000-4000-8000-000000000050",
+      "seq": 1,
+      "item_id": "1",
+      "question_revision": 1,
+      "question_snapshot": "Keep the full reply history?",
+      "ask_snapshot": "Choose whether to keep full history.",
+      "options_snapshot": [
+        {
+          "id": "keep",
+          "label": "Keep complete history",
+          "consequence": "Every reply and outcome stays readable.",
+          "recommended": true
+        }
+      ],
+      "selected_option_id": "keep",
+      "text": "Keep it.\nRetain the full history, including earlier outcomes.",
+      "message_id": "00000000-0000-4000-8000-000000000102",
+      "input_id": "00000000-0000-4000-8000-000000000070",
+      "supersedes_answer_id": null,
+      "created_at": "2026-10-03T12:00:02.000Z"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000051",
+      "seq": 2,
+      "item_id": "1",
+      "question_revision": 1,
+      "question_snapshot": "Keep the full reply history?",
+      "ask_snapshot": "Choose whether to keep full history.",
+      "options_snapshot": [
+        {
+          "id": "keep",
+          "label": "Keep complete history",
+          "consequence": "Every reply and outcome stays readable.",
+          "recommended": true
+        }
+      ],
+      "selected_option_id": "keep",
+      "text": "Correction: keep the option and this explanation.\nThe earlier answer remains readable.",
+      "message_id": "00000000-0000-4000-8000-000000000111",
+      "input_id": "00000000-0000-4000-8000-000000000078",
+      "supersedes_answer_id": "00000000-0000-4000-8000-000000000050",
+      "created_at": "2026-10-03T12:00:27.000Z"
+    }
+  ],
+  "bindings": {
+    "00000000-0000-4000-8000-000000000020": {
+      "id": "00000000-0000-4000-8000-000000000020",
+      "adapter_id": "demo.local",
+      "adapter_version": "1.0.0",
+      "protocol_major": 1,
+      "config_version": 1,
+      "external_session_id": "demo-thread-20",
+      "endpoint": {
+        "kind": "unix_socket",
+        "path": "/tmp/ariadne-demo.sock"
+      },
+      "endpoint_fingerprint": "demo-endpoint-20",
+      "generation": "00000000-0000-4000-8000-000000000022",
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "dispatch_state": "enabled",
+      "owner_paused": false,
+      "pause_reason": null,
+      "connection_state": "connected",
+      "capabilities": {
+        "existing_session": {
+          "supported": true,
+          "conditions": [
+            "Selected existing local demo conversation."
+          ]
+        },
+        "deferred_delivery": {
+          "supported": true,
+          "conditions": []
+        },
+        "turn_correlation": {
+          "supported": true,
+          "conditions": []
+        },
+        "turn_completion": {
+          "supported": true,
+          "conditions": []
+        },
+        "domain_cli": {
+          "supported": true,
+          "conditions": []
+        },
+        "domain_mcp": {
+          "supported": false,
+          "conditions": []
+        },
+        "history_reconcile": {
+          "supported": true,
+          "conditions": []
+        },
+        "streaming_output": {
+          "supported": false,
+          "conditions": []
+        },
+        "final_text_read": {
+          "supported": true,
+          "conditions": []
+        },
+        "discover_sessions": {
+          "supported": true,
+          "conditions": []
+        },
+        "delivery_mode": "pull"
+      },
+      "active_input_id": "00000000-0000-4000-8000-000000000072",
+      "issued_through_message_number": 5,
+      "adapter_config": {
+        "namespace": "demo.local",
+        "values": {
+          "fixture": true,
+          "retry_budget": 0,
+          "label": "offline demo",
+          "nested": {
+            "flags": [
+              false,
+              null,
+              1.5
+            ]
+          }
+        }
+      }
+    },
+    "00000000-0000-4000-8000-000000000021": {
+      "id": "00000000-0000-4000-8000-000000000021",
+      "adapter_id": "demo.local",
+      "adapter_version": "1.0.0",
+      "protocol_major": 1,
+      "config_version": 1,
+      "external_session_id": "demo-thread-21",
+      "endpoint": {
+        "kind": "local_bridge",
+        "name": "demo-bridge"
+      },
+      "endpoint_fingerprint": "demo-endpoint-21",
+      "generation": "00000000-0000-4000-8000-000000000023",
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "dispatch_state": "recovery_required",
+      "owner_paused": false,
+      "pause_reason": "uncertain",
+      "connection_state": "disconnected",
+      "capabilities": {
+        "existing_session": {
+          "supported": true,
+          "conditions": [
+            "Selected existing local demo conversation."
+          ]
+        },
+        "deferred_delivery": {
+          "supported": true,
+          "conditions": []
+        },
+        "turn_correlation": {
+          "supported": true,
+          "conditions": []
+        },
+        "turn_completion": {
+          "supported": true,
+          "conditions": []
+        },
+        "domain_cli": {
+          "supported": true,
+          "conditions": []
+        },
+        "domain_mcp": {
+          "supported": false,
+          "conditions": []
+        },
+        "history_reconcile": {
+          "supported": true,
+          "conditions": []
+        },
+        "streaming_output": {
+          "supported": false,
+          "conditions": []
+        },
+        "final_text_read": {
+          "supported": true,
+          "conditions": []
+        },
+        "discover_sessions": {
+          "supported": true,
+          "conditions": []
+        },
+        "delivery_mode": "push"
+      },
+      "active_input_id": "00000000-0000-4000-8000-000000000074",
+      "issued_through_message_number": 8,
+      "adapter_config": {
+        "namespace": "demo.local",
+        "values": {
+          "fixture": true,
+          "retry_budget": 0,
+          "label": "offline demo",
+          "nested": {
+            "flags": [
+              false,
+              null,
+              1.5
+            ]
+          }
+        }
+      }
+    }
+  },
+  "inputs": {
+    "00000000-0000-4000-8000-000000000070": {
+      "id": "00000000-0000-4000-8000-000000000070",
+      "seq": 1,
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "kind": "answer",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "item_id": "1"
+      },
+      "message_id": "00000000-0000-4000-8000-000000000102",
+      "answer_id": "00000000-0000-4000-8000-000000000050",
+      "created_at": "2026-10-03T12:00:02.000Z",
+      "expected_question_revision": 1,
+      "payload": {
+        "text": "Keep it.\nRetain the full history, including earlier outcomes.",
+        "intent": "answer",
+        "target_snapshot": {
+          "topic_name": "Delivery decisions",
+          "item_question": "Keep the full reply history?",
+          "question_revision": 1,
+          "ask": "Choose whether to keep full history.",
+          "options": [
+            {
+              "id": "keep",
+              "label": "Keep complete history",
+              "consequence": "Every reply and outcome stays readable.",
+              "recommended": true
+            }
+          ]
+        },
+        "selected_option_id": "keep",
+        "context": {
+          "message_ids": [
+            "00000000-0000-4000-8000-000000000101"
+          ],
+          "item_ids": [
+            "1"
+          ],
+          "round_id": "00000000-0000-4000-8000-000000000040",
+          "continuation_operation_id": null
+        }
+      },
+      "state": "handled",
+      "attempts": [
+        {
+          "id": "00000000-0000-4000-8000-000000000060",
+          "purpose": "work",
+          "repair_for_attempt_id": null,
+          "claim_request_id": "00000000-0000-4000-8000-000000000360",
+          "binding_generation": "00000000-0000-4000-8000-000000000022",
+          "prepared_at": "2026-10-03T12:00:15.000Z",
+          "formatted_payload": "Keep it.\nRetain the full history, including earlier outcomes.\nBinding context: canonical demo.",
+          "payload_sha256": "48f5cc92905e0b03bebb5dc8502de289b4ad0805657576fdfce20953777b7c24",
+          "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000070:00000000-0000-4000-8000-000000000060]",
+          "acceptance": "accepted",
+          "acceptance_receipt": {
+            "provider_reference": "demo-acceptance-60",
+            "observed_at": "2026-10-03T12:00:16.000Z"
+          },
+          "acceptance_observed_at": "2026-10-03T12:00:16.000Z",
+          "host_turn_id": "demo-turn-60",
+          "turn_state": "completed",
+          "turn_observed_at": "2026-10-03T12:00:19.000Z",
+          "domain_result": null,
+          "result_state": "missing",
+          "sealed_at": null,
+          "error": {
+            "code": "result_missing",
+            "reason": "The completed turn supplied no explicit result.",
+            "retryable": false,
+            "observed_at": "2026-10-03T12:00:20.000Z"
+          },
+          "reconciliation_checkpoint": "demo checkpoint 60"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000061",
+          "purpose": "result_repair",
+          "repair_for_attempt_id": "00000000-0000-4000-8000-000000000060",
+          "claim_request_id": "00000000-0000-4000-8000-000000000361",
+          "binding_generation": "00000000-0000-4000-8000-000000000022",
+          "prepared_at": "2026-10-03T12:00:35.000Z",
+          "formatted_payload": "Publish only the missing result for attempt 00000000-0000-4000-8000-000000000060.\nReuse committed reply 00000000-0000-4000-8000-000000000103 and follow-up 1.1; do not repeat mutations.",
+          "payload_sha256": "dc3de66992c9104674c763324f982109e8432c45c5829bd0609756805f6d12ee",
+          "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000070:00000000-0000-4000-8000-000000000061]",
+          "acceptance": "accepted",
+          "acceptance_receipt": {
+            "provider_reference": "demo-acceptance-61",
+            "observed_at": "2026-10-03T12:00:36.000Z"
+          },
+          "acceptance_observed_at": "2026-10-03T12:00:36.000Z",
+          "host_turn_id": "demo-turn-61",
+          "turn_state": "completed",
+          "turn_observed_at": "2026-10-03T12:00:39.000Z",
+          "domain_result": {
+            "operation_id": "00000000-0000-4000-8000-000000000201",
+            "outcome": "answered",
+            "explanation": "Recorded the original reply and receipt-test follow-up.",
+            "reply_message_ids": [
+              "00000000-0000-4000-8000-000000000103"
+            ],
+            "followup_item_ids": [
+              "1.1"
+            ],
+            "handled_through_message_number": 2,
+            "committed_revision": 18,
+            "committed_at": "2026-10-03T12:00:40.000Z"
+          },
+          "result_state": "committed",
+          "sealed_at": "2026-10-03T12:00:40.000Z",
+          "error": null,
+          "reconciliation_checkpoint": "demo checkpoint 61"
+        }
+      ],
+      "active_attempt_id": null,
+      "resolution_history": [
+        {
+          "op_id": "00000000-0000-4000-8000-000000000203",
+          "kind": "confirm_evidence",
+          "reason": "The owner observed completion of the original turn.",
+          "at": "2026-10-03T12:00:33.000Z",
+          "attempt_id": "00000000-0000-4000-8000-000000000060",
+          "evidence": {
+            "source": "owner_attestation",
+            "turn_state": "completed",
+            "host_turn_id": "demo-turn-60",
+            "owner_attested_idle": true,
+            "at": "2026-10-03T12:00:33.000Z"
+          }
+        },
+        {
+          "op_id": "00000000-0000-4000-8000-000000000202",
+          "kind": "request_result_repair",
+          "reason": "Request only the missing structured result.",
+          "at": "2026-10-03T12:00:34.000Z",
+          "attempt_id": "00000000-0000-4000-8000-000000000060",
+          "evidence": null
+        }
+      ]
+    },
+    "00000000-0000-4000-8000-000000000071": {
+      "id": "00000000-0000-4000-8000-000000000071",
+      "seq": 2,
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "kind": "bring",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "item_id": "2"
+      },
+      "message_id": "00000000-0000-4000-8000-000000000104",
+      "answer_id": null,
+      "created_at": "2026-10-03T12:00:20.000Z",
+      "expected_question_revision": null,
+      "payload": {
+        "text": "Bring request for item 2.\nPreserve this complete owner text.",
+        "intent": "bring",
+        "target_snapshot": {
+          "topic_name": "Delivery decisions",
+          "item_question": "Which delivery window?",
+          "question_revision": 1,
+          "ask": "Choose the next delivery window.",
+          "options": []
+        },
+        "selected_option_id": null,
+        "context": {
+          "message_ids": [],
+          "item_ids": [
+            "2"
+          ],
+          "round_id": "00000000-0000-4000-8000-000000000041",
+          "continuation_operation_id": null
+        }
+      },
+      "state": "handled",
+      "attempts": [
+        {
+          "id": "00000000-0000-4000-8000-000000000065",
+          "purpose": "work",
+          "repair_for_attempt_id": null,
+          "claim_request_id": "00000000-0000-4000-8000-000000000365",
+          "binding_generation": "00000000-0000-4000-8000-000000000022",
+          "prepared_at": "2026-10-03T12:00:41.000Z",
+          "formatted_payload": "Bring request for item 2.\nPreserve this complete owner text.\nBinding context: delivery decisions.",
+          "payload_sha256": "aa77931c4e7ee4d0f5500c72e07e83c4c3cc28c19796e3e1e08f7b559f21cb42",
+          "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000071:00000000-0000-4000-8000-000000000065]",
+          "acceptance": "accepted",
+          "acceptance_receipt": {
+            "provider_reference": "demo-acceptance-65",
+            "observed_at": "2026-10-03T12:00:42.000Z"
+          },
+          "acceptance_observed_at": "2026-10-03T12:00:42.000Z",
+          "host_turn_id": "demo-turn-65",
+          "turn_state": "completed",
+          "turn_observed_at": "2026-10-03T12:00:44.000Z",
+          "domain_result": {
+            "operation_id": "00000000-0000-4000-8000-000000000213",
+            "outcome": "deferred",
+            "explanation": "The agent still needs a delivery window.",
+            "reply_message_ids": [
+              "00000000-0000-4000-8000-000000000115"
+            ],
+            "followup_item_ids": [],
+            "handled_through_message_number": 4,
+            "committed_revision": 19,
+            "committed_at": "2026-10-03T12:00:45.000Z"
+          },
+          "result_state": "committed",
+          "sealed_at": "2026-10-03T12:00:45.000Z",
+          "error": null,
+          "reconciliation_checkpoint": "demo checkpoint 65"
+        }
+      ],
+      "active_attempt_id": null,
+      "resolution_history": []
+    },
+    "00000000-0000-4000-8000-000000000072": {
+      "id": "00000000-0000-4000-8000-000000000072",
+      "seq": 3,
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "kind": "reply",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "item_id": "3"
+      },
+      "message_id": "00000000-0000-4000-8000-000000000105",
+      "answer_id": null,
+      "created_at": "2026-10-03T12:00:21.000Z",
+      "expected_question_revision": null,
+      "payload": {
+        "text": "Reply request for item 3.\nPreserve this complete owner text.",
+        "intent": "reply",
+        "target_snapshot": {
+          "topic_name": "Delivery decisions",
+          "item_question": "Implement receipt lookup",
+          "question_revision": 1,
+          "ask": null,
+          "options": []
+        },
+        "selected_option_id": null,
+        "context": {
+          "message_ids": [],
+          "item_ids": [
+            "3"
+          ],
+          "round_id": null,
+          "continuation_operation_id": null
+        }
+      },
+      "state": "in_flight",
+      "attempts": [
+        {
+          "id": "00000000-0000-4000-8000-000000000062",
+          "purpose": "work",
+          "repair_for_attempt_id": null,
+          "claim_request_id": "00000000-0000-4000-8000-000000000362",
+          "binding_generation": "00000000-0000-4000-8000-000000000022",
+          "prepared_at": "2026-10-03T12:00:46.000Z",
+          "formatted_payload": "Reply request for item 3.\nPreserve this complete owner text.",
+          "payload_sha256": "dfea0a64d4f3be4f7f949cd079745348d0027614a4c289bd0c43895a8105f103",
+          "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000072:00000000-0000-4000-8000-000000000062]",
+          "acceptance": "accepted",
+          "acceptance_receipt": {
+            "provider_reference": "demo-acceptance-62",
+            "observed_at": "2026-10-03T12:00:47.000Z"
+          },
+          "acceptance_observed_at": "2026-10-03T12:00:47.000Z",
+          "host_turn_id": "demo-turn-62",
+          "turn_state": "running",
+          "turn_observed_at": "2026-10-03T12:00:48.000Z",
+          "domain_result": null,
+          "result_state": "pending",
+          "sealed_at": null,
+          "error": null,
+          "reconciliation_checkpoint": null
+        }
+      ],
+      "active_attempt_id": "00000000-0000-4000-8000-000000000062",
+      "resolution_history": []
+    },
+    "00000000-0000-4000-8000-000000000073": {
+      "id": "00000000-0000-4000-8000-000000000073",
+      "seq": 4,
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "kind": "note",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "item_id": "4"
+      },
+      "message_id": "00000000-0000-4000-8000-000000000106",
+      "answer_id": null,
+      "created_at": "2026-10-03T12:00:22.000Z",
+      "expected_question_revision": null,
+      "payload": {
+        "text": "Note request for item 4.\nPreserve this complete owner text.",
+        "intent": "note",
+        "target_snapshot": {
+          "topic_name": "Delivery decisions",
+          "item_question": "Record retry limits",
+          "question_revision": 1,
+          "ask": null,
+          "options": []
+        },
+        "selected_option_id": null,
+        "context": {
+          "message_ids": [],
+          "item_ids": [
+            "4"
+          ],
+          "round_id": null,
+          "continuation_operation_id": null
+        }
+      },
+      "state": "cancelled",
+      "attempts": [],
+      "active_attempt_id": null,
+      "resolution_history": []
+    },
+    "00000000-0000-4000-8000-000000000074": {
+      "id": "00000000-0000-4000-8000-000000000074",
+      "seq": 5,
+      "binding_id": "00000000-0000-4000-8000-000000000021",
+      "kind": "followup",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "item_id": "7"
+      },
+      "message_id": "00000000-0000-4000-8000-000000000107",
+      "answer_id": null,
+      "created_at": "2026-10-03T12:00:23.000Z",
+      "expected_question_revision": null,
+      "payload": {
+        "text": "Followup request for item 7.\nPreserve this complete owner text.",
+        "intent": "followup",
+        "target_snapshot": {
+          "topic_name": "Delivery decisions",
+          "item_question": "Replace the old retry question",
+          "question_revision": 1,
+          "ask": null,
+          "options": []
+        },
+        "selected_option_id": null,
+        "context": {
+          "message_ids": [],
+          "item_ids": [
+            "7"
+          ],
+          "round_id": null,
+          "continuation_operation_id": null
+        }
+      },
+      "state": "needs_attention",
+      "attempts": [
+        {
+          "id": "00000000-0000-4000-8000-000000000063",
+          "purpose": "work",
+          "repair_for_attempt_id": null,
+          "claim_request_id": "00000000-0000-4000-8000-000000000363",
+          "binding_generation": "00000000-0000-4000-8000-000000000023",
+          "prepared_at": "2026-10-03T12:00:28.000Z",
+          "formatted_payload": "Followup request for item 7.\nPreserve this complete owner text.",
+          "payload_sha256": "007d0c8d241364a255a196afa1b48329dc1526be82829be76fd6c639189d6402",
+          "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000074:00000000-0000-4000-8000-000000000063]",
+          "acceptance": "uncertain",
+          "acceptance_receipt": null,
+          "acceptance_observed_at": "2026-10-03T12:00:29.000Z",
+          "host_turn_id": null,
+          "turn_state": "unknown",
+          "turn_observed_at": null,
+          "domain_result": null,
+          "result_state": "pending",
+          "sealed_at": null,
+          "error": {
+            "code": "delivery_uncertain",
+            "reason": "Bridge disconnected during acceptance.",
+            "retryable": false,
+            "observed_at": "2026-10-03T12:00:30.000Z"
+          },
+          "reconciliation_checkpoint": "demo checkpoint 63"
+        }
+      ],
+      "active_attempt_id": "00000000-0000-4000-8000-000000000063",
+      "resolution_history": []
+    },
+    "00000000-0000-4000-8000-000000000075": {
+      "id": "00000000-0000-4000-8000-000000000075",
+      "seq": 6,
+      "binding_id": "00000000-0000-4000-8000-000000000021",
+      "kind": "reopen",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "item_id": "6"
+      },
+      "message_id": "00000000-0000-4000-8000-000000000108",
+      "answer_id": null,
+      "created_at": "2026-10-03T12:00:24.000Z",
+      "expected_question_revision": null,
+      "payload": {
+        "text": "Reopen request for item 6.\nPreserve this complete owner text.",
+        "intent": "reopen",
+        "target_snapshot": {
+          "topic_name": "Delivery decisions",
+          "item_question": "Retire the old summary",
+          "question_revision": 1,
+          "ask": null,
+          "options": []
+        },
+        "selected_option_id": null,
+        "context": {
+          "message_ids": [],
+          "item_ids": [
+            "6"
+          ],
+          "round_id": null,
+          "continuation_operation_id": null
+        }
+      },
+      "state": "skipped",
+      "attempts": [
+        {
+          "id": "00000000-0000-4000-8000-000000000064",
+          "purpose": "work",
+          "repair_for_attempt_id": null,
+          "claim_request_id": "00000000-0000-4000-8000-000000000364",
+          "binding_generation": "00000000-0000-4000-8000-000000000023",
+          "prepared_at": "2026-10-03T12:00:28.000Z",
+          "formatted_payload": "Reopen request for item 6.\nPreserve this complete owner text.",
+          "payload_sha256": "df960a23eeaec52026b77fbf1f117234d24874e974ca8d2e4569c9a5fc528011",
+          "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000075:00000000-0000-4000-8000-000000000064]",
+          "acceptance": "rejected",
+          "acceptance_receipt": null,
+          "acceptance_observed_at": "2026-10-03T12:00:29.000Z",
+          "host_turn_id": null,
+          "turn_state": "failed",
+          "turn_observed_at": "2026-10-03T12:00:30.000Z",
+          "domain_result": null,
+          "result_state": "pending",
+          "sealed_at": null,
+          "error": {
+            "code": "host_unreachable",
+            "reason": "Local demo bridge unavailable.",
+            "retryable": true,
+            "observed_at": "2026-10-03T12:00:30.000Z"
+          },
+          "reconciliation_checkpoint": "demo checkpoint 64"
+        }
+      ],
+      "active_attempt_id": null,
+      "resolution_history": [
+        {
+          "op_id": "00000000-0000-4000-8000-000000000204",
+          "kind": "skip",
+          "reason": "Owner skipped the rejected request.",
+          "at": "2026-10-03T12:00:31.000Z",
+          "attempt_id": "00000000-0000-4000-8000-000000000064",
+          "evidence": null
+        }
+      ]
+    },
+    "00000000-0000-4000-8000-000000000076": {
+      "id": "00000000-0000-4000-8000-000000000076",
+      "seq": 7,
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "kind": "drop",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "item_id": "4"
+      },
+      "message_id": "00000000-0000-4000-8000-000000000109",
+      "answer_id": null,
+      "created_at": "2026-10-03T12:00:25.000Z",
+      "expected_question_revision": null,
+      "payload": {
+        "text": "Drop request for item 4.\nPreserve this complete owner text.",
+        "intent": "drop",
+        "target_snapshot": {
+          "topic_name": "Delivery decisions",
+          "item_question": "Record retry limits",
+          "question_revision": 1,
+          "ask": null,
+          "options": []
+        },
+        "selected_option_id": null,
+        "context": {
+          "message_ids": [],
+          "item_ids": [
+            "4"
+          ],
+          "round_id": null,
+          "continuation_operation_id": null
+        }
+      },
+      "state": "queued",
+      "attempts": [],
+      "active_attempt_id": null,
+      "resolution_history": []
+    },
+    "00000000-0000-4000-8000-000000000077": {
+      "id": "00000000-0000-4000-8000-000000000077",
+      "seq": 8,
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "kind": "continue",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000011",
+        "item_id": null
+      },
+      "message_id": "00000000-0000-4000-8000-000000000110",
+      "answer_id": null,
+      "created_at": "2026-10-03T12:00:26.000Z",
+      "expected_question_revision": null,
+      "payload": {
+        "text": "Continue the source topic here.\nKeep the original provenance.",
+        "intent": "continue",
+        "target_snapshot": {
+          "topic_name": "Continued context",
+          "item_question": null,
+          "question_revision": null,
+          "ask": null,
+          "options": []
+        },
+        "selected_option_id": null,
+        "context": {
+          "message_ids": [],
+          "item_ids": [
+            "8"
+          ],
+          "round_id": null,
+          "continuation_operation_id": "00000000-0000-4000-8000-000000000209"
+        }
+      },
+      "state": "queued",
+      "attempts": [],
+      "active_attempt_id": null,
+      "resolution_history": []
+    },
+    "00000000-0000-4000-8000-000000000078": {
+      "id": "00000000-0000-4000-8000-000000000078",
+      "seq": 9,
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "kind": "answer",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "item_id": "1"
+      },
+      "message_id": "00000000-0000-4000-8000-000000000111",
+      "answer_id": "00000000-0000-4000-8000-000000000051",
+      "created_at": "2026-10-03T12:00:27.000Z",
+      "expected_question_revision": 1,
+      "payload": {
+        "text": "Correction: keep the option and this explanation.\nThe earlier answer remains readable.",
+        "intent": "answer",
+        "target_snapshot": {
+          "topic_name": "Delivery decisions",
+          "item_question": "Keep the full reply history?",
+          "question_revision": 1,
+          "ask": "Choose whether to keep full history.",
+          "options": [
+            {
+              "id": "keep",
+              "label": "Keep complete history",
+              "consequence": "Every reply and outcome stays readable.",
+              "recommended": true
+            }
+          ]
+        },
+        "selected_option_id": "keep",
+        "context": {
+          "message_ids": [],
+          "item_ids": [
+            "1"
+          ],
+          "round_id": "00000000-0000-4000-8000-000000000040",
+          "continuation_operation_id": null
+        }
+      },
+      "state": "cancelled",
+      "attempts": [],
+      "active_attempt_id": null,
+      "resolution_history": []
+    }
+  },
+  "operation_receipts": {
+    "00000000-0000-4000-8000-000000000200": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000200",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "72a8ed57cc0566414652ca6b3f4a1027e0deb4cdbd8bbbc3c644970e4f5a20eb",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000200",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 5,
+          "data": {
+            "kind": "input_submit",
+            "input_id": "00000000-0000-4000-8000-000000000070",
+            "message_id": "00000000-0000-4000-8000-000000000102",
+            "message_number": 2,
+            "answer_id": "00000000-0000-4000-8000-000000000050",
+            "input_seq": 1
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000201": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000201",
+        "actor_scope": {
+          "kind": "agent",
+          "binding_id": "00000000-0000-4000-8000-000000000020"
+        },
+        "command_digest": "f667a9a28504e3546a99c54312cb1b3af18e1df11a7275adc2db8c761ee220c9",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000201",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 18,
+          "data": {
+            "kind": "apply",
+            "allocated_refs": {},
+            "messages": [],
+            "item_revisions": {},
+            "topic_revisions": {},
+            "input_result_state": "committed",
+            "queue_join_state": "handled"
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000202": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000202",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "5d899c5406a802c1c60f1dc4dadbde90d94bf3e66f94d27f7200701253139924",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000202",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 17,
+          "data": {
+            "kind": "input_resolve",
+            "input_id": "00000000-0000-4000-8000-000000000070",
+            "attempt_id": "00000000-0000-4000-8000-000000000060",
+            "resolution_kind": "request_result_repair",
+            "state": "needs_attention"
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000203": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000203",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "174b1b992ea4ce5437d8604231e99eb1b3dfe6c02937b7cd697e5024fa795e60",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000203",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 16,
+          "data": {
+            "kind": "input_resolve",
+            "input_id": "00000000-0000-4000-8000-000000000070",
+            "attempt_id": "00000000-0000-4000-8000-000000000060",
+            "resolution_kind": "confirm_evidence",
+            "state": "needs_attention"
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000204": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000204",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "29a892a6129e98720a51cbefd54b8a2709050ee12987a1d35a99b85a244559f3",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000204",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 12,
+          "data": {
+            "kind": "input_resolve",
+            "input_id": "00000000-0000-4000-8000-000000000075",
+            "attempt_id": "00000000-0000-4000-8000-000000000064",
+            "resolution_kind": "skip",
+            "state": "skipped"
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000205": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000205",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "a107e3aaf17a0e22e92b28e3a97ba37a973327666984863160381f6b33e1b92d",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000205",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 10,
+          "data": {
+            "kind": "input_cancel",
+            "input_id": "00000000-0000-4000-8000-000000000073",
+            "state": "cancelled"
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000206": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000206",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "073f34911c0cc4db53bce80be1da0f81e6b3c9838f54b6aa4c0bbef59f8fc567",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000206",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 15,
+          "data": {
+            "kind": "topic_lifecycle",
+            "topic_id": "00000000-0000-4000-8000-000000000010",
+            "topic_revision": 8,
+            "archived_at": null
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000207": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000207",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "ccf55c00de3c00abb304f7c6d8dc8e235e9dcf4406767d2683b35f75a4929c1a",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000207",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 3,
+          "data": {
+            "kind": "session_lifecycle",
+            "state": "active",
+            "closed_at": null
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000208": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000208",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "d57a2cdd406fe6214db45b923c27dc1608478ba5ccb41c64e49a0ee8e67c3c2d",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000208",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 2,
+          "data": {
+            "kind": "binding_connect",
+            "binding_id": "00000000-0000-4000-8000-000000000020",
+            "generation": "00000000-0000-4000-8000-000000000022",
+            "capabilities": {
+              "existing_session": {
+                "supported": true,
+                "conditions": [
+                  "Selected existing local demo conversation."
+                ]
+              },
+              "deferred_delivery": {
+                "supported": true,
+                "conditions": []
+              },
+              "turn_correlation": {
+                "supported": true,
+                "conditions": []
+              },
+              "turn_completion": {
+                "supported": true,
+                "conditions": []
+              },
+              "domain_cli": {
+                "supported": true,
+                "conditions": []
+              },
+              "domain_mcp": {
+                "supported": false,
+                "conditions": []
+              },
+              "history_reconcile": {
+                "supported": true,
+                "conditions": []
+              },
+              "streaming_output": {
+                "supported": false,
+                "conditions": []
+              },
+              "final_text_read": {
+                "supported": true,
+                "conditions": []
+              },
+              "discover_sessions": {
+                "supported": true,
+                "conditions": []
+              },
+              "delivery_mode": "pull"
+            },
+            "setup_instruction": "Use explicit demo binding and generation IDs."
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000209": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000209",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "cbf18a85656b9118a18e47eb5d00fc5b82753c7c8aadd948eb4fdc18da6c266f",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000209",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 13,
+          "data": {
+            "kind": "continuation",
+            "continuation": {
+              "operation_id": "00000000-0000-4000-8000-000000000209",
+              "source_project_id": "00000000-0000-4000-8000-000000000901",
+              "source_session_id": "00000000-0000-4000-8000-000000000902",
+              "source_topic_id": "00000000-0000-4000-8000-000000000910",
+              "source_revision": 12,
+              "source_sha256": "4c73435517923b9ff0ebf1fe29100ffaa57563c13fd9feb7014799fcb602c2c8",
+              "target_topic_id": "00000000-0000-4000-8000-000000000011",
+              "target_input_id": "00000000-0000-4000-8000-000000000077",
+              "item_id_map": {
+                "2": "8"
+              },
+              "message_id_map": {
+                "00000000-0000-4000-8000-000000000903": "00000000-0000-4000-8000-000000000112"
+              },
+              "round_id_map": {
+                "00000000-0000-4000-8000-000000000940": "00000000-0000-4000-8000-000000000042"
+              },
+              "answer_id_map": {},
+              "summary": "Continue the source context.\nThe original author and entity references remain available.",
+              "confirmed_at": "2026-10-03T12:00:26.000Z"
+            }
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000210": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000210",
+        "actor_scope": {
+          "kind": "owner"
+        },
+        "command_digest": "fa436ded6432bc815f2b0b305b97af015cc34f15fe4c9aa7bcbe0c52e32c82db",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000210",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 11,
+          "data": {
+            "kind": "binding_state",
+            "binding_id": "00000000-0000-4000-8000-000000000021",
+            "generation": "00000000-0000-4000-8000-000000000023",
+            "dispatch_state": "recovery_required",
+            "owner_paused": false,
+            "pause_reason": "uncertain",
+            "connection_state": "disconnected"
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000211": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000211",
+        "actor_scope": {
+          "kind": "adapter",
+          "binding_id": "00000000-0000-4000-8000-000000000020"
+        },
+        "command_digest": "87d53e3916ad422fa561234a31ab9a2d83c34eb83d02dbd0ad45fe81c6a214f2",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000211",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 7,
+          "data": {
+            "kind": "event",
+            "event_id": "demo:event:completed-60",
+            "input_id": "00000000-0000-4000-8000-000000000070",
+            "attempt_id": "00000000-0000-4000-8000-000000000060",
+            "durable_effect": true
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000212": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000212",
+        "actor_scope": {
+          "kind": "agent",
+          "binding_id": "00000000-0000-4000-8000-000000000020"
+        },
+        "command_digest": "1e63d9c1b18122504055c0cebdb08628cb34a485ee0bb3e29de0656a87f08fd2",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000212",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 6,
+          "data": {
+            "kind": "apply",
+            "allocated_refs": {
+              "followup": {
+                "kind": "item",
+                "id": "1.1"
+              },
+              "reply": {
+                "kind": "message",
+                "id": "00000000-0000-4000-8000-000000000103"
+              }
+            },
+            "messages": [
+              {
+                "id": "00000000-0000-4000-8000-000000000103",
+                "number": 3
+              }
+            ],
+            "item_revisions": {
+              "1": 3,
+              "1.1": 1
+            },
+            "topic_revisions": {
+              "00000000-0000-4000-8000-000000000010": 8
+            },
+            "input_result_state": null,
+            "queue_join_state": "in_flight"
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000213": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000213",
+        "actor_scope": {
+          "kind": "agent",
+          "binding_id": "00000000-0000-4000-8000-000000000020"
+        },
+        "command_digest": "e27da0f60e48a590cb0b6740801cf5495b63692e92c2c55945b8b1b21123f7fe",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000213",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 19,
+          "data": {
+            "kind": "apply",
+            "allocated_refs": {
+              "reply": {
+                "kind": "message",
+                "id": "00000000-0000-4000-8000-000000000115"
+              }
+            },
+            "messages": [
+              {
+                "id": "00000000-0000-4000-8000-000000000115",
+                "number": 15
+              }
+            ],
+            "item_revisions": {
+              "2": 2
+            },
+            "topic_revisions": {},
+            "input_result_state": "committed",
+            "queue_join_state": "handled"
+          }
+        }
+      }
+    ],
+    "00000000-0000-4000-8000-000000000214": [
+      {
+        "operation_id": "00000000-0000-4000-8000-000000000214",
+        "actor_scope": {
+          "kind": "agent",
+          "binding_id": "00000000-0000-4000-8000-000000000020"
+        },
+        "command_digest": "1f8c83cf75f1099572f8adf97e8ca7136742e06c2da0ce7832476d0ac3c97015",
+        "result": {
+          "operation_id": "00000000-0000-4000-8000-000000000214",
+          "session_id": "00000000-0000-4000-8000-000000000002",
+          "revision": 4,
+          "data": {
+            "kind": "apply",
+            "allocated_refs": {
+              "topic": {
+                "kind": "topic",
+                "id": "00000000-0000-4000-8000-000000000010"
+              },
+              "round": {
+                "kind": "round",
+                "id": "00000000-0000-4000-8000-000000000040"
+              },
+              "root": {
+                "kind": "item",
+                "id": "1"
+              },
+              "opening": {
+                "kind": "message",
+                "id": "00000000-0000-4000-8000-000000000101"
+              }
+            },
+            "messages": [
+              {
+                "id": "00000000-0000-4000-8000-000000000101",
+                "number": 1
+              }
+            ],
+            "item_revisions": {
+              "1": 1,
+              "2": 1,
+              "3": 1,
+              "4": 1,
+              "5": 1,
+              "6": 1,
+              "7": 1
+            },
+            "topic_revisions": {
+              "00000000-0000-4000-8000-000000000010": 1
+            },
+            "input_result_state": null,
+            "queue_join_state": null
+          }
+        }
+      }
+    ]
+  },
+  "continuations": {
+    "00000000-0000-4000-8000-000000000209": {
+      "operation_id": "00000000-0000-4000-8000-000000000209",
+      "source_project_id": "00000000-0000-4000-8000-000000000901",
+      "source_session_id": "00000000-0000-4000-8000-000000000902",
+      "source_topic_id": "00000000-0000-4000-8000-000000000910",
+      "source_revision": 12,
+      "source_sha256": "4c73435517923b9ff0ebf1fe29100ffaa57563c13fd9feb7014799fcb602c2c8",
+      "target_topic_id": "00000000-0000-4000-8000-000000000011",
+      "target_input_id": "00000000-0000-4000-8000-000000000077",
+      "item_id_map": {
+        "2": "8"
+      },
+      "message_id_map": {
+        "00000000-0000-4000-8000-000000000903": "00000000-0000-4000-8000-000000000112"
+      },
+      "round_id_map": {
+        "00000000-0000-4000-8000-000000000940": "00000000-0000-4000-8000-000000000042"
+      },
+      "answer_id_map": {},
+      "summary": "Continue the source context.\nThe original author and entity references remain available.",
+      "confirmed_at": "2026-10-03T12:00:26.000Z"
+    }
+  }
+}
