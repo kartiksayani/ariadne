@@ -142,7 +142,7 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `binding_connect` | op_id, project_id, adapter_id, external_session_id, endpoint config, existing_session_id? | validated session+binding IDs, generation, capabilities, setup instruction |
 | `binding_pause/resume/disconnect` | binding_id, expected_generation, op_id | persisted dispatch state; disconnect does not kill host |
 | `input_submit` | session_id, binding_id, item_id or topic_id, kind, text, selected_option_id?, expected_question_revision?, supersedes_answer_id? | atomically owner Message + Answer if applicable + Input; status unchanged |
-| `input_cancel` | queued input_id, expected_revision, op_id | only before prepare; preserve message + cancellation record |
+| `input_cancel` | queued input_id, expected_revision, op_id | only before any preparation; preserve history, persist cancelled state + receipt |
 | `input_resolve` | input_id, attempt_id, decision (retry_unexecuted/resend/skip/request_result_repair/confirm_evidence), reason, expected_revision, op_id | queue recovery; decisions in queue spec |
 | `topic_archive/restore` | topic_id, expected_revision, op_id | lifecycle only; archive guards active items/unresolved inputs |
 | `session_close/reopen` | session_id, expected_revision, op_id | close requires dispatch paused, all items terminal and no unresolved inputs; never terminate host |
@@ -151,6 +151,23 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry |
 | `preferences_get` | none | local owner-only versioned UI preferences, including unsent drafts |
 | `reveal_item` | registered project/session/item IDs | focus route; no mutation |
+
+`input_submit` constructs ordinary item-targeted inputs. Continue and topic-only
+submission return `invalid_argument` directing the caller to `topic_continue`,
+whose preview/mapping and copied history commit atomically in P2.6. A supplied
+`expected_question_revision` remains a real locked guard for every item intent;
+staleness returns `question_changed`. `supersedes_answer_id` is valid only for
+Answer corrections. A changed current eligible Answer returns `revision_conflict`
+with the current session revision and guidance to reload that Answer.
+
+`input_cancel.expected_revision` guards the session revision. Cancellation requires
+queued state, no attempt history and no active attempt. It changes only Input state
+plus session update/revision and the durable `InputCancel` receipt; Message, Answer,
+frozen payload and round/item history remain intact. It creates no attempt-bound
+resolution history entry. Both commands replay the exact saved owner/session
+operation before mutable guards; changed normalized intent under the same operation
+key returns `operation_reused`. Native `inputs::InputService` supplies these real
+transactions; application composition delegates without changing CoreService.
 
 Owner transports use the generated `OwnerQueryRequest={session:SessionRef|null,
 request:QueryRequest}` and `OwnerMutationRequest={session:SessionRef|null,
