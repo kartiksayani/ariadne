@@ -99,6 +99,16 @@ version = "0.1.0"
 [[package]]
 name = "ariadne-core"
 version = "0.1.0"
+dependencies = [
+ "ariadne-agent-protocol",
+ "ariadne-domain",
+ "jsonschema",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sha2",
+ "ts-rs",
+]
 
 [[package]]
 name = "ariadne-desktop"
@@ -143,10 +153,12 @@ name = "ariadne-xtask"
 version = "0.1.0"
 dependencies = [
  "ariadne-agent-protocol",
+ "ariadne-core",
  "ariadne-domain",
  "jsonschema",
  "schemars 0.8.22",
  "schemars 1.2.2",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

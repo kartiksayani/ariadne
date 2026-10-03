@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FieldError",
+  "type": "object",
+  "properties": {
+    "field": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "field",
+    "message"
+  ]
+}

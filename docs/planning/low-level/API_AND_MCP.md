@@ -10,6 +10,10 @@ P0.6 publishes this synchronous, provider-neutral `CoreService` in
 `ariadne-core`, with owned request/result DTOs and typed errors. Domain entities,
 IDs, receipts and projections are the canonical P0.3b Rust-generated types;
 command/query unions belong to this service, not alternate renderer schemas.
+The canonical declarations are exported at `ariadne_core::service`; generated
+schemas and the CLI/Tauri service and MCP tool manifests live in
+`contracts/generated/core`, with TypeScript imports in
+`apps/desktop/src/generated/core`. No transport owns a second command model.
 
 ```text
 query(QueryContext, QueryRequest) -> Result<QueryResult, CoreError>
@@ -27,6 +31,17 @@ validated dispatch context only while holding the current binding lease; core
 rechecks persisted scope/generation/dispatch state under the transaction.
 Historical reports follow PROCESS section 2's verified reconciliation exception.
 
+Contexts have private fields and no wire deserializer/schema. Explicitly trusted
+local constructors retain registered project/session IDs, binding/current
+generation, and owner versus agent scope. `AgentReadScope` distinguishes terminal
+reads using the latest issued watermark from dispatched input/attempt reads.
+`ValidatedDispatchContext` asserts the runtime currently holds the binding OS
+lease; `AdapterContext` may additionally retain the requested historical attempt,
+originating generation and verified host fingerprint. These typed assertions are
+not unforgeable credentials: the real core rechecks persisted scope, generation,
+lease and watermark under its transaction. Historical facts never reopen dispatch
+or rewrite a sealed attempt. Models cannot select an actor or storage path.
+
 `ClaimRequest={binding_id,generation,request_id}`. Replay the original claim
 receipt first. `Ok(None)` means a healthy binding has no eligible work, including
 an empty queue or an existing in-flight input. Bad scope/generation/lease, pause
@@ -36,6 +51,13 @@ input/attempt IDs, originating generation, exact formatted payload, digest and
 wire marker. It does not claim host acceptance. `EventReceipt` identifies the
 reported event and persisted revision/effect, including a consistent replay;
 ephemeral presence need not produce a new durable session receipt.
+Its exact record is `{event_id,session_id,revision:positive_safe_integer|null,
+durable_effect,replayed}`; consistent replay preserves saved revision/effect.
+An invalid lease is `permission_denied`; disconnected dispatch is
+`host_unreachable`. Explicit owner pause and otherwise blocked recovery are
+`invalid_transition` with typed `details.reason=owner_paused|recovery_required`.
+Actual missing result, uncertainty and contradictory facts retain `result_missing`,
+`delivery_uncertain` and `protocol_conflict`; healthy in-flight work stays `Ok(None)`.
 
 Filesystem calls run off the UI and async executor thread. Never keep a store
 lock across an adapter/host wait. A scripted test/dev double may implement this
@@ -71,6 +93,15 @@ after the session commit. If metadata conflicts, stop and show the affected path
 No bootstrap journal, completion-stage tracking or automatic setup repair is
 required; follow DOMAIN_AND_STORAGE section 4.
 
+`MutationReceipt` is an untagged typed union: session commands return the existing
+`SavedReceipt` directly, project registration returns
+`{operation_id,project_id,registry_revision}`, and preference writes return
+`{operation_id,preferences_revision}`. Required IDs/revisions distinguish these
+records and mixed/unknown fields reject. `ApplyReceipt` reuses `SavedReceipt` and
+must have `data.kind=apply`. No extra session wrapper changes the public success
+shape. Application `ok` is a literal boolean; absent optional error revision/details
+are omitted, while nullable domain/service fields emit explicit null.
+
 ## 2. Query and owner command inventory
 
 | Command | Parameters | Result / effect |
@@ -92,7 +123,21 @@ required; follow DOMAIN_AND_STORAGE section 4.
 | `topic_continue_preview` | source session/topic, target session | snapshot revision/hash, mapping preview, full summary, readiness |
 | `topic_continue` | source refs/revision/hash, target session/binding, op_id | atomic target copy + input + origin mapping; source untouched |
 | `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry |
+| `preferences_get` | none | local owner-only versioned UI preferences, including unsent drafts |
 | `reveal_item` | registered project/session/item IDs | focus route; no mutation |
+
+Owner transports use the generated `OwnerQueryRequest={session:SessionRef|null,
+request:QueryRequest}` and `OwnerMutationRequest={session:SessionRef|null,
+command:OwnerCommand}`. Single-session commands/reads route only through this
+registered session handle; `session_get` has empty params, lifecycle params retain
+only expected revision, input submission params retain binding/target/content,
+and reveal params retain item ID. The table's project/session IDs describe routing,
+not duplicate IDs in those params. Missing, unexpected and contradictory routes
+reject. Registry/preferences/global list reads and bootstrap registration/connect
+use null. Continue preview uses null and explicit source/target refs; Continue
+commit uses the target route and verifies its explicit target agrees. Entry points
+resolve registered scope before constructing trusted contexts. No caller selects
+an actor or arbitrary storage path through these routing wrappers.
 
 `binding_connect` creates a new Ariadne session by default. With
 existing_session_id it requires active state, no outstanding input and paused or
@@ -175,6 +220,47 @@ Guard errors return `details.blocking_item_ids`, `blocking_input_ids` and
 `dispatch_must_pause`; unresolved means queued/in_flight/needs_attention. Handled,
 cancelled and explicitly skipped inputs do not block archive/close.
 
+### Service-owned read and preference records
+
+`QueryRequest` uses `{command,params}`; `QueryResult` uses `{kind,data}` and the
+matching command name. `session_read.selection` is a view/filter union:
+topics have an archived filter, items topic/item/parent/status/archive filters,
+messages topic/item filters, and inputs topic/item/state filters. Each request
+has the canonical cursor and a validated limit of 1..100. Item history continuation
+selectors inside `session_read.item_pages` and round selectors inside
+`item_rounds.round_pages` identify the parent item/round plus the existing DOMAIN
+cursor view and their independent cursor/limit; they add no endpoints. Cursor
+filter digest includes those parent/scope selectors, and execution validates
+view, filters, sort key and snapshot revision together.
+
+Owner input pages contain complete canonical `Input` records. Agent input pages
+use `inputs_queue` with `InputQueueEntry={id,seq,binding_id,state}`; context selects
+visibility and callers cannot request private payloads. Messages, item updated
+messages, answers and nested round histories still honor the issued watermark
+and preserve complete visible bodies and provenance. List results carry their
+canonical Page and completeness counts; session lists separately carry active
+and closed totals. No inaccessible data becomes a complete zero.
+
+Preference records belong to the local owner backend. `PreferencesSnapshot`
+contains schema/revision, global theme (system/light/dark), optional window
+geometry/monitor, pin and notification watermark; per-session selection, tab
+order, expansion, filters, rail and scroll; qualified Later routes; and unsent
+`OwnerDraft` records. Drafts retain a stable operation ID, registered session,
+binding, canonical target, intent, exact text/option and target/question revisions.
+They are never submitted inputs or agent query data. A revision-checked
+`PreferencesPatch` uses typed entries to set global/session view, set/clear Later,
+upsert or delete drafts. Explicit null clears nullable UI fields; deleting a draft
+is explicit. The existing request/entity/page bounds apply. See
+[UI state](UI_AND_NATIVE.md).
+
+Continue previews identify the validated source revision/hash, full approved
+summary, source item IDs and proposed copy or imported-drop action for external
+replacement edges, and ready/blocked target reasons. They allocate no target IDs.
+A known valid target binding can queue while its host is unavailable; unknown or
+ambiguous bindings cannot. Confirmation passes the source refs/revision/hash,
+target session/binding and exact approved summary. Allocation and commit remain
+under the target lock.
+
 ## 3. Agent API: explicit results and tree operations
 
 Tools: `session_read`, `item_messages`, `item_rounds`, `apply`.
@@ -207,6 +293,12 @@ input_result: ResultDraft|null
 | `item.replace` | `item,replacement,outcome,why` |
 | `reply` | `ref,item,text,round_id?`; exactly one full item reply |
 | `round.close` | `round_id`; immutable history retained |
+
+In `item.edit.patch`, omitted `note` leaves it unchanged, explicit null clears it,
+and a string preserves its exact text, including an empty string. Other optional
+patch fields emit null when absent and update only when present with a value;
+an empty links array clears links. Scope/reference/revision and domain-transition
+checks belong to the real core, after exact operation replay lookup.
 
 `ref` is a request-local name `[A-Za-z][A-Za-z0-9_]{0,31}`. Reference objects are
 `{id:"existing-id"}` or `{ref:"earlier-operation-ref"}`. No forward references;

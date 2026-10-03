@@ -3,3 +3,19 @@ name = "ariadne-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[features]
+default = []
+test-support = []
+
+[dependencies]
+ariadne-domain = { path = "../ariadne-domain" }
+ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+ts-rs.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+jsonschema.workspace = true

@@ -33,6 +33,8 @@ Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, d
 | Theme, window geometry, pin, notification watermark | Versioned global preferences |
 
 Drafts are unsent and invisible to the agent. Preserve them across unrelated snapshots, tab close, and detail navigation. A changed target revision shows a review banner and requires renewed submission. Never auto-send a draft after restart. Preferences corruption backs up the file and allows resetting UI preferences without modifying session data. Follow exact caps, file modes, and write/atomicity behavior in the domain and storage specifications.
+The canonical owner-only preference read and typed revision-checked patch records
+are published by [CoreService](API_AND_MCP.md#service-owned-read-and-preference-records).
 
 ## 2. Snapshot and event synchronization
 

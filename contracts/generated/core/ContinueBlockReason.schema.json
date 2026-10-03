@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContinueBlockReason",
+  "type": "string",
+  "enum": [
+    "same_session",
+    "target_closed",
+    "binding_unknown",
+    "binding_ambiguous",
+    "binding_invalid",
+    "target_unavailable"
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ViewFilters",
+  "type": "object",
+  "properties": {
+    "archived": {
+      "type": "boolean"
+    },
+    "hide_later": {
+      "type": "boolean"
+    },
+    "search": {
+      "type": "string"
+    },
+    "statuses": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ItemStatus"
+      }
+    },
+    "topic_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UuidV4"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "search",
+    "statuses",
+    "topic_id",
+    "archived",
+    "hide_later"
+  ],
+  "$defs": {
+    "ItemStatus": {
+      "type": "string",
+      "enum": [
+        "open",
+        "waiting_on_me",
+        "in_progress",
+        "decided",
+        "done",
+        "dropped",
+        "replaced"
+      ]
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

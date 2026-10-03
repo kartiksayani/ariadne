@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ItemPatch",
+  "type": "object",
+  "properties": {
+    "links": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/ItemLinkTarget"
+      }
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "question": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "type": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ItemType"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "question",
+    "type",
+    "links"
+  ],
+  "$defs": {
+    "ItemLinkTarget": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/LinkKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "label",
+        "target"
+      ]
+    },
+    "ItemType": {
+      "type": "string",
+      "enum": [
+        "question",
+        "decision",
+        "finding",
+        "task",
+        "explanation"
+      ]
+    },
+    "LinkKind": {
+      "type": "string",
+      "enum": [
+        "pr",
+        "file",
+        "doc"
+      ]
+    }
+  }
+}
