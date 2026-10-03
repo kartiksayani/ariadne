@@ -170,7 +170,7 @@
     },
     {
       "id": "P0.3a",
-      "title": "Generate complete domain DTOs, schemas and focused shape tests",
+      "title": "Validate domain primitives and build the contract generator",
       "phase": "M0",
       "depends_on": [
         "P0.2"
@@ -179,15 +179,60 @@
         "Cargo.toml",
         "Cargo.lock",
         "crates/ariadne-domain/Cargo.toml",
-        "crates/ariadne-domain/src/models/**",
         "crates/ariadne-domain/src/lib.rs",
-        "crates/ariadne-domain/tests/schema.rs",
+        "crates/ariadne-domain/src/models/mod.rs",
+        "crates/ariadne-domain/src/models/primitives.rs",
         "crates/ariadne-domain/tests/lexical.rs",
-        "contracts/generated/domain/**",
-        "apps/desktop/src/generated/**",
+        "crates/ariadne-domain/tests/schema.rs",
         "tools/xtask/**",
         ".cargo/config.toml",
-        "quality-gates.json"
+        "quality-gates.json",
+        "contracts/generated/domain/primitives/**",
+        "apps/desktop/src/generated/domain/primitives/**",
+        "docs/adr/ADR-0013-validate-domain-primitives.md",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md"
+      ],
+      "spec": [
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#1-primitive-conventions",
+        "docs/planning/low-level/API_AND_MCP.md#3-agent-api-explicit-results-and-tree-operations",
+        "docs/planning/low-level/VERIFICATION.md#required-acceptance-matrix"
+      ],
+      "acceptance": [
+        "Implement validated UuidV4, ItemRef, UtcMillis, SchemaVersion, PositiveSafeInteger, NonnegativeSafeInteger, Sha256 and RequestRef primitives with real constructors/deserialization checks, canonical serialization and accurate JSON Schema and TypeScript wire types.",
+        "UtcMillis accepts only already-canonical RFC3339 UTC strings with exactly three fractional digits and uppercase T/Z; validate calendar/time semantics and canonical round-trip with a pinned library without inventing extra range or length restrictions. ItemRef is dot-separated positive decimal segments without leading zeros, each in 1..9007199254740991; ancestry remains explicit, never inferred from parsing.",
+        "Provide a working tooling-only cargo xtask gen-contracts command and read-only --check mode that generate actual deterministic primitive schemas/TypeScript and detect missing, stale or unexpected artifacts. No empty generator, placeholder DTOs, product entry point or change to the ten production package boundaries.",
+        "Use a directly pinned schema-validator dev dependency and meaningful lexical, generated-schema, typed-map-key and generator tests, including positive/negative TypeScript assignments where TypeScript can express the constraint. Tests do not write source artifacts; generation is deterministic and regeneration drift fails.",
+        "Keep executable primitives in measured application coverage and independently measure xtask at at least 80%, preserving canonical application coverage and only exact reviewed source classifications. Record the primitive interpretations in ADR-0013 and DOMAIN section 1; complete DTO shapes and fixtures remain P0.3b/P0.3."
+      ],
+      "checks": [
+        "rtk proxy cargo xtask gen-contracts --check",
+        "rtk proxy cargo test -p ariadne-domain --test lexical",
+        "rtk proxy cargo test -p ariadne-domain --test schema",
+        "rtk proxy cargo test -p ariadne-xtask"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P0.3b",
+      "title": "Complete domain DTO contracts, schemas and focused shape tests",
+      "phase": "M0",
+      "depends_on": [
+        "P0.3a"
+      ],
+      "paths": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/ariadne-domain/Cargo.toml",
+        "crates/ariadne-domain/src/lib.rs",
+        "crates/ariadne-domain/src/models/**",
+        "crates/ariadne-domain/tests/schema.rs",
+        "tools/xtask/**",
+        "quality-gates.json",
+        "contracts/generated/domain/**",
+        "apps/desktop/src/generated/domain/**",
+        "docs/adr/ADR-0012-complete-the-domain-v1-contract.md",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md",
+        "docs/planning/low-level/API_AND_MCP.md"
       ],
       "spec": [
         "docs/planning/low-level/DOMAIN_AND_STORAGE.md#1-primitive-conventions",
@@ -202,15 +247,15 @@
         "docs/planning/low-level/VERIFICATION.md#required-acceptance-matrix"
       ],
       "acceptance": [
-        "Rust-authored schema version 1 includes complete Messages, Answers, Rounds, Binding, Input, Attempt, Result, provenance and typed receipts; DTO generation does not invent alternate renderer models, persistence or future API command unions.",
-        "Implement the specified UUIDv4, UTC-millisecond, schema-version and safe-integer lexical contracts with focused real tests; canonical emitted fields and nullable read behavior are explicit. Later semantic transitions and five-round history remain P1.1/P1.2.",
-        "Generate deterministic JSON Schema and TypeScript from Rust, check in generated artifacts and detect regeneration drift. Maintain canonical coverage with only exact independently reviewed treatment of noninstrumented DTO sources.",
-        "Use a tooling-only cargo xtask alias/package without adding a product entry point or changing the ten production package boundaries."
+        "Rust-authored schema version 1 includes complete Project, Session, Topic, Item, Message, Answer, Round, Binding, Input, Attempt, Result, provenance, typed receipt/continuation and current SummaryCounts DTO shapes. Resolve exact remaining shape gaps before dependent code and record the complete contract in ADR-0012 with canonical DOMAIN/API updates.",
+        "Extend the working generator to complete deterministic domain JSON Schema and TypeScript exports. Canonical emitted fields and nullable read behavior are explicit; do not invent alternate renderer models, generic JSON saved-result substitutes, unspecified summary projections, persistence or future API command unions.",
+        "Test representative records spanning tagged variants, nullable fields, nested receipts, typed maps and provenance against Rust and generated contracts, including negative lexical map-key cases and TypeScript assignments where expressible. A bare UUID schema format does not prove map-key lexical constraints.",
+        "Retain primitive validation, read-only regeneration drift checks and independent xtask coverage. Maintain canonical application coverage with only exact independently reviewed treatment of noninstrumented DTO sources; all child sources remain inventoried. Complete demo/invalid fixtures remain P0.3; semantic transitions and five-round history remain P1.1/P1.2."
       ],
       "checks": [
         "rtk proxy cargo xtask gen-contracts --check",
         "rtk proxy cargo test -p ariadne-domain --test schema",
-        "rtk proxy cargo test -p ariadne-domain --test lexical"
+        "rtk proxy cargo test -p ariadne-xtask"
       ],
       "estimate_days": 1
     },
@@ -219,7 +264,7 @@
       "title": "Complete canonical domain demo and invalid schema fixtures",
       "phase": "M0",
       "depends_on": [
-        "P0.3a"
+        "P0.3b"
       ],
       "paths": [
         "fixtures/domain/**",
@@ -232,7 +277,7 @@
       ],
       "acceptance": [
         "Check in a deterministic canonical demo covering the complete domain v1 DTO inventory, plus invalid and future-schema fixtures; Rust, generated JSON Schema and TypeScript conform to the same canonical emitted records.",
-        "Retain focused shape tests and regeneration drift checks from P0.3a. This final fixture acceptance completes P0.3; semantic transitions and five-round history remain P1.1/P1.2."
+        "Retain focused shape tests and regeneration drift checks from P0.3a/P0.3b. This final fixture acceptance completes P0.3; semantic transitions and five-round history remain P1.1/P1.2."
       ],
       "checks": [
         "rtk proxy cargo xtask gen-contracts --check",
