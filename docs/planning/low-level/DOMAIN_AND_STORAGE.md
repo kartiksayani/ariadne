@@ -322,9 +322,20 @@ frozen ItemOption records. `InputContext={message_ids,item_ids,round_id,
 continuation_operation_id}` with required ID arrays and nullable scalar IDs.
 This is immutable owner text and its original target/context, including the
 question/options displayed in Sent after the live question changes.
+P1.5 ordinary item submissions freeze `context.item_ids=[target]`, no caller-selected
+message IDs, the chosen existing or fresh round ID, and no continuation operation.
+P2.2 renders additional current-target context into the immutable prepared Attempt;
+it never rewrites the original Input payload. Continue construction belongs to
+P2.6's atomic topic continuation with preview/mapping, not ordinary input submission.
 Do not treat the user's text as permission to run arbitrary tools.
 `state=queued|in_flight|handled|cancelled|needs_attention|skipped`.
 Attempts and resolution history are ordered arrays; active attempt is nullable.
+Owner cancellation requires queued, never-prepared state (empty attempts and no
+active attempt) and the expected session revision. It preserves the full Message,
+Answer, payload, counters and item/round history, saving cancelled state with an
+`InputCancel` receipt and one session revision. No fabricated attempt, resolution
+entry, time or reason accompanies cancellation. Exact operation replay still
+precedes these mutable guards.
 
 Attempt: `{id,purpose,repair_for_attempt_id,claim_request_id,binding_generation,prepared_at,formatted_payload,payload_sha256,wire_marker,
 acceptance,acceptance_receipt,acceptance_observed_at,host_turn_id,turn_state,turn_observed_at,domain_result,
