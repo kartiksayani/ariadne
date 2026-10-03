@@ -220,7 +220,7 @@ def main(argv=None):
         run("cargo", "build", "--workspace", "--locked", "--all-features")
         run("cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings")
         run("env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean", "--workspace", "--locked", "--offline")
-        ignored = "(?:^|/)(?:tools|generated|vendor|tests|__tests__)/|" + "|".join(
+        ignored = "(^|/)(tools|generated|vendor|tests|__tests__)/|" + "|".join(
             re.escape(name).replace(r"\*", ".*").replace(r"\?", ".") + "$"
             for name in config["coverage_exclusions"])
         run("cargo", "llvm-cov", "--workspace", "--all-features", "--locked", "--lcov",
