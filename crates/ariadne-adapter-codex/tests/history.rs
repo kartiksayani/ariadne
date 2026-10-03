@@ -17,7 +17,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -74,6 +74,7 @@ struct Harness {
     socket: PathBuf,
     stop: Arc<AtomicBool>,
     calls: Arc<Mutex<Vec<Value>>>,
+    recorded: Arc<Condvar>,
     worker: Option<JoinHandle<()>>,
 }
 impl Harness {
@@ -92,6 +93,8 @@ impl Harness {
         let stopped = stop.clone();
         let calls = Arc::new(Mutex::new(Vec::new()));
         let observed = calls.clone();
+        let recorded = Arc::new(Condvar::new());
+        let notification = recorded.clone();
         let worker = thread::spawn(move || {
             let stream = loop {
                 match listener.accept() {
@@ -122,6 +125,7 @@ impl Harness {
                 };
                 let request: Value = serde_json::from_str(text.as_str()).unwrap();
                 observed.lock().unwrap().push(request.clone());
+                notification.notify_all();
                 let method = request["method"].as_str().unwrap().to_owned();
                 if method == "initialized" {
                     continue;
@@ -174,6 +178,7 @@ impl Harness {
             socket,
             stop,
             calls,
+            recorded,
             worker: Some(worker),
         }
     }
@@ -196,6 +201,19 @@ impl Harness {
             .iter()
             .map(|call| call["method"].as_str().unwrap().to_owned())
             .collect()
+    }
+    fn wait_for_method(&self, method: &str) {
+        let calls = self.calls.lock().unwrap();
+        let (calls, _) = self
+            .recorded
+            .wait_timeout_while(calls, Duration::from_secs(2), |calls| {
+                !calls.iter().any(|call| call["method"] == method)
+            })
+            .unwrap();
+        assert!(
+            calls.iter().any(|call| call["method"] == method),
+            "Fixture daemon did not record {method} within the bounded wait"
+        );
     }
 }
 impl Drop for Harness {
@@ -1058,6 +1076,7 @@ fn unbound_discovery_precedes_explicit_binding_and_reuses_initialization() {
     let harness = Harness::standard();
     let mut reader =
         CodexDaemonReader::open(harness.options(), harness.request().endpoint).unwrap();
+    harness.wait_for_method("initialized");
     assert_eq!(harness.methods(), ["initialize", "initialized"]);
     let candidates = reader.discover(None).unwrap();
     assert_eq!(candidates.candidates[0].external_session_id, THREAD);
@@ -1103,6 +1122,7 @@ fn unbound_reader_rechecks_identity_and_explicit_endpoint_when_binding() {
                 Code::BindingMismatch
             }
         );
+        harness.wait_for_method("initialized");
         assert_eq!(harness.methods(), ["initialize", "initialized"]);
     }
 }
