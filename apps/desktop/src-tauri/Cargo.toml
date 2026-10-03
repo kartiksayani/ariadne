@@ -1,0 +1,23 @@
+[package]
+name = "ariadne-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ariadne_desktop_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+tauri.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tauri-plugin-wdio = { workspace = true, optional = true }
+tauri-plugin-wdio-webdriver = { workspace = true, optional = true }
+
+[features]
+e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]

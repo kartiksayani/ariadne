@@ -85,6 +85,13 @@ validation/transitions/transactions out of Tauri handlers and transport wrappers
 Codex wire DTOs are generated from the pinned host's JSON Schema with typify;
 they remain private to its adapter. See the linked protocol-generation recipe in PROCESS_AND_PROTOCOLS section 6.
 Dependency resolution and exact lockfiles are a mechanical M0 task; see handoff.
+The P0.2 scaffold stages these boundaries under
+[ADR-0009](../adr/ADR-0009-stage-truthful-cli-entrypoints.md): seven domain/provider
+libraries are comment-only compiling packages, and the CLI/MCP binaries expose
+truthful help/version with nonzero unsupported/unimplemented requests. A scaffold
+`ariadne mcp serve` or `ariadne-mcp` invocation must not claim a working MCP service.
+The final shared `serve_stdio()`/rmcp boundary above is implemented by its service
+task, with the same core/store ownership rather than alternate business logic.
 CSS modules + source design variables, React reducer/context, SVG graph; no
 remote fonts, UI framework redesign, graph service, Redux or database required.
 

@@ -1,0 +1,40 @@
+[workspace]
+members = [
+    "apps/desktop/src-tauri",
+    "crates/ariadne-domain",
+    "crates/ariadne-store",
+    "crates/ariadne-core",
+    "crates/ariadne-agent-protocol",
+    "crates/ariadne-runtime",
+    "crates/ariadne-adapter-claude",
+    "crates/ariadne-adapter-codex",
+    "crates/ariadne-cli",
+    "crates/ariadne-mcp",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
+tauri = "=2.12.1"
+tauri-build = "=2.7.1"
+tauri-plugin-wdio = "=1.4.0"
+tauri-plugin-wdio-webdriver = "=1.4.0"
+tempfile = "=3.27.0"
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
+[profile.release]
+opt-level = 1
+lto = false
