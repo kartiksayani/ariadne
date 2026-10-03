@@ -206,7 +206,11 @@ cloning. Provenance records original/normalized boxes and temporary style change
 the original ElementHandle remains stable when temporary styles stop matching
 the source selector. Measurements, screenshots and cleanup use that same node.
 Assertions in `finally` check restored node identity, inline styles, original
-position/dimensions and backing removal, including after capture failure. Transparent
+position/dimensions, ancestor/document scroll offsets and backing removal,
+including after capture failure. Original scroll offsets are recorded in provenance
+and restored after styles, because removing a large graph from flow can clamp an
+overflow ancestor's scroll range. The regression covers nonzero horizontal,
+vertical and document scroll on successful capture and post-placement failure. Transparent
 regions preserve their own independently resolved solid ancestor backdrop.
 The current round’s own 7% accent layer stays unchanged over a temporary inert
 backing with its actual solid ancestor color, recorded and removed in `finally`.

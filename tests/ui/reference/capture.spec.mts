@@ -101,7 +101,15 @@ async function normalizedComponent(region: Locator) {
     const originalStyle = await component.getAttribute('style');
     const originalBox = await component.boundingBox();
     if (!originalBox) throw new Error('Missing component box before raster normalization');
+    // Removing a large component from flow can clamp its ancestor scroll range.
+    // Retain the actual ancestor nodes, including the document scroll position.
+    const scrollState = await component.evaluateHandle(element => {
+      const ancestors = [];
+      for (let node: Element | null = element; node; node = node.parentElement) ancestors.push({ node, left: node.scrollLeft, top: node.scrollTop });
+      return { ancestors, left: window.scrollX, top: window.scrollY };
+    });
     try {
+      const originalScroll = await scrollState.evaluate(state => ({ ancestors: state.ancestors.map(({ node, left, top }) => ({ tag: node.tagName, id: node.id, sourceTemplate: node.getAttribute('data-dc-tpl'), left, top })), left: state.left, top: state.top }));
       const placement = await component.evaluate((element, box) => {
         const node = element as HTMLElement;
         let backdrop = '', preserveBackdrop = false, backingLayer = false;
@@ -131,36 +139,48 @@ async function normalizedComponent(region: Locator) {
       for (const dimension of ['width', 'height'] as const) expect(normalizedBox![dimension], `Normalization preserves ${dimension}`).toBeCloseTo(originalBox[dimension], 5);
       expect(normalizedBox!.x).toBe(0); expect(normalizedBox!.y).toBe(0);
       const png = await component.screenshot({ animations: 'disabled' });
-      return { png, provenance: { originalBox, normalizedBox, ...placement, identity: 'Original ElementHandle retained for measurement, capture and restoration', purpose: 'Whole-component pixel comparison; does not prove original viewport visibility.' } };
+      return { png, provenance: { originalBox, normalizedBox, originalScroll, ...placement, identity: 'Original ElementHandle retained for measurement, capture and restoration', purpose: 'Whole-component pixel comparison; does not prove original viewport visibility.' } };
     } finally {
-      await component.evaluate((element, style) => {
-        const backing = element.previousElementSibling;
-        if (backing?.hasAttribute('data-reference-raster-backdrop')) backing.remove();
-        if (style === null) element.removeAttribute('style'); else element.setAttribute('style', style); }, originalStyle);
-      expect(await component.evaluate(element => element.isConnected), 'Original component remains connected').toBe(true);
-      expect(await component.getAttribute('style'), 'Original node inline styles restored').toBe(originalStyle);
-      expect(await region.evaluate((resolved, original) => resolved === original, component), 'Locator resolves the original node after restoration').toBe(true);
-      const restoredBox = await component.boundingBox();
-      expect(restoredBox, 'Original node box restored').not.toBeNull();
-      for (const dimension of ['x', 'y', 'width', 'height'] as const) expect(restoredBox![dimension], `Restoration preserves ${dimension}`).toBeCloseTo(originalBox[dimension], 5);
-      expect(await region.page().locator('[data-reference-raster-backdrop]').count(), 'Temporary backing removed').toBe(0);
+      try {
+        await component.evaluate((element, style) => {
+          const backing = element.previousElementSibling;
+          if (backing?.hasAttribute('data-reference-raster-backdrop')) backing.remove();
+          if (style === null) element.removeAttribute('style'); else element.setAttribute('style', style); }, originalStyle);
+        const scrollRestored = await scrollState.evaluate(state => {
+          for (const { node, left, top } of [...state.ancestors].reverse()) node.scrollTo({ left, top, behavior: 'instant' });
+          window.scrollTo({ left: state.left, top: state.top, behavior: 'instant' });
+          return state.ancestors.every(({ node, left, top }) => node.scrollLeft === left && node.scrollTop === top) && window.scrollX === state.left && window.scrollY === state.top;
+        });
+        expect(scrollRestored, 'Original ancestor and document scroll offsets restored').toBe(true);
+        expect(await component.evaluate(element => element.isConnected), 'Original component remains connected').toBe(true);
+        expect(await component.getAttribute('style'), 'Original node inline styles restored').toBe(originalStyle);
+        expect(await region.evaluate((resolved, original) => resolved === original, component), 'Locator resolves the original node after restoration').toBe(true);
+        const restoredBox = await component.boundingBox();
+        expect(restoredBox, 'Original node box restored').not.toBeNull();
+        for (const dimension of ['x', 'y', 'width', 'height'] as const) expect(restoredBox![dimension], `Restoration preserves ${dimension}`).toBeCloseTo(originalBox[dimension], 5);
+        expect(await region.page().locator('[data-reference-raster-backdrop]').count(), 'Temporary backing removed').toBe(0);
+      } finally {
+        await scrollState.dispose();
+      }
     }
   } finally {
     await component.dispose();
   }
 }
 
-test('normalization retains a style-selected node and restores it after failure', async ({ page }) => {
-  await page.setContent(`<main style="background: white">
-    <div id="original" style="position: relative; width: 688px; height: 120px; background: rgba(80, 80, 255, 0.07)"><svg></svg></div>
+test('normalization retains a style-selected node and restores scroll after failure', async ({ page }) => {
+  await page.setContent(`<body style="min-height: 2000px"><main style="background: white; width: 500px; height: 160px; overflow: auto; margin-top: 800px">
+    <div id="original" style="position: relative; width: 688px; height: 628px; background: rgba(80, 80, 255, 0.07)"><svg></svg></div>
     <div id="next" style="position: relative; width: 472px; height: 120px; background: white"><svg></svg></div>
-  </main>`);
+  </main></body>`);
+  await page.evaluate(() => { document.querySelector('main')!.scrollTo(4, 169); window.scrollTo(0, 400); });
   const region = page.locator('main div[style*="position: relative;"]:has(> svg)').first();
   const originalStyle = await page.locator('#original').getAttribute('style');
   const nextStyle = await page.locator('#next').getAttribute('style');
   const normalized = await normalizedComponent(region);
   expect(normalized.provenance.normalizedBox?.width).toBe(688);
   expect(normalized.provenance.temporaryBacking).not.toBeNull();
+  expect(normalized.provenance.originalScroll.top).toBe(400);
   expect(normalized.png.byteLength).toBeGreaterThan(0);
   // Force an assertion failure after positioning/backing insertion, exercising
   // the same cleanup path that a failed screenshot or dimension check takes.
@@ -169,6 +189,7 @@ test('normalization retains a style-selected node and restores it after failure'
   expect(await page.locator('#original').getAttribute('style')).toBe(originalStyle);
   expect(await page.locator('#next').getAttribute('style')).toBe(nextStyle);
   expect(await region.getAttribute('id')).toBe('original');
+  expect(await page.evaluate(() => ({ left: document.querySelector('main')!.scrollLeft, top: document.querySelector('main')!.scrollTop, windowTop: window.scrollY }))).toEqual({ left: 4, top: 169, windowTop: 400 });
   await expect(page.locator('[data-reference-raster-backdrop]')).toHaveCount(0);
 });
 
