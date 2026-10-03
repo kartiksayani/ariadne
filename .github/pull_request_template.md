@@ -21,5 +21,5 @@ Task ID and spec section:
 
 List risks or decisions that need maintainer attention.
 
-- Architecture decisions (exact changed ADR paths, or []):
-- Spec updates (exact additional task-referenced Markdown paths, or []):
+- Important ADRs and related contract changes, if any:
+- Full validation still pending, if any:

@@ -3,6 +3,7 @@ name: Quality
 on:
   push:
     branches: ["**"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,36 +13,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  change-policy:
-    name: change-policy
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-      - name: Check PR source commits or main squash commits
-        env:
-          BASE_SHA: ${{ github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
-          HEAD_SHA: ${{ github.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          args=(--base "$BASE_SHA" --head "$HEAD_SHA")
-          if [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "refs/heads/main" ]]; then
-            args+=(--main)
-          fi
-          python3 scripts/check-change.py "${args[@]}"
-
   quality:
+    name: quality
+    runs-on: macos-26
     env:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       CARGO_TARGET_DIR: "${{ github.workspace }}/target/native-e2e"
-    name: quality
-    runs-on: macos-26
+      BASE_SHA: ${{ github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -56,38 +36,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          snapshot=$(git rev-parse HEAD)
-          archive_reports() {
-            mkdir -p "$RUNNER_TEMP/ariadne-quality-evidence/$snapshot"
-            if [[ -d coverage ]]; then cp -R coverage/. "$RUNNER_TEMP/ariadne-quality-evidence/$snapshot/"; fi
-          }
-          trap archive_reports EXIT
-          rm -rf coverage
+          args=(--ci --base "$BASE_SHA")
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then args+=(--full); fi
+          scope=$(python scripts/check-commit.py "${args[@]}" --print-scope)
           npm install --global npm@10.9.8
           python -m venv .venv-quality
           .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
-          sw_vers
-          uname -m
-          xcode-select -p
-          xcodebuild -version
-          if [[ -f Cargo.toml ]]; then
+          npm ci --ignore-scripts --engine-strict
+          if [[ "$scope" == application* ]]; then
             rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
             cargo install cargo-llvm-cov --version 0.9.1 --locked
           fi
-          npm ci --ignore-scripts --engine-strict
-          if [[ -f Cargo.toml ]]; then
-            npm run build
-            cargo build --workspace --locked --all-features
-          fi
-          .venv-quality/bin/python scripts/check-commit.py --ci
+          .venv-quality/bin/python scripts/check-commit.py "${args[@]}"
       - name: Preserve native and coverage evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ariadne-quality-evidence/
+          path: coverage/
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: ignore
       - name: Record result
         if: always()
         env:

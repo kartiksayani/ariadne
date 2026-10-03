@@ -1,8 +1,11 @@
 # ADR-0014: Check only the pushed branch head in CI
 
-Status: accepted
+Status: accepted (partially superseded)
 Supersedes: none
-Superseded by: none
+Superseded by: [ADR-0018](ADR-0018-recalibrate-delivery.md)
+
+Only cadence/local gate requirements are revised by ADR-0018; the original
+application/native/release safety controls and pushed-head CI behavior remain.
 
 ## Context
 

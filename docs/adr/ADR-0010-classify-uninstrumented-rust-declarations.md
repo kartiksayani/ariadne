@@ -1,8 +1,8 @@
 # ADR-0010: Classify uninstrumented Rust declarations
 
-Status: accepted
+Status: deprecated
 Supersedes: [ADR-0004](ADR-0004-account-for-scaffold-coverage-sources.md)
-Superseded by: none
+Superseded by: [ADR-0018](ADR-0018-recalibrate-delivery.md)
 
 ## Context
 

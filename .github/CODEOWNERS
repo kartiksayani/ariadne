@@ -1,7 +1,6 @@
 # Review changes to quality enforcement and dependency policy.
 /.github/ @kartiksayani
 /scripts/check-commit.py @kartiksayani
-/scripts/check-change.py @kartiksayani
 /quality-gates.json @kartiksayani
 /package.json @kartiksayani
 /package-lock.json @kartiksayani
