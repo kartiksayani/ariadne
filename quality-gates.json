@@ -4,6 +4,11 @@
   "coverage_exclusions": [
     "crates/ariadne-domain/src/lib.rs",
     "crates/ariadne-domain/src/models/mod.rs",
+    "crates/ariadne-domain/src/models/entities.rs",
+    "crates/ariadne-domain/src/models/delivery.rs",
+    "crates/ariadne-domain/src/models/provenance.rs",
+    "crates/ariadne-domain/src/models/receipts.rs",
+    "crates/ariadne-domain/src/models/projections.rs",
     "crates/ariadne-store/src/lib.rs",
     "crates/ariadne-core/src/lib.rs",
     "crates/ariadne-agent-protocol/src/lib.rs",

@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BindingSummary",
+  "type": "object",
+  "properties": {
+    "adapter_id": {
+      "type": "string"
+    },
+    "connection_state": {
+      "$ref": "#/$defs/ConnectionState"
+    },
+    "dispatch_state": {
+      "$ref": "#/$defs/DispatchState"
+    },
+    "external_session_id": {
+      "type": "string"
+    },
+    "generation": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "owner_paused": {
+      "type": "boolean"
+    },
+    "pause_reason": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PauseReason"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "presence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PresenceObservation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "adapter_id",
+    "external_session_id",
+    "generation",
+    "dispatch_state",
+    "owner_paused",
+    "pause_reason",
+    "connection_state",
+    "presence"
+  ],
+  "$defs": {
+    "ConnectionState": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "disconnected",
+        "reconnecting",
+        "unknown"
+      ]
+    },
+    "DispatchState": {
+      "type": "string",
+      "enum": [
+        "enabled",
+        "paused",
+        "recovery_required",
+        "disconnected"
+      ]
+    },
+    "ExecutionState": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "running",
+        "waiting_for_approval",
+        "unknown"
+      ]
+    },
+    "Freshness": {
+      "type": "string",
+      "enum": [
+        "fresh",
+        "stale",
+        "historical",
+        "unknown"
+      ]
+    },
+    "PauseReason": {
+      "type": "string",
+      "enum": [
+        "result_missing",
+        "uncertain",
+        "host_failure",
+        "store_error",
+        "incompatible"
+      ]
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "PresenceObservation": {
+      "type": "object",
+      "properties": {
+        "connection_state": {
+          "$ref": "#/$defs/ConnectionState"
+        },
+        "execution_state": {
+          "$ref": "#/$defs/ExecutionState"
+        },
+        "freshness": {
+          "$ref": "#/$defs/Freshness"
+        },
+        "generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "instance_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "last_seen_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "process_identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcessIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PresenceSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "instance_id",
+        "generation",
+        "connection_state",
+        "execution_state",
+        "last_seen_at",
+        "source",
+        "process_identity",
+        "freshness"
+      ]
+    },
+    "PresenceSource": {
+      "type": "string",
+      "enum": [
+        "bridge_heartbeat",
+        "host_poll",
+        "host_event",
+        "process_hint"
+      ]
+    },
+    "ProcessIdentity": {
+      "type": "object",
+      "properties": {
+        "pid": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "started_at": {
+          "$ref": "#/$defs/UtcMillis"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "pid",
+        "started_at"
+      ]
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

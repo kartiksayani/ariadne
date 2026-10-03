@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ResultProjection",
+  "type": "object",
+  "properties": {
+    "attempt_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "input_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "result": {
+      "$ref": "#/$defs/DomainResult"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "input_id",
+    "attempt_id",
+    "result"
+  ],
+  "$defs": {
+    "DomainResult": {
+      "type": "object",
+      "properties": {
+        "committed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "committed_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "followup_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "handled_through_message_number": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ResultOutcome"
+        },
+        "reply_message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "outcome",
+        "explanation",
+        "reply_message_ids",
+        "followup_item_ids",
+        "handled_through_message_number",
+        "committed_revision",
+        "committed_at"
+      ]
+    },
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "ResultOutcome": {
+      "type": "string",
+      "enum": [
+        "answered",
+        "deferred",
+        "unable"
+      ]
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

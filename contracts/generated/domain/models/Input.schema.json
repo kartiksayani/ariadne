@@ -1,0 +1,679 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Input",
+  "type": "object",
+  "properties": {
+    "active_attempt_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UuidV4"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "answer_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UuidV4"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "attempts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Attempt"
+      }
+    },
+    "binding_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "created_at": {
+      "$ref": "#/$defs/UtcMillis"
+    },
+    "expected_question_revision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "kind": {
+      "$ref": "#/$defs/InputKind"
+    },
+    "message_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "payload": {
+      "$ref": "#/$defs/InputPayload"
+    },
+    "resolution_history": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ResolutionHistoryEntry"
+      }
+    },
+    "seq": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "state": {
+      "$ref": "#/$defs/InputState"
+    },
+    "target": {
+      "$ref": "#/$defs/InputTarget"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "seq",
+    "binding_id",
+    "kind",
+    "target",
+    "message_id",
+    "answer_id",
+    "created_at",
+    "expected_question_revision",
+    "payload",
+    "state",
+    "attempts",
+    "active_attempt_id",
+    "resolution_history"
+  ],
+  "$defs": {
+    "AcceptanceState": {
+      "type": "string",
+      "enum": [
+        "prepared",
+        "accepted",
+        "rejected",
+        "uncertain"
+      ]
+    },
+    "Attempt": {
+      "type": "object",
+      "properties": {
+        "acceptance": {
+          "$ref": "#/$defs/AcceptanceState"
+        },
+        "acceptance_observed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acceptance_receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "binding_generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "claim_request_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "domain_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DomainResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttemptError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "formatted_payload": {
+          "type": "string"
+        },
+        "host_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "prepared_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "purpose": {
+          "$ref": "#/$defs/AttemptPurpose"
+        },
+        "reconciliation_checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Checkpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repair_for_attempt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result_state": {
+          "$ref": "#/$defs/ResultState"
+        },
+        "sealed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_observed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_state": {
+          "$ref": "#/$defs/TurnState"
+        },
+        "wire_marker": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "purpose",
+        "repair_for_attempt_id",
+        "claim_request_id",
+        "binding_generation",
+        "prepared_at",
+        "formatted_payload",
+        "payload_sha256",
+        "wire_marker",
+        "acceptance",
+        "acceptance_receipt",
+        "acceptance_observed_at",
+        "host_turn_id",
+        "turn_state",
+        "turn_observed_at",
+        "domain_result",
+        "result_state",
+        "sealed_at",
+        "error",
+        "reconciliation_checkpoint"
+      ]
+    },
+    "AttemptError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "reason",
+        "retryable",
+        "observed_at"
+      ]
+    },
+    "AttemptPurpose": {
+      "type": "string",
+      "enum": [
+        "work",
+        "result_repair"
+      ]
+    },
+    "Checkpoint": {
+      "description": "At most 4096 UTF-8 bytes; maxLength only bounds Unicode characters.",
+      "type": "string",
+      "maxLength": 4096
+    },
+    "DomainResult": {
+      "type": "object",
+      "properties": {
+        "committed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "committed_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "followup_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "handled_through_message_number": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ResultOutcome"
+        },
+        "reply_message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "outcome",
+        "explanation",
+        "reply_message_ids",
+        "followup_item_ids",
+        "handled_through_message_number",
+        "committed_revision",
+        "committed_at"
+      ]
+    },
+    "HostReceipt": {
+      "type": "object",
+      "properties": {
+        "observed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "provider_reference": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider_reference",
+        "observed_at"
+      ]
+    },
+    "InputContext": {
+      "type": "object",
+      "properties": {
+        "continuation_operation_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "message_ids",
+        "item_ids",
+        "round_id",
+        "continuation_operation_id"
+      ]
+    },
+    "InputKind": {
+      "type": "string",
+      "enum": [
+        "answer",
+        "bring",
+        "reply",
+        "note",
+        "followup",
+        "reopen",
+        "drop",
+        "continue"
+      ]
+    },
+    "InputPayload": {
+      "type": "object",
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/InputContext"
+        },
+        "intent": {
+          "$ref": "#/$defs/InputKind"
+        },
+        "selected_option_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_snapshot": {
+          "$ref": "#/$defs/InputTargetSnapshot"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "intent",
+        "target_snapshot",
+        "selected_option_id",
+        "context"
+      ]
+    },
+    "InputState": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "in_flight",
+        "handled",
+        "cancelled",
+        "needs_attention",
+        "skipped"
+      ]
+    },
+    "InputTarget": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "item_id"
+      ]
+    },
+    "InputTargetSnapshot": {
+      "type": "object",
+      "properties": {
+        "ask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "item_question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "question_revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topic_name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_name",
+        "item_question",
+        "question_revision",
+        "ask",
+        "options"
+      ]
+    },
+    "ItemOption": {
+      "type": "object",
+      "properties": {
+        "consequence": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "recommended": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "consequence",
+        "recommended"
+      ]
+    },
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "OwnerEvidenceSource": {
+      "type": "string",
+      "enum": [
+        "owner_attestation"
+      ]
+    },
+    "OwnerResolutionEvidence": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "host_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner_attested_idle": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/OwnerEvidenceSource"
+        },
+        "turn_state": {
+          "$ref": "#/$defs/TurnState"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "turn_state",
+        "host_turn_id",
+        "owner_attested_idle",
+        "at"
+      ]
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "ResolutionHistoryEntry": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerResolutionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/ResolutionKind"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "op_id",
+        "kind",
+        "reason",
+        "at",
+        "attempt_id",
+        "evidence"
+      ]
+    },
+    "ResolutionKind": {
+      "type": "string",
+      "enum": [
+        "retry_unexecuted",
+        "resend",
+        "skip",
+        "request_result_repair",
+        "confirm_evidence"
+      ]
+    },
+    "ResultOutcome": {
+      "type": "string",
+      "enum": [
+        "answered",
+        "deferred",
+        "unable"
+      ]
+    },
+    "ResultState": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "committed",
+        "missing"
+      ]
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "TurnState": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "running",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

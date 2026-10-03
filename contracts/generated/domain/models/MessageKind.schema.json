@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MessageKind",
+  "type": "string",
+  "enum": [
+    "owner_input",
+    "reply",
+    "activity",
+    "lifecycle"
+  ]
+}
