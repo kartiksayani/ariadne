@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "view": "topics",
+  "filter_digest": "f013aa4b8daf3e2242eafa6c635e1ea323288a8fb3c4d7c21176efce76224f37",
+  "after": {
+    "kind": "topic",
+    "order": 1,
+    "id": "00000000-0000-4000-8000-000000000010"
+  },
+  "revision": 21
+}

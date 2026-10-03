@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "view": "sessions",
+  "filter_digest": "1225ae6c1ae69dcb4ee4781b703e12206f3b549cd3ca151070a8d8d8f371dd71",
+  "after": {
+    "kind": "session",
+    "updated_at": "2026-10-03T12:00:50.000Z",
+    "project_id": "00000000-0000-4000-8000-000000000001",
+    "id": "00000000-0000-4000-8000-000000000002"
+  },
+  "revision": 21
+}

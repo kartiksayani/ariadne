@@ -1,0 +1,81 @@
+{
+  "items": [
+    {
+      "id": "00000000-0000-4000-8000-000000000071",
+      "seq": 2,
+      "binding_id": "00000000-0000-4000-8000-000000000020",
+      "kind": "bring",
+      "target": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "item_id": "2"
+      },
+      "message_id": "00000000-0000-4000-8000-000000000104",
+      "answer_id": null,
+      "created_at": "2026-10-03T12:00:20.000Z",
+      "expected_question_revision": null,
+      "payload": {
+        "text": "Bring request for item 2.\nPreserve this complete owner text.",
+        "intent": "bring",
+        "target_snapshot": {
+          "topic_name": "Delivery decisions",
+          "item_question": "Which delivery window?",
+          "question_revision": 1,
+          "ask": "Choose the next delivery window.",
+          "options": []
+        },
+        "selected_option_id": null,
+        "context": {
+          "message_ids": [],
+          "item_ids": [
+            "2"
+          ],
+          "round_id": "00000000-0000-4000-8000-000000000041",
+          "continuation_operation_id": null
+        }
+      },
+      "state": "handled",
+      "attempts": [
+        {
+          "id": "00000000-0000-4000-8000-000000000065",
+          "purpose": "work",
+          "repair_for_attempt_id": null,
+          "claim_request_id": "00000000-0000-4000-8000-000000000365",
+          "binding_generation": "00000000-0000-4000-8000-000000000022",
+          "prepared_at": "2026-10-03T12:00:41.000Z",
+          "formatted_payload": "Bring request for item 2.\nPreserve this complete owner text.\nBinding context: delivery decisions.",
+          "payload_sha256": "aa77931c4e7ee4d0f5500c72e07e83c4c3cc28c19796e3e1e08f7b559f21cb42",
+          "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000071:00000000-0000-4000-8000-000000000065]",
+          "acceptance": "accepted",
+          "acceptance_receipt": {
+            "provider_reference": "demo-acceptance-65",
+            "observed_at": "2026-10-03T12:00:42.000Z"
+          },
+          "acceptance_observed_at": "2026-10-03T12:00:42.000Z",
+          "host_turn_id": "demo-turn-65",
+          "turn_state": "completed",
+          "turn_observed_at": "2026-10-03T12:00:44.000Z",
+          "domain_result": {
+            "operation_id": "00000000-0000-4000-8000-000000000213",
+            "outcome": "deferred",
+            "explanation": "The agent still needs a delivery window.",
+            "reply_message_ids": [
+              "00000000-0000-4000-8000-000000000115"
+            ],
+            "followup_item_ids": [],
+            "handled_through_message_number": 4,
+            "committed_revision": 19,
+            "committed_at": "2026-10-03T12:00:45.000Z"
+          },
+          "result_state": "committed",
+          "sealed_at": "2026-10-03T12:00:45.000Z",
+          "error": null,
+          "reconciliation_checkpoint": "demo checkpoint 65"
+        }
+      ],
+      "active_attempt_id": null,
+      "resolution_history": []
+    }
+  ],
+  "next_cursor": null,
+  "snapshot_revision": 21
+}

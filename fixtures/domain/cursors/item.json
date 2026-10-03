@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "view": "items",
+  "filter_digest": "5f3c4f8580d392e422e7c2f6802674ac27966c98d95c39696e4b2490168e5488",
+  "after": {
+    "kind": "item",
+    "ordinals": [
+      1,
+      1
+    ],
+    "id": "1.1"
+  },
+  "revision": 21
+}
