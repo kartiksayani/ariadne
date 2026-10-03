@@ -22,7 +22,8 @@ FULL_FILES = {"quality-gates.json", "scripts/check-commit.py", "tests/test_commi
               "tests/test_quality_workflow.py", "scripts/run-native-e2e.mjs",
               "scripts/check-release-boundary.mjs", "tests/test_process_contract.py"}
 RELEASE_FILES = FULL_FILES | {"Cargo.toml", "Cargo.lock", "package.json", "package-lock.json",
-                            "rust-toolchain.toml", ".node-version", "Makefile", "eslint.config.mjs"}
+                            "rust-toolchain.toml", ".node-version", "Makefile", "eslint.config.mjs",
+                            "apps/desktop/src/main.tsx"}
 
 
 def run(*args, capture=False, input=None):

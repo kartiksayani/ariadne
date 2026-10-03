@@ -29,6 +29,7 @@ class ScopeTests(unittest.TestCase):
             (["crates/ariadne-core/src/queue.rs"], ("application", False)),
             (["apps/desktop/src-tauri/src/lib.rs"], ("application", True)),
             (["apps/desktop/vite.config.ts"], ("application", True)),
+            (["apps/desktop/src/main.tsx"], ("application", True)),
             (["apps/desktop/src-tauri/capabilities/main.json"], ("application", True)),
             (["crates/ariadne-domain/Cargo.toml"], ("application", True)),
             (["Cargo.lock"], ("application", True)),
