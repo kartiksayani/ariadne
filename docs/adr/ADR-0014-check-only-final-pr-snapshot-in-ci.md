@@ -43,3 +43,4 @@ superseded: the existing decisions did not require the commit-replay loop.
 - [Contribution rules](../../CONTRIBUTING.md#six-rules)
 - [Development checks](../planning/DEVELOPMENT_CHECKS.md#current-state)
 - [Harness enforcement](../delivery/HARNESS_OVERVIEW.md#what-is-enforced-and-where)
+- [Scheduling prerequisites](../planning/ROADMAP.md#execution-and-pr-rules)
