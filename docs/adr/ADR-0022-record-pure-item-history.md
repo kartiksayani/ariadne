@@ -31,6 +31,15 @@ first reverse-link assignment; existing forks cannot be reassigned. Result linki
 closes only explicitly selected related rounds and may cite verified prior effects
 for a result-repair attempt. Repeated linking preserves ordered history.
 
+A result follow-up must have a creation message from this input and the current
+attempt or verified original-work repair attempt. Earlier incremental creation
+by that same input qualifies; merely replying to or editing an existing item does
+not. A source-round child also requires the actual parent and reciprocal fork
+membership. V1's item.add creates these children; it has no existing-item reparent
+or source-round patch. The fork helper can link an already inserted candidate
+child, but that helper alone is not creation/result provenance. Both result linking
+and full history validation enforce this same rule.
+
 An option-only answer keeps its actual empty/whitespace text. It is valid only with
 a matching canonical Answer and deliberate option present in its frozen choices;
 generic owner messages and replies require nonblank text. Corrections append with

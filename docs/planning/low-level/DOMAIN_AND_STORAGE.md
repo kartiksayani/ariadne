@@ -202,6 +202,13 @@ The pure `ariadne_domain::history` helpers assemble an owned `Session` candidate
 - `link_result_history(session, input_id, attempt_id, close_round_ids, at)` reads an
   already committed canonical result and links its input to target/reply/fork-source
   rounds. It accepts verified original-attempt effects for a result-repair attempt.
+  Follow-up items require their creation message to belong to this input and its
+  current attempt, or the verified original-work attempt allowed for repair. An
+  earlier incremental apply of that same input qualifies. An existing item's
+  ordinary reply/edit/update is insufficient. If a created follow-up carries a
+  source round, its actual parent and reciprocal fork link must agree. V1's
+  item.add owns child creation/source-round assignment; there is no existing-item
+  reparent or source-round patch operation.
   Only the explicitly named related rounds close; queue, result and host-completion
   states remain unchanged.
 

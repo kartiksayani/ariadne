@@ -276,6 +276,13 @@ pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
             }
         }
     }
+    for input in session.inputs.0.values() {
+        for attempt in &input.attempts {
+            if let Some(result) = &attempt.domain_result {
+                result_rounds(session, input, attempt, result)?;
+            }
+        }
+    }
     for item in session.items.0.values() {
         distinct(
             session
@@ -450,15 +457,33 @@ fn owner(session: &Session, message: &Message) -> Result<(), HistoryError> {
         input.kind == input.payload.intent,
         HistoryError::InvalidProvenance,
     )?;
-    let selected = input
-        .answer_id
-        .as_ref()
-        .and_then(|id| session.answers.iter().find(|a| &a.id == id))
-        .is_some_and(|a| {
-            a.selected_option_id
+    let selected = match (&input.kind, &input.answer_id) {
+        (InputKind::Answer, Some(id)) => {
+            let answer = session
+                .answers
+                .iter()
+                .find(|a| &a.id == id)
+                .ok_or(HistoryError::MissingReference)?;
+            require(
+                answer.input_id == input.id
+                    && answer.message_id == message.id
+                    && message.item_id.as_ref() == Some(&answer.item_id),
+                HistoryError::InvalidAnswer,
+            )?;
+            answer
+                .selected_option_id
                 .as_ref()
-                .is_some_and(|id| a.options_snapshot.iter().any(|o| &o.id == id))
-        });
+                .is_some_and(|id| answer.options_snapshot.iter().any(|o| &o.id == id))
+        }
+        (InputKind::Answer, None) | (_, Some(_)) => return Err(HistoryError::InvalidAnswer),
+        (_, None) => {
+            require(
+                input.payload.selected_option_id.is_none(),
+                HistoryError::InvalidAnswer,
+            )?;
+            false
+        }
+    };
     text(&message.body, !selected, 16 * 1024)
 }
 fn agent(session: &Session, message: &Message) -> Result<(), HistoryError> {
@@ -585,7 +610,7 @@ pub(super) fn result_rounds(
             .ok_or(HistoryError::MissingReference)?;
         require(
             session.messages.iter().any(|m| {
-                (m.id == child.created_message_id || child.updated_message_ids.contains(&m.id))
+                m.id == child.created_message_id
                     && m.author == MessageAuthor::Agent
                     && m.input_id.as_ref() == Some(&input.id)
                     && m.binding_id.as_ref() == Some(&input.binding_id)
@@ -595,9 +620,21 @@ pub(super) fn result_rounds(
             HistoryError::InvalidProvenance,
         )?;
         if let Some(id) = &child.source_round_id {
+            let round = session
+                .rounds
+                .0
+                .get(id)
+                .ok_or(HistoryError::MissingReference)?;
+            let parent = session
+                .items
+                .0
+                .get(&round.item_id)
+                .ok_or(HistoryError::MissingReference)?;
             require(
-                session.rounds.0.contains_key(id),
-                HistoryError::MissingReference,
+                child.parent.as_ref() == Some(&round.item_id)
+                    && child.topic_id == parent.topic_id
+                    && round.fork_item_ids.contains(&child.id),
+                HistoryError::InvalidRound,
             )?;
             push_unique(&mut related, id.clone());
         }

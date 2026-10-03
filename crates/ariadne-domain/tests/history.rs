@@ -1153,3 +1153,165 @@ fn copied_answers_and_round_results_remain_source_history_without_target_inputs(
         );
     }
 }
+
+#[test]
+fn original_answer_inputs_require_their_complete_canonical_answer_links() {
+    let session = record(
+        &ask(&seed(), 1),
+        item("1"),
+        1,
+        InputKind::Answer,
+        "Nonblank accepted answer",
+        Some("option-1".into()),
+        None,
+    );
+    for case in 0..8 {
+        let mut broken = session.clone();
+        match case {
+            0 => broken.answers.clear(),
+            1 => broken.inputs.0.get_mut(&id(401)).unwrap().answer_id = None,
+            2 => broken.inputs.0.get_mut(&id(401)).unwrap().answer_id = Some(id(99)),
+            3 => broken.answers[0].input_id = id(99),
+            4 => broken.answers[0].message_id = id(6),
+            5 => broken.answers[0].item_id = item("2"),
+            6 => broken.inputs.0.get_mut(&id(401)).unwrap().kind = InputKind::Reply,
+            _ => broken.answers[0].options_snapshot.clear(),
+        }
+        assert!(
+            validate_session_history(&broken).is_err(),
+            "accepted broken answer link {case}"
+        );
+    }
+    let mut generic = record(
+        &seed(),
+        item("2"),
+        1,
+        InputKind::Followup,
+        "Generic message",
+        None,
+        None,
+    );
+    generic.inputs.0.get_mut(&id(401)).unwrap().answer_id = Some(id(99));
+    assert_eq!(
+        validate_session_history(&generic),
+        Err(HistoryError::InvalidAnswer)
+    );
+}
+
+#[test]
+fn ordinary_updates_to_existing_items_are_not_result_followup_creation() {
+    let queued = record(
+        &ask(&seed(), 1),
+        item("1"),
+        1,
+        InputKind::Answer,
+        "Owner answer",
+        None,
+        None,
+    );
+    let active = stage_attempt(queued, 1);
+    let updated = reply(&active, 1, "2", None, 1);
+    assert_eq!(updated.items.0[&item("2")].created_message_id, id(6));
+    assert_eq!(updated.items.0[&item("2")].source_round_id, None);
+    assert!(updated.items.0[&item("2")]
+        .updated_message_ids
+        .contains(&id(901)));
+    let result = commit_result(updated, 1, vec![], vec![item("2")]);
+    assert_eq!(
+        link_result_history(&result, &id(401), &id(601), &[], at()),
+        Err(HistoryError::InvalidProvenance)
+    );
+    assert_eq!(
+        validate_session_history(&result),
+        Err(HistoryError::InvalidProvenance)
+    );
+    // Forging a result backlink must not make the ordinary update legitimate.
+    let mut linked = result.clone();
+    linked
+        .rounds
+        .0
+        .get_mut(&id(201))
+        .unwrap()
+        .result_input_ids
+        .push(id(401));
+    assert_eq!(
+        validate_session_history(&linked),
+        Err(HistoryError::InvalidProvenance)
+    );
+}
+
+#[test]
+fn results_accept_earlier_same_input_creation_and_verified_repair_created_children() {
+    let active = stage_attempt(
+        record(
+            &ask(&seed(), 1),
+            item("1"),
+            1,
+            InputKind::Answer,
+            "Owner answer",
+            None,
+            None,
+        ),
+        1,
+    );
+    let created = child(active, 1);
+    let later = reply(&created, 1, "1", None, 1);
+    let result = commit_result(later, 1, vec![], vec![item("1.1")]);
+    let linked = link_result_history(&result, &id(401), &id(601), &[], at()).unwrap();
+    validate_session_history(&linked).unwrap();
+    // Repair cites the previously created child without repeating its creation.
+    let mut repairable = created.clone();
+    let input = repairable.inputs.0.get_mut(&id(401)).unwrap();
+    input.attempts[0].turn_state = TurnState::Completed;
+    let mut repair = attempt(2);
+    repair.purpose = AttemptPurpose::ResultRepair;
+    repair.repair_for_attempt_id = Some(id(601));
+    repair.domain_result = Some(DomainResult {
+        operation_id: id(1002),
+        outcome: ResultOutcome::Answered,
+        explanation: "Verified original created follow-up.".into(),
+        reply_message_ids: vec![],
+        followup_item_ids: vec![item("1.1")],
+        handled_through_message_number: NonnegativeSafeInteger::new(3).unwrap(),
+        committed_revision: p(1),
+        committed_at: at(),
+    });
+    repair.result_state = ResultState::Committed;
+    input.attempts.push(repair);
+    input.active_attempt_id = Some(id(602));
+    let repaired = link_result_history(&repairable, &id(401), &id(602), &[], at()).unwrap();
+    assert_eq!(repaired.messages, repairable.messages);
+    assert_eq!(repaired.items, repairable.items);
+    validate_session_history(&repaired).unwrap();
+    for case in 0..4 {
+        let mut invalid = result.clone();
+        match case {
+            0 => invalid.items.0.get_mut(&item("1.1")).unwrap().parent = Some(item("2")),
+            1 => invalid
+                .rounds
+                .0
+                .get_mut(&id(201))
+                .unwrap()
+                .fork_item_ids
+                .clear(),
+            2 => {
+                invalid
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.id == id(1101))
+                    .unwrap()
+                    .attempt_id = Some(id(99))
+            }
+            _ => {
+                invalid
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.id == id(1101))
+                    .unwrap()
+                    .input_id = Some(id(99))
+            }
+        }
+        assert!(link_result_history(&invalid, &id(401), &id(601), &[], at()).is_err());
+        assert!(validate_session_history(&invalid).is_err());
+    }
+}
