@@ -5,7 +5,7 @@ import { AnswerControl, type AnswerControlProps } from '../../../apps/desktop/sr
 import { MessageExcerpt, type MessageExcerptProps } from '../../../apps/desktop/src/components/reference/MessageExcerpt';
 
 // Deterministic presentation inputs: never imported by the application entry.
-export type ReferenceCase = { id: string; component: 'Status Badge' | 'Item Row' | 'Answer Control' | 'Message Excerpt'; source: Record<string, unknown>; render: () => ReactNode; region?: 'textarea' };
+export type ReferenceCase = { id: string; component: 'Status Badge' | 'Item Row' | 'Answer Control' | 'Message Excerpt'; source: Record<string, unknown>; render: () => ReactNode; region?: 'textarea'; shortcutHint?: { source: string; app: string } };
 const noop = () => {};
 const options = [
   { id: 'approve', label: 'Approve', consequence: 'Continue with the current plan.', recommended: true },
@@ -28,7 +28,12 @@ const row = (id: string, props: TreeRowProps): ReferenceCase => ({
 });
 const answer = (id: string, extra: Partial<AnswerControlProps>, region?: 'textarea'): ReferenceCase => {
   const props: AnswerControlProps = { options, selected: null, draft: '', onSelect: noop, onDraft: noop, onSubmit: noop, noText: true, ...extra };
-  return { id, component: 'Answer Control', region, render: () => <AnswerControl {...props} />,
+  const full = props.variant !== 'compact';
+  const shortcutHint = props.selected && !props.blocked ? {
+    source: full ? `1–${options.length} to change · Enter sends · Esc closes, keeps your draft` : 'Enter sends',
+    app: full ? `1–${options.length} to change · Esc closes, keeps your draft` : 'Enter activates the focused button',
+  } : undefined;
+  return { id, component: 'Answer Control', region, shortcutHint, render: () => <AnswerControl {...props} />,
     source: { variant: props.variant || 'full', options: sourceOptions, ctl: { selected: options.findIndex(option => option.id === props.selected), draft: props.draft, noText: props.noText, warn: props.warning, blocked: props.blocked } } };
 };
 const excerpt = 'I checked the current plan and found a question that needs your input before we can continue.';
@@ -57,6 +62,6 @@ export const cases: ReferenceCase[] = [
   // The supplied reply hint describes prototype submission semantics. The release
   // contract combines option + text; compare the genuine textarea region separately.
   answer('answer-textarea', { noText: false, draft: 'Additional context for this answer.' }, 'textarea'),
-  ...(['plain', 'highlight', 'active', 'origin'] as const).map(state => message(`message-rail-${state}`, { message: { number: 42, author: state === 'origin' ? 'me' : 'agent', when: 'Today 09:30', excerpt }, variant: 'rail', active: state === 'active', highlight: state === 'highlight', mark: state === 'origin' ? 'origin' : 'created' })),
+  ...(['plain', 'highlight', 'active', 'origin'] as const).map(state => message(`message-rail-${state}`, { message: { number: 42, author: state === 'origin' ? 'me' : 'agent', when: 'Today 09:30', excerpt }, variant: 'rail', active: state === 'active', highlight: state === 'highlight', mark: state === 'origin' ? 'origin' : 'created', onClick: state === 'active' ? noop : undefined })),
   ...(['created', 'updated', 'origin', 'answer'] as const).flatMap(mark => (['me', 'agent'] as const).map(author => message(`message-timeline-${mark}-${author}`, { message: { number: 42, author, when: 'Today 09:30', excerpt, tag: mark === 'origin' ? 'Origin' : undefined }, variant: 'timeline', mark, last: mark === 'answer', note: mark === 'origin' ? 'Parent context remains visible.' : undefined }))),
 ];

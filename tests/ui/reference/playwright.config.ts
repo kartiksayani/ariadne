@@ -9,7 +9,7 @@ export default defineConfig({
   outputDir: '../../../coverage/reference/results',
   snapshotPathTemplate: '{testDir}/../../../coverage/reference/source/{projectName}/{arg}{ext}',
   updateSnapshots: 'none',
-  reporter: [['list'], ['html', { outputFolder: 'coverage/reference/report', open: 'never' }]],
+  reporter: [['list'], ['html', { outputFolder: resolve('coverage/reference/report'), open: 'never' }]],
   use: { browserName: 'chromium', deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: 'dark', reducedMotion: 'reduce', trace: 'retain-on-failure' },
   projects: ['dark', 'light'].flatMap(theme => [
     { name: `${theme}-1600x960`, use: { viewport: { width: 1600, height: 960 } } },

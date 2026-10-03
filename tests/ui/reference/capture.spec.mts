@@ -111,15 +111,35 @@ for (const component of ['Status Badge', 'Item Row', 'Answer Control', 'Message 
       for (const dimension of ['width', 'height'] as const) expect(Math.abs(sourceBox![dimension] - appBox![dimension]), `${fixture.id} ${dimension}`).toBeLessThanOrEqual(1);
       const sourcePng = await sourceRegion.screenshot({ animations: 'disabled' });
       const appPng = await appRegion.screenshot({ animations: 'disabled' });
+      let comparedSource = sourcePng, comparedApp = appPng;
+      if (fixture.shortcutHint) {
+        const oldHint = original.getByText(fixture.shortcutHint.source, { exact: true });
+        const newHint = page.getByText(fixture.shortcutHint.app, { exact: true });
+        await expect(oldHint).toHaveCount(1); await expect(newHint).toHaveCount(1);
+        // Preserve full unmasked PNGs below. Only the exact prototype shortcut
+        // text differs by the release keyboard contract; no control is hidden.
+        await oldHint.evaluate(node => { node.style.visibility = 'hidden'; });
+        await newHint.evaluate(node => { node.style.visibility = 'hidden'; });
+        comparedSource = await sourceRegion.screenshot({ animations: 'disabled' });
+        comparedApp = await appRegion.screenshot({ animations: 'disabled' });
+      }
       const expected = testInfo.snapshotPath(`${fixture.id}.png`);
       await mkdir(dirname(expected), { recursive: true });
-      await writeFile(expected, sourcePng);
+      await writeFile(expected, comparedSource);
       await testInfo.attach(`${fixture.id}-source`, { body: sourcePng, contentType: 'image/png' });
       await testInfo.attach(`${fixture.id}-app`, { body: appPng, contentType: 'image/png' });
-      await testInfo.attach(`${fixture.id}-provenance`, { body: JSON.stringify({ archive: sourceManifest.archive, member: `design_handoff_ariadne/${component}.dc.html`, runtime: Object.entries(runtimeBytes).map(([url, bytes]) => ({ url, sha256: sha256(bytes) })), browser: browser.version(), project: testInfo.project.name, viewport: page.viewportSize(), source: fixture.source, sourceBox, appBox }), contentType: 'application/json' });
+      await testInfo.attach(`${fixture.id}-provenance`, { body: JSON.stringify({ archive: sourceManifest.archive, member: `design_handoff_ariadne/${component}.dc.html`, runtime: Object.entries(runtimeBytes).map(([url, bytes]) => ({ url, sha256: sha256(bytes) })), browser: browser.version(), project: testInfo.project.name, viewport: page.viewportSize(), source: fixture.source, sourceBox, appBox, shortcutHintException: fixture.shortcutHint }), contentType: 'application/json' });
       // This expected PNG is freshly rendered SOURCE, never an app-generated
       // golden. Playwright retains its real actual/diff images on mismatch.
-      expect(appPng).toMatchSnapshot(`${fixture.id}.png`, { threshold: 0.2, maxDiffPixelRatio: 0.005 });
+      expect(comparedApp).toMatchSnapshot(`${fixture.id}.png`, { threshold: 0.2, maxDiffPixelRatio: 0.005 });
+      if (['row-selected-focused', 'message-rail-active'].includes(fixture.id)) {
+        await page.keyboard.press('Tab');
+        const focusedRoot = page.locator('#root > .ariadne-reference');
+        await expect(focusedRoot).toBeFocused();
+        await expect(focusedRoot).toHaveCSS('outline-style', 'solid');
+        await expect(focusedRoot).toHaveCSS('outline-width', '2px');
+        await expect(focusedRoot).toHaveCSS('outline-offset', '2px');
+      }
     }
     expect(denied).toEqual([]); expect(errors).toEqual([]);
     await original.close();

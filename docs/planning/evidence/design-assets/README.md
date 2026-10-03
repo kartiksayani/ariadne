@@ -74,6 +74,9 @@ alone, form one submission. Escape retains the parent-owned draft. A Replaced
 row filters reopening while allowing Follow up. Answer delivery labels remain
 separate from item status. The text hint describes combined submission accurately;
 it does not retain the prototype's “reply instead of option” behavior.
+Plain Enter activates the focused button, selecting an option or activating its
+explicit Send control. Only Cmd+Enter in the focused valid text input submits via
+the editor shortcut; container/other-control key events do not send a prior choice.
 
 `tests/ui/reference/gallery.html`, `gallery.tsx` and `cases.tsx` mount fixtures only
 through the dedicated test server. The native/application entry does not import
@@ -94,11 +97,21 @@ geometry provenance are attached to the report. Playwright emits real diff PNGs
 on mismatches. Each expected PNG is freshly rendered source, never an application
 golden. The qualified free-text region compares the actual textarea separately;
 the corrected submission hint is verified by product behavior tests.
+Two selected-answer cases qualify only the exact shortcut hint text: the full
+hint removes “Enter sends”; the compact hint changes it to “Enter activates the
+focused button”. Comparison screenshots hide that text alone, retaining its
+layout and all controls. Complete unmasked source/app PNGs and before-mask geometry
+remain attached, and provenance records the exact original/release strings.
+Keyboard tests independently assert the app's Cmd+Enter copy and ordinary button
+activation. Browser captures also Tab to the TreeRow and clickable MessageExcerpt
+roots and verify actual focus plus their 2px focus-visible outline.
 
 Playwright 1.63.0 pins its Chromium revision. Provision it explicitly with
 `PLAYWRIGHT_BROWSERS_PATH="$PWD/target/reference-browser" node node_modules/playwright/cli.js install chromium`
 before captures; missing browsers fail. CI uses that task directory, never the
 global cache, and uploads `coverage/reference/` with existing quality evidence.
+The HTML reporter uses an absolute repository `coverage/reference/report` path,
+so its app/source PNG attachments and provenance are included in that upload.
 No captures, production/native builds or full coverage runs are performed locally
 under the owner's current execution preference.
 

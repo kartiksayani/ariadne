@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { STATUS, StatusBadge } from '../../../apps/desktop/src/components/reference/StatusBadge';
 import { AnswerControl, type AnswerControlProps } from '../../../apps/desktop/src/components/reference/AnswerControl';
 import { TreeRow, type TreeRowProps } from '../../../apps/desktop/src/components/reference/TreeRow';
@@ -51,10 +52,11 @@ describe('source presentation primitives', () => {
     fireEvent.click(screen.getByText('Send “Approve”'));
     expect(props.onSubmit).toHaveBeenLastCalledWith({ optionId: 'approve' });
     rerender(<AnswerControl {...props} selected="approve" draft="  Extra context  " />);
-    fireEvent.keyDown(screen.getByTitle('Press 1 to select'), { key: 'Enter', metaKey: true });
+    const area = screen.getByRole('textbox');
+    area.focus();
+    fireEvent.keyDown(area, { key: 'Enter', metaKey: true });
     expect(props.onSubmit).toHaveBeenCalledTimes(2);
     expect(props.onSubmit).toHaveBeenLastCalledWith({ optionId: 'approve', text: 'Extra context' });
-    const area = screen.getByRole('textbox');
     fireEvent.keyDown(area, { key: 'Enter' });
     fireEvent.keyDown(area, { key: '1' });
     expect(props.onSubmit).toHaveBeenCalledTimes(2);
@@ -65,31 +67,59 @@ describe('source presentation primitives', () => {
     expect(props.onEscape).toHaveBeenCalledOnce();
     expect((area as HTMLTextAreaElement).value).toBe('  Extra context  ');
     rerender(<AnswerControl {...props} selected="missing" draft="Text alone" />);
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
+    screen.getByRole('textbox').focus();
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', metaKey: true });
     expect(props.onSubmit).toHaveBeenLastCalledWith({ text: 'Text alone' });
     fireEvent.click(screen.getByText('Send reply'));
     expect(props.onSubmit).toHaveBeenCalledTimes(4);
   });
 
-  it('allows plain Enter only with a valid focused control and freezes submission while blocked/saving', () => {
+  it('uses plain Enter to activate the focused option/Send button, never to submit from the container', async () => {
+    const user = userEvent.setup();
+    const props = answerProps();
+    render(<AnswerControl {...props} selected="approve" draft="Kept context" />);
+    screen.getByTitle('Press 2 to select').focus();
+    await user.keyboard('{Enter}');
+    expect(props.onSelect).toHaveBeenCalledExactlyOnceWith('change');
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Enter sends/)).toBeNull();
+    expect(screen.getByText('⌘↵ sends · Esc closes, keeps your draft')).toBeTruthy();
+    const area = screen.getByRole('textbox');
+    fireEvent.keyDown(area, { key: 'Enter', metaKey: true });
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    area.focus();
+    await user.keyboard('{End}{Enter}');
+    expect(props.onDraft).toHaveBeenCalledWith('Kept context\n');
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+    expect(props.onSubmit).toHaveBeenCalledExactlyOnceWith({ optionId: 'approve', text: 'Kept context' });
+    screen.getByText('Send “Approve”').closest('button')!.focus();
+    await user.keyboard('{Enter}');
+    expect(props.onSubmit).toHaveBeenCalledTimes(2);
+    expect(props.onSubmit).toHaveBeenLastCalledWith({ optionId: 'approve', text: 'Kept context' });
+  });
+
+  it('rejects invalid focused input and freezes submission while blocked/saving', () => {
     const props = answerProps();
     const { rerender } = render(<AnswerControl {...props} />);
-    fireEvent.keyDown(screen.getByTitle('Press 1 to select'), { key: 'Enter' });
+    screen.getByRole('textbox').focus();
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', metaKey: true });
     expect(props.onSubmit).not.toHaveBeenCalled();
     rerender(<AnswerControl {...props} selected="approve" blocked="Offline · your draft is kept" warning="Review the changed question" />);
     expect(screen.getByText('Send “Approve”').closest('button')?.disabled).toBe(true);
+    screen.getByRole('textbox').focus();
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', metaKey: true });
     expect(props.onSubmit).not.toHaveBeenCalled();
     expect(screen.getByText('Review the changed question')).toBeTruthy();
     rerender(<AnswerControl {...props} selected="approve" draft="Kept" saving error="Could not save" />);
     fireEvent.keyDown(screen.getByTitle('Press 1 to select'), { key: '2' });
-    fireEvent.keyDown(screen.getByTitle('Press 1 to select'), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', metaKey: true });
     expect(props.onSelect).not.toHaveBeenCalled();
     expect(props.onSubmit).not.toHaveBeenCalled();
     expect(screen.getByRole('status').textContent).toBe('Saving…');
     expect(screen.getByRole('alert').textContent).toBe('Could not save');
     rerender(<AnswerControl {...props} selected="approve" stateLabel="Sent locally" />);
-    fireEvent.keyDown(screen.getByTitle('Press 1 to select'), { key: 'Enter' });
+    fireEvent.click(screen.getByText('Send “Approve”'));
     expect(props.onSubmit).toHaveBeenCalledWith({ optionId: 'approve' });
     expect(screen.getByRole('status').textContent).toBe('Sent locally');
     for (const stateLabel of ['Saved', 'Queued', 'Delivering', 'Received', 'Delivery uncertain']) {
@@ -123,6 +153,17 @@ describe('source presentation primitives', () => {
     expect(screen.getByRole('treeitem').getAttribute('aria-expanded')).toBe('false');
     rerender(<TreeRow {...props} context />);
     expect(screen.getByRole('treeitem').getAttribute('aria-expanded')).toBeNull();
+  });
+
+  it('moves keyboard focus to the selected tree root and clickable excerpt root', async () => {
+    const user = userEvent.setup();
+    render(<><TreeRow {...rowProps()} selected /><MessageExcerpt message={{ number: 1, author: 'agent', when: '09:30', excerpt: 'Focused message' }} onClick={vi.fn()} /></>);
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('treeitem'));
+    expect(document.activeElement?.matches('.ariadne-reference:focus')).toBe(true);
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button'));
+    expect(document.activeElement?.matches('.ariadne-reference:focus')).toBe(true);
   });
 
   it('renders exactly one supporting line in source priority, preserving Later and Explained roles', () => {

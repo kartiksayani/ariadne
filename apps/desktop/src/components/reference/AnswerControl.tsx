@@ -30,10 +30,9 @@ export function AnswerControl({ options, variant = 'full', selected, draft, onSe
   };
   const key = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') { event.stopPropagation(); onEscape?.(); }
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); submit(); return; }
+    if (event.key === 'Enter' && event.metaKey && event.target instanceof HTMLTextAreaElement && event.target === document.activeElement) { event.preventDefault(); event.stopPropagation(); submit(); return; }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) return;
-    if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); submit(); }
     if (saving) return;
     const index = Number(event.key) - 1;
     if (/^[1-9]$/.test(event.key) && options[index]) { event.preventDefault(); event.stopPropagation(); onSelect(options[index].id); }
@@ -49,7 +48,7 @@ export function AnswerControl({ options, variant = 'full', selected, draft, onSe
         </button>;
       })}
     </div>
-    {option && <div className="ref-send-row"><button type="button" className="ref-button ref-primary" onClick={submit} disabled={disabled} style={{ height: 32, maxWidth: '100%' }}><i className="ph ph-paper-plane-right" aria-hidden="true" style={{ fontSize: 14 }} /><span className="ref-send-label">{full ? `Send “${option.label}”` : 'Send answer'}</span><span className="ref-keycap ref-enter">↵</span></button><span className="ref-hint">{!blocked && (full && options.length > 1 ? `1–${options.length} to change · Enter sends · Esc closes, keeps your draft` : 'Enter sends')}</span></div>}
+    {option && <div className="ref-send-row"><button type="button" className="ref-button ref-primary" onClick={submit} disabled={disabled} style={{ height: 32, maxWidth: '100%' }}><i className="ph ph-paper-plane-right" aria-hidden="true" style={{ fontSize: 14 }} /><span className="ref-send-label">{full ? `Send “${option.label}”` : 'Send answer'}</span><span className="ref-keycap ref-enter">↵</span></button><span className="ref-hint">{!blocked && (full && options.length > 1 ? `1–${options.length} to change · Esc closes, keeps your draft` : 'Enter activates the focused button')}</span></div>}
     {full && !noText && <div className="ref-text-reply"><textarea className="ref-input" aria-label="Reply in your own words" placeholder="Or reply in your own words…" rows={2} value={draft} onChange={event => onDraft(event.target.value)} /><div className="ref-send-row"><button type="button" className="ref-button ref-secondary" style={{ height: 30, fontSize: 13 }} disabled={disabled || !text} onClick={submit}>Send reply</button><span className="ref-hint">⌘↵ sends · Esc closes, keeps your draft</span></div></div>}
     {blocked && <div className="ref-blocked"><i className="ph ph-wifi-slash" aria-hidden="true" /><span>{blocked}</span></div>}
     {error && <div className="ref-warning" role="alert">{error}</div>}
