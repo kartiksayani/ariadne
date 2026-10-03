@@ -18,3 +18,7 @@ the exact head; metadata does not prove judgment.
 [ADR-0018](ADR-0018-recalibrate-delivery.md) retires machine receipt/ADR validation
 and numeric caps while retaining meaningful tests, coverage, release controls and
 independent review. Historical ADRs and delivery records remain preserved.
+
+[ADR-0019](ADR-0019-restore-module-delivery.md) supersedes only ADR-0018's product
+sequencing, restoring foundation/dependency intent and contract-ready parallel
+modules while retaining its tooling, quality and review decisions.

@@ -6,14 +6,24 @@ until the owner resumes it. Do not reactivate old contexts.
 
 Read CONTRIBUTING, BUILD_HANDOFF, PERSONAL_RELEASE and ROADMAP. Fetch origin/main,
 inspect worktrees and current task PRs, and preserve unrelated edits/history.
-Use one implementer in a new isolated worktree until the first walking slice.
-Declare bounded owned paths, goal, spec and acceptance. Reviewers join when ready.
+Use fresh isolated worktrees for dependency-eligible parallel modules. Declare
+bounded owned paths, goal, settled contracts, spec and acceptance. Reviewers join
+when ready. Product scheduling waits for the corrected plan and owner resumption.
 No automatic readiness engine or receipt workflow is required.
 
-Prioritize the [thin first slice](docs/planning/BUILD_HANDOFF.md#thin-first-slice)
-before deepening foundations. Keep the provider-neutral core, atomic locked JSON,
-binding identity/generation, operation deduplication and explicit result/host
-completion semantics. No paid/live host call without owner approval.
+Follow the [implementation order](docs/planning/BUILD_HANDOFF.md#implementation-order)
+and actual task prerequisites. Foundations and contract readiness enable parallel
+work; no phase-wide barrier or single-implementer restriction applies. Preserve
+the provider-neutral core, atomic locked JSON, binding identity/generation,
+operation deduplication and explicit result/host-completion semantics. Live host
+acceptance remains M7 and needs owner approval.
+
+Select work from actual merged prerequisite PRs and current GitHub state. A draft,
+local commit or partial task does not satisfy a dependency. Reserve disjoint paths
+before assigning work; overlapping ownership serializes work even when dependency
+edges allow parallelism. Assign one owner for shared manifests, exports and wiring,
+and settle a contract change before dependent implementation. Keep independent
+work moving while a concrete access or architecture blocker is resolved.
 
 The implementer adds meaningful behavior tests, commits through the cheap hook,
 runs relevant pushed-head checks and opens a reviewable PR with behavior and real

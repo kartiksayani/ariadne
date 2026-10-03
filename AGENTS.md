@@ -9,8 +9,9 @@ is the task and completion catalogue.
   and independent reviewers use **Sol 6.1, High effort** exclusively.
 - Use an isolated worktree, one bounded task and declared owned paths. You are not
   alone. Preserve others' changes, worktrees, branches, history and ignored evidence.
-- Product implementation is paused until the owner resumes it. On resumption use
-  one implementer until the first walking slice; bring in a reviewer when ready.
+- Product implementation is paused until the corrected plan is reviewed and the
+  owner resumes it. Schedule dependency-eligible modules in parallel with settled
+  contracts and disjoint owned paths; bring in independent reviewers when ready.
 - The installed hook runs cheap changed-language format/lint/type checks. CI on
   each pushed head runs relevant tests; unknown paths or missing base run full checks.
   Application changes keep >=80% weighted application coverage, including untested

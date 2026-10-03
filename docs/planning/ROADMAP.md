@@ -44,22 +44,37 @@ installer journals, automated corruption repair, disk/power-crash recovery,
 capacity reservations and exhaustive fault injection remain later work under
 [PERSONAL_RELEASE](PERSONAL_RELEASE.md#accepted-choices).
 
-## First-slice sequencing
+## Dependency and contract readiness
 
-After owner resumption, prioritize the [thin first slice](BUILD_HANDOFF.md#thin-first-slice)
-before completing all foundations: manually bind one Claude session, CLI publish
-into atomic locked JSON, Waiting UI, owner answer queue, fake provider boundary,
-explicit agent CLI reply/result and UI update. Use bounded portions of existing
-tasks; partial work is not task completion. Retain binding identity/generation,
-operation deduplication and separate result/host-completion semantics.
-An early paid/live Claude run needs explicit owner approval.
-Codex/MCP/discovery/graph/Continue/native release features follow this slice and
-remain required. Preserve paused drafts and ten packages; defer schema/DTO depth
-until needed and add no new packages ahead of code.
+Restore the original [foundation and integration order](BUILD_HANDOFF.md#implementation-order):
+settle domain/provider contracts and assets, implement pure domain/store/core
+behavior, then integrate dependent entry points, providers and desktop behavior.
+P4.1 remains the real UI-to-Rust domain slice after its declared prerequisites,
+before dependent screen expansion. Preserve initial schema/DTO acceptance, all
+ten packages and the paused P0.3a/P0.4a drafts. Product work remains paused until
+the corrected plan is reviewed and the owner resumes it.
+
+This strategy correction retains the current catalogue's scope, prerequisites
+and acceptance. A separate reviewed module plan may reorganize scheduling only
+through explicit contract-ready dependencies; it must preserve real prerequisites
+and the original product acceptance rather than starting a cross-roadmap slice.
+
+Task eligibility comes from actual merged prerequisites and current GitHub state.
+Local drafts, opened PRs and partial task work do not satisfy dependencies. Select
+eligible tasks whose owned paths do not overlap running work; ownership overlap
+serializes implementation. Shared manifests, exports and wiring have one declared
+owner. Settle shared contracts before consumer work rather than relying on later
+integration to resolve incompatible assumptions.
+
+No phase-wide barrier is implied. Domain validation/history, store, assets and
+provider contracts can branch after concrete prerequisites. CLI/MCP, independent
+provider modules, renderer features and native/setup work branch when their
+dependencies and paths allow. Live five-input Claude/Codex acceptance remains M7
+with owner approval; the earlier transport POCs are not product acceptance.
 
 ## Execution and PR rules
 
-Use one Sol 6.1 High implementer in an isolated worktree until the walking slice,
+Use Sol 6.1 High implementers in isolated worktrees for eligible parallel modules,
 with Astra High maintaining. A separate reviewer joins when ready and reviews the
 latest GitHub diff at its exact head. The author fixes findings; one targeted
 re-review follows. Required unresolved issues remain unmerged.
