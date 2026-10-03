@@ -24,6 +24,8 @@ exact qualified core/verified external derives and demonstrated safe attributes.
 Ordinary Rust comments are accepted by the AST parser; legacy comment-only
 byte rules remain unchanged. Reject executable items, arbitrary derives/hooks, const/generic expressions,
 unknown attributes, path/cfg/inline modules and aliases of protected bindings.
+Normalize raw identifier spelling for identity checks; ordinary DTO raw field
+names remain data declarations.
 
 Require each DTO's canonical library root/module ancestor chain to be SHA-declared
 verified facades. A real probe proved root `extern crate attacker as serde` can
@@ -39,7 +41,14 @@ substitutions; active resolve nodes alone cannot establish their declared closur
 Verify the helper's actual syn registry/version/checksum binding before exclusion.
 Exclude tools from the application report only; all fmt/Clippy/tests remain.
 Each present fixed tool gets its own complete report and >=80% line floor.
-Reuse one workspace/all-feature test run for package-selected report-only exports.
+Before that single workspace/all-feature test run, run checked
+`env CARGO_LLVM_COV_DENY_WARNINGS=1 cargo llvm-cov clean --workspace --locked --offline`
+without exclusions. Pinned llvm-cov 0.9.1's automatic partial cleanup omits report-excluded
+tools while object discovery can retain their historical binaries. Warning denial is
+limited to cleanup because underlying Cargo cleanup failures otherwise become warnings.
+Abort on cleanup failure; package-selected report-only exports reuse the fresh profiles
+without an intervening clean. This corrects source freshness without changing inventories
+or coverage floors.
 Add only honest zero-line records for verified absent declarations; never discard
 actual DA or accept duplicate/contradictory zero evidence. Both canonical reports
 still need genuine executable line data.

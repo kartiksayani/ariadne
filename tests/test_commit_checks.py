@@ -487,10 +487,16 @@ class OrchestrationTests(unittest.TestCase):
         if getattr(self, "tool_metadata", None) and "metadata" in args:
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps(self.tool_metadata))
         if "llvm-cov" in args:
-            if "report" in args:
+            objects = getattr(self, "coverage_objects", [])
+            if "clean" in args:
+                objects.clear()
+            elif "report" in args:
+                if hasattr(self, "coverage_objects"):
+                    self.assertEqual(objects, ["current-workspace"])
                 report(self.root, "coverage/tooling/ariadne-coverage-inventory.lcov",
                        "tools/coverage-inventory/src/lib.rs", self.tool_hits)
             else:
+                objects.append("current-workspace")
                 report(self.root, "coverage/rust.lcov", "crates/lib.rs", self.hits)
         if "test:coverage" in args:
             report(self.root, "coverage/web/lcov.info", "apps/main.ts", self.hits)
@@ -592,15 +598,29 @@ class OrchestrationTests(unittest.TestCase):
                               "resolve": {"nodes": [{"id": helper["id"], "deps": []}]}}
         factory.install_parser(self.tool_metadata)
         self.tool_hits = [1]
+        self.coverage_objects = ["stale-excluded-helper"]
         self.execute(["--ci"])
         coverage = [args for args in self.commands if "llvm-cov" in args]
-        self.assertEqual(len(coverage), 2)
-        self.assertIn("--workspace", coverage[0])
-        self.assertIn("--exclude-from-report", coverage[0])
-        self.assertNotIn("--exclude", coverage[0])
-        self.assertIn("--package", coverage[1])
-        self.assertIn("exact-helper-pkgid", coverage[1])
-        self.assertNotIn("--all-features", coverage[1])
+        cleanup = ("env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean",
+                   "--workspace", "--locked", "--offline")
+        self.assertEqual(len(coverage), 3)
+        self.assertEqual(coverage[0], cleanup)
+        self.assertEqual(self.coverage_objects, ["current-workspace"])
+        self.assertIn("--workspace", coverage[1])
+        self.assertIn("--exclude-from-report", coverage[1])
+        self.assertNotIn("--exclude", coverage[1])
+        self.assertIn("--package", coverage[2])
+        self.assertIn("exact-helper-pkgid", coverage[2])
+        self.assertNotIn("--all-features", coverage[2])
+        self.assertNotIn("CARGO_LLVM_COV_DENY_WARNINGS=1", coverage[1] + coverage[2])
+        self.commands.clear()
+        self.failure = "clean"
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.execute(["--ci"])
+        self.assertEqual([args for args in self.commands if "llvm-cov" in args], [cleanup])
+        self.assertFalse((self.root / "coverage/rust.lcov").exists())
+        self.assertFalse((self.root / "coverage/tooling/ariadne-coverage-inventory.lcov").exists())
+        self.failure = None
         self.tool_hits = [0]
         with self.assertRaisesRegex(ValueError, "Independent tooling coverage"):
             self.execute(["--ci"])

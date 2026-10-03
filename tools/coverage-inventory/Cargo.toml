@@ -1,0 +1,10 @@
+[package]
+name = "ariadne-coverage-inventory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+syn = { version = "=2.0.119", features = ["full"] }

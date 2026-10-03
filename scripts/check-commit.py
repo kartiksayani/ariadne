@@ -405,6 +405,8 @@ def main(argv=None):
         run("cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings")
         run("npm", "run", "lint")
         exclusions = [arg for tool in tools for arg in ("--exclude-from-report", tool["id"])]
+        run("env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean",
+            "--workspace", "--locked", "--offline")
         run("cargo", "llvm-cov", "--workspace", "--all-features", "--locked", "--lcov", "--output-path", reports[0], *exclusions)
         for tool in tools:
             target = tool_reports[tool["id"]]

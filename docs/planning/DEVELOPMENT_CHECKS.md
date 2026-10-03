@@ -85,8 +85,13 @@ build, renamed, optional, target-specific or transitive edges. Relevant unresolv
 local/path/substituted identities fail. Every present tool has its own recursive
 source inventory, fresh report and independent >=80% line floor; tool coverage
 cannot compensate for application coverage. All workspace fmt/Clippy and all-feature
-tests still run, including tools. One instrumented test run produces application
-LCOV, then package-selected report-only exports reuse those same profiles.
+tests still run, including tools. Before the single instrumented workspace run,
+checked `env CARGO_LLVM_COV_DENY_WARNINGS=1 cargo llvm-cov clean --workspace --locked --offline`
+cleans all workspace coverage artifacts without exclusions. This avoids stale tool object
+maps retained by llvm-cov 0.9.1's report-excluded partial cleanup. Warning denial applies
+only to cleanup and makes underlying cleanup warnings fail the gate before instrumentation.
+The test run produces application LCOV; package-selected report-only exports reuse those
+same fresh profiles without another clean. Inventories and separate >=80% floors remain.
 
 Both canonical Rust/web reports must be fresh and each contain genuine DA lines.
 Only verified non-executable sources receive explicit SF/LF:0/LH:0 records after

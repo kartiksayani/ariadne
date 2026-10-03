@@ -68,6 +68,15 @@ name = "ariadne-core"
 version = "0.1.0"
 
 [[package]]
+name = "ariadne-coverage-inventory"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "ariadne-desktop"
 version = "0.1.0"
 dependencies = [
