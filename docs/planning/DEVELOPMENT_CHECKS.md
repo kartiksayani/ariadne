@@ -24,6 +24,11 @@ Release isolation additionally runs for dependencies/features/config/capabilitie
 native harness, desktop Rust and frontend bundling changes, plus gate/workflow/
 coverage-policy changes. Use `--full` or manual CI dispatch at release milestones.
 Native OS automation joins when native features exist. Live hosts need owner approval.
+Today no crate under `crates/` has Cargo features or feature-gated code and the desktop
+app does not depend on internal crates, so crate source edits do not trigger release
+isolation. The PR that first adds a crate feature, feature-gated code or a desktop
+dependency on an internal crate must add the relevant paths to `RELEASE_FILES`/the
+release prefixes in `scripts/check-commit.py` with a focused scope test.
 
 ```sh
 .venv-quality/bin/python scripts/check-commit.py --working-tree
@@ -53,6 +58,6 @@ data and actual PID/port cleanup. Packaged release proof keeps the test-only plu
 permissions and frontend modules out of production. See
 [Native E2E](low-level/NATIVE_E2E.md) and [Mac setup](../development/MACOS_TEST_SETUP.md).
 
-Observed public-repository rulesets are described in CONTRIBUTING; neither currently
-requires status checks. Organization security guidance was not checked under the
+Main requires the `quality` check with no bypass (details in CONTRIBUTING).
+Organization security guidance was not checked under the
 owner's current-session MCP/Seezo waiver.
