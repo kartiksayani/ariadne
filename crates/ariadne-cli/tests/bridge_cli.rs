@@ -286,3 +286,193 @@ fn absent_desktop_and_untrusted_endpoint_never_fall_back_to_direct_claim() {
     assert!(bridge::claim(home.path().to_owned(), request).is_err());
     assert_eq!(fs::read(owner.control_path()).unwrap(), b"ordinary file");
 }
+
+fn invalid_errors() -> Vec<(bool, CoreError)> {
+    let valid = CoreError::new(
+        CoreErrorCode::DeliveryUncertain,
+        "The original operation may have effects.",
+        "Retain its original identity and reconcile.",
+    );
+    let mut cases = vec![(true, valid.clone())];
+    for change in ["retryable", "message", "hint", "field"] {
+        let mut error = valid.clone();
+        match change {
+            "retryable" => error.retryable = true,
+            "message" => error.message.clear(),
+            "hint" => error.hint = "private invalid diagnostic".repeat(200),
+            _ => error.field_errors.push(FieldError {
+                field: " ".into(),
+                message: "bad field".into(),
+            }),
+        }
+        assert!(error.validate().is_err());
+        cases.push((false, error));
+    }
+    cases
+}
+fn assert_checked_error(actual: &CoreError, valid: bool, original: &CoreError) {
+    actual.validate().unwrap();
+    if valid {
+        assert_eq!(actual, original);
+    } else {
+        assert_eq!(actual.code, CoreErrorCode::ProtocolConflict);
+        assert!(!actual.retryable);
+        assert!(actual
+            .hint
+            .contains("original request, event and operation IDs"));
+        assert!(actual.hint.contains("effects may already exist"));
+        assert!(!actual.message.contains("private invalid diagnostic"));
+        assert!(!actual.hint.contains("private invalid diagnostic"));
+    }
+}
+#[test]
+fn direct_report_validates_core_errors_and_preserves_valid_uncertainty() {
+    let corpus = cases::load(root());
+    let (historical, event) = corpus
+        .cases
+        .iter()
+        .flat_map(|c| &c.steps)
+        .find_map(|step| {
+            if let cases::CaseStep::Report {
+                historical, event, ..
+            } = step
+            {
+                Some((*historical, event))
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let context = corpus.routing.adapter(historical, event);
+    for (valid, error) in invalid_errors() {
+        let core = FaultyErrorCore(error.clone());
+        let actual = bridge::report(&core, context.clone(), *event.clone()).unwrap_err();
+        assert_checked_error(&actual, valid, &error);
+    }
+}
+#[test]
+fn executable_claim_rejects_malformed_peer_errors_with_bounded_canonical_output() {
+    let corpus = cases::load(root());
+    let r = corpus.routing;
+    let home = home();
+    let owner = DesktopOwner::acquire(home.path()).unwrap();
+    let listener = UnixListener::bind(owner.control_path()).unwrap();
+    fs::set_permissions(owner.control_path(), fs::Permissions::from_mode(0o600)).unwrap();
+    let errors = invalid_errors();
+    let responses = errors.clone();
+    let server = std::thread::spawn(move || {
+        let _owner = owner;
+        for (_, error) in responses {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut prefix = [0; 4];
+            stream.read_exact(&mut prefix).unwrap();
+            let mut bytes = vec![0; u32::from_be_bytes(prefix) as usize];
+            stream.read_exact(&mut bytes).unwrap();
+            let request: ControlRequest = serde_json::from_slice(&bytes).unwrap();
+            request.validate().unwrap();
+            let response = serde_json::to_vec(
+                &serde_json::json!({"v":1,"kind":"response","id":request.id,"error":error}),
+            )
+            .unwrap();
+            stream
+                .write_all(&(response.len() as u32).to_be_bytes())
+                .unwrap();
+            stream.write_all(&response).unwrap();
+        }
+    });
+    for (valid, error) in errors {
+        let child = command()
+            .args([
+                "bridge",
+                "claim",
+                "--binding",
+                r.binding_id.as_str(),
+                "--generation",
+                r.generation.as_str(),
+                "--request-id",
+                r.source_input_id.as_str(),
+            ])
+            .env("ARIADNE_HOME", home.path())
+            .output()
+            .unwrap();
+        assert_eq!(child.status.code(), Some(3));
+        assert!(child.stderr.is_empty());
+        let envelope: ClaimEnvelope = serde_json::from_slice(&child.stdout).unwrap();
+        let actual = cases::result(&envelope.0).unwrap_err();
+        assert_checked_error(&actual, valid, &error);
+        assert!(child.stdout.len() < 4096);
+    }
+    server.join().unwrap();
+}
+#[test]
+fn cli_output_validates_oversized_local_error_without_exposing_raw_cause() {
+    struct BadInput;
+    impl Read for BadInput {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other(
+                "private invalid diagnostic".repeat(200),
+            ))
+        }
+    }
+    let r = cases::load(root()).routing;
+    let mut bytes = Vec::new();
+    let exit = bridge::command::run(
+        &[
+            "report",
+            "--binding",
+            r.binding_id.as_str(),
+            "--generation",
+            r.generation.as_str(),
+            "--json-stdin",
+        ],
+        &mut BadInput,
+        &mut bytes,
+    );
+    assert_eq!(exit, 3);
+    let envelope: ReportEnvelope = serde_json::from_slice(&bytes).unwrap();
+    let actual = cases::result(&envelope.0).unwrap_err();
+    actual.validate().unwrap();
+    assert_eq!(actual.code, CoreErrorCode::ProtocolConflict);
+    assert!(!actual.retryable);
+    assert!(actual.hint.contains("effects may already exist"));
+    assert!(!String::from_utf8(bytes)
+        .unwrap()
+        .contains("private invalid diagnostic"));
+}
+
+struct FaultyErrorCore(CoreError);
+impl CoreService for FaultyErrorCore {
+    fn query(&self, _: QueryContext, _: QueryRequest) -> Result<QueryResult, CoreError> {
+        unreachable!("unexpected query")
+    }
+    fn execute_owner(
+        &self,
+        _: OwnerContext,
+        _: OwnerCommand,
+    ) -> Result<MutationReceipt, CoreError> {
+        unreachable!("unexpected owner command")
+    }
+    fn apply(&self, _: AgentContext, _: ApplyRequest) -> Result<ApplyReceipt, CoreError> {
+        unreachable!("unexpected apply")
+    }
+    fn claim(
+        &self,
+        _: ValidatedDispatchContext,
+        _: ClaimRequest,
+    ) -> Result<Option<PreparedAttempt>, CoreError> {
+        unreachable!("unexpected claim")
+    }
+    fn report(
+        &self,
+        _: AdapterContext,
+        _: ariadne_agent_protocol::NormalizedEvent,
+    ) -> Result<EventReceipt, CoreError> {
+        Err(self.0.clone())
+    }
+}

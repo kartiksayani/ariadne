@@ -1,5 +1,5 @@
 //! Private control framing DTOs, shared with the installed bridge client.
-use super::error;
+use super::{error, validated_error};
 use ariadne_core::{ClaimRequest, CoreError, CoreErrorCode, PreparedAttempt};
 use ariadne_domain::models::{BindingSummary, UuidV4};
 use serde::{Deserialize, Serialize};
@@ -156,7 +156,7 @@ impl ControlResponse {
                 v: 1,
                 kind: ResponseKind::Response,
                 id,
-                error,
+                error: validated_error(error),
             }),
         }
     }
@@ -173,7 +173,7 @@ impl ControlResponse {
         }
         let response = match self {
             Self::Success(response) => response,
-            Self::Error(response) => return Err(response.error),
+            Self::Error(response) => return Err(validated_error(response.error)),
         };
         match (&request.method, &response.result) {
             (ControlMethod::Ping(scope), ControlResult::Ping(result)) if scope == result => {}

@@ -31,6 +31,7 @@ pub fn run(args: &[&str], input: &mut dyn Read, output: &mut dyn Write) -> i32 {
             0,
         ),
         Err(error) => {
+            let error = ariadne_runtime::control::validated_error(error);
             let exit = error.code.cli_exit();
             (
                 ApplicationEnvelope::Failure(FailureEnvelope {

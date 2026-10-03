@@ -554,3 +554,107 @@ fn client_rejects_ambiguous_or_mismatched_responses_and_claim_identity() {
     )
     .is_err());
 }
+
+fn error_cases() -> Vec<(bool, CoreError)> {
+    let mut valid = CoreError::new(
+        CoreErrorCode::DeliveryUncertain,
+        "The original operation may have effects.",
+        "Retain its original identity and reconcile.",
+    );
+    valid.current_revision = Some(PositiveSafeInteger::new(2).unwrap());
+    valid.field_errors.push(FieldError {
+        field: "operation_id".into(),
+        message: "Retain this ID.".into(),
+    });
+    let mut cases = vec![(true, valid.clone())];
+    for change in ["retryable", "message", "hint", "field", "field_message"] {
+        let mut error = valid.clone();
+        match change {
+            "retryable" => error.retryable = true,
+            "message" => error.message = " ".into(),
+            "hint" => error.hint = "private invalid diagnostic".repeat(200),
+            "field" => error.field_errors[0].field.clear(),
+            _ => error.field_errors[0].message = "private invalid diagnostic".repeat(200),
+        }
+        assert!(error.validate().is_err());
+        cases.push((false, error));
+    }
+    cases
+}
+fn checked_error(actual: CoreError, valid: bool, original: &CoreError) {
+    actual.validate().unwrap();
+    if valid {
+        assert_eq!(&actual, original);
+    } else {
+        assert_eq!(actual.code, CoreErrorCode::ProtocolConflict);
+        assert!(!actual.retryable);
+        assert!(actual
+            .hint
+            .contains("original request, event and operation IDs"));
+        assert!(actual.hint.contains("effects may already exist"));
+        assert!(!actual.message.contains("private invalid diagnostic"));
+        assert!(!actual.hint.contains("private invalid diagnostic"));
+    }
+}
+#[test]
+fn native_core_error_producer_and_ipc_consumer_validate_without_losing_identity() {
+    let h = home();
+    let rt = runtime();
+    let r = corpus().routing;
+    let claim = ClaimRequest {
+        binding_id: r.binding_id.clone(),
+        generation: r.generation.clone(),
+        request_id: r.source_input_id.clone(),
+    };
+    for (valid, error) in error_cases() {
+        let server = Running::start(&rt, h.path(), Arc::new(FaultyErrorCore(error.clone())), &r);
+        for method in [
+            ControlMethod::Claim(claim.clone()),
+            ControlMethod::ConnectionStatus(scope(&r)),
+        ] {
+            let request = ControlRequest::new(r.source_input_id.clone(), method).unwrap();
+            let bytes = serde_json::to_vec(&request).unwrap();
+            let response = raw(h.path(), &bytes, bytes.len()).unwrap();
+            assert_eq!(response["id"], serde_json::to_value(&request.id).unwrap());
+            let published: CoreError = serde_json::from_value(response["error"].clone()).unwrap();
+            checked_error(published, valid, &error);
+            // An untrusted desktop can independently inject a malformed error.
+            let untrusted =
+                serde_json::json!({"v":1,"kind":"response","id":request.id,"error":error});
+            let response: ControlResponse = serde_json::from_value(untrusted).unwrap();
+            checked_error(response.into_result(&request).unwrap_err(), valid, &error);
+        }
+        server.stop(&rt);
+    }
+}
+
+struct FaultyErrorCore(CoreError);
+impl CoreService for FaultyErrorCore {
+    fn query(&self, _: QueryContext, _: QueryRequest) -> Result<QueryResult, CoreError> {
+        Err(self.0.clone())
+    }
+    fn execute_owner(
+        &self,
+        _: OwnerContext,
+        _: OwnerCommand,
+    ) -> Result<MutationReceipt, CoreError> {
+        unreachable!("unexpected owner command")
+    }
+    fn apply(&self, _: AgentContext, _: ApplyRequest) -> Result<ApplyReceipt, CoreError> {
+        unreachable!("unexpected apply")
+    }
+    fn claim(
+        &self,
+        _: ValidatedDispatchContext,
+        _: ClaimRequest,
+    ) -> Result<Option<PreparedAttempt>, CoreError> {
+        Err(self.0.clone())
+    }
+    fn report(
+        &self,
+        _: AdapterContext,
+        _: ariadne_agent_protocol::NormalizedEvent,
+    ) -> Result<EventReceipt, CoreError> {
+        unreachable!("unexpected report")
+    }
+}

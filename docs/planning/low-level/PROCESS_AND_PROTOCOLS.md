@@ -37,7 +37,10 @@ Control request: `{v:1,kind:"request",id:UuidV4,method,params}`. A response has
 `{v:1,kind:"response",id,result}` or `{v:1,kind:"response",id,error:CoreError}`,
 exactly one of result/error and the same ID. Malformed frames without a trusted
 UUID ID may close; never invent an ID. Unknown fields and mismatched method
-params reject. Typed methods are:
+params reject. Producers and consumers validate canonical CoreError values; valid
+errors remain exact. Malformed errors return bounded nonretryable protocol_conflict
+without raw invalid data, retaining original request/event/operation ID guidance
+and no inference that effects were absent. Typed methods are:
 
 | Method | Params | Result |
 | --- | --- | --- |

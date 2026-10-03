@@ -23,6 +23,12 @@ response ID/version/method/scope and prepared evidence are validated. Ping prove
 control reachability, never provider readiness. Status queries the canonical
 registered session binding and supplies no invented presence.
 
+CoreError::validate guards the IPC producer, peer error consumer, direct report
+and CLI envelope output. Valid errors are preserved exactly. Malformed errors
+become a bounded nonretryable protocol_conflict without raw diagnostic/panic
+data; guidance retains the original request/event/operation IDs and warns that
+effects may already exist. No malformed uncertainty authorizes resend or a new ID.
+
 Native owned directories are 0700; owned socket and stable single-link regular
 lock files are 0600. Open private directory/lock targets without following
 symlinks, verify peer UID in both directions, check the native Unix path byte

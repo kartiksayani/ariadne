@@ -29,6 +29,20 @@ pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CONNECTIONS: usize = 16;
 
+/// Bound errors at native transport boundaries without exposing malformed facts.
+/// The original operation may have committed; this fallback never authorizes resend.
+pub fn validated_error(error: CoreError) -> CoreError {
+    if error.validate().is_ok() {
+        error
+    } else {
+        CoreError::new(
+            CoreErrorCode::ProtocolConflict,
+            "Received a malformed canonical core error.",
+            "Retain the original request, event and operation IDs; effects may already exist. Check matching app/helper versions before repeating that exact operation.",
+        )
+    }
+}
+
 fn path_limit(path: &Path) -> Result<(), CoreError> {
     use std::os::unix::ffi::OsStrExt;
     // SAFETY: zero is a valid sockaddr_un representation used only for its array capacity.

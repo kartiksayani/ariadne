@@ -34,7 +34,9 @@ pub fn report(
             "Resolve the registered binding and generation before reporting.",
         ));
     }
-    let receipt = core.report(context.clone(), event.clone())?;
+    let receipt = core
+        .report(context.clone(), event.clone())
+        .map_err(control::validated_error)?;
     receipt.validate_for(&context, &event)?;
     Ok(receipt)
 }
