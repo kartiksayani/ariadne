@@ -98,6 +98,59 @@ fn registration_canonicalizes_roots_preserves_receipts_and_never_persists_zero_r
 }
 
 #[test]
+fn restored_project_metadata_after_absence_keeps_bytes_and_cannot_publish_wrong_identity() {
+    let home = tempfile::tempdir().unwrap();
+    let registered_root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::open(home.path()).unwrap();
+    registration(&registry, registered_root.path(), 10);
+    registry.rebuild().unwrap();
+    let registry_path = home.path().join(".ariadne/projects.json");
+    let index_path = home.path().join(".ariadne/bindings.json");
+    let registry_before = fs::read(&registry_path).unwrap();
+    let index_before = fs::read(&index_path).unwrap();
+    let projects_before = registry.registered_projects().unwrap();
+    let metadata_path = root.path().join(".ariadne/project.json");
+    let restored = serde_json::to_vec(&Project {
+        schema_version: SchemaVersion::new(1).unwrap(),
+        id: id(2),
+        display_name: "Restored authoritative project".into(),
+    })
+    .unwrap();
+    assert!(!metadata_path.exists());
+    assert!(matches!(
+        registry.register(root.path(), &id(1001), || {
+            // Ordinary external restoration after the locked absence decision.
+            write_private(&metadata_path, &restored);
+            id(1)
+        }),
+        Err(RegistryError::Store(StoreError::AlreadyExists))
+    ));
+    assert_eq!(fs::read(&metadata_path).unwrap(), restored);
+    assert_eq!(fs::read(&registry_path).unwrap(), registry_before);
+    assert_eq!(fs::read(&index_path).unwrap(), index_before);
+    assert_eq!(registry.registered_projects().unwrap(), projects_before);
+    assert!(fs::read_dir(metadata_path.parent().unwrap())
+        .unwrap()
+        .all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_str()
+            .unwrap()
+            .contains(".tmp-")));
+
+    // The failed publication left no receipt: retry reads the restored identity.
+    let result = registry
+        .register(root.path(), &id(1001), || panic!("existing metadata"))
+        .unwrap();
+    assert_eq!(result.project_id, id(2));
+    assert_eq!(
+        registry.resolve_project(&id(2)).unwrap().root,
+        root.path().canonicalize().unwrap()
+    );
+}
+
+#[test]
 fn invalid_native_registration_text_paths_and_persisted_zero_have_typed_no_effect_errors() {
     let home = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();

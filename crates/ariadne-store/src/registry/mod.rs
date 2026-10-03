@@ -201,7 +201,8 @@ impl Registry {
             }
             let data = directory.child(".ariadne", true)?;
             lock::with_lock(&data, "project.lock", || {
-                let project = if data.verify_target("project.json")? {
+                let create_project = !data.verify_target("project.json")?;
+                let project = if !create_project {
                     read_data(&data, "project.json")?
                 } else {
                     let display_name = canonical
@@ -234,7 +235,7 @@ impl Registry {
                         validate_project(registered)?;
                     }
                 }
-                if !data.verify_target("project.json")? {
+                if create_project {
                     data.temp("project.json", &encode(&project)?)?
                         .create("project.json")?;
                     data.sync()?;
