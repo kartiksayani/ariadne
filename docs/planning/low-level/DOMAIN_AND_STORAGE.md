@@ -317,7 +317,12 @@ behavior belong to P0.6 and the core tasks.
 - Agent operations with an Ariadne input must acknowledge that input's owner
   message number. Closing/replacing an item cannot skip a newer unhandled owner
   message targeting it. Return `unhandled_owner_message` with IDs; agent can reply
-  now but must handle the newer message before terminalizing the item.
+  now but must handle the newer message before terminalizing the item. This guard
+  considers live owner inputs still queued/in_flight/needs_attention. Handled,
+  cancelled or skipped inputs and copied origin history do not block. Exemption
+  never marks an input handled or rewrites history. Orphan live owner-input
+  messages are invalid. Unissued owner bodies cannot be read/acknowledged by an
+  earlier turn, so explicitly cancelling such an input must remove that blocker.
 - Owner can message any unarchived item in an active session, including terminal
   items. Drop/reopen/bring are requests; only the agent decides the transition.
 - Waiting selects waiting items with no Answer for the current question_revision
@@ -333,6 +338,94 @@ behavior belong to P0.6 and the core tasks.
   inputs and dispatch paused. Restore/reopen changes presentation lifecycle only.
 - Full validation runs for every commit; expected revisions are per touched item,
   question, topic or session lifecycle, not unrelated snapshot edits.
+
+### Pure item validation and transition seam
+
+`ariadne-domain` publishes native Rust calls over canonical DTOs:
+
+```rust
+validation::validate_session_items(&Session) -> Result<(), ValidationError>
+validation::validate_item(&Session, &Item) -> Result<(), ValidationError>
+transitions::transition_item(
+    &Session, &ItemRef, &ItemChange, &TransitionContext,
+) -> Result<Item, TransitionError>
+```
+
+These calls perform no IO and never mutate their arguments. The session validator
+checks item-tree identities, explicit parent/topic/reference agreement, parent and
+replacement cycles, allocation counters, relevant message/round references and
+individual prose bounds, including frozen round/answer/input snapshots. It is one
+component of final store validation; history immutability, actor/source-attempt
+scope, receipts, delivery/result joins and lifecycle guards remain their owning
+history/core modules. `validate_item` expects its referenced messages, rounds and
+bindings in the assembled session. Primitive constructors/deserialization already
+reject invalid lexical references and duplicate JSON map keys.
+An imported item's origin supplies source context for historical binding IDs,
+which may be absent from the target session. Copied history retains those IDs;
+live item owner/recipient and every new transition require registered target
+bindings. No historical authorization or per-entry source chronology is inferred
+from this reference check.
+
+`ItemChange` is a native enum, not another serialized API DTO:
+
+- `Edit { question: Option<String>, item_type: Option<ItemType>,
+  note: Option<Option<String>>, links: Option<Vec<ItemLinkTarget>> }`.
+  Outer `None` retains a field; `note: Some(None)` clears it.
+- `Ask { ask: String, options: Vec<ItemOption>, recipient_binding_id: UuidV4,
+  round_id: UuidV4 }`.
+- `Status { status: ItemStatus, outcome: Option<String>, why: Option<String>,
+  reason: Option<String> }`.
+- `Replace { replacement: ItemRef, outcome: String, why: String }`.
+
+`TransitionContext` contains `binding_id: UuidV4`, `generation: UuidV4`,
+`cause_message_id: UuidV4`, `at: UtcMillis`,
+`handled_through_message_number: NonnegativeSafeInteger`,
+`expected_revision: PositiveSafeInteger` and
+`expected_question_revision: Option<PositiveSafeInteger>`. Core assembles the
+agent activity/reply cause message before calling; the helper requires matching
+registered non-disconnected binding, current generation, agent cause authorship
+and supplied revisions. A handled watermark cannot exceed that binding's issued
+watermark. Closing/replacing reports newer unresolved live owner-message IDs
+targeting the item, excluding handled/cancelled/skipped inputs and imported
+history; an orphan live owner-input message is a validation failure. Core still
+validates the source input/attempt and operation replay; owner
+input save and host events do not invoke a domain status transition.
+
+| Prior status | Edit | Ask | Status open/in_progress | Status decided/done/dropped | Replace |
+| --- | --- | --- | --- | --- | --- |
+| open/waiting_on_me/in_progress | allowed | allowed | reason required | fresh outcome + why required | outcome + why + valid target required |
+| decided/done/dropped | allowed | first reopen with reason | reason required; clear terminal fields | fresh outcome + why required | outcome + why + valid target required |
+| replaced | allowed | rejected | rejected | rejected | rejected |
+
+`Status` never targets waiting or replaced: use `Ask` or `Replace`. Same-status
+`Status` calls are allowed with the same required fields, revision and audit rules.
+Every successful call increments item revision and deduplicates its cause-message
+backlink. Status/Ask/Replace append history with old/new status and prior terminal
+fields; reopening clears those fields only on the returned candidate. No child
+status cascades. Terminal-to-terminal updates retain the previous outcome/why.
+
+Each Ask, including waiting-to-waiting, increments question revision, sets owner
+to me and starts a fresh waiting timestamp and round ID. The supplied round ID
+must be unused. The caller/P1.2 closes the old round and constructs the canonical
+new Round with frozen question/ask/options before inserting the item and running
+assembled-session validation. The helper does not require that new round to exist
+yet. Question edits and leaving a waiting episode increment question revision;
+ordinary note/type/link edits do not. No existing parent/topic/ID can change.
+Stored waiting items created with `item.add` may retain any valid explicit owner;
+the owner-to-me rule belongs specifically to `item.ask`.
+
+`ValidationError { path: String, kind: ValidationErrorKind }` returns a field path
+without stored prose. Kinds are `Blank`, `Nul`, `TooLong { maximum_bytes: usize }`,
+`TooMany { maximum: usize }`, `Duplicate`, `MissingReference`, `IdentityMismatch`,
+`HierarchyMismatch`, `Cycle`, `CounterNotAhead` and `InvalidState`.
+`TransitionError` variants are `Validation(ValidationError)`, `MissingItem`,
+`StaleRevision`, `StaleQuestionRevision`, `MissingBinding`, `DisconnectedBinding`,
+`StaleGeneration`, `InvalidCauseMessage`, `InvalidTransition`, `MissingReason`,
+`UnhandledOwnerMessages { message_ids: Vec<UuidV4> }`, `InvalidHandledWatermark`
+and `CounterOverflow`. Entry points map these typed failures to their shared API
+error vocabulary; they do not copy a local validation contract.
+
+See [ADR-0021](../../adr/ADR-0021-pure-item-transitions.md).
 
 ## 4. Transaction and lock algorithm
 
@@ -370,6 +463,19 @@ reply ≤64 KiB; 12 options each label/consequence≤1 KiB; 32 links/item each t
 KiB. Response page≤100 entities/1 MiB; a single fixed entity projection≤768 KiB
 including escaping. Large histories/backlinks are separate paginated queries.
 No silent truncation of durable content. Diagnostic output is separately bounded.
+
+These individual content limits count UTF-8 bytes, not characters. Required
+question/ask/outcome/why and option label/consequence are nonblank; optional note
+may be absent or empty. NUL is rejected and prose is otherwise preserved exactly.
+An option-only owner answer may preserve empty/whitespace submitted text in its
+Message body, Input payload and Answer text. The Message exception requires a
+canonical Answer with the same message/input/item and a selected option present
+in its frozen options; other owner messages and agent replies remain nonblank.
+History/core separately enforce complete answer/payload linkage and snapshots.
+The pure item validator also enforces the existing 4 KiB endpoint-fingerprint
+bound. It introduces no blanket bound for unrelated names, labels or opaque host
+IDs. Request/batch/query limits and pending-input capacity are enforced by their
+core/protocol/query owners, not by this item-tree seam.
 
 No result/control capacity reservations. A write error returns failure, keeps
 the last saved data, and pauses dispatch until writes succeed. Keep unsent drafts;
