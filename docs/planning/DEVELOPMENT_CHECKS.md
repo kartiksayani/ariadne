@@ -34,36 +34,79 @@ round trip test. Generated contracts have drift checks. Type-only/empty source f
 must be represented explicitly by the coverage tooling; any instrumentation
 exception is a narrow reviewed policy change, never a blanket module exclusion.
 
-[ADR-0004](../adr/ADR-0004-account-for-scaffold-coverage-sources.md) permits only
-these explicit classifications in `quality-gates.json`:
+[ADR-0010](../adr/ADR-0010-classify-uninstrumented-rust-declarations.md) keeps
+explicit `quality-gates.json` entries with exactly `path`, `sha256` and `reason`.
+The new profile accepts ordinary Rust line/block comments parsed by syn; this
+does not change the legacy comment-only byte grammar.
+The existing `comment-only-rust-package-boundary` reason remains restricted to
+blank/line-comment `crates/<member>/src/lib.rs` with its package manifest.
+`uninstrumented-rust-declarations-v1` permits only the following verified Rust:
 
-- `non_executable_sources`: objects with exactly `path`, `sha256` and `reason`.
-  The reason is `comment-only-rust-package-boundary`; the path must be an existing
-  `crates/<member>/src/lib.rs` with its package `Cargo.toml`. The SHA-256 covers
-  the exact file bytes. Only blank lines and `//` line comments qualify; code,
-  attributes and block comments fail even after a hash update. Adding executable
-  Rust requires removing the classification and measuring the source normally.
-- `coverage_tooling`: distinct exact paths from the fixed allowlist
-  `apps/desktop/vite.config.ts`, `apps/desktop/wdio.native.conf.mjs` and
-  `apps/desktop/src-tauri/build.rs`. These build/test configuration files remain
-  subject to lint, compilation and relevant tests; their lines do not enter
-  production coverage. Other paths and glob patterns fail.
+- Facades: ordinary public external modules and explicit public reexports,
+  without aliases/globs, inline modules, path/cfg attributes or protected bindings.
+- DTO structs/enums/type aliases: recursively checked data types, no functions,
+  impls, traits, constants, statics, discriminants, macros or executable items.
+  Plain argument-free DTO paths are allowed; only known containers take type
+  arguments. Const arguments, qself, associated bindings and expressions fail.
+  BTreeMap keys must be argument-free paths satisfying that same data-type
+  grammar, including ordinary DTO paths and qualified UUID; values recurse.
+- Qualified core Debug/PartialEq/Eq/Clone and serde Serialize/Deserialize,
+  schemars JsonSchema and ts-rs TS derives only. The external packages/macros
+  have exact verified registry/version/checksum identities: serde 1.0.228,
+  schemars 1.2.2 and ts-rs 12.0.1. Cargo aliases cannot replace core/std or
+  protected external derive bindings. Unknown derives/attributes fail.
+- Only literal serde tags `status`/`kind`, rename_all `camelCase`/`snake_case`,
+  deny_unknown_fields and the exact
+  safe-integer u64 schemars range; no serialization/default/schema callbacks,
+  crate overrides, `schemars(required)` or source-local ts export attributes.
+  String doc attributes are allowed. Unsupported syntax needs normal measurement
+  or a separately reviewed policy change.
 
-The gate checks classification types, duplicate entries, missing files, hashes
-and repository escapes. It recursively inventories canonical `apps`, `crates`
-and `integrations` sources, including shipped Mods and future `.mjs`/`.cjs` files.
-The existing generated/vendor/dependency/test/declaration classifications remain;
-there is no broad `dist` exclusion. Vite output belongs in repository-root
-`target/desktop-dist`, outside the production roots.
+Each classified file retains its exact SHA. Its library root and actual module
+ancestors must also be SHA-classified verified facades, using unambiguous ordinary
+`foo.rs`/`foo/mod.rs` paths; symlinks, hidden/inline/path-mapped ancestors fail.
+Every child executable file remains inventoried. The pinned syn 2.0.119 AST helper
+validates the whole source; syntax acceptance does not prove runtime validation.
+The tested generator uses schemars draft07 `for_serialize()` and explicit ts-rs
+Config large-int number exports. Serde still accepts missing Option keys and
+out-of-range u64; domain validation must enforce those input contracts separately.
+Pinned helper-only output tests reuse the actual classified DTO fixture with
+serde/schema/TS derives, UUID and string-newtype maps. Encoding does not prove
+key lexical invariants: the emitted bare UUID-key schema lacks a property-name
+format constraint. Tagged unit variants accept unknown fields despite
+deny_unknown_fields; an empty struct variant rejects the same input. No general
+attribute support, per-variant rename or stored-data hardening is implied.
 
-Both canonical reports, `coverage/rust.lcov` and `coverage/web/lcov.info`, must
-be freshly produced and each must contain genuine executable `DA` line data.
-After Rust measurement, the gate adds explicit `SF`/`LF:0`/`LH:0` records only
-for verified comment-only boundaries. These records account for zero executable
-lines and add no covered lines. Every other production source needs executable
-line evidence; an omitted file, an unverified zero-line record or a zero-only
-report fails. The combined executable-line floor stays at least 80% from the
-first application commit.
+The gate rejects malformed/duplicate entries, missing files, stale hashes and
+repository escapes. Canonical `apps`, `crates`, `integrations` remain recursively
+inventoried, including shipped Mods and future `.mjs`/`.cjs`. Existing generated,
+vendor, dependency, test and declaration classifications remain; no broad dist
+exclusion. Vite output stays in root `target/desktop-dist`.
+
+`coverage_tooling` still permits only the three exact desktop Vite/native-WDIO/
+Tauri-build paths. In addition, fixed workspace packages `ariadne-coverage-inventory`
+at `tools/coverage-inventory` and future `ariadne-xtask` at `tools/xtask` are
+excluded only from the application report after strict metadata/target ownership
+verification. The helper's actual syn 2.0.119 registry/checksum binding is verified
+before excluding its report. Root local path patch/replace overrides are explicitly
+unsupported; tool-root substitutions fail before active graph traversal. No application dependency may reach tooling through normal, dev,
+build, renamed, optional, target-specific or transitive edges. Relevant unresolved
+local/path/substituted identities fail. Every present tool has its own recursive
+source inventory, fresh report and independent >=80% line floor; tool coverage
+cannot compensate for application coverage. All workspace fmt/Clippy and all-feature
+tests still run, including tools. Before the single instrumented workspace run,
+checked `env CARGO_LLVM_COV_DENY_WARNINGS=1 cargo llvm-cov clean --workspace --locked --offline`
+cleans all workspace coverage artifacts without exclusions. This avoids stale tool object
+maps retained by llvm-cov 0.9.1's report-excluded partial cleanup. Warning denial applies
+only to cleanup and makes underlying cleanup warnings fail the gate before instrumentation.
+The test run produces application LCOV; package-selected report-only exports reuse those
+same fresh profiles without another clean. Inventories and separate >=80% floors remain.
+
+Both canonical Rust/web reports must be fresh and each contain genuine DA lines.
+Only verified non-executable sources receive explicit SF/LF:0/LH:0 records after
+Rust measurement, adding no covered lines. Actual DA for a classified source,
+duplicate zero evidence, missing executable sources, unverified zeros and zero-only
+reports fail. The combined application executable-line floor remains >=80%.
 
 [ADR-0005](../adr/ADR-0005-use-out-of-line-rust-coverage-tests.md) keeps Rust tests
 out of production files, in `src/tests` or package `tests` directories, so inline
