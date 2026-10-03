@@ -1,0 +1,2245 @@
+{
+  "api_version": 1,
+  "tools": [
+    {
+      "inputSchema": {
+        "$defs": {
+          "CursorPosition": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "sequence",
+                    "type": "string"
+                  },
+                  "number": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "number",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "topic",
+                    "type": "string"
+                  },
+                  "order": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "order",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/ItemRef"
+                  },
+                  "kind": {
+                    "const": "item",
+                    "type": "string"
+                  },
+                  "ordinals": {
+                    "items": {
+                      "$ref": "#/$defs/PositiveSafeInteger"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ordinals",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "round",
+                    "type": "string"
+                  },
+                  "ordinal": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ordinal",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "canonical_root": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "project",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "canonical_root",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "session",
+                    "type": "string"
+                  },
+                  "project_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "updated_at": {
+                    "$ref": "#/$defs/UtcMillis"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "updated_at",
+                  "project_id",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "index": {
+                    "$ref": "#/$defs/NonnegativeSafeInteger"
+                  },
+                  "kind": {
+                    "const": "history",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "index"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "attempt_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "attempt_ordinal": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  },
+                  "input_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "input_seq": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  },
+                  "kind": {
+                    "const": "result",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "input_seq",
+                  "attempt_ordinal",
+                  "input_id",
+                  "attempt_id"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "InputState": {
+            "enum": [
+              "queued",
+              "in_flight",
+              "handled",
+              "cancelled",
+              "needs_attention",
+              "skipped"
+            ],
+            "type": "string"
+          },
+          "ItemPageRequest": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "cursor": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/QueryCursor"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "item_id": {
+                    "$ref": "#/$defs/ItemRef"
+                  },
+                  "limit": {
+                    "$ref": "#/$defs/PageLimit"
+                  },
+                  "view": {
+                    "const": "item_updated_messages",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "item_id",
+                  "cursor",
+                  "limit"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "cursor": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/QueryCursor"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "item_id": {
+                    "$ref": "#/$defs/ItemRef"
+                  },
+                  "limit": {
+                    "$ref": "#/$defs/PageLimit"
+                  },
+                  "view": {
+                    "const": "item_status_history",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "item_id",
+                  "cursor",
+                  "limit"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "ItemRef": {
+            "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])",
+            "type": "string"
+          },
+          "ItemStatus": {
+            "enum": [
+              "open",
+              "waiting_on_me",
+              "in_progress",
+              "decided",
+              "done",
+              "dropped",
+              "replaced"
+            ],
+            "type": "string"
+          },
+          "NonnegativeSafeInteger": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "PageLimit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "PositiveSafeInteger": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "QueryCursor": {
+            "additionalProperties": false,
+            "properties": {
+              "after": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CursorPosition"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "filter_digest": {
+                "$ref": "#/$defs/Sha256"
+              },
+              "revision": {
+                "$ref": "#/$defs/PositiveSafeInteger"
+              },
+              "schema": {
+                "$ref": "#/$defs/SchemaVersion"
+              },
+              "view": {
+                "$ref": "#/$defs/QueryView"
+              }
+            },
+            "required": [
+              "schema",
+              "view",
+              "filter_digest",
+              "after",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "QueryView": {
+            "enum": [
+              "projects",
+              "sessions",
+              "topics",
+              "items",
+              "messages",
+              "inputs",
+              "item_messages",
+              "item_rounds",
+              "round_answers",
+              "round_owner_messages",
+              "round_agent_messages",
+              "round_results",
+              "round_forks",
+              "item_status_history",
+              "item_updated_messages"
+            ],
+            "type": "string"
+          },
+          "ReadView": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "filters": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "archived": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "archived"
+                    ],
+                    "type": "object"
+                  },
+                  "view": {
+                    "const": "topics",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "filters"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "filters": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "archived": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      },
+                      "item_id": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/ItemRef"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "parent_item_id": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/ItemRef"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "statuses": {
+                        "items": {
+                          "$ref": "#/$defs/ItemStatus"
+                        },
+                        "type": "array"
+                      },
+                      "topic_id": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/UuidV4"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "topic_id",
+                      "item_id",
+                      "parent_item_id",
+                      "statuses",
+                      "archived"
+                    ],
+                    "type": "object"
+                  },
+                  "view": {
+                    "const": "items",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "filters"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "filters": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "item_id": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/ItemRef"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "topic_id": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/UuidV4"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "topic_id",
+                      "item_id"
+                    ],
+                    "type": "object"
+                  },
+                  "view": {
+                    "const": "messages",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "filters"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "filters": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "item_id": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/ItemRef"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "states": {
+                        "items": {
+                          "$ref": "#/$defs/InputState"
+                        },
+                        "type": "array"
+                      },
+                      "topic_id": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/UuidV4"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "topic_id",
+                      "item_id",
+                      "states"
+                    ],
+                    "type": "object"
+                  },
+                  "view": {
+                    "const": "inputs",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "filters"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "SchemaVersion": {
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "SessionReadRequest": {
+            "additionalProperties": false,
+            "properties": {
+              "cursor": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/QueryCursor"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "item_pages": {
+                "items": {
+                  "$ref": "#/$defs/ItemPageRequest"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "$ref": "#/$defs/PageLimit"
+              },
+              "selection": {
+                "$ref": "#/$defs/ReadView"
+              }
+            },
+            "required": [
+              "selection",
+              "cursor",
+              "limit",
+              "item_pages"
+            ],
+            "type": "object"
+          },
+          "Sha256": {
+            "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+            "type": "string"
+          },
+          "UtcMillis": {
+            "format": "date-time",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])",
+            "type": "string"
+          },
+          "UuidV4": {
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/UuidV4"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "binding_id": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "generation": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "params": {
+            "$ref": "#/$defs/SessionReadRequest"
+          },
+          "source_input_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/UuidV4"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "binding_id",
+          "generation",
+          "source_input_id",
+          "attempt_id",
+          "params"
+        ],
+        "title": "AgentReadToolRequest",
+        "type": "object"
+      },
+      "name": "session_read",
+      "output_schema": "ApplicationEnvelope_QueryResult"
+    },
+    {
+      "inputSchema": {
+        "$defs": {
+          "CursorPosition": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "sequence",
+                    "type": "string"
+                  },
+                  "number": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "number",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "topic",
+                    "type": "string"
+                  },
+                  "order": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "order",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/ItemRef"
+                  },
+                  "kind": {
+                    "const": "item",
+                    "type": "string"
+                  },
+                  "ordinals": {
+                    "items": {
+                      "$ref": "#/$defs/PositiveSafeInteger"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ordinals",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "round",
+                    "type": "string"
+                  },
+                  "ordinal": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ordinal",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "canonical_root": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "project",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "canonical_root",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "session",
+                    "type": "string"
+                  },
+                  "project_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "updated_at": {
+                    "$ref": "#/$defs/UtcMillis"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "updated_at",
+                  "project_id",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "index": {
+                    "$ref": "#/$defs/NonnegativeSafeInteger"
+                  },
+                  "kind": {
+                    "const": "history",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "index"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "attempt_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "attempt_ordinal": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  },
+                  "input_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "input_seq": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  },
+                  "kind": {
+                    "const": "result",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "input_seq",
+                  "attempt_ordinal",
+                  "input_id",
+                  "attempt_id"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "ItemMessagesRequest": {
+            "additionalProperties": false,
+            "properties": {
+              "cursor": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/QueryCursor"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "item_id": {
+                "$ref": "#/$defs/ItemRef"
+              },
+              "limit": {
+                "$ref": "#/$defs/PageLimit"
+              }
+            },
+            "required": [
+              "item_id",
+              "cursor",
+              "limit"
+            ],
+            "type": "object"
+          },
+          "ItemRef": {
+            "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])",
+            "type": "string"
+          },
+          "NonnegativeSafeInteger": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "PageLimit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "PositiveSafeInteger": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "QueryCursor": {
+            "additionalProperties": false,
+            "properties": {
+              "after": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CursorPosition"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "filter_digest": {
+                "$ref": "#/$defs/Sha256"
+              },
+              "revision": {
+                "$ref": "#/$defs/PositiveSafeInteger"
+              },
+              "schema": {
+                "$ref": "#/$defs/SchemaVersion"
+              },
+              "view": {
+                "$ref": "#/$defs/QueryView"
+              }
+            },
+            "required": [
+              "schema",
+              "view",
+              "filter_digest",
+              "after",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "QueryView": {
+            "enum": [
+              "projects",
+              "sessions",
+              "topics",
+              "items",
+              "messages",
+              "inputs",
+              "item_messages",
+              "item_rounds",
+              "round_answers",
+              "round_owner_messages",
+              "round_agent_messages",
+              "round_results",
+              "round_forks",
+              "item_status_history",
+              "item_updated_messages"
+            ],
+            "type": "string"
+          },
+          "SchemaVersion": {
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "Sha256": {
+            "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+            "type": "string"
+          },
+          "UtcMillis": {
+            "format": "date-time",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])",
+            "type": "string"
+          },
+          "UuidV4": {
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/UuidV4"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "binding_id": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "generation": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "params": {
+            "$ref": "#/$defs/ItemMessagesRequest"
+          },
+          "source_input_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/UuidV4"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "binding_id",
+          "generation",
+          "source_input_id",
+          "attempt_id",
+          "params"
+        ],
+        "title": "AgentMessagesToolRequest",
+        "type": "object"
+      },
+      "name": "item_messages",
+      "output_schema": "ApplicationEnvelope_QueryResult"
+    },
+    {
+      "inputSchema": {
+        "$defs": {
+          "CursorPosition": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "sequence",
+                    "type": "string"
+                  },
+                  "number": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "number",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "topic",
+                    "type": "string"
+                  },
+                  "order": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "order",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/ItemRef"
+                  },
+                  "kind": {
+                    "const": "item",
+                    "type": "string"
+                  },
+                  "ordinals": {
+                    "items": {
+                      "$ref": "#/$defs/PositiveSafeInteger"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ordinals",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "round",
+                    "type": "string"
+                  },
+                  "ordinal": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ordinal",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "canonical_root": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "project",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "canonical_root",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "session",
+                    "type": "string"
+                  },
+                  "project_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "updated_at": {
+                    "$ref": "#/$defs/UtcMillis"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "updated_at",
+                  "project_id",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "index": {
+                    "$ref": "#/$defs/NonnegativeSafeInteger"
+                  },
+                  "kind": {
+                    "const": "history",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "index"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "attempt_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "attempt_ordinal": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  },
+                  "input_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "input_seq": {
+                    "$ref": "#/$defs/PositiveSafeInteger"
+                  },
+                  "kind": {
+                    "const": "result",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "input_seq",
+                  "attempt_ordinal",
+                  "input_id",
+                  "attempt_id"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "ItemRef": {
+            "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])",
+            "type": "string"
+          },
+          "ItemRoundsRequest": {
+            "additionalProperties": false,
+            "properties": {
+              "cursor": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/QueryCursor"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "item_id": {
+                "$ref": "#/$defs/ItemRef"
+              },
+              "limit": {
+                "$ref": "#/$defs/PageLimit"
+              },
+              "round_pages": {
+                "items": {
+                  "$ref": "#/$defs/RoundPageRequest"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "item_id",
+              "cursor",
+              "limit",
+              "round_pages"
+            ],
+            "type": "object"
+          },
+          "NonnegativeSafeInteger": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "PageLimit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "PositiveSafeInteger": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "QueryCursor": {
+            "additionalProperties": false,
+            "properties": {
+              "after": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CursorPosition"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "filter_digest": {
+                "$ref": "#/$defs/Sha256"
+              },
+              "revision": {
+                "$ref": "#/$defs/PositiveSafeInteger"
+              },
+              "schema": {
+                "$ref": "#/$defs/SchemaVersion"
+              },
+              "view": {
+                "$ref": "#/$defs/QueryView"
+              }
+            },
+            "required": [
+              "schema",
+              "view",
+              "filter_digest",
+              "after",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "QueryView": {
+            "enum": [
+              "projects",
+              "sessions",
+              "topics",
+              "items",
+              "messages",
+              "inputs",
+              "item_messages",
+              "item_rounds",
+              "round_answers",
+              "round_owner_messages",
+              "round_agent_messages",
+              "round_results",
+              "round_forks",
+              "item_status_history",
+              "item_updated_messages"
+            ],
+            "type": "string"
+          },
+          "RoundPageRequest": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "cursor": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/QueryCursor"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "limit": {
+                    "$ref": "#/$defs/PageLimit"
+                  },
+                  "round_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "view": {
+                    "const": "round_answers",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "round_id",
+                  "cursor",
+                  "limit"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "cursor": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/QueryCursor"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "limit": {
+                    "$ref": "#/$defs/PageLimit"
+                  },
+                  "round_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "view": {
+                    "const": "round_owner_messages",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "round_id",
+                  "cursor",
+                  "limit"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "cursor": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/QueryCursor"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "limit": {
+                    "$ref": "#/$defs/PageLimit"
+                  },
+                  "round_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "view": {
+                    "const": "round_agent_messages",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "round_id",
+                  "cursor",
+                  "limit"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "cursor": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/QueryCursor"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "limit": {
+                    "$ref": "#/$defs/PageLimit"
+                  },
+                  "round_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "view": {
+                    "const": "round_results",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "round_id",
+                  "cursor",
+                  "limit"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "cursor": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/QueryCursor"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "limit": {
+                    "$ref": "#/$defs/PageLimit"
+                  },
+                  "round_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "view": {
+                    "const": "round_forks",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "view",
+                  "round_id",
+                  "cursor",
+                  "limit"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "SchemaVersion": {
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "Sha256": {
+            "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+            "type": "string"
+          },
+          "UtcMillis": {
+            "format": "date-time",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])",
+            "type": "string"
+          },
+          "UuidV4": {
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/UuidV4"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "binding_id": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "generation": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "params": {
+            "$ref": "#/$defs/ItemRoundsRequest"
+          },
+          "source_input_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/UuidV4"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "binding_id",
+          "generation",
+          "source_input_id",
+          "attempt_id",
+          "params"
+        ],
+        "title": "AgentRoundsToolRequest",
+        "type": "object"
+      },
+      "name": "item_rounds",
+      "output_schema": "ApplicationEnvelope_QueryResult"
+    },
+    {
+      "inputSchema": {
+        "$defs": {
+          "ApplyRequest": {
+            "additionalProperties": false,
+            "properties": {
+              "attempt_id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "expected_item_revisions": {
+                "$ref": "#/$defs/UniqueMap"
+              },
+              "expected_topic_revisions": {
+                "$ref": "#/$defs/UniqueMap2"
+              },
+              "input_result": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ResultDraft"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "op_id": {
+                "$ref": "#/$defs/UuidV4"
+              },
+              "operations": {
+                "items": {
+                  "$ref": "#/$defs/Operation"
+                },
+                "type": "array"
+              },
+              "source_input_id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "op_id",
+              "source_input_id",
+              "attempt_id",
+              "expected_item_revisions",
+              "expected_topic_revisions",
+              "summary",
+              "operations",
+              "input_result"
+            ],
+            "type": "object"
+          },
+          "EntityRef": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExistingRef"
+              },
+              {
+                "$ref": "#/$defs/LocalRef"
+              }
+            ]
+          },
+          "ExistingRef": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/ItemRef"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "ExistingUuidRef": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/UuidV4"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "ItemLinkTarget": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "$ref": "#/$defs/LinkKind"
+              },
+              "label": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "target"
+            ],
+            "type": "object"
+          },
+          "ItemOption": {
+            "additionalProperties": false,
+            "properties": {
+              "consequence": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "recommended": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "consequence",
+              "recommended"
+            ],
+            "type": "object"
+          },
+          "ItemOwner": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "me",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  },
+                  "kind": {
+                    "const": "agent",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "binding_id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "other",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "ItemPatch": {
+            "additionalProperties": false,
+            "properties": {
+              "links": {
+                "items": {
+                  "$ref": "#/$defs/ItemLinkTarget"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "question": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ItemType"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "question",
+              "type",
+              "links"
+            ],
+            "type": "object"
+          },
+          "ItemRef": {
+            "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])",
+            "type": "string"
+          },
+          "ItemStatus": {
+            "enum": [
+              "open",
+              "waiting_on_me",
+              "in_progress",
+              "decided",
+              "done",
+              "dropped",
+              "replaced"
+            ],
+            "type": "string"
+          },
+          "ItemType": {
+            "enum": [
+              "question",
+              "decision",
+              "finding",
+              "task",
+              "explanation"
+            ],
+            "type": "string"
+          },
+          "LinkKind": {
+            "enum": [
+              "pr",
+              "file",
+              "doc"
+            ],
+            "type": "string"
+          },
+          "LocalRef": {
+            "additionalProperties": false,
+            "properties": {
+              "ref": {
+                "$ref": "#/$defs/RequestRef"
+              }
+            },
+            "required": [
+              "ref"
+            ],
+            "type": "object"
+          },
+          "Operation": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "op": {
+                    "const": "topic.add",
+                    "type": "string"
+                  },
+                  "ref": {
+                    "$ref": "#/$defs/RequestRef"
+                  }
+                },
+                "required": [
+                  "op",
+                  "ref",
+                  "name"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "ask": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "links": {
+                    "items": {
+                      "$ref": "#/$defs/ItemLinkTarget"
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ]
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "op": {
+                    "const": "item.add",
+                    "type": "string"
+                  },
+                  "options": {
+                    "items": {
+                      "$ref": "#/$defs/ItemOption"
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ]
+                  },
+                  "outcome": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "owner": {
+                    "$ref": "#/$defs/ItemOwner"
+                  },
+                  "parent": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/EntityRef"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "question": {
+                    "type": "string"
+                  },
+                  "ref": {
+                    "$ref": "#/$defs/RequestRef"
+                  },
+                  "replaced_by": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/EntityRef"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "source_round_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/UuidV4"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "$ref": "#/$defs/ItemStatus"
+                  },
+                  "topic": {
+                    "$ref": "#/$defs/UuidRef"
+                  },
+                  "type": {
+                    "$ref": "#/$defs/ItemType"
+                  },
+                  "why": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "op",
+                  "ref",
+                  "topic",
+                  "parent",
+                  "question",
+                  "type",
+                  "status",
+                  "owner",
+                  "ask",
+                  "options",
+                  "note",
+                  "links",
+                  "outcome",
+                  "why",
+                  "replaced_by",
+                  "source_round_id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "item": {
+                    "$ref": "#/$defs/EntityRef"
+                  },
+                  "op": {
+                    "const": "item.edit",
+                    "type": "string"
+                  },
+                  "patch": {
+                    "$ref": "#/$defs/ItemPatch"
+                  }
+                },
+                "required": [
+                  "op",
+                  "item",
+                  "patch"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "ask": {
+                    "type": "string"
+                  },
+                  "item": {
+                    "$ref": "#/$defs/EntityRef"
+                  },
+                  "op": {
+                    "const": "item.ask",
+                    "type": "string"
+                  },
+                  "options": {
+                    "items": {
+                      "$ref": "#/$defs/ItemOption"
+                    },
+                    "type": "array"
+                  },
+                  "recipient_binding_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  }
+                },
+                "required": [
+                  "op",
+                  "item",
+                  "ask",
+                  "options",
+                  "recipient_binding_id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "item": {
+                    "$ref": "#/$defs/EntityRef"
+                  },
+                  "op": {
+                    "const": "item.status",
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "$ref": "#/$defs/ItemStatus"
+                  },
+                  "why": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "op",
+                  "item",
+                  "status",
+                  "outcome",
+                  "why",
+                  "reason"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "item": {
+                    "$ref": "#/$defs/EntityRef"
+                  },
+                  "op": {
+                    "const": "item.replace",
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "replacement": {
+                    "$ref": "#/$defs/EntityRef"
+                  },
+                  "why": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "op",
+                  "item",
+                  "replacement",
+                  "outcome",
+                  "why"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "item": {
+                    "$ref": "#/$defs/EntityRef"
+                  },
+                  "op": {
+                    "const": "reply",
+                    "type": "string"
+                  },
+                  "ref": {
+                    "$ref": "#/$defs/RequestRef"
+                  },
+                  "round_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/UuidV4"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "op",
+                  "ref",
+                  "item",
+                  "text",
+                  "round_id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "op": {
+                    "const": "round.close",
+                    "type": "string"
+                  },
+                  "round_id": {
+                    "$ref": "#/$defs/UuidV4"
+                  }
+                },
+                "required": [
+                  "op",
+                  "round_id"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "PositiveSafeInteger": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "RequestRef": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,31}(?![\\s\\S])",
+            "type": "string"
+          },
+          "ResultDraft": {
+            "additionalProperties": false,
+            "properties": {
+              "explanation": {
+                "type": "string"
+              },
+              "followup_item_refs": {
+                "items": {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                "type": "array"
+              },
+              "handled_through_message_number": {
+                "$ref": "#/$defs/PositiveSafeInteger"
+              },
+              "outcome": {
+                "$ref": "#/$defs/ResultOutcome"
+              },
+              "reply_refs": {
+                "items": {
+                  "$ref": "#/$defs/UuidRef"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "outcome",
+              "explanation",
+              "reply_refs",
+              "followup_item_refs",
+              "handled_through_message_number"
+            ],
+            "type": "object"
+          },
+          "ResultOutcome": {
+            "enum": [
+              "answered",
+              "deferred",
+              "unable"
+            ],
+            "type": "string"
+          },
+          "UniqueMap": {
+            "additionalProperties": false,
+            "description": "Deterministically serialized map that rejects duplicate keys on read.",
+            "patternProperties": {
+              "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])": {
+                "$ref": "#/$defs/PositiveSafeInteger"
+              }
+            },
+            "type": "object"
+          },
+          "UniqueMap2": {
+            "additionalProperties": false,
+            "description": "Deterministically serialized map that rejects duplicate keys on read.",
+            "patternProperties": {
+              "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+                "$ref": "#/$defs/PositiveSafeInteger"
+              }
+            },
+            "type": "object"
+          },
+          "UuidRef": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExistingUuidRef"
+              },
+              {
+                "$ref": "#/$defs/LocalRef"
+              }
+            ]
+          },
+          "UuidV4": {
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "generation": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "request": {
+            "$ref": "#/$defs/ApplyRequest"
+          }
+        },
+        "required": [
+          "binding_id",
+          "generation",
+          "request"
+        ],
+        "title": "AgentApplyToolRequest",
+        "type": "object"
+      },
+      "name": "apply",
+      "output_schema": "ApplicationEnvelope_SavedReceipt"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProjectRegisterParams",
+  "type": "object",
+  "properties": {
+    "canonical_root": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "canonical_root"
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TopicContinueParams",
+  "type": "object",
+  "properties": {
+    "source": {
+      "$ref": "#/$defs/SessionRef"
+    },
+    "source_revision": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "source_sha256": {
+      "$ref": "#/$defs/Sha256"
+    },
+    "source_topic_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/SessionRef"
+    },
+    "target_binding_id": {
+      "$ref": "#/$defs/UuidV4"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "source",
+    "source_topic_id",
+    "source_revision",
+    "source_sha256",
+    "target",
+    "target_binding_id",
+    "summary"
+  ],
+  "$defs": {
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "SessionRef": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id"
+      ]
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

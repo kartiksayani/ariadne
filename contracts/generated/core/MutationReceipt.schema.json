@@ -1,0 +1,785 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MutationReceipt",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/SavedReceipt"
+    },
+    {
+      "$ref": "#/$defs/ProjectRegisteredReceipt"
+    },
+    {
+      "$ref": "#/$defs/PreferencesPatchedReceipt"
+    }
+  ],
+  "$defs": {
+    "AllocatedRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "topic"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/ItemRef"
+            },
+            "kind": {
+              "type": "string",
+              "const": "item"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "message"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "round"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        }
+      ]
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "deferred_delivery": {
+          "$ref": "#/$defs/Capability"
+        },
+        "delivery_mode": {
+          "$ref": "#/$defs/DeliveryMode"
+        },
+        "discover_sessions": {
+          "$ref": "#/$defs/Capability"
+        },
+        "domain_cli": {
+          "$ref": "#/$defs/Capability"
+        },
+        "domain_mcp": {
+          "$ref": "#/$defs/Capability"
+        },
+        "existing_session": {
+          "$ref": "#/$defs/Capability"
+        },
+        "final_text_read": {
+          "$ref": "#/$defs/Capability"
+        },
+        "history_reconcile": {
+          "$ref": "#/$defs/Capability"
+        },
+        "streaming_output": {
+          "$ref": "#/$defs/Capability"
+        },
+        "turn_completion": {
+          "$ref": "#/$defs/Capability"
+        },
+        "turn_correlation": {
+          "$ref": "#/$defs/Capability"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "existing_session",
+        "deferred_delivery",
+        "turn_correlation",
+        "turn_completion",
+        "domain_cli",
+        "domain_mcp",
+        "history_reconcile",
+        "streaming_output",
+        "final_text_read",
+        "discover_sessions",
+        "delivery_mode"
+      ]
+    },
+    "Capability": {
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supported": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "supported",
+        "conditions"
+      ]
+    },
+    "ConnectionState": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "disconnected",
+        "reconnecting",
+        "unknown"
+      ]
+    },
+    "ContinuationReceipt": {
+      "type": "object",
+      "properties": {
+        "answer_id_map": {
+          "$ref": "#/$defs/UniqueMap5"
+        },
+        "confirmed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "item_id_map": {
+          "$ref": "#/$defs/UniqueMap4"
+        },
+        "message_id_map": {
+          "$ref": "#/$defs/UniqueMap5"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "round_id_map": {
+          "$ref": "#/$defs/UniqueMap5"
+        },
+        "source_project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "source_session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "source_topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "target_input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "target_topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "source_project_id",
+        "source_session_id",
+        "source_topic_id",
+        "source_revision",
+        "source_sha256",
+        "target_topic_id",
+        "target_input_id",
+        "item_id_map",
+        "message_id_map",
+        "round_id_map",
+        "answer_id_map",
+        "summary",
+        "confirmed_at"
+      ]
+    },
+    "DeliveryMode": {
+      "type": "string",
+      "enum": [
+        "pull",
+        "push"
+      ]
+    },
+    "DispatchState": {
+      "type": "string",
+      "enum": [
+        "enabled",
+        "paused",
+        "recovery_required",
+        "disconnected"
+      ]
+    },
+    "InputState": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "in_flight",
+        "handled",
+        "cancelled",
+        "needs_attention",
+        "skipped"
+      ]
+    },
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "MessageIdentity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "number": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "number"
+      ]
+    },
+    "PauseReason": {
+      "type": "string",
+      "enum": [
+        "result_missing",
+        "uncertain",
+        "host_failure",
+        "store_error",
+        "incompatible"
+      ]
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "PreferencesPatchedReceipt": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "preferences_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "preferences_revision"
+      ]
+    },
+    "ProjectRegisteredReceipt": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "registry_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "project_id",
+        "registry_revision"
+      ]
+    },
+    "ResolutionKind": {
+      "type": "string",
+      "enum": [
+        "retry_unexecuted",
+        "resend",
+        "skip",
+        "request_result_repair",
+        "confirm_evidence"
+      ]
+    },
+    "ResultState": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "committed",
+        "missing"
+      ]
+    },
+    "SavedReceipt": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SavedReceiptData"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "session_id",
+        "revision",
+        "data"
+      ]
+    },
+    "SavedReceiptData": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "answer_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_seq": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input_submit"
+            },
+            "message_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "message_number": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "message_id",
+            "message_number",
+            "answer_id",
+            "input_seq"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input_cancel"
+            },
+            "state": {
+              "$ref": "#/$defs/InputState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input_resolve"
+            },
+            "resolution_kind": {
+              "$ref": "#/$defs/ResolutionKind"
+            },
+            "state": {
+              "$ref": "#/$defs/InputState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "attempt_id",
+            "resolution_kind",
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "archived_at": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UtcMillis"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "topic_lifecycle"
+            },
+            "topic_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "topic_revision": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topic_id",
+            "topic_revision",
+            "archived_at"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "closed_at": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UtcMillis"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "session_lifecycle"
+            },
+            "state": {
+              "$ref": "#/$defs/SessionState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "state",
+            "closed_at"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "capabilities": {
+              "$ref": "#/$defs/Capabilities"
+            },
+            "generation": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "binding_connect"
+            },
+            "setup_instruction": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "binding_id",
+            "generation",
+            "capabilities",
+            "setup_instruction"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "connection_state": {
+              "$ref": "#/$defs/ConnectionState"
+            },
+            "dispatch_state": {
+              "$ref": "#/$defs/DispatchState"
+            },
+            "generation": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "binding_state"
+            },
+            "owner_paused": {
+              "type": "boolean"
+            },
+            "pause_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PauseReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "binding_id",
+            "generation",
+            "dispatch_state",
+            "owner_paused",
+            "pause_reason",
+            "connection_state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "allocated_refs": {
+              "$ref": "#/$defs/UniqueMap"
+            },
+            "input_result_state": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ResultState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "item_revisions": {
+              "$ref": "#/$defs/UniqueMap2"
+            },
+            "kind": {
+              "type": "string",
+              "const": "apply"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/MessageIdentity"
+              }
+            },
+            "queue_join_state": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InputState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "topic_revisions": {
+              "$ref": "#/$defs/UniqueMap3"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "allocated_refs",
+            "messages",
+            "item_revisions",
+            "topic_revisions",
+            "input_result_state",
+            "queue_join_state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "durable_effect": {
+              "type": "boolean"
+            },
+            "event_id": {
+              "type": "string"
+            },
+            "input_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "event"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "input_id",
+            "attempt_id",
+            "durable_effect"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "continuation": {
+              "$ref": "#/$defs/ContinuationReceipt"
+            },
+            "kind": {
+              "type": "string",
+              "const": "continuation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "continuation"
+          ]
+        }
+      ]
+    },
+    "SessionState": {
+      "type": "string",
+      "enum": [
+        "active",
+        "closed"
+      ]
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "UniqueMap": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[A-Za-z][A-Za-z0-9_]{0,31}(?![\\s\\S])": {
+          "$ref": "#/$defs/AllocatedRef"
+        }
+      }
+    },
+    "UniqueMap2": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      }
+    },
+    "UniqueMap3": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      }
+    },
+    "UniqueMap4": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])": {
+          "$ref": "#/$defs/ItemRef"
+        }
+      }
+    },
+    "UniqueMap5": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      }
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

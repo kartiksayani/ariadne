@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use ts_rs::TS;
 
 pub mod codex_wire;
+pub mod core_models;
 pub mod domain_models;
 pub mod protocol_models;
 
@@ -69,6 +70,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
     add::<RequestRef>(&mut files)?;
     files.extend(domain_models::artifacts()?);
     files.extend(protocol_models::artifacts()?);
+    files.extend(core_models::artifacts()?);
     Ok(files)
 }
 
@@ -81,6 +83,8 @@ pub fn generate(root: &Path, check: bool) -> Result<(), String> {
         domain_models::TYPES,
         protocol_models::SCHEMAS,
         protocol_models::TYPES,
+        core_models::SCHEMAS,
+        core_models::TYPES,
     ] {
         let target = root.join(directory);
         let mut ancestor = target.as_path();

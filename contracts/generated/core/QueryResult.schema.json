@@ -1,0 +1,4900 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "QueryResult",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ProjectListResult"
+        },
+        "kind": {
+          "type": "string",
+          "const": "project_list"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SessionListResult"
+        },
+        "kind": {
+          "type": "string",
+          "const": "session_list"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SessionSnapshot"
+        },
+        "kind": {
+          "type": "string",
+          "const": "session_get"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SessionReadResult"
+        },
+        "kind": {
+          "type": "string",
+          "const": "session_read"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ItemMessagesProjection"
+        },
+        "kind": {
+          "type": "string",
+          "const": "item_messages"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ItemRoundsProjection"
+        },
+        "kind": {
+          "type": "string",
+          "const": "item_rounds"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ContinuePreview"
+        },
+        "kind": {
+          "type": "string",
+          "const": "topic_continue_preview"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/PreferencesSnapshot"
+        },
+        "kind": {
+          "type": "string",
+          "const": "preferences_get"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ItemRoute"
+        },
+        "kind": {
+          "type": "string",
+          "const": "reveal_item"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    }
+  ],
+  "$defs": {
+    "AcceptanceState": {
+      "type": "string",
+      "enum": [
+        "prepared",
+        "accepted",
+        "rejected",
+        "uncertain"
+      ]
+    },
+    "AdapterConfig": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/UniqueMap5"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "values"
+      ]
+    },
+    "AllocatedRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "topic"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/ItemRef"
+            },
+            "kind": {
+              "type": "string",
+              "const": "item"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "message"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "round"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        }
+      ]
+    },
+    "Answer": {
+      "type": "object",
+      "properties": {
+        "ask_snapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "options_snapshot": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "question_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "question_snapshot": {
+          "type": "string"
+        },
+        "selected_option_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "seq": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "supersedes_answer_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "seq",
+        "item_id",
+        "question_revision",
+        "question_snapshot",
+        "ask_snapshot",
+        "options_snapshot",
+        "selected_option_id",
+        "text",
+        "message_id",
+        "input_id",
+        "supersedes_answer_id",
+        "created_at"
+      ]
+    },
+    "Attempt": {
+      "type": "object",
+      "properties": {
+        "acceptance": {
+          "$ref": "#/$defs/AcceptanceState"
+        },
+        "acceptance_observed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acceptance_receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "binding_generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "claim_request_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "domain_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DomainResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttemptError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "formatted_payload": {
+          "type": "string"
+        },
+        "host_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "prepared_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "purpose": {
+          "$ref": "#/$defs/AttemptPurpose"
+        },
+        "reconciliation_checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Checkpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repair_for_attempt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result_state": {
+          "$ref": "#/$defs/ResultState"
+        },
+        "sealed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_observed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_state": {
+          "$ref": "#/$defs/TurnState"
+        },
+        "wire_marker": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "purpose",
+        "repair_for_attempt_id",
+        "claim_request_id",
+        "binding_generation",
+        "prepared_at",
+        "formatted_payload",
+        "payload_sha256",
+        "wire_marker",
+        "acceptance",
+        "acceptance_receipt",
+        "acceptance_observed_at",
+        "host_turn_id",
+        "turn_state",
+        "turn_observed_at",
+        "domain_result",
+        "result_state",
+        "sealed_at",
+        "error",
+        "reconciliation_checkpoint"
+      ]
+    },
+    "AttemptError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "reason",
+        "retryable",
+        "observed_at"
+      ]
+    },
+    "AttemptPurpose": {
+      "type": "string",
+      "enum": [
+        "work",
+        "result_repair"
+      ]
+    },
+    "Binding": {
+      "type": "object",
+      "properties": {
+        "active_input_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "adapter_config": {
+          "$ref": "#/$defs/AdapterConfig"
+        },
+        "adapter_id": {
+          "type": "string"
+        },
+        "adapter_version": {
+          "type": "string"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "config_version": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "connection_state": {
+          "$ref": "#/$defs/ConnectionState"
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "dispatch_state": {
+          "$ref": "#/$defs/DispatchState"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/EndpointRef"
+        },
+        "endpoint_fingerprint": {
+          "type": "string"
+        },
+        "external_session_id": {
+          "type": "string"
+        },
+        "generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "issued_through_message_number": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "owner_paused": {
+          "type": "boolean"
+        },
+        "pause_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PauseReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "protocol_major": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "adapter_id",
+        "adapter_version",
+        "protocol_major",
+        "config_version",
+        "external_session_id",
+        "endpoint",
+        "endpoint_fingerprint",
+        "generation",
+        "created_at",
+        "dispatch_state",
+        "owner_paused",
+        "pause_reason",
+        "connection_state",
+        "capabilities",
+        "active_input_id",
+        "issued_through_message_number",
+        "adapter_config"
+      ]
+    },
+    "BindingSummary": {
+      "type": "object",
+      "properties": {
+        "adapter_id": {
+          "type": "string"
+        },
+        "connection_state": {
+          "$ref": "#/$defs/ConnectionState"
+        },
+        "dispatch_state": {
+          "$ref": "#/$defs/DispatchState"
+        },
+        "external_session_id": {
+          "type": "string"
+        },
+        "generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "owner_paused": {
+          "type": "boolean"
+        },
+        "pause_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PauseReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "presence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PresenceObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "adapter_id",
+        "external_session_id",
+        "generation",
+        "dispatch_state",
+        "owner_paused",
+        "pause_reason",
+        "connection_state",
+        "presence"
+      ]
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "deferred_delivery": {
+          "$ref": "#/$defs/Capability"
+        },
+        "delivery_mode": {
+          "$ref": "#/$defs/DeliveryMode"
+        },
+        "discover_sessions": {
+          "$ref": "#/$defs/Capability"
+        },
+        "domain_cli": {
+          "$ref": "#/$defs/Capability"
+        },
+        "domain_mcp": {
+          "$ref": "#/$defs/Capability"
+        },
+        "existing_session": {
+          "$ref": "#/$defs/Capability"
+        },
+        "final_text_read": {
+          "$ref": "#/$defs/Capability"
+        },
+        "history_reconcile": {
+          "$ref": "#/$defs/Capability"
+        },
+        "streaming_output": {
+          "$ref": "#/$defs/Capability"
+        },
+        "turn_completion": {
+          "$ref": "#/$defs/Capability"
+        },
+        "turn_correlation": {
+          "$ref": "#/$defs/Capability"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "existing_session",
+        "deferred_delivery",
+        "turn_correlation",
+        "turn_completion",
+        "domain_cli",
+        "domain_mcp",
+        "history_reconcile",
+        "streaming_output",
+        "final_text_read",
+        "discover_sessions",
+        "delivery_mode"
+      ]
+    },
+    "Capability": {
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supported": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "supported",
+        "conditions"
+      ]
+    },
+    "Checkpoint": {
+      "description": "At most 4096 UTF-8 bytes; maxLength only bounds Unicode characters.",
+      "type": "string",
+      "maxLength": 4096
+    },
+    "Completeness": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "partial"
+      ]
+    },
+    "ConnectionState": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "disconnected",
+        "reconnecting",
+        "unknown"
+      ]
+    },
+    "ContinuationReceipt": {
+      "type": "object",
+      "properties": {
+        "answer_id_map": {
+          "$ref": "#/$defs/UniqueMap12"
+        },
+        "confirmed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "item_id_map": {
+          "$ref": "#/$defs/UniqueMap11"
+        },
+        "message_id_map": {
+          "$ref": "#/$defs/UniqueMap12"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "round_id_map": {
+          "$ref": "#/$defs/UniqueMap12"
+        },
+        "source_project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "source_session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "source_topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "target_input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "target_topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "source_project_id",
+        "source_session_id",
+        "source_topic_id",
+        "source_revision",
+        "source_sha256",
+        "target_topic_id",
+        "target_input_id",
+        "item_id_map",
+        "message_id_map",
+        "round_id_map",
+        "answer_id_map",
+        "summary",
+        "confirmed_at"
+      ]
+    },
+    "ContinueBlockReason": {
+      "type": "string",
+      "enum": [
+        "same_session",
+        "target_closed",
+        "binding_unknown",
+        "binding_ambiguous",
+        "binding_invalid",
+        "target_unavailable"
+      ]
+    },
+    "ContinueCopyAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "copy"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "external_replacement_id": {
+              "$ref": "#/$defs/ItemRef"
+            },
+            "kind": {
+              "type": "string",
+              "const": "imported_drop"
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "external_replacement_id",
+            "outcome",
+            "why"
+          ]
+        }
+      ]
+    },
+    "ContinueItemPreview": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/ContinueCopyAction"
+        },
+        "source_item_id": {
+          "$ref": "#/$defs/ItemRef"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source_item_id",
+        "action"
+      ]
+    },
+    "ContinuePreview": {
+      "type": "object",
+      "properties": {
+        "mapping": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContinueItemPreview"
+          }
+        },
+        "readiness": {
+          "$ref": "#/$defs/ContinueReadiness"
+        },
+        "source": {
+          "$ref": "#/$defs/SessionRef"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "source_topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/SessionRef"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "source_topic_id",
+        "source_revision",
+        "source_sha256",
+        "target",
+        "summary",
+        "mapping",
+        "readiness"
+      ]
+    },
+    "ContinueReadiness": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "generation": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "host_available": {
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "const": "ready"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "binding_id",
+            "generation",
+            "host_available"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "blocked"
+            },
+            "reasons": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContinueBlockReason"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "reasons"
+          ]
+        }
+      ]
+    },
+    "CursorPosition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "sequence"
+            },
+            "number": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "number",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "topic"
+            },
+            "order": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "order",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/ItemRef"
+            },
+            "kind": {
+              "type": "string",
+              "const": "item"
+            },
+            "ordinals": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PositiveSafeInteger"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ordinals",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "round"
+            },
+            "ordinal": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ordinal",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "canonical_root": {
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "project"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "canonical_root",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "session"
+            },
+            "project_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "updated_at": {
+              "$ref": "#/$defs/UtcMillis"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "updated_at",
+            "project_id",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/NonnegativeSafeInteger"
+            },
+            "kind": {
+              "type": "string",
+              "const": "history"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "index"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "attempt_ordinal": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_seq": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            "kind": {
+              "type": "string",
+              "const": "result"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_seq",
+            "attempt_ordinal",
+            "input_id",
+            "attempt_id"
+          ]
+        }
+      ]
+    },
+    "DeliveryMode": {
+      "type": "string",
+      "enum": [
+        "pull",
+        "push"
+      ]
+    },
+    "DispatchState": {
+      "type": "string",
+      "enum": [
+        "enabled",
+        "paused",
+        "recovery_required",
+        "disconnected"
+      ]
+    },
+    "DomainResult": {
+      "type": "object",
+      "properties": {
+        "committed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "committed_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "followup_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "handled_through_message_number": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ResultOutcome"
+        },
+        "reply_message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "outcome",
+        "explanation",
+        "reply_message_ids",
+        "followup_item_ids",
+        "handled_through_message_number",
+        "committed_revision",
+        "committed_at"
+      ]
+    },
+    "EndpointRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unix_socket"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "local_bridge"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        }
+      ]
+    },
+    "ExecutionState": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "running",
+        "waiting_for_approval",
+        "unknown"
+      ]
+    },
+    "Freshness": {
+      "type": "string",
+      "enum": [
+        "fresh",
+        "stale",
+        "historical",
+        "unknown"
+      ]
+    },
+    "GlobalPreferences": {
+      "type": "object",
+      "properties": {
+        "notification_watermark": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "theme": {
+          "$ref": "#/$defs/Theme"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WindowGeometry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "theme",
+        "window",
+        "pinned",
+        "notification_watermark"
+      ]
+    },
+    "HostReceipt": {
+      "type": "object",
+      "properties": {
+        "observed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "provider_reference": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider_reference",
+        "observed_at"
+      ]
+    },
+    "Input": {
+      "type": "object",
+      "properties": {
+        "active_attempt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "answer_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Attempt"
+          }
+        },
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "expected_question_revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "kind": {
+          "$ref": "#/$defs/InputKind"
+        },
+        "message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "payload": {
+          "$ref": "#/$defs/InputPayload"
+        },
+        "resolution_history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResolutionHistoryEntry"
+          }
+        },
+        "seq": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "state": {
+          "$ref": "#/$defs/InputState"
+        },
+        "target": {
+          "$ref": "#/$defs/InputTarget"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "seq",
+        "binding_id",
+        "kind",
+        "target",
+        "message_id",
+        "answer_id",
+        "created_at",
+        "expected_question_revision",
+        "payload",
+        "state",
+        "attempts",
+        "active_attempt_id",
+        "resolution_history"
+      ]
+    },
+    "InputContext": {
+      "type": "object",
+      "properties": {
+        "continuation_operation_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "message_ids",
+        "item_ids",
+        "round_id",
+        "continuation_operation_id"
+      ]
+    },
+    "InputKind": {
+      "type": "string",
+      "enum": [
+        "answer",
+        "bring",
+        "reply",
+        "note",
+        "followup",
+        "reopen",
+        "drop",
+        "continue"
+      ]
+    },
+    "InputPayload": {
+      "type": "object",
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/InputContext"
+        },
+        "intent": {
+          "$ref": "#/$defs/InputKind"
+        },
+        "selected_option_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_snapshot": {
+          "$ref": "#/$defs/InputTargetSnapshot"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "intent",
+        "target_snapshot",
+        "selected_option_id",
+        "context"
+      ]
+    },
+    "InputQueueEntry": {
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "seq": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "state": {
+          "$ref": "#/$defs/InputState"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "seq",
+        "binding_id",
+        "state"
+      ]
+    },
+    "InputState": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "in_flight",
+        "handled",
+        "cancelled",
+        "needs_attention",
+        "skipped"
+      ]
+    },
+    "InputTarget": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "item_id"
+      ]
+    },
+    "InputTargetSnapshot": {
+      "type": "object",
+      "properties": {
+        "ask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "item_question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "question_revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topic_name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_name",
+        "item_question",
+        "question_revision",
+        "ask",
+        "options"
+      ]
+    },
+    "Item": {
+      "type": "object",
+      "properties": {
+        "ask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "created_message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "current_round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemLinkTarget"
+          }
+        },
+        "next_child": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "ordinal": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "$ref": "#/$defs/ItemOwner"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "question_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "recipient_binding_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replaced_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "source_round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ItemStatus"
+        },
+        "status_history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StatusHistoryEntry"
+          }
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "type": {
+          "$ref": "#/$defs/ItemType"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "updated_message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "waiting_since": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ordinal",
+        "topic_id",
+        "parent",
+        "question",
+        "type",
+        "status",
+        "owner",
+        "revision",
+        "question_revision",
+        "next_child",
+        "ask",
+        "note",
+        "options",
+        "links",
+        "outcome",
+        "why",
+        "replaced_by",
+        "created_at",
+        "updated_at",
+        "created_message_id",
+        "updated_message_ids",
+        "status_history",
+        "waiting_since",
+        "recipient_binding_id",
+        "current_round_id",
+        "source_round_id",
+        "origin"
+      ]
+    },
+    "ItemLink": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "question": {
+          "type": "string"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "status": {
+          "$ref": "#/$defs/ItemStatus"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "item_id",
+        "question",
+        "status"
+      ]
+    },
+    "ItemLinkTarget": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/LinkKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "label",
+        "target"
+      ]
+    },
+    "ItemMessagesProjection": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "messages": {
+          "$ref": "#/$defs/Page_Message"
+        },
+        "timeline_context": {
+          "$ref": "#/$defs/TimelineContext"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "messages",
+        "timeline_context"
+      ]
+    },
+    "ItemOption": {
+      "type": "object",
+      "properties": {
+        "consequence": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "recommended": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "consequence",
+        "recommended"
+      ]
+    },
+    "ItemOrigin": {
+      "type": "object",
+      "properties": {
+        "entity_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "topic_id",
+        "entity_id",
+        "source_revision"
+      ]
+    },
+    "ItemOwner": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "me"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "agent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "binding_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "other"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        }
+      ]
+    },
+    "ItemReadProjection": {
+      "type": "object",
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/ItemSnapshot"
+        },
+        "status_history": {
+          "$ref": "#/$defs/Page_StatusHistoryEntry"
+        },
+        "updated_messages": {
+          "$ref": "#/$defs/Page_Message"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item",
+        "updated_messages",
+        "status_history"
+      ]
+    },
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "ItemRoundsProjection": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "rounds": {
+          "$ref": "#/$defs/Page_RoundProjection"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "rounds"
+      ]
+    },
+    "ItemRoute": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "item_id"
+      ]
+    },
+    "ItemSnapshot": {
+      "description": "All current item fields except unbounded updated-message and status-history arrays.",
+      "type": "object",
+      "properties": {
+        "ask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "created_message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "current_round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemLinkTarget"
+          }
+        },
+        "next_child": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "ordinal": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "$ref": "#/$defs/ItemOwner"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "question_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "recipient_binding_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replaced_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "source_round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ItemStatus"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "type": {
+          "$ref": "#/$defs/ItemType"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "waiting_since": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ordinal",
+        "topic_id",
+        "parent",
+        "question",
+        "type",
+        "status",
+        "owner",
+        "revision",
+        "question_revision",
+        "next_child",
+        "ask",
+        "note",
+        "options",
+        "links",
+        "outcome",
+        "why",
+        "replaced_by",
+        "created_at",
+        "updated_at",
+        "created_message_id",
+        "waiting_since",
+        "recipient_binding_id",
+        "current_round_id",
+        "source_round_id",
+        "origin"
+      ]
+    },
+    "ItemStatus": {
+      "type": "string",
+      "enum": [
+        "open",
+        "waiting_on_me",
+        "in_progress",
+        "decided",
+        "done",
+        "dropped",
+        "replaced"
+      ]
+    },
+    "ItemType": {
+      "type": "string",
+      "enum": [
+        "question",
+        "decision",
+        "finding",
+        "task",
+        "explanation"
+      ]
+    },
+    "ItemsByStatus": {
+      "type": "object",
+      "properties": {
+        "decided": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "done": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "dropped": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "in_progress": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "open": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "replaced": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "waiting_on_me": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "open",
+        "waiting_on_me",
+        "in_progress",
+        "decided",
+        "done",
+        "dropped",
+        "replaced"
+      ]
+    },
+    "LinkKind": {
+      "type": "string",
+      "enum": [
+        "pr",
+        "file",
+        "doc"
+      ]
+    },
+    "Message": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "author": {
+          "$ref": "#/$defs/MessageAuthor"
+        },
+        "binding_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "host_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "input_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items_touched": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "kind": {
+          "$ref": "#/$defs/MessageKind"
+        },
+        "number": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MessageOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topic_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "number",
+        "author",
+        "kind",
+        "body",
+        "created_at",
+        "item_id",
+        "topic_id",
+        "items_touched",
+        "binding_id",
+        "input_id",
+        "attempt_id",
+        "host_turn_id",
+        "round_id",
+        "origin"
+      ]
+    },
+    "MessageAuthor": {
+      "type": "string",
+      "enum": [
+        "owner",
+        "agent",
+        "system"
+      ]
+    },
+    "MessageIdentity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "number": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "number"
+      ]
+    },
+    "MessageKind": {
+      "type": "string",
+      "enum": [
+        "owner_input",
+        "reply",
+        "activity",
+        "lifecycle"
+      ]
+    },
+    "MessageOrigin": {
+      "type": "object",
+      "properties": {
+        "adapter_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "author": {
+          "$ref": "#/$defs/MessageAuthor"
+        },
+        "binding_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entity_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "external_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "topic_id",
+        "entity_id",
+        "source_revision",
+        "author",
+        "binding_id",
+        "adapter_id",
+        "external_session_id"
+      ]
+    },
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "OperationReceipt": {
+      "type": "object",
+      "properties": {
+        "actor_scope": {
+          "$ref": "#/$defs/ReceiptActorScope"
+        },
+        "command_digest": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "result": {
+          "$ref": "#/$defs/SavedReceipt"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "actor_scope",
+        "command_digest",
+        "result"
+      ]
+    },
+    "OwnerDraft": {
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "intent": {
+          "$ref": "#/$defs/InputKind"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "question_revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selected_option_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session": {
+          "$ref": "#/$defs/SessionRef"
+        },
+        "supersedes_answer_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/InputTarget"
+        },
+        "target_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "op_id",
+        "session",
+        "binding_id",
+        "target",
+        "intent",
+        "text",
+        "selected_option_id",
+        "target_revision",
+        "question_revision",
+        "supersedes_answer_id"
+      ]
+    },
+    "OwnerEvidenceSource": {
+      "type": "string",
+      "enum": [
+        "owner_attestation"
+      ]
+    },
+    "OwnerResolutionEvidence": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "host_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner_attested_idle": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/OwnerEvidenceSource"
+        },
+        "turn_state": {
+          "$ref": "#/$defs/TurnState"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "turn_state",
+        "host_turn_id",
+        "owner_attested_idle",
+        "at"
+      ]
+    },
+    "Page_Answer": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Answer"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_Input": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Input"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_InputQueueEntry": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InputQueueEntry"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_ItemLink": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemLink"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_ItemReadProjection": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemReadProjection"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_Message": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_ProjectSummary": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProjectSummary"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_ResultProjection": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResultProjection"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_RoundProjection": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RoundProjection"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_SessionSummary": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_StatusHistoryEntry": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StatusHistoryEntry"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_Topic": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Topic"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "PauseReason": {
+      "type": "string",
+      "enum": [
+        "result_missing",
+        "uncertain",
+        "host_failure",
+        "store_error",
+        "incompatible"
+      ]
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "PreferencesSnapshot": {
+      "type": "object",
+      "properties": {
+        "drafts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnerDraft"
+          }
+        },
+        "global": {
+          "$ref": "#/$defs/GlobalPreferences"
+        },
+        "later": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRoute"
+          }
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "schema_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionPreferences"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "revision",
+        "global",
+        "sessions",
+        "later",
+        "drafts"
+      ]
+    },
+    "PresenceObservation": {
+      "type": "object",
+      "properties": {
+        "connection_state": {
+          "$ref": "#/$defs/ConnectionState"
+        },
+        "execution_state": {
+          "$ref": "#/$defs/ExecutionState"
+        },
+        "freshness": {
+          "$ref": "#/$defs/Freshness"
+        },
+        "generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "instance_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "last_seen_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "process_identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcessIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PresenceSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "instance_id",
+        "generation",
+        "connection_state",
+        "execution_state",
+        "last_seen_at",
+        "source",
+        "process_identity",
+        "freshness"
+      ]
+    },
+    "PresenceSource": {
+      "type": "string",
+      "enum": [
+        "bridge_heartbeat",
+        "host_poll",
+        "host_event",
+        "process_hint"
+      ]
+    },
+    "ProcessIdentity": {
+      "type": "object",
+      "properties": {
+        "pid": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "started_at": {
+          "$ref": "#/$defs/UtcMillis"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "pid",
+        "started_at"
+      ]
+    },
+    "Project": {
+      "type": "object",
+      "properties": {
+        "display_name": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "schema_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "id",
+        "display_name"
+      ]
+    },
+    "ProjectAvailability": {
+      "type": "string",
+      "enum": [
+        "available",
+        "unavailable"
+      ]
+    },
+    "ProjectListResult": {
+      "type": "object",
+      "properties": {
+        "counts": {
+          "$ref": "#/$defs/SummaryCounts"
+        },
+        "projects": {
+          "$ref": "#/$defs/Page_ProjectSummary"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "projects",
+        "counts"
+      ]
+    },
+    "ProjectSummary": {
+      "type": "object",
+      "properties": {
+        "availability": {
+          "$ref": "#/$defs/ProjectAvailability"
+        },
+        "canonical_root": {
+          "type": "string"
+        },
+        "counts": {
+          "$ref": "#/$defs/SummaryCounts"
+        },
+        "project": {
+          "$ref": "#/$defs/Project"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project",
+        "canonical_root",
+        "availability",
+        "counts"
+      ]
+    },
+    "QueryCursor": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CursorPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "filter_digest": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "view": {
+          "$ref": "#/$defs/QueryView"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "view",
+        "filter_digest",
+        "after",
+        "revision"
+      ]
+    },
+    "QueryView": {
+      "type": "string",
+      "enum": [
+        "projects",
+        "sessions",
+        "topics",
+        "items",
+        "messages",
+        "inputs",
+        "item_messages",
+        "item_rounds",
+        "round_answers",
+        "round_owner_messages",
+        "round_agent_messages",
+        "round_results",
+        "round_forks",
+        "item_status_history",
+        "item_updated_messages"
+      ]
+    },
+    "RailView": {
+      "type": "string",
+      "enum": [
+        "waiting",
+        "sent",
+        "activity",
+        "hidden"
+      ]
+    },
+    "ReceiptActorScope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "owner"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "agent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "binding_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "adapter"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "binding_id"
+          ]
+        }
+      ]
+    },
+    "ResolutionHistoryEntry": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerResolutionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/ResolutionKind"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "op_id",
+        "kind",
+        "reason",
+        "at",
+        "attempt_id",
+        "evidence"
+      ]
+    },
+    "ResolutionKind": {
+      "type": "string",
+      "enum": [
+        "retry_unexecuted",
+        "resend",
+        "skip",
+        "request_result_repair",
+        "confirm_evidence"
+      ]
+    },
+    "ResultOutcome": {
+      "type": "string",
+      "enum": [
+        "answered",
+        "deferred",
+        "unable"
+      ]
+    },
+    "ResultProjection": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "result": {
+          "$ref": "#/$defs/DomainResult"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "input_id",
+        "attempt_id",
+        "result"
+      ]
+    },
+    "ResultState": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "committed",
+        "missing"
+      ]
+    },
+    "Round": {
+      "type": "object",
+      "properties": {
+        "agent_message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "ask_snapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "closed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fork_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "opened_message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "options_snapshot": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "ordinal": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoundOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner_message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "question_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "question_snapshot": {
+          "type": "string"
+        },
+        "result_input_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "item_id",
+        "ordinal",
+        "opened_message_id",
+        "question_snapshot",
+        "ask_snapshot",
+        "options_snapshot",
+        "question_revision",
+        "owner_message_ids",
+        "agent_message_ids",
+        "result_input_ids",
+        "fork_item_ids",
+        "closed_at",
+        "origin"
+      ]
+    },
+    "RoundOrigin": {
+      "type": "object",
+      "properties": {
+        "entity_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "topic_id",
+        "entity_id",
+        "source_revision"
+      ]
+    },
+    "RoundProjection": {
+      "type": "object",
+      "properties": {
+        "agent_messages": {
+          "$ref": "#/$defs/Page_Message"
+        },
+        "answers": {
+          "$ref": "#/$defs/Page_Answer"
+        },
+        "forks": {
+          "$ref": "#/$defs/Page_ItemLink"
+        },
+        "owner_messages": {
+          "$ref": "#/$defs/Page_Message"
+        },
+        "results": {
+          "$ref": "#/$defs/Page_ResultProjection"
+        },
+        "round": {
+          "$ref": "#/$defs/RoundSnapshot"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "round",
+        "answers",
+        "owner_messages",
+        "agent_messages",
+        "results",
+        "forks"
+      ]
+    },
+    "RoundSnapshot": {
+      "description": "Frozen round fields; each historical list has an independent page below.",
+      "type": "object",
+      "properties": {
+        "ask_snapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "closed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "opened_message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "options_snapshot": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "ordinal": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoundOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "question_snapshot": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "item_id",
+        "ordinal",
+        "opened_message_id",
+        "question_snapshot",
+        "ask_snapshot",
+        "options_snapshot",
+        "question_revision",
+        "closed_at",
+        "origin"
+      ]
+    },
+    "SavedReceipt": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SavedReceiptData"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "session_id",
+        "revision",
+        "data"
+      ]
+    },
+    "SavedReceiptData": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "answer_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_seq": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input_submit"
+            },
+            "message_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "message_number": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "message_id",
+            "message_number",
+            "answer_id",
+            "input_seq"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input_cancel"
+            },
+            "state": {
+              "$ref": "#/$defs/InputState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input_resolve"
+            },
+            "resolution_kind": {
+              "$ref": "#/$defs/ResolutionKind"
+            },
+            "state": {
+              "$ref": "#/$defs/InputState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "attempt_id",
+            "resolution_kind",
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "archived_at": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UtcMillis"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "topic_lifecycle"
+            },
+            "topic_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "topic_revision": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topic_id",
+            "topic_revision",
+            "archived_at"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "closed_at": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UtcMillis"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "session_lifecycle"
+            },
+            "state": {
+              "$ref": "#/$defs/SessionState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "state",
+            "closed_at"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "capabilities": {
+              "$ref": "#/$defs/Capabilities"
+            },
+            "generation": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "binding_connect"
+            },
+            "setup_instruction": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "binding_id",
+            "generation",
+            "capabilities",
+            "setup_instruction"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "connection_state": {
+              "$ref": "#/$defs/ConnectionState"
+            },
+            "dispatch_state": {
+              "$ref": "#/$defs/DispatchState"
+            },
+            "generation": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "binding_state"
+            },
+            "owner_paused": {
+              "type": "boolean"
+            },
+            "pause_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PauseReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "binding_id",
+            "generation",
+            "dispatch_state",
+            "owner_paused",
+            "pause_reason",
+            "connection_state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "allocated_refs": {
+              "$ref": "#/$defs/UniqueMap8"
+            },
+            "input_result_state": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ResultState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "item_revisions": {
+              "$ref": "#/$defs/UniqueMap9"
+            },
+            "kind": {
+              "type": "string",
+              "const": "apply"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/MessageIdentity"
+              }
+            },
+            "queue_join_state": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InputState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "topic_revisions": {
+              "$ref": "#/$defs/UniqueMap10"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "allocated_refs",
+            "messages",
+            "item_revisions",
+            "topic_revisions",
+            "input_result_state",
+            "queue_join_state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "durable_effect": {
+              "type": "boolean"
+            },
+            "event_id": {
+              "type": "string"
+            },
+            "input_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "event"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "input_id",
+            "attempt_id",
+            "durable_effect"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "continuation": {
+              "$ref": "#/$defs/ContinuationReceipt"
+            },
+            "kind": {
+              "type": "string",
+              "const": "continuation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "continuation"
+          ]
+        }
+      ]
+    },
+    "SchemaVersion": {
+      "type": "integer",
+      "maximum": 1,
+      "minimum": 1
+    },
+    "ScrollAnchor": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offset": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "offset"
+      ]
+    },
+    "SentInputCounts": {
+      "type": "object",
+      "properties": {
+        "in_flight": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "needs_attention": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "queued": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "queued",
+        "in_flight",
+        "needs_attention"
+      ]
+    },
+    "Session": {
+      "type": "object",
+      "properties": {
+        "active_binding_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Answer"
+          }
+        },
+        "bindings": {
+          "$ref": "#/$defs/UniqueMap4"
+        },
+        "closed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "continuations": {
+          "$ref": "#/$defs/UniqueMap13"
+        },
+        "counters": {
+          "$ref": "#/$defs/SessionCounters"
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "inputs": {
+          "$ref": "#/$defs/UniqueMap6"
+        },
+        "items": {
+          "$ref": "#/$defs/UniqueMap2"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "operation_receipts": {
+          "$ref": "#/$defs/UniqueMap7"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "rounds": {
+          "$ref": "#/$defs/UniqueMap3"
+        },
+        "schema_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "state": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "topics": {
+          "$ref": "#/$defs/UniqueMap"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/UtcMillis"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "id",
+        "project_id",
+        "title",
+        "state",
+        "created_at",
+        "updated_at",
+        "revision",
+        "closed_at",
+        "counters",
+        "active_binding_id",
+        "topics",
+        "items",
+        "messages",
+        "rounds",
+        "answers",
+        "bindings",
+        "inputs",
+        "operation_receipts",
+        "continuations"
+      ]
+    },
+    "SessionCounters": {
+      "type": "object",
+      "properties": {
+        "next_answer": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "next_input": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "next_message": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "next_root": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "next_topic_order": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "next_root",
+        "next_topic_order",
+        "next_message",
+        "next_input",
+        "next_answer"
+      ]
+    },
+    "SessionListResult": {
+      "type": "object",
+      "properties": {
+        "active_total": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "closed_total": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "counts": {
+          "$ref": "#/$defs/SummaryCounts"
+        },
+        "sessions": {
+          "$ref": "#/$defs/Page_SessionSummary"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessions",
+        "active_total",
+        "closed_total",
+        "counts"
+      ]
+    },
+    "SessionPreferences": {
+      "type": "object",
+      "properties": {
+        "expanded_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "filters": {
+          "$ref": "#/$defs/ViewFilters"
+        },
+        "rail": {
+          "$ref": "#/$defs/RailView"
+        },
+        "scroll": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScrollAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selected_item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session": {
+          "$ref": "#/$defs/SessionRef"
+        },
+        "tab_order": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "selected_item_id",
+        "tab_order",
+        "expanded_item_ids",
+        "filters",
+        "rail",
+        "scroll"
+      ]
+    },
+    "SessionReadResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "page": {
+              "$ref": "#/$defs/Page_Topic"
+            },
+            "view": {
+              "type": "string",
+              "const": "topics"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "view",
+            "page"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "page": {
+              "$ref": "#/$defs/Page_ItemReadProjection"
+            },
+            "view": {
+              "type": "string",
+              "const": "items"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "view",
+            "page"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "page": {
+              "$ref": "#/$defs/Page_Message"
+            },
+            "view": {
+              "type": "string",
+              "const": "messages"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "view",
+            "page"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "page": {
+              "$ref": "#/$defs/Page_Input"
+            },
+            "view": {
+              "type": "string",
+              "const": "inputs"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "view",
+            "page"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "page": {
+              "$ref": "#/$defs/Page_InputQueueEntry"
+            },
+            "view": {
+              "type": "string",
+              "const": "inputs_queue"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "view",
+            "page"
+          ]
+        }
+      ]
+    },
+    "SessionRef": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id"
+      ]
+    },
+    "SessionSnapshot": {
+      "type": "object",
+      "properties": {
+        "freshness": {
+          "$ref": "#/$defs/Freshness"
+        },
+        "session": {
+          "$ref": "#/$defs/Session"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "freshness"
+      ]
+    },
+    "SessionState": {
+      "type": "string",
+      "enum": [
+        "active",
+        "closed"
+      ]
+    },
+    "SessionSummary": {
+      "type": "object",
+      "properties": {
+        "active_binding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BindingSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "counts": {
+          "$ref": "#/$defs/SummaryCounts"
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "state": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/UtcMillis"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "title",
+        "state",
+        "revision",
+        "created_at",
+        "updated_at",
+        "closed_at",
+        "active_binding",
+        "counts"
+      ]
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "StatusHistoryEntry": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "binding_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cause_message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "handled_through_message_number": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "new_status": {
+          "$ref": "#/$defs/ItemStatus"
+        },
+        "old_status": {
+          "$ref": "#/$defs/ItemStatus"
+        },
+        "previous_outcome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previous_replaced_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_why": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "old_status",
+        "new_status",
+        "previous_outcome",
+        "previous_why",
+        "previous_replaced_by",
+        "cause_message_id",
+        "at",
+        "binding_id",
+        "handled_through_message_number",
+        "reason"
+      ]
+    },
+    "SummaryCounts": {
+      "type": "object",
+      "properties": {
+        "archived_topics": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "completeness": {
+          "$ref": "#/$defs/Completeness"
+        },
+        "items_by_status": {
+          "$ref": "#/$defs/ItemsByStatus"
+        },
+        "sent_inputs": {
+          "$ref": "#/$defs/SentInputCounts"
+        },
+        "unavailable_session_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "waiting_unanswered": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items_by_status",
+        "waiting_unanswered",
+        "sent_inputs",
+        "archived_topics",
+        "completeness",
+        "unavailable_session_ids"
+      ]
+    },
+    "Theme": {
+      "type": "string",
+      "enum": [
+        "system",
+        "light",
+        "dark"
+      ]
+    },
+    "TimelineContext": {
+      "type": "object",
+      "properties": {
+        "created_message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Message"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parent_item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "parent_item_id",
+        "created_message",
+        "source_round_id"
+      ]
+    },
+    "Topic": {
+      "type": "object",
+      "properties": {
+        "archived_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "name": {
+          "type": "string"
+        },
+        "order": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TopicOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "order",
+        "revision",
+        "created_at",
+        "archived_at",
+        "origin"
+      ]
+    },
+    "TopicOrigin": {
+      "type": "object",
+      "properties": {
+        "continued_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "topic_id",
+        "source_revision",
+        "continued_at"
+      ]
+    },
+    "TurnState": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "running",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "UniqueMap": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "$ref": "#/$defs/Topic"
+        }
+      }
+    },
+    "UniqueMap10": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      }
+    },
+    "UniqueMap11": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])": {
+          "$ref": "#/$defs/ItemRef"
+        }
+      }
+    },
+    "UniqueMap12": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      }
+    },
+    "UniqueMap13": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "$ref": "#/$defs/ContinuationReceipt"
+        }
+      }
+    },
+    "UniqueMap2": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])": {
+          "$ref": "#/$defs/Item"
+        }
+      }
+    },
+    "UniqueMap3": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "$ref": "#/$defs/Round"
+        }
+      }
+    },
+    "UniqueMap4": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "$ref": "#/$defs/Binding"
+        }
+      }
+    },
+    "UniqueMap5": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "UniqueMap6": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "$ref": "#/$defs/Input"
+        }
+      }
+    },
+    "UniqueMap7": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OperationReceipt"
+          }
+        }
+      }
+    },
+    "UniqueMap8": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[A-Za-z][A-Za-z0-9_]{0,31}(?![\\s\\S])": {
+          "$ref": "#/$defs/AllocatedRef"
+        }
+      }
+    },
+    "UniqueMap9": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      }
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    },
+    "ViewFilters": {
+      "type": "object",
+      "properties": {
+        "archived": {
+          "type": "boolean"
+        },
+        "hide_later": {
+          "type": "boolean"
+        },
+        "search": {
+          "type": "string"
+        },
+        "statuses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemStatus"
+          }
+        },
+        "topic_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "search",
+        "statuses",
+        "topic_id",
+        "archived",
+        "hide_later"
+      ]
+    },
+    "WindowGeometry": {
+      "type": "object",
+      "properties": {
+        "height": {
+          "type": "number",
+          "format": "double"
+        },
+        "monitor_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "type": "number",
+          "format": "double"
+        },
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height",
+        "monitor_id"
+      ]
+    }
+  }
+}

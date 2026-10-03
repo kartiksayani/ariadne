@@ -41,6 +41,7 @@ fn generation_is_deterministic_and_check_is_read_only() {
         expected.len(),
         16 + ariadne_xtask::domain_models::artifacts().unwrap().len()
             + ariadne_xtask::protocol_models::artifacts().unwrap().len()
+            + ariadne_xtask::core_models::artifacts().unwrap().len()
     );
     assert_eq!(artifacts().unwrap(), expected);
     generate(temp.path(), true).unwrap();
