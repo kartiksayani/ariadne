@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-pub(super) struct Directory {
+pub(crate) struct Directory {
     file: File,
     pub path: PathBuf,
 }
@@ -187,6 +187,71 @@ impl Directory {
         }
     }
 
+    pub fn names(&self) -> Result<Vec<String>, StoreError> {
+        // A new file description keeps independent directory offsets; enumeration
+        // and subsequent opens remain anchored to the same owned directory inode.
+        let dot = CString::new(".").expect("literal");
+        // SAFETY: the parent descriptor is live, and dot is a terminated component.
+        let fd = unsafe {
+            libc::openat(
+                self.file.as_raw_fd(),
+                dot.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            )
+        };
+        if fd == -1 {
+            return Err(StoreError::io(
+                "enumerate",
+                &self.path,
+                io::Error::last_os_error(),
+            ));
+        }
+        // SAFETY: fdopendir takes ownership of this new directory descriptor.
+        let directory = unsafe { libc::fdopendir(fd) };
+        if directory.is_null() {
+            let error = io::Error::last_os_error();
+            // SAFETY: fdopendir failed, so we still own fd.
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(StoreError::io("enumerate", &self.path, error));
+        }
+        struct Entries(*mut libc::DIR);
+        impl Drop for Entries {
+            fn drop(&mut self) {
+                unsafe {
+                    libc::closedir(self.0);
+                }
+            }
+        }
+        let entries = Entries(directory);
+        let mut names = Vec::new();
+        loop {
+            // SAFETY: readdir borrows this live stream; errno distinguishes EOF.
+            unsafe {
+                *errno() = 0;
+            }
+            let entry = unsafe { libc::readdir(entries.0) };
+            if entry.is_null() {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(0) {
+                    return Err(StoreError::io("enumerate", &self.path, error));
+                }
+                break;
+            }
+            // SAFETY: readdir's name is terminated and valid until its next call.
+            let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) };
+            let name = name.to_str().map_err(|_| StoreError::UnsafePath {
+                path: self.path.clone(),
+            })?;
+            if name != "." && name != ".." {
+                names.push(name.to_owned());
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
     pub fn sync(&self) -> Result<(), StoreError> {
         self.file
             .sync_all()
@@ -194,7 +259,7 @@ impl Directory {
     }
 }
 
-pub(super) struct Temporary<'a> {
+pub(crate) struct Temporary<'a> {
     directory: &'a Directory,
     name: String,
     present: bool,
@@ -284,6 +349,15 @@ impl Drop for Temporary<'_> {
             }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn errno() -> *mut libc::c_int {
+    unsafe { libc::__error() }
+}
+#[cfg(not(target_os = "macos"))]
+unsafe fn errno() -> *mut libc::c_int {
+    unsafe { libc::__errno_location() }
 }
 
 #[cfg(test)]

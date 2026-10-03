@@ -217,7 +217,7 @@ backlink; they never change status or question revision. A generic owner message
 opens a new round when the current pointer is absent or names a closed round.
 No helper rewrites old bodies, answers, snapshots or close timestamps. Failed calls
 leave the input snapshot unchanged. These native callable inputs are not additional
-wire DTOs. P2.1 owns Input construction/submission; core/store own actor/revision
+wire DTOs. P1.5 owns Input construction/submission; core/store own actor/revision
 checks, session revision, operation replay, final validation and atomic persistence.
 
 `validate_session_history` checks ordered counters, unique IDs, targeted messages,

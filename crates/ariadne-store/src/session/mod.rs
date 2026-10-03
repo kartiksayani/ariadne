@@ -2,8 +2,8 @@
 //!
 //! Callbacks do only local domain work: no host, socket, inference or lease waits.
 //! Core owns authorization, expected revisions and command-specific semantics.
-mod fs;
-mod lock;
+pub(crate) mod fs;
+pub(crate) mod lock;
 
 use ariadne_domain::history::{validate_session_history, HistoryError};
 use ariadne_domain::models::*;
@@ -41,7 +41,7 @@ pub enum StoreError {
 }
 
 impl StoreError {
-    fn io(action: &'static str, path: &Path, error: io::Error) -> Self {
+    pub(crate) fn io(action: &'static str, path: &Path, error: io::Error) -> Self {
         Self::Io {
             action,
             path: path.into(),
@@ -115,6 +115,110 @@ impl Store {
         })
     }
 
+    /// First session commit plus its authoritative replay receipt. Caller supplies
+    /// the complete domain candidate; IDs are allocated while setup locks are held.
+    /// A creation retry can replay only this exact route/actor/command tuple.
+    pub fn create_with_receipt(
+        &self,
+        session: &Session,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        normalized_command: &Value,
+        data: SavedReceiptData,
+    ) -> Result<SavedReceipt, StoreError> {
+        self.with_lock(&session.id, || {
+            let name = format!("{}.json", session.id.as_str());
+            if self.sessions.verify_target(&name)? {
+                let (live, _) = self.live(&session.id)?;
+                return self
+                    .saved(&live, actor, operation_id, normalized_command)?
+                    .ok_or(StoreError::AlreadyExists);
+            }
+            if session.revision.value() != 1 || !session.operation_receipts.0.is_empty() {
+                return Err(StoreError::InvalidSnapshot);
+            }
+            let mut candidate = session.clone();
+            let receipt = SavedReceipt {
+                operation_id: operation_id.clone(),
+                session_id: candidate.id.clone(),
+                revision: candidate.revision,
+                data,
+            };
+            candidate.operation_receipts.0.insert(
+                operation_id.clone(),
+                vec![OperationReceipt {
+                    operation_id: operation_id.clone(),
+                    actor_scope: actor.clone(),
+                    command_digest: self.digest(&candidate.id, actor, normalized_command)?,
+                    result: receipt.clone(),
+                }],
+            );
+            self.validate(&candidate, &candidate.id)?;
+            self.sessions
+                .temp(&name, &encode(&candidate)?)?
+                .create(&name)
+                .map_err(|error| uncertain_operation(error, operation_id))?;
+            self.sessions
+                .sync()
+                .map_err(|_| StoreError::CommitUncertain {
+                    operation_id: Some(operation_id.clone()),
+                })?;
+            Ok(receipt)
+        })
+    }
+
+    /// Locked canonical replay check, before core current-state guards or host I/O.
+    pub fn replay(
+        &self,
+        session_id: &UuidV4,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        normalized_command: &Value,
+    ) -> Result<Option<SavedReceipt>, StoreError> {
+        self.with_lock(session_id, || {
+            let (live, _) = self.live(session_id)?;
+            self.saved(&live, actor, operation_id, normalized_command)
+        })
+    }
+
+    fn saved(
+        &self,
+        live: &Session,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        command: &Value,
+    ) -> Result<Option<SavedReceipt>, StoreError> {
+        let digest = self.digest(&live.id, actor, command)?;
+        match live
+            .operation_receipts
+            .0
+            .get(operation_id)
+            .and_then(|bucket| bucket.iter().find(|entry| &entry.actor_scope == actor))
+        {
+            Some(entry) if entry.command_digest == digest => Ok(Some(entry.result.clone())),
+            Some(_) => Err(StoreError::OperationReused),
+            None => Ok(None),
+        }
+    }
+
+    /// Enumerates only generated authoritative session names in this registered
+    /// directory. Each snapshot is reread and validated under its own stable lock.
+    pub fn sessions(&self) -> Result<Vec<Session>, StoreError> {
+        let mut result = Vec::new();
+        for name in self.sessions.names()? {
+            if name.starts_with('.') || !name.ends_with(".json") {
+                continue;
+            }
+            let id = UuidV4::new(name.trim_end_matches(".json")).map_err(|_| {
+                StoreError::UnsafePath {
+                    path: self.sessions.path.join(&name),
+                }
+            })?;
+            result.push(self.read(&id)?);
+        }
+        Ok(result)
+    }
+
     /// Reads share the writer lock and validation boundary; no backup recovery.
     pub fn read(&self, session_id: &UuidV4) -> Result<Session, StoreError> {
         self.with_lock(session_id, || {
@@ -136,19 +240,10 @@ impl Store {
     ) -> Result<SavedReceipt, TransactionError<E>> {
         self.with_lock(session_id, || {
             let (live, previous) = self.live(session_id)?;
-            let digest = self.digest(session_id, actor, normalized_command)?;
-            if let Some(receipt) = live
-                .operation_receipts
-                .0
-                .get(operation_id)
-                .and_then(|bucket| bucket.iter().find(|receipt| &receipt.actor_scope == actor))
-            {
-                return if receipt.command_digest == digest {
-                    Ok(receipt.result.clone())
-                } else {
-                    Err(StoreError::OperationReused.into())
-                };
+            if let Some(saved) = self.saved(&live, actor, operation_id, normalized_command)? {
+                return Ok(saved);
             }
+            let digest = self.digest(session_id, actor, normalized_command)?;
             let mut candidate = live.clone();
             let data = apply(&mut candidate).map_err(TransactionError::Command)?;
             // Callback owns business effects, not transaction bookkeeping.
@@ -265,7 +360,7 @@ impl Store {
     }
 }
 
-fn encode(value: &impl serde::Serialize) -> Result<Vec<u8>, StoreError> {
+pub(crate) fn encode(value: &impl serde::Serialize) -> Result<Vec<u8>, StoreError> {
     let value = serde_json::to_value(value).map_err(|_| StoreError::InvalidSnapshot)?;
     let mut bytes =
         serde_json::to_vec_pretty(&sorted(value)).map_err(|_| StoreError::InvalidSnapshot)?;
@@ -287,7 +382,7 @@ fn sorted(value: Value) -> Value {
     }
 }
 
-fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, StoreError> {
+pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, StoreError> {
     // Probe only for an actionable future-version error; final typed decode
     // rejects duplicate keys, unknown fields and all lexical/shape violations.
     if serde_json::from_slice::<Value>(bytes)
@@ -298,4 +393,13 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, StoreError>
         return Err(StoreError::FutureSchema);
     }
     serde_json::from_slice(bytes).map_err(|_| StoreError::InvalidSnapshot)
+}
+
+fn uncertain_operation(error: StoreError, operation_id: &UuidV4) -> StoreError {
+    match error {
+        StoreError::CommitUncertain { .. } => StoreError::CommitUncertain {
+            operation_id: Some(operation_id.clone()),
+        },
+        other => other,
+    }
 }
