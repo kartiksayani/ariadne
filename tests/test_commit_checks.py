@@ -1,5 +1,7 @@
 """Small regressions for scope selection and honest application coverage."""
 import importlib.util
+import contextlib
+import io
 import os
 import re
 import subprocess
@@ -55,6 +57,45 @@ class ScopeTests(unittest.TestCase):
             with self.subTest(paths=paths):
                 self.assertEqual(commit.scope_for(paths), expected)
 
+    def test_reference_capture_conservative_backend_allowlist(self):
+        for paths, expected in [
+            (["crates/ariadne-core/src/service/validation.rs", "Cargo.lock"], False),
+            (["crates/ariadne-store/Cargo.toml", "docs/planning/DOMAIN.md"], False),
+            (["apps/desktop/src-tauri/src/commands/query.rs", "Cargo.toml"], False),
+            (["rust-toolchain.toml", "docs/delivery/tasks.json", "docs/planning/roadmap.html"], False),
+            (["crates/ariadne-core/tests/service_contract.rs"], False),
+            (["apps/desktop/src/App.tsx"], True),
+            (["crates/ariadne-core/src/lib.rs", "apps/desktop/src/data/service.ts"], True),
+            (["designs/reference.md"], True),
+            (["apps/desktop/public/icon.svg"], True),
+            (["docs/example.png"], True),
+            (["tests/ui/reference/capture.spec.mts"], True),
+            (["package.json"], True),
+            (["package-lock.json"], True),
+            (["apps/desktop/vite.config.ts"], True),
+            (["apps/desktop/src-tauri/tauri.conf.json"], True),
+            (["crates/future/config.json"], True),
+            (["future/unknown.rs"], True),
+            (None, True),
+        ]:
+            with self.subTest(paths=paths):
+                self.assertEqual(commit.reference_capture_for(paths), expected)
+        self.assertTrue(commit.reference_capture_for(["crates/core/src/lib.rs"], full=True))
+
+    def test_print_scope_uses_same_paths_and_full_override_for_reference(self):
+        for paths, extra, expected in [
+            (["crates/ariadne-core/src/lib.rs"], [], "application release=false reference=false"),
+            (["apps/desktop/src/App.tsx"], [], "application release=false reference=true"),
+            (None, [], "application release=true reference=true"),
+            (["crates/ariadne-core/src/lib.rs"], ["--full"], "application release=true reference=true"),
+        ]:
+            with self.subTest(paths=paths, extra=extra), mock.patch.object(
+                    commit, "changed_paths", return_value=paths), mock.patch.object(
+                    commit, "run") as run, contextlib.redirect_stdout(io.StringIO()) as output:
+                commit.main(["--ci", "--base", "main", "--print-scope", *extra])
+                self.assertEqual(output.getvalue().strip(), expected)
+                run.assert_not_called()
+
     def test_git_deletion_rename_missing_base_and_earlier_commit(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -82,6 +123,7 @@ class ScopeTests(unittest.TestCase):
                     paths = commit.changed_paths(base, merge_base=merge_base)
                     self.assertEqual(set(paths), {"crates/source.rs", "crates/deleted.rs", "docs/source.rs", "docs/note.md"})
                     self.assertEqual(commit.scope_for(paths)[0], "application")
+                    self.assertTrue(commit.reference_capture_for(paths))
                 self.assertIsNone(commit.changed_paths("missing-base"))
                 self.assertEqual(commit.scope_for(commit.changed_paths("missing-base")), ("application", True))
 
@@ -115,11 +157,13 @@ class ScopeTests(unittest.TestCase):
                 paths = commit.changed_paths("main", merge_base=True)
                 self.assertEqual(paths, ["docs/first.md", "docs/second.md"])
                 self.assertEqual(commit.scope_for(paths), ("docs", False))
+                self.assertFalse(commit.reference_capture_for(paths))
                 self.assertIsNone(commit.changed_paths("main"))
                 git("checkout", "-q", "main")
                 paths = commit.changed_paths(previous_push)
                 self.assertEqual(paths, ["crates/core/src/queue.rs", "docs/main.md"])
                 self.assertEqual(commit.scope_for(paths), ("application", False))
+                self.assertFalse(commit.reference_capture_for(paths))
                 self.assertIn("Cargo.lock", commit.changed_paths(fork))
                 git("checkout", "--orphan", "unrelated")
                 git("rm", "-rf", ".")
@@ -170,7 +214,7 @@ class CoverageTests(unittest.TestCase):
                 if args[:3] == ("npm", "run", "build"):
                     self.assertTrue(all(not path.exists() for path in paths))
             with mock.patch.object(commit, "ROOT", root), mock.patch.object(
-                    commit, "changed_paths", return_value=["scripts/check-commit.py"]), mock.patch.object(
+                    commit, "changed_paths", return_value=["crates/ariadne-core/src/service.rs"]), mock.patch.object(
                     commit, "lint"), mock.patch.object(commit, "run", side_effect=check_run) as run, mock.patch.object(
                     commit, "coverage_counts", return_value=(8, 10)) as counts:
                 commit.main(["--ci", "--base", "main"])
@@ -183,6 +227,10 @@ class CoverageTests(unittest.TestCase):
                 "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
                 "--output-path", paths[2], "--fail-under-lines", "80"))
             self.assertEqual(calls.index(exports[1]), calls.index(exports[0]) + 1)
+            self.assertIn(("npm", "run", "test:coverage"), calls)
+            self.assertIn(("npm", "run", "test:native"), calls)
+            self.assertIn(("cargo", "clippy", "--workspace", "--all-targets", "--all-features",
+                           "--", "-D", "warnings"), calls)
             counts.assert_called_once_with(paths[:2], root, {
                 "minimum_line_coverage": 80, "coverage_exclusions": []})
             pattern = exports[1][exports[1].index("--ignore-filename-regex") + 1]
