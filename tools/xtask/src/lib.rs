@@ -8,6 +8,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use ts_rs::TS;
 
+pub mod codex_wire;
+
+pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
+    if args.first().map(String::as_str) == Some("gen-codex-wire") {
+        let (version, check) = codex_wire::arguments(args)?;
+        codex_wire::generate(root, version, check)
+    } else {
+        arguments(args).and_then(|check| generate(root, check))
+    }
+}
+
 const SCHEMAS: &str = "contracts/generated/domain/primitives";
 const TYPES: &str = "apps/desktop/src/generated/domain/primitives";
 

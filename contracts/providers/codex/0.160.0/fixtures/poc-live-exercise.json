@@ -1,0 +1,185 @@
+{
+  "thread_id": "01a0fba3-6ed9-76c2-a84e-a462929cef91",
+  "nonce": "ariadne-2eae452a57ed",
+  "started_at": 1790935674.09893,
+  "inputs": [
+    {
+      "input_id": "b38e6400-540d-42f5-8a35-1cd30ab86974",
+      "item_id": "finding-1",
+      "marker": "[ARIADNE_INPUT:b38e6400-540d-42f5-8a35-1cd30ab86974]",
+      "text": "[ARIADNE_INPUT:b38e6400-540d-42f5-8a35-1cd30ab86974]\nOwner message on Ariadne item finding-1:\nCommunication test only. Remember this exact phrase for my next message: ariadne-2eae452a57ed. Reply with exactly ACK. Do not use tools.",
+      "state": "completed",
+      "send_started_at": 1790935674.459954,
+      "send_returned_at": 1790935674.9522712,
+      "queue_exit_code": 0,
+      "queue_stdout": "Queued message 01a0fc15-b03b-7000-b22e-0ce7442bef5c for thread 01a0fba3-6ed9-76c2-a84e-a462929cef91.\n",
+      "queue_stderr": "",
+      "first_observed_at": 1790935675.210282,
+      "turn_id": "01a0fc15-b03c-7283-8134-f53ebc025864",
+      "started_at": 1790935674,
+      "completed_at": 1790935685,
+      "duration_ms": 10918,
+      "items_view": "full",
+      "reply_items": [
+        {
+          "id": "msg_084afffc809ce394016abf8284ba4887d293ab3d6850795bb8",
+          "text": "ACK",
+          "phase": "final_answer",
+          "delivery": null
+        }
+      ],
+      "answer": "ACK",
+      "user_message_ids": [
+        {
+          "id": "01a0fc15-b068-7ad3-94b1-92449ff01d0b",
+          "clientId": "01a0fc15-b03a-7c21-8544-2094d1f10a25"
+        }
+      ],
+      "terminal_observed_at": 1790935685.8764942
+    },
+    {
+      "input_id": "4fb83fca-0dcc-44ca-b686-c8adc68c330e",
+      "item_id": "finding-2",
+      "marker": "[ARIADNE_INPUT:4fb83fca-0dcc-44ca-b686-c8adc68c330e]",
+      "text": "[ARIADNE_INPUT:4fb83fca-0dcc-44ca-b686-c8adc68c330e]\nOwner message on Ariadne item finding-2:\nWhat exact phrase did I just ask you to remember? Reply with that phrase only. Do not use tools.",
+      "state": "completed",
+      "send_started_at": 1790935675.21034,
+      "send_returned_at": 1790935675.522041,
+      "queue_exit_code": 0,
+      "queue_stdout": "Queued message 01a0fc15-b27a-7e63-89b1-f71fc7d412f7 for thread 01a0fba3-6ed9-76c2-a84e-a462929cef91.\n",
+      "queue_stderr": "",
+      "first_observed_at": 1790935686.139806,
+      "turn_id": "01a0fc15-daeb-7961-b89b-9773c43eb633",
+      "started_at": 1790935685,
+      "completed_at": 1790935690,
+      "duration_ms": 4485,
+      "items_view": "full",
+      "reply_items": [
+        {
+          "id": "msg_084afffc809ce394016abf8289a41087d295323b321720d076",
+          "text": "ariadne-2eae452a57ed",
+          "phase": "final_answer",
+          "delivery": null
+        }
+      ],
+      "answer": "ariadne-2eae452a57ed",
+      "user_message_ids": [
+        {
+          "id": "01a0fc15-db0e-7b33-b5dc-43739f111b4f",
+          "clientId": "01a0fc15-b27a-79f3-aa72-10f2f4ebc2fc"
+        }
+      ],
+      "terminal_observed_at": 1790935690.521934
+    },
+    {
+      "input_id": "163ea1c2-a331-4072-af1d-9e599c272dcd",
+      "item_id": "finding-3",
+      "marker": "[ARIADNE_INPUT:163ea1c2-a331-4072-af1d-9e599c272dcd]",
+      "text": "[ARIADNE_INPUT:163ea1c2-a331-4072-af1d-9e599c272dcd]\nOwner message on Ariadne item finding-3:\nReply with exactly ARIADNE_CODEX_POC_DONE. Do not use tools.",
+      "state": "completed",
+      "send_started_at": 1790935675.522104,
+      "send_returned_at": 1790935675.88389,
+      "queue_exit_code": 0,
+      "queue_stdout": "Queued message 01a0fc15-b3e4-7f90-94c2-625baf3d524a for thread 01a0fba3-6ed9-76c2-a84e-a462929cef91.\n",
+      "queue_stderr": "",
+      "first_observed_at": 1790935690.5219378,
+      "turn_id": "01a0fc15-ec75-7211-8fa6-313294ec730e",
+      "started_at": 1790935690,
+      "completed_at": 1790935699,
+      "duration_ms": 9381,
+      "items_view": "full",
+      "reply_items": [
+        {
+          "id": "msg_084afffc809ce394016abf8292d81c87d29fe355ee293385b1",
+          "text": "ARIADNE_CODEX_POC_DONE",
+          "phase": "final_answer",
+          "delivery": null
+        }
+      ],
+      "answer": "ARIADNE_CODEX_POC_DONE",
+      "user_message_ids": [
+        {
+          "id": "01a0fc15-ec99-76b3-959e-29978b3fe57f",
+          "clientId": "01a0fc15-b3e2-7cc0-af22-de301dd5f741"
+        }
+      ],
+      "terminal_observed_at": 1790935700.0188
+    }
+  ],
+  "observations": [
+    {
+      "at": 1790935674.953912,
+      "states": [
+        "accepted_by_cli"
+      ]
+    },
+    {
+      "at": 1790935675.210308,
+      "states": [
+        "inProgress"
+      ]
+    },
+    {
+      "at": 1790935676.14535,
+      "states": [
+        "inProgress",
+        "accepted_by_cli",
+        "accepted_by_cli"
+      ]
+    },
+    {
+      "at": 1790935685.8765152,
+      "states": [
+        "completed",
+        "accepted_by_cli",
+        "accepted_by_cli"
+      ]
+    },
+    {
+      "at": 1790935686.139827,
+      "states": [
+        "completed",
+        "inProgress",
+        "accepted_by_cli"
+      ]
+    },
+    {
+      "at": 1790935690.521955,
+      "states": [
+        "completed",
+        "completed",
+        "inProgress"
+      ]
+    },
+    {
+      "at": 1790935700.018917,
+      "states": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    }
+  ],
+  "checks": {
+    "three_completed": true,
+    "same_thread_read_without_resume": true,
+    "three_distinct_turns": true,
+    "fifo_turn_times": true,
+    "context_retained": true,
+    "final_ack": true,
+    "both_followups_accepted_while_first_running": true,
+    "full_item_views": true
+  },
+  "method": "codex queue over explicit shared daemon socket; observer uses WebSocket-over-Unix with read-only history; no start/resume/queue-start RPC",
+  "cli_version": "codex-cli 0.160.0",
+  "initialize": {
+    "userAgent": "codex-tui/0.160.0 (Mac OS 26.7.0; arm64) iTerm.app/3.7.3 (ariadne_queue_poc; 0.1.0)",
+    "platformFamily": "unix",
+    "platformOs": "macos"
+  },
+  "initial_status": {
+    "type": "idle"
+  },
+  "finished_at": 1790935700.019232,
+  "passed": true
+}
