@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ApplicationEnvelope_EventReceipt",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/SuccessEnvelope_EventReceipt"
+    },
+    {
+      "$ref": "#/$defs/FailureEnvelope"
+    }
+  ],
+  "$defs": {
+    "BarrierReason": {
+      "type": "string",
+      "enum": [
+        "owner_paused",
+        "recovery_required",
+        "disconnected",
+        "lease_invalid",
+        "incompatible",
+        "result_missing",
+        "delivery_uncertain",
+        "host_failure",
+        "store_error"
+      ]
+    },
+    "CoreError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/CoreErrorCode"
+        },
+        "current_revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "details": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorDetails"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "field_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FieldError"
+          }
+        },
+        "hint": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "hint",
+        "retryable",
+        "field_errors"
+      ]
+    },
+    "CoreErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_argument",
+        "not_found",
+        "binding_ambiguous",
+        "binding_mismatch",
+        "binding_conflict",
+        "stale_generation",
+        "incompatible_adapter",
+        "host_unreachable",
+        "revision_conflict",
+        "question_changed",
+        "unhandled_owner_message",
+        "invalid_ref",
+        "invalid_transition",
+        "operation_reused",
+        "result_already_committed",
+        "attempt_sealed",
+        "result_missing",
+        "delivery_uncertain",
+        "queue_full",
+        "topic_not_archivable",
+        "session_not_closable",
+        "preview_stale",
+        "snapshot_changed",
+        "store_busy",
+        "capacity_exceeded",
+        "commit_uncertain",
+        "corrupt_session",
+        "future_schema",
+        "permission_denied",
+        "unsupported",
+        "protocol_conflict",
+        "unsupported_host_version",
+        "control_path_too_long"
+      ]
+    },
+    "ErrorDetails": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "binding_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blocking_input_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "blocking_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "dispatch_must_pause": {
+          "type": "boolean"
+        },
+        "input_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BarrierReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "binding_id",
+        "input_id",
+        "attempt_id",
+        "blocking_item_ids",
+        "blocking_input_ids",
+        "dispatch_must_pause"
+      ]
+    },
+    "EventReceipt": {
+      "type": "object",
+      "properties": {
+        "durable_effect": {
+          "type": "boolean"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "replayed": {
+          "type": "boolean"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "session_id",
+        "revision",
+        "durable_effect",
+        "replayed"
+      ]
+    },
+    "FailureEnvelope": {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "error": {
+          "$ref": "#/$defs/CoreError"
+        },
+        "ok": {
+          "$ref": "#/$defs/FailureFlag"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "api_version",
+        "ok",
+        "error"
+      ]
+    },
+    "FailureFlag": {
+      "type": "boolean",
+      "const": false
+    },
+    "FieldError": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "message"
+      ]
+    },
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "SchemaVersion": {
+      "type": "integer",
+      "maximum": 1,
+      "minimum": 1
+    },
+    "SuccessEnvelope_EventReceipt": {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "data": {
+          "$ref": "#/$defs/EventReceipt"
+        },
+        "ok": {
+          "$ref": "#/$defs/SuccessFlag"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "api_version",
+        "ok",
+        "data"
+      ]
+    },
+    "SuccessFlag": {
+      "type": "boolean",
+      "const": true
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

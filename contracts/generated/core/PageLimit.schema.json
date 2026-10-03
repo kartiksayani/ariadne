@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PageLimit",
+  "type": "integer",
+  "maximum": 100,
+  "minimum": 1
+}

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContinueReadiness",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "host_available": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string",
+          "const": "ready"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "binding_id",
+        "generation",
+        "host_available"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "blocked"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContinueBlockReason"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "reasons"
+      ]
+    }
+  ],
+  "$defs": {
+    "ContinueBlockReason": {
+      "type": "string",
+      "enum": [
+        "same_session",
+        "target_closed",
+        "binding_unknown",
+        "binding_ambiguous",
+        "binding_invalid",
+        "target_unavailable"
+      ]
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

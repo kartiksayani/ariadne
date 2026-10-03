@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContinuePreview",
+  "type": "object",
+  "properties": {
+    "mapping": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ContinueItemPreview"
+      }
+    },
+    "readiness": {
+      "$ref": "#/$defs/ContinueReadiness"
+    },
+    "source": {
+      "$ref": "#/$defs/SessionRef"
+    },
+    "source_revision": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "source_sha256": {
+      "$ref": "#/$defs/Sha256"
+    },
+    "source_topic_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/SessionRef"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "source",
+    "source_topic_id",
+    "source_revision",
+    "source_sha256",
+    "target",
+    "summary",
+    "mapping",
+    "readiness"
+  ],
+  "$defs": {
+    "ContinueBlockReason": {
+      "type": "string",
+      "enum": [
+        "same_session",
+        "target_closed",
+        "binding_unknown",
+        "binding_ambiguous",
+        "binding_invalid",
+        "target_unavailable"
+      ]
+    },
+    "ContinueCopyAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "copy"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "external_replacement_id": {
+              "$ref": "#/$defs/ItemRef"
+            },
+            "kind": {
+              "type": "string",
+              "const": "imported_drop"
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "external_replacement_id",
+            "outcome",
+            "why"
+          ]
+        }
+      ]
+    },
+    "ContinueItemPreview": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/ContinueCopyAction"
+        },
+        "source_item_id": {
+          "$ref": "#/$defs/ItemRef"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source_item_id",
+        "action"
+      ]
+    },
+    "ContinueReadiness": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "generation": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "host_available": {
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "const": "ready"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "binding_id",
+            "generation",
+            "host_available"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "blocked"
+            },
+            "reasons": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContinueBlockReason"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "reasons"
+          ]
+        }
+      ]
+    },
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "SessionRef": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id"
+      ]
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

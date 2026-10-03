@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RailView",
+  "type": "string",
+  "enum": [
+    "waiting",
+    "sent",
+    "activity",
+    "hidden"
+  ]
+}

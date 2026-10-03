@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BindingConnectParams",
+  "type": "object",
+  "properties": {
+    "adapter_id": {
+      "type": "string"
+    },
+    "configuration": {
+      "$ref": "#/$defs/AdapterConfig"
+    },
+    "endpoint": {
+      "$ref": "#/$defs/EndpointRef"
+    },
+    "existing_session_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UuidV4"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "external_session_id": {
+      "type": "string"
+    },
+    "project_id": {
+      "$ref": "#/$defs/UuidV4"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "project_id",
+    "adapter_id",
+    "external_session_id",
+    "endpoint",
+    "configuration",
+    "existing_session_id"
+  ],
+  "$defs": {
+    "AdapterConfig": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/UniqueMap"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "values"
+      ]
+    },
+    "EndpointRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unix_socket"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "local_bridge"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        }
+      ]
+    },
+    "UniqueMap": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

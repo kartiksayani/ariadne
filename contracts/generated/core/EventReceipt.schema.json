@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EventReceipt",
+  "type": "object",
+  "properties": {
+    "durable_effect": {
+      "type": "boolean"
+    },
+    "event_id": {
+      "type": "string"
+    },
+    "replayed": {
+      "type": "boolean"
+    },
+    "revision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "session_id": {
+      "$ref": "#/$defs/UuidV4"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "session_id",
+    "revision",
+    "durable_effect",
+    "replayed"
+  ],
+  "$defs": {
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}
