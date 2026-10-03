@@ -1,2 +1,2 @@
-// Local persistence and transaction boundaries.
-// Implementation belongs to the corresponding catalogue task.
+//! Locked, atomic local session persistence.
+pub mod session;

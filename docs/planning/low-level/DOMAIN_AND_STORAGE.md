@@ -493,16 +493,56 @@ See [ADR-0021](../../adr/ADR-0021-pure-item-transitions.md).
 
 ## 4. Transaction and lock algorithm
 
-All writers call `Store.transact(SessionRef, ActorContext, op_id, command)`:
+All writers use the synchronous native `ariadne_store::session::Store` seam:
+
+```rust
+Store::open_registered(&Path, project_id: UuidV4) -> Result<Store, StoreError>
+Store::create(&Session) -> Result<(), StoreError>
+Store::read(&UuidV4) -> Result<Session, StoreError>
+Store::transact<E>(
+    &UuidV4, &ReceiptActorScope, &UuidV4, &serde_json::Value,
+    impl FnOnce(&mut Session) -> Result<SavedReceiptData, E>,
+) -> Result<SavedReceipt, TransactionError<E>>
+```
+
+Trusted registry wiring selects the canonical project root and project UUID;
+opening verifies existing `project.json` identity. The root is never a renderer
+command path. Session UUIDs generate filenames, and create validates matching
+project/session identity under the same stable lock and rejects any existing
+target. First creation has no previous snapshot. Core owns setup metadata and
+the registry, authorization, expected revisions, timestamps/IDs and meaningful
+domain/history assembly inside the callback. Callbacks perform local domain
+work without host, socket, inference or lease waits.
+
+The JSON argument is ephemeral normalized command input, never a persisted
+arbitrary command or success shape. Core supplies explicit defaults, expected
+revisions and exact text, excluding transport IDs. Store adds project/session
+routing and canonical actor scope, then hashes the recursively sorted tuple.
+The operation UUID selects the actor-scoped receipt; it is not part of that
+command digest. Durable results remain the canonical typed receipt union.
+
+The transaction follows this algorithm:
 
 1. Resolve project/session from registered IDs, not arbitrary renderer paths. Open canonical root and `.ariadne` descendants with no-follow checks. Reject symlinked store/lock targets and unsafe filesystem types; account for path-to-use races using directory-relative opens in the OS module.
 2. Open stable `locks/<session>.lock` and acquire `flock(LOCK_EX|LOCK_NB)` in a bounded retry loop: 10 ms initial, cap 50 ms, deadline 2 s. Never rename/delete the lock file. Failed lock returns `store_busy` and no effects.
-3. Re-read live snapshot under the lock, enforcing size/schema/structural/semantic checks. Compute idempotency key `(actor_scope,op_id)`; canonical digest is SHA-256 of normalized command JSON (sorted keys, explicit defaults, exact text). Exclude transport request IDs; include routing, actor scope and expected revisions.
+3. Re-read live snapshot under the lock, enforcing schema/structural/semantic checks without introducing a snapshot hard cap. Compute idempotency key `(actor_scope,op_id)`; canonical digest is SHA-256 of the normalized route/actor/command tuple (sorted keys, explicit defaults, exact text). Exclude transport request IDs; include routing, actor scope and expected revisions.
 4. If a receipt exists: same digest returns its saved result even if current revisions differ; different digest is `operation_reused`. Otherwise validate authorization, revisions and transitions, then apply to an owned copy.
-5. Increment session revision once, generate message IDs/times, record receipt, validate candidate and serialize deterministically. Never serialize with a session lock held across provider/network waits.
+5. Core's callback supplies message IDs/times and business effects. Store preserves session/project identity and pre-existing receipts, increments session revision once, records the typed receipt, validates the candidate and serializes deterministically. Never hold a session lock across provider/network waits.
 6. Write candidate with mode 0600 to same-directory exclusive temp file; write_all and fsync. Write/sync previous validated live bytes to a temporary backup and rename into `backups/<session>.previous.json`; sync backup directory. First creation has no previous backup.
 7. Rename candidate over live file and sync sessions directory. If rename succeeded but sync failed, return `commit_uncertain` with op ID. Retry re-reads receipt to resolve it. It must not blindly repeat the mutation.
 8. Release lock; publish invalidation hints only after commit. Slow UI or dead watchers do not roll back a saved command.
+
+Current store validation composes typed shape/primitive decoding, P1.1
+`validate_session_items`, P1.2 `validate_session_history` and receipt bucket/result
+identity, revision bounds and actor-scope uniqueness. Core/history helpers own
+append-only assembly and command authorization. These checks do not claim future
+delivery/result joins or queue/lifecycle state machines; their owning tasks extend
+pure validation as the behavior is introduced. Store errors separate ordinary
+IO/path failures, invalid/future data, identity mismatch, item/history validation,
+busy/poisoned locks, existing creation, operation reuse, counter overflow and
+uncertain commit. `TransactionError::Command(E)` preserves core's typed rejection
+without saving the abandoned candidate. Entry points map these to shared API
+errors. See [ADR-0025](../../adr/ADR-0025-locked-session-transactions.md).
 
 One session lock at a time; intra-process keyed mutex plus OS `flock`. Registry
 and binding setup use global-registry → project-metadata → session lock order.
