@@ -31,11 +31,18 @@ def run(*args, capture=False, input=None):
                           stdout=subprocess.PIPE if capture else None, input=input)
 
 
-def changed_paths(base=None, working_tree=False):
-    """No rename collapsing: inspect both old/deleted and new paths."""
+def changed_paths(base=None, working_tree=False, merge_base=False):
+    """Compare branch or push changes without collapsing renamed/deleted paths."""
     if base is not None:
         try:
-            run("git", "rev-parse", "--verify", base + "^{commit}", capture=True)
+            base = run("git", "rev-parse", "--verify", base + "^{commit}", capture=True).stdout.strip()
+            if merge_base:
+                bases = run("git", "merge-base", "--all", base, "HEAD", capture=True).stdout.splitlines()
+                if len(bases) != 1:
+                    return None
+                base = bases[0]
+            else:
+                run("git", "merge-base", "--is-ancestor", base, "HEAD", capture=True)
             raw = run("git", "diff", "--no-renames", "--name-only", "-z", base, "HEAD", capture=True).stdout
         except subprocess.CalledProcessError:
             return None
@@ -188,11 +195,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--working-tree", action="store_true")
     parser.add_argument("--ci", action="store_true")
-    parser.add_argument("--base", help="CI comparison commit; missing/unavailable means full checks")
+    parser.add_argument("--base", help="Previous push commit, or branch target with --merge-base; unavailable/invalid ancestry means full checks")
+    parser.add_argument("--merge-base", action="store_true", help="Compare the feature branch from its common ancestor with --base")
     parser.add_argument("--full", action="store_true", help="All tests plus release isolation")
     parser.add_argument("--print-scope", action="store_true")
     args = parser.parse_args(argv)
-    paths = changed_paths(args.base, args.working_tree) if args.base or not args.ci else None
+    paths = changed_paths(args.base, args.working_tree, args.merge_base) if args.base or not args.ci else None
     scope, release = scope_for(paths)
     if args.full:
         scope, release = "application", True
