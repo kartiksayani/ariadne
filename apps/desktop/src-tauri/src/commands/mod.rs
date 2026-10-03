@@ -2,7 +2,7 @@
 use ariadne_core::*;
 use ariadne_domain::models::{SavedReceiptData, SchemaVersion};
 use std::sync::Arc;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 type ResolveSession = dyn Fn(&SessionRef) -> Result<RegisteredSession, CoreError> + Send + Sync;
 
@@ -219,12 +219,32 @@ fn validate_receipt(
     }
 }
 
+// Tauri schedules async commands on its executor. Move the entire synchronous
+// operation, including trusted registration lookup, off that executor as well.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, ()> {
+    #[cfg(test)]
+    let executor_thread = std::thread::current().id();
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        assert_ne!(std::thread::current().id(), executor_thread);
+        work()
+    })
+    .await
+    .map_err(|_| ())
+}
 macro_rules! queries {
     ($($name:ident => $pattern:pat),+ $(,)?) => { $(
         #[tauri::command]
-        pub fn $name(request: OwnerQueryRequest, state: tauri::State<'_, DesktopService>) -> QueryEnvelope {
+        pub async fn $name<R: tauri::Runtime>(request: OwnerQueryRequest, app: tauri::AppHandle<R>) -> QueryEnvelope {
             let matches = matches!(&request.request, $pattern);
-            state.query(request, matches)
+            let service = app.state::<DesktopService>().inner().clone();
+            blocking(move || service.query(request, matches)).await.unwrap_or_else(|()| {
+                QueryEnvelope(envelope(Err(CoreError::new(
+                    CoreErrorCode::IoError,
+                    "Desktop query worker terminated before returning a result.",
+                    "Keep the last valid snapshot and reload the registered session.",
+                ))))
+            })
         }
     )+ };
 }
@@ -242,9 +262,12 @@ queries! {
 macro_rules! mutations {
     ($($name:ident => $variant:ident),+ $(,)?) => { $(
         #[tauri::command]
-        pub fn $name<R: tauri::Runtime>(request: OwnerMutationRequest, app: tauri::AppHandle<R>, state: tauri::State<'_, DesktopService>) -> MutationEnvelope {
+        pub async fn $name<R: tauri::Runtime>(request: OwnerMutationRequest, app: tauri::AppHandle<R>) -> MutationEnvelope {
             let matches = matches!(&request.command, OwnerCommand::$variant { .. });
-            let envelope = state.owner(request, matches);
+            let service = app.state::<DesktopService>().inner().clone();
+            let operation_id = request.command.operation_id().clone();
+            blocking(move || {
+            let envelope = service.owner(request, matches);
             if let ApplicationEnvelope::Success(SuccessEnvelope { data: MutationReceipt::Session(receipt), .. }) = &envelope.0 {
                 // Revision hints are best effort. A failed event publication must
                 // never turn an already durable receipt into a failed mutation.
@@ -253,6 +276,13 @@ macro_rules! mutations {
                 });
             }
             envelope
+            }).await.unwrap_or_else(|()| {
+                MutationEnvelope(envelope(Err(CoreError::new(
+                    CoreErrorCode::CommitUncertain,
+                    "Desktop mutation worker terminated before returning a receipt.",
+                    format!("Reconcile original operation {} before retrying it; do not allocate a new operation ID.", operation_id.as_str()),
+                ))))
+            })
         }
     )+ };
 }

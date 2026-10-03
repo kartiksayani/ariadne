@@ -226,6 +226,20 @@ describe('opened session synchronization', () => {
 });
 
 describe('selectors and registered reveal', () => {
+  it('keeps shared activity and other-operation backlinks out of item conversations', () => {
+    const session = snapshot().session;
+    const opening = session.messages.find((message) => message.kind === 'activity')!;
+    const reply = session.messages.find((message) => message.kind === 'reply' && message.item_id === '1')!;
+    const owner = session.messages.find((message) => message.kind === 'owner_input' && message.item_id === '1')!;
+    opening.items_touched = ['1', '2'];
+    reply.items_touched = ['1', '2'];
+    session.messages = [reply, opening, owner];
+    const indexes = indexSession(immutable(session));
+    expect(indexes.messagesByItem.get('1')?.map((message) => message.id)).toEqual([owner.id, reply.id]);
+    expect(indexes.messagesByItem.get('2') ?? []).toEqual([]);
+    expect(indexes.messagesByItem.get('1')?.map((message) => message.body)).toEqual([owner.body, reply.body]);
+    expect(indexes.roundsByItem.get('1')?.[0]?.opened_message_id).toBe(opening.id);
+  });
   it('uses explicit parent indexes, deduplicates message relations and retains backend count completeness', () => {
     const session = immutable(snapshot().session); const indexes = indexSession(session);
     expect(indexSession(session)).toBe(indexes);

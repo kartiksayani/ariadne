@@ -77,6 +77,124 @@ fn invoke(window: &TestWindow, name: &str, body: Value) -> Result<Value, Value> 
 }
 
 #[test]
+fn actual_ipc_offloads_registration_and_core_calls_from_command_threads() {
+    let query = QueryRequest::SessionGet {};
+    let inventory = inventory();
+    let command: OwnerCommand = serde_json::from_value(
+        inventory["owner_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["command"] == "input_submit")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    let error = CoreError::new(
+        CoreErrorCode::IoError,
+        "Test read failed.",
+        "Check test access.",
+    );
+    let core = Arc::new(ScriptedCoreService::new([
+        ScriptStep {
+            request: RecordedRequest::Query(
+                QueryContext::owner(context(&route())),
+                Box::new(query.clone()),
+            ),
+            response: ScriptedResponse::Query(Box::new(Err(error.clone()))),
+        },
+        ScriptStep {
+            request: RecordedRequest::Owner(context(&route()), Box::new(command.clone())),
+            response: ScriptedResponse::Owner(Box::new(Err(error))),
+        },
+    ]));
+    let (send, receive) = std::sync::mpsc::channel();
+    let window = window(DesktopService::from_trusted_startup(
+        core.clone(),
+        move |route| {
+            send.send(std::thread::current().id()).unwrap();
+            resolve(route)
+        },
+    ));
+    let ipc_thread = std::thread::current().id();
+    for (name, request) in [
+        (
+            "session_get",
+            json!(OwnerQueryRequest {
+                session: Some(route()),
+                request: query
+            }),
+        ),
+        (
+            "input_submit",
+            json!(OwnerMutationRequest {
+                session: Some(route()),
+                command
+            }),
+        ),
+    ] {
+        let response = invoke(&window, name, json!({"request":request})).unwrap();
+        assert_eq!(response["error"]["code"], "io_error");
+        assert_ne!(
+            receive
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap(),
+            ipc_thread
+        );
+    }
+    // The actual blocking closure also asserts its callback is off the async
+    // command executor thread. The scripted core proves each routed call arrived.
+    assert_eq!(core.remaining().unwrap(), 0);
+    assert_eq!(core.history().unwrap().len(), 2);
+}
+
+#[test]
+fn terminated_workers_preserve_read_failure_and_unknown_mutation_completion() {
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let window = window(DesktopService::from_trusted_startup(core.clone(), |_| {
+        panic!("Test-owned resolver panic must not appear in a wire error")
+    }));
+    let response = invoke(
+        &window,
+        "session_get",
+        json!({"request":OwnerQueryRequest {
+            session: Some(route()), request: QueryRequest::SessionGet {},
+        }}),
+    )
+    .unwrap();
+    assert_eq!(response["error"]["code"], "io_error");
+    assert_eq!(response["error"]["retryable"], false);
+    let inventory = inventory();
+    let command: OwnerCommand = serde_json::from_value(
+        inventory["owner_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["command"] == "input_submit")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    let operation_id = command.operation_id().as_str().to_owned();
+    let response = invoke(
+        &window,
+        "input_submit",
+        json!({"request":OwnerMutationRequest {
+            session: Some(route()), command,
+        }}),
+    )
+    .unwrap();
+    assert_eq!(response["error"]["code"], "commit_uncertain");
+    assert_eq!(response["error"]["retryable"], false);
+    assert!(response["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .contains(&operation_id));
+    assert!(!response.to_string().contains("resolver panic"));
+    assert!(core.history().unwrap().is_empty());
+}
+
+#[test]
 fn actual_registered_command_names_and_request_envelopes_match_canonical_inventory() {
     let inventory = inventory();
     let route = route();

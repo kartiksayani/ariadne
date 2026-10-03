@@ -23,6 +23,11 @@ the requested project/session before Core is called. Continue checks both source
 and target. Registry bootstrap commands retain `OwnerScope::Registry`; Core owns
 their actual project/root trust checks. No renderer command installs composition.
 Ordinary uncomposed commands return concrete nonretryable `unsupported`.
+Async Tauri commands move the complete trusted lookup and synchronous core call
+onto Tauri's existing blocking executor. A terminated read worker returns a
+nonretryable `io_error`; a terminated mutation worker returns `commit_uncertain`
+with reconciliation guidance retaining the original operation ID, since durable
+effects may already exist. Neither response includes panic diagnostics.
 
 Each opened session has one immutable external snapshot store. Subscribe before
 loading; coalesce newer revision hints; reconcile on focus, wake and every2s;

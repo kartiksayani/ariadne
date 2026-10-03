@@ -29,8 +29,10 @@ export function indexSession(session: Immutable<Session>): SessionIndexes {
   }
   children.forEach((items) => items.sort((a, b) => a.ordinal - b.ordinal || a.id.localeCompare(b.id)));
   for (const message of session.messages) {
-    const touched = new Set([...message.items_touched, ...(message.item_id === null ? [] : [message.item_id])]);
-    touched.forEach((id) => append(messages, id, message));
+    // Operation backlinks supply timeline provenance, not conversation targets.
+    // Shared activity can also name a round without being one of its replies.
+    if (message.kind !== 'owner_input' && message.kind !== 'reply') continue;
+    if (message.item_id !== null) append(messages, message.item_id, message);
   }
   messages.forEach((values) => values.sort((a, b) => a.number - b.number));
   Object.values(session.rounds).forEach((round) => { if (round) append(rounds, round.item_id, round); });
