@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "id": "00000000-0000-4000-8000-000000000002",
+  "project_id": "00000000-0000-4000-8000-000000000001",
+  "title": "Complete history fixture",
+  "state": "active",
+  "created_at": "2026-10-03T12:00:00.000Z",
+  "updated_at": "2026-10-03T12:00:00.000Z",
+  "revision": 1,
+  "closed_at": null,
+  "counters": {
+    "next_root": 3,
+    "next_topic_order": 2,
+    "next_message": 2,
+    "next_input": 1,
+    "next_answer": 1
+  },
+  "active_binding_id": "00000000-0000-4000-8000-000000000003",
+  "topics": {
+    "00000000-0000-4000-8000-000000000005": {
+      "id": "00000000-0000-4000-8000-000000000005",
+      "name": "Release choice",
+      "order": 1,
+      "revision": 1,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "archived_at": null,
+      "origin": null
+    }
+  },
+  "items": {
+    "1": {
+      "id": "1",
+      "ordinal": 1,
+      "topic_id": "00000000-0000-4000-8000-000000000005",
+      "parent": null,
+      "question": "Which release approach?",
+      "type": "decision",
+      "status": "open",
+      "owner": {
+        "kind": "agent",
+        "binding_id": "00000000-0000-4000-8000-000000000003"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": null,
+      "why": null,
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:00.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000006",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": null,
+      "source_round_id": null,
+      "origin": null
+    },
+    "2": {
+      "id": "2",
+      "ordinal": 2,
+      "topic_id": "00000000-0000-4000-8000-000000000005",
+      "parent": null,
+      "question": "Record the original reference.",
+      "type": "task",
+      "status": "done",
+      "owner": {
+        "kind": "agent",
+        "binding_id": "00000000-0000-4000-8000-000000000003"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": "Recorded original reference.",
+      "why": "Evidence is complete.",
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:00.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000006",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": null,
+      "source_round_id": null,
+      "origin": null
+    }
+  },
+  "messages": [
+    {
+      "id": "00000000-0000-4000-8000-000000000006",
+      "number": 1,
+      "author": "agent",
+      "kind": "activity",
+      "body": "Created the release decision and the finished reference item.\nEvery line remains in the activity timeline.",
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "item_id": null,
+      "topic_id": "00000000-0000-4000-8000-000000000005",
+      "items_touched": [
+        "1",
+        "2"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000003",
+      "input_id": null,
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": null,
+      "origin": null
+    }
+  ],
+  "rounds": {},
+  "answers": [],
+  "bindings": {
+    "00000000-0000-4000-8000-000000000003": {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "adapter_id": "fake.local",
+      "adapter_version": "1.0",
+      "protocol_major": 1,
+      "config_version": 1,
+      "external_session_id": "existing-thread",
+      "endpoint": {
+        "kind": "local_bridge",
+        "name": "fake"
+      },
+      "endpoint_fingerprint": "fake.local/one",
+      "generation": "00000000-0000-4000-8000-000000000004",
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "dispatch_state": "enabled",
+      "owner_paused": false,
+      "pause_reason": null,
+      "connection_state": "connected",
+      "capabilities": {
+        "existing_session": {
+          "supported": true,
+          "conditions": []
+        },
+        "deferred_delivery": {
+          "supported": true,
+          "conditions": []
+        },
+        "turn_correlation": {
+          "supported": true,
+          "conditions": []
+        },
+        "turn_completion": {
+          "supported": true,
+          "conditions": []
+        },
+        "domain_cli": {
+          "supported": true,
+          "conditions": []
+        },
+        "domain_mcp": {
+          "supported": true,
+          "conditions": []
+        },
+        "history_reconcile": {
+          "supported": true,
+          "conditions": []
+        },
+        "streaming_output": {
+          "supported": true,
+          "conditions": []
+        },
+        "final_text_read": {
+          "supported": true,
+          "conditions": []
+        },
+        "discover_sessions": {
+          "supported": true,
+          "conditions": []
+        },
+        "delivery_mode": "pull"
+      },
+      "active_input_id": null,
+      "issued_through_message_number": 0,
+      "adapter_config": {
+        "namespace": "fake.local",
+        "values": {}
+      }
+    }
+  },
+  "inputs": {},
+  "operation_receipts": {},
+  "continuations": {}
+}
