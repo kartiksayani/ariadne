@@ -19,6 +19,9 @@ section 4. Trusted registry wiring selects the project root and UUID; the store
 canonicalizes that root and verifies existing project metadata. Session UUIDs
 generate contained filenames. Separate creation validates a complete Session
 under its stable lock and rejects an existing target without replacing it.
+Publication uses directory-relative `linkat` to atomically reject a target that
+appears after the initial absence check, then removes the exclusive temporary
+name and syncs the directory. Existing restored bytes survive unchanged.
 
 Transactions receive the canonical `ReceiptActorScope`, operation UUID and an
 ephemeral normalized command JSON value. The store hashes the route, actor scope

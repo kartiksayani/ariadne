@@ -509,7 +509,12 @@ Trusted registry wiring selects the canonical project root and project UUID;
 opening verifies existing `project.json` identity. The root is never a renderer
 command path. Session UUIDs generate filenames, and create validates matching
 project/session identity under the same stable lock and rejects any existing
-target. First creation has no previous snapshot. Core owns setup metadata and
+target. First creation has no previous snapshot and publishes the synced
+temporary file with directory-relative
+`linkat`, which atomically rejects any target appearing after the initial absence
+check; it then removes the temporary name and syncs the sessions directory.
+Failures after publication return `commit_uncertain`; existing target bytes
+remain unchanged on a creation conflict. Core owns setup metadata and
 the registry, authorization, expected revisions, timestamps/IDs and meaningful
 domain/history assembly inside the callback. Callbacks perform local domain
 work without host, socket, inference or lease waits.

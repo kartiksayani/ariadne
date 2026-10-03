@@ -108,7 +108,10 @@ impl Store {
             }
             self.validate(session, &session.id)?;
             let bytes = encode(session)?;
-            self.commit(&name, None, &bytes, None)
+            self.sessions.temp(&name, &bytes)?.create(&name)?;
+            self.sessions
+                .sync()
+                .map_err(|_| StoreError::CommitUncertain { operation_id: None })
         })
     }
 

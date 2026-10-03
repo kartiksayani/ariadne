@@ -202,7 +202,7 @@ pub(super) struct Temporary<'a> {
 }
 
 impl Temporary<'_> {
-    pub fn replace(mut self, target: &str) -> Result<(), StoreError> {
+    fn verified_source(&self) -> Result<(CString, File), StoreError> {
         let source_file = self.directory.open(&self.name, false)?;
         let identity = source_file.metadata().map_err(|error| {
             StoreError::io("stat", &self.directory.path.join(&self.name), error)
@@ -212,8 +212,48 @@ impl Temporary<'_> {
                 path: self.directory.path.join(&self.name),
             });
         }
+        Ok((
+            c_name(self.name.as_bytes(), &self.directory.path)?,
+            source_file,
+        ))
+    }
+
+    /// Atomically publish first creation without replacing any existing entry.
+    pub fn create(mut self, target: &str) -> Result<(), StoreError> {
+        let (source, _source_file) = self.verified_source()?;
+        let destination = c_name(target.as_bytes(), &self.directory.path)?;
+        // SAFETY: both single-component names are anchored to our live directory;
+        // flags=0 links the verified source itself and never follows a symlink.
+        let result = unsafe {
+            libc::linkat(
+                self.directory.file.as_raw_fd(),
+                source.as_ptr(),
+                self.directory.file.as_raw_fd(),
+                destination.as_ptr(),
+                0,
+            )
+        };
+        if result == -1 {
+            let error = io::Error::last_os_error();
+            return Err(if error.kind() == io::ErrorKind::AlreadyExists {
+                StoreError::AlreadyExists
+            } else {
+                StoreError::io("create", &self.directory.path.join(target), error)
+            });
+        }
+        // Live is now published. Removing the temporary name leaves one private
+        // authoritative file; any failure after publication is uncertain.
+        // SAFETY: this is the exclusive temporary entry linked immediately above.
+        if unsafe { libc::unlinkat(self.directory.file.as_raw_fd(), source.as_ptr(), 0) } == -1 {
+            return Err(StoreError::CommitUncertain { operation_id: None });
+        }
+        self.present = false;
+        Ok(())
+    }
+
+    pub fn replace(mut self, target: &str) -> Result<(), StoreError> {
+        let (source, _source_file) = self.verified_source()?;
         self.directory.verify_target(target)?;
-        let source = c_name(self.name.as_bytes(), &self.directory.path)?;
         let destination = c_name(target.as_bytes(), &self.directory.path)?;
         // SAFETY: both names belong to this live parent descriptor.
         os_result(
@@ -250,6 +290,47 @@ impl Drop for Temporary<'_> {
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn first_publication_preserves_a_restore_that_appeared_after_absence_check() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = Directory::root(root.path()).unwrap();
+        assert!(!directory.verify_target("live").unwrap());
+        let candidate = directory.temp("live", b"new session").unwrap();
+        let temporary_path = root.path().join(&candidate.name);
+        // An ordinary restore publishes between create's initial absence check
+        // and the candidate publication, without using the store lock.
+        directory
+            .temp("restore", b"restored session bytes")
+            .unwrap()
+            .replace("live")
+            .unwrap();
+        assert!(matches!(
+            candidate.create("live"),
+            Err(StoreError::AlreadyExists)
+        ));
+        assert_eq!(directory.read("live").unwrap(), b"restored session bytes");
+        assert!(!temporary_path.exists());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn first_publication_unlinks_temporary_name_and_preserves_private_file_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = Directory::root(root.path()).unwrap();
+        let candidate = directory.temp("live", b"first session").unwrap();
+        let inode = candidate.identity.ino();
+        let temporary_path = root.path().join(&candidate.name);
+        candidate.create("live").unwrap();
+        directory.sync().unwrap();
+        assert_eq!(directory.read("live").unwrap(), b"first session");
+        let metadata = std::fs::metadata(root.path().join("live")).unwrap();
+        assert_eq!(metadata.ino(), inode);
+        assert_eq!(metadata.nlink(), 1);
+        assert_eq!(metadata.mode() & 0o777, 0o600);
+        assert!(!temporary_path.exists());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    }
 
     #[test]
     fn substituted_exclusive_temporary_entry_is_rejected_before_rename() {
