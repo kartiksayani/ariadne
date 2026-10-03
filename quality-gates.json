@@ -13,6 +13,7 @@
     "crates/ariadne-core/src/lib.rs",
     "crates/ariadne-agent-protocol/src/lib.rs",
     "crates/ariadne-runtime/src/lib.rs",
+    "crates/ariadne-cli/src/lib.rs",
     "crates/ariadne-adapter-claude/src/lib.rs",
     "crates/ariadne-adapter-codex/src/lib.rs",
     "crates/*/src/dto/*.rs",

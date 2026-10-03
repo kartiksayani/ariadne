@@ -1,2 +1,3 @@
-// Per-binding supervision and dispatch.
-// Implementation belongs to the corresponding catalogue task.
+//! Native desktop control and lease ownership; core owns durable business effects.
+pub mod control;
+pub mod leases;
