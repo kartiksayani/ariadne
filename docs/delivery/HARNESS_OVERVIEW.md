@@ -115,7 +115,7 @@ maintenance PRs use the same declarations and direct maintainer history review.
 | Layer | What it does |
 | --- | --- |
 | Installed commit hook | Requires the staged tree to match the tested files; runs size checks, lint, tests, coverage and planning validation. It does not stash changes or skip checks. |
-| GitHub Actions | Repeats quality checks for every PR commit and the integrated result; validates authored commit/PR sizes and each main squash commit. |
+| GitHub Actions | Runs one complete suite on each pushed branch head, including post-squash main; newer pushes cancel older runs on that branch. Checks the whole feature-branch authored commit/PR range and each main squash commit. |
 | Delivery helper | Reads fresh GitHub state, task dependencies, owned paths, review heads, dispositions, required checks and delivery records. Before merging it rechecks head/base and requests an exact-head squash merge. |
 | Maintainer and reviewer | Judge behavior, specification fidelity, real review independence, valid deferrals and decision quality. JSON fields cannot prove that this judgment happened. |
 
