@@ -58,6 +58,12 @@ export async function frontendModules(inventory, output, started) {
   }
   return inventory.chunks.flatMap(chunk => chunk.modules);
 }
+export function verifyReferenceIsolation(modules, files) {
+  const testModule = /(?:^|\/)tests\/ui\/reference\/|\/node_modules\/(?:@babel\/standalone\/|@playwright\/|playwright(?:-core)?\/)|Ariadne UI mockups\.zip/;
+  assert.ok(!modules.some(name => testModule.test(name)), 'Reference fixtures or source runtime entered production modules');
+  const testFile = /(?:^|\/)(?:tests\/ui\/reference\/|source-runtime\/|support\.js$|gallery\.(?:html|tsx)$)|\.dc\.html$|Ariadne UI mockups\.zip/;
+  assert.ok(!files.some(name => testFile.test(name)), 'Reference mount or prototype source entered production files');
+}
 export function verifyGraph(names, config, acl, capabilities, modules) {
   assert.ok(!names.some(name => name === 'tauri-plugin-wdio' || name === 'tauri-plugin-wdio-webdriver'));
   assert.equal(config.app.withGlobalTauri, false);
@@ -97,6 +103,7 @@ export async function checkRelease() {
   assert.equal(config.build.frontendDist, '../../../target/desktop-dist');
   const inventory = await readJson(join(repo, 'target/desktop-modules.json'));
   const modules = await frontendModules(inventory, join(repo, 'target/desktop-dist'), started);
+  verifyReferenceIsolation(modules, await readdir(join(repo, 'target/desktop-dist'), { recursive: true }));
   const names = resolvedNames(metadata); verifyGraph(names, config, acl, capabilities, modules); verifyProductionSecurity(config);
   const binary = join(target, 'release/bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop');
   await portFree(port);
