@@ -10,6 +10,7 @@ members = [
     "crates/ariadne-adapter-codex",
     "crates/ariadne-cli",
     "crates/ariadne-mcp",
+    "tools/xtask",
 ]
 resolver = "2"
 
@@ -26,6 +27,11 @@ tauri-build = "=2.7.1"
 tauri-plugin-wdio = "=1.4.0"
 tauri-plugin-wdio-webdriver = "=1.4.0"
 tempfile = "=3.27.0"
+schemars = "=1.2.2"
+ts-rs = "=12.0.1"
+uuid = { version = "=1.26.1", default-features = false, features = ["std"] }
+chrono = { version = "=0.4.45", default-features = false, features = ["std"] }
+jsonschema = { version = "=0.58.5", default-features = false }
 
 [profile.dev]
 debug = 0
