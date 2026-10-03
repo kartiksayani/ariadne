@@ -66,11 +66,65 @@ class ScopeTests(unittest.TestCase):
             git("add", ".")
             git("-c", "core.hooksPath=/dev/null", "commit", "-qm", "docs")
             with mock.patch.object(commit, "ROOT", root):
-                paths = commit.changed_paths(base)
-                self.assertEqual(set(paths), {"crates/source.rs", "crates/deleted.rs", "docs/source.rs", "docs/note.md"})
-                self.assertEqual(commit.scope_for(paths)[0], "application")
+                for merge_base in (False, True):
+                    paths = commit.changed_paths(base, merge_base=merge_base)
+                    self.assertEqual(set(paths), {"crates/source.rs", "crates/deleted.rs", "docs/source.rs", "docs/note.md"})
+                    self.assertEqual(commit.scope_for(paths)[0], "application")
                 self.assertIsNone(commit.changed_paths("missing-base"))
                 self.assertEqual(commit.scope_for(commit.changed_paths("missing-base")), ("application", True))
+
+    def test_diverged_feature_scope_main_push_delta_and_ancestry_fallback(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=root, check=True, text=True,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.strip()
+            def save(name, content):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+                git("add", ".")
+                git("-c", "core.hooksPath=/dev/null", "commit", "-qm", name)
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "tests@example.invalid")
+            git("config", "user.name", "Test")
+            save("docs/initial.md", "initial\n")
+            fork = git("rev-parse", "HEAD")
+            git("checkout", "-qb", "feature")
+            save("docs/first.md", "first branch change\n")
+            save("docs/second.md", "second branch change\n")
+            git("checkout", "-q", "main")
+            save("Cargo.lock", "main-only addition\n")
+            previous_push = git("rev-parse", "HEAD")
+            save("crates/core/src/queue.rs", "fn run() {}\n")
+            save("docs/main.md", "latest main change\n")
+            git("checkout", "-q", "feature")
+            with mock.patch.object(commit, "ROOT", root):
+                paths = commit.changed_paths("main", merge_base=True)
+                self.assertEqual(paths, ["docs/first.md", "docs/second.md"])
+                self.assertEqual(commit.scope_for(paths), ("docs", False))
+                self.assertIsNone(commit.changed_paths("main"))
+                git("checkout", "-q", "main")
+                paths = commit.changed_paths(previous_push)
+                self.assertEqual(paths, ["crates/core/src/queue.rs", "docs/main.md"])
+                self.assertEqual(commit.scope_for(paths), ("application", False))
+                self.assertIn("Cargo.lock", commit.changed_paths(fork))
+                git("checkout", "--orphan", "unrelated")
+                git("rm", "-rf", ".")
+                save("docs/unrelated.md", "unrelated root\n")
+                for base in ("main", "missing-base", "0" * 40):
+                    for merge_base in (False, True):
+                        with self.subTest(base=base, merge_base=merge_base):
+                            paths = commit.changed_paths(base, merge_base=merge_base)
+                            self.assertIsNone(paths)
+                            self.assertEqual(commit.scope_for(paths), ("application", True))
+
+    def test_ambiguous_merge_base_selects_full_checks(self):
+        with mock.patch.object(commit, "run", side_effect=[
+                mock.Mock(stdout="target\n"), mock.Mock(stdout="ancestor-one\nancestor-two\n")]):
+            paths = commit.changed_paths("main", merge_base=True)
+            self.assertIsNone(paths)
+            self.assertEqual(commit.scope_for(paths), ("application", True))
 
     def test_local_hook_only_lints_even_for_gate_change_and_dirty_tree(self):
         with mock.patch.object(commit, "changed_paths", return_value=["scripts/check-commit.py"]), mock.patch.object(
@@ -84,6 +138,11 @@ class ScopeTests(unittest.TestCase):
                 commit, "lint"), mock.patch.object(commit, "run") as run:
             commit.main(["--ci", "--base", "main"])
             run.assert_called_once_with(commit.sys.executable, "scripts/regenerate-roadmap.py", "--check")
+
+    def test_ci_feature_comparison_requests_merge_base(self):
+        with mock.patch.object(commit, "changed_paths", return_value=["docs/note.md"]) as paths:
+            commit.main(["--ci", "--base", "origin/main", "--merge-base", "--print-scope"])
+            paths.assert_called_once_with("origin/main", False, True)
 
 
 class CoverageTests(unittest.TestCase):

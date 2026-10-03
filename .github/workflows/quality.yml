@@ -38,6 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           args=(--ci --base "$BASE_SHA")
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then args+=(--merge-base); fi
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then args+=(--full); fi
           scope=$(python scripts/check-commit.py "${args[@]}" --print-scope)
           npm install --global npm@10.9.8

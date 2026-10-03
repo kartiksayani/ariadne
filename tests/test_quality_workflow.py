@@ -47,23 +47,30 @@ class QualityWorkflowTests(unittest.TestCase):
             command.chmod(0o755)
             for name in ("npm", "cargo", "rustup"):
                 (commands / name).symlink_to(command)
-            for index, (scope, status, event) in enumerate([
-                ("docs release=false", 0, "push"), ("tooling release=false", 0, "push"),
-                ("application release=true", 0, "push"), ("application release=true", 17, "push"),
-                ("application release=true", 0, "workflow_dispatch"),
+            for index, (scope, status, event, ref) in enumerate([
+                ("docs release=false", 0, "push", "refs/heads/docs"),
+                ("tooling release=false", 0, "push", "refs/heads/tooling"),
+                ("application release=true", 0, "push", "refs/heads/feature"),
+                ("application release=true", 17, "push", "refs/heads/feature"),
+                ("application release=true", 0, "push", "refs/heads/main"),
+                ("application release=true", 0, "workflow_dispatch", "refs/heads/main"),
+                ("application release=true", 0, "workflow_dispatch", "refs/heads/feature"),
             ]):
-                with self.subTest(scope=scope, status=status, event=event):
+                with self.subTest(scope=scope, status=status, event=event, ref=ref):
                     checkout = root / str(index)
                     checkout.mkdir()
                     log = checkout / "commands.jsonl"
                     env = {**os.environ, "PATH": str(commands) + os.pathsep + os.environ["PATH"],
                            "BASE_SHA": "whole-pr-base", "GITHUB_EVENT_NAME": event,
+                           "GITHUB_REF": ref,
                            "COMMAND_LOG": str(log), "SCOPE": scope, "GATE_EXIT": str(status)}
                     result = subprocess.run(["bash", "-c", script], cwd=checkout, env=env,
                                             text=True, capture_output=True)
                     self.assertEqual(result.returncode, status, result.stderr)
                     calls = [json.loads(line) for line in log.read_text().splitlines()]
                     gate = ["python", "scripts/check-commit.py", "--ci", "--base", "whole-pr-base"]
+                    if ref != "refs/heads/main":
+                        gate += ["--merge-base"]
                     if event == "workflow_dispatch":
                         gate += ["--full"]
                     self.assertEqual(calls.count(gate), 1)
