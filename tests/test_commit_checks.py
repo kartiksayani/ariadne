@@ -84,7 +84,7 @@ class ScopeTests(unittest.TestCase):
 
     def test_print_scope_uses_same_paths_and_full_override_for_reference(self):
         for paths, extra, expected in [
-            (["crates/ariadne-core/src/lib.rs"], [], "application release=false reference=false"),
+            (["crates/ariadne-core/src/lib.rs"], [], "application release=true reference=false"),
             (["apps/desktop/src/App.tsx"], [], "application release=false reference=true"),
             (None, [], "application release=true reference=true"),
             (["crates/ariadne-core/src/lib.rs"], ["--full"], "application release=true reference=true"),
@@ -203,42 +203,48 @@ class ScopeTests(unittest.TestCase):
 
 class CoverageTests(unittest.TestCase):
     def test_ci_exports_independent_xtask_report_from_workspace_profiles(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            (root / "quality-gates.json").write_text('{"minimum_line_coverage":80,"coverage_exclusions":[]}')
-            paths = [root / name for name in (*commit.APPLICATION_REPORTS, "coverage/xtask.lcov")]
-            for path in paths:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text("stale evidence")
-            def check_run(*args):
-                if args[:3] == ("npm", "run", "build"):
-                    self.assertTrue(all(not path.exists() for path in paths))
-            with mock.patch.object(commit, "ROOT", root), mock.patch.object(
-                    commit, "changed_paths", return_value=["crates/ariadne-core/src/service.rs"]), mock.patch.object(
-                    commit, "lint"), mock.patch.object(commit, "run", side_effect=check_run) as run, mock.patch.object(
-                    commit, "coverage_counts", return_value=(8, 10)) as counts:
-                commit.main(["--ci", "--base", "main"])
-            calls = [call.args for call in run.call_args_list]
-            exports = [args for args in calls if args[:2] == ("cargo", "llvm-cov") and "--lcov" in args]
-            self.assertEqual(len(exports), 2)
-            self.assertIn("--workspace", exports[0])
-            self.assertEqual(exports[1], (
-                "cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--locked", "--offline", "--lcov",
-                "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
-                "--output-path", paths[2], "--fail-under-lines", "80"))
-            self.assertEqual(calls.index(exports[1]), calls.index(exports[0]) + 1)
-            self.assertIn(("npm", "run", "test:coverage"), calls)
-            self.assertIn(("npm", "run", "test:native"), calls)
-            self.assertIn(("cargo", "clippy", "--workspace", "--all-targets", "--all-features",
-                           "--", "-D", "warnings"), calls)
-            counts.assert_called_once_with(paths[:2], root, {
-                "minimum_line_coverage": 80, "coverage_exclusions": []})
-            pattern = exports[1][exports[1].index("--ignore-filename-regex") + 1]
-            for source in (ROOT / "tools/xtask/src").glob("*.rs"):
-                self.assertIsNone(re.search(pattern, str(source)))
-            for source in ("apps/desktop/src/main.rs", "crates/core/src/lib.rs", "tools/xtask/tests/contracts.rs",
-                           "tools/xtask/src/generated/wire.rs", "tools/xtask/vendor/source.rs"):
-                self.assertIsNotNone(re.search(pattern, source))
+        for changed, native_command in [
+            ("crates/ariadne-domain/src/validation.rs", "test:native"),
+            ("crates/ariadne-core/src/service.rs", "test:e2e"),
+        ]:
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                (root / "quality-gates.json").write_text('{"minimum_line_coverage":80,"coverage_exclusions":[]}')
+                paths = [root / name for name in (*commit.APPLICATION_REPORTS, "coverage/xtask.lcov")]
+                for path in paths:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("stale evidence")
+                def check_run(*args):
+                    if args[:3] == ("npm", "run", "build"):
+                        self.assertTrue(all(not path.exists() for path in paths))
+                with mock.patch.object(commit, "ROOT", root), mock.patch.object(
+                        commit, "changed_paths", return_value=[changed]), mock.patch.object(
+                        commit, "lint"), mock.patch.object(commit, "run", side_effect=check_run) as run, mock.patch.object(
+                        commit, "coverage_counts", return_value=(8, 10)) as counts:
+                    commit.main(["--ci", "--base", "main"])
+                calls = [call.args for call in run.call_args_list]
+                exports = [args for args in calls if args[:2] == ("cargo", "llvm-cov") and "--lcov" in args]
+                self.assertEqual(len(exports), 2)
+                self.assertIn("--workspace", exports[0])
+                self.assertEqual(exports[1], (
+                    "cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--locked", "--offline", "--lcov",
+                    "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
+                    "--output-path", paths[2], "--fail-under-lines", "80"))
+                self.assertEqual(calls.index(exports[1]), calls.index(exports[0]) + 1)
+                self.assertIn(("npm", "run", "test:coverage"), calls)
+                self.assertIn(("npm", "run", native_command), calls)
+                other_command = "test:e2e" if native_command == "test:native" else "test:native"
+                self.assertNotIn(("npm", "run", other_command), calls)
+                self.assertIn(("cargo", "clippy", "--workspace", "--all-targets", "--all-features",
+                               "--", "-D", "warnings"), calls)
+                counts.assert_called_once_with(paths[:2], root, {
+                    "minimum_line_coverage": 80, "coverage_exclusions": []})
+                pattern = exports[1][exports[1].index("--ignore-filename-regex") + 1]
+                for source in (ROOT / "tools/xtask/src").glob("*.rs"):
+                    self.assertIsNone(re.search(pattern, str(source)))
+                for source in ("apps/desktop/src/main.rs", "crates/core/src/lib.rs", "tools/xtask/tests/contracts.rs",
+                               "tools/xtask/src/generated/wire.rs", "tools/xtask/vendor/source.rs"):
+                    self.assertIsNotNone(re.search(pattern, source))
 
     def test_weighted_counts_include_uncovered_lines_and_merge_duplicates(self):
         with tempfile.TemporaryDirectory() as folder:
