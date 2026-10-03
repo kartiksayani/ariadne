@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "id": "1.1",
+      "ordinal": 1,
+      "topic_id": "00000000-0000-4000-8000-000000000010",
+      "parent": "1",
+      "question": "Add the receipt lookup test",
+      "type": "task",
+      "status": "open",
+      "owner": {
+        "kind": "me"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": null,
+      "why": null,
+      "replaced_by": null,
+      "created_at": "2026-10-03T12:00:18.000Z",
+      "updated_at": "2026-10-03T12:00:40.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000103",
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": null,
+      "source_round_id": "00000000-0000-4000-8000-000000000040",
+      "origin": null
+    }
+  ],
+  "next_cursor": null,
+  "snapshot_revision": 21
+}

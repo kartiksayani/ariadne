@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "view": "messages",
+  "filter_digest": "f5cccfb737512bedd4f2e39e7d72425ae8d3ebf8aa8ab6f966bef1fc916f5011",
+  "after": {
+    "kind": "sequence",
+    "number": 3,
+    "id": "00000000-0000-4000-8000-000000000103"
+  },
+  "revision": 21
+}
