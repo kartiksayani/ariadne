@@ -3,6 +3,7 @@
 Status: accepted
 Supersedes: none
 Superseded by: none
+Implementation: [PR #32 — domain v1 DTO contracts](https://github.com/kartiksayani/ariadne/pull/32)
 
 ## Context
 
