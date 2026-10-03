@@ -45,11 +45,12 @@ Routine decisions and ownership/spec updates can ship in the product PR.
 ## GitHub enforcement
 
 The repository `kartiksayani/ariadne` is public. Observed on 2026-10-03:
-ruleset 24380843 blocks deletion and non-fast-forward updates with no bypass;
-24380844 requires a PR with one approval and permits administrator bypass.
-Neither requires status checks. The maintainer must check quality and independent
-review; these are not claimed as server-enforced requirements. Always squash
-merge. Do not change visibility, billing, rulesets or other remote settings.
+ruleset 24380843 (main-1) blocks deletion and non-fast-forward updates with no
+bypass. Ruleset 24380844 (main-2) requires a PR with zero approvals and the GitHub
+Actions `quality` check (not strict) with no bypass actors, so admins also need green
+`quality` on the PR head. Independent agent review is still required by our workflow
+because agents share one GitHub identity. Only squash merge is enabled. Do not change
+visibility, billing, rulesets or other remote settings without owner authorization.
 
 MCP/the review tool remain disabled under the owner's explicit current-session waiver.
 Organization security guidance was not checked; no organizational approval is claimed.
