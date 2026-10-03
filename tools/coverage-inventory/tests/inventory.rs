@@ -85,6 +85,20 @@ fn ordinary_comments_and_literal_docs_are_allowed_but_malformed_rust_is_not() {
     }
 }
 #[test]
+fn map_keys_follow_the_existing_argument_free_dto_path_grammar() {
+    for key in [
+        "String",
+        "ItemRef",
+        "crate::ids::Key",
+        "self::Key",
+        "super::Key",
+        "::uuid::Uuid",
+    ] {
+        let source = format!("pub struct Maps {{ values: ::std::collections::BTreeMap<{key}, Vec<Option<String>>> }}");
+        assert!(verify(request(&source)).is_ok(), "{key}");
+    }
+}
+#[test]
 fn executable_items_and_nested_expression_types_cannot_be_classified() {
     for source in [
         "pub fn execute() {}",
@@ -115,7 +129,13 @@ fn executable_items_and_nested_expression_types_cannot_be_classified() {
         "pub struct Data { value: Vec<> }",
         "pub struct Data { value: Option<String, u64> }",
         "pub struct Data { value: Option }",
-        "pub struct Data { value: ::std::collections::BTreeMap<u64, String> }",
+        "pub struct Data { value: ::std::collections::BTreeMap<Option<String>, String> }",
+        "pub struct Data { value: ::std::collections::BTreeMap<crate::Key<String>, String> }",
+        "pub struct Data { value: ::std::collections::BTreeMap<crate::Key<{ run() }>, String> }",
+        "pub struct Data { value: ::std::collections::BTreeMap<make_type!(), String> }",
+        "pub struct Data { value: ::std::collections::BTreeMap<fn(), String> }",
+        "pub struct Data { value: ::std::collections::BTreeMap<<Key as Trait>::Id, String> }",
+        "pub struct Data { value: ::std::collections::BTreeMap<String, Option<fn()>> }",
         "pub struct Data { value: ::chrono::DateTime<String> }",
         "pub struct Data { value: module::Type }",
         "pub struct Data { value: Vec::<String> }",
@@ -155,7 +175,7 @@ fn derives_and_serde_schema_hooks_have_no_alias_or_unknown_attribute_escape() {
     }
     for attribute in [
         "#[serde(tag = \"other\")]",
-        "#[serde(rename_all = \"snake_case\")]",
+        "#[serde(rename_all = \"kebab-case\")]",
         "#[serde(tag = \"status\", tag = \"status\")]",
     ] {
         assert!(verify(request(&format!("{attribute} pub enum State {{ Ready }}"))).is_err());
