@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { identity, listeners, json } from '../../../../scripts/run-native-e2e.mjs';
+
+const root = process.env.ARIADNE_E2E_ROOT;
+const nonce = process.env.ARIADNE_E2E_NONCE;
+const evidence = process.env.ARIADNE_E2E_EVIDENCE;
+const receiptPath = join(root, 'smoke/receipt.json');
+describe('native WebView, typed invoke and independently observed Rust file', () => {
+  it('writes before acknowledgement, matches native PID and rejects without writing', async () => {
+    const witness = JSON.parse(await readFile(join(root, 'startup.json'), 'utf8'));
+    assert.equal(witness.nonce, nonce);
+    const observed = JSON.parse(await readFile(join(root, 'observed.json'), 'utf8'));
+    assert.equal(identity(witness.pid).exe, process.env.ARIADNE_E2E_BINARY);
+    assert.equal(identity(witness.pid).birth, observed.birth);
+    const launcher = JSON.parse(await readFile(join(root, 'launcher.json'), 'utf8'));
+    assert.equal(observed.ancestry.at(-1).pid, launcher.pid);
+    const sockets = listeners(Number(process.env.ARIADNE_E2E_PORT));
+    assert.ok(sockets.includes(`p${witness.pid}\n`));
+    const addresses = sockets.split('\n').filter(line => line.startsWith('n'));
+    assert.ok(addresses.length > 0 && addresses.every(line => /^n(127\.0\.0\.1|\[::1\]):/.test(line)), 'Driver must bind only loopback');
+    await assert.rejects(stat(receiptPath), { code: 'ENOENT' });
+    const nonceInput = await browser.$('#nonce'), payloadInput = await browser.$('#payload'), button = await browser.$('#ping');
+    for (const element of [nonceInput, payloadInput, button]) assert.ok(await element.isDisplayed());
+    const payload = `native-scaffold-${Date.now()}`;
+    await nonceInput.setValue(nonce); await payloadInput.setValue(payload); await button.click();
+    await browser.waitUntil(async () => (await browser.$('#receipt').getText()).includes('receipt_id'));
+    const displayed = JSON.parse(await browser.$('#receipt').getText()), bytes = await readFile(receiptPath), disk = JSON.parse(bytes);
+    assert.deepEqual(displayed, disk);
+    assert.equal(disk.nonce, nonce); assert.equal(disk.payload, payload); assert.equal(disk.pid, witness.pid);
+    assert.match(disk.receipt_id, /^ping-\d+-\d+$/);
+    await browser.saveScreenshot(join(evidence, 'native-webview.png'));
+    await nonceInput.setValue(nonce === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64)); await button.click();
+    await browser.waitUntil(async () => (await browser.$('#error').getText()).includes('nonce_mismatch'));
+    assert.deepEqual(await readFile(receiptPath), bytes);
+    assert.deepEqual(await readdir(join(root, 'smoke')), ['receipt.json']);
+    await json(join(evidence, 'assertions.json'), { passed: true, witness, observed, sockets, displayed, disk, receiptAbsentBeforeClick: true, wrongNonceRejected: true, receiptUnchangedAfterRejection: true, elementActions: 'WKWebView element actions; not native OS mouse/key injection' });
+  });
+});

@@ -3,10 +3,55 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "lint:planning": "eslint . --max-warnings=0"
+    "lint:planning": "eslint . --max-warnings=0",
+    "dev": "npm run tauri --workspace @ariadne/desktop -- dev",
+    "build": "npm run build --workspace @ariadne/desktop",
+    "check": "eslint . --max-warnings=0 && tsc -p apps/desktop/tsconfig.json && tsc -p apps/desktop/tsconfig.node.json && stylelint \"apps/desktop/**/*.css\"",
+    "lint": "npm run check",
+    "test:ui": "vitest run --config apps/desktop/vite.config.ts",
+    "test:coverage": "vitest run --coverage --config apps/desktop/vite.config.ts",
+    "test:native": "node scripts/run-native-e2e.mjs --suite native",
+    "test:e2e": "node scripts/run-native-e2e.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "eslint": "10.11.0"
-  }
+    "eslint": "10.11.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "vite": "8.3.2",
+    "typescript": "6.0.3",
+    "@tauri-apps/api": "2.12.1",
+    "@tauri-apps/cli": "2.12.1",
+    "vitest": "5.0.3",
+    "@vitest/coverage-v8": "5.0.3",
+    "jsdom": "30.1.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.7",
+    "@testing-library/jest-dom": "7.0.1",
+    "@wdio/tauri-service": "1.4.0",
+    "@wdio/tauri-plugin": "1.4.0",
+    "@wdio/cli": "9.30.1",
+    "@wdio/local-runner": "9.30.1",
+    "@wdio/mocha-framework": "9.30.1",
+    "@wdio/spec-reporter": "9.30.1",
+    "@testing-library/dom": "10.4.2",
+    "@types/node": "22.19.15",
+    "typescript-eslint": "8.71.0",
+    "stylelint": "17.16.0",
+    "stylelint-config-standard": "40.0.0"
+  },
+  "packageManager": "npm@10.9.8",
+  "engines": {
+    "node": "22.23.2",
+    "npm": "10.9.8"
+  },
+  "stylelint": {
+    "extends": "stylelint-config-standard"
+  },
+  "workspaces": [
+    "apps/desktop"
+  ]
 }

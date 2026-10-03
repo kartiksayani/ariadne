@@ -7,8 +7,8 @@ source is `scripts/check-commit.py`; CI and the local hook run the same gate.
 
 - Locked Node/Python lint and coverage tools; lint rejects every reported violation.
 - Quality tooling has measured coverage and real temporary-Git/CLI functional tests.
-- Application code does not exist yet. Its coverage is **N/A**; the first application
-  source or root Cargo manifest requires `phase: application` and all real gates.
+- The scaffold activates `phase: application` from its first application source
+  and root Cargo manifest; every application snapshot runs all real gates.
 - Every application commit: Rust format/Clippy, TS/JS/CSS lint and type checks, unit
   and integration tests, deterministic UI-to-Rust E2E, weighted Rust+TS/JS coverage
   of at least 80%, including untested production files. Live hosts are milestone tests.
@@ -64,6 +64,20 @@ lines and add no covered lines. Every other production source needs executable
 line evidence; an omitted file, an unverified zero-line record or a zero-only
 report fails. The combined executable-line floor stays at least 80% from the
 first application commit.
+
+[ADR-0005](../adr/ADR-0005-use-out-of-line-rust-coverage-tests.md) keeps Rust tests
+out of production files, in `src/tests` or package `tests` directories, so inline
+test code does not inflate the production denominator. Tests still execute real
+validation, file operations and process behavior; no coverage flags are weakened.
+
+[ADR-0008](../adr/ADR-0008-select-supported-native-ci-image.md) selects standard
+arm64 `macos-26` for both CI jobs, using the image's selected full Xcode. Each
+snapshot records actual macOS/architecture/Xcode rather than asserting the owner's
+Xcode build. CI installs Node 22.23.2, npm 10.9.8, Rust 1.98.1 with rustfmt,
+Clippy and llvm-tools-preview, and cargo-llvm-cov 0.9.1. Deployment target stays
+13.0; two Cargo jobs and incremental compilation off bound resource usage.
+Missing tools or a usable GUI are gate failures. Every PR commit and integrated
+result run the same complete checks; no self-hosted host/settings/billing change.
 
 The full workflow acceptance matrix lives in
 [Verification](low-level/VERIFICATION.md). Planning checks validate the 30 mockup
