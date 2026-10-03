@@ -1,11 +1,14 @@
 # Native macOS E2E implementation contract
 
-Status: **specified application gate; disposable native prerequisite smoke passed
-2026-10-03 on macOS 26.7 arm64**. No production Ariadne Tauri app has been built.
-The standalone probe passed the real WebView/invoke/Rust/disk path and cleanup
-with the pins below, as recorded in [Mac testing setup](../../development/MACOS_TEST_SETUP.md).
-This does not complete [V29](VERIFICATION.md): the first application commit must
-run its own gate and meet the agreed 80% actual coverage.
+Status: **P0.2 scaffold implemented; local application/native gates passed with
+137/148 executable lines covered (92.57%)**. The real Ariadne Tauri scaffold passed
+the WebView/invoke/Rust/disk smoke and cleanup; its packaged production build passed
+test-service exclusion, CSP, capability and minimum-macOS boundary checks.
+The historical disposable prerequisite smoke passed 2026-10-03 on macOS 26.7
+arm64, as recorded in [Mac testing setup](../../development/MACOS_TEST_SETUP.md).
+Later domain/store gates under [V29](VERIFICATION.md) and full native OS interaction
+acceptance remain to be demonstrated. Final-head hosted CI and independent review
+remain separate merge requirements.
 
 Use WebdriverIO with the embedded WebDriver server inside the real Tauri app.
 Tauri's [official testing guide](https://v2.tauri.app/develop/tests/webdriver/)
