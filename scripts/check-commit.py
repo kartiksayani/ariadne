@@ -235,7 +235,7 @@ def main(argv=None):
             for name in config["coverage_exclusions"])
         run("cargo", "llvm-cov", "--workspace", "--all-features", "--locked", "--lcov",
             "--ignore-filename-regex", ignored, "--output-path", reports[0])
-        run("cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--all-features", "--locked", "--offline", "--lcov",
+        run("cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--locked", "--offline", "--lcov",
             "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
             "--output-path", xtask_report, "--fail-under-lines", "80")
         run("npm", "run", "test:coverage")

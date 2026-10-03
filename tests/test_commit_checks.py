@@ -168,7 +168,7 @@ class CoverageTests(unittest.TestCase):
             self.assertEqual(len(exports), 2)
             self.assertIn("--workspace", exports[0])
             self.assertEqual(exports[1], (
-                "cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--all-features", "--locked", "--offline", "--lcov",
+                "cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--locked", "--offline", "--lcov",
                 "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
                 "--output-path", paths[2], "--fail-under-lines", "80"))
             self.assertEqual(calls.index(exports[1]), calls.index(exports[0]) + 1)
