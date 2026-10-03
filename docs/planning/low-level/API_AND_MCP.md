@@ -1,8 +1,46 @@
 # Application APIs, CLI and MCP — v1
 
-All transports invoke the same `Core.execute(actor, Command)` and query service.
-Canonical schemas derive from Rust; transport adapters only decode, select actor,
+All transports invoke the same typed core service below.
+Canonical schemas derive from Rust; transport adapters only decode, construct context,
 validate the envelope and encode. No raw snapshot replacement API exists.
+
+### Core service interface
+
+P0.6 publishes this synchronous, provider-neutral `CoreService` in
+`ariadne-core`, with owned request/result DTOs and typed errors. Domain entities,
+IDs, receipts and projections are the canonical P0.3b Rust-generated types;
+command/query unions belong to this service, not alternate renderer schemas.
+
+```text
+query(QueryContext, QueryRequest) -> Result<QueryResult, CoreError>
+execute_owner(OwnerContext, OwnerCommand) -> Result<MutationReceipt, CoreError>
+apply(AgentContext, ApplyRequest) -> Result<ApplyReceipt, CoreError>
+claim(ValidatedDispatchContext, ClaimRequest) -> Result<Option<PreparedAttempt>, CoreError>
+report(AdapterContext, NormalizedEvent) -> Result<EventReceipt, CoreError>
+```
+
+Trusted local entry points construct contexts from registered project/session or
+binding IDs, validated actor scope and current generation. Query context retains
+owner versus agent visibility and issued-watermark rules below. No caller-chosen
+actor or arbitrary renderer path enters the service. Runtime constructs a
+validated dispatch context only while holding the current binding lease; core
+rechecks persisted scope/generation/dispatch state under the transaction.
+Historical reports follow PROCESS section 2's verified reconciliation exception.
+
+`ClaimRequest={binding_id,generation,request_id}`. Replay the original claim
+receipt first. `Ok(None)` means a healthy binding has no eligible work, including
+an empty queue or an existing in-flight input. Bad scope/generation/lease, pause
+or recovery barriers return the existing typed error with a reason in `details`;
+they are not a healthy empty queue. `PreparedAttempt` contains the persisted
+input/attempt IDs, originating generation, exact formatted payload, digest and
+wire marker. It does not claim host acceptance. `EventReceipt` identifies the
+reported event and persisted revision/effect, including a consistent replay;
+ephemeral presence need not produce a new durable session receipt.
+
+Filesystem calls run off the UI and async executor thread. Never keep a store
+lock across an adapter/host wait. A scripted test/dev double may implement this
+same interface using shared fixtures; actual domain/store acceptance remains
+mandatory. See [module delivery](../MODULE_CONTRACTS.md).
 
 ## 1. Envelope, actors and replay
 
@@ -84,6 +122,15 @@ requests as well as answers. Its entries preserve the original target snapshot.
 full reply bodies, result outcome and child links; paginate rounds and each large
 message list with explicit continuation cursors. `item_messages` returns stable
 message IDs/numbers and origin metadata; timeline context is a separate field.
+
+Every bounded collection uses
+`Page<T>={items:T[],next_cursor:QueryCursor|null,snapshot_revision}`. `QueryCursor`
+is the existing DOMAIN section 5 structured cursor
+`{schema,view,filter_digest,after,revision}`, not a second opaque-string format.
+Each nested round-message list has its own `Page<Message>` and cursor; fetching
+more rounds cannot silently truncate or advance a message list. Complete message
+bodies and provenance remain intact under the existing entity/page limits;
+revision changes return `snapshot_changed` rather than mixed history.
 
 Design symbols use dots; transport uses underscores: input.submit→input_submit,
 input.resolve→input_resolve, binding.connect/pause/resume/disconnect→corresponding
@@ -223,7 +270,11 @@ Errors include `invalid_argument`, `not_found`, `binding_ambiguous`,
 `attempt_sealed`, `result_missing`, `delivery_uncertain`, `queue_full`,
 `topic_not_archivable`, `session_not_closable`, `preview_stale`, `snapshot_changed`,
 `store_busy`, `capacity_exceeded`, `commit_uncertain`, `corrupt_session`,
-`future_schema`, `permission_denied`, `unsupported`.
+`future_schema`, `permission_denied`, `unsupported`, `protocol_conflict`.
+
+`protocol_conflict` is the PROCESS error for contradictory normalized turn IDs
+or outcomes; it pauses the affected binding. Existing process-specific errors
+retain their documented recovery; P0.6 publishes their typed transport mapping.
 
 Error messages explain a concrete recovery action and contain bounded IDs/revisions,
 not raw stderr/environment/content dumps. Retryable means the **same operation**

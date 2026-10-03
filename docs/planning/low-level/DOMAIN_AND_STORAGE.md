@@ -262,7 +262,11 @@ the last saved data, and pauses dispatch until writes succeed. Keep unsent draft
 do not acknowledge a save that exists only in memory. No full-disk remediation,
 automatic lost-data recovery or deliberate power-loss testing is required now.
 
-Queries use sequence/keyset cursors `{schema,view,filter_digest,after,revision}`.
+Queries use `QueryCursor`, the structured sequence/keyset cursor
+`{schema,view,filter_digest,after,revision}`. Bounded collections return the shared
+`Page<T>={items:T[],next_cursor:QueryCursor|null,snapshot_revision}`; nested round
+message collections use their own `Page<Message>`. Rust-generated domain types
+own both shapes; no opaque-string cursor or consumer-local entity copy is added.
 Reject mismatched filters. Current-page consistency is one snapshot; if revision
 changes between pages, return `snapshot_changed` so UI restarts rather than
 mixing histories. `session_get` may return the full validated snapshot to local
