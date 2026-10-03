@@ -62,8 +62,9 @@ named tasks with preserved dependencies/ownership before implementing it.
 Task eligibility is calculated from actual merged prerequisite PR evidence.
 There are no stored `ready` flags or manually maintained completion checkboxes.
 Before selecting work, the maintainer verifies task → PR → final reviewed head,
-successful checks for every commit and integrated result, spec adjudication,
-actual merge and resulting main revision. A changed head invalidates prior review
+full local hooks for every authored commit, successful checks at the exact current
+pushed PR head, spec adjudication, actual merge and successful checks of the
+resulting main revision. A changed head invalidates prior review
 and verification. Failed, pending, merely opened or locally committed PRs do not
 satisfy a dependency. The chart's offline evidence import is display only; the
 harness must re-read GitHub before scheduling or merging.
