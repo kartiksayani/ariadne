@@ -1,0 +1,941 @@
+{
+  "source_archive": {
+    "path": "designs/Ariadne UI mockups.zip",
+    "bytes": 106109,
+    "sha256": "f17152968502d592ba604f03fab97dab678265d90f763b8e575bda1dd9445e98"
+  },
+  "source_prompt": {
+    "path": "DESIGN_PROMPT.md",
+    "sha256": "93065d3de2fbbdcfb4452a1095b6550d8df7872420e5ebaf61d27a8e902a599c"
+  },
+  "fixture": {
+    "path": "tests/ui/reference/workspace-fixtures.json",
+    "sha256": "62baf2a560ae38c4dc1d6d0384e4d11f36135c47705f556c0552e278defe0f64",
+    "extraction": "Ariadne.dc.html Component constructor/renderVals with exact board import props, then typed presentation-field projection. No componentDidMount, timers, provider actions or source runtime are copied. Top-level field fragments remove repeated JSON values."
+  },
+  "projects": [
+    "dark-1600x960",
+    "light-1600x960",
+    "dark-1000x700",
+    "light-1000x700"
+  ],
+  "frames": [
+    {
+      "id": "1a",
+      "source_inventory": "source.json#/frames/1a",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 26,
+      "families": [
+        "StatusBadge",
+        "TreeRow",
+        "MessageExcerpt",
+        "GlobalWaitingPanel"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1a"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1a",
+      "evidence": {
+        "source_whole": "1a-source-whole-unmasked",
+        "app_whole": "1a-app-whole-unmasked",
+        "region_pairs": "1a-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1a-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1b",
+      "source_inventory": "source.json#/frames/1b",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 28,
+      "families": [
+        "StatusBadge",
+        "TreeRow",
+        "MessageExcerpt"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1b"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1b",
+      "evidence": {
+        "source_whole": "1b-source-whole-unmasked",
+        "app_whole": "1b-app-whole-unmasked",
+        "region_pairs": "1b-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1b-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1c",
+      "source_inventory": "source.json#/frames/1c",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 30,
+      "families": [
+        "AnswerControl",
+        "GlobalWaitingPanel"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1c"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1c",
+      "evidence": {
+        "source_whole": "1c-source-whole-unmasked",
+        "app_whole": "1c-app-whole-unmasked",
+        "region_pairs": "1c-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1c-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1d",
+      "source_inventory": "source.json#/frames/1d",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 32,
+      "families": [
+        "StatusBadge",
+        "TopicGraph node/edge"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1d"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1d",
+      "evidence": {
+        "source_whole": "1d-source-whole-unmasked",
+        "app_whole": "1d-app-whole-unmasked",
+        "region_pairs": "1d-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1d-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1e",
+      "source_inventory": "source.json#/frames/1e",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 34,
+      "families": [
+        "StatusBadge",
+        "AnswerControl",
+        "GlobalWaitingPanel"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1e"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1e",
+      "evidence": {
+        "source_whole": "1e-source-whole-unmasked",
+        "app_whole": "1e-app-whole-unmasked",
+        "region_pairs": "1e-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1e-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1f",
+      "source_inventory": "source.json#/frames/1f",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 36,
+      "families": [
+        "StatusBadge",
+        "TopicGraph node/edge",
+        "MessageExcerpt"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1f"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1f",
+      "evidence": {
+        "source_whole": "1f-source-whole-unmasked",
+        "app_whole": "1f-app-whole-unmasked",
+        "region_pairs": "1f-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1f-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1g",
+      "source_inventory": "source.json#/frames/1g",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 38,
+      "families": [
+        "Project/session card",
+        "GlobalWaitingPanel"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1g"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1g",
+      "evidence": {
+        "source_whole": "1g-source-whole-unmasked",
+        "app_whole": "1g-app-whole-unmasked",
+        "region_pairs": "1g-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1g-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1h",
+      "source_inventory": "source.json#/frames/1h",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 40,
+      "families": [
+        "Project/session card",
+        "GlobalWaitingPanel"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1h"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1h",
+      "evidence": {
+        "source_whole": "1h-source-whole-unmasked",
+        "app_whole": "1h-app-whole-unmasked",
+        "region_pairs": "1h-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1h-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1i",
+      "source_inventory": "source.json#/frames/1i",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 42,
+      "families": [
+        "GlobalWaitingPanel"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1i"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1i",
+      "evidence": {
+        "source_whole": "1i-source-whole-unmasked",
+        "app_whole": "1i-app-whole-unmasked",
+        "region_pairs": "1i-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1i-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1j",
+      "source_inventory": "source.json#/frames/1j",
+      "member": "design_handoff_ariadne/Component Sheet.dc.html",
+      "board_line": 82,
+      "families": [
+        "StatusBadge",
+        "TreeRow",
+        "AnswerControl",
+        "MessageExcerpt"
+      ],
+      "kind": "component-sheet",
+      "render_cases": [
+        "status-open-pill",
+        "status-open-text",
+        "status-open-icon",
+        "status-waiting-pill",
+        "status-waiting-text",
+        "status-waiting-icon",
+        "status-progress-pill",
+        "status-progress-text",
+        "status-progress-icon",
+        "status-decided-pill",
+        "status-decided-text",
+        "status-decided-icon",
+        "status-done-pill",
+        "status-done-text",
+        "status-done-icon",
+        "status-dropped-pill",
+        "status-dropped-text",
+        "status-dropped-icon",
+        "status-replaced-pill",
+        "status-replaced-text",
+        "status-replaced-icon",
+        "row-open",
+        "row-waiting",
+        "row-progress",
+        "row-decided",
+        "row-done",
+        "row-dropped",
+        "row-replaced",
+        "row-selected-focused",
+        "row-hover-context",
+        "row-touched",
+        "row-collapsed-search",
+        "row-later",
+        "row-explained",
+        "row-delivery",
+        "row-inline-answer",
+        "answer-full-empty",
+        "answer-full-selected",
+        "answer-compact-empty",
+        "answer-compact-selected",
+        "answer-warning-blocked",
+        "answer-textarea",
+        "message-rail-plain",
+        "message-rail-highlight",
+        "message-rail-active",
+        "message-rail-origin",
+        "message-timeline-created-me",
+        "message-timeline-created-agent",
+        "message-timeline-updated-me",
+        "message-timeline-updated-agent",
+        "message-timeline-origin-me",
+        "message-timeline-origin-agent",
+        "message-timeline-answer-me",
+        "message-timeline-answer-agent"
+      ],
+      "evidence": "Original 54 component region comparisons; no standalone application page."
+    },
+    {
+      "id": "1k",
+      "source_inventory": "source.json#/frames/1k",
+      "member": "design_handoff_ariadne/Component Sheet.dc.html",
+      "board_line": 84,
+      "families": [
+        "StatusBadge",
+        "TreeRow",
+        "AnswerControl",
+        "MessageExcerpt"
+      ],
+      "kind": "component-sheet",
+      "render_cases": [
+        "status-open-pill",
+        "status-open-text",
+        "status-open-icon",
+        "status-waiting-pill",
+        "status-waiting-text",
+        "status-waiting-icon",
+        "status-progress-pill",
+        "status-progress-text",
+        "status-progress-icon",
+        "status-decided-pill",
+        "status-decided-text",
+        "status-decided-icon",
+        "status-done-pill",
+        "status-done-text",
+        "status-done-icon",
+        "status-dropped-pill",
+        "status-dropped-text",
+        "status-dropped-icon",
+        "status-replaced-pill",
+        "status-replaced-text",
+        "status-replaced-icon",
+        "row-open",
+        "row-waiting",
+        "row-progress",
+        "row-decided",
+        "row-done",
+        "row-dropped",
+        "row-replaced",
+        "row-selected-focused",
+        "row-hover-context",
+        "row-touched",
+        "row-collapsed-search",
+        "row-later",
+        "row-explained",
+        "row-delivery",
+        "row-inline-answer",
+        "answer-full-empty",
+        "answer-full-selected",
+        "answer-compact-empty",
+        "answer-compact-selected",
+        "answer-warning-blocked",
+        "answer-textarea",
+        "message-rail-plain",
+        "message-rail-highlight",
+        "message-rail-active",
+        "message-rail-origin",
+        "message-timeline-created-me",
+        "message-timeline-created-agent",
+        "message-timeline-updated-me",
+        "message-timeline-updated-agent",
+        "message-timeline-origin-me",
+        "message-timeline-origin-agent",
+        "message-timeline-answer-me",
+        "message-timeline-answer-agent"
+      ],
+      "evidence": "Original 54 component region comparisons; no standalone application page."
+    },
+    {
+      "id": "1l",
+      "source_inventory": "source.json#/frames/1l",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 44,
+      "families": [
+        "GlobalWaitingPanel",
+        "AnswerControl"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1l"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1l",
+      "evidence": {
+        "source_whole": "1l-source-whole-unmasked",
+        "app_whole": "1l-app-whole-unmasked",
+        "region_pairs": "1l-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1l-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1m",
+      "source_inventory": "source.json#/frames/1m",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 46,
+      "families": [
+        "GlobalWaitingPanel",
+        "AnswerControl"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1m"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1m",
+      "evidence": {
+        "source_whole": "1m-source-whole-unmasked",
+        "app_whole": "1m-app-whole-unmasked",
+        "region_pairs": "1m-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1m-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1n",
+      "source_inventory": "source.json#/frames/1n",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 48,
+      "families": [
+        "TreeRow"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1n"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1n",
+      "evidence": {
+        "source_whole": "1n-source-whole-unmasked",
+        "app_whole": "1n-app-whole-unmasked",
+        "region_pairs": "1n-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1n-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1o",
+      "source_inventory": "source.json#/frames/1o",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 50,
+      "families": [
+        "Project/session card",
+        "AnswerControl"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1o",
+        "frame:1o/reconnect-choice",
+        "frame:1o/reconnect-draft"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1o",
+      "evidence": {
+        "source_whole": "1o-source-whole-unmasked",
+        "app_whole": "1o-app-whole-unmasked",
+        "region_pairs": "1o-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1o-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1p",
+      "source_inventory": "source.json#/frames/1p",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 52,
+      "families": [
+        "Project/session card"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1p"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1p",
+      "evidence": {
+        "source_whole": "1p-source-whole-unmasked",
+        "app_whole": "1p-app-whole-unmasked",
+        "region_pairs": "1p-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1p-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1q",
+      "source_inventory": "source.json#/frames/1q",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 54,
+      "families": [
+        "StatusBadge",
+        "TreeRow",
+        "AnswerControl"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1q"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1q",
+      "evidence": {
+        "source_whole": "1q-source-whole-unmasked",
+        "app_whole": "1q-app-whole-unmasked",
+        "region_pairs": "1q-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1q-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1r",
+      "source_inventory": "source.json#/frames/1r",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 56,
+      "families": [
+        "AnswerControl"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1r"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1r",
+      "evidence": {
+        "source_whole": "1r-source-whole-unmasked",
+        "app_whole": "1r-app-whole-unmasked",
+        "region_pairs": "1r-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1r-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1s",
+      "source_inventory": "source.json#/frames/1s",
+      "member": "design_handoff_ariadne/Status Diagram.dc.html",
+      "board_line": 80,
+      "families": [
+        "StatusBadge",
+        "BackAndForthRound"
+      ],
+      "kind": "implementer-diagram",
+      "render_cases": [
+        "status-open-pill",
+        "status-waiting-pill",
+        "status-progress-pill",
+        "status-decided-pill",
+        "status-done-pill",
+        "status-dropped-pill",
+        "status-replaced-pill",
+        "frame:1u",
+        "frame:1u/ask-only"
+      ],
+      "evidence": "Status shapes and ordered round/result history; source diagram remains an immutable reference, not an application page."
+    },
+    {
+      "id": "1t",
+      "source_inventory": "source.json#/frames/1t",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 58,
+      "families": [
+        "StatusBadge",
+        "TreeRow",
+        "MessageExcerpt",
+        "GlobalWaitingPanel"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1t"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1t",
+      "evidence": {
+        "source_whole": "1t-source-whole-unmasked",
+        "app_whole": "1t-app-whole-unmasked",
+        "region_pairs": "1t-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1t-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1u",
+      "source_inventory": "source.json#/frames/1u",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 60,
+      "families": [
+        "BackAndForthRound",
+        "MessageExcerpt"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1u"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1u",
+      "evidence": {
+        "source_whole": "1u-source-whole-unmasked",
+        "app_whole": "1u-app-whole-unmasked",
+        "region_pairs": "1u-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1u-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1v",
+      "source_inventory": "source.json#/frames/1v",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 62,
+      "families": [
+        "StatusBadge",
+        "AnswerControl"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1v"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1v",
+      "evidence": {
+        "source_whole": "1v-source-whole-unmasked",
+        "app_whole": "1v-app-whole-unmasked",
+        "region_pairs": "1v-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1v-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1w",
+      "source_inventory": "source.json#/frames/1w",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 64,
+      "families": [
+        "Project/session card",
+        "TreeRow"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1w"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1w",
+      "evidence": {
+        "source_whole": "1w-source-whole-unmasked",
+        "app_whole": "1w-app-whole-unmasked",
+        "region_pairs": "1w-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1w-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1x",
+      "source_inventory": "source.json#/frames/1x",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 66,
+      "families": [
+        "Archive/Continue dialogs"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1x"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1x",
+      "evidence": {
+        "source_whole": "1x-source-whole-unmasked",
+        "app_whole": "1x-app-whole-unmasked",
+        "region_pairs": "1x-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1x-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1y",
+      "source_inventory": "source.json#/frames/1y",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 68,
+      "families": [
+        "Archive/Continue dialogs"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1y"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1y",
+      "evidence": {
+        "source_whole": "1y-source-whole-unmasked",
+        "app_whole": "1y-app-whole-unmasked",
+        "region_pairs": "1y-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1y-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1z",
+      "source_inventory": "source.json#/frames/1z",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 76,
+      "families": [
+        "Project/session card"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1z"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1z",
+      "evidence": {
+        "source_whole": "1z-source-whole-unmasked",
+        "app_whole": "1z-app-whole-unmasked",
+        "region_pairs": "1z-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1z-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1aa",
+      "source_inventory": "source.json#/frames/1aa",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 78,
+      "families": [
+        "Project/session card",
+        "TopicGraph node/edge"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1aa"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1aa",
+      "evidence": {
+        "source_whole": "1aa-source-whole-unmasked",
+        "app_whole": "1aa-app-whole-unmasked",
+        "region_pairs": "1aa-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1aa-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1ab",
+      "source_inventory": "source.json#/frames/1ab",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 70,
+      "families": [
+        "Project/session card"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1ab"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1ab",
+      "evidence": {
+        "source_whole": "1ab-source-whole-unmasked",
+        "app_whole": "1ab-app-whole-unmasked",
+        "region_pairs": "1ab-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1ab-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1ac",
+      "source_inventory": "source.json#/frames/1ac",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 72,
+      "families": [
+        "Project/session card"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1ac"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1ac",
+      "evidence": {
+        "source_whole": "1ac-source-whole-unmasked",
+        "app_whole": "1ac-app-whole-unmasked",
+        "region_pairs": "1ac-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1ac-{region}-{index}-normalized-{source|app}"
+      }
+    },
+    {
+      "id": "1ad",
+      "source_inventory": "source.json#/frames/1ad",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "board_line": 74,
+      "families": [
+        "Project/session card",
+        "AnswerControl"
+      ],
+      "kind": "application-reference",
+      "render_cases": [
+        "frame:1ad"
+      ],
+      "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1ad",
+      "evidence": {
+        "source_whole": "1ad-source-whole-unmasked",
+        "app_whole": "1ad-app-whole-unmasked",
+        "region_pairs": "1ad-{region}-{index}-{source|app|provenance}",
+        "normalized_component_pairs": "1ad-{region}-{index}-normalized-{source|app}"
+      },
+      "qualification": "No matching compliant crop: the supplied cross-agent reroute overlay shades the entire workspace. Retain both unmasked whole images; independently test the disconnected existing-session presentation and absence of rerouting."
+    }
+  ],
+  "components": [
+    {
+      "family": "StatusBadge",
+      "states_from": "source.json#/components/StatusBadge",
+      "render_cases": [
+        "status-open-pill",
+        "status-open-text",
+        "status-open-icon",
+        "status-waiting-pill",
+        "status-waiting-text",
+        "status-waiting-icon",
+        "status-progress-pill",
+        "status-progress-text",
+        "status-progress-icon",
+        "status-decided-pill",
+        "status-decided-text",
+        "status-decided-icon",
+        "status-done-pill",
+        "status-done-text",
+        "status-done-icon",
+        "status-dropped-pill",
+        "status-dropped-text",
+        "status-dropped-icon",
+        "status-replaced-pill",
+        "status-replaced-text",
+        "status-replaced-icon"
+      ]
+    },
+    {
+      "family": "TreeRow",
+      "states_from": "source.json#/components/TreeRow",
+      "render_cases": [
+        "row-open",
+        "row-waiting",
+        "row-progress",
+        "row-decided",
+        "row-done",
+        "row-dropped",
+        "row-replaced",
+        "row-selected-focused",
+        "row-hover-context",
+        "row-touched",
+        "row-collapsed-search",
+        "row-later",
+        "row-explained",
+        "row-delivery",
+        "row-inline-answer"
+      ]
+    },
+    {
+      "family": "AnswerControl",
+      "states_from": "source.json#/components/AnswerControl",
+      "render_cases": [
+        "answer-full-empty",
+        "answer-full-selected",
+        "answer-compact-empty",
+        "answer-compact-selected",
+        "answer-warning-blocked",
+        "answer-textarea",
+        "frame:1o/reconnect-choice",
+        "frame:1o/reconnect-draft"
+      ]
+    },
+    {
+      "family": "MessageExcerpt",
+      "states_from": "source.json#/components/MessageExcerpt",
+      "render_cases": [
+        "message-rail-plain",
+        "message-rail-highlight",
+        "message-rail-active",
+        "message-rail-origin",
+        "message-timeline-created-me",
+        "message-timeline-created-agent",
+        "message-timeline-updated-me",
+        "message-timeline-updated-agent",
+        "message-timeline-origin-me",
+        "message-timeline-origin-agent",
+        "message-timeline-answer-me",
+        "message-timeline-answer-agent",
+        "frame:1a/paused-follow"
+      ]
+    },
+    {
+      "family": "BackAndForthRound",
+      "states_from": "source.json#/components/BackAndForthRound",
+      "render_cases": [
+        "frame:1u",
+        "frame:1u/ask-only"
+      ]
+    },
+    {
+      "family": "TopicGraph node/edge",
+      "states_from": "source.json#/components/TopicGraph node/edge",
+      "render_cases": [
+        "frame:1d",
+        "frame:1f",
+        "frame:1aa",
+        "frame:graph-expanded-replacement",
+        "frame:graph-filtered"
+      ]
+    },
+    {
+      "family": "Archive/Continue dialogs",
+      "states_from": "source.json#/components/Archive/Continue dialogs",
+      "render_cases": [
+        "frame:1x",
+        "frame:1y",
+        "frame:1x/archive-blocked",
+        "frame:1x/archive-eligible",
+        "frame:1ac/close-guard",
+        "frame:1y/target-error"
+      ]
+    },
+    {
+      "family": "Project/session card",
+      "states_from": "source.json#/components/Project/session card",
+      "render_cases": [
+        "frame:1p",
+        "frame:1z",
+        "frame:1aa",
+        "frame:1ab",
+        "frame:1ac",
+        "frame:1ad"
+      ]
+    },
+    {
+      "family": "GlobalWaitingPanel",
+      "states_from": "source.json#/components/GlobalWaitingPanel",
+      "render_cases": [
+        "frame:1a",
+        "frame:1c",
+        "frame:1i",
+        "frame:1l",
+        "frame:1m",
+        "frame:1w",
+        "frame:1z",
+        "frame:1o/reconnect-choice",
+        "frame:1o/reconnect-draft"
+      ]
+    }
+  ],
+  "extra_source_states": [
+    {
+      "case": "graph-expanded-replacement",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "base_frame": "1d",
+      "props": {
+        "expand": "1.3.1.2"
+      }
+    },
+    {
+      "case": "graph-filtered",
+      "member": "design_handoff_ariadne/Ariadne.dc.html",
+      "base_frame": "1d",
+      "props": {
+        "selected": "",
+        "query": "Redis"
+      }
+    }
+  ],
+  "target_only_states": [
+    "frame:1x/archive-blocked",
+    "frame:1x/archive-eligible",
+    "frame:1ac/close-guard",
+    "frame:1y/target-error",
+    "frame:1u/ask-only",
+    "frame:1a/paused-follow",
+    "frame:1o/reconnect-choice",
+    "frame:1o/reconnect-draft"
+  ],
+  "evidence": {
+    "directory": "coverage/reference",
+    "report": "coverage/reference/report/index.html",
+    "status": "Capture/coverage/native/release evidence is produced by CI on the pushed PR head; this map does not claim checks passed."
+  },
+  "qualifications": [
+    "Whole-frame source/app parity is not claimed. Exact independently rendered region pairs use the unchanged 1px geometry, 0.5% pixel ratio and 0.2 raster threshold; no new masks.",
+    "Canonical Waiting is pinned outside the center/detail/rail horizontal scroll region at both required sizes; the source scrolls the complete body grid. Shell dimensions and pinned scroll are verified independently, retaining full unmasked images.",
+    "Graph primitives receive explicit source fixture coordinates. No source 84px leaf or 208/216px depth layout algorithm is copied into production; actual 94px/254px layout and viewport behavior remain P5.1.",
+    "Continue source/release lead and send text are excluded by precisely cropping its unchanged grouped summary; exact strings live in assembled-regions.ts. New target-local IDs/immutable provenance/source-preserving error text is tested independently.",
+    "The release footer advertises Cmd+Enter send and Enter details; prototype Enter-send copy/default recommendation is excluded from comparison crops. Source-derived answer cases start without a selection; retained-choice states are explicit target-only fixtures.",
+    "Guarded archive/confirmed dispatch pause/target write failure have no supplied matching frame. Source dialog style is reused with honest application-only captures and meaningful interaction/geometry checks.",
+    "Reconnect retained-choice and nonempty-draft cases are deliberate controlled application states with no supplied matching frame. Waiting and detail share reconnect blocking; option/text Send and Cmd+Enter cannot submit. The prior nonrecommended choice is explicit, never a restored default recommendation.",
+    "Original unmasked whole-frame and region source/app PNGs retain actual composition and clipping. Separately labelled whole-component comparisons preserve measured dimensions and inherited styling while moving the existing DOM region to integer origin, recording original/normalized boxes and temporary/restored styles. Transparent regions preserve their independently resolved solid ancestor backdrop. A component’s own 7% accent layer stays unchanged over a recorded inert temporary backing with its actual solid ancestor color, removed in finally; images/gradients, opacity or translucent ancestor layers fail normalization. These comparisons do not prove original viewport visibility; unmodified canonical shell/pinned/overflow tests prove release geometry."
+  ]
+}
