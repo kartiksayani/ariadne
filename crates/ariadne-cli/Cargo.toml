@@ -12,6 +12,7 @@ ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
 serde_json.workspace = true
 
 [dev-dependencies]
+serde.workspace = true
 ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
 tempfile.workspace = true
 

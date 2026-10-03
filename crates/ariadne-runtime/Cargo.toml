@@ -11,7 +11,7 @@ ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
 serde.workspace = true
 serde_json.workspace = true
 libc.workspace = true
-tokio = { version = "=1.53.1", default-features = false, features = ["net", "rt-multi-thread", "io-util", "time", "sync"] }
+tokio = { version = "=1.53.1", default-features = false, features = ["net", "rt-multi-thread", "io-util", "time", "sync", "macros"] }
 
 [dev-dependencies]
 ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
