@@ -1,4 +1,5 @@
-//! Canonical synchronous contract; execution and persistence belong to later tasks.
+//! Canonical synchronous service contract and native registered binding setup.
+pub mod bindings;
 #[path = "service/context.rs"]
 mod context;
 mod dto;

@@ -11,6 +11,7 @@ test-support = []
 [dependencies]
 ariadne-domain = { path = "../ariadne-domain" }
 ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
+ariadne-store = { path = "../ariadne-store" }
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
@@ -19,3 +20,4 @@ sha2.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true
+tempfile.workspace = true

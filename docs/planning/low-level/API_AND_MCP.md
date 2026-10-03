@@ -98,6 +98,27 @@ after the session commit. If metadata conflicts, stop and show the affected path
 No bootstrap journal, completion-stage tracking or automatic setup repair is
 required; follow DOMAIN_AND_STORAGE section 4.
 
+Bootstrap keeps that session/actor namespace. With `existing_session_id`, check
+only the requested owner/session receipt. Without it, scan the requested project's
+authoritative sessions for one exact route/owner/command digest match: unrelated
+mismatches are ignored, one match replays, multiple exact matches return
+`binding_ambiguous`. Other projects' operation keys are unrelated. With no match,
+verify the explicitly chosen host outside every filesystem lock, then recheck
+replay and global selected routes under setup locks. Only the intended session's
+conflicting operation key returns `operation_reused`. Command normalization
+includes its discriminant and complete typed params, excluding op ID and the
+already validated envelope version. Pause and resume are different intents even
+with identical params.
+
+First connect commits session plus receipt at revision 1 before publishing the
+rebuildable index. Index failure reports `commit_uncertain` with op ID; same-op
+retry refreshes the index and returns saved IDs/generation without another
+mutation or provider check. Native `bindings::BindingService` retains typed
+core/registry/store errors and paths; ordinary pre-publication I/O is not an
+uncertain commit. Registration derives its initial display name from the
+canonical root basename under lock and preserves an existing metadata name;
+that derived name is not a request field or digest input.
+
 `MutationReceipt` is an untagged typed union: session commands return the existing
 `SavedReceipt` directly, project registration returns
 `{operation_id,project_id,registry_revision}`, and preference writes return
@@ -144,12 +165,26 @@ commit uses the target route and verifies its explicit target agrees. Entry poin
 resolve registered scope before constructing trusted contexts. No caller selects
 an actor or arbitrary storage path through these routing wrappers.
 
-`binding_connect` creates a new Ariadne session by default. With
-existing_session_id it requires active state, no outstanding input and paused or
-disconnected old binding; preserve old binding history. Same host identity returns
-its existing binding, not another session. A different second enabled binding
-returns `binding_conflict`. Changing the active binding never silently retargets
-queued messages. Rebind requires resolving/cancelling old inputs first.
+`binding_connect` creates a new Ariadne session by default unless the host identity
+already belongs to a selected binding. Same-host validated reconnect keeps the
+session/binding, rotates generation and preserves owner pause/history/original
+attempt generations. Unresolved prepared work requires reconciliation; unsent
+queued work and resolved/sealed history alone do not imply uncertainty. Selected
+routes remain reserved while paused/disconnected/recovering or closed; a new
+connect to a closed session returns `invalid_transition` until explicit reopen.
+Different-host `existing_session_id` rebind requires active state, no queued,
+in-flight or needs-attention input and a paused/disconnected old binding. The old
+binding/history stays intact and its inactive former route is freed for a new
+default-connect session. A different enabled binding or route conflict returns
+`binding_conflict`; no queued message is silently retargeted.
+
+Trusted composition supplies read-only verified endpoint/config/version/thread
+facts through native `core::bindings::VerifiedHost`, outside all store locks.
+These facts are not a wire DTO or active provider handle. Unknown/incompatible
+qualification or unavailable host fails preflight; verified identity without an
+active connection observation persists Unknown with disconnected dispatch.
+Runtime later calls Adapter.connect using durable IDs/generation before acquiring
+dispatch authority. That provider wiring belongs to P3.6/runtime, not P1.4.
 
 Tauri command names use the snake_case names above; CLI uses nouns/verbs
 (`input submit`, `binding connect`, `topic continue`). `apply` uses operation

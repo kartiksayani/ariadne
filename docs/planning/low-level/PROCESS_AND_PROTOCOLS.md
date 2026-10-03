@@ -38,6 +38,19 @@ is never undone by app restart. No provider launch/resume is performed.
 
 ## 2. Shared adapter contract
 
+Binding setup performs a trusted read-only provider/config/version/endpoint and
+explicit-thread qualification outside registry/project/session locks. Native
+core-owned `VerifiedHost` facts carry no active provider handle; exact operation
+replay is checked before verification and again when locks are reacquired. Final
+IDs/generation are allocated only during locked persistence. Runtime then calls
+Adapter.connect with those durable IDs outside locks before lease/dispatch;
+failure reports generation-scoped disconnected and never dispatches. Unknown
+preflight connection remains Unknown with a disconnected dispatch barrier.
+Provider/runtime tasks own that final connection and report wiring. Codex's
+current reader qualifies its selected thread during bind, so production setup
+also needs a provider-private read-only qualifier before IDs; P1.4 does not add a
+placeholder-ID connection or an unused shared adapter method.
+
 See [Agent adapters](../AGENT_ADAPTERS.md) for the shared interface and later
 executable-extension design. Public registration/negotiation is deferred. Rust trait
 uses owned DTOs and async operations `probe`, `connect`, `submit`, `observe`,
