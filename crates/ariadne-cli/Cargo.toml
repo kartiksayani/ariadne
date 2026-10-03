@@ -4,6 +4,18 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[dependencies]
+ariadne-runtime = { path = "../ariadne-runtime" }
+ariadne-core = { path = "../ariadne-core" }
+ariadne-domain = { path = "../ariadne-domain" }
+ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
+serde_json.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
+tempfile.workspace = true
+
 [[bin]]
 name = "ariadne"
 path = "src/main.rs"
