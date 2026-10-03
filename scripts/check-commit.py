@@ -222,7 +222,8 @@ def main(argv=None):
         if not isinstance(floor, (int, float)) or not 80 <= floor <= 100:
             raise ValueError("Application coverage floor must be at least 80%")
         reports = [ROOT / name for name in APPLICATION_REPORTS]
-        for report in reports:
+        xtask_report = ROOT / "coverage/xtask.lcov"
+        for report in [*reports, xtask_report]:
             report.unlink(missing_ok=True)
         (ROOT / "coverage").mkdir(exist_ok=True)
         run("npm", "run", "build")
@@ -234,6 +235,9 @@ def main(argv=None):
             for name in config["coverage_exclusions"])
         run("cargo", "llvm-cov", "--workspace", "--all-features", "--locked", "--lcov",
             "--ignore-filename-regex", ignored, "--output-path", reports[0])
+        run("cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--all-features", "--locked", "--offline", "--lcov",
+            "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
+            "--output-path", xtask_report, "--fail-under-lines", "80")
         run("npm", "run", "test:coverage")
         covered, total = coverage_counts(reports, ROOT, config)
         print(f"Application line coverage: {covered}/{total} = {100 * covered / total:.2f}%", flush=True)
