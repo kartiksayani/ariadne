@@ -1,0 +1,192 @@
+{
+  "schema_version": 2,
+  "id": "00000000-0000-4000-8000-000000000902",
+  "project_id": "00000000-0000-4000-8000-000000000901",
+  "title": "Synthetic continuation source",
+  "state": "active",
+  "created_at": "2026-10-02T12:00:00.000Z",
+  "updated_at": "2026-10-02T12:00:00.000Z",
+  "revision": 12,
+  "closed_at": null,
+  "counters": {
+    "next_root": 3,
+    "next_topic_order": 2,
+    "next_message": 2,
+    "next_input": 1,
+    "next_answer": 1
+  },
+  "active_binding_id": "00000000-0000-4000-8000-000000000920",
+  "topics": {
+    "00000000-0000-4000-8000-000000000910": {
+      "id": "00000000-0000-4000-8000-000000000910",
+      "name": "Continued context",
+      "order": 1,
+      "revision": 12,
+      "created_at": "2026-10-02T12:00:00.000Z",
+      "archived_at": null,
+      "origin": null
+    }
+  },
+  "items": {
+    "2": {
+      "id": "2",
+      "ordinal": 2,
+      "topic_id": "00000000-0000-4000-8000-000000000910",
+      "parent": null,
+      "question": "Preserve continued context",
+      "type": "task",
+      "status": "open",
+      "owner": {
+        "kind": "me"
+      },
+      "revision": 1,
+      "question_revision": 1,
+      "next_child": 1,
+      "ask": null,
+      "note": null,
+      "options": [],
+      "links": [],
+      "outcome": null,
+      "why": null,
+      "replaced_by": null,
+      "created_at": "2026-10-02T12:00:00.000Z",
+      "updated_at": "2026-10-02T12:00:00.000Z",
+      "created_message_id": "00000000-0000-4000-8000-000000000903",
+      "updated_message_ids": [],
+      "status_history": [],
+      "waiting_since": null,
+      "recipient_binding_id": null,
+      "current_round_id": "00000000-0000-4000-8000-000000000940",
+      "source_round_id": null,
+      "origin": null
+    }
+  },
+  "messages": [
+    {
+      "id": "00000000-0000-4000-8000-000000000903",
+      "number": 1,
+      "author": "agent",
+      "kind": "reply",
+      "body": "Imported complete reply.\nIts source author and binding are preserved.",
+      "created_at": "2026-10-02T12:00:00.000Z",
+      "item_id": "2",
+      "topic_id": "00000000-0000-4000-8000-000000000910",
+      "items_touched": [
+        "2"
+      ],
+      "binding_id": "00000000-0000-4000-8000-000000000920",
+      "input_id": null,
+      "attempt_id": null,
+      "host_turn_id": null,
+      "round_id": "00000000-0000-4000-8000-000000000940",
+      "origin": null
+    }
+  ],
+  "rounds": {
+    "00000000-0000-4000-8000-000000000940": {
+      "id": "00000000-0000-4000-8000-000000000940",
+      "item_id": "2",
+      "ordinal": 1,
+      "opened_message_id": "00000000-0000-4000-8000-000000000903",
+      "question_snapshot": "Preserve continued context",
+      "ask_snapshot": null,
+      "options_snapshot": [],
+      "question_revision": 1,
+      "owner_message_ids": [],
+      "agent_message_ids": [
+        "00000000-0000-4000-8000-000000000903"
+      ],
+      "result_input_ids": [],
+      "fork_item_ids": [],
+      "closed_at": "2026-10-02T12:00:00.000Z",
+      "origin": null
+    }
+  },
+  "answers": [],
+  "bindings": {
+    "00000000-0000-4000-8000-000000000920": {
+      "id": "00000000-0000-4000-8000-000000000920",
+      "adapter_id": "demo.source",
+      "adapter_version": "1.0.0",
+      "protocol_major": 1,
+      "config_version": 1,
+      "external_session_id": "source-thread",
+      "endpoint": {
+        "kind": "unix_socket",
+        "path": "/tmp/ariadne-source-demo.sock"
+      },
+      "endpoint_fingerprint": "demo-source-endpoint",
+      "generation": "00000000-0000-4000-8000-000000000922",
+      "created_at": "2026-10-02T12:00:00.000Z",
+      "dispatch_state": "paused",
+      "owner_paused": true,
+      "pause_reason": null,
+      "connection_state": "connected",
+      "capabilities": {
+        "existing_session": {
+          "supported": true,
+          "conditions": [
+            "Selected existing local demo conversation."
+          ]
+        },
+        "deferred_delivery": {
+          "supported": true,
+          "conditions": []
+        },
+        "turn_correlation": {
+          "supported": true,
+          "conditions": []
+        },
+        "turn_completion": {
+          "supported": true,
+          "conditions": []
+        },
+        "domain_cli": {
+          "supported": true,
+          "conditions": []
+        },
+        "domain_mcp": {
+          "supported": false,
+          "conditions": []
+        },
+        "history_reconcile": {
+          "supported": true,
+          "conditions": []
+        },
+        "streaming_output": {
+          "supported": false,
+          "conditions": []
+        },
+        "final_text_read": {
+          "supported": true,
+          "conditions": []
+        },
+        "discover_sessions": {
+          "supported": true,
+          "conditions": []
+        },
+        "delivery_mode": "pull"
+      },
+      "active_input_id": null,
+      "issued_through_message_number": 0,
+      "adapter_config": {
+        "namespace": "demo.source",
+        "values": {
+          "fixture": true,
+          "retry_budget": 0,
+          "label": "offline demo",
+          "nested": {
+            "flags": [
+              false,
+              null,
+              1.5
+            ]
+          }
+        }
+      }
+    }
+  },
+  "inputs": {},
+  "operation_receipts": {},
+  "continuations": {}
+}

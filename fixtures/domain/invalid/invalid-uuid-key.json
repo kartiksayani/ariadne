@@ -1,0 +1,22 @@
+{
+  "operation_id": "00000000-0000-4000-8000-000000000209",
+  "source_project_id": "00000000-0000-4000-8000-000000000901",
+  "source_session_id": "00000000-0000-4000-8000-000000000902",
+  "source_topic_id": "00000000-0000-4000-8000-000000000910",
+  "source_revision": 12,
+  "source_sha256": "4c73435517923b9ff0ebf1fe29100ffaa57563c13fd9feb7014799fcb602c2c8",
+  "target_topic_id": "00000000-0000-4000-8000-000000000011",
+  "target_input_id": "00000000-0000-4000-8000-000000000077",
+  "item_id_map": {
+    "2": "8"
+  },
+  "message_id_map": {
+    "INVALID": "00000000-0000-4000-8000-000000000112"
+  },
+  "round_id_map": {
+    "00000000-0000-4000-8000-000000000940": "00000000-0000-4000-8000-000000000042"
+  },
+  "answer_id_map": {},
+  "summary": "Continue the source context.\nThe original author and entity references remain available.",
+  "confirmed_at": "2026-10-03T12:00:26.000Z"
+}
