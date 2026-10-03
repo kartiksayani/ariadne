@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "project": {
+        "schema_version": 1,
+        "id": "00000000-0000-4000-8000-000000000001",
+        "display_name": "Ariadne canonical demo"
+      },
+      "canonical_root": "/fixtures/ariadne-demo",
+      "availability": "available",
+      "counts": {
+        "items_by_status": {
+          "open": 3,
+          "waiting_on_me": 1,
+          "in_progress": 1,
+          "decided": 1,
+          "done": 1,
+          "dropped": 1,
+          "replaced": 1
+        },
+        "waiting_unanswered": 1,
+        "sent_inputs": {
+          "queued": 2,
+          "in_flight": 1,
+          "needs_attention": 1
+        },
+        "archived_topics": 0,
+        "completeness": "complete",
+        "unavailable_session_ids": []
+      }
+    }
+  ],
+  "next_cursor": null,
+  "snapshot_revision": 21
+}

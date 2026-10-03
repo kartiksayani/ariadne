@@ -1,0 +1,13 @@
+{
+  "instance_id": "00000000-0000-4000-8000-000000000030",
+  "generation": "00000000-0000-4000-8000-000000000022",
+  "connection_state": "connected",
+  "execution_state": "running",
+  "last_seen_at": "2026-10-03T12:00:50.000Z",
+  "source": "host_event",
+  "process_identity": {
+    "pid": 1234,
+    "started_at": "2026-10-03T12:00:00.000Z"
+  },
+  "freshness": "fresh"
+}

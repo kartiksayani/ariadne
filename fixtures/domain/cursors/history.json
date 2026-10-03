@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "view": "item_status_history",
+  "filter_digest": "03b600e47898fc6c8565b62d254bb5ed7657bbea5973e2ca5632c6248640be05",
+  "after": {
+    "kind": "history",
+    "index": 0
+  },
+  "revision": 21
+}

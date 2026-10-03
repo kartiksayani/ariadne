@@ -1,0 +1,59 @@
+{
+  "items": [
+    {
+      "project_id": "00000000-0000-4000-8000-000000000001",
+      "title": "Canonical domain v1 demo",
+      "state": "active",
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "updated_at": "2026-10-03T12:00:50.000Z",
+      "revision": 21,
+      "closed_at": null,
+      "session_id": "00000000-0000-4000-8000-000000000002",
+      "active_binding": {
+        "id": "00000000-0000-4000-8000-000000000020",
+        "adapter_id": "demo.local",
+        "external_session_id": "demo-thread-20",
+        "generation": "00000000-0000-4000-8000-000000000022",
+        "dispatch_state": "enabled",
+        "owner_paused": false,
+        "pause_reason": null,
+        "connection_state": "connected",
+        "presence": {
+          "instance_id": "00000000-0000-4000-8000-000000000030",
+          "generation": "00000000-0000-4000-8000-000000000022",
+          "connection_state": "connected",
+          "execution_state": "running",
+          "last_seen_at": "2026-10-03T12:00:50.000Z",
+          "source": "host_event",
+          "process_identity": {
+            "pid": 1234,
+            "started_at": "2026-10-03T12:00:00.000Z"
+          },
+          "freshness": "fresh"
+        }
+      },
+      "counts": {
+        "items_by_status": {
+          "open": 3,
+          "waiting_on_me": 1,
+          "in_progress": 1,
+          "decided": 1,
+          "done": 1,
+          "dropped": 1,
+          "replaced": 1
+        },
+        "waiting_unanswered": 1,
+        "sent_inputs": {
+          "queued": 2,
+          "in_flight": 1,
+          "needs_attention": 1
+        },
+        "archived_topics": 0,
+        "completeness": "complete",
+        "unavailable_session_ids": []
+      }
+    }
+  ],
+  "next_cursor": null,
+  "snapshot_revision": 21
+}
