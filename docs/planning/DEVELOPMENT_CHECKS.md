@@ -50,9 +50,11 @@ Tool code never contributes to the application percentage. Ordinary helper tests
 files, declaration-only `dto.rs`/`dto/` paths and known build configuration.
 The exact domain `src/lib.rs` and `src/models/mod.rs` exclusions cover only module
 declarations/re-exports: real LLVM measurement produces no executable lines for
-these wiring files. Domain `src/models/primitives.rs` is fully measured. Remove
-either wiring exclusion in the same PR that adds its first executable logic;
-the independent reviewer checks both files and the real report.
+these wiring files. Domain `src/models/primitives.rs` is fully measured.
+The CLI `src/lib.rs` exclusion likewise covers only its bridge module export;
+the executable main, bridge command, codec and lease logic remain measured. Remove
+any wiring exclusion in the same PR that adds its first executable logic;
+the independent reviewer checks the affected wiring files and the real report.
 Generated/vendor/dependency/test sources are excluded by path. There is no blanket
 `crates/**/lib.rs` exemption, AST parser, source SHA or dependency-identity classifier.
 Remove a stub's exact exclusion when its first logic lands. Declaration paths must
