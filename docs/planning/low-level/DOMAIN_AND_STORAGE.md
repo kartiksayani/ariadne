@@ -178,6 +178,63 @@ the fork both ways. This renders the mockup's ask → owner response → result 
 branches cards without guessing from chronology. Unrelated messages stay in the
 ordinary timeline. Imported round/message IDs are remapped on topic continuation.
 
+The pure `ariadne_domain::history` helpers assemble an owned `Session` candidate:
+
+- `record_owner_history(session, message, answer, new_round_id)` records canonical
+  caller-prepared records after the caller stages their matching Input. It validates
+  the original target/snapshots/text and an Answer's current question revision,
+  deliberate choice/text and correction link. A correction explicitly supersedes
+  the latest answer in that same item/question episode. It increments message/answer
+  counters, adds round/item backlinks and leaves every Input/Attempt unchanged.
+- `open_ask_round(session, asked_item, opened_message_id, at)` consumes the candidate
+  from the agent Ask transition while the original session retains the previous
+  Item. It closes the previous open round, freezes the new snapshots and inserts
+  the candidate without another item revision increment.
+- `append_reply(session, context, draft)` validates binding/generation and paired
+  input/attempt provenance, then creates one full targeted reply. An explicit
+  historical closed round remains closed. Otherwise it uses the current round,
+  or null when none exists; it never opens a round by guessing from agent prose.
+- `close_round(session, round_id, at)` retains an existing close timestamp and clears
+  a matching current-round pointer, incrementing that item's revision/time once.
+  `link_round_fork(session, round_id, child_item_id, at)` checks the existing child's
+  actual parent/topic, records both directions and increments child revision/time
+  once only when assigning a new reverse link; it cannot reassign an old fork.
+- `link_result_history(session, input_id, attempt_id, close_round_ids, at)` reads an
+  already committed canonical result and links its input to target/reply/fork-source
+  rounds. It accepts verified original-attempt effects for a result-repair attempt.
+  Only the explicitly named related rounds close; queue, result and host-completion
+  states remain unchanged.
+
+Owner/reply appends increment item revision/update time once and add the message
+backlink; they never change status or question revision. A generic owner message
+opens a new round when the current pointer is absent or names a closed round.
+No helper rewrites old bodies, answers, snapshots or close timestamps. Failed calls
+leave the input snapshot unchanged. These native callable inputs are not additional
+wire DTOs. P2.1 owns Input construction/submission; core/store own actor/revision
+checks, session revision, operation replay, final validation and atomic persistence.
+
+`validate_session_history` checks ordered counters, unique IDs, targeted messages,
+existing creation/update backlinks, answer/correction snapshots, round lists/forks,
+result references and source attribution. Compose it with item-tree and delivery
+validation before committing. A reply has one direct `item_id`, but its deduplicated
+`items_touched` may include other operations' provenance. Shared activity can name a
+round with null `item_id` and several touched items; it is not a reply copied into
+that round's conversation list. Topic-only owner Continue and system lifecycle
+input/attempt evidence remain valid. Existing current-round pointers must resolve
+to the same item and may name a closed historical round. Created/update backlinks
+and Message targets serve different purposes: targeted history is selected through
+`Message.item_id` and round links, never solely through update backlinks.
+
+Imported history still validates local item/message/round/answer IDs and matching
+continuation maps plus source project/session/topic/revision. An origin-qualified
+copied Message may retain source binding/input/attempt identities without target
+live records, preserving source authorship. Copied Answers may retain source input
+IDs only with a consistent answer map and mapped local owner Message/snapshots.
+Origin Round result input IDs remain source history only with matching round-map
+lineage; they never become target work or committed target results. This validation
+adds no source-store access or copy construction; those belong to P2.6.
+See [ADR-0022](../../adr/ADR-0022-record-pure-item-history.md).
+
 ### Binding and presence
 
 Binding: `{id,adapter_id,adapter_version,protocol_major,config_version,

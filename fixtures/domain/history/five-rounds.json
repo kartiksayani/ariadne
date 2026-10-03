@@ -1,0 +1,29 @@
+{
+  "rounds": [
+    {
+      "number": 1,
+      "owner_text": "Owner answer for round 1.\nPreserve the complete explanation and original choice."
+    },
+    {
+      "number": 2,
+      "owner_text": "Owner answer for round 2.\nPreserve the complete explanation and original choice."
+    },
+    {
+      "number": 3,
+      "owner_text": "Owner answer for round 3.\nPreserve the complete explanation and original choice."
+    },
+    {
+      "number": 4,
+      "owner_text": "Owner answer for round 4.\nPreserve the complete explanation and original choice."
+    },
+    {
+      "number": 5,
+      "owner_text": "Owner answer for round 5.\nPreserve the complete explanation and original choice."
+    }
+  ],
+  "fork_rounds": [
+    2,
+    4
+  ],
+  "closed_item_message": "Follow-up on the finished reference.\nIts original outcome remains visible."
+}
