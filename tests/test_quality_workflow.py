@@ -53,15 +53,21 @@ class QualityWorkflowTests(unittest.TestCase):
             for name in ("npm", "cargo", "rustup", "node"):
                 (commands / name).symlink_to(command)
             for index, (scope, status, event, ref, provision_status, capture_status) in enumerate([
-                ("docs release=false", 0, "push", "refs/heads/docs", 23, 29),
-                ("tooling release=false", 0, "push", "refs/heads/tooling", 23, 29),
-                ("application release=true", 0, "push", "refs/heads/feature", 0, 0),
-                ("application release=true", 17, "push", "refs/heads/feature", 0, 0),
-                ("application release=true", 0, "push", "refs/heads/main", 0, 0),
-                ("application release=true", 0, "workflow_dispatch", "refs/heads/main", 0, 0),
-                ("application release=true", 0, "workflow_dispatch", "refs/heads/feature", 0, 0),
-                ("application release=true", 0, "push", "refs/heads/feature", 23, 0),
-                ("application release=true", 0, "push", "refs/heads/feature", 0, 29),
+                ("docs release=false reference=false", 0, "push", "refs/heads/docs", 23, 29),
+                ("tooling release=false reference=false", 0, "push", "refs/heads/tooling", 23, 29),
+                ("docs release=false reference=true", 0, "push", "refs/heads/design", 0, 0),
+                ("tooling release=false reference=true", 0, "push", "refs/heads/browser-test", 0, 0),
+                ("docs release=false reference=true", 0, "push", "refs/heads/design", 23, 0),
+                ("tooling release=false reference=true", 0, "push", "refs/heads/browser-test", 0, 29),
+                ("application release=false reference=false", 0, "push", "refs/heads/backend", 23, 29),
+                ("application release=true reference=false", 17, "push", "refs/heads/backend", 23, 29),
+                ("application release=true reference=true", 0, "push", "refs/heads/feature", 0, 0),
+                ("application release=true reference=true", 17, "push", "refs/heads/feature", 0, 0),
+                ("application release=true reference=true", 0, "push", "refs/heads/main", 0, 0),
+                ("application release=true reference=true", 0, "workflow_dispatch", "refs/heads/main", 0, 0),
+                ("application release=true reference=true", 0, "workflow_dispatch", "refs/heads/feature", 0, 0),
+                ("application release=true reference=true", 0, "push", "refs/heads/feature", 23, 0),
+                ("application release=true reference=true", 0, "push", "refs/heads/feature", 0, 29),
             ]):
                 with self.subTest(scope=scope, status=status, event=event, ref=ref):
                     checkout = root / str(index)
@@ -75,7 +81,8 @@ class QualityWorkflowTests(unittest.TestCase):
                     result = subprocess.run(["bash", "-c", script], cwd=checkout, env=env,
                                             text=True, capture_output=True)
                     application = scope.startswith("application")
-                    expected_status = (provision_status or capture_status or status) if application else status
+                    reference = "reference=true" in scope
+                    expected_status = (provision_status or capture_status or status) if reference else status
                     self.assertEqual(result.returncode, expected_status, result.stderr)
                     calls = [json.loads(line) for line in log.read_text().splitlines()]
                     gate = ["python", "scripts/check-commit.py", "--ci", "--base", "whole-pr-base"]
@@ -83,15 +90,15 @@ class QualityWorkflowTests(unittest.TestCase):
                         gate += ["--merge-base"]
                     if event == "workflow_dispatch":
                         gate += ["--full"]
-                    capture_ok = not application or not (provision_status or capture_status)
+                    capture_ok = not reference or not (provision_status or capture_status)
                     self.assertEqual(calls.count(gate), int(capture_ok))
                     provisioning = ["node", "node_modules/playwright/cli.js", "install", "chromium"]
                     capture = ["npm", "run", "capture:reference"]
-                    self.assertEqual(calls.count(provisioning), int(application))
-                    self.assertEqual(calls.count(capture), int(application and not provision_status))
-                    if application and not provision_status:
+                    self.assertEqual(calls.count(provisioning), int(reference))
+                    self.assertEqual(calls.count(capture), int(reference and not provision_status))
+                    if reference and not provision_status:
                         self.assertLess(calls.index(provisioning), calls.index(capture))
-                    if application and capture_ok:
+                    if reference and capture_ok:
                         self.assertLess(calls.index(capture), calls.index(gate))
                     installs = [call for call in calls if call[0] == "rustup"]
                     self.assertEqual(bool(installs), application and capture_ok)
