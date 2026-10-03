@@ -47,6 +47,49 @@ First-party Claude submit is pull-driven: scheduler supplies work in response to
 the Mod claim. Codex submit is push-driven through its native CLI. Both use the
 same core attempt/result state machine, not a mandatory artificial push socket.
 
+### Owned method DTOs
+
+P0.5 publishes `Adapter` in `ariadne-agent-protocol`. Each method is async,
+takes one owned request and returns `Result<OwnedResult, AdapterError>`.
+`AdapterError` uses the shared typed error vocabulary and bounded reason/retry
+semantics, not provider stderr. Domain primitives, `EndpointRef`,
+`EndpointFingerprint`, adapter configuration and qualified presence are imported
+from the canonical Rust contract. P0.3b/P0.5 settle every member before consumers
+start; no consumer-local dictionaries or provider wire types enter this seam.
+
+| Method | Request fields | Result fields / semantics |
+| --- | --- | --- |
+| `probe` | `endpoint:EndpointRef,configuration:AdapterConfig` | `host_version:string|null,compatibility:compatible|incompatible|unknown,availability:available|unavailable|unknown,setup_steps:string[]`; unknown never enables dispatch |
+| `connect` | `binding_id,generation,external_session_id:string,endpoint:EndpointRef,configuration:AdapterConfig` | verified `external_session_id:string,endpoint_fingerprint:EndpointFingerprint,capabilities:Capabilities,observation:PresenceObservation`; mismatch rejects |
+| `submit` | `binding_id,generation,input_id,attempt_id,formatted_payload:string,payload_sha256:Sha256,wire_marker:string` | `SubmitOutcome=Accepted{receipt:HostReceipt|null}\|RejectedBeforeDelivery{reason:string}\|Uncertain{reason:string}`; consume the exact persisted dispatch values |
+| `observe` | `binding_id,generation,checkpoint:Checkpoint|null,limit:1..100` | `ObserveResult={events:NormalizedEvent[],next_checkpoint:Checkpoint|null}` |
+| `reconcile` | `binding_id,generation,attempts:AttemptEvidenceRequest[],checkpoint:Checkpoint|null` | `ReconcileResult={attempt_evidence:AttemptEvidence[],unresolved_attempt_ids:UuidV4[],next_checkpoint:Checkpoint|null}` |
+| `disconnect` | `binding_id,generation` | `DisconnectResult={}` after stopping observation/releasing adapter-owned resources; never stops the host |
+
+`Capabilities` is the typed capability set from AGENT_ADAPTERS, with
+`{supported:boolean,conditions:string[]}` per declared capability and
+`delivery_mode:pull|push`; core never branches on provider names.
+`Checkpoint` is a private adapter checkpoint bounded to 4 KiB, not a query cursor.
+`HostReceipt={provider_reference:string,observed_at:UtcMillis}` is bounded
+provider acceptance evidence, not a successful turn/result.
+`AttemptEvidenceRequest` carries the persisted input/attempt IDs, originating
+generation, payload digest, wire marker and nullable known host turn ID;
+`AttemptEvidence={input_id,attempt_id,events:NormalizedEvent[]}`. Read-only
+reconciliation does not resubmit. Advance a checkpoint only after core persists
+all corresponding effects; unresolved evidence cannot prove non-delivery.
+Explicit nullable fields serialize as null. Method DTOs are protocol-owned
+records using canonical primitives, not copies of persisted entity schemas.
+
+The existing method deadlines remain 10s probe/connect, 20s submit, 5s observe,
+10s per reconciliation batch and 5s disconnect. A timeout/error after possible
+send returns `Uncertain`, including interrupted queue senders. Rejection means
+proven failure before any host delivery/execution; no automatic retry follows
+uncertainty. Pull delivery offers the already persisted claim to the Mod; it does
+not add a Claude push socket. Both modes retain runtime lease validation and
+domain-core claim/result ownership.
+
+### Normalized event payloads
+
 Normalize `connected`, `accepted`, `turn_started`, `visible_output`,
 `turn_finished`, `rejected`, `uncertain`, `presence`, `disconnected`.
 Event: `{event_id,binding_id,generation,input_id?,attempt_id?,host_turn_id?,
@@ -54,6 +97,37 @@ observed_at,kind,payload}`. Deterministic IDs for terminal events use source eve
 identity where supplied, else hash(binding,generation,attempt,turn,kind). Presence
 is ephemeral and need not have a persistent event receipt. Do not deduplicate
 legitimately different output chunks using identical text hashes.
+
+P0.5 publishes this tagged payload union in the protocol package. Envelope IDs
+use canonical primitives; `observed_at:UtcMillis`, `host_turn_id:string|null`.
+All optional envelope fields emit explicit null when absent.
+
+| `kind` | Exact payload |
+| --- | --- |
+| `connected` | `{external_session_id:string,endpoint_fingerprint:EndpointFingerprint,capabilities:Capabilities}` |
+| `accepted` | `{receipt:HostReceipt|null}` |
+| `turn_started` | `{}` |
+| `visible_output` | `{host_message_id:string|null,phase:commentary|final|unknown,operation:append|replace,text:string,truncated:boolean,gap_before:boolean}` |
+| `turn_finished` | `{status:completed|failed|interrupted,reason:string|null,diagnostic_text:string|null,truncated:boolean}` |
+| `rejected` | `{reason:string}`; proven before delivery/execution |
+| `uncertain` | `{reason:string}`; delivery/execution cannot be ruled out |
+| `presence` | `{observation:PresenceObservation}`; canonical DOMAIN binding/presence fields and PROCESS section 5 qualification |
+| `disconnected` | `{reason:string|null}` |
+
+Matched attempt events (`accepted`, `turn_started`, `visible_output`,
+`turn_finished`, `rejected`, `uncertain`) require input and attempt IDs together.
+Started/output/finished also require the matching host turn ID; accepted/rejected/
+uncertain allow null before correlation. Connection/presence/disconnect events
+have null input/attempt/turn IDs. Unrelated host turns produce qualified
+presence/activity only; they cannot consume pending work or create domain replies.
+Stable event/chunk identity remains required when host message IDs are absent;
+generated identity never pretends to be a host ID. Payload nullable fields are
+always explicit. `EndpointFingerprint` is the canonical bounded identity type,
+not an invented SHA256 constraint; it is distinct from `payload_sha256`.
+
+Visible/terminal text follows the existing diagnostic bounds and shows truncation
+or a dropped/coalesced gap. No raw tools, private reasoning, environment or auth
+payloads. A completed host turn remains separate from a committed domain result.
 
 New work requires current generation. Reconciliation can report historical
 attempt evidence only through the current supervisor after verifying exact

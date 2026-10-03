@@ -8,7 +8,8 @@ source of task definitions; its exact copy is embedded in the HTML for `file://`
 
 P0.1 (#11) and P0.2 (#14) are merged: the pinned scaffold and real native
 WebView smoke are implemented. Domain/provider integration and final release
-acceptance remain ahead. Product implementation stays paused until owner resumption. Existing Claude/Codex POCs prove
+acceptance remain ahead. The owner resumed contract-first three-stream delivery on
+2026-10-03; follow [MODULE_CONTRACTS](MODULE_CONTRACTS.md). Existing Claude/Codex POCs prove
 transport primitives only. Organization security guidance was not fetched under
 the owner's explicit session-wide Seezo/MCP waiver; no approval is claimed.
 
@@ -46,36 +47,46 @@ capacity reservations and exhaustive fault injection remain later work under
 
 ## Dependency and contract readiness
 
-Restore the original [foundation and integration order](BUILD_HANDOFF.md#implementation-order):
-settle domain/provider contracts and assets, implement pure domain/store/core
-behavior, then integrate dependent entry points, providers and desktop behavior.
-P4.1 remains the real UI-to-Rust domain slice after its declared prerequisites,
-before dependent screen expansion. Preserve initial schema/DTO acceptance, all
-ten packages and the paused P0.3a/P0.4a drafts. Product work remains paused until
-the corrected plan is reviewed and the owner resumes it.
+Use [MODULE_CONTRACTS](MODULE_CONTRACTS.md) for the published producer/consumer
+seams, three streams and shared-file owners. A starts original P0.3a
+(domain/generator), B starts P0.5's independent private Codex wire/schema work,
+and C starts original P0.4a (assets). Shared adapter DTOs wait for P0.3b. P0.6
+publishes the core service contract and a small scripted test/dev double, without
+adding a production package or duplicating business logic.
 
-This strategy correction retains the current catalogue's scope, prerequisites
-and acceptance. A separate reviewed module plan may reorganize scheduling only
-through explicit contract-ready dependencies; it must preserve real prerequisites
-and the original product acceptance rather than starting a cross-roadmap slice.
+`depends_on` retains every original full acceptance/integration prerequisite.
+Optional `implementation_depends_on` permits an earlier implementation start on
+reviewed, merged contracts/components; otherwise use `depends_on`. A merged
+implementation publishes only the surface its consumers need, recorded by a real
+`implementation_pr_url`, and remains in progress. `completion.pr_url` requires
+full original acceptance and real integration. Neither drafts nor partial work
+satisfy acceptance dependencies. The maintainer checks actual GitHub state and
+published scope before dispatch; chart projections are not readiness decisions.
 
-Task eligibility comes from actual merged prerequisites and current GitHub state.
-Local drafts, opened PRs and partial task work do not satisfy dependencies. Select
-eligible tasks whose owned paths do not overlap running work; ownership overlap
-serializes implementation. Shared manifests, exports and wiring have one declared
-owner. Settle shared contracts before consumer work rather than relying on later
-integration to resolve incompatible assumptions.
-Workers propose contract changes to the maintainer, who adjudicates, updates the
-authoritative contract and assigns every affected implementation/test change.
-Shared signatures and semantics do not drift unilaterally or through duplicate
-contract copies. Important architecture changes get ADRs; routine compatible
-amendments are tracked in the affected PR.
+Domain DTOs fan out to validation/history, protocol and storage. Core service and
+adapter contracts fan out to runtime, CLI/MCP and UI. Published reusable renderer
+service/route/selection/count components unlock their screens, graph and native
+consumers; those component dependencies remain explicit. Build full modules in
+parallel and connect actual boundaries when available. P4.1 completes the real
+UI-to-Rust domain integration after its original acceptance prerequisites; it
+is not an early walking-slice priority or a phase-wide barrier. P7.1 joins every
+module and remaining integration acceptance, then unchanged live P7.2/P7.3 and
+release P8.1 prove the assembled product. No arbitrary integration-duration
+promise is made.
 
-No phase-wide barrier is implied. Domain validation/history, store, assets and
-provider contracts can branch after concrete prerequisites. CLI/MCP, independent
-provider modules, renderer features and native/setup work branch when their
-dependencies and paths allow. Live five-input Claude/Codex acceptance remains M7
-with owner approval; the earlier transport POCs are not product acceptance.
+Choose disjoint owned paths; serialize shared manifests, exports, generator
+registration and composition wiring under one declared owner per path. A owns
+domain generation during P0.3a/b, B owns private Codex files, and generator
+registration changes are handed to A. Workers propose shared signature/semantic
+changes to the maintainer before dependent work. The maintainer adjudicates,
+updates the authoritative contract and dispatches all affected producer,
+consumer and test changes. No worker-local contract copies. Important
+architecture choices get short ADRs; compatible routine amendments go in the PR.
+
+Scripted doubles return canonical fixture responses/events only. Native
+acceptance always uses actual core/store; all original meaningful tests,
+coverage, native and release checks remain required. Live five-input host proof
+remains M7 with owner approval; POCs and module fixtures are not product proof.
 
 ## Execution and PR rules
 
@@ -109,11 +120,11 @@ without promoting a fixture, mocked provider or POC to live production proof.
 
 | Milestone | Task range | Reviewable artifact and gate |
 | --- | --- | --- |
-| M0 | P0.1–P0.5 | Pinned staged scaffold, ten packages/three entry points, activated native/UI-to-Rust smoke and coverage gates, domain schemas/fixtures, bundled source assets, pinned private Codex wire generation. No generated drift or remote runtime assets. |
+| M0 | P0.1–P0.6 | Pinned staged scaffold, ten packages/three entry points, activated native/UI-to-Rust smoke and coverage gates, domain schemas/fixtures, bundled source assets, pinned private Codex wire generation, core service/semantic fixture publication. No generated drift or remote runtime assets. |
 | M1 | P1.1–P1.6 | Validated domain/history, stable locked atomic snapshots, separate-process concurrency, explicit registry/generations, durable input receipts and bounded queries/counts. Invalid/stale/future data never silently overwrites history. |
 | M2 | P2.1–P2.6 | Atomic explicit replies/status/topic/children/results, FIFO join, real CLI and both identical stdio MCP entry paths, bootstrap/rules and guarded history/continuation. Core owns effects; transport wrappers stay thin. |
 | M3 | P3.1–P3.8 | Desktop lease/control socket, independent binding supervisors, both first-party adapters, generated-version conformance, read-only discovery/freshness, duplicate/out-of-order events and audited normal recovery/quit/reopen with a deterministic fake host. |
-| M4 | P4.1–P4.8 | Working real Tauri domain slice before screen expansion, project/session navigation, Waiting/Sent, tree/reveal, full rounds/rail, all owner intents/drafts, qualified edge states and supplied-frame/theme/keyboard comparisons. |
+| M4 | P4.1–P4.8 | Real Tauri domain integration and independently implemented screens, project/session navigation, Waiting/Sent, tree/reveal, full rounds/rail, all owner intents/drafts, qualified edge states and supplied-frame/theme/keyboard comparisons. |
 | M5 | P5.1–P5.3 | Deterministic graph plus correct 2,000-node viewport culling and focus/selection, guarded archive/close and Continue preview/send. Target failure leaves source unchanged. |
 | M6 | P6.1–P6.4 | Actual packaged window/open/tray/notification routes, permission denial behavior, owned idempotent setup and read-only doctor, locked clean install/uninstall preserving unrelated settings and history. |
 | M7 | P7.1–P7.3 | Full deterministic failure suite, then five original owner messages in each supported existing host, complete explicit item replies/results and correlation/FIFO/isolation. Additional recovery scenarios are separate from the baseline five-input no-coalescing run. |
@@ -151,8 +162,15 @@ is mapped here to concrete tasks; V19 public plugin proof is deferred.
 ## Estimates and offline chart
 
 `tasks.json` is the single source for definitions, estimates and maintainer-updated
-`completion.pr_url` metadata. Estimates are relative work days, not delivery
-promises. The static Gantt computes counts and effort from the catalogue.
+`completion.pr_url` and optional `implementation_pr_url` metadata. Completion
+means full acceptance; an implementation merge remains in progress. Estimates are relative work days, not delivery
+promises. The static Gantt projects full acceptance joins and owned-path constraints; the
+dependency graph can show implementation prerequisites separately. It does not
+predict a contract-first delivery date. The pre-plan baseline was 48 tasks /
+56.5 effort days, with a three-worker full-plan projection of 29 work days
+(64.9% utilization); remaining work was 54 effort days / 26.5 projected days.
+These describe the original graph, not delivery promises or forecasts for the
+new parallel plan.
 After an actual merge, update completion with its real PR link and run:
 
 ```sh
