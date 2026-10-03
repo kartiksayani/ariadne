@@ -24,6 +24,8 @@ exact qualified core/verified external derives and demonstrated safe attributes.
 Ordinary Rust comments are accepted by the AST parser; legacy comment-only
 byte rules remain unchanged. Reject executable items, arbitrary derives/hooks, const/generic expressions,
 unknown attributes, path/cfg/inline modules and aliases of protected bindings.
+Normalize raw identifier spelling for identity checks; ordinary DTO raw field
+names remain data declarations.
 
 Require each DTO's canonical library root/module ancestor chain to be SHA-declared
 verified facades. A real probe proved root `extern crate attacker as serde` can
