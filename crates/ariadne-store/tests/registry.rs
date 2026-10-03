@@ -13,7 +13,7 @@ use support::*;
 
 fn registration(registry: &Registry, project: &std::path::Path, number: u64) {
     registry
-        .register(project, "Registry test", &id(number + 1000), || id(number))
+        .register(project, &id(number + 1000), || id(number))
         .unwrap();
 }
 fn blank(project: u64, session: u64, binding: u64, host: &str) -> Session {
@@ -54,9 +54,7 @@ fn registration_canonicalizes_roots_preserves_receipts_and_never_persists_zero_r
     let registry = Registry::open(home.path()).unwrap();
     assert!(!home.path().join(".ariadne/projects.json").exists());
     assert!(registry.registered_projects().unwrap().is_empty());
-    let result = registry
-        .register(&alias, "Registry test", &id(101), || id(1))
-        .unwrap();
+    let result = registry.register(&alias, &id(101), || id(1)).unwrap();
     assert_eq!(result.registry_revision.value(), 1);
     let projects = registry.registered_projects().unwrap();
     assert_eq!(projects.len(), 1);
@@ -70,7 +68,7 @@ fn registration_canonicalizes_roots_preserves_receipts_and_never_persists_zero_r
     .unwrap();
     assert_eq!(
         registry
-            .register(&alias, "Registry test", &id(101), || panic!("exact replay"))
+            .register(&alias, &id(101), || panic!("exact replay"))
             .unwrap(),
         result
     );
@@ -83,7 +81,7 @@ fn registration_canonicalizes_roots_preserves_receipts_and_never_persists_zero_r
         Err(RegistryError::Unavailable { .. })
     ));
     assert!(matches!(
-        registry.register(&alias, "Changed", &id(101), || id(9)),
+        registry.register(&alias.join("changed"), &id(101), || id(9)),
         Err(RegistryError::Store(StoreError::OperationReused))
     ));
     assert_eq!(
@@ -104,15 +102,9 @@ fn invalid_native_registration_text_paths_and_persisted_zero_have_typed_no_effec
     let home = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();
     let registry = Registry::open(home.path()).unwrap();
-    for name in ["", " \n", "bad\0name", &"x".repeat(4097)] {
-        assert!(matches!(
-            registry.register(root.path(), name, &id(1), || panic!("invalid")),
-            Err(RegistryError::InvalidArgument)
-        ));
-    }
     let invalid = std::path::Path::new(std::ffi::OsStr::from_bytes(b"/tmp/invalid-\xff"));
     assert!(matches!(
-        registry.register(invalid, "Valid name", &id(1), || panic!("invalid")),
+        registry.register(invalid, &id(1), || panic!("invalid")),
         Err(RegistryError::InvalidArgument)
     ));
     assert!(!root.path().join(".ariadne").exists());
@@ -136,13 +128,13 @@ fn duplicate_metadata_identity_and_unavailable_registered_roots_stop_new_registr
     registration(&registry, one.path(), 1);
     let bytes = fs::read(home.path().join(".ariadne/projects.json")).unwrap();
     assert!(matches!(
-        registry.register(two.path(), "Registry test", &id(1002), || id(1)),
+        registry.register(two.path(), &id(1002), || id(1)),
         Err(RegistryError::Conflict { .. })
     ));
     assert!(!two.path().join(".ariadne/project.json").exists());
     fs::rename(one.path().join(".ariadne"), one.path().join("unavailable")).unwrap();
     assert!(matches!(
-        registry.register(two.path(), "Registry test", &id(1002), || id(2)),
+        registry.register(two.path(), &id(1002), || id(2)),
         Err(RegistryError::Unavailable { .. })
     ));
     assert_eq!(
@@ -515,7 +507,7 @@ fn separate_process_registration_reuses_project_identity_and_keeps_both_operatio
     assert_eq!(registry.registered_projects().unwrap().len(), 1);
     for number in [1, 2] {
         let replay = registry
-            .register(root.path(), "Registry test", &id(number + 1000), || {
+            .register(root.path(), &id(number + 1000), || {
                 panic!("saved registration")
             })
             .unwrap();

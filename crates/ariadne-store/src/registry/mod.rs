@@ -174,21 +174,15 @@ impl Registry {
     pub fn register(
         &self,
         root: &Path,
-        display_name: &str,
         operation_id: &UuidV4,
         allocate_project_id: impl FnOnce() -> UuidV4,
     ) -> Result<RegistrationReceipt, RegistryError> {
-        if display_name.trim().is_empty()
-            || display_name.len() > 4096
-            || display_name.contains('\0')
-        {
-            return Err(RegistryError::InvalidArgument);
-        }
         let root_text = root.to_str().ok_or(RegistryError::InvalidArgument)?;
         let digest = digest(&serde_json::json!({ "actor_scope": "local_setup",
-            "command": { "kind": "project_register", "root": root_text, "display_name": display_name } }))?;
+            "command": { "kind": "project_register", "canonical_root": root_text } }))?;
         lock::with_lock(&self.data, "registry.lock", || {
             let mut projects = self.projects()?;
+            let create_registry = projects.revision.value() == 0;
             if let Some(saved) = projects
                 .operations
                 .iter()
@@ -208,14 +202,13 @@ impl Registry {
             let data = directory.child(".ariadne", true)?;
             lock::with_lock(&data, "project.lock", || {
                 let project = if data.verify_target("project.json")? {
-                    let project: Project = read_data(&data, "project.json")?;
-                    if project.display_name != display_name {
-                        return Err(RegistryError::Conflict {
-                            paths: vec![canonical.clone()],
-                        });
-                    }
-                    project
+                    read_data(&data, "project.json")?
                 } else {
+                    let display_name = canonical
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .filter(|name| !name.trim().is_empty() && name.len() <= 4096)
+                        .ok_or(RegistryError::InvalidArgument)?;
                     Project {
                         schema_version: SchemaVersion::new(1).expect("literal"),
                         id: allocate_project_id(),
@@ -272,7 +265,7 @@ impl Registry {
                     result: receipt.clone(),
                 });
                 projects.validate()?;
-                self.write("projects.json", &projects)
+                self.write("projects.json", &projects, create_registry)
                     .map_err(|source| match source {
                         RegistryError::Store(StoreError::CommitUncertain { .. }) => {
                             RegistryError::CommitUncertain {
@@ -356,8 +349,13 @@ impl Registry {
         })?;
         Ok(projects)
     }
-    fn write(&self, name: &str, value: &impl Serialize) -> Result<(), RegistryError> {
-        self.data.temp(name, &encode(value)?)?.replace(name)?;
+    fn write(&self, name: &str, value: &impl Serialize, create: bool) -> Result<(), RegistryError> {
+        let temporary = self.data.temp(name, &encode(value)?)?;
+        if create {
+            temporary.create(name)?;
+        } else {
+            temporary.replace(name)?;
+        }
         self.data
             .sync()
             .map_err(|_| StoreError::CommitUncertain { operation_id: None })?;
@@ -445,7 +443,8 @@ impl BindingSetup<'_> {
             })
     }
     fn publish(&self, routes: &[BindingRoute]) -> Result<(), RegistryError> {
-        if self.registry.data.verify_target("bindings.json")? {
+        let exists = self.registry.data.verify_target("bindings.json")?;
+        if exists {
             let _: BindingIndex = read_data(&self.registry.data, "bindings.json")?;
         }
         self.registry.write(
@@ -454,6 +453,7 @@ impl BindingSetup<'_> {
                 schema_version: SchemaVersion::new(1).expect("literal"),
                 bindings: routes.to_vec(),
             },
+            !exists,
         )
     }
 }
@@ -550,4 +550,46 @@ fn read_data<T: serde::de::DeserializeOwned>(
             path: directory.path.join(name),
             source,
         })
+}
+
+#[cfg(test)]
+mod publication_tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn appeared_target_survives(name: &str) {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::open(home.path()).unwrap();
+        lock::with_lock(&registry.data, "registry.lock", || {
+            // Capture absence, then model an ordinary external restore before
+            // publication. The restored future bytes must survive unchanged.
+            let create = !registry.data.verify_target(name)?;
+            assert!(create);
+            let restored = br#"{"schema_version":2,"restored":"external snapshot"}"#;
+            let path = registry.data.path.join(name);
+            fs::write(&path, restored).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+            assert!(matches!(
+                registry.write(name, &serde_json::json!({"schema_version":1}), create),
+                Err(RegistryError::Store(StoreError::AlreadyExists))
+            ));
+            assert_eq!(fs::read(&path).unwrap(), restored);
+            assert!(!registry
+                .data
+                .names()?
+                .iter()
+                .any(|name| name.starts_with('.')));
+            Ok::<_, RegistryError>(())
+        })
+        .unwrap();
+    }
+    #[test]
+    fn initial_project_registry_keeps_a_restored_target_and_cleans_the_temp() {
+        appeared_target_survives("projects.json");
+    }
+    #[test]
+    fn initial_binding_index_keeps_a_restored_target_and_cleans_the_temp() {
+        appeared_target_survives("bindings.json");
+    }
 }

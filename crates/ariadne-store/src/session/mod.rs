@@ -27,6 +27,10 @@ pub enum StoreError {
     },
     InvalidSnapshot,
     FutureSchema,
+    SessionFile {
+        path: PathBuf,
+        source: Box<StoreError>,
+    },
     IdentityMismatch,
     Validation(ValidationError),
     History(HistoryError),
@@ -205,16 +209,26 @@ impl Store {
     /// directory. Each snapshot is reread and validated under its own stable lock.
     pub fn sessions(&self) -> Result<Vec<Session>, StoreError> {
         let mut result = Vec::new();
-        for name in self.sessions.names()? {
+        let names = self
+            .sessions
+            .names()
+            .map_err(|source| StoreError::SessionFile {
+                path: self.sessions.path.clone(),
+                source: Box::new(source),
+            })?;
+        for name in names {
             if name.starts_with('.') || !name.ends_with(".json") {
                 continue;
             }
-            let id = UuidV4::new(name.trim_end_matches(".json")).map_err(|_| {
-                StoreError::UnsafePath {
+            let id = UuidV4::new(name.strip_suffix(".json").expect("filtered suffix")).map_err(
+                |_| StoreError::UnsafePath {
                     path: self.sessions.path.join(&name),
-                }
-            })?;
-            result.push(self.read(&id)?);
+                },
+            )?;
+            result.push(self.read(&id).map_err(|source| StoreError::SessionFile {
+                path: self.sessions.path.join(&name),
+                source: Box::new(source),
+            })?);
         }
         Ok(result)
     }
