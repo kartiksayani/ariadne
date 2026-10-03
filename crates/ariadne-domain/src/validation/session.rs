@@ -63,7 +63,20 @@ pub fn validate_session_items(session: &Session) -> Result<(), ValidationError> 
             (_, MessageKind::Activity) => Some(4096),
             _ => None,
         };
-        text(&message.body, "messages.body", true, limit)?;
+        let selected_answer = message.author == MessageAuthor::Owner
+            && message.kind == MessageKind::OwnerInput
+            && session.answers.iter().any(|answer| {
+                answer.message_id == message.id
+                    && message.input_id.as_ref() == Some(&answer.input_id)
+                    && message.item_id.as_ref() == Some(&answer.item_id)
+                    && answer.selected_option_id.as_ref().is_some_and(|selected| {
+                        answer
+                            .options_snapshot
+                            .iter()
+                            .any(|option| &option.id == selected)
+                    })
+            });
+        text(&message.body, "messages.body", !selected_answer, limit)?;
         if message.author == MessageAuthor::Owner
             && message.kind == MessageKind::OwnerInput
             && message.origin.is_none()

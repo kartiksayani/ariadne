@@ -220,7 +220,7 @@ pub(crate) fn validate_candidate(
         )?;
         if let Some(binding) = &history.binding_id {
             require(
-                session.bindings.0.contains_key(binding),
+                item.origin.is_some() || session.bindings.0.contains_key(binding),
                 format!("{path}.binding_id"),
                 ValidationErrorKind::MissingReference,
             )?;

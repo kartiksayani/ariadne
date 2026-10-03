@@ -360,6 +360,11 @@ scope, receipts, delivery/result joins and lifecycle guards remain their owning
 history/core modules. `validate_item` expects its referenced messages, rounds and
 bindings in the assembled session. Primitive constructors/deserialization already
 reject invalid lexical references and duplicate JSON map keys.
+An imported item's origin supplies source context for historical binding IDs,
+which may be absent from the target session. Copied history retains those IDs;
+live item owner/recipient and every new transition require registered target
+bindings. No historical authorization or per-entry source chronology is inferred
+from this reference check.
 
 `ItemChange` is a native enum, not another serialized API DTO:
 
@@ -462,6 +467,11 @@ No silent truncation of durable content. Diagnostic output is separately bounded
 These individual content limits count UTF-8 bytes, not characters. Required
 question/ask/outcome/why and option label/consequence are nonblank; optional note
 may be absent or empty. NUL is rejected and prose is otherwise preserved exactly.
+An option-only owner answer may preserve empty/whitespace submitted text in its
+Message body, Input payload and Answer text. The Message exception requires a
+canonical Answer with the same message/input/item and a selected option present
+in its frozen options; other owner messages and agent replies remain nonblank.
+History/core separately enforce complete answer/payload linkage and snapshots.
 The pure item validator also enforces the existing 4 KiB endpoint-fingerprint
 bound. It introduces no blanket bound for unrelated names, labels or opaque host
 IDs. Request/batch/query limits and pending-input capacity are enforced by their

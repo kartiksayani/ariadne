@@ -1159,3 +1159,107 @@ fn stored_round_and_answer_snapshots_obey_current_content_bounds() {
     s.messages[0].round_id = Some(uuid(10));
     validate_session_items(&s).unwrap();
 }
+
+#[test]
+fn option_only_owner_answers_preserve_empty_or_whitespace_message_bodies() {
+    for submitted in ["", " \n\t"] {
+        let mut s = session();
+        let waiting = apply(&mut s, &ask(10));
+        add_owner_input(&mut s, 9, 2, InputState::Queued);
+        s.messages[1].body = submitted.into();
+        let input = s.inputs.0.get_mut(&uuid(109)).unwrap();
+        input.kind = InputKind::Answer;
+        input.answer_id = Some(uuid(20));
+        input.payload.intent = InputKind::Answer;
+        input.payload.text = submitted.into();
+        input.payload.selected_option_id = Some("yes".into());
+        s.answers.push(Answer {
+            id: uuid(20),
+            seq: positive(1),
+            item_id: reference("1"),
+            question_revision: waiting.question_revision,
+            question_snapshot: waiting.question,
+            ask_snapshot: waiting.ask,
+            options_snapshot: waiting.options,
+            selected_option_id: Some("yes".into()),
+            text: submitted.into(),
+            message_id: uuid(9),
+            input_id: uuid(109),
+            supersedes_answer_id: None,
+            created_at: time(),
+        });
+        validate_session_items(&s).unwrap();
+        assert_eq!(s.messages[1].body, submitted);
+        assert_eq!(s.answers[0].text, submitted);
+        assert_eq!(s.inputs.0[&uuid(109)].payload.text, submitted);
+        for mismatch in ["option", "input", "message", "item"] {
+            let mut bad = s.clone();
+            let answer = &mut bad.answers[0];
+            match mismatch {
+                "option" => answer.selected_option_id = Some("unknown".into()),
+                "input" => answer.input_id = uuid(99),
+                "message" => answer.message_id = uuid(99),
+                "item" => answer.item_id = reference("99"),
+                _ => unreachable!(),
+            }
+            invalid(&bad, ValidationErrorKind::Blank);
+        }
+        let mut bad = s.clone();
+        bad.answers.clear();
+        invalid(&bad, ValidationErrorKind::Blank);
+        let mut bad = s.clone();
+        bad.messages[1].body = "\0".into();
+        invalid(&bad, ValidationErrorKind::Nul);
+    }
+    let mut s = session();
+    s.messages[0].kind = MessageKind::Reply;
+    s.messages[0].body.clear();
+    invalid(&s, ValidationErrorKind::Blank);
+}
+
+#[test]
+fn copied_item_history_preserves_source_binding_but_new_transitions_require_target_context() {
+    let mut s = session();
+    apply(&mut s, &status(ItemStatus::Done));
+    let item = s.items.0.get_mut(&reference("1")).unwrap();
+    item.origin = Some(ItemOrigin {
+        project_id: uuid(90),
+        session_id: uuid(91),
+        topic_id: uuid(92),
+        entity_id: reference("7"),
+        source_revision: positive(1),
+    });
+    item.status_history[0].binding_id = Some(uuid(99));
+    item.status_history[0].cause_message_id = uuid(30);
+    let mut copied = message(30, 2, MessageAuthor::Agent);
+    copied.binding_id = Some(uuid(99));
+    copied.origin = Some(MessageOrigin {
+        project_id: uuid(90),
+        session_id: uuid(91),
+        topic_id: uuid(92),
+        entity_id: uuid(93),
+        source_revision: positive(1),
+        author: MessageAuthor::Agent,
+        binding_id: Some(uuid(99)),
+        adapter_id: Some("source.agent".into()),
+        external_session_id: Some("original-thread".into()),
+    });
+    s.messages.push(copied);
+    s.counters.next_message = positive(3);
+    validate_session_items(&s).unwrap();
+    let mut c = context(&s);
+    c.binding_id = uuid(99);
+    assert_eq!(
+        reject(&s, &status(ItemStatus::Open), &c),
+        TransitionError::MissingBinding
+    );
+    let reopened = apply(&mut s, &status(ItemStatus::Open));
+    assert_eq!(reopened.status_history[0].binding_id, Some(uuid(99)));
+    assert_eq!(
+        reopened.status_history.last().unwrap().binding_id,
+        Some(uuid(2))
+    );
+    let mut unqualified = s.clone();
+    unqualified.items.0.get_mut(&reference("1")).unwrap().origin = None;
+    invalid(&unqualified, ValidationErrorKind::MissingReference);
+}

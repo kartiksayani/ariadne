@@ -31,6 +31,11 @@ new Round before final validation. Parent/topic/ID never change and children do
 not cascade. Ask sets owner to me; a stored waiting item created with an explicit
 owner may retain valid agent/other responsibility, so no global waiting-owner
 restriction is added.
+Imported Item origin also provides context for original historical binding IDs
+absent from the target session. Preserve those IDs while requiring registered
+target bindings for live owner/recipient and every new transition. The existing
+history shape has no per-entry origin; reference validation does not establish
+historical authorization or invent chronological proof.
 
 Agent context requires the registered binding/current generation, a matching
 agent cause message and revisions. Terminalization respects issued/handled owner
@@ -43,6 +48,10 @@ events cannot directly change status.
 Core retains source-attempt and replay authorization. Only specified UTF-8 content
 limits and endpoint-fingerprint bounds are enforced; unrelated metadata caps are
 not invented.
+An option-only answer preserves its submitted empty/whitespace text. The owner
+Message nonblank exception requires a matching canonical Answer and a valid
+selected option in its frozen snapshot; it does not synthesize prose. Other owner
+messages and agent replies require text. Full linkage stays with history/core.
 
 ## Consequences
 
