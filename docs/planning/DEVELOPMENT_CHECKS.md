@@ -11,7 +11,7 @@ packaged release isolation. These prove scaffold wiring, not domain/provider com
 The installed hook runs cheap format/lint/type checks for changed languages.
 It does not run tests, coverage, native builds, size checks or staged-tree identity.
 CI runs once per pushed head, cancels older runs on its ref and always reports
-`quality`. Feature branches compare origin/main..head; main uses previous-push..head.
+`quality`. Feature branches compare merge-base(origin/main, HEAD)..HEAD; main uses previous-push..HEAD.
 Renames inspect old and new paths. Unknown paths/missing base select full checks.
 
 | Scope | Pushed-head checks |
@@ -32,7 +32,7 @@ release path checks in `scope_for` (`scripts/check-commit.py`) with a focused sc
 
 ```sh
 .venv-quality/bin/python scripts/check-commit.py --working-tree
-.venv-quality/bin/python scripts/check-commit.py --ci --base origin/main
+.venv-quality/bin/python scripts/check-commit.py --ci --base origin/main --merge-base
 .venv-quality/bin/python scripts/check-commit.py --full
 python3 scripts/regenerate-roadmap.py
 ```
