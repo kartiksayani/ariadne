@@ -1,0 +1,30 @@
+{
+  "api_version": 1,
+  "cli_json": "application envelope",
+  "context": "trusted local entrypoint only",
+  "entrypoints": {
+    "apply": {
+      "request": "ApplyRequest",
+      "result": "ApplicationEnvelope_SavedReceipt"
+    },
+    "claim": {
+      "request": "ClaimRequest",
+      "result": "ApplicationEnvelope_Nullable_PreparedAttempt"
+    },
+    "execute_owner": {
+      "owner_transport_request": "OwnerMutationRequest",
+      "request": "OwnerCommand",
+      "result": "ApplicationEnvelope_MutationReceipt"
+    },
+    "query": {
+      "owner_transport_request": "OwnerQueryRequest",
+      "request": "QueryRequest",
+      "result": "ApplicationEnvelope_QueryResult"
+    },
+    "report": {
+      "request": "../adapter/NormalizedEvent",
+      "result": "ApplicationEnvelope_EventReceipt"
+    }
+  },
+  "tauri_commands": "QueryRequest and OwnerCommand command tags"
+}

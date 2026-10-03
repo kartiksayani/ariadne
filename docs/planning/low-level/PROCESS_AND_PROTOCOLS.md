@@ -225,7 +225,11 @@ into shell commands. Helper resolves state via explicit binding handles.
    end event is handled by stale heartbeat/reconciliation, never assumed clean.
 
 Identity uses `[ARIADNE_INPUT:<input_uuid>:<attempt_uuid>]` plus binding/generation
-in the injected envelope. Payload contains exact owner text, kind, item path,
+in the injected envelope. The canonical persisted submitted payload begins with
+that exact marker line and LF, then safely encoded owner/context data; the digest
+covers the entire exact payload. A provider must not add the marker after hashing.
+P2.2 owns the production claim formatter; P2.5 owns MCP transport.
+Payload contains exact owner text, kind, item path,
 question revision/snapshot, references to bounded recent item messages, and
 instructions for `apply.input_result`. Escape owner content as a JSON value or
 clearly delimited data block; it cannot change envelope routing. Total prompt

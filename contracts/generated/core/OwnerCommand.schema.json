@@ -1,0 +1,1212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OwnerCommand",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "project_register"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/ProjectRegisterParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "binding_connect"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/BindingConnectParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "binding_pause"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/BindingStateParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "binding_resume"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/BindingStateParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "binding_disconnect"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/BindingStateParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "input_submit"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/InputSubmitParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "input_cancel"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/InputCancelParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "input_resolve"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/InputResolveParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "topic_archive"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/TopicLifecycleParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "topic_restore"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/TopicLifecycleParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "session_close"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/SessionLifecycleParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "session_reopen"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/SessionLifecycleParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "topic_continue"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/TopicContinueParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "preferences_patch"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/PreferencesPatch"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
+    }
+  ],
+  "$defs": {
+    "AdapterConfig": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/UniqueMap"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "values"
+      ]
+    },
+    "BindingConnectParams": {
+      "type": "object",
+      "properties": {
+        "adapter_id": {
+          "type": "string"
+        },
+        "configuration": {
+          "$ref": "#/$defs/AdapterConfig"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/EndpointRef"
+        },
+        "existing_session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "external_session_id": {
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "adapter_id",
+        "external_session_id",
+        "endpoint",
+        "configuration",
+        "existing_session_id"
+      ]
+    },
+    "BindingStateParams": {
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "expected_generation": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "binding_id",
+        "expected_generation"
+      ]
+    },
+    "EndpointRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unix_socket"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "local_bridge"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        }
+      ]
+    },
+    "GlobalPreferences": {
+      "type": "object",
+      "properties": {
+        "notification_watermark": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "theme": {
+          "$ref": "#/$defs/Theme"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WindowGeometry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "theme",
+        "window",
+        "pinned",
+        "notification_watermark"
+      ]
+    },
+    "InputCancelParams": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "input_id",
+        "expected_revision"
+      ]
+    },
+    "InputKind": {
+      "type": "string",
+      "enum": [
+        "answer",
+        "bring",
+        "reply",
+        "note",
+        "followup",
+        "reopen",
+        "drop",
+        "continue"
+      ]
+    },
+    "InputResolveParams": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "decision": {
+          "$ref": "#/$defs/ResolutionKind"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerResolutionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "input_id",
+        "attempt_id",
+        "decision",
+        "reason",
+        "expected_revision",
+        "evidence"
+      ]
+    },
+    "InputSubmitParams": {
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "expected_question_revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/InputKind"
+        },
+        "selected_option_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "supersedes_answer_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/InputTarget"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "binding_id",
+        "target",
+        "kind",
+        "text",
+        "selected_option_id",
+        "expected_question_revision",
+        "supersedes_answer_id"
+      ]
+    },
+    "InputTarget": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "item_id"
+      ]
+    },
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "ItemRoute": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "item_id"
+      ]
+    },
+    "ItemStatus": {
+      "type": "string",
+      "enum": [
+        "open",
+        "waiting_on_me",
+        "in_progress",
+        "decided",
+        "done",
+        "dropped",
+        "replaced"
+      ]
+    },
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "OwnerDraft": {
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "intent": {
+          "$ref": "#/$defs/InputKind"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "question_revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selected_option_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session": {
+          "$ref": "#/$defs/SessionRef"
+        },
+        "supersedes_answer_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/InputTarget"
+        },
+        "target_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "op_id",
+        "session",
+        "binding_id",
+        "target",
+        "intent",
+        "text",
+        "selected_option_id",
+        "target_revision",
+        "question_revision",
+        "supersedes_answer_id"
+      ]
+    },
+    "OwnerEvidenceSource": {
+      "type": "string",
+      "enum": [
+        "owner_attestation"
+      ]
+    },
+    "OwnerResolutionEvidence": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "host_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner_attested_idle": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/OwnerEvidenceSource"
+        },
+        "turn_state": {
+          "$ref": "#/$defs/TurnState"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "turn_state",
+        "host_turn_id",
+        "owner_attested_idle",
+        "at"
+      ]
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "PreferencesPatch": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreferencesPatchEntry"
+          }
+        },
+        "expected_preferences_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "expected_preferences_revision",
+        "entries"
+      ]
+    },
+    "PreferencesPatchEntry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "set_global"
+            },
+            "preferences": {
+              "$ref": "#/$defs/GlobalPreferences"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "preferences"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "set_session_view"
+            },
+            "preferences": {
+              "$ref": "#/$defs/SessionPreferences"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "preferences"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "item": {
+              "$ref": "#/$defs/ItemRoute"
+            },
+            "kind": {
+              "type": "string",
+              "const": "set_later"
+            },
+            "later": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "item",
+            "later"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "draft": {
+              "$ref": "#/$defs/OwnerDraft"
+            },
+            "kind": {
+              "type": "string",
+              "const": "upsert_draft"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "draft"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "delete_draft"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/UuidV4"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation_id"
+          ]
+        }
+      ]
+    },
+    "ProjectRegisterParams": {
+      "type": "object",
+      "properties": {
+        "canonical_root": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "canonical_root"
+      ]
+    },
+    "RailView": {
+      "type": "string",
+      "enum": [
+        "waiting",
+        "sent",
+        "activity",
+        "hidden"
+      ]
+    },
+    "ResolutionKind": {
+      "type": "string",
+      "enum": [
+        "retry_unexecuted",
+        "resend",
+        "skip",
+        "request_result_repair",
+        "confirm_evidence"
+      ]
+    },
+    "SchemaVersion": {
+      "type": "integer",
+      "maximum": 1,
+      "minimum": 1
+    },
+    "ScrollAnchor": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offset": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "offset"
+      ]
+    },
+    "SessionLifecycleParams": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "expected_revision"
+      ]
+    },
+    "SessionPreferences": {
+      "type": "object",
+      "properties": {
+        "expanded_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "filters": {
+          "$ref": "#/$defs/ViewFilters"
+        },
+        "rail": {
+          "$ref": "#/$defs/RailView"
+        },
+        "scroll": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScrollAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selected_item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session": {
+          "$ref": "#/$defs/SessionRef"
+        },
+        "tab_order": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "selected_item_id",
+        "tab_order",
+        "expanded_item_ids",
+        "filters",
+        "rail",
+        "scroll"
+      ]
+    },
+    "SessionRef": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id"
+      ]
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "Theme": {
+      "type": "string",
+      "enum": [
+        "system",
+        "light",
+        "dark"
+      ]
+    },
+    "TopicContinueParams": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/SessionRef"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "source_topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/SessionRef"
+        },
+        "target_binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "source_topic_id",
+        "source_revision",
+        "source_sha256",
+        "target",
+        "target_binding_id",
+        "summary"
+      ]
+    },
+    "TopicLifecycleParams": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "expected_revision"
+      ]
+    },
+    "TurnState": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "running",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "UniqueMap": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    },
+    "ViewFilters": {
+      "type": "object",
+      "properties": {
+        "archived": {
+          "type": "boolean"
+        },
+        "hide_later": {
+          "type": "boolean"
+        },
+        "search": {
+          "type": "string"
+        },
+        "statuses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemStatus"
+          }
+        },
+        "topic_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "search",
+        "statuses",
+        "topic_id",
+        "archived",
+        "hide_later"
+      ]
+    },
+    "WindowGeometry": {
+      "type": "object",
+      "properties": {
+        "height": {
+          "type": "number",
+          "format": "double"
+        },
+        "monitor_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "type": "number",
+          "format": "double"
+        },
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height",
+        "monitor_id"
+      ]
+    }
+  }
+}

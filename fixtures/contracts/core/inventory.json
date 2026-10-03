@@ -1,0 +1,454 @@
+{
+  "owner_commands": [
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "project_register",
+      "params": {
+        "canonical_root": "/registered/project"
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "binding_connect",
+      "params": {
+        "project_id": "00000000-0000-4000-8000-000000000001",
+        "adapter_id": "fake",
+        "external_session_id": "opaque host",
+        "endpoint": {
+          "kind": "unix_socket",
+          "path": "/tmp/ariadne-demo.sock"
+        },
+        "configuration": {
+          "namespace": "demo.local",
+          "values": {
+            "fixture": true,
+            "retry_budget": 0,
+            "label": "offline demo",
+            "nested": {
+              "flags": [
+                false,
+                null,
+                1.5
+              ]
+            }
+          }
+        },
+        "existing_session_id": null
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "binding_pause",
+      "params": {
+        "binding_id": "00000000-0000-4000-8000-000000000020",
+        "expected_generation": "00000000-0000-4000-8000-000000000022"
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "binding_resume",
+      "params": {
+        "binding_id": "00000000-0000-4000-8000-000000000020",
+        "expected_generation": "00000000-0000-4000-8000-000000000022"
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "binding_disconnect",
+      "params": {
+        "binding_id": "00000000-0000-4000-8000-000000000020",
+        "expected_generation": "00000000-0000-4000-8000-000000000022"
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000200",
+      "command": "input_submit",
+      "params": {
+        "binding_id": "00000000-0000-4000-8000-000000000020",
+        "target": {
+          "topic_id": "00000000-0000-4000-8000-000000000010",
+          "item_id": "1"
+        },
+        "kind": "answer",
+        "text": "Keep it.\nRetain the full history, including earlier outcomes.",
+        "selected_option_id": "keep",
+        "expected_question_revision": 1,
+        "supersedes_answer_id": null
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "input_cancel",
+      "params": {
+        "input_id": "00000000-0000-4000-8000-000000000071",
+        "expected_revision": 21
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "input_resolve",
+      "params": {
+        "input_id": "00000000-0000-4000-8000-000000000070",
+        "attempt_id": "00000000-0000-4000-8000-000000000060",
+        "decision": "skip",
+        "reason": "Owner reviewed the evidence.",
+        "expected_revision": 21,
+        "evidence": null
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "topic_archive",
+      "params": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "expected_revision": 1
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "topic_restore",
+      "params": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "expected_revision": 1
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "session_close",
+      "params": {
+        "expected_revision": 21
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "session_reopen",
+      "params": {
+        "expected_revision": 21
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "topic_continue",
+      "params": {
+        "source": {
+          "project_id": "00000000-0000-4000-8000-000000000003",
+          "session_id": "00000000-0000-4000-8000-000000000004"
+        },
+        "source_topic_id": "00000000-0000-4000-8000-000000000011",
+        "source_revision": 1,
+        "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target": {
+          "project_id": "00000000-0000-4000-8000-000000000001",
+          "session_id": "00000000-0000-4000-8000-000000000002"
+        },
+        "target_binding_id": "00000000-0000-4000-8000-000000000020",
+        "summary": "Approved complete topic summary."
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "preferences_patch",
+      "params": {
+        "expected_preferences_revision": 1,
+        "entries": [
+          {
+            "kind": "set_global",
+            "preferences": {
+              "theme": "system",
+              "window": {
+                "x": 10.0,
+                "y": 10.0,
+                "width": 1024.0,
+                "height": 768.0,
+                "monitor_id": null
+              },
+              "pinned": false,
+              "notification_watermark": null
+            }
+          },
+          {
+            "kind": "set_session_view",
+            "preferences": {
+              "session": {
+                "project_id": "00000000-0000-4000-8000-000000000001",
+                "session_id": "00000000-0000-4000-8000-000000000002"
+              },
+              "selected_item_id": null,
+              "tab_order": 0,
+              "expanded_item_ids": [],
+              "filters": {
+                "search": "",
+                "statuses": [],
+                "topic_id": null,
+                "archived": false,
+                "hide_later": false
+              },
+              "rail": "waiting",
+              "scroll": {
+                "item_id": null,
+                "offset": 0.0
+              }
+            }
+          },
+          {
+            "kind": "set_later",
+            "item": {
+              "project_id": "00000000-0000-4000-8000-000000000001",
+              "session_id": "00000000-0000-4000-8000-000000000002",
+              "item_id": "1"
+            },
+            "later": true
+          },
+          {
+            "kind": "upsert_draft",
+            "draft": {
+              "op_id": "00000000-0000-4000-8000-000000000401",
+              "session": {
+                "project_id": "00000000-0000-4000-8000-000000000001",
+                "session_id": "00000000-0000-4000-8000-000000000002"
+              },
+              "binding_id": "00000000-0000-4000-8000-000000000020",
+              "target": {
+                "topic_id": "00000000-0000-4000-8000-000000000010",
+                "item_id": "1"
+              },
+              "intent": "answer",
+              "text": "",
+              "selected_option_id": null,
+              "target_revision": 2,
+              "question_revision": 1,
+              "supersedes_answer_id": null
+            }
+          },
+          {
+            "kind": "delete_draft",
+            "operation_id": "00000000-0000-4000-8000-000000000401"
+          }
+        ]
+      }
+    }
+  ],
+  "query_requests": [
+    {
+      "command": "project_list",
+      "params": {
+        "cursor": null,
+        "limit": 100
+      }
+    },
+    {
+      "command": "session_list",
+      "params": {
+        "project_id": null,
+        "state": null,
+        "cursor": null,
+        "limit": 100
+      }
+    },
+    {
+      "command": "session_get",
+      "params": {}
+    },
+    {
+      "command": "preferences_get",
+      "params": {}
+    },
+    {
+      "command": "reveal_item",
+      "params": {
+        "item_id": "1"
+      }
+    },
+    {
+      "command": "topic_continue_preview",
+      "params": {
+        "source": {
+          "project_id": "00000000-0000-4000-8000-000000000003",
+          "session_id": "00000000-0000-4000-8000-000000000004"
+        },
+        "source_topic_id": "00000000-0000-4000-8000-000000000011",
+        "target": {
+          "project_id": "00000000-0000-4000-8000-000000000001",
+          "session_id": "00000000-0000-4000-8000-000000000002"
+        }
+      }
+    },
+    {
+      "command": "session_read",
+      "params": {
+        "selection": {
+          "view": "topics",
+          "filters": {
+            "archived": null
+          }
+        },
+        "cursor": null,
+        "limit": 100,
+        "item_pages": []
+      }
+    },
+    {
+      "command": "session_read",
+      "params": {
+        "selection": {
+          "view": "items",
+          "filters": {
+            "topic_id": null,
+            "parent_item_id": null,
+            "statuses": [],
+            "archived": null,
+            "item_id": null
+          }
+        },
+        "cursor": null,
+        "limit": 100,
+        "item_pages": []
+      }
+    },
+    {
+      "command": "session_read",
+      "params": {
+        "selection": {
+          "view": "messages",
+          "filters": {
+            "topic_id": null,
+            "item_id": null
+          }
+        },
+        "cursor": null,
+        "limit": 100,
+        "item_pages": []
+      }
+    },
+    {
+      "command": "session_read",
+      "params": {
+        "selection": {
+          "view": "inputs",
+          "filters": {
+            "topic_id": null,
+            "item_id": null,
+            "states": []
+          }
+        },
+        "cursor": null,
+        "limit": 100,
+        "item_pages": []
+      }
+    }
+  ],
+  "apply_requests": [
+    {
+      "op_id": "00000000-0000-4000-8000-000000000402",
+      "source_input_id": null,
+      "attempt_id": null,
+      "expected_item_revisions": {
+        "1": 2
+      },
+      "expected_topic_revisions": {
+        "00000000-0000-4000-8000-000000000010": 1
+      },
+      "summary": "",
+      "input_result": null,
+      "operations": [
+        {
+          "op": "topic.add",
+          "ref": "topic",
+          "name": "A new topic."
+        },
+        {
+          "op": "item.add",
+          "ref": "child",
+          "topic": {
+            "ref": "topic"
+          },
+          "parent": null,
+          "question": "Keep this question?",
+          "type": "question",
+          "status": "open",
+          "owner": {
+            "kind": "agent",
+            "binding_id": "00000000-0000-4000-8000-000000000020"
+          },
+          "ask": null,
+          "options": null,
+          "note": "",
+          "links": null,
+          "outcome": null,
+          "why": null,
+          "replaced_by": null,
+          "source_round_id": null
+        },
+        {
+          "op": "item.edit",
+          "item": {
+            "id": "1"
+          },
+          "patch": {
+            "question": "Updated question?",
+            "type": "question",
+            "note": null,
+            "links": []
+          }
+        },
+        {
+          "op": "item.ask",
+          "item": {
+            "id": "1"
+          },
+          "ask": "Choose.",
+          "options": [],
+          "recipient_binding_id": "00000000-0000-4000-8000-000000000020"
+        },
+        {
+          "op": "item.status",
+          "item": {
+            "id": "1"
+          },
+          "status": "done",
+          "outcome": "Completed.",
+          "why": "Evidence retained.",
+          "reason": null
+        },
+        {
+          "op": "item.replace",
+          "item": {
+            "id": "1"
+          },
+          "replacement": {
+            "ref": "child"
+          },
+          "outcome": "Superseded.",
+          "why": "New question."
+        },
+        {
+          "op": "reply",
+          "ref": "reply",
+          "item": {
+            "id": "1"
+          },
+          "text": "Complete response.",
+          "round_id": null
+        },
+        {
+          "op": "round.close",
+          "round_id": "00000000-0000-4000-8000-000000000040"
+        }
+      ]
+    }
+  ]
+}

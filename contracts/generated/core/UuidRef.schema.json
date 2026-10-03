@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UuidRef",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/ExistingUuidRef"
+    },
+    {
+      "$ref": "#/$defs/LocalRef"
+    }
+  ],
+  "$defs": {
+    "ExistingUuidRef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ]
+    },
+    "LocalRef": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/RequestRef"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "ref"
+      ]
+    },
+    "RequestRef": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]{0,31}(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

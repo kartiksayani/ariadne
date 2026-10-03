@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BarrierReason",
+  "type": "string",
+  "enum": [
+    "owner_paused",
+    "recovery_required",
+    "disconnected",
+    "lease_invalid",
+    "incompatible",
+    "result_missing",
+    "delivery_uncertain",
+    "host_failure",
+    "store_error"
+  ]
+}

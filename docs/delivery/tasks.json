@@ -310,7 +310,10 @@
         "rtk proxy npm run test:ui -- --project reference",
         "rtk proxy npm run capture:reference"
       ],
-      "estimate_days": 0.25
+      "estimate_days": 0.25,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/33"
+      }
     },
     {
       "id": "P0.5",
@@ -421,7 +424,10 @@
       "estimate_days": 1.5,
       "implementation_depends_on": [
         "P0.3b"
-      ]
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/36"
+      }
     },
     {
       "id": "P1.2",
@@ -451,7 +457,10 @@
       "estimate_days": 1,
       "implementation_depends_on": [
         "P0.3b"
-      ]
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/37"
+      }
     },
     {
       "id": "P1.3",
@@ -911,7 +920,10 @@
         "rtk proxy cargo test -p ariadne-adapter-codex --test history",
         "rtk proxy cargo xtask gen-codex-wire --check"
       ],
-      "estimate_days": 1.5
+      "estimate_days": 1.5,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/38"
+      }
     },
     {
       "id": "P3.6",
