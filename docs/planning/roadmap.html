@@ -68,7 +68,7 @@
   <header>
     <h1>Ariadne execution roadmap</h1>
     <p id="catalogue-summary"></p>
-    <p class="muted">Relative working-day estimates, not dates or promises. Dependencies and owned paths constrain the selected number of workers. Completion is maintainer-updated; check GitHub before scheduling or merging. One implementer until the walking slice.</p>
+    <p class="muted">Relative working-day estimates, not dates or promises. Dependencies and owned paths constrain the selected number of workers. Completion is maintainer-updated; check GitHub before scheduling or merging. Schedule eligible work in parallel with settled contracts and disjoint owned paths.</p>
     <div class="controls">
       <label>Find task<input id="search" type="search" placeholder="ID, title, path or criterion"></label>
       <label>Milestone<select id="phase"><option value="all">All milestones</option></select></label>
@@ -1909,7 +1909,7 @@
       setTimeout(() => URL.revokeObjectURL(url), 0);
     });
     $('catalogue-summary').textContent = tasks.length + ' tasks · ' + tasks.reduce((sum, task) => sum + task.estimate_days, 0) +
-      ' estimated work days · Claude walking slice first; full release scope retained.';
+      ' estimated work days · Contract-ready, dependency-led parallel delivery; full release scope retained.';
     render();
   })();
   </script>

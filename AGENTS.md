@@ -35,7 +35,9 @@ is the task and completion catalogue.
   Use argument arrays and body files for commands/GitHub mutations; GraphQL first
   for GitHub reads. Do not change remote settings or delete user data/history.
 - A tooling blocker gets one cheap attempt (about 15 minutes), then report its cost
-  and a cheaper route. Do not grow another delivery framework.
+  and a cheaper route. Harness/gate changes must address demonstrated delivery
+  issues or repeatedly solved manual work, stay small and proportionate, and
+  preserve quality. Do not grow another delivery framework.
 - Use applicable independent review; no global service pre-mortem checklist.
   RTK belongs only to outer agent commands, never repository subprocesses or CI.
 - MCP/Seezo are disabled under the owner's explicit current-session waiver.

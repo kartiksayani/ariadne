@@ -57,7 +57,10 @@ Update task completion in tasks.json with actual PR links, then regenerate the
 static chart. Preserve historical .delivery records without creating new receipts.
 
 A tooling blocker gets one cheap attempt (about 15 minutes), then explain the cost
-and cheaper route to the owner. Do not expand the harness. The maintainer writes
+and cheaper route to the owner. Change harness/gates only for a demonstrated
+delivery issue or repeatedly solved manual work; keep changes small and
+proportionate while preserving quality. Do not grow another delivery framework.
+The maintainer writes
 retrospectives/docs directly and reports delivered capability, completed tasks and
 concrete blockers. Use concise handoffs on interruption; reconcile them with
 actual worktrees, GitHub and live contexts on resumption.
