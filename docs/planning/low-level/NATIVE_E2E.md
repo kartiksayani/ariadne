@@ -216,8 +216,8 @@ Process-helper regression tests exercise descendant cleanup, deadline and SIGINT
 Budget the initial implementation as one focused day: approximately half for
 the scaffold/typed ping and half for native macOS build, coverage, driver and
 cleanup evidence. This is an estimate, not an executed benchmark. Complete the
-smoke before the first scaffold commit; keep commits <=800 handwritten lines
-and PRs <=1600. Allocate the harness with that slice rather than deferring E2E
+smoke before the first scaffold commit; keep commits <=1600 handwritten lines
+and PRs <=3200. Allocate the harness with that slice rather than deferring E2E
 until the domain store is complete.
 
 The minimal native command is typed `native_ping(request: PingRequest) ->

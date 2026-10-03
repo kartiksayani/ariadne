@@ -12,8 +12,8 @@ source is `scripts/check-commit.py`; CI and the local hook run the same gate.
 - Every application commit: Rust format/Clippy, TS/JS/CSS lint and type checks, unit
   and integration tests, deterministic UI-to-Rust E2E, weighted Rust+TS/JS coverage
   of at least 80%, including untested production files. Live hosts are milestone tests.
-- Prefer about 500 handwritten changed lines per PR; maximum 800 per commit and
-  1600 per PR, including tests/config.
+- Prefer about 500 handwritten changed lines per PR; maximum 1600 per commit and
+  3200 per PR, including tests/config.
   Original design/spec imports and generated lockfiles are reported separately.
 - Every branch push runs one complete CI suite on the exact pushed head, including
   post-squash main. A newer push cancels the previous execution on the same branch.
@@ -21,6 +21,10 @@ source is `scripts/check-commit.py`; CI and the local hook run the same gate.
   Every local application commit still runs the full hook. Whole-branch authored
   commit/PR and main squash size checks remain. Independent review and final spec
   adjudication belong to the maintainer, tied to the exact current head.
+
+[ADR-0017](../adr/ADR-0017-increase-review-size-budgets.md) increases only the
+numeric review budgets. Classification, whole-branch authored-commit checks,
+per-squash main checks and all application/helper coverage floors stay unchanged.
 
 ## Remote limitation
 
@@ -86,6 +90,14 @@ repository escapes. Canonical `apps`, `crates`, `integrations` remain recursivel
 inventoried, including shipped Mods and future `.mjs`/`.cjs`. Existing generated,
 vendor, dependency, test and declaration classifications remain; no broad dist
 exclusion. Vite output stays in root `target/desktop-dist`.
+
+[ADR-0016](../adr/ADR-0016-align-generated-frontend-coverage.md) aligns Vitest
+with the existing generated-directory inventory exclusion: coverage preserves
+the pinned Vitest defaults and excludes `**/generated/**`. Genuine generated
+type-only and executable outputs do not enter application LCOV. Handwritten
+production sources outside those directories, including untested files, remain
+inventoried and measured. This alignment grants no new source classification or
+permission to place handwritten implementation in generated directories.
 
 `coverage_tooling` still permits only the three exact desktop Vite/native-WDIO/
 Tauri-build paths. In addition, fixed workspace packages `ariadne-coverage-inventory`

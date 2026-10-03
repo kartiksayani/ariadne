@@ -119,9 +119,9 @@ maintenance PRs use the same declarations and direct maintainer history review.
 | Delivery helper | Reads fresh GitHub state, task dependencies, owned paths, review heads, dispositions, required checks and delivery records. Before merging it rechecks head/base and requests an exact-head squash merge. |
 | Maintainer and reviewer | Judge behavior, specification fidelity, real review independence, valid deferrals and decision quality. JSON fields cannot prove that this judgment happened. |
 
-The agreed size limits are **800 changed handwritten lines per authored commit**
-and **1600 per PR**, with roughly 500 preferred for easy review. Main's integrated
-squash commits use the 1600-line PR cap. Tests and configuration count; documents,
+The agreed size limits are **1600 changed handwritten lines per authored commit**
+and **3200 per PR**, with roughly 500 preferred for easy review. Main's integrated
+squash commits use the 3200-line PR cap. Tests and configuration count; documents,
 original assets and generated lockfiles are accounted for separately. That
 exemption is not permission to place application code in documentation.
 

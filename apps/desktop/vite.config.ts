@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { coverageConfigDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -29,6 +29,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['tests/ui/**/*.test.tsx'],
-    coverage: { provider: 'v8', include: ['src/**/*.{ts,tsx}'], reporter: [['lcov', { projectRoot: resolve(root, '../..') }], 'text'], reportsDirectory: resolve(root, '../../coverage/web') },
+    coverage: { provider: 'v8', include: ['src/**/*.{ts,tsx}'], exclude: [...coverageConfigDefaults.exclude, '**/generated/**'], reporter: [['lcov', { projectRoot: resolve(root, '../..') }], 'text'], reportsDirectory: resolve(root, '../../coverage/web') },
   },
 });
