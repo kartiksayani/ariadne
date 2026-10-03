@@ -1,4 +1,4 @@
-# Personal release scope — revision 5
+# Personal release scope — revision 6
 
 The owner’s latest choices govern the first version. This page supersedes earlier
 blanket requirements for exhaustive hardening. The application is for one person
@@ -56,15 +56,15 @@ The pinned scaffold and native smoke are implemented. Planning data/lint cannot
 count as application coverage or prove domain/provider completion. Fresh real
 reports include untested handwritten logic; missing reports/tests fail.
 
-## First-slice sequencing
+## Implementation sequencing
 
-On owner resumption, prioritize one manual binding: agent CLI publish → durable
-JSON item → Waiting UI → owner answer queue → fake provider boundary → explicit
-agent CLI reply/result → UI update. Keep binding identity/generation, operation
-deduplication, atomic JSON/file lock and separate result/host-completion semantics.
-A paid/live early Claude run needs owner approval. Defer schema-generator/DTO
-edge-case depth until needed; preserve paused drafts and existing packages.
-Codex, MCP, discovery, graph, Continue and native features stay in the final scope.
+Follow the original foundation and dependency intent in [BUILD_HANDOFF](BUILD_HANDOFF.md#implementation-order)
+and [ROADMAP](ROADMAP.md). Settle contracts before their consumers and schedule
+eligible modules in parallel with disjoint ownership. The real UI-to-Rust domain
+slice remains P4.1 acceptance after its prerequisites, before dependent screen
+expansion. Preserve paused drafts, existing packages and the declared schema/DTO
+acceptance. Live Claude/Codex product acceptance remains M7 with owner approval.
+Codex, MCP, discovery, graph, Continue and native features stay in final scope.
 
 ## Scope discipline
 
