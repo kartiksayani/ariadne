@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SessionCounters",
+  "type": "object",
+  "properties": {
+    "next_answer": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "next_input": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "next_message": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "next_root": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "next_topic_order": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "next_root",
+    "next_topic_order",
+    "next_message",
+    "next_input",
+    "next_answer"
+  ],
+  "$defs": {
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    }
+  }
+}

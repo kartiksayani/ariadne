@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Checkpoint",
+  "description": "At most 4096 UTF-8 bytes; maxLength only bounds Unicode characters.",
+  "type": "string",
+  "maxLength": 4096
+}

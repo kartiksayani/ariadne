@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ItemsByStatus",
+  "type": "object",
+  "properties": {
+    "decided": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
+    "done": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
+    "dropped": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
+    "in_progress": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
+    "open": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
+    "replaced": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
+    "waiting_on_me": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "open",
+    "waiting_on_me",
+    "in_progress",
+    "decided",
+    "done",
+    "dropped",
+    "replaced"
+  ],
+  "$defs": {
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    }
+  }
+}

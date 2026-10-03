@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UniqueMap",
+  "description": "Deterministically serialized map that rejects duplicate keys on read.",
+  "type": "object",
+  "additionalProperties": true
+}

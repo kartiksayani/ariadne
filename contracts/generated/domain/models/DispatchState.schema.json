@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DispatchState",
+  "type": "string",
+  "enum": [
+    "enabled",
+    "paused",
+    "recovery_required",
+    "disconnected"
+  ]
+}

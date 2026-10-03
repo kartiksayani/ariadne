@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PresenceSource",
+  "type": "string",
+  "enum": [
+    "bridge_heartbeat",
+    "host_poll",
+    "host_event",
+    "process_hint"
+  ]
+}

@@ -132,6 +132,40 @@ more rounds cannot silently truncate or advance a message list. Complete message
 bodies and provenance remain intact under the existing entity/page limits;
 revision changes return `snapshot_changed` rather than mixed history.
 
+Canonical P0.3b records make those projections explicit:
+
+- `ItemSnapshot` contains the stored Item fields except the unbounded
+  `updated_message_ids` and `status_history` arrays.
+  `ItemReadProjection={item:ItemSnapshot,updated_messages:Page<Message>,
+  status_history:Page<StatusHistoryEntry>}` preserves both histories separately.
+- `RoundSnapshot` contains the stored Round fields except the four historical
+  ID lists: owner/agent messages, result inputs and fork items.
+  `RoundProjection={round:RoundSnapshot,answers:Page<Answer>,
+  owner_messages:Page<Message>,agent_messages:Page<Message>,
+  results:Page<ResultProjection>,forks:Page<ItemLink>}`.
+  `ResultProjection={input_id,attempt_id,result:DomainResult}`;
+  `ItemLink={project_id,session_id,item_id,question,status}`.
+- `ItemMessagesProjection={item_id,messages:Page<Message>,timeline_context}`;
+  `TimelineContext={parent_item_id,created_message:Message|null,source_round_id}`
+  keeps nullable parent/creation/fork context apart from the deduplicated timeline.
+  `ItemRoundsProjection={item_id,rounds:Page<RoundProjection>}` retains independent
+  cursors inside each round; advancing outer pages never advances nested pages.
+- `ProjectSummary={project:Project,canonical_root,availability:available|unavailable,
+  counts:SummaryCounts}`. `SessionSummary={project_id,session_id,title,state,
+  revision,created_at,updated_at,closed_at,active_binding:BindingSummary|null,
+  counts:SummaryCounts}`. `BindingSummary={id,adapter_id,external_session_id,
+  generation,dispatch_state,owner_paused,pause_reason,connection_state,
+  presence:PresenceObservation|null}`. Closed time and pause reason are nullable.
+
+These are owned domain records, not renderer copies or executable transforms.
+Full bodies and source author/identity remain in canonical Message/Answer/origin
+records. Projection execution must enforce page/entity caps; it cannot silently
+truncate historical bodies. QueryCursor's exact tagged sort/tie-break keys and
+nested cursor scopes are in DOMAIN section 5. Service command/query unions and
+list wrapper totals, including active/closed session totals, remain P0.6; they do
+not extend SummaryCounts. The typed saved replay receipt union is in DOMAIN
+section 2; application envelopes wrap those records without arbitrary saved JSON.
+
 Design symbols use dots; transport uses underscores: input.submit→input_submit,
 input.resolve→input_resolve, binding.connect/pause/resume/disconnect→corresponding
 binding_* commands, topic.archive/restore→topic_*, session.close/reopen→session_*,

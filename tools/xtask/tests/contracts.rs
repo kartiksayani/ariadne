@@ -37,15 +37,21 @@ fn generation_is_deterministic_and_check_is_read_only() {
     assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
     generate(temp.path(), false).unwrap();
     let expected = artifacts().unwrap();
-    assert_eq!(expected.len(), 16);
+    assert_eq!(
+        expected.len(),
+        16 + ariadne_xtask::domain_models::artifacts().unwrap().len()
+    );
     assert_eq!(artifacts().unwrap(), expected);
     generate(temp.path(), true).unwrap();
+    let mut modified = Vec::new();
     for (path, text) in &expected {
         let file = temp.path().join(path);
-        let before = file.metadata().unwrap().modified().unwrap();
-        generate(temp.path(), true).unwrap();
-        assert_eq!(file.metadata().unwrap().modified().unwrap(), before);
+        modified.push((file.clone(), file.metadata().unwrap().modified().unwrap()));
         assert_eq!(fs::read_to_string(file).unwrap(), *text);
+    }
+    generate(temp.path(), true).unwrap();
+    for (file, before) in modified {
+        assert_eq!(file.metadata().unwrap().modified().unwrap(), before);
     }
     generate(temp.path(), false).unwrap();
     for (path, text) in expected {
@@ -141,7 +147,7 @@ fn generated_typescript_checks_wire_assignments() {
     let files = artifacts().unwrap();
     let mut source = String::new();
     for (path, text) in files {
-        if path.extension().is_some_and(|extension| extension == "ts") {
+        if path.starts_with("apps/desktop/src/generated/domain/primitives") {
             source.push_str(&text);
         }
     }

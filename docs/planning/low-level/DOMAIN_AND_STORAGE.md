@@ -36,7 +36,9 @@ explicit field: never infer ancestry by parsing an ID. Root/suffix counters neve
 reuse numbers. Sort siblings by assigned numeric ordinal, not string comparison.
 All counters/revisions are integers in 1..2^53-1 with checked increments. Timestamp
 is RFC3339 UTC milliseconds assigned by core; ordering uses sequences/revisions.
-Optional scalar fields serialize as null; collections are present. Reject unknown
+Optional fields serialize as explicit null and accept omitted or null values on
+read; collections are required and never defaulted. Entity and nested record
+shapes reject unknown fields. Reject unknown
 command fields, duplicate map keys, invalid UTF-8/NUL and whitespace-only required
 text. Preserve actual text, including newlines; no normalization of stored prose.
 
@@ -58,11 +60,18 @@ the pinned libraries' responsibility; no independent length cap, year range,
 month-end rule or historical leap-second table is added. Core assigns timestamps;
 sequence and revision determine ordering.
 
-`cargo xtask gen-contracts` generates Rust-authored primitive JSON Schema and
-TypeScript wire aliases; read-only `--check` rejects missing, stale or unexpected
-artifacts. TypeScript expresses scalar wire kinds and literal schema version 1;
+`cargo xtask gen-contracts` generates Rust-authored primitive and complete model
+JSON Schema and TypeScript; read-only `--check` rejects missing, stale or unexpected
+artifacts. Schemas describe canonical emitted records, including required nullable
+fields; optional-read compatibility is proved separately by Rust tests. TypeScript
+expresses scalar wire kinds, tagged variants and literal schema version 1;
 lexical forms, integrality and safe bounds require Rust or JSON Schema validation.
-Complete DTOs and fixtures remain P0.3b/P0.3. See
+Typed maps use deterministic `UniqueMap<K,V>` with lexical primitive keys and
+duplicate-key rejection, including nested adapter-configuration objects. JSON
+Schema validates map-key spelling but cannot detect duplicate keys already lost
+by a JSON parser. Prose byte limits, blank/NUL checks, relationship invariants,
+scope and transitions remain P1.1; full canonical demo/invalid fixtures remain P0.3.
+See [ADR-0012](../../adr/ADR-0012-complete-the-domain-v1-contract.md) and
 [ADR-0013](../../adr/ADR-0013-validate-domain-primitives.md).
 
 ## 2. Files and entity inventory
@@ -82,12 +91,18 @@ Complete DTOs and fixtures remain P0.3b/P0.3. See
   run/                           # private control socket, leases, presence
 ```
 
+Project: `{schema_version:1,id,display_name}`.
+
 Session: `{schema_version:1,id,project_id,title,state,created_at,updated_at,
 revision,closed_at,counters,active_binding_id,topics,items,messages,rounds,
 answers,bindings,inputs,operation_receipts,continuations}`.
 `state=active|closed`. Counters: `next_root,next_topic_order,next_message,
 next_input,next_answer`. Collections except messages/answers are ID-keyed maps;
 messages and answers are ordered arrays. Binding, not provider name, routes work.
+`operation_receipts` maps operation UUIDs to ordered arrays of actor-scoped
+receipts: the same operation UUID may occur in different actor scopes; one receipt
+per actor scope in a bucket is a semantic invariant. No new composite-key syntax
+or global operation-ID namespace is introduced.
 An active session has at most one dispatch-enabled binding. Historical bindings
 remain for provenance; multiple sessions in one project may run concurrently.
 
@@ -99,7 +114,7 @@ Topic: `{id,name,order,revision,created_at,archived_at,origin}`. `origin` is nul
 Item: `{id,ordinal,topic_id,parent,question,type,status,owner,revision,
 question_revision,next_child,ask,note,options,links,outcome,why,replaced_by,
 created_at,updated_at,created_message_id,updated_message_ids,status_history,
-waiting_since,recipient_binding_id,current_round_id,origin}`.
+waiting_since,recipient_binding_id,current_round_id,source_round_id,origin}`.
 `type=question|decision|finding|task|explanation`;
 `status=open|waiting_on_me|in_progress|decided|done|dropped|replaced`.
 `owner={kind:me}|{kind:agent,binding_id}|{kind:other,name}`.
@@ -121,6 +136,10 @@ not question revision. `waiting_since` is the UTC timestamp of the current
 waiting episode, null outside waiting; its identity is item_id + question_revision.
 The ask round/opening message supplies asked-in-message provenance. History entries include old/new status, previous terminal
 fields, cause message ID, time, acting binding, and handled owner-message number.
+`StatusHistoryEntry={old_status,new_status,previous_outcome,previous_why,
+previous_replaced_by,cause_message_id,at,binding_id,
+handled_through_message_number,reason}`; previous terminal fields, binding and
+reason are nullable. The handled watermark is a nonnegative safe integer.
 Only the agent's validated domain operation changes an item status. Owner input
 save, transport acknowledgement and host completion never do so.
 
@@ -143,8 +162,11 @@ Selected option and explanation are preserved together. Correction appends a
 new answer linked to a prior answer; it never edits an accepted payload. If the
 question changed, offer a generic follow-up instead of mislabelling it an answer.
 
-Round: `{id,item_id,ordinal,opened_message_id,ask_snapshot,question_revision,
-owner_message_ids,agent_message_ids,result_input_ids,fork_item_ids,closed_at}`.
+Round: `{id,item_id,ordinal,opened_message_id,question_snapshot,ask_snapshot,
+options_snapshot,question_revision,owner_message_ids,agent_message_ids,
+result_input_ids,fork_item_ids,closed_at,origin}`. Ask, close time and origin are
+nullable; options and every historical ID list are present. `Item.source_round_id`
+is the nullable reverse link for a round fork.
 Agent `item.ask` starts a new round and freezes question/options/ask snapshots.
 A generic owner message uses the current round, or creates one with the current
 question when none is open. Agent replies reference the current/explicit valid
@@ -172,9 +194,31 @@ schema and contains no credentials/tokens/environment dumps. Session host identi
 one live binding per identity across registered roots. Generation is a fresh UUIDv4 on a
 validated reconnect; prior attempts retain their originating generation.
 
+`EndpointRef={kind:unix_socket,path}|{kind:local_bridge,name}`. A symbolic bridge
+name identifies an already registered local bridge, resolved by trusted local
+wiring; it is not another transport or a caller-selected network endpoint.
+`EndpointFingerprint` is opaque string identity, at most 4 KiB UTF-8, not a SHA256
+digest; this semantic byte limit remains P1.1. `AdapterConfig={namespace,values}`
+holds a string-keyed map of canonical JSON values validated by the adapter schema.
+`protocol_major` and `config_version` are positive safe integers.
+
+`Capabilities` has exactly `existing_session,deferred_delivery,turn_correlation,
+turn_completion,domain_cli,domain_mcp,history_reconcile,streaming_output,
+final_text_read,discover_sessions` each `{supported:boolean,conditions:string[]}`
+and `delivery_mode=pull|push`. It exposes no deferred plugin controls.
+`connection_state=connected|disconnected|reconnecting|unknown`;
+`pause_reason=null|result_missing|uncertain|host_failure|store_error|incompatible`.
+
 High-frequency presence is ephemeral in `run/presence/<binding>.json` with
 `instance_id,generation,connection_state,execution_state,last_seen_at,source,
-process_identity?`. Do not rewrite the whole session for every heartbeat. On app
+process_identity,freshness`. The canonical `PresenceObservation` uses
+`execution_state=idle|running|waiting_for_approval|unknown`,
+`source=null|bridge_heartbeat|host_poll|host_event|process_hint`,
+`freshness=fresh|stale|historical|unknown`, nullable `last_seen_at` and nullable
+`process_identity={pid:positive_safe_integer,started_at:UtcMillis}`. Source is
+actual evidence provenance; historical is a freshness qualifier. Heartbeat
+freshness or missing events never establish idle or approval state.
+Do not rewrite the whole session for every heartbeat. On app
 restart it is historical until revalidated. Session stores only meaningful
 connection/dispatch transitions. Detailed presence algorithm: process spec.
 
@@ -184,13 +228,21 @@ Input: `{id,seq,binding_id,kind,target,message_id,answer_id,created_at,
 expected_question_revision,payload,state,attempts,
 active_attempt_id,resolution_history}`.
 `kind=answer|bring|reply|note|followup|reopen|drop|continue`;
-`target={topic_id,item_id?}`; topic-only is allowed only for continue.
-`payload` is immutable owner text + optional option snapshot/intent + context
-references. Do not treat the user's text as permission to run arbitrary tools.
+`target={topic_id,item_id:ItemRef|null}`; topic-only is allowed only for continue.
+`InputPayload={text,intent,target_snapshot,selected_option_id,context}`;
+`intent` uses the same InputKind and matches Input.kind.
+`InputTargetSnapshot={topic_name,item_question,question_revision,ask,options}`;
+item question/revision, ask and selected option are nullable. Options are complete
+frozen ItemOption records. `InputContext={message_ids,item_ids,round_id,
+continuation_operation_id}` with required ID arrays and nullable scalar IDs.
+This is immutable owner text and its original target/context, including the
+question/options displayed in Sent after the live question changes.
+Do not treat the user's text as permission to run arbitrary tools.
 `state=queued|in_flight|handled|cancelled|needs_attention|skipped`.
+Attempts and resolution history are ordered arrays; active attempt is nullable.
 
 Attempt: `{id,purpose,repair_for_attempt_id,claim_request_id,binding_generation,prepared_at,formatted_payload,payload_sha256,wire_marker,
-acceptance,host_turn_id,turn_state,turn_observed_at,domain_result,
+acceptance,acceptance_receipt,acceptance_observed_at,host_turn_id,turn_state,turn_observed_at,domain_result,
 result_state,sealed_at,error,reconciliation_checkpoint}`.
 `purpose=work|result_repair`; repair_for_attempt_id is null for work, otherwise
 references an earlier completed attempt of the same input. The new attempt keeps
@@ -203,7 +255,14 @@ the mapping (binding,generation,request_id) → exact attempt/payload receipt.
 `acceptance=prepared|accepted|rejected|uncertain`;
 `turn_state=unknown|running|completed|failed|interrupted`;
 `result_state=pending|committed|missing`.
-Receipt metadata includes provider reference and observed time where available.
+`HostReceipt={provider_reference,observed_at}` is nullable acceptance evidence;
+`acceptance_observed_at` independently records observed acceptance/rejection/
+uncertainty and is nullable. The canonical HostReceipt is reused by protocol DTOs.
+`AttemptError={code,reason,retryable,observed_at}` and reconciliation checkpoint are
+nullable. `Checkpoint` is opaque string, at most 4096 UTF-8 bytes, validated now
+by its constructor/deserializer. Its schema `maxLength:4096` bounds characters
+and is necessary but insufficient for the byte bound; no complete byte-semantic
+parity is claimed. Provider reference/host turn identifiers remain opaque strings.
 `domain_result` is null or `{operation_id,outcome,explanation,reply_message_ids,
 followup_item_ids,handled_through_message_number,committed_revision,committed_at}`;
 `outcome=answered|deferred|unable`. It belongs to one input+attempt, and becomes
@@ -212,10 +271,40 @@ immutable after first commit. Exact operation replay returns its receipt.
 Core seals when turn=completed AND result=committed. Until then it can accept the
 late domain result for that same still-open attempt; a wall-clock timeout alone
 cannot seal. Host failures retain committed domain work. Resolutions are
-append-only `{op_id,kind,reason,at,attempt_id}` with
+append-only `{op_id,kind,reason,at,attempt_id,evidence}` with
 `kind=retry_unexecuted|resend|skip|request_result_repair|confirm_evidence`.
+Nullable `OwnerResolutionEvidence={source:owner_attestation,turn_state,
+host_turn_id,owner_attested_idle,at}` preserves owner-supplied facts explicitly.
+It cannot claim adapter-observed evidence or fabricate a committed agent result.
 Recovery rules, including repair without redoing business work, are in queues.
 No `received` bool or answer-fetch cursor controls dispatch.
+
+### Typed operation receipts
+
+`OperationReceipt={operation_id,actor_scope,command_digest:Sha256,result}`;
+`actor_scope={kind:owner}|{kind:agent,binding_id}|{kind:adapter,binding_id}`.
+`SavedReceipt={operation_id,session_id,revision,data}` has a tagged `data.kind`
+union of exact saved success shapes:
+
+| kind | data members other than kind |
+| --- | --- |
+| input_submit | input_id, message_id, message_number, answer_id nullable, input_seq |
+| input_cancel | input_id, state |
+| input_resolve | input_id, attempt_id, resolution_kind, state |
+| topic_lifecycle | topic_id, topic_revision, archived_at nullable |
+| session_lifecycle | state, closed_at nullable |
+| binding_connect | binding_id, generation, capabilities, setup_instruction |
+| binding_state | binding_id, generation, dispatch_state, owner_paused, pause_reason nullable, connection_state |
+| apply | allocated_refs, messages, item_revisions, topic_revisions, input_result_state nullable, queue_join_state nullable |
+| event | event_id, input_id nullable, attempt_id nullable, durable_effect |
+| continuation | continuation: ContinuationReceipt |
+
+Apply `messages` is an array of `{id,number}`, never parallel positional arrays.
+`allocated_refs` is RequestRef-keyed with values
+`{kind:topic,id:UuidV4}|{kind:item,id:ItemRef}|{kind:message,id:UuidV4}|{kind:round,id:UuidV4}`.
+Item and topic revision maps have ItemRef and UUID keys respectively. Saved results
+are typed records, never generic JSON. Command/query unions and actual replay
+behavior belong to P0.6 and the core tasks.
 
 ## 3. Domain invariants and transitions
 
@@ -297,13 +386,34 @@ changes between pages, return `snapshot_changed` so UI restarts rather than
 mixing histories. `session_get` may return the full validated snapshot to local
 Tauri; agent tools use bounded projections.
 
+`QueryCursor.schema=1`, `filter_digest:Sha256`, `revision:positive_safe_integer`;
+`after` is null or a `kind`-tagged `CursorPosition`:
+sequence `{number,id}`, topic `{order,id}`, item `{ordinals:positive_safe_integer[],id:ItemRef}`,
+round `{ordinal,id}`, project `{canonical_root,id}`, session
+`{updated_at,project_id,id}`, history `{index:nonnegative_safe_integer}`, or result
+`{input_seq,attempt_ordinal,input_id,attempt_id}`. UUID IDs are lexical primitives.
+Ordinal paths are derived from explicit parent+ordinal data, never ItemRef parsing.
+`view=projects|sessions|topics|items|messages|inputs|item_messages|item_rounds|
+round_answers|round_owner_messages|round_agent_messages|round_results|round_forks|
+item_status_history|item_updated_messages`. Nested views identify continuation
+cursor scopes within existing queries; they add no endpoints. Execution validates
+the view, filter, sort key and snapshot revision together.
+
 ## 6. Continuation, repair and migration
 
 Item/Message/Round `origin`, when copied, is
 `{project_id,session_id,topic_id,entity_id,source_revision}`; original entities
-have null origin. `continuations[op_id]` stores source IDs/revision/hash, target
-topic/input IDs, immutable old→new maps for items/messages/rounds/answers, and
-confirmed summary text/time. Origin routes retain IDs when the source is offline;
+have null origin. Item entity_id is an ItemRef; message/round entity_id is UUID.
+MessageOrigin additionally carries `author,binding_id,adapter_id,external_session_id`
+with the three identity strings/IDs nullable, preserving actual source authorship.
+Copied message author/binding provenance never becomes that of the target agent.
+`ContinuationReceipt={operation_id,source_project_id,source_session_id,
+source_topic_id,source_revision,source_sha256,target_topic_id,target_input_id,
+item_id_map,message_id_map,round_id_map,answer_id_map,summary,confirmed_at}`.
+The item map is ItemRef→ItemRef; all other old→new maps are UUID→UUID.
+These maps, summary and confirmed time are immutable. Answers retain source
+lineage through their receipt map rather than an additional invented origin field.
+Origin routes retain IDs when the source is offline;
 the UI displays unavailable-source metadata and the complete local copy. Copied
 messages preserve original author identity in origin metadata and do not claim
 the target agent authored them. Live target binding IDs are not retroactively

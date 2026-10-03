@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ItemLinkTarget",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "$ref": "#/$defs/LinkKind"
+    },
+    "label": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "label",
+    "target"
+  ],
+  "$defs": {
+    "LinkKind": {
+      "type": "string",
+      "enum": [
+        "pr",
+        "file",
+        "doc"
+      ]
+    }
+  }
+}
