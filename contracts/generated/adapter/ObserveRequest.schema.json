@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ObserveRequest",
+  "type": "object",
+  "properties": {
+    "binding_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "checkpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "generation": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "limit": {
+      "$ref": "#/$defs/ObserveLimit"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "binding_id",
+    "generation",
+    "checkpoint",
+    "limit"
+  ],
+  "$defs": {
+    "Checkpoint": {
+      "description": "At most 4096 UTF-8 bytes; maxLength only bounds Unicode characters.",
+      "type": "string",
+      "maxLength": 4096
+    },
+    "ObserveLimit": {
+      "type": "integer",
+      "maximum": 100,
+      "minimum": 1
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

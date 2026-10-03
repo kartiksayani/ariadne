@@ -1,0 +1,38 @@
+[
+  {
+    "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "host_turn_id": "host-turn/α",
+    "kind": "turn_finished",
+    "source_event_id": null,
+    "expected_id": "6c9129da06c2e469a2606a933831db021a3c5cc61447dfc00862882413e2c45e"
+  },
+  {
+    "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "host_turn_id": null,
+    "kind": "uncertain",
+    "source_event_id": null,
+    "expected_id": "657f488f80cf2bbe16fce73bff0136c4d69c2d6122a8cd60fbc5c0744357eb03"
+  },
+  {
+    "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "host_turn_id": "null",
+    "kind": "uncertain",
+    "source_event_id": null,
+    "expected_id": "5e23e27461bf251f073d71a76848f9cc4f3d52c986f485d76e3c3c72190d1763"
+  },
+  {
+    "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "host_turn_id": null,
+    "kind": "rejected",
+    "source_event_id": "native-event/α",
+    "expected_id": "native-event/α"
+  }
+]

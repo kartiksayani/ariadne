@@ -1,0 +1,171 @@
+{
+  "replay": [
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": null,
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "accepted",
+      "kind": "accepted",
+      "payload": {
+        "receipt": null
+      }
+    },
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": "host-turn/α",
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "started",
+      "kind": "turn_started",
+      "payload": {}
+    },
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": "host-turn/α",
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "finished",
+      "kind": "turn_finished",
+      "payload": {
+        "status": "completed",
+        "reason": null,
+        "diagnostic_text": null,
+        "truncated": false
+      }
+    },
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": "host-turn/α",
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "finished",
+      "kind": "turn_finished",
+      "payload": {
+        "status": "completed",
+        "reason": null,
+        "diagnostic_text": null,
+        "truncated": false
+      }
+    }
+  ],
+  "conflicting_turn": [
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": "host-turn/α",
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "started",
+      "kind": "turn_started",
+      "payload": {}
+    },
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": "different/turn",
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "other-start",
+      "kind": "turn_started",
+      "payload": {}
+    }
+  ],
+  "conflicting_outcome": [
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": "host-turn/α",
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "finished",
+      "kind": "turn_finished",
+      "payload": {
+        "status": "completed",
+        "reason": null,
+        "diagnostic_text": null,
+        "truncated": false
+      }
+    },
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": "host-turn/α",
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "failed",
+      "kind": "turn_finished",
+      "payload": {
+        "status": "failed",
+        "reason": "Host failed.",
+        "diagnostic_text": null,
+        "truncated": false
+      }
+    }
+  ],
+  "uncertainty": [
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": null,
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "uncertain",
+      "kind": "uncertain",
+      "payload": {
+        "reason": "Sender interrupted after possible delivery."
+      }
+    }
+  ],
+  "same_text_distinct_chunks": [
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": "host-turn/α",
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "chunk-1",
+      "kind": "visible_output",
+      "payload": {
+        "host_message_id": null,
+        "phase": "commentary",
+        "operation": "append",
+        "text": "Repeated visible text.",
+        "truncated": false,
+        "gap_before": false
+      }
+    },
+    {
+      "binding_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "input_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "attempt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "host_turn_id": "host-turn/α",
+      "observed_at": "2026-10-03T12:00:00.000Z",
+      "event_id": "chunk-2",
+      "kind": "visible_output",
+      "payload": {
+        "host_message_id": null,
+        "phase": "final",
+        "operation": "replace",
+        "text": "Repeated visible text.",
+        "truncated": true,
+        "gap_before": true
+      }
+    }
+  ]
+}

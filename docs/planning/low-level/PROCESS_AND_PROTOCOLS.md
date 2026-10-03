@@ -49,10 +49,19 @@ same core attempt/result state machine, not a mandatory artificial push socket.
 
 ### Owned method DTOs
 
-P0.5 publishes `Adapter` in `ariadne-agent-protocol`. Each method is async,
-takes one owned request and returns `Result<OwnedResult, AdapterError>`.
-`AdapterError` uses the shared typed error vocabulary and bounded reason/retry
-semantics, not provider stderr. Domain primitives, `EndpointRef`,
+P0.5 publishes the object-safe `Adapter: Send + Sync` in
+`ariadne-agent-protocol`. Each method takes `&self` and one owned request, returning
+`AdapterFuture<'_, OwnedResult>`: a boxed, pinned `Send` future whose output is
+`Result<OwnedResult, AdapterError>`. The seam requires no async runtime or macro;
+runtime supplies the executor, deadlines and dispatch lease validation.
+`AdapterError={code:AdapterErrorCode,message:string,retryable:boolean}` uses the
+shared error vocabulary, not provider stderr. Its exact codes are
+`invalid_argument`, `binding_mismatch`, `stale_generation`, `incompatible_adapter`,
+`host_unreachable`, `delivery_uncertain`, `permission_denied`, `unsupported`,
+`protocol_conflict`, `unsupported_host_version`. P0.6 maps every variant into the
+public API envelope. Message/reason text is at most 4 KiB UTF-8. Retryable means the
+same safe operation may retry; `delivery_uncertain` is never retryable and no error
+authorizes uncertain submit resend. Domain primitives, `EndpointRef`,
 `EndpointFingerprint`, adapter configuration and qualified presence are imported
 from the canonical Rust contract. P0.3b/P0.5 settle every member before consumers
 start; no consumer-local dictionaries or provider wire types enter this seam.
@@ -62,23 +71,38 @@ start; no consumer-local dictionaries or provider wire types enter this seam.
 | `probe` | `endpoint:EndpointRef,configuration:AdapterConfig` | `host_version:string|null,compatibility:compatible|incompatible|unknown,availability:available|unavailable|unknown,setup_steps:string[]`; unknown never enables dispatch |
 | `connect` | `binding_id,generation,external_session_id:string,endpoint:EndpointRef,configuration:AdapterConfig` | verified `external_session_id:string,endpoint_fingerprint:EndpointFingerprint,capabilities:Capabilities,observation:PresenceObservation`; mismatch rejects |
 | `submit` | `binding_id,generation,input_id,attempt_id,formatted_payload:string,payload_sha256:Sha256,wire_marker:string` | `SubmitOutcome=Accepted{receipt:HostReceipt|null}\|RejectedBeforeDelivery{reason:string}\|Uncertain{reason:string}`; consume the exact persisted dispatch values |
-| `observe` | `binding_id,generation,checkpoint:Checkpoint|null,limit:1..100` | `ObserveResult={events:NormalizedEvent[],next_checkpoint:Checkpoint|null}` |
+| `observe` | `binding_id,generation,checkpoint:Checkpoint|null,limit:ObserveLimit` (integer 1..100) | `ObserveResult={events:NormalizedEvent[],next_checkpoint:Checkpoint|null}` |
 | `reconcile` | `binding_id,generation,attempts:AttemptEvidenceRequest[],checkpoint:Checkpoint|null` | `ReconcileResult={attempt_evidence:AttemptEvidence[],unresolved_attempt_ids:UuidV4[],next_checkpoint:Checkpoint|null}` |
 | `disconnect` | `binding_id,generation` | `DisconnectResult={}` after stopping observation/releasing adapter-owned resources; never stops the host |
 
 `Capabilities` is the typed capability set from AGENT_ADAPTERS, with
 `{supported:boolean,conditions:string[]}` per declared capability and
 `delivery_mode:pull|push`; core never branches on provider names.
-`Checkpoint` is a private adapter checkpoint bounded to 4 KiB, not a query cursor.
-`HostReceipt={provider_reference:string,observed_at:UtcMillis}` is bounded
+`Checkpoint` is the canonical domain opaque adapter checkpoint bounded to 4 KiB,
+not a query cursor. `HostReceipt` is also imported from domain;
+`{provider_reference:string,observed_at:UtcMillis}` is bounded
 provider acceptance evidence, not a successful turn/result.
-`AttemptEvidenceRequest` carries the persisted input/attempt IDs, originating
-generation, payload digest, wire marker and nullable known host turn ID;
+`AttemptEvidenceRequest={input_id:UuidV4,attempt_id:UuidV4,
+binding_generation:UuidV4,payload_sha256:Sha256,wire_marker:string,
+host_turn_id:string|null}` carries persisted dispatch evidence unchanged;
 `AttemptEvidence={input_id,attempt_id,events:NormalizedEvent[]}`. Read-only
 reconciliation does not resubmit. Advance a checkpoint only after core persists
 all corresponding effects; unresolved evidence cannot prove non-delivery.
-Explicit nullable fields serialize as null. Method DTOs are protocol-owned
+Optional reads accept omitted/null fields and emit explicit null; collections
+remain required. Method DTOs are protocol-owned
 records using canonical primitives, not copies of persisted entity schemas.
+
+`cargo xtask gen-contracts` emits adapter JSON Schemas under
+`contracts/generated/adapter` and TypeScript under
+`apps/desktop/src/generated/adapter`. TypeScript imports canonical domain types.
+Schemas describe emitted shapes; callable protocol validators additionally check
+UTF-8 byte bounds, event correlation and batch binding/generation scope. Producers
+validate before returning facts; consumers validate before persisting effects.
+These validators do not perform replay, outcome joins or core state transitions.
+The `fake::ScriptedAdapter` is available only in crate tests or via the default-off
+`test-support` feature for consumer dev dependencies. Owned request/response steps
+and call history exercise this seam without production fallback, host execution,
+implicit checkpoint advance, automatic resubmit or business state.
 
 The existing method deadlines remain 10s probe/connect, 20s submit, 5s observe,
 10s per reconciliation batch and 5s disconnect. A timeout/error after possible
@@ -98,9 +122,20 @@ identity where supplied, else hash(binding,generation,attempt,turn,kind). Presen
 is ephemeral and need not have a persistent event receipt. Do not deduplicate
 legitimately different output chunks using identical text hashes.
 
+The terminal fallback is lowercase hexadecimal SHA256 over UTF-8 compact JSON
+array `[binding_id,generation,attempt_id,host_turn_id,kind]` in that exact order,
+serialized by serde_json. IDs use their canonical string spelling; absent turn
+is explicit JSON null. Only `turn_finished`, `rejected`, `uncertain` use this
+helper. Valid source identity is preserved verbatim. Status, diagnostics and
+reception time are excluded: contradictory facts must reach core adjudication.
+
 P0.5 publishes this tagged payload union in the protocol package. Envelope IDs
 use canonical primitives; `observed_at:UtcMillis`, `host_turn_id:string|null`.
-All optional envelope fields emit explicit null when absent.
+All optional envelope fields emit explicit null when absent. `event_id` and host
+identifiers (external session, turn, message, provider receipt reference) are
+nonempty opaque strings, at most 4 KiB UTF-8; never impose UUID/ASCII grammar,
+normalize or truncate identity. `kind`/`payload` form one tagged union flattened
+into the envelope, so an event cannot carry a payload for a different kind.
 
 | `kind` | Exact payload |
 | --- | --- |
@@ -129,9 +164,20 @@ Visible/terminal text follows the existing diagnostic bounds and shows truncatio
 or a dropped/coalesced gap. No raw tools, private reasoning, environment or auth
 payloads. A completed host turn remains separate from a committed domain result.
 
-New work requires current generation. Reconciliation can report historical
-attempt evidence only through the current supervisor after verifying exact
-host identity; it cannot reopen old dispatch or rewrite a sealed attempt.
+New work requires current generation. Ordinary `observe` returns only events for
+its requested binding/current generation. `reconcile.generation` identifies the
+current supervisor; each evidence request retains the originating
+`binding_generation`, and its returned matched events retain that same historical
+generation. The adapter verifies exact host identity before historical
+reconciliation; scope validation alone does not prove host identity. Historical
+facts never reopen old dispatch or rewrite a sealed attempt. Unrequested,
+duplicate or mismatched evidence scopes reject. Every requested attempt must be
+represented by an evidence entry or unresolved ID; omission is a malformed
+response, leaving callers' persisted unresolved state intact. Each collection
+contains no duplicate attempts, but evidence and unresolved IDs may overlap when
+facts remain incomplete. Empty requests/results are valid. This response
+completeness proves neither delivery nor outcome; partial facts never prove
+non-delivery.
 Repeated consistent facts are no-ops. Conflicting turn IDs or outcomes pause
 with `protocol_conflict`; arrival order must not regress progress.
 

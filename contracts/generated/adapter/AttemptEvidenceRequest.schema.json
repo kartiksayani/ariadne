@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AttemptEvidenceRequest",
+  "type": "object",
+  "properties": {
+    "attempt_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "binding_generation": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "host_turn_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "input_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "payload_sha256": {
+      "$ref": "#/$defs/Sha256"
+    },
+    "wire_marker": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "input_id",
+    "attempt_id",
+    "binding_generation",
+    "payload_sha256",
+    "wire_marker",
+    "host_turn_id"
+  ],
+  "$defs": {
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

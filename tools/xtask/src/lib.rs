@@ -10,6 +10,7 @@ use ts_rs::TS;
 
 pub mod codex_wire;
 pub mod domain_models;
+pub mod protocol_models;
 
 pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
     if args.first().map(String::as_str) == Some("gen-codex-wire") {
@@ -67,12 +68,20 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
     add::<Sha256>(&mut files)?;
     add::<RequestRef>(&mut files)?;
     files.extend(domain_models::artifacts()?);
+    files.extend(protocol_models::artifacts()?);
     Ok(files)
 }
 
 pub fn generate(root: &Path, check: bool) -> Result<(), String> {
     let files = artifacts()?;
-    for directory in [SCHEMAS, TYPES, domain_models::SCHEMAS, domain_models::TYPES] {
+    for directory in [
+        SCHEMAS,
+        TYPES,
+        domain_models::SCHEMAS,
+        domain_models::TYPES,
+        protocol_models::SCHEMAS,
+        protocol_models::TYPES,
+    ] {
         let target = root.join(directory);
         let mut ancestor = target.as_path();
         while ancestor != root {

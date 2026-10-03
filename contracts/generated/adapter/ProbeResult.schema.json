@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProbeResult",
+  "type": "object",
+  "properties": {
+    "availability": {
+      "$ref": "#/$defs/Availability"
+    },
+    "compatibility": {
+      "$ref": "#/$defs/Compatibility"
+    },
+    "host_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "setup_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "host_version",
+    "compatibility",
+    "availability",
+    "setup_steps"
+  ],
+  "$defs": {
+    "Availability": {
+      "type": "string",
+      "enum": [
+        "available",
+        "unavailable",
+        "unknown"
+      ]
+    },
+    "Compatibility": {
+      "type": "string",
+      "enum": [
+        "compatible",
+        "incompatible",
+        "unknown"
+      ]
+    }
+  }
+}

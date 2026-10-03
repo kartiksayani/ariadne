@@ -1,0 +1,631 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReconcileResult",
+  "type": "object",
+  "properties": {
+    "attempt_evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AttemptEvidence"
+      }
+    },
+    "next_checkpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "unresolved_attempt_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UuidV4"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "attempt_evidence",
+    "unresolved_attempt_ids",
+    "next_checkpoint"
+  ],
+  "$defs": {
+    "AttemptEvidence": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NormalizedEvent"
+          }
+        },
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "input_id",
+        "attempt_id",
+        "events"
+      ]
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "deferred_delivery": {
+          "$ref": "#/$defs/Capability"
+        },
+        "delivery_mode": {
+          "$ref": "#/$defs/DeliveryMode"
+        },
+        "discover_sessions": {
+          "$ref": "#/$defs/Capability"
+        },
+        "domain_cli": {
+          "$ref": "#/$defs/Capability"
+        },
+        "domain_mcp": {
+          "$ref": "#/$defs/Capability"
+        },
+        "existing_session": {
+          "$ref": "#/$defs/Capability"
+        },
+        "final_text_read": {
+          "$ref": "#/$defs/Capability"
+        },
+        "history_reconcile": {
+          "$ref": "#/$defs/Capability"
+        },
+        "streaming_output": {
+          "$ref": "#/$defs/Capability"
+        },
+        "turn_completion": {
+          "$ref": "#/$defs/Capability"
+        },
+        "turn_correlation": {
+          "$ref": "#/$defs/Capability"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "existing_session",
+        "deferred_delivery",
+        "turn_correlation",
+        "turn_completion",
+        "domain_cli",
+        "domain_mcp",
+        "history_reconcile",
+        "streaming_output",
+        "final_text_read",
+        "discover_sessions",
+        "delivery_mode"
+      ]
+    },
+    "Capability": {
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supported": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "supported",
+        "conditions"
+      ]
+    },
+    "Checkpoint": {
+      "description": "At most 4096 UTF-8 bytes; maxLength only bounds Unicode characters.",
+      "type": "string",
+      "maxLength": 4096
+    },
+    "ConnectionState": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "disconnected",
+        "reconnecting",
+        "unknown"
+      ]
+    },
+    "DeliveryMode": {
+      "type": "string",
+      "enum": [
+        "pull",
+        "push"
+      ]
+    },
+    "ExecutionState": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "running",
+        "waiting_for_approval",
+        "unknown"
+      ]
+    },
+    "Freshness": {
+      "type": "string",
+      "enum": [
+        "fresh",
+        "stale",
+        "historical",
+        "unknown"
+      ]
+    },
+    "HostReceipt": {
+      "type": "object",
+      "properties": {
+        "observed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "provider_reference": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider_reference",
+        "observed_at"
+      ]
+    },
+    "NormalizedEvent": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "host_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "connected"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "capabilities": {
+                  "$ref": "#/$defs/Capabilities"
+                },
+                "endpoint_fingerprint": {
+                  "type": "string"
+                },
+                "external_session_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "external_session_id",
+                "endpoint_fingerprint",
+                "capabilities"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "accepted"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "receipt": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/HostReceipt"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "receipt"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "turn_started"
+            },
+            "payload": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "visible_output"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "gap_before": {
+                  "type": "boolean"
+                },
+                "host_message_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "operation": {
+                  "$ref": "#/$defs/OutputOperation"
+                },
+                "phase": {
+                  "$ref": "#/$defs/OutputPhase"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "host_message_id",
+                "phase",
+                "operation",
+                "text",
+                "truncated",
+                "gap_before"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "turn_finished"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "diagnostic_text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "$ref": "#/$defs/TurnFinishedStatus"
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "status",
+                "reason",
+                "diagnostic_text",
+                "truncated"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "rejected"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "uncertain"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "presence"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "observation": {
+                  "$ref": "#/$defs/PresenceObservation"
+                }
+              },
+              "required": [
+                "observation"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "disconnected"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        }
+      ],
+      "required": [
+        "event_id",
+        "binding_id",
+        "generation",
+        "input_id",
+        "attempt_id",
+        "host_turn_id",
+        "observed_at"
+      ]
+    },
+    "OutputOperation": {
+      "type": "string",
+      "enum": [
+        "append",
+        "replace"
+      ]
+    },
+    "OutputPhase": {
+      "type": "string",
+      "enum": [
+        "commentary",
+        "final",
+        "unknown"
+      ]
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "PresenceObservation": {
+      "type": "object",
+      "properties": {
+        "connection_state": {
+          "$ref": "#/$defs/ConnectionState"
+        },
+        "execution_state": {
+          "$ref": "#/$defs/ExecutionState"
+        },
+        "freshness": {
+          "$ref": "#/$defs/Freshness"
+        },
+        "generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "instance_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "last_seen_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "process_identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcessIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PresenceSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "instance_id",
+        "generation",
+        "connection_state",
+        "execution_state",
+        "last_seen_at",
+        "source",
+        "process_identity",
+        "freshness"
+      ]
+    },
+    "PresenceSource": {
+      "type": "string",
+      "enum": [
+        "bridge_heartbeat",
+        "host_poll",
+        "host_event",
+        "process_hint"
+      ]
+    },
+    "ProcessIdentity": {
+      "type": "object",
+      "properties": {
+        "pid": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "started_at": {
+          "$ref": "#/$defs/UtcMillis"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "pid",
+        "started_at"
+      ]
+    },
+    "TurnFinishedStatus": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}
