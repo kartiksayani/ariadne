@@ -20,7 +20,8 @@ proof. See [ROADMAP](ROADMAP.md) and [tasks.json](../delivery/tasks.json).
 P0.3b publishes exact stored entities, receipts and query projection shapes. P0.5
 publishes exact adapter method DTOs and normalized event payloads. P0.6 publishes
 the callable core trait, typed command/query unions and shared semantic fixtures.
-Its implementation can begin after P0.3b; full acceptance retains P0.3
+Its implementation can begin after P0.3b and the merged P0.5 adapter event
+contract, which its report methods consume; full acceptance retains P0.3
 canonical demo/invalid-fixture prerequisites.
 Consumer work starts only once its required published surface is reviewed and
 merged; a prose name or a draft PR is insufficient. Do not copy entity schemas

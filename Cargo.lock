@@ -82,6 +82,15 @@ dependencies = [
 [[package]]
 name = "ariadne-agent-protocol"
 version = "0.1.0"
+dependencies = [
+ "ariadne-domain",
+ "jsonschema",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sha2",
+ "ts-rs",
+]
 
 [[package]]
 name = "ariadne-cli"
@@ -133,6 +142,7 @@ version = "0.1.0"
 name = "ariadne-xtask"
 version = "0.1.0"
 dependencies = [
+ "ariadne-agent-protocol",
  "ariadne-domain",
  "jsonschema",
  "schemars 0.8.22",

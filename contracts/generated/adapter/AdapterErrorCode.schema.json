@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AdapterErrorCode",
+  "type": "string",
+  "enum": [
+    "invalid_argument",
+    "binding_mismatch",
+    "stale_generation",
+    "incompatible_adapter",
+    "host_unreachable",
+    "delivery_uncertain",
+    "permission_denied",
+    "unsupported",
+    "protocol_conflict",
+    "unsupported_host_version"
+  ]
+}

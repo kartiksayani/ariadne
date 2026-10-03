@@ -24,11 +24,13 @@ Release isolation additionally runs for dependencies/features/config/capabilitie
 native harness, desktop Rust and frontend bundling changes, plus gate/workflow/
 coverage-policy changes. Use `--full` or manual CI dispatch at release milestones.
 Native OS automation joins when native features exist. Live hosts need owner approval.
-Today no crate under `crates/` has Cargo features or feature-gated code and the desktop
-app does not depend on internal crates, so crate source edits do not trigger release
-isolation. The PR that first adds a crate feature, feature-gated code or a desktop
-dependency on an internal crate must add the relevant paths to `RELEASE_FILES` or the
-release path checks in `scope_for` (`scripts/check-commit.py`) with a focused scope test.
+`ariadne-agent-protocol` has a default-off `test-support` feature for its scripted
+fake; crate tests also compile the fake with `cfg(test)`. Its Rust source changes
+trigger release isolation to keep the fake outside default release builds. Other
+crate source edits retain application/native checks. A PR adding another crate
+feature, feature-gated code or a desktop dependency on an internal crate must add
+the relevant paths to `RELEASE_FILES` or the release path checks in `scope_for`
+(`scripts/check-commit.py`) with a focused scope test.
 
 ```sh
 .venv-quality/bin/python scripts/check-commit.py --working-tree
