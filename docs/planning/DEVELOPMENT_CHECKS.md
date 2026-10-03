@@ -27,8 +27,8 @@ Native OS automation joins when native features exist. Live hosts need owner app
 Today no crate under `crates/` has Cargo features or feature-gated code and the desktop
 app does not depend on internal crates, so crate source edits do not trigger release
 isolation. The PR that first adds a crate feature, feature-gated code or a desktop
-dependency on an internal crate must add the relevant paths to `RELEASE_FILES`/the
-release prefixes in `scripts/check-commit.py` with a focused scope test.
+dependency on an internal crate must add the relevant paths to `RELEASE_FILES` or the
+release path checks in `scope_for` (`scripts/check-commit.py`) with a focused scope test.
 
 ```sh
 .venv-quality/bin/python scripts/check-commit.py --working-tree
