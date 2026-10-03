@@ -1,8 +1,8 @@
 # ADR-0004: Account for non-executable scaffold coverage sources
 
-Status: accepted
+Status: deprecated
 Supersedes: none
-Superseded by: none
+Superseded by: [ADR-0010](ADR-0010-classify-uninstrumented-rust-declarations.md)
 
 ## Context
 
