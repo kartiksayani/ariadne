@@ -1,5 +1,5 @@
 use ariadne_domain::models::*;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
 fn wire<T: DeserializeOwned + Serialize>(good: &[Value], bad: &[Value]) {
@@ -104,10 +104,69 @@ fn integers_enforce_safe_bounds_and_numeric_wire_types() {
         &[vec![json!(0)], bad.to_vec()].concat(),
     );
     wire::<NonnegativeSafeInteger>(&[json!(0), json!(1), json!(max)], &bad);
-    wire::<SchemaVersion>(
-        &[json!(1)],
-        &[json!(0), json!(2), json!(1.0), json!("1"), json!(null)],
+    wire::<SchemaVersion>(&[json!(1)], &[json!(0), json!(2), json!("1"), json!(null)]);
+}
+
+#[test]
+fn integer_numeric_spellings_normalize_and_invalid_values_stay_rejected() {
+    fn normalized<T: DeserializeOwned + Serialize>(wire: &str, canonical: &str) {
+        let value: T = serde_json::from_str(wire).unwrap();
+        assert_eq!(serde_json::to_string(&value).unwrap(), canonical);
+    }
+
+    for wire in ["1.0", "1e0", "1.00e+0"] {
+        normalized::<SchemaVersion>(wire, "1");
+        normalized::<PositiveSafeInteger>(wire, "1");
+        normalized::<NonnegativeSafeInteger>(wire, "1");
+    }
+    for wire in ["0.0", "0e0", "-0.0"] {
+        normalized::<NonnegativeSafeInteger>(wire, "0");
+        assert!(serde_json::from_str::<PositiveSafeInteger>(wire).is_err());
+        assert!(serde_json::from_str::<SchemaVersion>(wire).is_err());
+    }
+    for wire in ["9007199254740991.0", "9.007199254740991e15"] {
+        normalized::<PositiveSafeInteger>(wire, "9007199254740991");
+        normalized::<NonnegativeSafeInteger>(wire, "9007199254740991");
+        assert!(serde_json::from_str::<SchemaVersion>(wire).is_err());
+    }
+    for wire in [
+        "-1",
+        "-1.0",
+        "1.5",
+        "9007199254740992",
+        "9007199254740992.0",
+        "1e300",
+        "1e309",
+        "\"1\"",
+        "null",
+    ] {
+        assert!(
+            serde_json::from_str::<SchemaVersion>(wire).is_err(),
+            "{wire}"
+        );
+        assert!(
+            serde_json::from_str::<PositiveSafeInteger>(wire).is_err(),
+            "{wire}"
+        );
+        assert!(
+            serde_json::from_str::<NonnegativeSafeInteger>(wire).is_err(),
+            "{wire}"
+        );
+    }
+
+    type Error = serde::de::value::Error;
+    assert_eq!(
+        PositiveSafeInteger::deserialize(serde::de::value::I64Deserializer::<Error>::new(1))
+            .unwrap()
+            .value(),
+        1
     );
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(NonnegativeSafeInteger::deserialize(
+            serde::de::value::F64Deserializer::<Error>::new(value)
+        )
+        .is_err());
+    }
 }
 
 #[test]

@@ -156,7 +156,34 @@ macro_rules! integer_primitive {
         }
         impl<'de> Deserialize<'de> for $name {
             fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                Self::new(u64::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+                struct IntegerVisitor;
+                impl<'de> serde::de::Visitor<'de> for IntegerVisitor {
+                    type Value = $name;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        write!(formatter, "an integer in {}..={}", $minimum, $maximum)
+                    }
+
+                    fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<$name, E> {
+                        $name::new(value).map_err(E::custom)
+                    }
+
+                    fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<$name, E> {
+                        self.visit_u64(u64::try_from(value).map_err(E::custom)?)
+                    }
+
+                    fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<$name, E> {
+                        if !value.is_finite()
+                            || value.fract() != 0.0
+                            || value < $minimum as f64
+                            || value > $maximum as f64
+                        {
+                            return Err(E::custom(concat!("Invalid ", stringify!($name))));
+                        }
+                        self.visit_u64(value as u64)
+                    }
+                }
+                deserializer.deserialize_any(IntegerVisitor)
             }
         }
         impl JsonSchema for $name {

@@ -80,6 +80,34 @@ fn primitive_schemas_enforce_actual_wire_constraints() {
 }
 
 #[test]
+fn integer_schemas_and_rust_agree_on_integral_float_json_values() {
+    let one: Value = serde_json::from_str("1e0").unwrap();
+    let max: Value = serde_json::from_str("9007199254740991.0").unwrap();
+    let bad = [
+        json!(-1),
+        json!(-1.0),
+        json!(1.5),
+        json!(9_007_199_254_740_992_u64),
+        json!(9_007_199_254_740_992_f64),
+        json!(1e300),
+        json!("1"),
+        json!(null),
+    ];
+    check::<PositiveSafeInteger>(
+        &[json!(1.0), one.clone(), max.clone()],
+        &[bad.to_vec(), vec![json!(0.0)]].concat(),
+    );
+    check::<NonnegativeSafeInteger>(
+        &[json!(0.0), json!(-0.0), json!(1.0), one.clone(), max],
+        &bad,
+    );
+    check::<SchemaVersion>(
+        &[json!(1.0), one],
+        &[bad.to_vec(), vec![json!(0.0), json!(2.0)]].concat(),
+    );
+}
+
+#[test]
 fn generated_map_schema_rejects_invalid_typed_keys() {
     check::<BTreeMap<UuidV4, String>>(
         &[
