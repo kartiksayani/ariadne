@@ -28,7 +28,10 @@ export default defineConfig({
   build: { outDir: output, emptyOutDir: true },
   test: {
     environment: 'jsdom',
-    include: ['tests/ui/**/*.test.tsx'],
+    projects: [
+      { test: { name: 'desktop', environment: 'jsdom', include: ['tests/ui/**/*.test.tsx'] } },
+      { test: { name: 'reference', environment: 'node', include: [resolve(root, '../../tests/ui/reference/**/*.test.ts')] } },
+    ],
     coverage: { provider: 'v8', include: ['src/**/*.{ts,tsx}'], exclude: [...coverageConfigDefaults.exclude, '**/generated/**'], reporter: [['lcov', { projectRoot: resolve(root, '../..') }], 'text'], reportsDirectory: resolve(root, '../../coverage/web') },
   },
 });
