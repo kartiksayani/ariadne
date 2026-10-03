@@ -7,3 +7,11 @@ license.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
+ariadne-domain = { path = "../ariadne-domain" }
+libc = "=0.2.190"
+sha2.workspace = true
+tungstenite = { version = "=0.29.0", default-features = false, features = ["handshake"] }
+
+[dev-dependencies]
+tempfile.workspace = true
