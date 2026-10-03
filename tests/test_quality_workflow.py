@@ -55,6 +55,10 @@ class QualityWorkflowTests(unittest.TestCase):
             for index, (scope, status, event, ref, provision_status, capture_status) in enumerate([
                 ("docs release=false reference=false", 0, "push", "refs/heads/docs", 23, 29),
                 ("tooling release=false reference=false", 0, "push", "refs/heads/tooling", 23, 29),
+                ("docs release=false reference=true", 0, "push", "refs/heads/design", 0, 0),
+                ("tooling release=false reference=true", 0, "push", "refs/heads/browser-test", 0, 0),
+                ("docs release=false reference=true", 0, "push", "refs/heads/design", 23, 0),
+                ("tooling release=false reference=true", 0, "push", "refs/heads/browser-test", 0, 29),
                 ("application release=false reference=false", 0, "push", "refs/heads/backend", 23, 29),
                 ("application release=true reference=false", 17, "push", "refs/heads/backend", 23, 29),
                 ("application release=true reference=true", 0, "push", "refs/heads/feature", 0, 0),
@@ -77,7 +81,7 @@ class QualityWorkflowTests(unittest.TestCase):
                     result = subprocess.run(["bash", "-c", script], cwd=checkout, env=env,
                                             text=True, capture_output=True)
                     application = scope.startswith("application")
-                    reference = application and "reference=true" in scope
+                    reference = "reference=true" in scope
                     expected_status = (provision_status or capture_status or status) if reference else status
                     self.assertEqual(result.returncode, expected_status, result.stderr)
                     calls = [json.loads(line) for line in log.read_text().splitlines()]
