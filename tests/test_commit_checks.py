@@ -211,6 +211,228 @@ class CoverageTests(unittest.TestCase):
                 commit.coverage_counts([report(root, "report", "crates/a.rs", [1])], root)
 
 
+class DeclarationIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name).resolve()
+        self.app = self.package("domain", "crates/domain", "domain")
+        self.helper = self.package("ariadne-coverage-inventory", "tools/coverage-inventory", "helper")
+        self.metadata = {"packages": [self.app, self.helper], "workspace_members": ["domain", "helper"],
+                         "resolve": {"nodes": [{"id": "domain", "deps": []}, {"id": "helper", "deps": []}]}}
+        self.install_parser(self.metadata)
+
+    def install_parser(self, metadata):
+        version, checksum = commit.SYN_IDENTITY
+        package = {"id": "syn", "name": "syn", "version": version, "source": commit.REGISTRY,
+                   "manifest_path": "/registry/syn/Cargo.toml", "dependencies": []}
+        self.syn_lock = {"name": "syn", "version": version, "source": commit.REGISTRY, "checksum": checksum}
+        helper = next(p for p in metadata["packages"] if p["name"] == "ariadne-coverage-inventory")
+        helper["dependencies"].append({"name": "syn", "rename": None, "path": None, "req": "=" + version, "features": ["full"]})
+        metadata["packages"].append(package)
+        metadata["resolve"]["nodes"].extend([{"id": "syn", "deps": []}])
+        next(n for n in metadata["resolve"]["nodes"] if n["id"] == helper["id"])["deps"].append({"name": "syn", "pkg": "syn"})
+        (self.root / "Cargo.lock").write_text("[[package]]\n" + "".join(f'{k}={json.dumps(v)}\n' for k, v in self.syn_lock.items()))
+
+    def package(self, name, folder, identity):
+        path = self.root / folder
+        (path / "src").mkdir(parents=True, exist_ok=True)
+        (path / "Cargo.toml").write_text(f'[package]\nname="{name}"\nversion="0.1.0"\nedition="2021"\n')
+        (path / "src/lib.rs").write_text("pub fn run() {}\n")
+        return {"name": name, "id": identity, "manifest_path": str(path / "Cargo.toml"), "source": None,
+                "version": "0.1.0", "dependencies": [],
+                "targets": [{"kind": ["lib"], "src_path": str(path / "src/lib.rs")}]}
+
+    def dependency(self, package, **extra):
+        return {"name": package["name"], "rename": None, "path": str(Path(package["manifest_path"]).parent),
+                "req": "=0.1.0", "optional": False, "kind": None, "target": None, **extra}
+
+    def test_metadata_protects_exact_tool_identity_targets_and_builtin_bindings(self):
+        self.assertEqual(commit.tool_packages(self.root, self.metadata), [self.helper])
+        for field, value in (("name", "different"), ("source", commit.REGISTRY),
+                             ("manifest_path", str(self.root / "crates/domain/Cargo.toml"))):
+            original = self.helper[field]
+            self.helper[field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                commit.tool_packages(self.root, self.metadata)
+            self.helper[field] = original
+        target = self.helper["targets"][0]
+        for key, value in (("kind", ["proc-macro"]), ("kind", ["custom-build"]),
+                           ("src_path", self.app["targets"][0]["src_path"])):
+            original = target[key]
+            target[key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                commit.tool_packages(self.root, self.metadata)
+            target[key] = original
+        duplicate = self.package(self.helper["name"], "crates/counterfeit", "counterfeit")
+        self.metadata["packages"].append(duplicate)
+        with self.assertRaisesRegex(ValueError, "identity"):
+            commit.tool_packages(self.root, self.metadata)
+
+    def test_inactive_renamed_target_dev_build_transitive_and_nested_tool_edges_fail(self):
+        for options in ({"optional": True}, {"rename": "hidden"}, {"target": 'cfg(windows)'},
+                        {"kind": "dev"}, {"kind": "build"}):
+            self.app["dependencies"] = [self.dependency(self.helper, **options)]
+            with self.subTest(options=options), self.assertRaisesRegex(ValueError, "reaches"):
+                commit.tool_packages(self.root, self.metadata)
+        middle = self.package("middle", "crates/middle", "middle")
+        middle["dependencies"] = [self.dependency(self.helper, optional=True)]
+        self.metadata["packages"].append(middle)
+        self.app["dependencies"] = [self.dependency(middle)]
+        with self.assertRaisesRegex(ValueError, "reaches"):
+            commit.tool_packages(self.root, self.metadata)
+        self.app["dependencies"] = [self.dependency(middle, path=None, rename="middle-alias")]
+        self.metadata["resolve"]["nodes"][0]["deps"] = [{"name": "middle_alias", "pkg": "middle"}]
+        with self.assertRaisesRegex(ValueError, "reaches"):
+            commit.tool_packages(self.root, self.metadata)
+        self.metadata["resolve"]["nodes"][0]["deps"] = []
+        nested = self.package("nested", "tools/coverage-inventory/nested", "nested")
+        self.metadata["packages"].append(nested)
+        self.app["dependencies"] = [self.dependency(nested)]
+        with self.assertRaisesRegex(ValueError, "reaches"):
+            commit.tool_packages(self.root, self.metadata)
+        self.app["dependencies"] = [self.dependency(middle, path=str(self.root / "unresolved"))]
+        with self.assertRaisesRegex(ValueError, "Unresolved"):
+            commit.tool_packages(self.root, self.metadata)
+        self.app["dependencies"] = [{**self.dependency(self.helper), "path": None}]
+        with self.assertRaisesRegex(ValueError, "Unresolved"):
+            commit.tool_packages(self.root, self.metadata)
+        self.app["dependencies"] = []
+        self.helper["dependencies"].append(self.dependency(self.app))
+        self.assertEqual(commit.tool_packages(self.root, self.metadata), [self.helper])
+
+    def test_declaration_request_rejects_absent_helper_incomplete_results_and_symlink(self):
+        source = self.root / "crates/domain/src/lib.rs"
+        source.write_text("pub mod models;\n")
+        names = {"crates/domain/src/lib.rs"}
+        with mock.patch.object(commit, "cargo_metadata", return_value=self.metadata), mock.patch.object(
+                commit, "run", return_value=mock.Mock(stdout=json.dumps({next(iter(names)): []}))) as run:
+            commit.validate_declarations(self.root, names, names)
+            request = json.loads(run.call_args.kwargs["input"])
+            self.assertEqual(set(request["sources"]), names)
+            self.assertEqual(request["roots"], [next(iter(names))])
+            external = {"id": "adler", "name": "adler2", "manifest_path": "/registry/adler/Cargo.toml",
+                        "dependencies": [{"name": "rustc-std-workspace-core", "rename": "core", "path": None}]}
+            self.metadata["packages"].append(external)
+            commit.validate_declarations(self.root, names, names)
+            for binding in ("core", "std"):
+                self.app["dependencies"] = [{"name": "replacement", "rename": binding, "path": None}]
+                self.assertEqual(commit.tool_packages(self.root, self.metadata), [self.helper])
+                with self.assertRaisesRegex(ValueError, "builtin"):
+                    commit.validate_declarations(self.root, names, names)
+            self.app["dependencies"] = []
+            run.return_value.stdout = "{}"
+            with self.assertRaisesRegex(ValueError, "incomplete"):
+                commit.validate_declarations(self.root, names, names)
+            self.metadata["workspace_members"].remove("helper")
+            self.metadata["packages"].remove(self.helper)
+            with self.assertRaisesRegex(ValueError, "requires"):
+                commit.validate_declarations(self.root, names, names)
+        target = self.root / "saved.rs"
+        source.rename(target)
+        source.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, "symlinks"):
+            commit.validate_declarations(self.root, names, names)
+
+    def test_pinned_macro_provider_checks_registry_checksum_alias_and_transitive_macro(self):
+        version, checksum, macro, macro_checksum = commit.DERIVE_IDENTITIES["serde"]
+        serde = {"id": "serde", "name": "serde", "version": version, "source": commit.REGISTRY,
+                 "dependencies": [], "manifest_path": "/registry/serde/Cargo.toml"}
+        derive = {**serde, "id": "derive", "name": macro}
+        self.metadata["packages"].extend([serde, derive])
+        self.metadata["resolve"]["nodes"].extend([
+            {"id": "serde", "deps": [{"name": macro, "pkg": "derive"}]}, {"id": "derive", "deps": []}])
+        self.metadata["resolve"]["nodes"][0]["deps"] = [{"name": "serde", "pkg": "serde"}]
+        self.app["dependencies"] = [{"name": "serde", "rename": None, "path": None, "req": "=" + version}]
+        lock = [{"name": name, "version": version, "source": commit.REGISTRY, "checksum": hash_value}
+                for name, hash_value in (("serde", checksum), (macro, macro_checksum))]
+        def write_lock():
+            (self.root / "Cargo.lock").write_text("".join("[[package]]\n" + "".join(
+                f'{key}={json.dumps(value)}\n' for key, value in package.items()) for package in [*lock, self.syn_lock]))
+        write_lock()
+        names = {"crates/domain/src/lib.rs"}
+        with mock.patch.object(commit, "cargo_metadata", return_value=self.metadata), mock.patch.object(
+                commit, "run", return_value=mock.Mock(stdout=json.dumps({next(iter(names)): ["serde"]}))) as run:
+            commit.validate_declarations(self.root, names, names)
+            for subject, key, value in ((serde, "source", None), (derive, "version", "0.0.0"),
+                                        (self.app["dependencies"][0], "rename", "serde"),
+                                        (self.app["dependencies"][0], "req", "^" + version),
+                                        (lock[1], "checksum", "0" * 64)):
+                original = subject[key]
+                subject[key] = value
+                write_lock()
+                with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                    commit.validate_declarations(self.root, names, names)
+                subject[key] = original
+            write_lock()
+            run.return_value.stdout = json.dumps({next(iter(names)): ["unknown"]})
+            with self.assertRaisesRegex(ValueError, "unknown"):
+                commit.validate_declarations(self.root, names, names)
+
+    def test_parser_identity_cannot_be_replaced_by_local_alias_version_or_checksum(self):
+        syn = next(p for p in self.metadata["packages"] if p["name"] == "syn")
+        for subject, key, value in ((syn, "source", None), (syn, "version", "3.0.6"),
+                                    (self.helper["dependencies"][0], "rename", "syn"),
+                                    (self.helper["dependencies"][0], "features", [])):
+            original = subject[key]
+            subject[key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "verified syn"):
+                commit.tool_packages(self.root, self.metadata)
+            subject[key] = original
+        (self.root / "Cargo.lock").write_text('[[package]]\nname="syn"\nversion="2.0.119"\nsource=' + json.dumps(commit.REGISTRY) + '\nchecksum="bad"\n')
+        with self.assertRaisesRegex(ValueError, "verified syn"):
+            commit.tool_packages(self.root, self.metadata)
+
+    def test_inactive_package_renamed_local_override_is_rejected_from_real_metadata(self):
+        middle = self.root / "crates/middle"
+        (middle / "src").mkdir(parents=True)
+        (middle / "src/lib.rs").write_text("pub struct Middle;\n")
+        (middle / "Cargo.toml").write_text('[package]\nname="middle"\nversion="0.1.0"\nedition="2021"\n[dependencies]\nserde={version="=1.0.228",optional=true}\n')
+        app_manifest = Path(self.app["manifest_path"])
+        app_manifest.write_text(app_manifest.read_text() + '[dependencies]\nmiddle={path="../middle"}\n')
+        patch = self.root / "tools/coverage-inventory/patch-serde"
+        (patch / "src").mkdir(parents=True)
+        (patch / "src/lib.rs").write_text("pub struct Data;\n")
+        (patch / "Cargo.toml").write_text('[package]\nname="serde"\nversion="1.0.228"\nedition="2021"\n')
+        manifest = self.root / "Cargo.toml"
+        manifest.write_text('[workspace]\nmembers=["crates/domain","tools/coverage-inventory"]\nexclude=["crates/middle","tools/coverage-inventory/patch-serde"]\nresolver="2"\n[patch.crates-io]\nrenamed={package="serde",path="tools/coverage-inventory/patch-serde"}\n')
+        args = ["cargo"]
+        subprocess.run([*args, "generate-lockfile", "--offline"], cwd=self.root, check=True, capture_output=True)
+        result = subprocess.run([*args, "metadata", "--format-version=1", "--all-features", "--locked", "--offline"],
+                                cwd=self.root, check=True, text=True, capture_output=True)
+        metadata = json.loads(result.stdout)
+        package = next(p for p in metadata["packages"] if p["name"] == "middle")
+        self.assertTrue(package["dependencies"][0]["optional"])
+        self.assertNotIn("path", package["dependencies"][0])
+        node = next(n for n in metadata["resolve"]["nodes"] if n["id"] == package["id"])
+        self.assertEqual(node["deps"], [])
+        with self.assertRaisesRegex(ValueError, "override targets"):
+            commit.tool_packages(self.root, metadata)
+        manifest.write_text('[replace]\n"middle:0.1.0"={path="tools/coverage-inventory/patch-serde"}\n')
+        with self.assertRaisesRegex(ValueError, "override targets"):
+            commit.tool_packages(self.root, self.metadata)
+        manifest.write_text('[patch.crates-io]\nother={path="crates/middle"}\n')
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            commit.tool_packages(self.root, self.metadata)
+
+    def test_zero_append_is_idempotent_but_rejects_real_or_duplicate_classified_evidence(self):
+        entry = CoverageTests().boundary(self.root)
+        config = {"non_executable_sources": [entry]}
+        path = report(self.root, "coverage/rust.lcov", "crates/domain/src/lib.rs", [1])
+        commit.append_non_executable_records(path, self.root, config)
+        previous = path.read_text()
+        commit.append_non_executable_records(path, self.root, config)
+        self.assertEqual(path.read_text(), previous)
+        for evidence in (f'SF:{entry["path"]}\nDA:1,0\nend_of_record\n',
+                         f'SF:{entry["path"]}\nLF:0\nLH:0\nend_of_record\n' * 2):
+            path.write_text(evidence)
+            with self.subTest(evidence=evidence), self.assertRaisesRegex(ValueError, "contradictory or duplicate"):
+                commit.append_non_executable_records(path, self.root, config)
+        path.write_text(previous + f'SF:{entry["path"]}\nLF:0\nLH:0\nend_of_record\n')
+        with self.assertRaisesRegex(ValueError, "Duplicate"):
+            commit.coverage_counts([path], self.root, config)
+
+
 class PhaseTests(unittest.TestCase):
     def test_phase_floor_and_scope_fail_closed(self):
         config = {"phase": "planning", "minimum_line_coverage": 80}
@@ -262,8 +484,14 @@ class OrchestrationTests(unittest.TestCase):
         self.commands.append(args)
         if self.failure and self.failure in args:
             raise subprocess.CalledProcessError(1, args)
+        if getattr(self, "tool_metadata", None) and "metadata" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps(self.tool_metadata))
         if "llvm-cov" in args:
-            report(self.root, "coverage/rust.lcov", "crates/lib.rs", self.hits)
+            if "report" in args:
+                report(self.root, "coverage/tooling/ariadne-coverage-inventory.lcov",
+                       "tools/coverage-inventory/src/lib.rs", self.tool_hits)
+            else:
+                report(self.root, "coverage/rust.lcov", "crates/lib.rs", self.hits)
         if "test:coverage" in args:
             report(self.root, "coverage/web/lcov.info", "apps/main.ts", self.hits)
         return subprocess.CompletedProcess(args, 0, stdout=self.npm_version if args == ("npm", "--version") else "")
@@ -349,6 +577,49 @@ class OrchestrationTests(unittest.TestCase):
             self.assertIn(expected, flattened)
         with mock.patch(__name__ + ".report"), self.assertRaises(FileNotFoundError):
             self.execute(["--ci"])
+
+    def test_tools_are_tested_once_and_measured_independently_without_stale_or_foreign_evidence(self):
+        self.config["phase"] = "application"
+        for name in ("crates/lib.rs", "apps/main.ts"):
+            path = self.root / name
+            path.parent.mkdir()
+            path.write_text("statement\n" * 5)
+        (self.root / "Cargo.toml").touch()
+        factory = DeclarationIntegrationTests()
+        factory.root = self.root.resolve()
+        helper = factory.package("ariadne-coverage-inventory", "tools/coverage-inventory", "exact-helper-pkgid")
+        self.tool_metadata = {"packages": [helper], "workspace_members": [helper["id"]],
+                              "resolve": {"nodes": [{"id": helper["id"], "deps": []}]}}
+        factory.install_parser(self.tool_metadata)
+        self.tool_hits = [1]
+        self.execute(["--ci"])
+        coverage = [args for args in self.commands if "llvm-cov" in args]
+        self.assertEqual(len(coverage), 2)
+        self.assertIn("--workspace", coverage[0])
+        self.assertIn("--exclude-from-report", coverage[0])
+        self.assertNotIn("--exclude", coverage[0])
+        self.assertIn("--package", coverage[1])
+        self.assertIn("exact-helper-pkgid", coverage[1])
+        self.assertNotIn("--all-features", coverage[1])
+        self.tool_hits = [0]
+        with self.assertRaisesRegex(ValueError, "Independent tooling coverage"):
+            self.execute(["--ci"])
+        self.tool_hits = [1]
+        self.hits = [0] * 5
+        with self.assertRaisesRegex(ValueError, "below the configured minimum"):
+            self.execute(["--ci"])
+        self.hits = [1] * 5
+        omitted = self.root / "tools/coverage-inventory/src/untested.rs"
+        omitted.write_text("pub fn omitted() {}\n")
+        with self.assertRaisesRegex(ValueError, "omits application sources"):
+            self.execute(["--ci"])
+        omitted.unlink()
+        with mock.patch(__name__ + ".report"), self.assertRaises(FileNotFoundError):
+            self.execute(["--ci"])
+        tool_report = report(self.root, "tool.lcov", "apps/main.ts", [1])
+        with self.assertRaisesRegex(ValueError, "not application code"):
+            commit.coverage_counts([tool_report], self.root,
+                                   expected_sources={"tools/coverage-inventory/src/lib.rs"})
 
     def test_command_wrapper_keeps_arguments_and_propagates_failure(self):
         with mock.patch.object(commit.shutil, "which", return_value="rtk"), mock.patch.object(commit.subprocess, "run") as process:
