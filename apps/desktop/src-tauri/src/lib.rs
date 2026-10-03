@@ -3,6 +3,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+pub mod commands;
 
 #[derive(Deserialize)]
 pub struct PingRequest {
@@ -146,6 +147,41 @@ fn native_ping(
 }
 
 pub fn run() {
+    run_with_service(commands::DesktopService::default());
+}
+
+fn desktop_handler<R: tauri::Runtime>(
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        native_ping,
+        commands::project_list,
+        commands::session_list,
+        commands::session_get,
+        commands::session_read,
+        commands::item_messages,
+        commands::item_rounds,
+        commands::topic_continue_preview,
+        commands::preferences_get,
+        commands::reveal_item,
+        commands::project_register,
+        commands::binding_connect,
+        commands::binding_pause,
+        commands::binding_resume,
+        commands::binding_disconnect,
+        commands::input_submit,
+        commands::input_cancel,
+        commands::input_resolve,
+        commands::topic_archive,
+        commands::topic_restore,
+        commands::session_close,
+        commands::session_reopen,
+        commands::topic_continue,
+        commands::preferences_patch,
+    ]
+}
+
+/// Rust startup composition only; the renderer cannot install a service or resolver.
+pub fn run_with_service(service: commands::DesktopService) {
     #[cfg(feature = "e2e")]
     let state = PingState::environment().expect("Invalid E2E startup");
     #[cfg(feature = "e2e")]
@@ -154,13 +190,13 @@ pub fn run() {
     let (state, owner) = PingState::ordinary().expect("Cannot create private diagnostic directory");
     #[cfg(not(feature = "e2e"))]
     let owner = Some(owner);
-    let builder = tauri::Builder::default().manage(state);
+    let builder = tauri::Builder::default().manage(state).manage(service);
     #[cfg(feature = "e2e")]
     let builder = builder
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
     let exit_code = builder
-        .invoke_handler(tauri::generate_handler![native_ping])
+        .invoke_handler(desktop_handler())
         .build(tauri::generate_context!())
         .expect("Tauri startup failed")
         .run_return(|_app, _event| {});

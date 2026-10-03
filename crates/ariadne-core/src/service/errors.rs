@@ -31,6 +31,7 @@ pub enum CoreErrorCode {
     SessionNotClosable,
     PreviewStale,
     SnapshotChanged,
+    IoError,
     StoreBusy,
     CapacityExceeded,
     CommitUncertain,
@@ -165,6 +166,7 @@ impl CoreErrorCode {
             | Self::UnsupportedHostVersion
             | Self::FutureSchema => 5,
             Self::HostUnreachable
+            | Self::IoError
             | Self::StoreBusy
             | Self::CapacityExceeded
             | Self::CommitUncertain

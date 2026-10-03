@@ -20,6 +20,26 @@ fn scope_error() -> CoreError {
     )
 }
 
+impl PresenceChangedHint {
+    pub fn validate_wire(&self) -> Result<(), CoreError> {
+        if self.generation != self.observation.generation {
+            return Err(scope_error());
+        }
+        Ok(())
+    }
+}
+
+impl OpenRoute {
+    /// Non-null item routes reuse the canonical reveal record.
+    pub fn item_route(&self) -> Option<ItemRoute> {
+        self.item_id.as_ref().map(|item_id| ItemRoute {
+            project_id: self.project_id.clone(),
+            session_id: self.session_id.clone(),
+            item_id: item_id.clone(),
+        })
+    }
+}
+
 macro_rules! agent_read_wire {
     ($($ty:ty),+ $(,)?) => { $(impl $ty {
         pub fn validate_wire(&self) -> Result<(), CoreError> {

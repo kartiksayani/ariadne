@@ -52,6 +52,17 @@ Real Tauri/native acceptance uses actual core/store and the original task gates.
 Publish reusable snapshot/selection/count selectors before their downstream
 components start; a service double is not a replacement for these dependencies.
 
+The early P4.1 seam lives in `apps/desktop/src/data`: `createDesktopService`,
+`OpenSessions`/`useSession`, `indexSession`, `summaryCounts` and `RegisteredRoutes`.
+Consumers explicitly open/close sessions; multiple readers share the same store.
+`revealItem` returns the registered route and temporary expanded ancestors for
+the caller to select/focus, without changing saved filters. Native composition is
+startup-only. If reveal returns `not_found`, the same registered session read
+must succeed before showing a missing-item banner; no missing item is selected
+or given invented ancestors. Inaccessible session reads preserve their error.
+Actual Registry wiring, registered-parent watch and original native
+on-disk acceptance remain required before P4.1 completion.
+
 Subscribe before loading. Keep one immutable validated snapshot store per opened session and expose it through `useSyncExternalStore`; keep drafts/view state in a separate local reducer. Coalesce invalidations and ignore revisions no newer than the displayed revision. Replace displayed data only after a complete valid snapshot is available. Preserve selected item, focus, scroll anchor, filters, and draft. A failed read marks the root/session stale or inaccessible; it never looks like an empty queue.
 
 Watch registered session-store parent directories, debounce changes, validate snapshots in the backend, and emit IDs/revisions rather than file contents. Reconcile on app focus, wake, watcher error, and a bounded fallback poll. Selected session gets priority. V1 session discovery reads only known-provider session metadata and Mod announcements; it never imports private terminal transcripts or chooses a binding automatically. Qualified host state and heartbeat freshness supply liveness. Explicit CLI/MCP messages and bridge lifecycle evidence are authoritative.
