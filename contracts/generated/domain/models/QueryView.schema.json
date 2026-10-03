@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "QueryView",
+  "type": "string",
+  "enum": [
+    "projects",
+    "sessions",
+    "topics",
+    "items",
+    "messages",
+    "inputs",
+    "item_messages",
+    "item_rounds",
+    "round_answers",
+    "round_owner_messages",
+    "round_agent_messages",
+    "round_results",
+    "round_forks",
+    "item_status_history",
+    "item_updated_messages"
+  ]
+}

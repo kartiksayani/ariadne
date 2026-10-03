@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MessageIdentity",
+  "type": "object",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "number": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "number"
+  ],
+  "$defs": {
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

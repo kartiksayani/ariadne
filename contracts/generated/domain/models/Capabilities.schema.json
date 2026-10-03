@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Capabilities",
+  "type": "object",
+  "properties": {
+    "deferred_delivery": {
+      "$ref": "#/$defs/Capability"
+    },
+    "delivery_mode": {
+      "$ref": "#/$defs/DeliveryMode"
+    },
+    "discover_sessions": {
+      "$ref": "#/$defs/Capability"
+    },
+    "domain_cli": {
+      "$ref": "#/$defs/Capability"
+    },
+    "domain_mcp": {
+      "$ref": "#/$defs/Capability"
+    },
+    "existing_session": {
+      "$ref": "#/$defs/Capability"
+    },
+    "final_text_read": {
+      "$ref": "#/$defs/Capability"
+    },
+    "history_reconcile": {
+      "$ref": "#/$defs/Capability"
+    },
+    "streaming_output": {
+      "$ref": "#/$defs/Capability"
+    },
+    "turn_completion": {
+      "$ref": "#/$defs/Capability"
+    },
+    "turn_correlation": {
+      "$ref": "#/$defs/Capability"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "existing_session",
+    "deferred_delivery",
+    "turn_correlation",
+    "turn_completion",
+    "domain_cli",
+    "domain_mcp",
+    "history_reconcile",
+    "streaming_output",
+    "final_text_read",
+    "discover_sessions",
+    "delivery_mode"
+  ],
+  "$defs": {
+    "Capability": {
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supported": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "supported",
+        "conditions"
+      ]
+    },
+    "DeliveryMode": {
+      "type": "string",
+      "enum": [
+        "pull",
+        "push"
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AttemptPurpose",
+  "type": "string",
+  "enum": [
+    "work",
+    "result_repair"
+  ]
+}

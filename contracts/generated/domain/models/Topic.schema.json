@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Topic",
+  "type": "object",
+  "properties": {
+    "archived_at": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "$ref": "#/$defs/UtcMillis"
+    },
+    "id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "name": {
+      "type": "string"
+    },
+    "order": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "origin": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TopicOrigin"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "revision": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "order",
+    "revision",
+    "created_at",
+    "archived_at",
+    "origin"
+  ],
+  "$defs": {
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "TopicOrigin": {
+      "type": "object",
+      "properties": {
+        "continued_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "topic_id",
+        "source_revision",
+        "continued_at"
+      ]
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

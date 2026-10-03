@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AdapterConfig",
+  "type": "object",
+  "properties": {
+    "namespace": {
+      "type": "string"
+    },
+    "values": {
+      "$ref": "#/$defs/UniqueMap"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "namespace",
+    "values"
+  ],
+  "$defs": {
+    "UniqueMap": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

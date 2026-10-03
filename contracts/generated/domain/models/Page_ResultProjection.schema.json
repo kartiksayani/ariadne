@@ -1,0 +1,379 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Page_ResultProjection",
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ResultProjection"
+      }
+    },
+    "next_cursor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QueryCursor"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "snapshot_revision": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "items",
+    "next_cursor",
+    "snapshot_revision"
+  ],
+  "$defs": {
+    "CursorPosition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "sequence"
+            },
+            "number": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "number",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "topic"
+            },
+            "order": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "order",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/ItemRef"
+            },
+            "kind": {
+              "type": "string",
+              "const": "item"
+            },
+            "ordinals": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PositiveSafeInteger"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ordinals",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "round"
+            },
+            "ordinal": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ordinal",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "canonical_root": {
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "project"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "canonical_root",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "session"
+            },
+            "project_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "updated_at": {
+              "$ref": "#/$defs/UtcMillis"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "updated_at",
+            "project_id",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/NonnegativeSafeInteger"
+            },
+            "kind": {
+              "type": "string",
+              "const": "history"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "index"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "attempt_ordinal": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_seq": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            "kind": {
+              "type": "string",
+              "const": "result"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_seq",
+            "attempt_ordinal",
+            "input_id",
+            "attempt_id"
+          ]
+        }
+      ]
+    },
+    "DomainResult": {
+      "type": "object",
+      "properties": {
+        "committed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "committed_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "followup_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "handled_through_message_number": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ResultOutcome"
+        },
+        "reply_message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "outcome",
+        "explanation",
+        "reply_message_ids",
+        "followup_item_ids",
+        "handled_through_message_number",
+        "committed_revision",
+        "committed_at"
+      ]
+    },
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "QueryCursor": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CursorPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "filter_digest": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "view": {
+          "$ref": "#/$defs/QueryView"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "view",
+        "filter_digest",
+        "after",
+        "revision"
+      ]
+    },
+    "QueryView": {
+      "type": "string",
+      "enum": [
+        "projects",
+        "sessions",
+        "topics",
+        "items",
+        "messages",
+        "inputs",
+        "item_messages",
+        "item_rounds",
+        "round_answers",
+        "round_owner_messages",
+        "round_agent_messages",
+        "round_results",
+        "round_forks",
+        "item_status_history",
+        "item_updated_messages"
+      ]
+    },
+    "ResultOutcome": {
+      "type": "string",
+      "enum": [
+        "answered",
+        "deferred",
+        "unable"
+      ]
+    },
+    "ResultProjection": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "result": {
+          "$ref": "#/$defs/DomainResult"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "input_id",
+        "attempt_id",
+        "result"
+      ]
+    },
+    "SchemaVersion": {
+      "type": "integer",
+      "maximum": 1,
+      "minimum": 1
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

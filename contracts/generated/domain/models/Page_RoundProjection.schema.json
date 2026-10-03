@@ -1,0 +1,965 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Page_RoundProjection",
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RoundProjection"
+      }
+    },
+    "next_cursor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QueryCursor"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "snapshot_revision": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "items",
+    "next_cursor",
+    "snapshot_revision"
+  ],
+  "$defs": {
+    "Answer": {
+      "type": "object",
+      "properties": {
+        "ask_snapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "options_snapshot": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "question_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "question_snapshot": {
+          "type": "string"
+        },
+        "selected_option_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "seq": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "supersedes_answer_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "seq",
+        "item_id",
+        "question_revision",
+        "question_snapshot",
+        "ask_snapshot",
+        "options_snapshot",
+        "selected_option_id",
+        "text",
+        "message_id",
+        "input_id",
+        "supersedes_answer_id",
+        "created_at"
+      ]
+    },
+    "CursorPosition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "sequence"
+            },
+            "number": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "number",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "topic"
+            },
+            "order": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "order",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/ItemRef"
+            },
+            "kind": {
+              "type": "string",
+              "const": "item"
+            },
+            "ordinals": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PositiveSafeInteger"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ordinals",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "round"
+            },
+            "ordinal": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ordinal",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "canonical_root": {
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "project"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "canonical_root",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "session"
+            },
+            "project_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "updated_at": {
+              "$ref": "#/$defs/UtcMillis"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "updated_at",
+            "project_id",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/NonnegativeSafeInteger"
+            },
+            "kind": {
+              "type": "string",
+              "const": "history"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "index"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "attempt_ordinal": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_seq": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            "kind": {
+              "type": "string",
+              "const": "result"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_seq",
+            "attempt_ordinal",
+            "input_id",
+            "attempt_id"
+          ]
+        }
+      ]
+    },
+    "DomainResult": {
+      "type": "object",
+      "properties": {
+        "committed_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "committed_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "followup_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "handled_through_message_number": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ResultOutcome"
+        },
+        "reply_message_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "outcome",
+        "explanation",
+        "reply_message_ids",
+        "followup_item_ids",
+        "handled_through_message_number",
+        "committed_revision",
+        "committed_at"
+      ]
+    },
+    "ItemLink": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "question": {
+          "type": "string"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "status": {
+          "$ref": "#/$defs/ItemStatus"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "item_id",
+        "question",
+        "status"
+      ]
+    },
+    "ItemOption": {
+      "type": "object",
+      "properties": {
+        "consequence": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "recommended": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "consequence",
+        "recommended"
+      ]
+    },
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "ItemStatus": {
+      "type": "string",
+      "enum": [
+        "open",
+        "waiting_on_me",
+        "in_progress",
+        "decided",
+        "done",
+        "dropped",
+        "replaced"
+      ]
+    },
+    "Message": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "author": {
+          "$ref": "#/$defs/MessageAuthor"
+        },
+        "binding_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "host_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "input_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items_touched": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "kind": {
+          "$ref": "#/$defs/MessageKind"
+        },
+        "number": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MessageOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topic_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "number",
+        "author",
+        "kind",
+        "body",
+        "created_at",
+        "item_id",
+        "topic_id",
+        "items_touched",
+        "binding_id",
+        "input_id",
+        "attempt_id",
+        "host_turn_id",
+        "round_id",
+        "origin"
+      ]
+    },
+    "MessageAuthor": {
+      "type": "string",
+      "enum": [
+        "owner",
+        "agent",
+        "system"
+      ]
+    },
+    "MessageKind": {
+      "type": "string",
+      "enum": [
+        "owner_input",
+        "reply",
+        "activity",
+        "lifecycle"
+      ]
+    },
+    "MessageOrigin": {
+      "type": "object",
+      "properties": {
+        "adapter_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "author": {
+          "$ref": "#/$defs/MessageAuthor"
+        },
+        "binding_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entity_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "external_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "topic_id",
+        "entity_id",
+        "source_revision",
+        "author",
+        "binding_id",
+        "adapter_id",
+        "external_session_id"
+      ]
+    },
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "Page_Answer": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Answer"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_ItemLink": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemLink"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_Message": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "Page_ResultProjection": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResultProjection"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    },
+    "QueryCursor": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CursorPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "filter_digest": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "schema": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "view": {
+          "$ref": "#/$defs/QueryView"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "view",
+        "filter_digest",
+        "after",
+        "revision"
+      ]
+    },
+    "QueryView": {
+      "type": "string",
+      "enum": [
+        "projects",
+        "sessions",
+        "topics",
+        "items",
+        "messages",
+        "inputs",
+        "item_messages",
+        "item_rounds",
+        "round_answers",
+        "round_owner_messages",
+        "round_agent_messages",
+        "round_results",
+        "round_forks",
+        "item_status_history",
+        "item_updated_messages"
+      ]
+    },
+    "ResultOutcome": {
+      "type": "string",
+      "enum": [
+        "answered",
+        "deferred",
+        "unable"
+      ]
+    },
+    "ResultProjection": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "result": {
+          "$ref": "#/$defs/DomainResult"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "input_id",
+        "attempt_id",
+        "result"
+      ]
+    },
+    "RoundOrigin": {
+      "type": "object",
+      "properties": {
+        "entity_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "topic_id",
+        "entity_id",
+        "source_revision"
+      ]
+    },
+    "RoundProjection": {
+      "type": "object",
+      "properties": {
+        "agent_messages": {
+          "$ref": "#/$defs/Page_Message"
+        },
+        "answers": {
+          "$ref": "#/$defs/Page_Answer"
+        },
+        "forks": {
+          "$ref": "#/$defs/Page_ItemLink"
+        },
+        "owner_messages": {
+          "$ref": "#/$defs/Page_Message"
+        },
+        "results": {
+          "$ref": "#/$defs/Page_ResultProjection"
+        },
+        "round": {
+          "$ref": "#/$defs/RoundSnapshot"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "round",
+        "answers",
+        "owner_messages",
+        "agent_messages",
+        "results",
+        "forks"
+      ]
+    },
+    "RoundSnapshot": {
+      "description": "Frozen round fields; each historical list has an independent page below.",
+      "type": "object",
+      "properties": {
+        "ask_snapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "closed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "opened_message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "options_snapshot": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "ordinal": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoundOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "question_snapshot": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "item_id",
+        "ordinal",
+        "opened_message_id",
+        "question_snapshot",
+        "ask_snapshot",
+        "options_snapshot",
+        "question_revision",
+        "closed_at",
+        "origin"
+      ]
+    },
+    "SchemaVersion": {
+      "type": "integer",
+      "maximum": 1,
+      "minimum": 1
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

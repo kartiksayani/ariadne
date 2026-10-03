@@ -7,10 +7,10 @@ license.workspace = true
 [dependencies]
 serde.workspace = true
 schemars.workspace = true
-ts-rs.workspace = true
+ts-rs = { workspace = true, features = ["serde-json-impl", "no-serde-warnings"] }
+serde_json.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 jsonschema.workspace = true
