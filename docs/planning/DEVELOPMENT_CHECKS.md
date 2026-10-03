@@ -48,12 +48,15 @@ blank/line-comment `crates/<member>/src/lib.rs` with its package manifest.
   impls, traits, constants, statics, discriminants, macros or executable items.
   Plain argument-free DTO paths are allowed; only known containers take type
   arguments. Const arguments, qself, associated bindings and expressions fail.
+  BTreeMap keys must be argument-free paths satisfying that same data-type
+  grammar, including ordinary DTO paths and qualified UUID; values recurse.
 - Qualified core Debug/PartialEq/Eq/Clone and serde Serialize/Deserialize,
   schemars JsonSchema and ts-rs TS derives only. The external packages/macros
   have exact verified registry/version/checksum identities: serde 1.0.228,
   schemars 1.2.2 and ts-rs 12.0.1. Cargo aliases cannot replace core/std or
   protected external derive bindings. Unknown derives/attributes fail.
-- Only demonstrated serde tag/rename_all/deny_unknown_fields and the exact
+- Only literal serde tags `status`/`kind`, rename_all `camelCase`/`snake_case`,
+  deny_unknown_fields and the exact
   safe-integer u64 schemars range; no serialization/default/schema callbacks,
   crate overrides, `schemars(required)` or source-local ts export attributes.
   String doc attributes are allowed. Unsupported syntax needs normal measurement
@@ -67,6 +70,12 @@ validates the whole source; syntax acceptance does not prove runtime validation.
 The tested generator uses schemars draft07 `for_serialize()` and explicit ts-rs
 Config large-int number exports. Serde still accepts missing Option keys and
 out-of-range u64; domain validation must enforce those input contracts separately.
+Pinned helper-only output tests reuse the actual classified DTO fixture with
+serde/schema/TS derives, UUID and string-newtype maps. Encoding does not prove
+key lexical invariants: the emitted bare UUID-key schema lacks a property-name
+format constraint. Tagged unit variants accept unknown fields despite
+deny_unknown_fields; an empty struct variant rejects the same input. No general
+attribute support, per-variant rename or stored-data hardening is implied.
 
 The gate rejects malformed/duplicate entries, missing files, stale hashes and
 repository escapes. Canonical `apps`, `crates`, `integrations` remain recursively

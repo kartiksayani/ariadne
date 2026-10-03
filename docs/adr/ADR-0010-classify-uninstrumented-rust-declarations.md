@@ -27,6 +27,13 @@ unknown attributes, path/cfg/inline modules and aliases of protected bindings.
 Normalize raw identifier spelling for identity checks; ordinary DTO raw field
 names remain data declarations.
 
+Retain literal `status`/`camelCase` and accept the canonical domain's demonstrated
+`kind`/`snake_case` spellings, without general or per-variant attribute support.
+BTreeMap keys must be argument-free Type::Path values, without qself or arguments
+on any segment, passing the existing data-type grammar. This admits ordinary DTO
+paths and qualified UUID without a business-name whitelist or general resolver;
+values remain recursively checked. Generic/const/macro/expression/callback keys fail.
+
 Require each DTO's canonical library root/module ancestor chain to be SHA-declared
 verified facades. A real probe proved root `extern crate attacker as serde` can
 redirect even `::serde::Serialize`; rejecting extern aliases/macros and verifying
@@ -60,7 +67,14 @@ syntax requires normal measurement or another explicit policy decision. Macro
 expansion is not covered source evidence. Serialized-output schemas/TS do not
 prove input invariants: Serde accepts missing Option keys and out-of-range u64;
 domain validation remains separate. Explicit generator exports avoid test source
-writes. This maintenance adds no DTOs, product behavior or generator dependencies.
+writes. This maintenance adds no production DTOs, product behavior or generator
+dependencies. Helper-only output regressions pin schemars 1.2.2, ts-rs 12.0.1 and
+uuid 1.26.1 with serde 1.0.228/serde_json 1.0.145; they compile the same pure DTO
+fixture supplied to the AST classifier. Executable newtype ordering stays outside
+that fixture. UUID/string-newtype map encoding does not establish key lexical
+validity; the emitted bare UUID-key schema lacks property-name format constraints.
+Tagged unit variants accept unknown fields despite deny_unknown_fields, whereas
+empty struct variants reject them. No global stored-data hardening is claimed.
 
 ## Spec references
 

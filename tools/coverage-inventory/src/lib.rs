@@ -81,9 +81,9 @@ fn data_type(ty: &Type) -> Check<()> {
             return Err("only UTC DateTime is demonstrated".into());
         }
         if names == "std::collections::BTreeMap"
-            && !matches!(arguments.args.first(), Some(GenericArgument::Type(Type::Path(p))) if p.qself.is_none() && p.path.is_ident("String"))
+            && !matches!(arguments.args.first(), Some(GenericArgument::Type(Type::Path(p))) if p.qself.is_none() && simple_path(&p.path))
         {
-            return Err("map keys must be String".into());
+            return Err("map keys must be argument-free data type paths".into());
         }
     } else if !simple_path(&path.path)
         || !(path.path.leading_colon.is_none()
@@ -177,8 +177,10 @@ fn attributes(
                 if matches!(context, Context::Enum) && matches!(name.as_str(), "tag" | "rename_all")
                 {
                     let value: syn::LitStr = meta.value()?.parse()?;
-                    let expected = if name == "tag" { "status" } else { "camelCase" };
-                    if value.value() == expected {
+                    if matches!(
+                        (name.as_str(), value.value().as_str()),
+                        ("tag", "status" | "kind") | ("rename_all", "camelCase" | "snake_case")
+                    ) {
                         return Ok(());
                     }
                 }
