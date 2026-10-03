@@ -258,7 +258,14 @@ impl OwnerCommand {
                 text(&params.adapter_id, 4096, true)?;
                 text(&params.external_session_id, 4096, true)?;
             }
-            Self::InputSubmit { params, .. } => text(&params.text, 16 * 1024, true)?,
+            Self::InputSubmit { params, .. } => {
+                let option_only = params.kind == InputKind::Answer
+                    && params
+                        .selected_option_id
+                        .as_ref()
+                        .is_some_and(|id| !id.trim().is_empty());
+                text(&params.text, 16 * 1024, !option_only)?;
+            }
             Self::InputResolve { params, .. } => text(&params.reason, 4096, true)?,
             Self::TopicContinue { params, .. } => text(&params.summary, 512 * 1024, true)?,
             Self::PreferencesPatch { params, .. } => {
@@ -313,6 +320,10 @@ impl PreparedAttempt {
             self.attempt_id.as_str()
         );
         if self.wire_marker != expected
+            || self
+                .formatted_payload
+                .split_once('\n')
+                .is_none_or(|(first, _)| first != self.wire_marker)
             || self.payload_sha256.as_str()
                 != format!("{:x}", Hasher::digest(self.formatted_payload.as_bytes()))
         {
@@ -382,6 +393,7 @@ fn continued_page<T>(
     requested: &Option<QueryCursor>,
     view: QueryView,
 ) -> Result<(), CoreError> {
+    cursor(requested, view.clone())?;
     cursor(&value.next_cursor, view)?;
     if let Some(requested) = requested {
         if requested.revision != value.snapshot_revision {
@@ -400,6 +412,115 @@ fn continued_page<T>(
         }
     }
     Ok(())
+}
+
+struct NestedSelection<'a> {
+    parent: &'a str,
+    cursor: &'a Option<QueryCursor>,
+    limit: usize,
+    view: QueryView,
+}
+fn item_selection(value: &ItemPageRequest) -> NestedSelection<'_> {
+    match value {
+        ItemPageRequest::ItemUpdatedMessages {
+            item_id,
+            cursor,
+            limit,
+        } => NestedSelection {
+            parent: item_id.as_str(),
+            cursor,
+            limit: limit.value(),
+            view: QueryView::ItemUpdatedMessages,
+        },
+        ItemPageRequest::ItemStatusHistory {
+            item_id,
+            cursor,
+            limit,
+        } => NestedSelection {
+            parent: item_id.as_str(),
+            cursor,
+            limit: limit.value(),
+            view: QueryView::ItemStatusHistory,
+        },
+    }
+}
+fn round_selection(value: &RoundPageRequest) -> NestedSelection<'_> {
+    let (round_id, cursor, limit, view) = match value {
+        RoundPageRequest::RoundAnswers {
+            round_id,
+            cursor,
+            limit,
+        } => (round_id, cursor, limit, QueryView::RoundAnswers),
+        RoundPageRequest::RoundOwnerMessages {
+            round_id,
+            cursor,
+            limit,
+        } => (round_id, cursor, limit, QueryView::RoundOwnerMessages),
+        RoundPageRequest::RoundAgentMessages {
+            round_id,
+            cursor,
+            limit,
+        } => (round_id, cursor, limit, QueryView::RoundAgentMessages),
+        RoundPageRequest::RoundResults {
+            round_id,
+            cursor,
+            limit,
+        } => (round_id, cursor, limit, QueryView::RoundResults),
+        RoundPageRequest::RoundForks {
+            round_id,
+            cursor,
+            limit,
+        } => (round_id, cursor, limit, QueryView::RoundForks),
+    };
+    NestedSelection {
+        parent: round_id.as_str(),
+        cursor,
+        limit: limit.value(),
+        view,
+    }
+}
+fn fulfilled_selectors(
+    selectors: &[NestedSelection<'_>],
+    parents: &[&str],
+) -> Result<(), CoreError> {
+    for (index, selector) in selectors.iter().enumerate() {
+        if !parents.contains(&selector.parent) {
+            return Err(invalid("Nested page selector has no returned parent"));
+        }
+        if selectors[..index]
+            .iter()
+            .any(|prior| prior.parent == selector.parent && prior.view == selector.view)
+        {
+            return Err(invalid("Nested page selectors repeat a parent collection"));
+        }
+    }
+    Ok(())
+}
+fn nested_page<T: Serialize>(
+    value: &Page<T>,
+    parent: &str,
+    view: QueryView,
+    selectors: &[NestedSelection<'_>],
+    revision: PositiveSafeInteger,
+) -> Result<usize, CoreError> {
+    let selector = selectors
+        .iter()
+        .find(|selector| selector.parent == parent && selector.view == view);
+    let limit = selector.map_or(100, |selector| selector.limit);
+    page(value, limit)?;
+    continued_page(
+        value,
+        selector.map_or(&None, |selector| selector.cursor),
+        view,
+    )?;
+    if value.snapshot_revision != revision {
+        return Err(CoreError::new(
+            CoreErrorCode::SnapshotChanged,
+            "Nested page revision differs from its outer snapshot",
+            "Restart this history query from its first page.",
+        ));
+    }
+    Ok(limit)
 }
 fn messages(value: &Page<Message>, limit: usize, context: &QueryContext) -> Result<(), CoreError> {
     page(value, limit)?;
@@ -581,9 +702,32 @@ impl QueryResult {
                     (SessionReadResult::Items(value), ReadView::Items { .. }, _) => {
                         page(value, limit)?;
                         continued_page(value, &request.cursor, QueryView::Items)?;
+                        let selectors: Vec<_> =
+                            request.item_pages.iter().map(item_selection).collect();
+                        fulfilled_selectors(
+                            &selectors,
+                            &value
+                                .items
+                                .iter()
+                                .map(|item| item.item.id.as_str())
+                                .collect::<Vec<_>>(),
+                        )?;
                         for item in &value.items {
-                            messages(&item.updated_messages, 100, context)?;
-                            page(&item.status_history, 100)?;
+                            let nested_limit = nested_page(
+                                &item.updated_messages,
+                                item.item.id.as_str(),
+                                QueryView::ItemUpdatedMessages,
+                                &selectors,
+                                value.snapshot_revision,
+                            )?;
+                            messages(&item.updated_messages, nested_limit, context)?;
+                            nested_page(
+                                &item.status_history,
+                                item.item.id.as_str(),
+                                QueryView::ItemStatusHistory,
+                                &selectors,
+                                value.snapshot_revision,
+                            )?;
                         }
                     }
                     (SessionReadResult::Messages(value), ReadView::Messages { .. }, _) => {
@@ -633,12 +777,59 @@ impl QueryResult {
                 }
                 page(&result.rounds, request.limit.value())?;
                 continued_page(&result.rounds, &request.cursor, QueryView::ItemRounds)?;
+                let selectors: Vec<_> = request.round_pages.iter().map(round_selection).collect();
+                fulfilled_selectors(
+                    &selectors,
+                    &result
+                        .rounds
+                        .items
+                        .iter()
+                        .map(|round| round.round.id.as_str())
+                        .collect::<Vec<_>>(),
+                )?;
                 for round in &result.rounds.items {
-                    page(&round.answers, 100)?;
-                    messages(&round.owner_messages, 100, context)?;
-                    messages(&round.agent_messages, 100, context)?;
-                    page(&round.results, 100)?;
-                    page(&round.forks, 100)?;
+                    if round.round.item_id != request.item_id {
+                        return Err(scope_error());
+                    }
+                    let parent = round.round.id.as_str();
+                    let revision = result.rounds.snapshot_revision;
+                    nested_page(
+                        &round.answers,
+                        parent,
+                        QueryView::RoundAnswers,
+                        &selectors,
+                        revision,
+                    )?;
+                    let owner_limit = nested_page(
+                        &round.owner_messages,
+                        parent,
+                        QueryView::RoundOwnerMessages,
+                        &selectors,
+                        revision,
+                    )?;
+                    messages(&round.owner_messages, owner_limit, context)?;
+                    let agent_limit = nested_page(
+                        &round.agent_messages,
+                        parent,
+                        QueryView::RoundAgentMessages,
+                        &selectors,
+                        revision,
+                    )?;
+                    messages(&round.agent_messages, agent_limit, context)?;
+                    nested_page(
+                        &round.results,
+                        parent,
+                        QueryView::RoundResults,
+                        &selectors,
+                        revision,
+                    )?;
+                    nested_page(
+                        &round.forks,
+                        parent,
+                        QueryView::RoundForks,
+                        &selectors,
+                        revision,
+                    )?;
                 }
             }
             (Self::TopicContinuePreview(result), QueryRequest::TopicContinuePreview(request)) => {

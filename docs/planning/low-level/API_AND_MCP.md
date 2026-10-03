@@ -48,7 +48,12 @@ an empty queue or an existing in-flight input. Bad scope/generation/lease, pause
 or recovery barriers return the existing typed error with a reason in `details`;
 they are not a healthy empty queue. `PreparedAttempt` contains the persisted
 input/attempt IDs, originating generation, exact formatted payload, digest and
-wire marker. It does not claim host acceptance. `EventReceipt` identifies the
+wire marker. The exact submitted payload starts with `wire_marker` followed by LF;
+owner/context data follows safely encoded, and the saved digest covers all these
+exact UTF-8 bytes. Providers submit those bytes unchanged; they cannot add the
+marker after hashing. P2.2 owns the production claim formatter; P2.5 owns MCP
+transport. P0.6 checks only this prefix/digest boundary. It does not claim host
+acceptance. `EventReceipt` identifies the
 reported event and persisted revision/effect, including a consistent replay;
 ephemeral presence need not produce a new durable session receipt.
 Its exact record is `{event_id,session_id,revision:positive_safe_integer|null,
@@ -176,6 +181,12 @@ Each nested round-message list has its own `Page<Message>` and cursor; fetching
 more rounds cannot silently truncate or advance a message list. Complete message
 bodies and provenance remain intact under the existing entity/page limits;
 revision changes return `snapshot_changed` rather than mixed history.
+An explicit nested selector must identify a parent returned in that outer page,
+must be unique for that parent/collection, and controls its own limit/cursor.
+Unfulfilled or contradictory selectors are rejected. Nested page revisions match
+the outer snapshot; continuation view, sort key and filter digest stay scoped to
+that collection. Option-only `input_submit` Answers may preserve empty or whitespace
+text with a selected option; the real core validates the frozen question/option.
 
 Canonical P0.3b records make those projections explicit:
 

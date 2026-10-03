@@ -240,8 +240,8 @@
               "input_id": "00000000-0000-4000-8000-000000000070",
               "attempt_id": "00000000-0000-4000-8000-000000000060",
               "binding_generation": "00000000-0000-4000-8000-000000000022",
-              "formatted_payload": "Keep it.\nRetain the full history, including earlier outcomes.\nBinding context: canonical demo.",
-              "payload_sha256": "48f5cc92905e0b03bebb5dc8502de289b4ad0805657576fdfce20953777b7c24",
+              "formatted_payload": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000070:00000000-0000-4000-8000-000000000060]\n{\"owner_text\":\"Keep it.\\nRetain the full history, including earlier outcomes.\",\"context\":{\"item_id\":\"1\",\"question_revision\":1}}",
+              "payload_sha256": "71ee76a2049d6fa855f17bb9cc7f029f3a39ac009e2d486e04b40e8e4aa98ff0",
               "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000070:00000000-0000-4000-8000-000000000060]"
             }
           }
@@ -261,8 +261,8 @@
               "input_id": "00000000-0000-4000-8000-000000000070",
               "attempt_id": "00000000-0000-4000-8000-000000000060",
               "binding_generation": "00000000-0000-4000-8000-000000000022",
-              "formatted_payload": "Keep it.\nRetain the full history, including earlier outcomes.\nBinding context: canonical demo.",
-              "payload_sha256": "48f5cc92905e0b03bebb5dc8502de289b4ad0805657576fdfce20953777b7c24",
+              "formatted_payload": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000070:00000000-0000-4000-8000-000000000060]\n{\"owner_text\":\"Keep it.\\nRetain the full history, including earlier outcomes.\",\"context\":{\"item_id\":\"1\",\"question_revision\":1}}",
+              "payload_sha256": "71ee76a2049d6fa855f17bb9cc7f029f3a39ac009e2d486e04b40e8e4aa98ff0",
               "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000070:00000000-0000-4000-8000-000000000060]"
             }
           }
@@ -579,7 +579,38 @@
               "item_id": "1",
               "cursor": null,
               "limit": 100,
-              "round_pages": []
+              "round_pages": [
+                {
+                  "view": "round_answers",
+                  "round_id": "00000000-0000-4000-8000-000000000040",
+                  "cursor": null,
+                  "limit": 1
+                },
+                {
+                  "view": "round_owner_messages",
+                  "round_id": "00000000-0000-4000-8000-000000000040",
+                  "cursor": null,
+                  "limit": 1
+                },
+                {
+                  "view": "round_agent_messages",
+                  "round_id": "00000000-0000-4000-8000-000000000040",
+                  "cursor": null,
+                  "limit": 1
+                },
+                {
+                  "view": "round_results",
+                  "round_id": "00000000-0000-4000-8000-000000000040",
+                  "cursor": null,
+                  "limit": 1
+                },
+                {
+                  "view": "round_forks",
+                  "round_id": "00000000-0000-4000-8000-000000000040",
+                  "cursor": null,
+                  "limit": 1
+                }
+              ]
             }
           },
           "response": {
@@ -1426,6 +1457,90 @@
                   "created_message": null,
                   "source_round_id": null
                 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "option_only_answer_empty",
+      "steps": [
+        {
+          "method": "owner",
+          "request": {
+            "api_version": 1,
+            "op_id": "00000000-0000-4000-8000-000000000200",
+            "command": "input_submit",
+            "params": {
+              "binding_id": "00000000-0000-4000-8000-000000000020",
+              "target": {
+                "topic_id": "00000000-0000-4000-8000-000000000010",
+                "item_id": "1"
+              },
+              "kind": "answer",
+              "text": "",
+              "selected_option_id": "keep",
+              "expected_question_revision": 1,
+              "supersedes_answer_id": null
+            }
+          },
+          "response": {
+            "api_version": 1,
+            "ok": true,
+            "data": {
+              "operation_id": "00000000-0000-4000-8000-000000000200",
+              "session_id": "00000000-0000-4000-8000-000000000002",
+              "revision": 5,
+              "data": {
+                "kind": "input_submit",
+                "input_id": "00000000-0000-4000-8000-000000000070",
+                "message_id": "00000000-0000-4000-8000-000000000102",
+                "message_number": 2,
+                "answer_id": "00000000-0000-4000-8000-000000000050",
+                "input_seq": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "option_only_answer_whitespace",
+      "steps": [
+        {
+          "method": "owner",
+          "request": {
+            "api_version": 1,
+            "op_id": "00000000-0000-4000-8000-000000000200",
+            "command": "input_submit",
+            "params": {
+              "binding_id": "00000000-0000-4000-8000-000000000020",
+              "target": {
+                "topic_id": "00000000-0000-4000-8000-000000000010",
+                "item_id": "1"
+              },
+              "kind": "answer",
+              "text": " \n \t",
+              "selected_option_id": "keep",
+              "expected_question_revision": 1,
+              "supersedes_answer_id": null
+            }
+          },
+          "response": {
+            "api_version": 1,
+            "ok": true,
+            "data": {
+              "operation_id": "00000000-0000-4000-8000-000000000200",
+              "session_id": "00000000-0000-4000-8000-000000000002",
+              "revision": 5,
+              "data": {
+                "kind": "input_submit",
+                "input_id": "00000000-0000-4000-8000-000000000070",
+                "message_id": "00000000-0000-4000-8000-000000000102",
+                "message_number": 2,
+                "answer_id": "00000000-0000-4000-8000-000000000050",
+                "input_seq": 1
               }
             }
           }

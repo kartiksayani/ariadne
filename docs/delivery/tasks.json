@@ -920,7 +920,10 @@
         "rtk proxy cargo test -p ariadne-adapter-codex --test history",
         "rtk proxy cargo xtask gen-codex-wire --check"
       ],
-      "estimate_days": 1.5
+      "estimate_days": 1.5,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/38"
+      }
     },
     {
       "id": "P3.6",

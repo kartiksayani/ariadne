@@ -35,6 +35,14 @@ history separately visible through canonical bounded projections. Nested cursor
 continuations stay inside existing queries. Continue previews propose actions and
 readiness without allocating target IDs.
 
+Option-only owner Answers preserve empty/whitespace submitted bytes when an option
+is selected; core still validates that option against the frozen question. Explicit
+nested selectors must match returned parents and their requested limits/cursors;
+every nested page shares the outer snapshot. The persisted prepared payload starts
+with the exact marker and LF before safely encoded owner/context data. Its digest
+covers all submitted bytes, including that prefix. P2.2 owns the production claim
+formatter, while P2.5 owns MCP transport; P0.6 supplies prefix/digest validation only.
+
 The default-off scripted double holds only steps and call history. Shared cases
 exercise producer/consumer serialization and caller ordering, including checkpoint
 advancement after reports persist. It has no business state machine, persistence,

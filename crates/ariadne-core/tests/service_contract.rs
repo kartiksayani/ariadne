@@ -204,6 +204,290 @@ fn complete_history_pages_preserve_bodies_provenance_and_independent_nested_curs
 }
 
 #[test]
+fn option_only_answers_preserve_blank_bytes_without_allowing_other_blank_submissions() {
+    let inventory: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root().join("fixtures/contracts/core/inventory.json")).unwrap(),
+    )
+    .unwrap();
+    let original = inventory["owner_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|command| command["command"] == "input_submit")
+        .unwrap();
+    for body in ["", " \n \t"] {
+        let mut wire = original.clone();
+        wire["params"]["text"] = json!(body);
+        let command: OwnerCommand = serde_json::from_value(wire.clone()).unwrap();
+        command.validate_wire().unwrap();
+        assert_eq!(serde_json::to_value(command).unwrap(), wire);
+        for (kind, option) in [
+            ("note", json!("keep")),
+            ("answer", json!(null)),
+            ("answer", json!("")),
+        ] {
+            let mut invalid = wire.clone();
+            invalid["params"]["kind"] = json!(kind);
+            invalid["params"]["selected_option_id"] = option;
+            assert_eq!(
+                serde_json::from_value::<OwnerCommand>(invalid)
+                    .unwrap()
+                    .validate_wire()
+                    .unwrap_err()
+                    .code,
+                CoreErrorCode::InvalidArgument
+            );
+        }
+    }
+    for body in ["\0", &"x".repeat(16 * 1024 + 1)] {
+        let mut wire = original.clone();
+        wire["params"]["text"] = json!(body);
+        assert!(serde_json::from_value::<OwnerCommand>(wire)
+            .unwrap()
+            .validate_wire()
+            .is_err());
+    }
+}
+
+#[test]
+fn prepared_payload_requires_exact_marker_prefix_before_its_full_byte_digest() {
+    use sha2::{Digest, Sha256};
+    let corpus = cases::load(root());
+    let step = corpus.cases.iter().flat_map(|case| &case.steps).find(|step| matches!(step, cases::CaseStep::Claim { response, .. } if cases::result(response).is_ok_and(|value| value.is_some()))).unwrap();
+    let cases::CaseStep::Claim {
+        request, response, ..
+    } = step
+    else {
+        unreachable!()
+    };
+    let prepared = cases::result(response).unwrap().unwrap();
+    assert_eq!(
+        prepared.formatted_payload.split_once('\n').unwrap().0,
+        prepared.wire_marker
+    );
+    let encoded: serde_json::Value =
+        serde_json::from_str(prepared.formatted_payload.split_once('\n').unwrap().1).unwrap();
+    assert_eq!(
+        encoded["owner_text"],
+        "Keep it.\nRetain the full history, including earlier outcomes."
+    );
+    assert_eq!(
+        prepared.payload_sha256.as_str(),
+        format!(
+            "{:x}",
+            Sha256::digest(prepared.formatted_payload.as_bytes())
+        )
+    );
+    for payload in [
+        "{}".to_owned(),
+        format!("x{}\n{{}}", prepared.wire_marker),
+        format!("{}\r\n{{}}", prepared.wire_marker),
+        prepared.wire_marker.clone(),
+    ] {
+        let mut invalid = prepared.clone();
+        invalid.formatted_payload = payload;
+        invalid.payload_sha256 = serde_json::from_value(json!(format!(
+            "{:x}",
+            Sha256::digest(invalid.formatted_payload.as_bytes())
+        )))
+        .unwrap();
+        assert_eq!(
+            invalid.validate_for(request).unwrap_err().code,
+            CoreErrorCode::InvalidArgument
+        );
+        let cases::CaseStep::Claim {
+            current_generation, ..
+        } = step
+        else {
+            unreachable!()
+        };
+        let context = corpus.routing.dispatch(current_generation.clone());
+        let fake = ScriptedCoreService::new([ScriptStep {
+            request: RecordedRequest::Claim(context.clone(), request.clone()),
+            response: ScriptedResponse::Claim(Ok(Some(invalid))),
+        }]);
+        assert_eq!(
+            fake.claim(context, request.clone()).unwrap_err().code,
+            CoreErrorCode::InvalidArgument
+        );
+    }
+    let mut invalid = prepared.clone();
+    invalid.formatted_payload.push(' ');
+    assert_eq!(
+        invalid.validate_for(request).unwrap_err().code,
+        CoreErrorCode::InvalidArgument
+    );
+}
+
+fn check_query_response(
+    request: serde_json::Value,
+    response: serde_json::Value,
+    expected: Option<CoreErrorCode>,
+) {
+    let corpus = cases::load(root());
+    let context = corpus.routing.query(cases::Audience::Owner);
+    let request: QueryRequest = serde_json::from_value(request).unwrap();
+    let response: QueryResult = serde_json::from_value(response).unwrap();
+    let service = ScriptedCoreService::new([ScriptStep {
+        request: RecordedRequest::Query(context.clone(), Box::new(request.clone())),
+        response: ScriptedResponse::Query(Box::new(Ok(response))),
+    }]);
+    let result = service.query(context, request);
+    match expected {
+        Some(code) => assert_eq!(result.unwrap_err().code, code),
+        None => {
+            result.unwrap();
+        }
+    }
+}
+
+#[test]
+fn nested_round_pages_reject_excess_entities_changed_snapshots_and_wrong_scope() {
+    let wire: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root().join("fixtures/contracts/core/cases.json")).unwrap(),
+    )
+    .unwrap();
+    let step = &wire["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == "complete_history_and_cursor")
+        .unwrap()["steps"][2];
+    let mut request = step["request"].clone();
+    let response = step["response"]["data"].clone();
+    let round = &response["data"]["rounds"]["items"][0];
+    request["params"]["round_pages"] = json!([{"view":"round_owner_messages","round_id":round["round"]["id"],"cursor":round["owner_messages"]["next_cursor"],"limit":1}]);
+    check_query_response(request.clone(), response.clone(), None);
+    for (path, replacement, code) in [
+        (
+            "/data/rounds/items/0/owner_messages/items",
+            json!([
+                round["owner_messages"]["items"][0],
+                round["owner_messages"]["items"][0]
+            ]),
+            CoreErrorCode::InvalidArgument,
+        ),
+        (
+            "/data/rounds/items/0/owner_messages/snapshot_revision",
+            json!(20),
+            CoreErrorCode::InvalidArgument,
+        ),
+        (
+            "/data/rounds/items/0/owner_messages/next_cursor/view",
+            json!("messages"),
+            CoreErrorCode::InvalidArgument,
+        ),
+        (
+            "/data/rounds/items/0/owner_messages/next_cursor/filter_digest",
+            json!("0".repeat(64)),
+            CoreErrorCode::InvalidArgument,
+        ),
+        (
+            "/data/rounds/items/0/round/item_id",
+            json!("2"),
+            CoreErrorCode::BindingMismatch,
+        ),
+    ] {
+        let mut invalid = response.clone();
+        *invalid.pointer_mut(path).unwrap() = replacement;
+        check_query_response(request.clone(), invalid, Some(code));
+    }
+    let mut stale = request.clone();
+    stale["params"]["round_pages"][0]["cursor"]["revision"] = json!(20);
+    check_query_response(
+        stale,
+        response.clone(),
+        Some(CoreErrorCode::SnapshotChanged),
+    );
+    let mut absent = request.clone();
+    absent["params"]["round_pages"][0]["round_id"] = json!("00000000-0000-4000-8000-000000000099");
+    check_query_response(
+        absent,
+        response.clone(),
+        Some(CoreErrorCode::InvalidArgument),
+    );
+    let mut duplicate = request.clone();
+    let selector = duplicate["params"]["round_pages"][0].clone();
+    duplicate["params"]["round_pages"]
+        .as_array_mut()
+        .unwrap()
+        .push(selector);
+    check_query_response(
+        duplicate,
+        response.clone(),
+        Some(CoreErrorCode::InvalidArgument),
+    );
+    let mut mixed = response;
+    mixed["data"]["rounds"]["items"][0]["agent_messages"]["snapshot_revision"] = json!(20);
+    check_query_response(request, mixed, Some(CoreErrorCode::SnapshotChanged));
+}
+
+#[test]
+fn nested_item_pages_use_explicit_limits_and_parent_cursor_snapshot_scope() {
+    let page: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root().join("fixtures/domain/projections/items.json")).unwrap(),
+    )
+    .unwrap();
+    let item = &page["items"][0];
+    let mut response = json!({"kind":"session_read","data":{"view":"items","page":{"items":[item],"next_cursor":null,"snapshot_revision":page["snapshot_revision"]}}});
+    let mut request = json!({"command":"session_read","params":{"selection":{"view":"items","filters":{"topic_id":null,"item_id":"1","parent_item_id":null,"statuses":[],"archived":null}},"cursor":null,"limit":1,"item_pages":[{"view":"item_updated_messages","item_id":"1","cursor":null,"limit":1},{"view":"item_status_history","item_id":"1","cursor":null,"limit":1}]}});
+    // Choose bounded first pages and retain their existing scoped cursors.
+    for field in ["updated_messages", "status_history"] {
+        response["data"]["page"]["items"][0][field]["items"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(1);
+    }
+    check_query_response(request.clone(), response.clone(), None);
+    let mut excess = response.clone();
+    let body = excess["data"]["page"]["items"][0]["updated_messages"]["items"][0].clone();
+    excess["data"]["page"]["items"][0]["updated_messages"]["items"]
+        .as_array_mut()
+        .unwrap()
+        .push(body);
+    check_query_response(
+        request.clone(),
+        excess,
+        Some(CoreErrorCode::InvalidArgument),
+    );
+    let mut absent = request.clone();
+    absent["params"]["item_pages"][0]["item_id"] = json!("2");
+    check_query_response(
+        absent,
+        response.clone(),
+        Some(CoreErrorCode::InvalidArgument),
+    );
+    let revision = response["data"]["page"]["snapshot_revision"].clone();
+    let continuation = json!({"schema":1,"view":"item_status_history","filter_digest":"a".repeat(64),"after":{"kind":"history","index":0},"revision":revision});
+    request["params"]["item_pages"][1]["cursor"] = continuation.clone();
+    response["data"]["page"]["items"][0]["status_history"]["next_cursor"] = continuation;
+    check_query_response(request.clone(), response.clone(), None);
+    for (field, replacement) in [
+        ("view", json!("messages")),
+        ("filter_digest", json!("b".repeat(64))),
+    ] {
+        let mut invalid = response.clone();
+        invalid["data"]["page"]["items"][0]["status_history"]["next_cursor"][field] = replacement;
+        check_query_response(
+            request.clone(),
+            invalid,
+            Some(CoreErrorCode::InvalidArgument),
+        );
+    }
+    let mut stale = request.clone();
+    stale["params"]["item_pages"][1]["cursor"]["revision"] = json!(1);
+    check_query_response(
+        stale,
+        response.clone(),
+        Some(CoreErrorCode::SnapshotChanged),
+    );
+    let mut mixed = response;
+    mixed["data"]["page"]["items"][0]["status_history"]["next_cursor"] = json!(null);
+    mixed["data"]["page"]["items"][0]["status_history"]["snapshot_revision"] = json!(1);
+    check_query_response(request, mixed, Some(CoreErrorCode::SnapshotChanged));
+}
+
+#[test]
 fn script_mismatch_keeps_pending_step_and_malformed_response_is_rejected() {
     let corpus = cases::load(root());
     let case = &corpus.cases[0];
