@@ -3,6 +3,7 @@
   "coverage_scope": "Weighted executable Rust and TS/JS application lines, including untested handwritten logic. Exclusions are reviewed; no handwritten logic may live in declaration/generated paths.",
   "coverage_exclusions": [
     "crates/ariadne-domain/src/lib.rs",
+    "crates/ariadne-domain/src/models/mod.rs",
     "crates/ariadne-store/src/lib.rs",
     "crates/ariadne-core/src/lib.rs",
     "crates/ariadne-agent-protocol/src/lib.rs",
