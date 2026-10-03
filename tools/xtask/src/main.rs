@@ -7,8 +7,7 @@ fn main() -> ExitCode {
         .unwrap()
         .parent()
         .unwrap();
-    let result = ariadne_xtask::arguments(&std::env::args().skip(1).collect::<Vec<_>>())
-        .and_then(|check| ariadne_xtask::generate(root, check));
+    let result = ariadne_xtask::run(root, &std::env::args().skip(1).collect::<Vec<_>>());
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

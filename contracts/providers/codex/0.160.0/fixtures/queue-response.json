@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": "fixture-queue-id",
+      "clientUserMessageId": "fixture-cli-client-id",
+      "input": [
+        {
+          "type": "text",
+          "text": "[ARIADNE_INPUT:b38e6400-540d-42f5-8a35-1cd30ab86974]\nOwner message on Ariadne item finding-1:\nCommunication test only. Remember this exact phrase for my next message: ariadne-2eae452a57ed. Reply with exactly ACK. Do not use tools.",
+          "text_elements": []
+        }
+      ]
+    }
+  ],
+  "nextCursor": null
+}

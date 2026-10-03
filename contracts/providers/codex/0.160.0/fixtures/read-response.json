@@ -1,0 +1,22 @@
+{
+  "thread": {
+    "id": "01a0fba3-6ed9-76c2-a84e-a462929cef91",
+    "sessionId": "01a0fba3-6ed9-76c2-a84e-a462929cef91",
+    "cliVersion": "0.160.0",
+    "createdAt": 1790935600,
+    "updatedAt": 1790935700,
+    "cwd": "/redacted/project",
+    "ephemeral": false,
+    "modelProvider": "openai",
+    "preview": "Codex queue communication test",
+    "projectId": null,
+    "source": "cli",
+    "status": {
+      "type": "idle"
+    },
+    "turns": [],
+    "name": "Ariadne communication fixture",
+    "canAcceptDirectInput": true,
+    "path": null
+  }
+}
