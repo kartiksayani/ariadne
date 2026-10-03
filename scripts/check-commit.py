@@ -79,6 +79,25 @@ def scope_for(paths):
     return scope, release
 
 
+def reference_capture_for(paths, full=False):
+    """Skip only known backend/docs changes; every other path can affect visuals."""
+    if full or paths is None:
+        return True
+    for name in paths:
+        path = Path(name)
+        if name in DOC_FILES or name in {
+                "Cargo.toml", "Cargo.lock", "rust-toolchain.toml",
+                "docs/delivery/tasks.json", "docs/planning/roadmap.html"}:
+            continue
+        if name.startswith("docs/") and path.suffix == ".md":
+            continue
+        if name.startswith(("crates/", "apps/desktop/src-tauri/")) and (
+                path.suffix == ".rs" or path.name == "Cargo.toml"):
+            continue
+        return True
+    return False
+
+
 def application_sources(root):
     sources = set()
     for folder in APPLICATION_ROOTS:
@@ -206,7 +225,8 @@ def main(argv=None):
     if args.full:
         scope, release = "application", True
     if args.print_scope:
-        print(f"{scope} release={str(release).lower()}")
+        print(f"{scope} release={str(release).lower()} "
+              f"reference={str(reference_capture_for(paths, args.full)).lower()}")
         return
     lint(paths or [], full=(args.ci or args.full) and scope == "application")
     if args.ci or args.full or any(name in {"docs/delivery/tasks.json", "docs/planning/roadmap.html"} for name in paths or []):
