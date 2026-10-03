@@ -1025,7 +1025,9 @@ fn verified_original_message_recovers_acceptance_and_preserves_only_valid_provid
             }],
             checkpoint: None,
         };
-        let recovered = block_on(adapter.reconcile(evidence)).unwrap();
+        let recovered = block_on(adapter.reconcile(evidence.clone())).unwrap();
+        let rescanned = block_on(adapter.reconcile(evidence)).unwrap();
+        let mut rescanned = rescanned.attempt_evidence[0].events[0].clone();
         let recovered = &recovered.attempt_evidence[0].events[0];
         assert_eq!(accepted.event_id, recovered.event_id);
         let EventPayload::Accepted {
@@ -1036,6 +1038,16 @@ fn verified_original_message_recovers_acceptance_and_preserves_only_valid_provid
         };
         assert_eq!(receipt.provider_reference, expected);
         assert_eq!(receipt.observed_at, recovered.observed_at);
+        let EventPayload::Accepted {
+            receipt: Some(rescanned_receipt),
+        } = &mut rescanned.event
+        else {
+            panic!("fresh repeated reconciliation lost acceptance evidence")
+        };
+        assert_eq!(rescanned_receipt.observed_at, rescanned.observed_at);
+        rescanned_receipt.observed_at = receipt.observed_at.clone();
+        rescanned.observed_at = recovered.observed_at.clone();
+        assert_eq!(*recovered, rescanned);
         assert_eq!(h.count(), 1);
     }
 }

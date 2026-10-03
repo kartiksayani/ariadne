@@ -368,39 +368,44 @@ fn recover_acceptance(
             continue;
         };
         let original = scan.user_message_identity(&evidence.attempt_id).ok_or_else(|| error(AdapterErrorCode::ProtocolConflict, "Verified Codex original-message identity is missing; acceptance remains unresolved."))?;
-        let provider_reference = original
-            .client_id
-            .as_deref()
-            .filter(|id| !id.is_empty() && id.len() <= 4096)
-            .or_else(|| {
-                (!original.host_message_id.is_empty() && original.host_message_id.len() <= 4096)
-                    .then_some(original.host_message_id.as_str())
-            });
-        let receipt = provider_reference.map(|reference| HostReceipt {
-            provider_reference: reference.to_owned(),
-            observed_at: started.observed_at.clone(),
-        });
-        let event_id = digest(
-            &serde_json::to_vec(&(
-                "codex-accepted-v1",
-                &started.binding_id,
-                &started.generation,
-                &evidence.attempt_id,
-                &started.host_turn_id,
-                &original.host_message_id,
-            ))
-            .map_err(|_| poisoned())?,
-        );
-        evidence.events.insert(
-            0,
-            NormalizedEvent {
-                event_id,
-                event: EventPayload::Accepted { receipt },
-                ..started
-            },
-        );
+        evidence
+            .events
+            .insert(0, acceptance_event(started, original)?);
     }
     Ok(())
+}
+fn acceptance_event(
+    started: NormalizedEvent,
+    original: &crate::history::UserMessageIdentity,
+) -> Result<NormalizedEvent, AdapterError> {
+    let provider_reference = original
+        .client_id
+        .as_deref()
+        .filter(|id| !id.is_empty() && id.len() <= 4096)
+        .or_else(|| {
+            (!original.host_message_id.is_empty() && original.host_message_id.len() <= 4096)
+                .then_some(original.host_message_id.as_str())
+        });
+    let receipt = provider_reference.map(|reference| HostReceipt {
+        provider_reference: reference.to_owned(),
+        observed_at: started.observed_at.clone(),
+    });
+    let event_id = digest(
+        &serde_json::to_vec(&(
+            "codex-accepted-v1",
+            &started.binding_id,
+            &started.generation,
+            &started.attempt_id,
+            &started.host_turn_id,
+            &original.host_message_id,
+        ))
+        .map_err(|_| poisoned())?,
+    );
+    Ok(NormalizedEvent {
+        event_id,
+        event: EventPayload::Accepted { receipt },
+        ..started
+    })
 }
 fn scope(shared: &Shared, binding: &UuidV4, generation: &UuidV4) -> Result<(), AdapterError> {
     let connection = shared.connection.as_ref().ok_or_else(|| {
@@ -540,6 +545,55 @@ mod tests {
     }
     fn connection() -> ConnectRequest {
         serde_json::from_value(serde_json::json!({"binding_id":"11111111-1111-4111-8111-111111111111","generation":"22222222-2222-4222-8222-222222222222","external_session_id":"thread","endpoint":{"kind":"unix_socket","path":"/unused"},"configuration":{"namespace":"codex","values":{}}})).unwrap()
+    }
+    #[test]
+    fn fresh_acceptance_identity_preserves_reference_and_excludes_observation_times() {
+        let original = crate::history::UserMessageIdentity {
+            host_turn_id: "actual-turn".to_owned(),
+            host_message_id: "actual-message".to_owned(),
+            client_id: Some("actual-client".to_owned()),
+        };
+        let make = |at: &str| {
+            let started = serde_json::from_value(serde_json::json!({
+                "event_id":"actual-start",
+                "binding_id":connection().binding_id,
+                "generation":connection().generation,
+                "input_id":"33333333-3333-4333-8333-333333333333",
+                "attempt_id":"44444444-4444-4444-8444-444444444444",
+                "host_turn_id":"actual-turn",
+                "observed_at":at,
+                "kind":"turn_started",
+                "payload":{}
+            }))
+            .unwrap();
+            acceptance_event(started, &original).unwrap()
+        };
+        let first = make("2026-10-04T12:00:00.000Z");
+        let mut later = make("2026-10-04T12:00:01.000Z");
+        assert_eq!(first.event_id, later.event_id);
+        assert_ne!(first.observed_at, later.observed_at);
+        let EventPayload::Accepted {
+            receipt: Some(first_receipt),
+        } = &first.event
+        else {
+            panic!("missing provider receipt")
+        };
+        let EventPayload::Accepted {
+            receipt: Some(later_receipt),
+        } = &mut later.event
+        else {
+            panic!("missing provider receipt")
+        };
+        assert_eq!(first_receipt.provider_reference, "actual-client");
+        assert_eq!(
+            later_receipt.provider_reference,
+            first_receipt.provider_reference
+        );
+        assert_eq!(later_receipt.observed_at, later.observed_at);
+        assert_ne!(first_receipt.observed_at, later_receipt.observed_at);
+        later_receipt.observed_at = first_receipt.observed_at.clone();
+        later.observed_at = first.observed_at.clone();
+        assert_eq!(first, later);
     }
     #[test]
     fn queued_read_and_submit_budgets_expire_before_any_operation_starts() {

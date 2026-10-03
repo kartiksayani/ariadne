@@ -122,6 +122,15 @@ identity where supplied, else hash(binding,generation,attempt,turn,kind). Presen
 is ephemeral and need not have a persistent event receipt. Do not deduplicate
 legitimately different output chunks using identical text hashes.
 
+Durable lifecycle replay uses event ID plus an immutable semantic digest. Exclude
+both envelope `observed_at` and accepted `HostReceipt.observed_at` from that digest:
+they describe observation time, so fresh verified scans may differ. The same ID
+and all other identical facts replay the original durable receipt without a
+revision or timestamp rewrite. Changed scope, provider reference, status, reason
+or diagnostic facts conflict. Cached observation batches retain their original
+timestamps exactly; ephemeral presence still uses qualified freshness. P2.2's
+production reporter owns this digest/replay behavior; P0.6 validates the wire.
+
 The terminal fallback is lowercase hexadecimal SHA256 over UTF-8 compact JSON
 array `[binding_id,generation,attempt_id,host_turn_id,kind]` in that exact order,
 serialized by serde_json. IDs use their canonical string spelling; absent turn

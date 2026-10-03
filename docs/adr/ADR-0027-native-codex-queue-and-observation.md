@@ -48,6 +48,12 @@ keys. The accepted observation ID hashes compact JSON tuple
 original_message_id]`. It excludes volatile observation/receipt timestamps;
 receipt observed_at uses the original normalized observation time. Cached replay
 never refreshes it. CLI exit 0 continues to supply Accepted with receipt None.
+Fresh verified scans may have different envelope and receipt observation times.
+Core's immutable lifecycle digest excludes both observation-time fields; matching
+event identity and all remaining facts replay the original durable receipt without
+rewriting revision or timestamps. Changed scope/provider reference/status/reason/
+diagnostic facts still conflict. P2.2 implements that production reporter behavior;
+P0.6 remains a wire validator. No provider time invention or journal is needed.
 
 Retain at most 100 simultaneous provider-private exact submit contexts/outcomes.
 Check retained duplicate certainty before worker/capacity rejection: identical
