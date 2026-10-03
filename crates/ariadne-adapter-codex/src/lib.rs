@@ -1,5 +1,4 @@
-// Codex sender and observer boundary.
-// Implementation belongs to the corresponding catalogue task.
+//! Read-only Codex existing-daemon boundary. Queue submission is a separate task.
 
 // Keep typify's output unchanged. Its keyword spelling, conversion helpers,
 // enum names/layout and explicit defaults trigger these specific lints.
@@ -17,3 +16,10 @@ mod generated;
 #[cfg(test)]
 #[path = "tests/wire.rs"]
 mod wire_tests;
+
+mod history;
+mod transport;
+pub use history::{
+    CodexDaemonReader, CodexHistoryClient, CodexOptions, DiscoveryPage, HistoryScan, ScanProgress,
+    ThreadCandidate, UserMessageIdentity,
+};
