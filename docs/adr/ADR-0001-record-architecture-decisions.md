@@ -1,8 +1,8 @@
 # ADR-0001: Record architecture decisions with the affected implementation
 
-Status: accepted
+Status: deprecated
 Supersedes: none
-Superseded by: none
+Superseded by: [ADR-0018](ADR-0018-recalibrate-delivery.md)
 
 ## Context
 

@@ -1,4 +1,4 @@
-# Personal release scope — revision 4
+# Personal release scope — revision 5
 
 The owner’s latest choices govern the first version. This page supersedes earlier
 blanket requirements for exhaustive hardening. The application is for one person
@@ -15,7 +15,7 @@ code organization and an easy path to adding agents.
 | Discovery/liveness | Implement known-provider discovery and activity/freshness evidence; manual connection remains available | Discuss pruning only if implementation proves too complex; do not silently drop it |
 | Graph | Deterministic SVG with viewport culling and selection/zoom correctness from the start | Additional optimization only after measurement |
 | Reliability | Correct binding, FIFO/result join, operation deduplication, file locking and atomic saves, ordinary quit/reopen and connection-loss handling | Corruption repair, disk-exhaustion recovery, machine/power-crash recovery, lost-data recovery, capacity reservations and exhaustive fault injection |
-| Testing | Every commit: all maintained code linted, functional and end-to-end checks, at least 80% overall application line coverage | Broad OS/architecture matrices, exotic failure scenarios and exhaustive native automation |
+| Testing | Cheap changed-language commit checks; application CI tests, native WebView smoke and >=80% weighted application coverage; release isolation on sensitive changes/milestones | Broad OS/architecture matrices, exotic failure scenarios and exhaustive native automation |
 
 ## What the smaller scope does not remove
 
@@ -52,10 +52,19 @@ meaning and end-to-end requirements. 80% is a minimum, not a reason to omit an
 important workflow test. “100% linting” means all maintained code is checked and
 there are no lint errors/warnings; it does not mean 100% test coverage.
 
-Planning/prototype validation cannot count as application coverage. No product
-source exists yet. Scaffolding must activate the application gates before its
-first application commit; missing reports or missing test commands fail the gate.
-The current planning check does not claim the future app has passed tests.
+The pinned scaffold and native smoke are implemented. Planning data/lint cannot
+count as application coverage or prove domain/provider completion. Fresh real
+reports include untested handwritten logic; missing reports/tests fail.
+
+## First-slice sequencing
+
+On owner resumption, prioritize one manual binding: agent CLI publish → durable
+JSON item → Waiting UI → owner answer queue → fake provider boundary → explicit
+agent CLI reply/result → UI update. Keep binding identity/generation, operation
+deduplication, atomic JSON/file lock and separate result/host-completion semantics.
+A paid/live early Claude run needs owner approval. Defer schema-generator/DTO
+edge-case depth until needed; preserve paused drafts and existing packages.
+Codex, MCP, discovery, graph, Continue and native features stay in the final scope.
 
 ## Scope discipline
 

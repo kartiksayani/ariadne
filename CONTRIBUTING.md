@@ -2,96 +2,54 @@
 
 ## Setup
 
-Use Node 22.23.2 and Python 3.12 (minimum 3.11).
-For native application prerequisites and the difference between WebView and OS
-automation, read [macOS testing setup](docs/development/MACOS_TEST_SETUP.md).
+Use pinned Node 22.23.2, npm 10.9.8, Rust 1.98.1 and Python 3.12 (minimum 3.11).
+Read [macOS testing setup](docs/development/MACOS_TEST_SETUP.md) for native prerequisites.
 
 ```sh
 python3 -m venv .venv-quality
 .venv-quality/bin/python -m pip install -r requirements-dev.txt
-npm ci --ignore-scripts
+npm ci --ignore-scripts --engine-strict
 git config --local core.hooksPath .githooks
 .venv-quality/bin/python scripts/check-commit.py --working-tree
 ```
 
-Use `rtk proxy` before shell commands when working in the owner's agent environment.
+RTK is an outer agent convenience; repository checks and CI do not depend on it.
 
-## Six rules
+## Quality and review
 
-1. One useful behavior per PR, with its task ID and exact spec section. Prefer about
-   500 changed handwritten lines; maximum 1600 per authored commit and 3200 per PR,
-   including tests/config. Main's integrated squash commits have the 3200-line PR
-   cap; push checks enforce it separately for every commit in the event range.
-   Docs, original assets and generated lockfiles are counted separately;
-   the task catalogue `docs/delivery/tasks.json` is documentation too.
-   Their exemption is not permission to hide application code there.
-2. Run all lint and tests on every commit. The hook refuses unstaged/untracked changes
-   so it tests exactly what is committed. Use a clean worktree, no automatic stash.
-   Each branch push runs the complete CI suite once on its exact pushed head,
-   including main after a squash merge. A newer push cancels the previous run on
-   that branch; PRs require their latest head to pass. Local hooks and whole-branch
-   authored-commit/PR size checks remain; CI does not replay historical commits.
-3. At least 80% measured line coverage. Quality helpers have their own measured gate.
-   Application coverage combines covered/total executable Rust and JS/TS lines,
-   includes untested files, and rejects missing/stale reports. The application is not
-   built yet: its coverage is N/A, not a claimed pass. Its first source/Cargo commit
-   must activate the application gate and install the real toolchain/test commands.
-4. Test complete behavior too: real core/storage/CLI/UI with a fake only at the agent
-   boundary. Every application commit runs deterministic E2E. Live Claude/Codex tests
-   run at integration milestones, not on every commit. No placeholder passing tests.
-5. An independent agent reviews the current PR diff; the maintainer adjudicates
-   findings against the spec, verifies patches and checks the final head before
-   merging. Changed code invalidates prior verification. Record tests, coverage and
-   exact commit IDs on the PR; do not claim skipped checks passed.
-6. Quality-policy changes are separate reviewed PRs. Never lower thresholds, disable
-   tests, widen exclusions or bypass hooks merely to get another change through.
+Keep each PR coherent and reviewable. There are no numeric commit/PR caps.
+The hook checks changed-language format, lint and types; it does not run full
+tests, coverage or native builds and does not require a clean unstaged tree.
 
-## Architecture questions
+CI runs once on each pushed head and cancels an older run on the same ref.
+A small map in `scripts/check-commit.py` selects docs, tooling or application
+checks. It compares the whole feature branch against origin/main, or main's
+previous push against its head. Missing bases and unknown paths run full checks.
+The `quality` job always reports. See [Development checks](docs/planning/DEVELOPMENT_CHECKS.md)
+for the commands, coverage exclusions and release-sensitive paths.
 
-Send implementation architecture gaps or conflicts to the orchestrator; routine
-choices within settled specs remain worker autonomy. Every resulting decision
-ships as a short [ADR](docs/adr/README.md) with the affected implementation PR.
-Update affected canonical contracts together and preserve deprecated decisions
-with reciprocal replacement links. Review decisions at the final code head.
+Application changes require meaningful tests, Clippy, >=80% weighted Rust+TS/JS
+executable-line coverage including untested handwritten logic, and native WebView
+smoke. Release-sensitive changes additionally prove packaged release isolation;
+manual milestone checks run the full suite. Live paid hosts require owner approval.
 
-## Checks
+An independent context reviews the latest GitHub diff at the exact head.
+The author fixes findings; one targeted re-review follows. Required unresolved
+issues remain unmerged. The maintainer checks current head/base, independent
+review and green quality, squash merges, then verifies main. No structured
+receipts or separate patcher are required. Never fake test results or skip hooks.
 
-Ruff covers maintained Python; ESLint covers maintained JavaScript, including
-inline JavaScript in the interactive planning diagrams. Both allow zero
-reported violations. Python tests include real temporary Git repositories and CLI
-processes. Application gates additionally require rustfmt, Clippy with warnings as
-errors, frontend/Mod lint and type checking, cargo-llvm-cov, frontend coverage, and
-E2E. The scaffold task pins and installs the Rust/JS tools before these gates activate.
-
-Planning checks validate source designs, links and interactive communication flows;
-they are not application tests. No app code may be committed in planning mode.
+Important architecture decisions get short [ADRs](docs/adr/README.md).
+Routine decisions and ownership/spec updates can ship in the product PR.
 
 ## GitHub enforcement
 
-Repository: private `kartiksayani/ariadne`. Always squash and merge PRs into main;
-other merge methods are disabled. PR checks and the local hook retain the 1600-line
-cap for each authored source commit; main checks allow each resulting squash
-commit up to the 3200-line PR cap. Main push ranges may contain multiple squashes.
-Refresh feature branches with rebase when needed before final-head review.
-Keep branches for traceability; do not auto-delete them.
+The repository `kartiksayani/ariadne` is public. Observed on 2026-10-03:
+ruleset 24380843 blocks deletion and non-fast-forward updates with no bypass;
+24380844 requires a PR with one approval and permits administrator bypass.
+Neither requires status checks. The maintainer must check quality and independent
+review; these are not claimed as server-enforced requirements. Always squash
+merge. Do not change visibility, billing, rulesets or other remote settings.
 
-**GitHub rejected branch protection with HTTP 403 on this private repository's
-current plan (2026-10-02).** CI and the autonomous maintainer enforce the workflow,
-but an account with write access can still bypass them. Do not call main protected.
-The ready-to-apply payload is `.github/main-protection.json`; enable it after the
-owner upgrades to GitHub Pro. Never change visibility or billing automatically.
-
-Agents share the owner's GitHub identity. They post independent-context review
-comments, not impossible self-approvals. `maintainer-spec-review` is a commit status
-posted only after genuine review and final spec adjudication; it is not a fake CI
-job. No checks can prevent a malicious account administrator from changing policy.
-
-Organization security guidance was not checked: the owner explicitly requested
-proceeding without the review tool/MCP. No organization-compliance claim is made.
-
-## Bootstrap provenance
-
-The initial dependency/checker commits were tested locally while installing the
-hook itself. After the hook/CI foundation commit, normal commits use the same
-complete gate. The archived planning/prototype import is on a reference branch,
-not an application change or an exception for future feature PRs.
+MCP/the review tool remain disabled under the owner's explicit current-session waiver.
+Organization security guidance was not checked; no organizational approval is claimed.

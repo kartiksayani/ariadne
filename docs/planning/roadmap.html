@@ -67,20 +67,17 @@
 <body>
   <header>
     <h1>Ariadne execution roadmap</h1>
-    <p>44 bounded PR tasks · existing Claude conversation first · Codex native queue required.</p>
-    <p class="muted">Relative working-day estimates, not dates or promises. Dependencies and owned paths constrain the selected number of workers. This offline view displays evidence; the maintainer verifies GitHub before executing or merging.</p>
+    <p id="catalogue-summary"></p>
+    <p class="muted">Relative working-day estimates, not dates or promises. Dependencies and owned paths constrain the selected number of workers. Completion is maintainer-updated; check GitHub before scheduling or merging. One implementer until the walking slice.</p>
     <div class="controls">
       <label>Find task<input id="search" type="search" placeholder="ID, title, path or criterion"></label>
       <label>Milestone<select id="phase"><option value="all">All milestones</option></select></label>
-      <label>Evidence state<select id="status"><option value="all">All states</option><option value="available">Dependencies merged</option><option value="blocked">Dependencies pending</option><option value="merged">Merged evidence imported</option></select></label>
-      <label>Workers / lanes<select id="workers"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>6</option><option>8</option></select></label>
+      <label>Task state<select id="status"><option value="all">All states</option><option value="available">Dependencies merged</option><option value="blocked">Dependencies pending</option><option value="merged">Merged</option></select></label>
+      <label>Workers / lanes<select id="workers"><option selected>1</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option></select></label>
       <label class="check"><input id="critical" type="checkbox">Critical path only</label>
-      <label>Import merged-PR evidence<input id="evidence" type="file" accept="application/json,.json"></label>
-      <button id="clear-evidence" type="button">Clear imported evidence</button>
       <button id="download" type="button">Download task JSON</button>
     </div>
     <p id="summary" role="status" aria-live="polite"></p>
-    <p id="evidence-status" class="muted">No evidence imported. No task is claimed complete.</p>
   </header>
   <main>
     <div class="layout">
@@ -89,13 +86,13 @@
           <button id="gantt-view" type="button" aria-pressed="true">Gantt estimate</button>
           <button id="graph-view" type="button" aria-pressed="false">Dependency graph</button>
         </div>
-        <div class="legend"><span>Orange + C: projected critical path</span><span>Green + M: qualifying imported merge evidence</span><span>Arrows: actual task dependencies</span><span>W: assigned worker lane</span></div>
+        <div class="legend"><span>Orange + C: projected critical path</span><span>Green + M: maintainer-recorded merge</span><span>Arrows: actual task dependencies</span><span>W: assigned worker lane</span></div>
         <p class="muted" id="chart-note">Filters hide rows only; estimates still use the complete unfinished catalogue.</p>
         <div id="chart" class="scroll" aria-label="Interactive task chart"></div>
       </section>
       <aside id="detail" class="panel" aria-label="Selected task details"><h2>Choose a task</h2><p>Click a bar or graph node, or use Tab and Enter. Dependency buttons open related tasks.</p></aside>
     </div>
-    <footer>Source: <a href="../delivery/tasks.json">tasks.json</a> and <a href="ROADMAP.md">execution rules</a>. Data is embedded for file:// use. No external scripts, fonts or requests. Offline imports cannot establish authenticity; export verified evidence from the maintainer ledger.</footer>
+    <footer>Source: <a href="../delivery/tasks.json">tasks.json</a> and <a href="ROADMAP.md">execution rules</a>. Data is embedded for file:// use. No external scripts, fonts or requests. Regenerate after task updates with python3 scripts/regenerate-roadmap.py.</footer>
   </main>
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
@@ -124,7 +121,10 @@
         "rtk proxy sw_vers; rtk proxy uname -m; rtk proxy xcode-select -p",
         "Review saved exact generator command/version, staged pristine template hash and pinned dependency ledger."
       ],
-      "estimate_days": 0.5
+      "estimate_days": 0.5,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/11"
+      }
     },
     {
       "id": "P0.2",
@@ -159,14 +159,17 @@
         "Integrate the pinned staged template deliberately; compile the ten Rust workspace packages and three thin entry points: desktop, ariadne and ariadne-mcp.",
         "Activate phase application before the first production source/Cargo commit; pin/install rustfmt, Clippy, coverage, browser/native automation and zero-warning TS/JS/CSS lint in CI.",
         "A UI action in the actual Tauri test process invokes Rust and displays its nonce/result; failure to launch or missing Rust execution fails E2E. Release builds contain no test automation services.",
-        "Both canonical LCOV reports account for all production sources, with explicit narrowly reviewed treatment of nonexecutable/type-only files; weighted executable Rust+TS/JS line coverage, including shipped Mod .mjs/.cjs, is at least 80%. Keep bootstrap within the PR cap with generated template provenance and no hidden handwritten exclusions."
+        "Both canonical LCOV reports account for all production sources, with explicit narrowly reviewed treatment of nonexecutable/type-only files; weighted executable Rust+TS/JS line coverage, including shipped Mod .mjs/.cjs, is at least 80%. Keep template provenance and no hidden handwritten exclusions."
       ],
       "checks": [
         "rtk proxy cargo build --workspace --locked",
         "rtk proxy npm run test:e2e -- --suite process-contract",
         "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree"
       ],
-      "estimate_days": 2
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/14"
+      }
     },
     {
       "id": "P0.3a",
@@ -1249,7 +1252,7 @@
       ],
       "acceptance": [
         "SVG uses fixed node/depth/leaf/root dimensions, stable ordered tree layout, cubic parent edges and distinct labelled dashed replacement edges (D07).",
-        "Shared filters/selection route to same detail; cursor-anchored zoom 0.25\u20132.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
+        "Shared filters/selection route to same detail; cursor-anchored zoom 0.25–2.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
       ],
       "checks": [
         "rtk proxy npm run test:ui -- --project graph-layout"
@@ -1539,7 +1542,7 @@
       ],
       "acceptance": [
         "Clean checkout builds/installs recorded source revision; packaged offline demo/history/owner edits, both supported integrations, native routing and owned uninstall pass on recorded Mac.",
-        "Every non-deferred V01\u2013V29 row links proved-on-version evidence or a concrete external blocker; distinguish mock/transport/production/live/native evidence and retain seeds/hashes/logs.",
+        "Every non-deferred V01–V29 row links proved-on-version evidence or a concrete external blocker; distinguish mock/transport/production/live/native evidence and retain seeds/hashes/logs.",
         "README covers install/unsigned Open Anyway/setup/both hosts/60-second tour/rules/recovery/uninstall/limits; record no remote assets, telemetry, updater, host transcript/credential handling or release test service.",
         "Public plugin and exotic recovery remain deferred; reviewed repository changes are publishable under existing authorization, while signed public app distribution is a later decision."
       ],
@@ -1556,35 +1559,6 @@
   (() => {
     const idOrder = (a, b) => a.id.localeCompare(b.id, 'en', {numeric: true});
     const asSet = value => value instanceof Set ? value : new Set(value || []);
-
-    function validateCatalogue(catalogue) {
-      if (catalogue.schema_version !== 1 || !Array.isArray(catalogue.tasks)) {
-        throw new Error('Expected schema_version 1 and a tasks array.');
-      }
-      const ids = new Set();
-      for (const task of catalogue.tasks) {
-        if (!task.id || ids.has(task.id) || !task.title || !task.phase ||
-            !Number.isFinite(task.estimate_days) || task.estimate_days <= 0) {
-          throw new Error('Invalid or duplicate task: ' + task.id);
-        }
-        ids.add(task.id);
-        for (const field of ['depends_on', 'paths', 'spec', 'acceptance', 'checks']) {
-          if (!Array.isArray(task[field]) || task[field].some(value => typeof value !== 'string')) {
-            throw new Error('Invalid ' + field + ' for ' + task.id);
-          }
-        }
-        for (const field of ['paths', 'spec', 'acceptance', 'checks']) {
-          if (!task[field].length) throw new Error('Empty ' + field + ' for ' + task.id);
-        }
-      }
-      for (const task of catalogue.tasks) {
-        if (task.depends_on.some(id => !ids.has(id) || id === task.id)) {
-          throw new Error('Unknown/self dependency for ' + task.id);
-        }
-      }
-      topological(catalogue.tasks);
-      return true;
-    }
 
     function topological(tasks) {
       const ordered = [];
@@ -1637,16 +1611,6 @@
       const done = asSet(completed);
       if (done.has(task.id)) return 'merged';
       return task.depends_on.every(id => done.has(id)) ? 'available' : 'blocked';
-    }
-
-    function qualifiedEvidence(record) {
-      const sha = value => typeof value === 'string' && /^[a-f0-9]{40}$/u.test(value);
-      return record && record.state === 'MERGED' &&
-        /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+$/u.test(record.pr_url || '') &&
-        typeof record.merged_at === 'string' && Number.isFinite(Date.parse(record.merged_at)) &&
-        sha(record.merged_commit) && sha(record.head_sha) &&
-        ['reviewed_head', 'checks_head', 'spec_review_head'].every(key => record[key] === record.head_sha) &&
-        record.checks_passed === true && record.review_passed === true && record.spec_review_passed === true;
     }
 
     function schedule(tasks, workers = 3, completed = []) {
@@ -1710,8 +1674,8 @@
         dependency_days: Math.max(0, ...dependencyEnds.values()), workers};
     }
 
-    globalThis.ariadneRoadmap = {validateCatalogue, topological, patternsOverlap, ownershipOverlap,
-      selectTask, dependencies, taskStatus, qualifiedEvidence, schedule};
+    globalThis.ariadneRoadmap = {topological, patternsOverlap, ownershipOverlap,
+      selectTask, dependencies, taskStatus, schedule};
   })();
   </script>
   <script id="roadmap-ui">
@@ -1719,13 +1683,11 @@
   (() => {
     const catalogue = JSON.parse(document.getElementById('roadmap-data').textContent);
     const engine = globalThis.ariadneRoadmap;
-    engine.validateCatalogue(catalogue);
     const tasks = catalogue.tasks;
     const byId = new Map(tasks.map(task => [task.id, task]));
     const $ = id => document.getElementById(id);
     const svgNS = 'http://www.w3.org/2000/svg';
-    let completed = new Set();
-    let evidence = new Map();
+    const completed = new Set(tasks.filter(task => task.completion).map(task => task.id));
     let selected = null;
     let view = 'gantt';
     let plan;
@@ -1765,11 +1727,10 @@
       panel.replaceChildren();
       node('h2', task.id + ' · ' + task.title, panel);
       node('p', task.phase + ' · ' + task.estimate_days + ' estimated work days · ' +
-        (completed.has(task.id) ? 'imported merged evidence' :
+        (completed.has(task.id) ? 'merged' :
           'projected day ' + record.start + '–' + record.end + ', worker ' + (record.lane + 1)), panel);
-      node('p', 'One small PR, preferably about 500 handwritten changed lines, ≤3200 total; ' +
-        'each commit ≤1600. Every application commit passes all gates and ' +
-        '≥80% weighted Rust+TS/JS coverage.', panel);
+      node('p', 'Coherent PRs, independent exact-head review and relevant CI. ' +
+        'Application coverage stays ≥80% weighted Rust+TS/JS.', panel);
       node('h3', 'Dependencies', panel);
       if (!task.depends_on.length) node('p', 'No prerequisite task.', panel);
       for (const id of task.depends_on) taskButton(byId.get(id), panel);
@@ -1796,13 +1757,11 @@
         node('h3', 'Direct successors', panel);
         for (const other of downstream) taskButton(other, panel);
       }
-      if (evidence.has(task.id)) {
-        const recordEvidence = evidence.get(task.id);
-        node('h3', 'Imported merge evidence', panel);
-        const link = node('a', recordEvidence.pr_url, panel);
-        link.href = recordEvidence.pr_url;
-        node('p', 'Merged ' + recordEvidence.merged_at + ' · source head ' + recordEvidence.head_sha + ' · merged commit ' + recordEvidence.merged_commit, panel);
-        node('p', 'Display only. The maintainer must verify current GitHub facts and evidence authenticity.', panel).className = 'muted';
+      if (task.completion) {
+        node('h3', 'Completed task', panel);
+        const link = node('a', task.completion.pr_url, panel);
+        link.href = task.completion.pr_url;
+        node('p', 'Maintainer-recorded merge. Check GitHub before scheduling or merging.', panel).className = 'muted';
       }
     }
 
@@ -1928,7 +1887,7 @@
       plan = engine.schedule(tasks, Number($('workers').value), completed);
       const visible = visibleTasks();
       $('summary').textContent = visible.length + '/' + tasks.length + ' shown · ' + completed.size +
-        ' imported merges · ' + plan.total_days + ' projected remaining work days with ' + plan.workers +
+        ' merged tasks · ' + plan.total_days + ' projected remaining work days with ' + plan.workers +
         ' workers · ' + plan.dependency_days + ' dependency-only lower bound. Owned paths and lanes may serialize work.';
       $('chart').replaceChildren(visible.length ? (view === 'gantt' ? renderGantt(visible) : renderGraph(visible)) : node('p', 'No tasks match these filters.'));
       $('gantt-view').setAttribute('aria-pressed', String(view === 'gantt'));
@@ -1944,41 +1903,13 @@
     for (const [id, nextView] of [['gantt-view', 'gantt'], ['graph-view', 'graph']]) {
       $(id).addEventListener('click', () => { view = nextView; render(); });
     }
-    $('evidence').addEventListener('change', async () => {
-      const file = $('evidence').files[0];
-      if (!file) return;
-      try {
-        if (file.size > 2 * 1024 * 1024) throw new Error('Evidence file exceeds 2 MiB.');
-        const imported = JSON.parse(await file.text());
-        if (imported.schema_version !== 1 || !Array.isArray(imported.tasks)) throw new Error('Expected schema_version 1 and tasks array.');
-        const entries = new Map();
-        for (const entry of imported.tasks) {
-          if (!byId.has(entry.task_id) || entries.has(entry.task_id) || !engine.qualifiedEvidence(entry)) {
-            throw new Error('Invalid, duplicate or incomplete merge evidence for ' + entry.task_id);
-          }
-          entries.set(entry.task_id, entry);
-        }
-        evidence = entries;
-        completed = new Set(entries.keys());
-        $('evidence-status').textContent = 'Imported ' + completed.size + ' qualifying merged-PR records from ' + file.name + '. Display only; authenticity has not been verified here.';
-        $('evidence-status').className = 'muted';
-        render();
-      } catch (error) {
-        $('evidence-status').textContent = 'Import rejected: ' + error.message + ' Previous evidence retained.';
-        $('evidence-status').className = 'error';
-      }
-    });
-    $('clear-evidence').addEventListener('click', () => {
-      completed = new Set(); evidence = new Map(); $('evidence').value = '';
-      $('evidence-status').textContent = 'No evidence imported. No task is claimed complete.';
-      $('evidence-status').className = 'muted';
-      render();
-    });
     $('download').addEventListener('click', () => {
       const url = URL.createObjectURL(new Blob([JSON.stringify(catalogue, null, 2) + '\n'], {type: 'application/json'}));
       const link = node('a'); link.href = url; link.download = 'tasks.json'; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 0);
     });
+    $('catalogue-summary').textContent = tasks.length + ' tasks · ' + tasks.reduce((sum, task) => sum + task.estimate_days, 0) +
+      ' estimated work days · Claude walking slice first; full release scope retained.';
     render();
   })();
   </script>

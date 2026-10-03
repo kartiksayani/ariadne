@@ -70,9 +70,9 @@ fs.writeFileSync(process.argv[1] + '/runtime.ts', executable.outputText);
             uncovered = records["apps/desktop/src/notgenerated/uncovered.ts"]
             self.assertTrue(uncovered)
             self.assertEqual(set(uncovered), {0})
-            config = {"coverage_tooling": ["apps/desktop/vite.config.ts"]}
-            inventory, _, tooling = COMMIT.coverage_policy(root, config)
-            self.assertEqual(inventory - tooling, expected)
+            config = {"coverage_exclusions": ["apps/desktop/vite.config.ts"]}
+            inventory, excluded = COMMIT.coverage_policy(root, config)
+            self.assertEqual(inventory - excluded, expected)
             covered, total = COMMIT.coverage_counts([report], root, config)
             self.assertEqual(covered, sum(hit > 0 for hits in records.values() for hit in hits))
             self.assertEqual(total, sum(map(len, records.values())))

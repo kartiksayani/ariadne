@@ -25,7 +25,10 @@
         "rtk proxy sw_vers; rtk proxy uname -m; rtk proxy xcode-select -p",
         "Review saved exact generator command/version, staged pristine template hash and pinned dependency ledger."
       ],
-      "estimate_days": 0.5
+      "estimate_days": 0.5,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/11"
+      }
     },
     {
       "id": "P0.2",
@@ -60,14 +63,17 @@
         "Integrate the pinned staged template deliberately; compile the ten Rust workspace packages and three thin entry points: desktop, ariadne and ariadne-mcp.",
         "Activate phase application before the first production source/Cargo commit; pin/install rustfmt, Clippy, coverage, browser/native automation and zero-warning TS/JS/CSS lint in CI.",
         "A UI action in the actual Tauri test process invokes Rust and displays its nonce/result; failure to launch or missing Rust execution fails E2E. Release builds contain no test automation services.",
-        "Both canonical LCOV reports account for all production sources, with explicit narrowly reviewed treatment of nonexecutable/type-only files; weighted executable Rust+TS/JS line coverage, including shipped Mod .mjs/.cjs, is at least 80%. Keep bootstrap within the PR cap with generated template provenance and no hidden handwritten exclusions."
+        "Both canonical LCOV reports account for all production sources, with explicit narrowly reviewed treatment of nonexecutable/type-only files; weighted executable Rust+TS/JS line coverage, including shipped Mod .mjs/.cjs, is at least 80%. Keep template provenance and no hidden handwritten exclusions."
       ],
       "checks": [
         "rtk proxy cargo build --workspace --locked",
         "rtk proxy npm run test:e2e -- --suite process-contract",
         "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree"
       ],
-      "estimate_days": 2
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/14"
+      }
     },
     {
       "id": "P0.3a",
@@ -1150,7 +1156,7 @@
       ],
       "acceptance": [
         "SVG uses fixed node/depth/leaf/root dimensions, stable ordered tree layout, cubic parent edges and distinct labelled dashed replacement edges (D07).",
-        "Shared filters/selection route to same detail; cursor-anchored zoom 0.25\u20132.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
+        "Shared filters/selection route to same detail; cursor-anchored zoom 0.25–2.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
       ],
       "checks": [
         "rtk proxy npm run test:ui -- --project graph-layout"
@@ -1440,7 +1446,7 @@
       ],
       "acceptance": [
         "Clean checkout builds/installs recorded source revision; packaged offline demo/history/owner edits, both supported integrations, native routing and owned uninstall pass on recorded Mac.",
-        "Every non-deferred V01\u2013V29 row links proved-on-version evidence or a concrete external blocker; distinguish mock/transport/production/live/native evidence and retain seeds/hashes/logs.",
+        "Every non-deferred V01–V29 row links proved-on-version evidence or a concrete external blocker; distinguish mock/transport/production/live/native evidence and retain seeds/hashes/logs.",
         "README covers install/unsigned Open Anyway/setup/both hosts/60-second tour/rules/recovery/uninstall/limits; record no remote assets, telemetry, updater, host transcript/credential handling or release test service.",
         "Public plugin and exotic recovery remain deferred; reviewed repository changes are publishable under existing authorization, while signed public app distribution is a later decision."
       ],

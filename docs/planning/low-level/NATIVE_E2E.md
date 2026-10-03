@@ -19,7 +19,7 @@ command results, and a detached Rust test server cannot satisfy this gate.
 The embedded driver's element actions generate JavaScript events in the real
 WebView. They prove the UI/invoke/Rust/disk path, not OS mouse/keyboard delivery,
 native menus, dialogs or tray behavior. [ADR-0002](../../adr/ADR-0002-test-webview-and-macos-surfaces.md)
-retains this per-commit gate and adds a bounded Appium/Mac2 supplement for genuine
+retains this application CI gate (cadence revised by ADR-0018) and adds a bounded Appium/Mac2 supplement for genuine
 OS interactions. [Mac testing setup](../../development/MACOS_TEST_SETUP.md) records
 machine prerequisites separately from application acceptance.
 
@@ -216,8 +216,7 @@ Process-helper regression tests exercise descendant cleanup, deadline and SIGINT
 Budget the initial implementation as one focused day: approximately half for
 the scaffold/typed ping and half for native macOS build, coverage, driver and
 cleanup evidence. This is an estimate, not an executed benchmark. Complete the
-smoke before the first scaffold commit; keep commits <=1600 handwritten lines
-and PRs <=3200. Allocate the harness with that slice rather than deferring E2E
+smoke with the scaffold slice. Allocate the harness with that slice rather than deferring E2E
 until the domain store is complete.
 
 The minimal native command is typed `native_ping(request: PingRequest) ->
@@ -270,8 +269,8 @@ provider transport may be deterministic fake: submit five messages through the
 native UI, retain the real invoke/dispatcher/store path, and assert five ordered
 distinct input/attempt/result receipts with no coalescing or cross-binding
 effects. Native `invoke` mocks and a detached backend are forbidden in this
-acceptance suite. Live Claude/Codex transport proof remains the separately
-budgeted M7 gate.
+acceptance suite. An early live Claude proof needs owner approval; final live Claude/Codex acceptance
+remains the separately budgeted M7 gate.
 
 ## macOS interaction supplement
 
@@ -300,16 +299,17 @@ ownership. Fail if a required port is occupied by an unrelated listener.
 
 ## Commit and release gates
 
-From the first app commit, default `npm run test:e2e` invokes both the embedded
+Default `npm run test:e2e` invokes both the embedded
 native wrapper and production boundary checker and fails closed. `--suite all`
 is equivalent; `--suite native` selects the embedded proof only and
 `--suite process-contract` selects the real Node process-helper suite. Invalid or
 extra selectors fail. `npm run test:native` is the explicit embedded-only command;
-the installed gate always uses the complete default. Every app commit also runs all maintained-code lint, meaningful unit
-and functional tests, fresh Rust/TypeScript LCOV and >=80% weighted overall
-application coverage, including untested production files. A native test pass
+application CI uses embedded smoke; release-sensitive changes and manual milestones
+use the complete default. The hook runs cheap changed-language format/lint/types.
+Application CI runs meaningful unit/functional tests, fresh Rust/TypeScript LCOV
+and >=80% weighted application coverage, including untested production files. A native test pass
 does not imply a coverage percentage. Missing reports or native prerequisites
-must block the commit/CI result. Record exact package/toolchain/macOS versions,
+must block the application CI result. Record exact package/toolchain/macOS versions,
 command, binary hash, run nonce, PID witness and assertions in the verification
 ledger only after an actual run.
 
