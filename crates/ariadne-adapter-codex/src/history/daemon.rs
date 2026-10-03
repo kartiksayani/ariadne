@@ -10,17 +10,20 @@ pub struct CodexDaemonReader {
     usable: bool,
 }
 impl CodexDaemonReader {
+    pub(crate) fn queue_executable(&self) -> &Path {
+        self.executable.path()
+    }
     pub fn open(options: CodexOptions, endpoint: EndpointRef) -> Result<Self, AdapterError> {
         Self::open_before(options, endpoint, Instant::now() + Duration::from_secs(10))
     }
-    pub(super) fn open_before(
+    pub(crate) fn open_before(
         options: CodexOptions,
         endpoint: EndpointRef,
         deadline: Instant,
     ) -> Result<Self, AdapterError> {
         let configured_socket = options.endpoint_path(&endpoint)?;
         let executable = ExecutableIdentity::read(&options.executable)?;
-        executable.version()?;
+        executable.version_before(deadline)?;
         let socket = SocketIdentity::read(&configured_socket)?;
         let stream = socket.connect(deadline)?;
         socket.verify_peer(&stream)?;
@@ -82,7 +85,7 @@ impl CodexDaemonReader {
             Instant::now() + Duration::from_secs(10),
         )
     }
-    pub(super) fn bind_before(
+    pub(crate) fn bind_before(
         self,
         request: ConnectRequest,
         instance_id: UuidV4,

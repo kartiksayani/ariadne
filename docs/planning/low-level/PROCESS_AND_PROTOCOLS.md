@@ -276,6 +276,32 @@ No shell. One command timeout20s; exit0 is queue acceptance only. CLI text recei
 is optional diagnostics, not a stable parser dependency. A nonzero exit or timeout
 after spawn is uncertain unless the adapter can prove rejection before delivery.
 No retry by default. Marker in the original user message binds the actual turn.
+Verified exact original user-message marker/full-payload evidence normalizes
+acceptance before turn-start, even after a lost sender receipt. Preserve a valid
+actual clientId as the opaque receipt provider reference, else the actual bounded
+user-message ID; unusable optional clientId is absent, never truncated. Provider
+references alone never match or deduplicate Ariadne attempts. Receipt timestamps
+remain the original observation time and stay out of stable accepted event IDs.
+
+The native Adapter executes blocking observer/sender IO on one bounded provider
+worker, never the UI/executor thread; its absolute budgets include waiting time.
+Worker/correlation bounds reject only a new proven-unadmitted sender. Retained
+identical pending submissions remain uncertain and completed submissions replay
+saved outcomes; cancellation after possible send never authorizes resend.
+Provider-private context is capped at 100 simultaneous attempts and retires after
+acknowledged terminal facts. Core/runtime remains durable replay/lease authority;
+cache retirement or restart does not request retrying a possibly sent attempt.
+
+Observation checkpoints are provider-private versioned instance/scope/offset
+candidates. Echo them only after committing that page's durable effects; retained
+batches replay until acknowledgement. Old/foreign/unoffered observation tokens
+reject clearly, while explicit persisted-attempt reconciliation remains usable
+with fresh provider pagination after restart. Presence-only observations are
+ephemeral and cannot block idle disconnect/reconnect. Pending durable lifecycle
+batches prevent changing connection scope; same-generation same-identity reconnect
+preserves context, and a generation change retires old context only after pending
+facts have been acknowledged. Runtime P3.2 owns this composition and the P3.6
+acceptance join; see [ADR-0027](../../adr/ADR-0027-native-codex-queue-and-observation.md).
 
 While outstanding: poll full turn pages every250ms, back off to1s on transient
 read errors while showing reconnecting. Traverse newest-first until the saved
