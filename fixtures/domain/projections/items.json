@@ -1,0 +1,115 @@
+{
+  "items": [
+    {
+      "item": {
+        "id": "1",
+        "ordinal": 1,
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "parent": null,
+        "question": "Keep the full reply history?",
+        "type": "decision",
+        "status": "done",
+        "owner": {
+          "kind": "me"
+        },
+        "revision": 3,
+        "question_revision": 1,
+        "next_child": 2,
+        "ask": null,
+        "note": null,
+        "options": [
+          {
+            "id": "keep",
+            "label": "Keep complete history",
+            "consequence": "Every reply and outcome stays readable.",
+            "recommended": true
+          }
+        ],
+        "links": [
+          {
+            "kind": "doc",
+            "label": "Storage design",
+            "target": "docs/storage.md"
+          },
+          {
+            "kind": "file",
+            "label": "Receipt module",
+            "target": "crates/ariadne-domain/src/models/receipts.rs"
+          },
+          {
+            "kind": "pr",
+            "label": "Recorded proposal",
+            "target": "https://github.com/kartiksayani/ariadne/pull/32"
+          }
+        ],
+        "outcome": "Recorded final decision.",
+        "why": "Explicit agent operation preserved its rationale.",
+        "replaced_by": null,
+        "created_at": "2026-10-03T12:00:00.000Z",
+        "updated_at": "2026-10-03T12:00:40.000Z",
+        "created_message_id": "00000000-0000-4000-8000-000000000101",
+        "waiting_since": null,
+        "recipient_binding_id": null,
+        "current_round_id": "00000000-0000-4000-8000-000000000040",
+        "source_round_id": null,
+        "origin": null
+      },
+      "updated_messages": {
+        "items": [
+          {
+            "id": "00000000-0000-4000-8000-000000000103",
+            "number": 3,
+            "author": "agent",
+            "kind": "reply",
+            "body": "The full history is retained.\nA follow-up task covers receipt lookup.",
+            "created_at": "2026-10-03T12:00:18.000Z",
+            "item_id": "1",
+            "topic_id": "00000000-0000-4000-8000-000000000010",
+            "items_touched": [
+              "1",
+              "1.1"
+            ],
+            "binding_id": "00000000-0000-4000-8000-000000000020",
+            "input_id": "00000000-0000-4000-8000-000000000070",
+            "attempt_id": "00000000-0000-4000-8000-000000000060",
+            "host_turn_id": "demo-turn-60",
+            "round_id": "00000000-0000-4000-8000-000000000040",
+            "origin": null
+          }
+        ],
+        "next_cursor": {
+          "schema": 1,
+          "view": "item_updated_messages",
+          "filter_digest": "d0922c70bf8906cc33bf6c385aa4316fedb65d703f5093b5dbb6bf56b7730277",
+          "after": {
+            "kind": "sequence",
+            "number": 3,
+            "id": "00000000-0000-4000-8000-000000000103"
+          },
+          "revision": 21
+        },
+        "snapshot_revision": 21
+      },
+      "status_history": {
+        "items": [
+          {
+            "old_status": "waiting_on_me",
+            "new_status": "done",
+            "previous_outcome": null,
+            "previous_why": null,
+            "previous_replaced_by": null,
+            "cause_message_id": "00000000-0000-4000-8000-000000000103",
+            "at": "2026-10-03T12:00:03.000Z",
+            "binding_id": "00000000-0000-4000-8000-000000000020",
+            "handled_through_message_number": 2,
+            "reason": "Owner selected complete history."
+          }
+        ],
+        "next_cursor": null,
+        "snapshot_revision": 21
+      }
+    }
+  ],
+  "next_cursor": null,
+  "snapshot_revision": 21
+}

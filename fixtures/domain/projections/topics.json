@@ -1,0 +1,30 @@
+{
+  "items": [
+    {
+      "id": "00000000-0000-4000-8000-000000000010",
+      "name": "Delivery decisions",
+      "order": 1,
+      "revision": 8,
+      "created_at": "2026-10-03T12:00:00.000Z",
+      "archived_at": null,
+      "origin": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "name": "Continued context",
+      "order": 2,
+      "revision": 1,
+      "created_at": "2026-10-03T12:00:26.000Z",
+      "archived_at": null,
+      "origin": {
+        "project_id": "00000000-0000-4000-8000-000000000901",
+        "session_id": "00000000-0000-4000-8000-000000000902",
+        "topic_id": "00000000-0000-4000-8000-000000000910",
+        "source_revision": 12,
+        "continued_at": "2026-10-03T12:00:26.000Z"
+      }
+    }
+  ],
+  "next_cursor": null,
+  "snapshot_revision": 21
+}
