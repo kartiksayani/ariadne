@@ -27,16 +27,77 @@ classify host-delivery uncertainty before any new send. CLI `bridge report` pers
 normalized events through core directly, so current-turn completion can be saved
 when desktop is closed. Hook/report retries reuse event IDs.
 
-Control envelope: `{v:1,kind:"request",id,method,params}`; response
-`{v:1,kind:"response",id,result}` or `error`. Methods: `ping`, `claim`,
-`connection_status`; domain bootstrap and event persistence use ordinary CLI core
-commands. Requests include binding/generation. stdout is structured JSON only.
+The runtime owns the private codec, reused by the installed CLI. Each Unix
+connection carries one request and one response: a four-byte unsigned big-endian
+byte length followed by UTF-8 JSON. Reject zero or more than 1 MiB before
+allocating the frame. One absolute 5-second deadline covers complete frame IO;
+partial bytes never extend it. There is no multiplexing or automatic retry.
+
+Control request: `{v:1,kind:"request",id:UuidV4,method,params}`. A response has
+`{v:1,kind:"response",id,result}` or `{v:1,kind:"response",id,error:CoreError}`,
+exactly one of result/error and the same ID. Malformed frames without a trusted
+UUID ID may close; never invent an ID. Unknown fields and mismatched method
+params reject. Producers and consumers validate canonical CoreError values; valid
+errors remain exact. Malformed errors return bounded nonretryable protocol_conflict
+without raw invalid data, retaining original request/event/operation ID guidance
+and no inference that effects were absent. Typed methods are:
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `ping` | `{binding_id:UuidV4,generation:UuidV4}` | the same binding/generation; proves scoped control reachability only |
+| `claim` | canonical `ClaimRequest={binding_id,generation,request_id}`; envelope `id=request_id` | canonical `PreparedAttempt|null`, validated against that request |
+| `connection_status` | `{binding_id:UuidV4,generation:UuidV4}` | canonical `BindingSummary` from the current registered binding; presence is null unless actually qualified |
+
+Ping/status require the current held generation. Claim routing verifies request
+syntax, peer UID and the registered binding, and retains the actual current
+binding lease throughout the blocking core call. Its trusted dispatch context
+contains the current lease generation, while the original ClaimRequest is
+forwarded unchanged. Core replays the exact saved claim before generation/state
+guards; a fresh stale request still rejects. A socket timeout, caller drop or
+shutdown cannot release a lease while its already-started core call may commit.
+Reuse the same claim ID after a possibly saved claim; no local claim cache or
+new-ID retry is authorized. Core calls run off the executor and socket waits
+never overlap a store transaction. Connection admission is bounded to 16,
+including blocking calls retained after socket timeout; shutdown stops accepts
+and pending IO while those calls retain their physical lease.
+
+Stable owned single-link regular lease files have mode 0600. Home, run and
+lease directories have mode 0700; opening these targets does not follow
+symlinks. The runtime-instance lock is `run/runtime.lock`. Socket setup/removal
+requires that lock and validates owned socket type/mode. A closed listener may
+leave a stale endpoint for the next proven owner to remove.
+
+Direct event reporting forwards the original event to CoreService using trusted
+current registered binding context; it must not reject an exact durable replay
+solely because its originating generation is old. Ordinary reports have no
+historical scope. Caller-supplied old IDs/generation cannot create a trusted
+VerifiedHistoricalScope; fresh historical evidence needs verified reconciliation.
+Until the real registered core composition exists, the production `bridge report`
+command returns nonretryable `unsupported` with a concrete reason, never a saved
+receipt. The injected direct-report function works without the desktop socket or
+lease. Durable claim/report integration remains P2.2, P1.4 registration and P3.2
+runtime wiring; P3.1 implementation alone does not close that acceptance join.
+CLI stdout is the canonical structured application envelope. Domain bootstrap
+and event persistence use ordinary CLI core commands.
 Startup drains persisted state before enabling dispatch. Window close hides;
 Quit pauses scheduling in memory and releases leases. New saved messages wait
 until reopening; already accepted turns can still run. User pause persists and
 is never undone by app restart. No provider launch/resume is performed.
 
 ## 2. Shared adapter contract
+
+Binding setup performs a trusted read-only provider/config/version/endpoint and
+explicit-thread qualification outside registry/project/session locks. Native
+core-owned `VerifiedHost` facts carry no active provider handle; exact operation
+replay is checked before verification and again when locks are reacquired. Final
+IDs/generation are allocated only during locked persistence. Runtime then calls
+Adapter.connect with those durable IDs outside locks before lease/dispatch;
+failure reports generation-scoped disconnected and never dispatches. Unknown
+preflight connection remains Unknown with a disconnected dispatch barrier.
+Provider/runtime tasks own that final connection and report wiring. Codex's
+current reader qualifies its selected thread during bind, so production setup
+also needs a provider-private read-only qualifier before IDs; P1.4 does not add a
+placeholder-ID connection or an unused shared adapter method.
 
 See [Agent adapters](../AGENT_ADAPTERS.md) for the shared interface and later
 executable-extension design. Public registration/negotiation is deferred. Rust trait

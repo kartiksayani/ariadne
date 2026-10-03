@@ -98,6 +98,27 @@ after the session commit. If metadata conflicts, stop and show the affected path
 No bootstrap journal, completion-stage tracking or automatic setup repair is
 required; follow DOMAIN_AND_STORAGE section 4.
 
+Bootstrap keeps that session/actor namespace. With `existing_session_id`, check
+only the requested owner/session receipt. Without it, scan the requested project's
+authoritative sessions for one exact route/owner/command digest match: unrelated
+mismatches are ignored, one match replays, multiple exact matches return
+`binding_ambiguous`. Other projects' operation keys are unrelated. With no match,
+verify the explicitly chosen host outside every filesystem lock, then recheck
+replay and global selected routes under setup locks. Only the intended session's
+conflicting operation key returns `operation_reused`. Command normalization
+includes its discriminant and complete typed params, excluding op ID and the
+already validated envelope version. Pause and resume are different intents even
+with identical params.
+
+First connect commits session plus receipt at revision 1 before publishing the
+rebuildable index. Index failure reports `commit_uncertain` with op ID; same-op
+retry refreshes the index and returns saved IDs/generation without another
+mutation or provider check. Native `bindings::BindingService` retains typed
+core/registry/store errors and paths; ordinary pre-publication I/O is not an
+uncertain commit. Registration derives its initial display name from the
+canonical root basename under lock and preserves an existing metadata name;
+that derived name is not a request field or digest input.
+
 `MutationReceipt` is an untagged typed union: session commands return the existing
 `SavedReceipt` directly, project registration returns
 `{operation_id,project_id,registry_revision}`, and preference writes return
@@ -121,7 +142,7 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `binding_connect` | op_id, project_id, adapter_id, external_session_id, endpoint config, existing_session_id? | validated session+binding IDs, generation, capabilities, setup instruction |
 | `binding_pause/resume/disconnect` | binding_id, expected_generation, op_id | persisted dispatch state; disconnect does not kill host |
 | `input_submit` | session_id, binding_id, item_id or topic_id, kind, text, selected_option_id?, expected_question_revision?, supersedes_answer_id? | atomically owner Message + Answer if applicable + Input; status unchanged |
-| `input_cancel` | queued input_id, expected_revision, op_id | only before prepare; preserve message + cancellation record |
+| `input_cancel` | queued input_id, expected_revision, op_id | only before any preparation; preserve history, persist cancelled state + receipt |
 | `input_resolve` | input_id, attempt_id, decision (retry_unexecuted/resend/skip/request_result_repair/confirm_evidence), reason, expected_revision, op_id | queue recovery; decisions in queue spec |
 | `topic_archive/restore` | topic_id, expected_revision, op_id | lifecycle only; archive guards active items/unresolved inputs |
 | `session_close/reopen` | session_id, expected_revision, op_id | close requires dispatch paused, all items terminal and no unresolved inputs; never terminate host |
@@ -130,6 +151,23 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry |
 | `preferences_get` | none | local owner-only versioned UI preferences, including unsent drafts |
 | `reveal_item` | registered project/session/item IDs | focus route; no mutation |
+
+`input_submit` constructs ordinary item-targeted inputs. Continue and topic-only
+submission return `invalid_argument` directing the caller to `topic_continue`,
+whose preview/mapping and copied history commit atomically in P2.6. A supplied
+`expected_question_revision` remains a real locked guard for every item intent;
+staleness returns `question_changed`. `supersedes_answer_id` is valid only for
+Answer corrections. A changed current eligible Answer returns `revision_conflict`
+with the current session revision and guidance to reload that Answer.
+
+`input_cancel.expected_revision` guards the session revision. Cancellation requires
+queued state, no attempt history and no active attempt. It changes only Input state
+plus session update/revision and the durable `InputCancel` receipt; Message, Answer,
+frozen payload and round/item history remain intact. It creates no attempt-bound
+resolution history entry. Both commands replay the exact saved owner/session
+operation before mutable guards; changed normalized intent under the same operation
+key returns `operation_reused`. Native `inputs::InputService` supplies these real
+transactions; application composition delegates without changing CoreService.
 
 Owner transports use the generated `OwnerQueryRequest={session:SessionRef|null,
 request:QueryRequest}` and `OwnerMutationRequest={session:SessionRef|null,
@@ -144,12 +182,26 @@ commit uses the target route and verifies its explicit target agrees. Entry poin
 resolve registered scope before constructing trusted contexts. No caller selects
 an actor or arbitrary storage path through these routing wrappers.
 
-`binding_connect` creates a new Ariadne session by default. With
-existing_session_id it requires active state, no outstanding input and paused or
-disconnected old binding; preserve old binding history. Same host identity returns
-its existing binding, not another session. A different second enabled binding
-returns `binding_conflict`. Changing the active binding never silently retargets
-queued messages. Rebind requires resolving/cancelling old inputs first.
+`binding_connect` creates a new Ariadne session by default unless the host identity
+already belongs to a selected binding. Same-host validated reconnect keeps the
+session/binding, rotates generation and preserves owner pause/history/original
+attempt generations. Unresolved prepared work requires reconciliation; unsent
+queued work and resolved/sealed history alone do not imply uncertainty. Selected
+routes remain reserved while paused/disconnected/recovering or closed; a new
+connect to a closed session returns `invalid_transition` until explicit reopen.
+Different-host `existing_session_id` rebind requires active state, no queued,
+in-flight or needs-attention input and a paused/disconnected old binding. The old
+binding/history stays intact and its inactive former route is freed for a new
+default-connect session. A different enabled binding or route conflict returns
+`binding_conflict`; no queued message is silently retargeted.
+
+Trusted composition supplies read-only verified endpoint/config/version/thread
+facts through native `core::bindings::VerifiedHost`, outside all store locks.
+These facts are not a wire DTO or active provider handle. Unknown/incompatible
+qualification or unavailable host fails preflight; verified identity without an
+active connection observation persists Unknown with disconnected dispatch.
+Runtime later calls Adapter.connect using durable IDs/generation before acquiring
+dispatch authority. That provider wiring belongs to P3.6/runtime, not P1.4.
 
 Tauri command names use the snake_case names above; CLI uses nouns/verbs
 (`input submit`, `binding connect`, `topic continue`). `apply` uses operation

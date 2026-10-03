@@ -217,7 +217,7 @@ backlink; they never change status or question revision. A generic owner message
 opens a new round when the current pointer is absent or names a closed round.
 No helper rewrites old bodies, answers, snapshots or close timestamps. Failed calls
 leave the input snapshot unchanged. These native callable inputs are not additional
-wire DTOs. P2.1 owns Input construction/submission; core/store own actor/revision
+wire DTOs. P1.5 owns Input construction/submission; core/store own actor/revision
 checks, session revision, operation replay, final validation and atomic persistence.
 
 `validate_session_history` checks ordered counters, unique IDs, targeted messages,
@@ -257,6 +257,27 @@ flag only after blockers are resolved.
 schema and contains no credentials/tokens/environment dumps. Session host identity is `(adapter_id,endpoint_fingerprint,external_id)`;
 one live binding per identity across registered roots. Generation is a fresh UUIDv4 on a
 validated reconnect; prior attempts retain their originating generation.
+
+The selected `active_binding_id` reserves that host identity even when paused,
+disconnected, recovering or closed. Inactive historical bindings never win routing.
+Connect into a closed session requires explicit reopen; exact saved replay still
+returns its original receipt. Same-host reconnect retains the session/binding IDs,
+owner pause, immutable input context and original attempt generations. Unresolved
+prepared/in-flight/needs-attention work or an existing recovery reason requires
+reconciliation; never-prepared queued work and resolved/sealed attempts do not
+alone imply uncertain delivery. Different-host rebind requires an active session,
+paused/disconnected old binding and no queued/in-flight/needs-attention inputs.
+History stays intact; the former inactive host route becomes available for a new
+default-connect session, never implicit reactivation or retargeting.
+
+Trusted read-only verification precedes persistence outside all filesystem locks.
+Native `core::bindings::VerifiedHost` retains canonical endpoint/configuration,
+compatibility, availability, capability and qualified connection facts, without
+wire deserialization or an active provider handle. Core rechecks facts against
+the explicit request, replay and authoritative routes under setup locks before
+allocating final IDs. Unknown connection persists disconnected dispatch while
+retaining owner pause/recovery reasons. Only verified Connected may derive
+recovery/paused/enabled; preflight never grants a runtime dispatch lease.
 
 `EndpointRef={kind:unix_socket,path}|{kind:local_bridge,name}`. A symbolic bridge
 name identifies an already registered local bridge, resolved by trusted local
@@ -301,9 +322,20 @@ frozen ItemOption records. `InputContext={message_ids,item_ids,round_id,
 continuation_operation_id}` with required ID arrays and nullable scalar IDs.
 This is immutable owner text and its original target/context, including the
 question/options displayed in Sent after the live question changes.
+P1.5 ordinary item submissions freeze `context.item_ids=[target]`, no caller-selected
+message IDs, the chosen existing or fresh round ID, and no continuation operation.
+P2.2 renders additional current-target context into the immutable prepared Attempt;
+it never rewrites the original Input payload. Continue construction belongs to
+P2.6's atomic topic continuation with preview/mapping, not ordinary input submission.
 Do not treat the user's text as permission to run arbitrary tools.
 `state=queued|in_flight|handled|cancelled|needs_attention|skipped`.
 Attempts and resolution history are ordered arrays; active attempt is nullable.
+Owner cancellation requires queued, never-prepared state (empty attempts and no
+active attempt) and the expected session revision. It preserves the full Message,
+Answer, payload, counters and item/round history, saving cancelled state with an
+`InputCancel` receipt and one session revision. No fabricated attempt, resolution
+entry, time or reason accompanies cancellation. Exact operation replay still
+precedes these mutable guards.
 
 Attempt: `{id,purpose,repair_for_attempt_id,claim_request_id,binding_generation,prepared_at,formatted_payload,payload_sha256,wire_marker,
 acceptance,acceptance_receipt,acceptance_observed_at,host_turn_id,turn_state,turn_observed_at,domain_result,
@@ -559,6 +591,24 @@ connect checks existing identities before creating another binding. No bootstrap
 journal, automatic interrupted-setup repair or distributed transaction is required.
 If metadata is inconsistent, stop connection and show the affected path; do not
 route messages by guessing. No lock is held across a host call or inference.
+
+Native `Registry::open` accepts a trusted selected home. Its private schema-1
+project registry retains canonical roots/UUIDs and local-setup receipt digests;
+first persisted revision is 1. Registration derives only the first display name
+from the canonical UTF-8 root basename under the metadata lock and preserves an
+existing name. A separate schema-1 binding index uses typed host identity tuples.
+Complete rebuild scans only explicit registered roots and validated session files.
+Unavailable roots remain registered; duplicate metadata or selected routes stop
+with affected paths. Missing/stale typed-valid index data can be rebuilt, while
+malformed/future index or authoritative data remains unchanged with a typed error.
+
+First session plus owner receipt uses `Store::create_with_receipt` at revision 1
+and the same canonical route/actor/command hashing and no-clobber publication.
+Session commit precedes index publication. Post-commit index failure reports
+`commit_uncertain` with the operation ID; exact retry refreshes the index and
+returns saved IDs/generation without another session mutation. There is no
+journal, staged bootstrap transaction or automatic corruption repair.
+See [ADR-0026](../../adr/ADR-0026-register-roots-and-verify-binding-setup.md).
 
 ## 5. Capacity, queries and errors
 
