@@ -10,7 +10,6 @@ members = [
     "crates/ariadne-adapter-codex",
     "crates/ariadne-cli",
     "crates/ariadne-mcp",
-    "tools/coverage-inventory",
 ]
 resolver = "2"
 

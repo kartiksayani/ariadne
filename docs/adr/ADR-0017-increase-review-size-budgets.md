@@ -1,8 +1,8 @@
 # ADR-0017: Increase review size budgets
 
-Status: accepted
+Status: deprecated
 Supersedes: none
-Superseded by: none
+Superseded by: [ADR-0018](ADR-0018-recalibrate-delivery.md)
 
 ## Context
 

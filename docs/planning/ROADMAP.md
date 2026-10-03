@@ -1,14 +1,14 @@
 # Ariadne implementation roadmap
 
-The execution catalogue is [tasks.json](../delivery/tasks.json): 44 scoped PRs
+The execution catalogue is [tasks.json](../delivery/tasks.json): scoped PRs
 with owned paths, dependencies, exact spec sections, acceptance and planned checks.
 Open [the standalone Gantt and dependency graph](roadmap.html) locally to inspect
 tasks and project relative work days for one or several workers. The JSON is the
 source of task definitions; its exact copy is embedded in the HTML for `file://`.
 
-No application task is implemented or proved by this plan. The quality foundation
-is already on main; it does not establish product coverage, real native E2E,
-adapter integration or release acceptance. Existing Claude/Codex POCs prove
+P0.1 (#11) and P0.2 (#14) are merged: the pinned scaffold and real native
+WebView smoke are implemented. Domain/provider integration and final release
+acceptance remain ahead. Product implementation stays paused until owner resumption. Existing Claude/Codex POCs prove
 transport primitives only. Organization security guidance was not fetched under
 the owner's explicit session-wide Seezo/MCP waiver; no approval is claimed.
 
@@ -44,75 +44,40 @@ installer journals, automated corruption repair, disk/power-crash recovery,
 capacity reservations and exhaustive fault injection remain later work under
 [PERSONAL_RELEASE](PERSONAL_RELEASE.md#accepted-choices).
 
+## First-slice sequencing
+
+After owner resumption, prioritize the [thin first slice](BUILD_HANDOFF.md#thin-first-slice)
+before completing all foundations: manually bind one Claude session, CLI publish
+into atomic locked JSON, Waiting UI, owner answer queue, fake provider boundary,
+explicit agent CLI reply/result and UI update. Use bounded portions of existing
+tasks; partial work is not task completion. Retain binding identity/generation,
+operation deduplication and separate result/host-completion semantics.
+An early paid/live Claude run needs explicit owner approval.
+Codex/MCP/discovery/graph/Continue/native release features follow this slice and
+remain required. Preserve paused drafts and ten packages; defer schema/DTO depth
+until needed and add no new packages ahead of code.
+
 ## Execution and PR rules
 
-The owner manually starts the orchestrator with **Astra High**. Delegated
-implementation/review agents use **Sol 6.1 High** exclusively. Use isolated
-worktrees for simultaneous work; preserve all unrelated edits. This roadmap is
-data for that workflow and does not start an orchestrator or execute commands.
-
-Each task is one small independently reviewed PR: prefer about 500 handwritten
-changed lines, maximum 3200 including tests/config; each commit maximum 1600.
-Original assets, documentation and genuinely generated outputs are classified
-separately with provenance, as required by [CONTRIBUTING](../../CONTRIBUTING.md).
-Do not put handwritten production code in a generated/documentation exemption.
-If the smallest correct diff exceeds the cap, amend the catalogue into smaller
-named tasks with preserved dependencies/ownership before implementing it.
-
-Task eligibility is calculated from actual merged prerequisite PR evidence.
-There are no stored `ready` flags or manually maintained completion checkboxes.
-Before selecting work, the maintainer verifies task → PR → final reviewed head,
-full local hooks for every authored commit, successful checks at the exact current
-pushed PR head, spec adjudication, actual merge and successful checks of the
-resulting main revision. A changed head invalidates prior review
-and verification. Failed, pending, merely opened or locally committed PRs do not
-satisfy a dependency. The chart's offline evidence import is display only; the
-harness must re-read GitHub before scheduling or merging.
-
-Select only dependency-eligible tasks whose owned `paths` do not overlap another
-running task. Ownership overlap serializes work even when dependencies allow
-parallelism. Task owners may edit only their declared scope; a necessary shared
-manifest/export change needs an ownership update before work starts. Shared
-documentation/evidence files follow the same rule. No phase-wide barrier is
-implied: domain validation, conversation history, store, assets and private
-provider DTOs can branch after their concrete prerequisites. CLI and optional
-MCP, independent provider modules, renderer features and native/setup work also
-branch where their task dependencies and paths allow it.
+Use one Sol 6.1 High implementer in an isolated worktree until the walking slice,
+with Astra High maintaining. A separate reviewer joins when ready and reviews the
+latest GitHub diff at its exact head. The author fixes findings; one targeted
+re-review follows. Required unresolved issues remain unmerged.
+Routine ownership/spec updates can ride product PRs; important choices get short ADRs.
+No numeric caps, machine receipts or mandatory separate patcher.
+See [ORCHESTRATOR](../../ORCHESTRATOR.md).
 
 ## Commit checks and native E2E
 
-The authoritative commit gate remains
-`rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree`
-for local review, the installed hook for the staged commit, and the same checker
-in CI. It runs all maintained-code lint/tests, functional tests and deterministic
-E2E. Task `checks` add focused behavior suites to that common gate; they are
-planned command contracts that the owning task implements, not commands claimed
-available or passing in today's planning repository.
-
-P0.1 records exact installed versions, chooses the concrete generator and creates
-the pristine template in a fresh external staging directory. P0.2 integrates it
-without overwriting curated files and activates `phase: application` before
-the first production source or root Cargo manifest commit. Both fresh canonical
-Rust and TS/JS LCOV reports must account for production sources, including untested
-files and shipped Mod code. Weighted executable-line coverage must be at least
-80%; missing tools/reports/E2E fail. Nonexecutable/type-only source treatment is
-explicit and narrowly reviewed, rather than a blanket module exclusion.
-
-Follow [the exact native macOS E2E contract](low-level/NATIVE_E2E.md#test-only-build-recipe)
-using the pinned embedded WDIO plugins and the real Tauri binary. P0.2 must prove
-UI element action → typed production `native_ping` invoke → Rust receipt on disk,
-matching nonce and independently observed native executable/PID. A rejected
-request leaves the receipt unchanged; startup and cleanup are bounded. This first
-native smoke is not a domain store. P4.1 replaces it with a real core/store
-operation, persisted receipt/revision and relaunch assertion. Later five-message
-deterministic tests fake only the provider transport. Mocked invoke, intercepted
-results, preloaded success or a detached HTTP/backend process cannot satisfy E2E.
-
-Release packaging uses a clean production target/config and excludes test driver
-dependencies, capabilities, frontend module and listener. Native feature proof
-uses the packaged app on the recorded Mac. Missing GUI/toolchain/permission
-prerequisites are concrete blockers, never passing skips. Live billable Claude
-and Codex turns run at M7; per-commit tests remain deterministic.
+The hook runs cheap changed-language format/lint/type checks. CI on each pushed
+head selects docs, tooling or application checks from the whole branch diff;
+unknown paths and missing base run full checks. Application changes keep all
+meaningful tests, >=80% weighted coverage including untested logic and real native
+WebView smoke. Release-sensitive changes and milestones prove packaged release
+isolation. See [Development checks](DEVELOPMENT_CHECKS.md).
+The scaffold smoke proves UI/invoke/Rust/disk and actual PID cleanup; the first
+domain slice replaces it with persisted domain behavior. Tests fake only providers.
+Live final Claude/Codex acceptance remains M7 with owner approval.
 
 ## Milestones and acceptance evidence
 
@@ -161,62 +126,21 @@ is mapped here to concrete tasks; V19 public plugin proof is deferred.
 | V17 Claude; V18 Codex; V20 discovery/liveness | P3.3–P3.7, P7.2, P7.3 |
 | V21 native; V22 setup/install/uninstall | P6.1–P6.4, P8.1; D13 |
 | V23 offline boundary; V24 full release | P8.1 |
-| V29 complete gates and measured coverage | P0.2 and every subsequent application commit |
+| V29 complete gates and measured coverage | P0.2 and subsequent application CI |
 
 ## Estimates and offline chart
 
-`estimate_days` means estimated task effort in relative work days; it is not a
-delivery promise, calendar date, cost forecast or observed benchmark. The 44
-tasks currently total **55.5 serial estimate days**. The chart computes a
-deterministic list schedule from the DAG, chosen worker count and conservative
-owned-path overlap. It prioritizes longest remaining dependency chains and then
-task ID. Lanes are worker allocations, not teams. Filtered rows do not change the
-full schedule. Real task dependencies are the arrow lines; lane/path serialization
-is included when marking the projected critical path and explained in details.
-The dependency-only lower bound excludes worker/path contention.
+`tasks.json` is the single source for definitions, estimates and maintainer-updated
+`completion.pr_url` metadata. Estimates are relative work days, not delivery
+promises. The static Gantt computes counts and effort from the catalogue.
+After an actual merge, update completion with its real PR link and run:
 
-This task model adapts scope/ownership/dependency/acceptance/check concepts and a
-task → PR → reviewed-head evidence map. The Gantt, resource schedule and effort
-estimates are newly authored projections. No corporate source content or prior
-Gantt estimates are imported.
-
-The chart has no stored execution state. Its optional local evidence file is:
-
-```json
-{
-  "schema_version": 1,
-  "tasks": [{
-    "task_id": "P0.1",
-    "pr_url": "https://github.com/kartiksayani/ariadne/pull/123",
-    "state": "MERGED",
-    "merged_at": "2026-10-02T00:00:00Z",
-    "merged_commit": "<40-character merged SHA>",
-    "head_sha": "<40-character final PR head>",
-    "reviewed_head": "<same final PR head>",
-    "checks_head": "<same final PR head>",
-    "spec_review_head": "<same final PR head>",
-    "checks_passed": true,
-    "review_passed": true,
-    "spec_review_passed": true
-  }]
-}
+```sh
+python3 scripts/regenerate-roadmap.py
 ```
 
-That is an illustrative shape, not merge evidence. Matching final heads, valid
-merge SHA/time, merged state and passing review/check/spec fields qualify an
-import for display. These fields cannot establish authenticity offline; execution
-requires fresh GitHub verification and the maintainer's full per-commit/integrated
-evidence ledger. No import means no claimed completed tasks. “Dependencies merged”
-describes prerequisites only; it does not override running owners or approval gates.
-
-When task definitions change, replace the `roadmap-data` JSON block with the
-exact parsed catalogue and validate equality, unique IDs, references, acyclic
-dependencies and spec anchors. The pure `roadmap-engine` exposes scheduling,
-selection/dependency and evidence-shape helpers through `globalThis.ariadneRoadmap`;
-the separate `roadmap-ui` renders accessible keyboard controls. No external
-script/font/network request or local web server is needed to open the chart.
-
-Start at **P0.1**, then follow the task dependencies and owned paths. Final release
-acceptance requires every non-deferred evidence row proved on its recorded version
-or explicitly blocked by a concrete external prerequisite. A blocker remains an
-incomplete required gate; it is not a claim that the product is done.
+The embedded data supports `file://` with useful Gantt/dependency views and no
+server, polling, credentials or live export. Completion metadata is a maintainer
+record; check GitHub before scheduling/merging. The old receipt import is retired.
+Final release still requires every non-deferred verification row proved on its
+recorded version or explicitly blocked by a concrete external prerequisite.
