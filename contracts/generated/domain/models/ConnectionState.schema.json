@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ConnectionState",
+  "type": "string",
+  "enum": [
+    "connected",
+    "disconnected",
+    "reconnecting",
+    "unknown"
+  ]
+}

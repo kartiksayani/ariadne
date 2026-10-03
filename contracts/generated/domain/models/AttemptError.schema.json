@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AttemptError",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string"
+    },
+    "observed_at": {
+      "$ref": "#/$defs/UtcMillis"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "retryable": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "reason",
+    "retryable",
+    "observed_at"
+  ],
+  "$defs": {
+    "UtcMillis": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    }
+  }
+}

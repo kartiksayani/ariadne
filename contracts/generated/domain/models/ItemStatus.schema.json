@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ItemStatus",
+  "type": "string",
+  "enum": [
+    "open",
+    "waiting_on_me",
+    "in_progress",
+    "decided",
+    "done",
+    "dropped",
+    "replaced"
+  ]
+}

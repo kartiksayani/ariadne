@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InputTargetSnapshot",
+  "type": "object",
+  "properties": {
+    "ask": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "item_question": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ItemOption"
+      }
+    },
+    "question_revision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "topic_name": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "topic_name",
+    "item_question",
+    "question_revision",
+    "ask",
+    "options"
+  ],
+  "$defs": {
+    "ItemOption": {
+      "type": "object",
+      "properties": {
+        "consequence": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "recommended": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "consequence",
+        "recommended"
+      ]
+    },
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    }
+  }
+}

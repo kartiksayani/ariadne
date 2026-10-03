@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SummaryCounts",
+  "type": "object",
+  "properties": {
+    "archived_topics": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
+    "completeness": {
+      "$ref": "#/$defs/Completeness"
+    },
+    "items_by_status": {
+      "$ref": "#/$defs/ItemsByStatus"
+    },
+    "sent_inputs": {
+      "$ref": "#/$defs/SentInputCounts"
+    },
+    "unavailable_session_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UuidV4"
+      }
+    },
+    "waiting_unanswered": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "items_by_status",
+    "waiting_unanswered",
+    "sent_inputs",
+    "archived_topics",
+    "completeness",
+    "unavailable_session_ids"
+  ],
+  "$defs": {
+    "Completeness": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "partial"
+      ]
+    },
+    "ItemsByStatus": {
+      "type": "object",
+      "properties": {
+        "decided": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "done": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "dropped": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "in_progress": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "open": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "replaced": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "waiting_on_me": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "open",
+        "waiting_on_me",
+        "in_progress",
+        "decided",
+        "done",
+        "dropped",
+        "replaced"
+      ]
+    },
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "SentInputCounts": {
+      "type": "object",
+      "properties": {
+        "in_flight": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "needs_attention": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
+        "queued": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "queued",
+        "in_flight",
+        "needs_attention"
+      ]
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

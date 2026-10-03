@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SentInputCounts",
+  "type": "object",
+  "properties": {
+    "in_flight": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
+    "needs_attention": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
+    "queued": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "queued",
+    "in_flight",
+    "needs_attention"
+  ],
+  "$defs": {
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    }
+  }
+}
