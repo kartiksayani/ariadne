@@ -120,3 +120,68 @@ for fixture mounts, archived prototypes and capture dependencies. Its focused
 regression proves those fail while reusable production component imports and
 bundled fonts/tokens remain allowed. Existing packaged/native checks provide
 release evidence in CI; test-only mounts are not application routes.
+
+## P0.4 assembled controlled gallery
+
+[gallery.json](gallery.json) links all 30 unchanged source frames to actual
+rendered case IDs, reusable families and named CI evidence attachments. The 27
+application references use `gallery.html?frame=<id>&theme=dark|light`; 1j/1k
+remain component-sheet mappings to the original 54 cases and 1s remains an
+implementer-diagram mapping to status/round history. None becomes a product route.
+The fixture JSON contains typed presentation values projected from the original
+`Ariadne.dc.html` constructor/`renderVals`, with exact board props and no mounted
+source logic, timers or agent behavior. Repeated top-level values share JSON
+fragments. Its digest is pinned in the gallery map; the ZIP/prompt/source inventory
+remain unchanged.
+
+Reusable additions include BackAndForthRound (ask, option/free-text reply, result,
+message range and forks), explicit-coordinate graph nodes/parent/replacement
+edges, ProjectCard/SessionCard, GlobalWaitingPanel/Sent, ArchiveCard,
+ContinueTopic/GuardDialog and ReferenceWorkspace. The shell composes the existing
+rows/answers/message excerpts with independently scrollable panels, the 48/38/30px
+chrome and 300/560/400/240px panel contract. Detail and rail close explicitly.
+Owner intents, eligibility/count projections, graph layout/viewport behavior,
+services, routing and persisted product workflows remain later modules.
+
+Canonical release geometry wins over the prototype: Waiting stays outside the
+horizontally scrolling center/detail/rail at 1000x700. Every assembled capture
+checks those dimensions and scrolls the center region to prove Waiting remains
+pinned. Graph fixtures supply the original explicit coordinates only; the source
+84px leaf and 208/216px depth algorithm is not copied. P5.1 implements the
+prescribed 94px leaf/254px depth layout. Extra source states record exact `expand`
+and `query` props for replacement edges and filtered contextual nodes.
+
+The existing source renderer/interception and pinned Chromium capture machinery
+also renders assembled references in all four size/theme projects. Each claimed
+comparison retains independently rendered source **and** application region PNGs,
+geometry/browser/props provenance, real diffs on mismatch, and full unmasked
+source/application viewport PNGs. Each matching occurrence is compared, including
+all rounds/cards/graphs, rather than only the first occurrence. Whole-frame parity
+is not claimed. `assembled-regions.ts` names precise crop selectors and excluded
+text/behavior; the unchanged 1px geometry/0.5% pixel/0.2 raster tolerances remain.
+No new masks hide discrepancies.
+
+Continue compares its unchanged grouped summary. The original lead claims item
+references stay the same and items join the shared topic; the release lead names
+source/target and new local IDs with immutable provenance for topics, items,
+messages, rounds and answers, leaving source unchanged. Both exact strings and
+send labels are recorded in the region map, outside that crop. The footer uses
+Cmd+Enter send and Enter details; recommendations remain unselected. These release
+semantics are independently tested rather than hidden by image masks.
+
+Guarded archive, dispatch pause/confirmed close and target-write failure have no
+supplied matching frame. Their source-style controlled dialogs get honest
+application-only captures, geometry checks and interaction/focus proof. Ask-only
+round and paused-follow/latest are component states with the same qualification.
+Frame 1ad's source reroute dialog shades its entire workspace; both unmasked whole
+images are retained, with no falsely matching crop. Its release fixture preserves
+the disconnected existing session and exposes no cross-agent reroute prompt.
+These qualifications apply existing DESIGN/UI contracts and change no architecture.
+
+The focused renderer tests verify ordered three-round/two-fork history, explicit
+graph geometry and keyboard reveal, older/generic Sent rows alongside a new ask,
+unbound/incomplete cards, blockers/confirmed pause, explicit Continue/error copy,
+dialog focus trap/return, closeable panels and all actual frame mounts. CI retains
+the existing measured application coverage, native WebView and release-isolation
+gates. Local work runs cheap renderer/type/lint/hook checks only; capture/native/
+build/coverage results must come from the pushed-head CI artifacts.

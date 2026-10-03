@@ -1,4 +1,4 @@
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, type Page, type BrowserContext } from '@playwright/test';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { execFileSync } from 'node:child_process';
@@ -10,6 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sourceManifest from '../../../docs/planning/evidence/design-assets/source.json' with { type: 'json' };
 import type { ReferenceCase } from './cases';
+import { assembledRegions, frameRegions } from './assembled-regions';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const archive = readFileSync(resolve(repo, sourceManifest.archive.path));
@@ -30,6 +31,10 @@ const runtimeBytes = Object.fromEntries(Object.entries(runtime).map(([url, path]
 type CaptureCase = Omit<ReferenceCase, 'render'>;
 declare global {
   interface Window {
+    __ariadneReferenceCases: CaptureCase[];
+    getDC: (name: string) => unknown;
+    React: { createElement: (component: unknown, props: Record<string, unknown>) => unknown };
+    ReactDOM: { render: (element: unknown, root: HTMLElement) => void };
     __dcSetProps: (name: string, props: Record<string, unknown>) => void;
     __dcRootName: () => string;
     __dcRegistry: Record<string, { Logic?: unknown }>;
@@ -68,13 +73,8 @@ async function ready(page: Page, source: boolean) {
   });
 }
 
-for (const component of ['Status Badge', 'Item Row', 'Answer Control', 'Message Excerpt']) {
-  test(`source parity: ${component}`, async ({ page, context, origin, browser }, testInfo) => {
-    const theme = testInfo.project.name.startsWith('light') ? 'light' : 'dark';
-    const denied: string[] = [], errors: string[] = [];
-    context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
-    page.on('pageerror', error => errors.push(error.message));
-    await context.route('**/*', async route => {
+async function routeSource(context: BrowserContext, origin: string, denied: string[]) {
+  await context.route('**/*', async route => {
       const url = route.request().url();
       if (runtimeBytes[url]) return route.fulfill({ body: runtimeBytes[url], contentType: 'application/javascript', headers: { 'access-control-allow-origin': '*' } });
       if (url.startsWith('https://fonts.googleapis.com/')) return route.fulfill({ body: readFileSync(resolve(repo, 'apps/desktop/public/fonts/inter.css'), 'utf8').split('url("./').join(`url("${origin}/fonts/`), contentType: 'text/css' });
@@ -88,6 +88,15 @@ for (const component of ['Status Badge', 'Item Row', 'Answer Control', 'Message 
       }
       return route.continue();
     });
+}
+
+for (const component of ['Status Badge', 'Item Row', 'Answer Control', 'Message Excerpt']) {
+  test(`source parity: ${component}`, async ({ page, context, origin, browser }, testInfo) => {
+    const theme = testInfo.project.name.startsWith('light') ? 'light' : 'dark';
+    const denied: string[] = [], errors: string[] = [];
+    context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
+    page.on('pageerror', error => errors.push(error.message));
+    await routeSource(context, origin, denied);
     await page.goto(`${origin}/tests/ui/reference/gallery.html?case=status-open-pill&theme=${theme}`);
     await ready(page, false);
     const fixtures = await page.evaluate(component => window.__ariadneReferenceCases.filter(fixture => fixture.component === component), component);
@@ -145,3 +154,90 @@ for (const component of ['Status Badge', 'Item Row', 'Answer Control', 'Message 
     await original.close();
   });
 }
+
+test('assembled frame regions and canonical pinned geometry', async ({ page, context, origin, browser }, testInfo) => {
+  const theme = testInfo.project.name.startsWith('light') ? 'light' : 'dark';
+  const denied: string[] = [], errors: string[] = [];
+  context.on('page', tab => tab.on('pageerror', error => errors.push(error.message)));
+  page.on('pageerror', error => errors.push(error.message));
+  await routeSource(context, origin, denied);
+  const original = await context.newPage();
+  const applicationFrames = sourceManifest.frames.filter(frame => frame.member.endsWith('/Ariadne.dc.html'));
+  const expanded = applicationFrames.find(frame => frame.id === '1d')!;
+  for (const frame of [...applicationFrames, { ...expanded, id: 'graph-expanded-replacement', props: { ...expanded.props, expand: '1.3.1.2' } }, { ...expanded, id: 'graph-filtered', props: { ...expanded.props, selected: '', query: 'Redis' } }]) {
+    const props = Object.fromEntries(Object.entries(frame.props).filter(([key]) => !['name', 'style', 'hint-size'].includes(key)).map(([key, value]) => [key.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase()), value === '{{ true }}' ? true : value === '{{ false }}' ? false : key === 'hover-msg' ? Number(value) : value]));
+    await original.goto(`${origin}/source/Ariadne.dc.html`);
+    await ready(original, true);
+    // The main prototype reads scenarios in its constructor. A fresh keyed
+    // source mount must receive props before construction; changing registry
+    // overrides on the already mounted default would compare the wrong state.
+    await original.evaluate(props => window.ReactDOM.render(window.React.createElement(window.getDC('Ariadne'), props), document.getElementById('dc-root')!), { ...props, key: frame.id, theme, embedded: true });
+    await original.addStyleTag({ content: 'body{margin:0}#dc-root{width:100vw;height:100vh}' });
+    await ready(original, true);
+    await page.goto(`${origin}/tests/ui/reference/gallery.html?frame=${frame.id}&theme=${theme}`);
+    await ready(page, false);
+    const dimensions = await page.evaluate(() => {
+      const box = (selector: string) => {
+        const node = document.querySelector<HTMLElement>(selector)!;
+        const rect = node.getBoundingClientRect();
+        return { width: rect.width, height: rect.height, x: rect.x, y: rect.y };
+      };
+      const scroll = document.querySelector<HTMLElement>('.ref-workspace-scroll')!;
+      return { header: box('.ref-header'), tabs: box('.ref-tabs'), footer: box('.ref-footer'), waiting: box('.ref-waiting'), center: box('.ref-center'), detail: document.querySelector('.ref-detail') ? box('.ref-detail') : null, rail: document.querySelector('.ref-rail') ? box('.ref-rail') : null, overflow: scroll.scrollWidth > scroll.clientWidth };
+    });
+    expect(dimensions.header.height).toBe(48); expect(dimensions.tabs.height).toBe(38); expect(dimensions.footer.height).toBe(30);
+    expect(dimensions.waiting.width).toBe(300); expect(dimensions.center.width).toBeGreaterThanOrEqual(560);
+    if (dimensions.detail) expect(dimensions.detail.width).toBe(400);
+    if (dimensions.rail) expect(dimensions.rail.width).toBe(240);
+    for (const node of await page.locator('.ref-graph-node').all()) {
+      const box = await node.boundingBox(); expect(box?.width).toBe(190); expect(box?.height).toBe(66);
+    }
+    const sourceWhole = await original.screenshot({ animations: 'disabled' });
+    const appWhole = await page.screenshot({ animations: 'disabled' });
+    await testInfo.attach(`${frame.id}-source-whole-unmasked`, { body: sourceWhole, contentType: 'image/png' });
+    await testInfo.attach(`${frame.id}-app-whole-unmasked`, { body: appWhole, contentType: 'image/png' });
+    for (const name of frameRegions[frame.id] ?? ['graph'] as const) {
+      const region = assembledRegions[name];
+      const sourceRegions = original.locator(region.source), appRegions = page.locator(region.app);
+      expect(await sourceRegions.count()).toBe(await appRegions.count());
+      for (let index = 0; index < await appRegions.count(); index++) {
+      const sourceRegion = sourceRegions.nth(index), appRegion = appRegions.nth(index);
+      await expect(sourceRegion).toBeAttached(); await expect(appRegion).toBeAttached();
+      const sourceBox = await sourceRegion.boundingBox(), appBox = await appRegion.boundingBox();
+      expect(sourceBox).not.toBeNull(); expect(appBox).not.toBeNull();
+      for (const dimension of ['width', 'height'] as const) expect(Math.abs(sourceBox![dimension] - appBox![dimension]), `${frame.id}/${name} ${dimension}`).toBeLessThanOrEqual(1);
+      const sourcePng = await sourceRegion.screenshot({ animations: 'disabled' });
+      const appPng = await appRegion.screenshot({ animations: 'disabled' });
+      const snapshot = `${frame.id}-${name}-${index}.png`;
+      const expected = testInfo.snapshotPath(snapshot);
+      await mkdir(dirname(expected), { recursive: true }); await writeFile(expected, sourcePng);
+      await testInfo.attach(`${frame.id}-${name}-${index}-source`, { body: sourcePng, contentType: 'image/png' });
+      await testInfo.attach(`${frame.id}-${name}-${index}-app`, { body: appPng, contentType: 'image/png' });
+      await testInfo.attach(`${frame.id}-${name}-${index}-provenance`, { body: JSON.stringify({ archive: sourceManifest.archive, member: frame.member, boardLine: frame.line, props, theme, viewport: page.viewportSize(), browser: browser.version(), sourceBox, appBox, dimensions, region, masks: [], wholeFrameParity: false }), contentType: 'application/json' });
+      expect(appPng).toMatchSnapshot(snapshot, { threshold: 0.2, maxDiffPixelRatio: 0.005 });
+      }
+    }
+    await page.locator('.ref-workspace-scroll').evaluate(node => { node.scrollLeft = 400; });
+    const pinned = await page.locator('.ref-waiting').boundingBox();
+    expect(pinned?.x).toBe(dimensions.waiting.x); expect(pinned?.width).toBe(300);
+    if (page.viewportSize()!.width === 1000 && (dimensions.detail || dimensions.rail)) expect(dimensions.overflow).toBe(true);
+    await expect(page.locator('.ref-footer')).toContainText('⌘↵');
+    if (frame.id === '1y') {
+      await expect(page.getByRole('dialog')).toContainText('new local IDs with immutable source references');
+      await expect(page.getByRole('dialog')).toContainText('The source stays unchanged');
+    }
+  }
+  for (const [frame, variant] of [['1x', 'archive-blocked'], ['1x', 'archive-eligible'], ['1ac', 'close-guard'], ['1y', 'target-error'], ['1u', 'ask-only'], ['1a', 'paused-follow']]) {
+    await page.goto(`${origin}/tests/ui/reference/gallery.html?frame=${frame}&variant=${variant}&theme=${theme}`);
+    await ready(page, false);
+    if (['archive-blocked', 'archive-eligible', 'close-guard', 'target-error'].includes(variant)) {
+      await expect(page.getByRole('dialog')).toBeVisible();
+      const box = await page.getByRole('dialog').boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(24); expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width - 24);
+    } else if (variant === 'paused-follow') await expect(page.getByRole('button', { name: '3 new messages · Jump to latest' })).toBeVisible();
+    else await expect(page.locator('.ref-round-card')).toHaveCount(1);
+    await testInfo.attach(`${variant}-app-no-supplied-matching-frame`, { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
+  }
+  expect(denied).toEqual([]); expect(errors).toEqual([]);
+  await original.close();
+});
