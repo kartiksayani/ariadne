@@ -27,6 +27,7 @@ transports and pending product tests are distinguished in the
 | Views, selectors, graph layout, keyboard, native routing | [UI_AND_NATIVE](low-level/UI_AND_NATIVE.md) |
 | Bootstrap, trust, simple installation, uninstall and doctor | [SETUP_AND_DELIVERY](low-level/SETUP_AND_DELIVERY.md) |
 | Ordered implementation artifacts and evidence gates | [ROADMAP](ROADMAP.md), [VERIFICATION](low-level/VERIFICATION.md) |
+| Published seams, producer/consumer ownership and acceptance joins | [MODULE_CONTRACTS](MODULE_CONTRACTS.md) |
 
 Overview pages link to these contracts rather than maintaining alternate schemas.
 Historical research and POC reports are evidence, not current behavior contracts.
