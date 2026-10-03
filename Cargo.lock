@@ -101,6 +101,14 @@ dependencies = [
 [[package]]
 name = "ariadne-cli"
 version = "0.1.0"
+dependencies = [
+ "ariadne-agent-protocol",
+ "ariadne-core",
+ "ariadne-domain",
+ "ariadne-runtime",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "ariadne-core"
@@ -149,6 +157,16 @@ version = "0.1.0"
 [[package]]
 name = "ariadne-runtime"
 version = "0.1.0"
+dependencies = [
+ "ariadne-agent-protocol",
+ "ariadne-core",
+ "ariadne-domain",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
 
 [[package]]
 name = "ariadne-store"

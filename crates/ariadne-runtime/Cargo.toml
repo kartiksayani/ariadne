@@ -3,3 +3,16 @@ name = "ariadne-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dependencies]
+ariadne-core = { path = "../ariadne-core" }
+ariadne-domain = { path = "../ariadne-domain" }
+ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+tokio = { version = "=1.53.1", default-features = false, features = ["net", "rt-multi-thread", "io-util", "time", "sync"] }
+
+[dev-dependencies]
+ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
+tempfile.workspace = true
