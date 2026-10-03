@@ -152,8 +152,13 @@ prescribed 94px leaf/254px depth layout. Extra source states record exact `expan
 and `query` props for replacement edges and filtered contextual nodes.
 
 The existing source renderer/interception and pinned Chromium capture machinery
-also renders assembled references in all four size/theme projects. Each claimed
-comparison retains independently rendered source **and** application region PNGs,
+also renders assembled references in all four size/theme projects. Each assembled
+source mount first finishes its original 400/1200/2500ms selection-scroll timers
+(`Ariadne.dc.html:946`) and two animation frames before measuring or taking any
+evidence. CI exposed the final timer resetting frame 1f's ancestor scroll from
+26px to zero between a successful cleanup scroll check and its geometry check;
+waiting for that existing lifecycle preserves source behavior and avoids the race.
+Each claimed comparison retains independently rendered source **and** application region PNGs,
 geometry/browser/props provenance, real diffs on mismatch, and full unmasked
 source/application viewport PNGs. Each matching occurrence is compared, including
 all rounds/cards/graphs, rather than only the first occurrence. Whole-frame parity

@@ -73,6 +73,15 @@ async function ready(page: Page, source: boolean) {
   });
 }
 
+async function settleSourceMountScroll(page: Page) {
+  // Immutable Ariadne.dc.html:946 schedules selection scroll at 400/1200/2500ms.
+  // Let the last mount timer run before measuring, without suppressing source
+  // behavior. CI caught that timer between restoration and the final box check.
+  await page.evaluate(() => new Promise<void>(resolve => {
+    setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())), 2500);
+  }));
+}
+
 async function routeSource(context: BrowserContext, origin: string, denied: string[]) {
   await context.route('**/*', async route => {
       const url = route.request().url();
@@ -193,6 +202,28 @@ test('normalization retains a style-selected node and restores scroll after fail
   await expect(page.locator('[data-reference-raster-backdrop]')).toHaveCount(0);
 });
 
+test('source mount scroll finishes before normalization records original geometry', async ({ page }) => {
+  await page.setContent(`<main style="background: white; width: 500px; height: 160px; overflow: auto">
+    <div style="height: 800px"></div><div id="original" style="position: relative; width: 444px; height: 118px"><svg></svg></div>
+  </main>`);
+  await page.evaluate(() => {
+    const scroll = document.querySelector('main')!;
+    scroll.scrollTop = 26;
+    // Reproduce the source's final mount callback changing scroll independently
+    // of the capture helper, which previously raced cleanup in frame 1f.
+    setTimeout(() => { scroll.scrollTop = 0; scroll.dataset.mountScrollFinished = 'true'; }, 2500);
+  });
+  await settleSourceMountScroll(page);
+  await expect(page.locator('main')).toHaveAttribute('data-mount-scroll-finished', 'true');
+  const region = page.locator('#original');
+  const originalBox = await region.boundingBox();
+  const normalized = await normalizedComponent(region);
+  expect(normalized.provenance.originalBox).toEqual(originalBox);
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  expect(await region.boundingBox()).toEqual(originalBox);
+  expect(await page.locator('main').evaluate(node => node.scrollTop)).toBe(0);
+});
+
 for (const component of ['Status Badge', 'Item Row', 'Answer Control', 'Message Excerpt']) {
   test(`source parity: ${component}`, async ({ page, context, origin, browser }, testInfo) => {
     const theme = testInfo.project.name.startsWith('light') ? 'light' : 'dark';
@@ -276,6 +307,7 @@ test('assembled frame regions and canonical pinned geometry', async ({ page, con
     // overrides on the already mounted default would compare the wrong state.
     await original.evaluate(props => window.ReactDOM.render(window.React.createElement(window.getDC('Ariadne'), props), document.getElementById('dc-root')!), { ...props, key: frame.id, theme, embedded: true });
     await original.addStyleTag({ content: 'body{margin:0}#dc-root{width:100vw;height:100vh}' });
+    await settleSourceMountScroll(original);
     await ready(original, true);
     await page.goto(`${origin}/tests/ui/reference/gallery.html?frame=${frame.id}&theme=${theme}`);
     await ready(page, false);

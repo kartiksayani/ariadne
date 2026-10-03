@@ -348,7 +348,10 @@
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/29",
       "implementation_depends_on": [
         "P0.3b"
-      ]
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/35"
+      }
     },
     {
       "id": "P0.6",
