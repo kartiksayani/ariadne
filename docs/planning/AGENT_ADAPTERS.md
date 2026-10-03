@@ -19,6 +19,17 @@ CLI. Test the same queue/result join and binding scope through the fake interfac
 Adding a provider should require an adapter and composition-root wiring.
 A public runtime plugin loader is not required.
 
+The callable v1 seam and exact owned records are published in
+[PROCESS section 2](low-level/PROCESS_AND_PROTOCOLS.md#2-shared-adapter-contract).
+It uses an object-safe `Send + Sync` Rust trait with boxed `Send` futures; runtime
+owns execution/deadlines. Canonical domain capability, presence, checkpoint and
+host-receipt records are reused. The in-process scripted fake is test/dev only,
+behind the default-off `test-support` feature for consumers, and never substitutes
+for a normal release adapter. Shared cases live in `fixtures/contracts/adapter`;
+they preserve replay, conflicting facts, uncertainty and distinct text chunks
+for core/runtime to adjudicate. Checkpoint advance remains explicit after effects
+are persisted. Full P0.5 acceptance still waits for P0.3 canonical fixtures.
+
 ## Deferred executable extension draft
 
 The sections below are a proposed later extension. They do not define first

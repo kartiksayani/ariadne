@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReconcileRequest",
+  "type": "object",
+  "properties": {
+    "attempts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AttemptEvidenceRequest"
+      }
+    },
+    "binding_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "checkpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "generation": {
+      "$ref": "#/$defs/UuidV4"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "binding_id",
+    "generation",
+    "attempts",
+    "checkpoint"
+  ],
+  "$defs": {
+    "AttemptEvidenceRequest": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "binding_generation": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "host_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "wire_marker": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "input_id",
+        "attempt_id",
+        "binding_generation",
+        "payload_sha256",
+        "wire_marker",
+        "host_turn_id"
+      ]
+    },
+    "Checkpoint": {
+      "description": "At most 4096 UTF-8 bytes; maxLength only bounds Unicode characters.",
+      "type": "string",
+      "maxLength": 4096
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

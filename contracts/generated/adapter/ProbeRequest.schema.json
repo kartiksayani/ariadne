@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProbeRequest",
+  "type": "object",
+  "properties": {
+    "configuration": {
+      "$ref": "#/$defs/AdapterConfig"
+    },
+    "endpoint": {
+      "$ref": "#/$defs/EndpointRef"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "endpoint",
+    "configuration"
+  ],
+  "$defs": {
+    "AdapterConfig": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/UniqueMap"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "values"
+      ]
+    },
+    "EndpointRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unix_socket"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "local_bridge"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        }
+      ]
+    },
+    "UniqueMap": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

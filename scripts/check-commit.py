@@ -60,6 +60,7 @@ def scope_for(paths):
     scope, release = "docs", False
     for name in paths:
         if (name in RELEASE_FILES or name.startswith((".github/", ".githooks/", "apps/desktop/src-tauri/"))
+                or (name.startswith("crates/ariadne-agent-protocol/") and name.endswith(".rs"))
                 or (name.startswith(("apps/", "crates/", "integrations/")) and
                     (Path(name).name in {"Cargo.toml", "build.rs", "package.json", "package-lock.json"} or
                      "/capabilities/" in name or "config" in Path(name).name or

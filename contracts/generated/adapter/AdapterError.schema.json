@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AdapterError",
+  "type": "object",
+  "properties": {
+    "code": {
+      "$ref": "#/$defs/AdapterErrorCode"
+    },
+    "message": {
+      "type": "string"
+    },
+    "retryable": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "message",
+    "retryable"
+  ],
+  "$defs": {
+    "AdapterErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_argument",
+        "binding_mismatch",
+        "stale_generation",
+        "incompatible_adapter",
+        "host_unreachable",
+        "delivery_uncertain",
+        "permission_denied",
+        "unsupported",
+        "protocol_conflict",
+        "unsupported_host_version"
+      ]
+    }
+  }
+}
