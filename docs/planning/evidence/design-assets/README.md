@@ -198,11 +198,15 @@ blocking and retention, with backend persistence outside this gallery’s scope.
 Whole-component comparison uses a shared integer raster origin because equivalent
 regions can inherit different fractional document positions from the canonical
 release composition and prototype. Original unmasked whole-frame **and region**
-source/app PNGs remain attached. Separately labelled `normalized-source` and
+source/app PNGs and original provenance are attached before normalization can
+fail. Separately labelled `normalized-source` and
 `normalized-app` PNGs compare the existing DOM region at `(0,0)`, preserving
 measured width/height, content and inherited fonts/styles without reparenting or
 cloning. Provenance records original/normalized boxes and temporary style changes;
-assertions check unchanged dimensions and reliable style restoration. Transparent
+the original ElementHandle remains stable when temporary styles stop matching
+the source selector. Measurements, screenshots and cleanup use that same node.
+Assertions in `finally` check restored node identity, inline styles, original
+position/dimensions and backing removal, including after capture failure. Transparent
 regions preserve their own independently resolved solid ancestor backdrop.
 The current round’s own 7% accent layer stays unchanged over a temporary inert
 backing with its actual solid ancestor color, recorded and removed in `finally`.

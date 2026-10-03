@@ -93,49 +93,84 @@ async function routeSource(context: BrowserContext, origin: string, denied: stri
 // Original screenshots prove the actual viewport. Compare component pixels at
 // a shared integer raster origin, retaining their inheritance and dimensions.
 async function normalizedComponent(region: Locator) {
-  const originalStyle = await region.getAttribute('style');
-  const originalBox = await region.boundingBox();
-  if (!originalBox) throw new Error('Missing component box before raster normalization');
+  // Style-based locators can stop matching when normalization changes position.
+  // Hold this exact node through capture and cleanup, including assertion failure.
+  const component = await region.elementHandle();
+  if (!component) throw new Error('Missing component before raster normalization');
   try {
-    const placement = await region.evaluate((element, box) => {
-      const node = element as HTMLElement;
-      let backdrop = '', preserveBackdrop = false, backingLayer = false;
-      for (let ancestor: HTMLElement | null = node; ancestor; ancestor = ancestor.parentElement) {
-        const style = getComputedStyle(ancestor), color = style.backgroundColor;
-        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1) throw new Error(`Unsupported component backdrop: image=${style.backgroundImage}, opacity=${style.opacity}`);
-        const match = color.match(/(?:rgba\([^)]*,\s*|\/\s*)([\d.]+)(%)?\s*\)$/);
-        const alpha = match ? Number(match[1]) / (match[2] ? 100 : 1) : 1;
-        if (alpha > 0 && alpha < 1) {
-          if (ancestor !== node) throw new Error(`Unsupported translucent ancestor backdrop: ${color}`);
-          backingLayer = true;
+    const originalStyle = await component.getAttribute('style');
+    const originalBox = await component.boundingBox();
+    if (!originalBox) throw new Error('Missing component box before raster normalization');
+    try {
+      const placement = await component.evaluate((element, box) => {
+        const node = element as HTMLElement;
+        let backdrop = '', preserveBackdrop = false, backingLayer = false;
+        for (let ancestor: HTMLElement | null = node; ancestor; ancestor = ancestor.parentElement) {
+          const style = getComputedStyle(ancestor), color = style.backgroundColor;
+          if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1) throw new Error(`Unsupported component backdrop: image=${style.backgroundImage}, opacity=${style.opacity}`);
+          const match = color.match(/(?:rgba\([^)]*,\s*|\/\s*)([\d.]+)(%)?\s*\)$/);
+          const alpha = match ? Number(match[1]) / (match[2] ? 100 : 1) : 1;
+          if (alpha > 0 && alpha < 1) {
+            if (ancestor !== node) throw new Error(`Unsupported translucent ancestor backdrop: ${color}`);
+            backingLayer = true;
+          }
+          if (alpha === 1) { backdrop = color; preserveBackdrop = ancestor !== node; break; }
         }
-        if (alpha === 1) { backdrop = color; preserveBackdrop = ancestor !== node; break; }
-      }
-      if (!backdrop) throw new Error('No solid component backdrop found');
-      const temporaryStyles = { position: 'fixed', left: '0px', top: '0px', width: `${box.width}px`, height: `${box.height}px`, margin: '0px', zIndex: '10000', ...(preserveBackdrop && !backingLayer ? { backgroundColor: backdrop } : {}) };
-      Object.assign(node.style, temporaryStyles);
-      const temporaryBacking = backingLayer ? { position: 'fixed', left: '0px', top: '0px', width: `${box.width}px`, height: `${box.height}px`, zIndex: '9999', backgroundColor: backdrop, pointerEvents: 'none' } : null;
-      if (temporaryBacking) {
-        const backing = document.createElement('div'); backing.dataset.referenceRasterBackdrop = ''; backing.inert = true; backing.setAttribute('aria-hidden', 'true');
-        Object.assign(backing.style, temporaryBacking); node.before(backing);
-      }
-      return { backdrop, preserveBackdrop, temporaryStyles, temporaryBacking };
-    }, originalBox);
-    const normalizedBox = await region.boundingBox();
-    expect(normalizedBox).not.toBeNull();
-    for (const dimension of ['width', 'height'] as const) expect(normalizedBox![dimension], `Normalization preserves ${dimension}`).toBeCloseTo(originalBox[dimension], 5);
-    expect(normalizedBox!.x).toBe(0); expect(normalizedBox!.y).toBe(0);
-    const png = await region.screenshot({ animations: 'disabled' });
-    return { png, provenance: { originalBox, normalizedBox, ...placement, purpose: 'Whole-component pixel comparison; does not prove original viewport visibility.' } };
+        if (!backdrop) throw new Error('No solid component backdrop found');
+        const temporaryStyles = { position: 'fixed', left: '0px', top: '0px', width: `${box.width}px`, height: `${box.height}px`, margin: '0px', zIndex: '10000', ...(preserveBackdrop && !backingLayer ? { backgroundColor: backdrop } : {}) };
+        Object.assign(node.style, temporaryStyles);
+        const temporaryBacking = backingLayer ? { position: 'fixed', left: '0px', top: '0px', width: `${box.width}px`, height: `${box.height}px`, zIndex: '9999', backgroundColor: backdrop, pointerEvents: 'none' } : null;
+        if (temporaryBacking) {
+          const backing = document.createElement('div'); backing.dataset.referenceRasterBackdrop = ''; backing.inert = true; backing.setAttribute('aria-hidden', 'true');
+          Object.assign(backing.style, temporaryBacking); node.before(backing);
+        }
+        return { backdrop, preserveBackdrop, temporaryStyles, temporaryBacking };
+      }, originalBox);
+      const normalizedBox = await component.boundingBox();
+      expect(normalizedBox).not.toBeNull();
+      for (const dimension of ['width', 'height'] as const) expect(normalizedBox![dimension], `Normalization preserves ${dimension}`).toBeCloseTo(originalBox[dimension], 5);
+      expect(normalizedBox!.x).toBe(0); expect(normalizedBox!.y).toBe(0);
+      const png = await component.screenshot({ animations: 'disabled' });
+      return { png, provenance: { originalBox, normalizedBox, ...placement, identity: 'Original ElementHandle retained for measurement, capture and restoration', purpose: 'Whole-component pixel comparison; does not prove original viewport visibility.' } };
+    } finally {
+      await component.evaluate((element, style) => {
+        const backing = element.previousElementSibling;
+        if (backing?.hasAttribute('data-reference-raster-backdrop')) backing.remove();
+        if (style === null) element.removeAttribute('style'); else element.setAttribute('style', style); }, originalStyle);
+      expect(await component.evaluate(element => element.isConnected), 'Original component remains connected').toBe(true);
+      expect(await component.getAttribute('style'), 'Original node inline styles restored').toBe(originalStyle);
+      expect(await region.evaluate((resolved, original) => resolved === original, component), 'Locator resolves the original node after restoration').toBe(true);
+      const restoredBox = await component.boundingBox();
+      expect(restoredBox, 'Original node box restored').not.toBeNull();
+      for (const dimension of ['x', 'y', 'width', 'height'] as const) expect(restoredBox![dimension], `Restoration preserves ${dimension}`).toBeCloseTo(originalBox[dimension], 5);
+      expect(await region.page().locator('[data-reference-raster-backdrop]').count(), 'Temporary backing removed').toBe(0);
+    }
   } finally {
-    await region.evaluate((element, style) => {
-      const backing = element.previousElementSibling;
-      if (backing?.hasAttribute('data-reference-raster-backdrop')) backing.remove();
-      if (style === null) element.removeAttribute('style'); else element.setAttribute('style', style); }, originalStyle);
-    expect(await region.getAttribute('style'), 'Original inline styles restored').toBe(originalStyle);
-    expect(await region.page().locator('[data-reference-raster-backdrop]').count(), 'Temporary backing removed').toBe(0);
+    await component.dispose();
   }
 }
+
+test('normalization retains a style-selected node and restores it after failure', async ({ page }) => {
+  await page.setContent(`<main style="background: white">
+    <div id="original" style="position: relative; width: 688px; height: 120px; background: rgba(80, 80, 255, 0.07)"><svg></svg></div>
+    <div id="next" style="position: relative; width: 472px; height: 120px; background: white"><svg></svg></div>
+  </main>`);
+  const region = page.locator('main div[style*="position: relative;"]:has(> svg)').first();
+  const originalStyle = await page.locator('#original').getAttribute('style');
+  const nextStyle = await page.locator('#next').getAttribute('style');
+  const normalized = await normalizedComponent(region);
+  expect(normalized.provenance.normalizedBox?.width).toBe(688);
+  expect(normalized.provenance.temporaryBacking).not.toBeNull();
+  expect(normalized.png.byteLength).toBeGreaterThan(0);
+  // Force an assertion failure after positioning/backing insertion, exercising
+  // the same cleanup path that a failed screenshot or dimension check takes.
+  await page.addStyleTag({ content: '#original[style*="fixed"] { width: 689px !important; }' });
+  await expect(normalizedComponent(region)).rejects.toThrow(/Normalization preserves width/);
+  expect(await page.locator('#original').getAttribute('style')).toBe(originalStyle);
+  expect(await page.locator('#next').getAttribute('style')).toBe(nextStyle);
+  expect(await region.getAttribute('id')).toBe('original');
+  await expect(page.locator('[data-reference-raster-backdrop]')).toHaveCount(0);
+});
 
 for (const component of ['Status Badge', 'Item Row', 'Answer Control', 'Message Excerpt']) {
   test(`source parity: ${component}`, async ({ page, context, origin, browser }, testInfo) => {
@@ -257,13 +292,14 @@ test('assembled frame regions and canonical pinned geometry', async ({ page, con
       expect(sourceBox).not.toBeNull(); expect(appBox).not.toBeNull();
       for (const dimension of ['width', 'height'] as const) expect.soft(Math.abs(sourceBox![dimension] - appBox![dimension]), `${frame.id}/${name} ${dimension}`).toBeLessThanOrEqual(1);
       const sourcePng = await sourceRegion.screenshot({ animations: 'disabled' });
+      await testInfo.attach(`${frame.id}-${name}-${index}-source`, { body: sourcePng, contentType: 'image/png' });
       const appPng = await appRegion.screenshot({ animations: 'disabled' });
+      await testInfo.attach(`${frame.id}-${name}-${index}-app`, { body: appPng, contentType: 'image/png' });
+      await testInfo.attach(`${frame.id}-${name}-${index}-original-provenance`, { body: JSON.stringify({ archive: sourceManifest.archive, member: frame.member, boardLine: frame.line, props, theme, viewport: page.viewportSize(), browser: browser.version(), sourceBox, appBox, dimensions, region, masks: [], normalized: false, wholeFrameParity: false }), contentType: 'application/json' });
       const normalizedSource = await normalizedComponent(sourceRegion), normalizedApp = await normalizedComponent(appRegion);
       const snapshot = `${frame.id}-${name}-${index}-normalized.png`;
       const expected = testInfo.snapshotPath(snapshot);
       await mkdir(dirname(expected), { recursive: true }); await writeFile(expected, normalizedSource.png);
-      await testInfo.attach(`${frame.id}-${name}-${index}-source`, { body: sourcePng, contentType: 'image/png' });
-      await testInfo.attach(`${frame.id}-${name}-${index}-app`, { body: appPng, contentType: 'image/png' });
       await testInfo.attach(`${frame.id}-${name}-${index}-normalized-source`, { body: normalizedSource.png, contentType: 'image/png' });
       await testInfo.attach(`${frame.id}-${name}-${index}-normalized-app`, { body: normalizedApp.png, contentType: 'image/png' });
       await testInfo.attach(`${frame.id}-${name}-${index}-provenance`, { body: JSON.stringify({ archive: sourceManifest.archive, member: frame.member, boardLine: frame.line, props, theme, viewport: page.viewportSize(), browser: browser.version(), sourceBox, appBox, normalizedSource: normalizedSource.provenance, normalizedApp: normalizedApp.provenance, dimensions, region, masks: [], wholeFrameParity: false }), contentType: 'application/json' });
