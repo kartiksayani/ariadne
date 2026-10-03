@@ -70,21 +70,61 @@
       "estimate_days": 2
     },
     {
-      "id": "P0.3",
-      "title": "Generate domain DTOs, schemas and canonical fixtures",
+      "id": "P0.3a",
+      "title": "Generate complete domain DTOs, schemas and focused shape tests",
       "phase": "M0",
       "depends_on": [
         "P0.2"
       ],
       "paths": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/ariadne-domain/Cargo.toml",
         "crates/ariadne-domain/src/models/**",
         "crates/ariadne-domain/src/lib.rs",
         "crates/ariadne-domain/tests/schema.rs",
+        "crates/ariadne-domain/tests/lexical.rs",
         "contracts/generated/domain/**",
         "apps/desktop/src/generated/**",
-        "fixtures/domain/**",
         "tools/xtask/**",
-        ".cargo/config.toml"
+        ".cargo/config.toml",
+        "quality-gates.json"
+      ],
+      "spec": [
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#1-primitive-conventions",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#2-files-and-entity-inventory",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#4-transaction-and-lock-algorithm",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md#6-continuation-repair-and-migration",
+        "docs/planning/low-level/API_AND_MCP.md#1-envelope-actors-and-replay",
+        "docs/planning/low-level/API_AND_MCP.md#2-query-and-owner-command-inventory",
+        "docs/planning/low-level/API_AND_MCP.md#3-agent-api-explicit-results-and-tree-operations",
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#2-shared-adapter-contract",
+        "docs/planning/low-level/QUEUES_AND_RECOVERY.md#1-save-claim-join",
+        "docs/planning/low-level/VERIFICATION.md#required-acceptance-matrix"
+      ],
+      "acceptance": [
+        "Rust-authored schema version 1 includes complete Messages, Answers, Rounds, Binding, Input, Attempt, Result, provenance and typed receipts; DTO generation does not invent alternate renderer models, persistence or future API command unions.",
+        "Implement the specified UUIDv4, UTC-millisecond, schema-version and safe-integer lexical contracts with focused real tests; canonical emitted fields and nullable read behavior are explicit. Later semantic transitions and five-round history remain P1.1/P1.2.",
+        "Generate deterministic JSON Schema and TypeScript from Rust, check in generated artifacts and detect regeneration drift. Maintain canonical coverage with only exact independently reviewed treatment of noninstrumented DTO sources.",
+        "Use a tooling-only cargo xtask alias/package without adding a product entry point or changing the ten production package boundaries."
+      ],
+      "checks": [
+        "rtk proxy cargo xtask gen-contracts --check",
+        "rtk proxy cargo test -p ariadne-domain --test schema",
+        "rtk proxy cargo test -p ariadne-domain --test lexical"
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P0.3",
+      "title": "Complete canonical domain demo and invalid schema fixtures",
+      "phase": "M0",
+      "depends_on": [
+        "P0.3a"
+      ],
+      "paths": [
+        "fixtures/domain/**",
+        "crates/ariadne-domain/tests/schema.rs"
       ],
       "spec": [
         "docs/planning/low-level/DOMAIN_AND_STORAGE.md#1-primitive-conventions",
@@ -92,27 +132,99 @@
         "docs/planning/low-level/VERIFICATION.md#required-acceptance-matrix"
       ],
       "acceptance": [
-        "Rust-authored schema version 1 includes complete Messages, Answers, Rounds, Binding, Input, Attempt, Result and receipts; DTO generation does not invent alternate renderer models.",
-        "Check in deterministic canonical demo plus invalid/future-schema fixtures; generated JSON Schema and TS agree with Rust and regenerate without drift.",
-        "Use a tooling-only cargo xtask alias/package without adding a product entry point or changing the ten production package boundaries."
+        "Check in a deterministic canonical demo covering the complete domain v1 DTO inventory, plus invalid and future-schema fixtures; Rust, generated JSON Schema and TypeScript conform to the same canonical emitted records.",
+        "Retain focused shape tests and regeneration drift checks from P0.3a. This final fixture acceptance completes P0.3; semantic transitions and five-round history remain P1.1/P1.2."
       ],
       "checks": [
         "rtk proxy cargo xtask gen-contracts --check",
         "rtk proxy cargo test -p ariadne-domain --test schema"
       ],
-      "estimate_days": 1.5
+      "estimate_days": 0.5
     },
     {
-      "id": "P0.4",
-      "title": "Bundle source design assets and reference component gallery",
+      "id": "P0.4a",
+      "title": "Bundle licensed design assets and source frame inventory",
       "phase": "M0",
       "depends_on": [
         "P0.2"
       ],
       "paths": [
+        "apps/desktop/public/fonts/**",
+        "apps/desktop/public/icons/**",
+        "apps/desktop/public/licenses/**",
+        "tests/ui/reference/assets.test.ts",
+        "docs/planning/evidence/design-assets/**",
+        "apps/desktop/vite.config.ts",
+        "apps/desktop/tsconfig.json"
+      ],
+      "spec": [
+        "docs/planning/DESIGN.md#reference-package",
+        "docs/planning/DESIGN.md#shared-visual-tokens",
+        "docs/planning/DESIGN_TRACEABILITY.md#board-frame-mapping",
+        "docs/planning/DESIGN_TRACEABILITY.md#component-state-mapping"
+      ],
+      "acceptance": [
+        "Map all 30 board frames and component variants to immutable source members; inventory exact tokens/icon treatment and record archive/member/asset hashes, source versions and licences without changing the original ZIP/prompt.",
+        "Bundle licensed source Inter 400/500 and Phosphor regular/fill assets, including the source regular spiral, with local resources and no remote runtime imports.",
+        "Add the named reference renderer test project and typecheck its root reference tests; asset/provenance checks are real. Reusable component rendering and visual captures belong to P0.4b/P0.4."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project reference",
+        "Verify immutable archive/member digests and bundled asset hashes/licences against the source inventory."
+      ],
+      "estimate_days": 0.25
+    },
+    {
+      "id": "P0.4b",
+      "title": "Implement reference primitives and real source visual comparisons",
+      "phase": "M0",
+      "depends_on": [
+        "P0.4a"
+      ],
+      "paths": [
         "apps/desktop/src/styles/**",
         "apps/desktop/src/components/reference/**",
-        "apps/desktop/public/**",
+        "tests/ui/reference/**",
+        "docs/planning/evidence/design-assets/**",
+        "apps/desktop/vite.config.ts",
+        "apps/desktop/tsconfig.json",
+        "package.json",
+        "package-lock.json",
+        ".github/workflows/quality.yml",
+        "scripts/check-release-boundary.mjs",
+        "tests/e2e/process-contract/**"
+      ],
+      "spec": [
+        "docs/planning/DESIGN.md#screens-and-components",
+        "docs/planning/DESIGN.md#shared-visual-tokens",
+        "docs/planning/DESIGN_TRACEABILITY.md#board-frame-mapping",
+        "docs/planning/DESIGN_TRACEABILITY.md#component-state-mapping",
+        "docs/planning/DESIGN_TRACEABILITY.md#visual-regression-fixtures",
+        "docs/planning/low-level/UI_AND_NATIVE.md#1-component-tree-and-state-owners"
+      ],
+      "acceptance": [
+        "Implement reusable StatusBadge, TreeRow, AnswerControl and MessageExcerpt reference primitives with every mapped variant, exact source typography/status labels/icons, local tokens and both themes; fixtures mount only in deterministic test/browser contexts.",
+        "Capture and compare actual source component regions at 1600x960 and 1000x700 in light and dark. Retain genuine captures/diffs and browser/source provenance; source prototype runtime stays isolated and never ships.",
+        "Introduce meaningful renderer/geometry/capture checks per commit with pinned browser tooling and explicit provisioning; never rely on a global browser cache or silently skip unavailable capture tools.",
+        "Verify fresh production frontend artifacts exclude reference mounts/fixtures/runtime; add focused release-boundary regression coverage. Full product screens/workflows remain later M4/M5 acceptance."
+      ],
+      "checks": [
+        "rtk proxy npm run test:ui -- --project reference",
+        "rtk proxy npm run capture:reference",
+        "rtk proxy npm run test:e2e -- --suite process-contract"
+      ],
+      "estimate_days": 0.5
+    },
+    {
+      "id": "P0.4",
+      "title": "Complete assembled reference gallery and responsive source acceptance",
+      "phase": "M0",
+      "depends_on": [
+        "P0.4b"
+      ],
+      "paths": [
+        "apps/desktop/src/styles/**",
+        "apps/desktop/src/components/reference/**",
         "tests/ui/reference/**",
         "docs/planning/evidence/design-assets/**"
       ],
@@ -123,14 +235,16 @@
         "docs/planning/low-level/UI_AND_NATIVE.md#1-component-tree-and-state-owners"
       ],
       "acceptance": [
-        "Map all 30 board frames and component variants to existing immutable source assets; record hashes/licences and bundle fonts/icons with no remote runtime requests.",
-        "Implement source dimensions, status text/icons, typography and themes in a reference gallery; keep original ZIP/prompt unchanged."
+        "Complete the reference families for BackAndForthRound, graph nodes/edges, archive/continue dialogs, project/session cards and GlobalWaitingPanel/Sent, retaining every mapped variant from the immutable source.",
+        "Assemble exact 48/38/30px chrome, 300px pinned Waiting, center/detail/rail dimensions, typography/status icons/text and both themes. At 1000x700 retain pinned Waiting and horizontal overflow; capture and compare actual source regions at both required sizes/themes.",
+        "Close exhaustive 30-frame/component mapping against actual reusable gallery states and retained comparison evidence. Frames 1s/1j/1k remain source diagram/component-sheet mappings; no invented standalone pages or product workflow implementation.",
+        "Preserve test-only deterministic mounts, production fixture exclusion and all per-commit visual checks introduced by P0.4b; keep original ZIP/prompt unchanged. This final acceptance completes P0.4."
       ],
       "checks": [
         "rtk proxy npm run test:ui -- --project reference",
-        "Capture reference gallery at 1600x960 and 1000x700, light and dark, and compare against the supplied source."
+        "rtk proxy npm run capture:reference"
       ],
-      "estimate_days": 1
+      "estimate_days": 0.25
     },
     {
       "id": "P0.5",
