@@ -19,7 +19,8 @@ for the end-to-end user flow and [POC results](../INTEGRATIONS.md#live-evidence-
 ~/.local/bin/ariadne-mcp -> ../share/ariadne/current/bin/ariadne-mcp
 ~/Applications/Ariadne.app              # personal app install
 ~/.ariadne/
-  projects.json                        # rebuildable canonical project registry
+  projects.json                        # explicit canonical roots + setup receipts
+  bindings.json                        # rebuildable selected binding route index
   registry.lock                        # stable global registry lock
   run/control.sock                     # desktop-owned private Unix control socket
   run/                                 # owner-only directory, mode 0700
@@ -27,6 +28,7 @@ for the end-to-end user flow and [POC results](../INTEGRATIONS.md#live-evidence-
   logs/                                # bounded redacted diagnostics
 <project>/.ariadne/
   project.json                         # immutable project UUID and metadata
+  project.lock                         # stable project metadata/setup lock
   sessions/<uuid>.json                 # authoritative domain, binding and outbox state
   locks/<session-uuid>.lock             # stable session transaction lock
   backups/                              # previous snapshot; automated repair deferred
@@ -34,7 +36,10 @@ for the end-to-end user flow and [POC results](../INTEGRATIONS.md#live-evidence-
 
 Directories are mode 0700 and data files mode 0600 where supported. Executable
 bits belong only on package-owned binaries. Session data is one JSON snapshot per
-session and remains the authority; the global registry is a rebuildable index.
+session and remains the authority. The project registry retains explicit roots
+and setup receipts, including unavailable roots; only the separate binding index
+is rebuilt from registered roots and validated authoritative sessions. Malformed
+or future-version data is never silently repaired or overwritten.
 Multiple bindings and independent queues may exist in one project. Dispatch is
 serialized per binding, not per project. Store writes remain serialized by the
 session transaction lock.

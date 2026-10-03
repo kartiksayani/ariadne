@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 type Locks = HashMap<PathBuf, Weak<Mutex<()>>>;
 static LOCKS: OnceLock<Mutex<Locks>> = OnceLock::new();
 
-pub(super) fn keyed(path: &Path) -> Result<Arc<Mutex<()>>, StoreError> {
+pub(crate) fn keyed(path: &Path) -> Result<Arc<Mutex<()>>, StoreError> {
     let mut locks = LOCKS
         .get_or_init(Mutex::default)
         .lock()
@@ -27,7 +27,7 @@ pub(super) fn keyed(path: &Path) -> Result<Arc<Mutex<()>>, StoreError> {
         }))
 }
 
-pub(super) struct Wait {
+pub(crate) struct Wait {
     deadline: Instant,
     delay: Duration,
 }
@@ -78,7 +78,7 @@ impl Wait {
     }
 }
 
-pub(super) struct OsLock(File);
+pub(crate) struct OsLock(File);
 impl Drop for OsLock {
     fn drop(&mut self) {
         // SAFETY: the owned live descriptor is unlocked and then closed by File.
@@ -86,4 +86,18 @@ impl Drop for OsLock {
             libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
         }
     }
+}
+
+/// Shared stable lock primitive; callers obey registry → metadata → session order.
+pub(crate) fn with_lock<T, E: From<StoreError>>(
+    directory: &super::fs::Directory,
+    name: &str,
+    work: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    let path = directory.path.join(name);
+    let keyed = keyed(&path)?;
+    let mut wait = Wait::new();
+    let _mutex = wait.mutex(&keyed)?;
+    let _flock = wait.flock(directory.open(name, true)?, &path)?;
+    work()
 }

@@ -108,11 +108,13 @@ version = "0.1.0"
 dependencies = [
  "ariadne-agent-protocol",
  "ariadne-domain",
+ "ariadne-store",
  "jsonschema",
  "schemars 1.2.2",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "ts-rs",
 ]
 
