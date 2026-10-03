@@ -14,6 +14,14 @@ CI runs once per pushed head, cancels older runs on its ref and always reports
 `quality`. Feature branches compare merge-base(origin/main, HEAD)..HEAD; main uses previous-push..HEAD.
 Renames inspect old and new paths. Unknown paths/missing base select full checks.
 
+Reference gallery capture and its Chromium provisioning use a separate conservative
+selector. Changes confined to Rust sources or Cargo manifests in crates/desktop
+Rust, root Cargo/toolchain files, Markdown documentation and the static task/chart
+metadata skip that capture. Frontend, design, asset, browser-test, Node dependency/
+configuration and other paths retain it; missing bases and manual full runs capture.
+Application tests, frontend build/lint/types, weighted Rust+web coverage, Clippy,
+native WebView smoke and selected packaged release checks run independently.
+
 | Scope | Pushed-head checks |
 | --- | --- |
 | Docs/planning/static chart | Relevant data regeneration and ordinary inline JavaScript ESLint |

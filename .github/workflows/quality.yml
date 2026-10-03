@@ -45,10 +45,12 @@ jobs:
           python -m venv .venv-quality
           .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
           npm ci --ignore-scripts --engine-strict
-          if [[ "$scope" == application* ]]; then
+          if [[ "$scope" == *" reference=true" ]]; then
             export PLAYWRIGHT_BROWSERS_PATH="$GITHUB_WORKSPACE/target/reference-browser"
             node node_modules/playwright/cli.js install chromium
             npm run capture:reference
+          fi
+          if [[ "$scope" == application* ]]; then
             rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
             cargo install cargo-llvm-cov --version 0.9.1 --locked
           fi
