@@ -61,6 +61,9 @@ declarations/re-exports: real LLVM measurement produces no executable lines for
 these wiring files. Domain `src/models/primitives.rs` is fully measured. Remove
 either wiring exclusion in the same PR that adds its first executable logic;
 the independent reviewer checks both files and the real report.
+The exact desktop `src/data/index.ts` exclusion covers only re-exports; remove it
+in the same PR that adds executable logic. Vite consumes the same reviewed
+exclusion patterns so this zero-line barrel is omitted from measured LCOV.
 Generated/vendor/dependency/test sources are excluded by path. There is no blanket
 `crates/**/lib.rs` exemption, AST parser, source SHA or dependency-identity classifier.
 Remove a stub's exact exclusion when its first logic lands. Declaration paths must

@@ -18,6 +18,7 @@
     "crates/*/src/dto/*.rs",
     "crates/*/src/dto.rs",
     "apps/desktop/vite.config.ts",
+    "apps/desktop/src/data/index.ts",
     "apps/desktop/wdio.native.conf.mjs",
     "apps/desktop/src-tauri/build.rs"
   ]
