@@ -65,6 +65,11 @@ eligible tasks whose owned paths do not overlap running work; ownership overlap
 serializes implementation. Shared manifests, exports and wiring have one declared
 owner. Settle shared contracts before consumer work rather than relying on later
 integration to resolve incompatible assumptions.
+Workers propose contract changes to the maintainer, who adjudicates, updates the
+authoritative contract and assigns every affected implementation/test change.
+Shared signatures and semantics do not drift unilaterally or through duplicate
+contract copies. Important architecture changes get ADRs; routine compatible
+amendments are tracked in the affected PR.
 
 No phase-wide barrier is implied. Domain validation/history, store, assets and
 provider contracts can branch after concrete prerequisites. CLI/MCP, independent

@@ -25,6 +25,13 @@ edges allow parallelism. Assign one owner for shared manifests, exports and wiri
 and settle a contract change before dependent implementation. Keep independent
 work moving while a concrete access or architecture blocker is resolved.
 
+Workers propose shared-interface changes to the maintainer with affected consumers
+and tests. The maintainer adjudicates, updates the authoritative contract and
+dispatches all affected implementation/test work under declared ownership. Workers
+do not change shared signatures or semantics unilaterally or maintain duplicate
+contract copies. Important architecture changes get a short ADR; routine compatible
+contract amendments are tracked in the affected PR.
+
 The implementer adds meaningful behavior tests, commits through the cheap hook,
 runs relevant pushed-head checks and opens a reviewable PR with behavior and real
 validation evidence. Routine ownership/spec updates can ride it. Important

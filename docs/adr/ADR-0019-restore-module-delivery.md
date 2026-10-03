@@ -40,6 +40,12 @@ count as dependency completion. The maintainer schedules and serializes merges;
 independent reviewers assess the current head. This corrects execution strategy
 without changing product scope or weakening quality.
 
+Workers propose shared contract changes to the maintainer, who adjudicates,
+updates the authoritative contract and assigns all affected implementation/test
+changes. Workers do not change shared signatures/semantics unilaterally or keep
+duplicate contract copies. Important architecture changes get short ADRs; routine
+compatible amendments are tracked in the affected PR.
+
 ## Spec references
 
 - [Build handoff](../planning/BUILD_HANDOFF.md#implementation-order)
