@@ -15,8 +15,12 @@ source is `scripts/check-commit.py`; CI and the local hook run the same gate.
 - Prefer about 500 handwritten changed lines per PR; maximum 800 per commit and
   1600 per PR, including tests/config.
   Original design/spec imports and generated lockfiles are reported separately.
-- Every PR commit and the integrated result run CI. Independent review and final
-  spec adjudication belong to the maintainer, tied to the exact current head.
+- Every branch push runs one complete CI suite on the exact pushed head, including
+  post-squash main. A newer push cancels the previous execution on the same branch.
+  PRs require the latest head to pass; historical commits are not replayed in CI.
+  Every local application commit still runs the full hook. Whole-branch authored
+  commit/PR and main squash size checks remain. Independent review and final spec
+  adjudication belong to the maintainer, tied to the exact current head.
 
 ## Remote limitation
 
@@ -119,8 +123,12 @@ snapshot records actual macOS/architecture/Xcode rather than asserting the owner
 Xcode build. CI installs Node 22.23.2, npm 10.9.8, Rust 1.98.1 with rustfmt,
 Clippy and llvm-tools-preview, and cargo-llvm-cov 0.9.1. Deployment target stays
 13.0; two Cargo jobs and incremental compilation off bound resource usage.
-Missing tools or a usable GUI are gate failures. Every PR commit and integrated
-result run the same complete checks; no self-hosted host/settings/billing change.
+Missing tools or a usable GUI are gate failures. Every pushed branch head runs
+the same complete checks once, including post-squash main. CI has one push trigger
+for all branches and no duplicate PR trigger or historical-commit replay. Newer
+pushes cancel older runs on that branch. Non-main size checks compare origin/main
+to the pushed head; main compares the preceding push SHA and checks each squash.
+Full local hooks remain. No self-hosted host/settings/billing change.
 
 The full workflow acceptance matrix lives in
 [Verification](low-level/VERIFICATION.md). Planning checks validate the 30 mockup

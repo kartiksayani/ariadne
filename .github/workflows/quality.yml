@@ -1,16 +1,14 @@
 name: Quality
 
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
+    branches: ["**"]
 
 permissions:
   contents: read
 
 concurrency:
-  group: quality-${{ github.event.pull_request.number || github.ref }}
+  group: quality-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,8 +21,8 @@ jobs:
           fetch-depth: 0
       - name: Check PR source commits or main squash commits
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
+          HEAD_SHA: ${{ github.sha }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref }}
         shell: bash
@@ -54,49 +52,34 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22.23.2"
-      - name: Check every PR commit and the integrated result
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      - name: Check the pushed branch head
         shell: bash
         run: |
           set -euo pipefail
-          npm install --global npm@10.9.8
-          integration=$(git rev-parse HEAD)
-          check_snapshot() {
-            local snapshot="$1"
-            archive_reports() {
-              mkdir -p "$RUNNER_TEMP/ariadne-quality-evidence/$snapshot"
-              if [[ -d coverage ]]; then cp -R coverage/. "$RUNNER_TEMP/ariadne-quality-evidence/$snapshot/"; fi
-            }
-            trap archive_reports EXIT
-            rm -rf coverage
-            git checkout --detach "$1"
-            python -m venv .venv-quality
-            .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
-            sw_vers
-            uname -m
-            xcode-select -p
-            xcodebuild -version
-            if [[ -f Cargo.toml ]]; then
-              rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
-              cargo install cargo-llvm-cov --version 0.9.1 --locked
-            fi
-            npm ci --ignore-scripts --engine-strict
-            if [[ -f Cargo.toml ]]; then
-              npm run build
-              cargo build --workspace --locked --all-features
-            fi
-            .venv-quality/bin/python scripts/check-commit.py --ci
-            archive_reports
-            trap - EXIT
+          snapshot=$(git rev-parse HEAD)
+          archive_reports() {
+            mkdir -p "$RUNNER_TEMP/ariadne-quality-evidence/$snapshot"
+            if [[ -d coverage ]]; then cp -R coverage/. "$RUNNER_TEMP/ariadne-quality-evidence/$snapshot/"; fi
           }
-          if [[ -n "$HEAD_SHA" ]]; then
-            while IFS= read -r revision; do
-              check_snapshot "$revision"
-            done < <(git rev-list --reverse "$BASE_SHA..$HEAD_SHA")
+          trap archive_reports EXIT
+          rm -rf coverage
+          npm install --global npm@10.9.8
+          python -m venv .venv-quality
+          .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          sw_vers
+          uname -m
+          xcode-select -p
+          xcodebuild -version
+          if [[ -f Cargo.toml ]]; then
+            rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
+            cargo install cargo-llvm-cov --version 0.9.1 --locked
           fi
-          check_snapshot "$integration"
+          npm ci --ignore-scripts --engine-strict
+          if [[ -f Cargo.toml ]]; then
+            npm run build
+            cargo build --workspace --locked --all-features
+          fi
+          .venv-quality/bin/python scripts/check-commit.py --ci
       - name: Preserve native and coverage evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -109,4 +92,4 @@ jobs:
         if: always()
         env:
           JOB_STATUS: ${{ job.status }}
-        run: echo "Quality result for $GITHUB_SHA — $JOB_STATUS. PR commits and integration must all pass." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Quality result for $GITHUB_SHA — $JOB_STATUS. Pushed branch head must pass." >> "$GITHUB_STEP_SUMMARY"

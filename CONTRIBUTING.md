@@ -27,7 +27,10 @@ Use `rtk proxy` before shell commands when working in the owner's agent environm
    Their exemption is not permission to hide application code there.
 2. Run all lint and tests on every commit. The hook refuses unstaged/untracked changes
    so it tests exactly what is committed. Use a clean worktree, no automatic stash.
-   CI repeats checks for every PR commit and GitHub's integrated merge result.
+   Each branch push runs the complete CI suite once on its exact pushed head,
+   including main after a squash merge. A newer push cancels the previous run on
+   that branch; PRs require their latest head to pass. Local hooks and whole-branch
+   authored-commit/PR size checks remain; CI does not replay historical commits.
 3. At least 80% measured line coverage. Quality helpers have their own measured gate.
    Application coverage combines covered/total executable Rust and JS/TS lines,
    includes untested files, and rejects missing/stale reports. The application is not

@@ -78,6 +78,15 @@ class GitFunctionalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "commit exceeds 800"):
             self.check(["--base", "0" * 40])
 
+    def test_feature_push_checks_whole_branch_not_only_latest_push_delta(self):
+        base = self.add_commit("base.py", 1)
+        self.git("update-ref", "refs/remotes/origin/main", base)
+        before = self.add_commit("earlier-oversized.py", 801)
+        self.add_commit("latest-small.py", 1)
+        self.check(["--base", before])
+        with self.assertRaisesRegex(ValueError, "commit exceeds 800"):
+            self.check(["--base", "origin/main"])
+
     def test_valid_prs_pass_after_real_squash_and_oversized_squash_fails(self):
         base = self.add_commit("base.py", 1)
         main = self.git("branch", "--show-current")
@@ -189,6 +198,8 @@ class WorkflowTests(unittest.TestCase):
     def test_only_pushes_to_main_select_squash_checks(self):
         workflow = (ROOT / ".github/workflows/quality.yml").read_text()
         step = workflow.split("  change-policy:\n", 1)[1].split("\n  quality:", 1)[0]
+        self.assertIn("BASE_SHA: ${{ github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}", step)
+        self.assertIn("HEAD_SHA: ${{ github.sha }}", step)
         script = "\n".join(line.removeprefix("          ")
                            for line in step.split("        run: |\n", 1)[1].splitlines())
         with tempfile.TemporaryDirectory() as directory:
