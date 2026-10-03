@@ -185,3 +185,12 @@ dialog focus trap/return, closeable panels and all actual frame mounts. CI retai
 the existing measured application coverage, native WebView and release-isolation
 gates. Local work runs cheap renderer/type/lint/hook checks only; capture/native/
 build/coverage results must come from the pushed-head CI artifacts.
+
+Reconnect frame `1o` forwards the matching Waiting answer’s blocked state into
+the detail editor. `frame:1o/reconnect-choice` explicitly retains the prior
+nonrecommended “No, keep both” choice, and `frame:1o/reconnect-draft` retains a
+nonempty text draft. These are controlled application states with no supplied
+matching frame, captured independently without claiming source parity. Actual
+user interactions verify option Send, text Send and Cmd+Enter cannot submit
+during reconnect; the choice and draft remain visible. This proves presentation
+blocking and retention, with backend persistence outside this gallery’s scope.

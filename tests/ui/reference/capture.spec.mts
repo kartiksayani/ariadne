@@ -185,6 +185,8 @@ test('assembled frame regions and canonical pinned geometry', async ({ page, con
       const scroll = document.querySelector<HTMLElement>('.ref-workspace-scroll')!;
       return { header: box('.ref-header'), tabs: box('.ref-tabs'), footer: box('.ref-footer'), waiting: box('.ref-waiting'), center: box('.ref-center'), detail: document.querySelector('.ref-detail') ? box('.ref-detail') : null, rail: document.querySelector('.ref-rail') ? box('.ref-rail') : null, overflow: scroll.scrollWidth > scroll.clientWidth };
     });
+    await expect(page.locator('.ref-workspace')).toHaveCSS('font-size', '14px');
+    await expect(page.locator('.ref-workspace')).toHaveCSS('line-height', '21px');
     expect(dimensions.header.height).toBe(48); expect(dimensions.tabs.height).toBe(38); expect(dimensions.footer.height).toBe(30);
     expect(dimensions.waiting.width).toBe(300); expect(dimensions.center.width).toBeGreaterThanOrEqual(560);
     if (dimensions.detail) expect(dimensions.detail.width).toBe(400);
@@ -199,13 +201,14 @@ test('assembled frame regions and canonical pinned geometry', async ({ page, con
     for (const name of frameRegions[frame.id] ?? ['graph'] as const) {
       const region = assembledRegions[name];
       const sourceRegions = original.locator(region.source), appRegions = page.locator(region.app);
-      expect(await sourceRegions.count()).toBe(await appRegions.count());
-      for (let index = 0; index < await appRegions.count(); index++) {
+      const sourceCount = await sourceRegions.count(), appCount = await appRegions.count();
+      expect.soft(sourceCount, `${frame.id}/${name} matching region count`).toBe(appCount);
+      for (let index = 0; index < Math.min(sourceCount, appCount); index++) {
       const sourceRegion = sourceRegions.nth(index), appRegion = appRegions.nth(index);
       await expect(sourceRegion).toBeAttached(); await expect(appRegion).toBeAttached();
       const sourceBox = await sourceRegion.boundingBox(), appBox = await appRegion.boundingBox();
       expect(sourceBox).not.toBeNull(); expect(appBox).not.toBeNull();
-      for (const dimension of ['width', 'height'] as const) expect(Math.abs(sourceBox![dimension] - appBox![dimension]), `${frame.id}/${name} ${dimension}`).toBeLessThanOrEqual(1);
+      for (const dimension of ['width', 'height'] as const) expect.soft(Math.abs(sourceBox![dimension] - appBox![dimension]), `${frame.id}/${name} ${dimension}`).toBeLessThanOrEqual(1);
       const sourcePng = await sourceRegion.screenshot({ animations: 'disabled' });
       const appPng = await appRegion.screenshot({ animations: 'disabled' });
       const snapshot = `${frame.id}-${name}-${index}.png`;
@@ -214,7 +217,8 @@ test('assembled frame regions and canonical pinned geometry', async ({ page, con
       await testInfo.attach(`${frame.id}-${name}-${index}-source`, { body: sourcePng, contentType: 'image/png' });
       await testInfo.attach(`${frame.id}-${name}-${index}-app`, { body: appPng, contentType: 'image/png' });
       await testInfo.attach(`${frame.id}-${name}-${index}-provenance`, { body: JSON.stringify({ archive: sourceManifest.archive, member: frame.member, boardLine: frame.line, props, theme, viewport: page.viewportSize(), browser: browser.version(), sourceBox, appBox, dimensions, region, masks: [], wholeFrameParity: false }), contentType: 'application/json' });
-      expect(appPng).toMatchSnapshot(snapshot, { threshold: 0.2, maxDiffPixelRatio: 0.005 });
+      // Keep the gate failing while retaining every downstream region pair.
+      expect.soft(appPng).toMatchSnapshot(snapshot, { threshold: 0.2, maxDiffPixelRatio: 0.005 });
       }
     }
     await page.locator('.ref-workspace-scroll').evaluate(node => { node.scrollLeft = 400; });
@@ -227,7 +231,7 @@ test('assembled frame regions and canonical pinned geometry', async ({ page, con
       await expect(page.getByRole('dialog')).toContainText('The source stays unchanged');
     }
   }
-  for (const [frame, variant] of [['1x', 'archive-blocked'], ['1x', 'archive-eligible'], ['1ac', 'close-guard'], ['1y', 'target-error'], ['1u', 'ask-only'], ['1a', 'paused-follow']]) {
+  for (const [frame, variant] of [['1x', 'archive-blocked'], ['1x', 'archive-eligible'], ['1ac', 'close-guard'], ['1y', 'target-error'], ['1u', 'ask-only'], ['1a', 'paused-follow'], ['1o', 'reconnect-choice'], ['1o', 'reconnect-draft']]) {
     await page.goto(`${origin}/tests/ui/reference/gallery.html?frame=${frame}&variant=${variant}&theme=${theme}`);
     await ready(page, false);
     if (['archive-blocked', 'archive-eligible', 'close-guard', 'target-error'].includes(variant)) {
@@ -235,7 +239,15 @@ test('assembled frame regions and canonical pinned geometry', async ({ page, con
       const box = await page.getByRole('dialog').boundingBox();
       expect(box!.x).toBeGreaterThanOrEqual(24); expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width - 24);
     } else if (variant === 'paused-follow') await expect(page.getByRole('button', { name: '3 new messages · Jump to latest' })).toBeVisible();
-    else await expect(page.locator('.ref-round-card')).toHaveCount(1);
+    else if (variant.startsWith('reconnect-')) {
+      const detail = page.getByRole('complementary', { name: 'Item detail' });
+      await expect(detail.getByText(/Reconnecting to claude-code/)).toBeVisible();
+      await expect(detail.getByRole('button', { name: 'Send reply' })).toBeDisabled();
+      if (variant === 'reconnect-choice') {
+        await expect(detail.getByRole('button', { name: /No, keep both/, pressed: true })).toBeVisible();
+        await expect(detail.getByRole('button', { name: /Send “No, keep both”/ })).toBeDisabled();
+      } else await expect(detail.getByRole('textbox', { name: 'Reply in your own words' })).toHaveValue('Please keep the rule only in AGENTS.md and link to it from CLAUDE.md.');
+    } else await expect(page.locator('.ref-round-card')).toHaveCount(1);
     await testInfo.attach(`${variant}-app-no-supplied-matching-frame`, { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
   }
   expect(denied).toEqual([]); expect(errors).toEqual([]);

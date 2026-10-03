@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import userEvent from '@testing-library/user-event';
 import { WorkspaceCase, workspaceFixtures } from './workspace-cases';
 import { frameRegions, assembledRegions } from './assembled-regions';
 import { BackAndForthRound } from '../../../apps/desktop/src/components/reference/BackAndForthRound';
@@ -138,6 +139,37 @@ describe('assembled reference presentation', () => {
     expect(screen.getByRole('heading', { name: workspaceFixtures['1ad'].detail!.question })).toBeVisible();
     expect(screen.getByText('Agent not running')).toBeVisible();
     expect(screen.queryByText(/Send to another agent|Start the agent|Route to/)).not.toBeInTheDocument();
+  });
+  it('blocks the reconnect detail editor after a deliberate option click', async () => {
+    const submit = vi.fn(), user = userEvent.setup();
+    render(<WorkspaceCase frameId="1o" onSubmitAnswer={submit} />);
+    const detail = within(screen.getByRole('complementary', { name: 'Item detail' }));
+    await user.click(detail.getByRole('button', { name: /Yes, keep it only in AGENTS.md/ }));
+    const send = detail.getByRole('button', { name: /Send “Yes, keep it only in AGENTS.md”/ });
+    expect(send).toBeDisabled();
+    expect(detail.getByText(/Reconnecting to claude-code/)).toBeVisible();
+    await user.click(send);
+    expect(submit).not.toHaveBeenCalled();
+  });
+  it.each(['reconnect-choice', 'reconnect-draft'])('retains explicit %s while option, reply and Cmd+Enter cannot submit', async variant => {
+    const submit = vi.fn(), user = userEvent.setup();
+    render(<WorkspaceCase frameId="1o" variant={variant} onSubmitAnswer={submit} />);
+    const detail = within(screen.getByRole('complementary', { name: 'Item detail' }));
+    const textarea = detail.getByRole('textbox', { name: 'Reply in your own words' });
+    if (variant === 'reconnect-choice') {
+      expect(detail.getByRole('button', { name: /No, keep both/, pressed: true })).toBeVisible();
+      const waiting = within(screen.getByRole('complementary', { name: 'Waiting on me' }));
+      expect(waiting.getByRole('button', { name: /No, keep both/, pressed: true })).toBeVisible();
+      await user.type(textarea, 'Retained text while reconnecting');
+    } else expect(textarea).toHaveValue('Please keep the rule only in AGENTS.md and link to it from CLAUDE.md.');
+    await user.click(detail.getByTitle('Press 2 to select'));
+    const optionSend = detail.getByRole('button', { name: /Send “No, keep both”/ }), replySend = detail.getByRole('button', { name: 'Send reply' });
+    expect(optionSend).toBeDisabled(); expect(replySend).toBeDisabled();
+    await user.click(optionSend); await user.click(replySend); await user.click(textarea);
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+    expect(textarea).not.toHaveValue('');
+    expect(detail.getByRole('button', { name: /No, keep both/, pressed: true })).toBeVisible();
+    expect(submit).not.toHaveBeenCalled();
   });
   it('mounts ask-only history and paused-follow affordances as component states', () => {
     const { container, rerender } = render(<WorkspaceCase frameId="1u" variant="ask-only" />);

@@ -414,7 +414,9 @@
       ],
       "kind": "application-reference",
       "render_cases": [
-        "frame:1o"
+        "frame:1o",
+        "frame:1o/reconnect-choice",
+        "frame:1o/reconnect-draft"
       ],
       "region_mapping": "tests/ui/reference/assembled-regions.ts#frameRegions.1o",
       "evidence": {
@@ -782,7 +784,9 @@
         "answer-compact-empty",
         "answer-compact-selected",
         "answer-warning-blocked",
-        "answer-textarea"
+        "answer-textarea",
+        "frame:1o/reconnect-choice",
+        "frame:1o/reconnect-draft"
       ]
     },
     {
@@ -857,7 +861,9 @@
         "frame:1l",
         "frame:1m",
         "frame:1w",
-        "frame:1z"
+        "frame:1z",
+        "frame:1o/reconnect-choice",
+        "frame:1o/reconnect-draft"
       ]
     }
   ],
@@ -886,7 +892,9 @@
     "frame:1ac/close-guard",
     "frame:1y/target-error",
     "frame:1u/ask-only",
-    "frame:1a/paused-follow"
+    "frame:1a/paused-follow",
+    "frame:1o/reconnect-choice",
+    "frame:1o/reconnect-draft"
   ],
   "evidence": {
     "directory": "coverage/reference",
@@ -898,7 +906,8 @@
     "Canonical Waiting is pinned outside the center/detail/rail horizontal scroll region at both required sizes; the source scrolls the complete body grid. Shell dimensions and pinned scroll are verified independently, retaining full unmasked images.",
     "Graph primitives receive explicit source fixture coordinates. No source 84px leaf or 208/216px depth layout algorithm is copied into production; actual 94px/254px layout and viewport behavior remain P5.1.",
     "Continue source/release lead and send text are excluded by precisely cropping its unchanged grouped summary; exact strings live in assembled-regions.ts. New target-local IDs/immutable provenance/source-preserving error text is tested independently.",
-    "The release footer advertises Cmd+Enter send and Enter details; prototype Enter-send copy/default recommendation is excluded from comparison crops. Controlled answers start without a selection.",
-    "Guarded archive/confirmed dispatch pause/target write failure have no supplied matching frame. Source dialog style is reused with honest application-only captures and meaningful interaction/geometry checks."
+    "The release footer advertises Cmd+Enter send and Enter details; prototype Enter-send copy/default recommendation is excluded from comparison crops. Source-derived answer cases start without a selection; retained-choice states are explicit target-only fixtures.",
+    "Guarded archive/confirmed dispatch pause/target write failure have no supplied matching frame. Source dialog style is reused with honest application-only captures and meaningful interaction/geometry checks.",
+    "Reconnect retained-choice and nonempty-draft cases are deliberate controlled application states with no supplied matching frame. Waiting and detail share reconnect blocking; option/text Send and Cmd+Enter cannot submit. The prior nonrecommended choice is explicit, never a restored default recommendation."
   ]
 }
