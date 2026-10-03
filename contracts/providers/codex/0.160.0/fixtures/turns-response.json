@@ -1,0 +1,96 @@
+{
+  "data": [
+    {
+      "id": "01a0fc15-ec75-7211-8fa6-313294ec730e",
+      "status": "completed",
+      "startedAt": 1790935690,
+      "completedAt": 1790935699,
+      "durationMs": 9381,
+      "itemsView": "full",
+      "error": null,
+      "items": [
+        {
+          "type": "userMessage",
+          "id": "01a0fc15-ec99-76b3-959e-29978b3fe57f",
+          "clientId": "01a0fc15-b3e2-7cc0-af22-de301dd5f741",
+          "content": [
+            {
+              "type": "text",
+              "text": "[ARIADNE_INPUT:163ea1c2-a331-4072-af1d-9e599c272dcd]\nOwner message on Ariadne item finding-3:\nReply with exactly ARIADNE_CODEX_POC_DONE. Do not use tools.",
+              "text_elements": []
+            }
+          ]
+        },
+        {
+          "id": "msg_084afffc809ce394016abf8292d81c87d29fe355ee293385b1",
+          "text": "ARIADNE_CODEX_POC_DONE",
+          "phase": "final_answer",
+          "delivery": null,
+          "type": "agentMessage"
+        }
+      ]
+    },
+    {
+      "id": "01a0fc15-daeb-7961-b89b-9773c43eb633",
+      "status": "completed",
+      "startedAt": 1790935685,
+      "completedAt": 1790935690,
+      "durationMs": 4485,
+      "itemsView": "full",
+      "error": null,
+      "items": [
+        {
+          "type": "userMessage",
+          "id": "01a0fc15-db0e-7b33-b5dc-43739f111b4f",
+          "clientId": "01a0fc15-b27a-79f3-aa72-10f2f4ebc2fc",
+          "content": [
+            {
+              "type": "text",
+              "text": "[ARIADNE_INPUT:4fb83fca-0dcc-44ca-b686-c8adc68c330e]\nOwner message on Ariadne item finding-2:\nWhat exact phrase did I just ask you to remember? Reply with that phrase only. Do not use tools.",
+              "text_elements": []
+            }
+          ]
+        },
+        {
+          "id": "msg_084afffc809ce394016abf8289a41087d295323b321720d076",
+          "text": "ariadne-2eae452a57ed",
+          "phase": "final_answer",
+          "delivery": null,
+          "type": "agentMessage"
+        }
+      ]
+    },
+    {
+      "id": "01a0fc15-b03c-7283-8134-f53ebc025864",
+      "status": "completed",
+      "startedAt": 1790935674,
+      "completedAt": 1790935685,
+      "durationMs": 10918,
+      "itemsView": "full",
+      "error": null,
+      "items": [
+        {
+          "type": "userMessage",
+          "id": "01a0fc15-b068-7ad3-94b1-92449ff01d0b",
+          "clientId": "01a0fc15-b03a-7c21-8544-2094d1f10a25",
+          "content": [
+            {
+              "type": "text",
+              "text": "[ARIADNE_INPUT:b38e6400-540d-42f5-8a35-1cd30ab86974]\nOwner message on Ariadne item finding-1:\nCommunication test only. Remember this exact phrase for my next message: ariadne-2eae452a57ed. Reply with exactly ACK. Do not use tools.",
+              "text_elements": []
+            }
+          ]
+        },
+        {
+          "id": "msg_084afffc809ce394016abf8284ba4887d293ab3d6850795bb8",
+          "text": "ACK",
+          "phase": "final_answer",
+          "delivery": null,
+          "type": "agentMessage"
+        }
+      ]
+    }
+  ],
+  "nextCursor": null,
+  "backwardsCursor": null
+}
