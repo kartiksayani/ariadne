@@ -1,0 +1,58 @@
+# P0.4a licensed asset foundation
+
+[source.json](source.json) maps every one of the 30 immutable board frames to its
+source member, board line, exact import props and component families. Its nine
+component records preserve the complete variant/state mapping from
+[DESIGN_TRACEABILITY](../../DESIGN_TRACEABILITY.md). Sheets 1j/1k and diagram 1s
+remain references. Frame 1c does not authorize default answer selection; 1p and
+1ad do not authorize guessed binding or cross-agent rerouting.
+
+The original ZIP and DESIGN_PROMPT digests are pinned. The existing
+[design manifest](../../assets/design-manifest.json) supplies all sixteen member
+digests, sizes and reference roles; this inventory does not duplicate it.
+Source tokens record all 51 Nocturne root declarations and the 16 dark/21 light
+roles in `Ariadne.dc.html:812–851`. Repeated sheet/diagram declarations remain in
+their immutable source members. The source README's **Design tokens** and
+**Components** sections retain dimensions, type, focus and outline-button rules:
+Inter 400/500; 20/18/15px heading/page/question; 11px medium section labels with
+0.07em tracking; 24px tree indentation; 22px status badges; 190×66px graph nodes;
+4/6/8/14px keycap/badge/card/dialog radii; 2px accent focus; 45% disabled opacity.
+
+[assets.json](assets.json) pins each bundled file's SHA-256 and size, provider
+URLs, licenses, fourteen Inter faces and all 59 used weight/glyph mappings.
+The seven unmodified Inter subsets come from the source's Google Fonts request,
+v20 WOFF2 with internal version `4.001;git-66647c0bb`, source commit
+`66647c0bbbe41a850d79d9c76fb13add3378940f`, under SIL OFL 1.1.
+The unversioned, user-agent-sensitive CSS request is qualified by the saved
+response digest and explicit v20 font URLs. This is not an assumed Inter v4.1
+release. Phosphor comes from official `@phosphor-icons/web@2.1.1` under MIT;
+the distribution archive digest and registry integrity are recorded. Its source
+treatment uses 55 regular mappings and four fill mappings (57 distinct names).
+The Ariadne mark is the regular `ph ph-spiral`, U+E9FA, in the bundled font.
+Every status keeps the source shape: regular circle/circle-half/check-circle/
+x-circle/arrow-circle-right, filled question for Waiting and filled check-circle
+for Done; labels remain required when components are implemented.
+
+Bundled CSS uses local URLs and only Inter 400/500. License copies retain all
+copyright/permission text; CRLF/CR becomes LF and trailing ASCII spaces/tabs are
+trimmed. Both upstream and bundled digests are recorded. The original downloads,
+licenses and probe evidence remain unchanged at
+`/private/tmp/ariadne-p04a-assets-em8a3mt3`; its manifest digest is
+`74c041c5761898e190585aa5c989c23223cdeaa7c32421366fe2d3d95e0e3259`.
+The paused `.worktrees/P0.4a` draft remains untouched.
+
+`/styles/design-tokens.css` ports exact source token values, with standard modern
+RGB/OKLCH syntax. It defaults to the source dark palette
+and supports explicit `data-theme="dark"`/`"light"` scopes. It is an unloaded
+asset for later consumers; theme preference/System handling remains later UI.
+Consumers can load `/fonts/inter.css`, `/icons/phosphor.css` and the tokens locally.
+No prototype scripts, timers, fixture behavior or remote imports are shipped.
+
+`npm run test:ui -- --project reference` verifies actual archive/member/prompt
+bytes, complete mappings, source token values, bundled hashes/licenses, face and
+glyph mappings, and every resource through a temporary loopback Vite server.
+The root reference tests are included in the desktop TypeScript check. Default
+UI/coverage runs still include the desktop scaffold tests. Rendering components,
+screenshots, font rasterization and packaged offline acceptance belong to
+P0.4b/P0.4 and later release checks. No native build was needed for asset extraction.
+Organization security guidance was not checked under the explicit session waiver.
