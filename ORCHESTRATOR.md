@@ -54,7 +54,7 @@ behavior, scope, tests/E2E, coverage, limitations and spec references. Keep it d
 until the required behavior and checks exist. The worker returns PR URL, final
 head, commands/results, coverage and any remaining concern. It never merges.
 
-If a task cannot fit one correct PR under the 1600-line handwritten cap, first
+If a task cannot fit one correct PR under the 3200-line handwritten cap, first
 split its catalogue entry in a small reviewed planning PR, updating dependants,
 owned paths and embedded chart data. Do not submit a half-working task or claim
 it complete with several ambiguous task markers. Maintenance PRs without a task

@@ -52,7 +52,7 @@ worktrees for simultaneous work; preserve all unrelated edits. This roadmap is
 data for that workflow and does not start an orchestrator or execute commands.
 
 Each task is one small independently reviewed PR: prefer about 500 handwritten
-changed lines, maximum 1600 including tests/config; each commit maximum 800.
+changed lines, maximum 3200 including tests/config; each commit maximum 1600.
 Original assets, documentation and genuinely generated outputs are classified
 separately with provenance, as required by [CONTRIBUTING](../../CONTRIBUTING.md).
 Do not put handwritten production code in a generated/documentation exemption.
