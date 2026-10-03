@@ -117,7 +117,10 @@
         "rtk proxy cargo test -p ariadne-domain --test schema",
         "rtk proxy cargo test -p ariadne-xtask"
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/26"
+      }
     },
     {
       "id": "P0.3b",
@@ -223,7 +226,10 @@
         "rtk proxy npm run test:ui -- --project reference",
         "Verify immutable archive/member digests and bundled asset hashes/licences against the source inventory."
       ],
-      "estimate_days": 0.25
+      "estimate_days": 0.25,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/27"
+      }
     },
     {
       "id": "P0.4b",
