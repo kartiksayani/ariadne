@@ -523,6 +523,10 @@ fn canonical_demo_links_preserve_records_and_projection_snapshots() {
         for (key, value) in read["item"].as_object().unwrap() {
             assert_eq!(value, &stored[key], "item snapshot field {key}");
         }
+        assert_eq!(
+            read["status_history"]["items"], stored["status_history"],
+            "complete projected status history must equal the stored entries"
+        );
         for message in read["updated_messages"]["items"].as_array().unwrap() {
             assert_eq!(message, messages[message["id"].as_str().unwrap()]);
         }

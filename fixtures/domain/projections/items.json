@@ -99,7 +99,7 @@
             "previous_why": null,
             "previous_replaced_by": null,
             "cause_message_id": "00000000-0000-4000-8000-000000000103",
-            "at": "2026-10-03T12:00:03.000Z",
+            "at": "2026-10-03T12:00:18.000Z",
             "binding_id": "00000000-0000-4000-8000-000000000020",
             "handled_through_message_number": 2,
             "reason": "Owner selected complete history."
