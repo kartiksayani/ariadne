@@ -3,3 +3,15 @@ name = "ariadne-adapter-claude"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dependencies]
+ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
+ariadne-domain = { path = "../ariadne-domain" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+libc.workspace = true
+futures-channel = { version = "=0.3.34", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tempfile.workspace = true
