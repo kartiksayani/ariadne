@@ -109,10 +109,14 @@ describe('explicit discovery registration and binding', () => {
       expect(screen.getByRole('button', { name: 'Connect existing session' })).toBeDisabled();
       expect(screen.getByLabelText('Socket path')).toHaveValue('/tmp/daemon.sock');
     }
+    await act(async () => { await context.controller.refresh(); });
+    expect(screen.getByRole('button', { name: 'Connect existing session' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Use host session' }));
+    expect(screen.getByRole('button', { name: 'Connect existing session' })).not.toBeDisabled();
     fireEvent.change(screen.getByLabelText('External session ID'), { target: { value: 'manual-fallback' } });
     expect(screen.getByRole('button', { name: 'Connect existing session' })).not.toBeDisabled(); expect(context.mutations).toHaveLength(0);
   });
-  it('failed refresh retains a visible complete snapshot and Escape dismissal closes StrictMode replay', async () => {
+  it('failed refresh retains a visible complete snapshot and dismissal closes StrictMode replay', async () => {
     const context = setup(); await context.store.start(); bind(context, true);
     await screen.findByText('Discovered conversation');
     context.reads.mockRejectedValueOnce(new Error('unavailable'));

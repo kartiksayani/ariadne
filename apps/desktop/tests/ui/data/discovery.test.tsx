@@ -58,6 +58,15 @@ describe('one application discovery lifetime', () => {
     await controller.refresh(); expect(controller.getSnapshot().snapshot).toBe(complete);
     await controller.refresh(); expect(controller.getSnapshot().error).toBeNull();
   });
+  it('does not publish an old read after the dialog was dismissed and reopened', async () => {
+    vi.useFakeTimers(); const { controller, discovery } = setup(); const read = deferred<DesktopDiscoverySnapshot>(); discovery.mockReturnValueOnce(read.promise);
+    const close = controller.acquire(); await flush(); close(); controller.acquire(); await flush();
+    expect(discovery).toHaveBeenCalledTimes(1);
+    read.resolve({ candidates: [candidate('obsolete')], error: null }); await flush();
+    expect(controller.getSnapshot().snapshot).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(controller.getSnapshot().snapshot).toEqual(snapshot());
+  });
   it('shows activation errors and can retry explicitly without creating a read storm', async () => {
     const { controller, discovery, open } = setup(); open.mockRejectedValueOnce(new Error('failed'));
     controller.acquire(); await flush();
