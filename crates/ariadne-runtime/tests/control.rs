@@ -1,5 +1,6 @@
 use ariadne_core::{fake::*, *};
 use ariadne_domain::models::*;
+use ariadne_runtime::discovery::{Discovery, LoadedPlugin, ModDescriptor, SessionAnnouncement};
 use ariadne_runtime::supervisor::ClaimGate;
 use ariadne_runtime::{control::*, leases::DesktopOwner};
 use std::{
@@ -731,7 +732,12 @@ fn connect_server(
     configured: bool,
 ) -> Running {
     let owner = DesktopOwner::acquire(home).unwrap();
-    let mut server = ControlServer::bind(owner, core, vec![]).unwrap();
+    let mut server = ControlServer::bind(owner, core, vec![])
+        .unwrap()
+        .with_discovery(Discovery::new(
+            Arc::new(|| UtcMillis::new("2026-10-04T00:00:00.000Z").unwrap()),
+            None,
+        ));
     if configured {
         server = server.with_binding_connect();
     }
@@ -760,6 +766,34 @@ fn binding_connect_bootstrap_preserves_canonical_request_and_receipt_without_dis
             ControlResult::BindingConnect(receipt.clone())
         );
     }
+    // Both opt-in private methods coexist: unbound announcement grants no Core
+    // mutation/route and cannot be confused with a saved bootstrap receipt.
+    let announcement = SessionAnnouncement {
+        adapter_id: "claude_code_mod".into(),
+        external_session_id: "original-session".into(),
+        cwd: h.path().to_str().unwrap().into(),
+        host_version: "2.1.287".into(),
+        plugin: LoadedPlugin {
+            name: "ariadne".into(),
+            root: h.path().to_str().unwrap().into(),
+        },
+        descriptor: ModDescriptor {
+            helper_path: "/Applications/Ariadne/helper".into(),
+            app_version: "0.1.0".into(),
+            api_version: 1,
+        },
+        binding_scope: None,
+    };
+    let expected = announcement.acknowledgement();
+    let announced = ControlRequest::new(
+        UuidV4::new("00000000-0000-4000-8000-000000000099").unwrap(),
+        ControlMethod::SessionAnnouncement(announcement),
+    )
+    .unwrap();
+    assert_eq!(
+        rt.block_on(call(h.path().into(), announced)).unwrap(),
+        ControlResult::Announcement(expected)
+    );
     // A saved binding receipt has not created a supervisor, lease or claim route.
     assert_eq!(
         rt.block_on(call(h.path().into(), ping(&corpus().routing)))

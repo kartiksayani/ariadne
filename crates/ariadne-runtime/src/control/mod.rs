@@ -1,6 +1,7 @@
 //! UID-checked Unix-only control; socket IO never spans a store transaction.
 mod codec;
 mod wire;
+use crate::discovery::Discovery;
 use crate::leases::{
     fs::{error, io_error, uid, Directory},
     BindingLease, DesktopOwner,
@@ -89,6 +90,7 @@ pub struct ControlServer {
     core: Arc<dyn CoreService>,
     bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
     binding_connect: bool,
+    discovery: Option<Discovery>,
 }
 impl ControlServer {
     /// Blocking native setup. Holding DesktopOwner proves stale removal is permitted.
@@ -140,12 +142,19 @@ impl ControlServer {
             core,
             bindings: Arc::new(routes),
             binding_connect: false,
+            discovery: None,
         })
     }
     /// Native composition opts in only with its real configured CoreService.
     /// This bootstrap route grants no dispatch lease or supervisor readiness.
     pub fn with_binding_connect(mut self) -> Self {
         self.binding_connect = true;
+        self
+    }
+    /// Native composition enables read-only announcements on this existing
+    /// UID-checked endpoint. It confers no dispatch lease or claim route.
+    pub fn with_discovery(mut self, discovery: Discovery) -> Self {
+        self.discovery = Some(discovery);
         self
     }
     pub async fn serve(self, mut stop: oneshot::Receiver<()>) -> Result<(), CoreError> {
@@ -173,12 +182,21 @@ impl ControlServer {
             let core = self.core.clone();
             let bindings = self.bindings.clone();
             let binding_connect = self.binding_connect;
+            let discovery = self.discovery.clone();
             let deadline = Instant::now() + CONTROL_TIMEOUT;
             connections.spawn(async move {
                 let slot = Arc::new(slot);
                 let _ = tokio::time::timeout_at(
                     tokio::time::Instant::from_std(deadline),
-                    handle(stream, core, bindings, binding_connect, slot, deadline),
+                    handle(
+                        stream,
+                        core,
+                        bindings,
+                        binding_connect,
+                        discovery,
+                        slot,
+                        deadline,
+                    ),
                 )
                 .await;
             });
@@ -190,6 +208,7 @@ async fn handle(
     core: Arc<dyn CoreService>,
     bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
     binding_connect: bool,
+    discovery: Option<Discovery>,
     slot: Arc<tokio::sync::OwnedSemaphorePermit>,
     deadline: Instant,
 ) -> Result<(), CoreError> {
@@ -219,7 +238,24 @@ async fn handle(
         Ok(request) => match request.validate() {
             Err(e) => Err(e),
             Ok(()) => {
-                if let ControlMethod::BindingConnect(request) = request.method {
+                if let ControlMethod::SessionAnnouncement(announcement) = request.method {
+                    match discovery {
+                        None => Err(error(
+                            CoreErrorCode::Unsupported,
+                            "Read-only discovery intake is not enabled on this desktop.",
+                        )),
+                        Some(discovery) => {
+                            let received = Instant::now();
+                            let observed_at = (discovery.now)();
+                            tokio::task::spawn_blocking(move || {
+                                let _retained_slot = slot;
+                                discovery.announce(announcement, received, observed_at, deadline)
+                                    .map(ControlResult::Announcement)
+                            }).await.map_err(|_| error(CoreErrorCode::HostUnreachable,
+                                "Native announcement validation failed; refresh the original conversation."))?
+                        }
+                    }
+                } else if let ControlMethod::BindingConnect(request) = request.method {
                     if !binding_connect {
                         Err(CoreError::new(CoreErrorCode::Unsupported,
                             "Native binding connect is not configured on this desktop.",
@@ -289,6 +325,10 @@ async fn handle(
                                         )
                                     })?
                                 }
+                                ControlMethod::SessionAnnouncement(_) => Err(error(
+                                    CoreErrorCode::ProtocolConflict,
+                                    "Announcement must be handled before dispatch lease routing.",
+                                )),
                                 ControlMethod::BindingConnect(_) => Err(error(
                                     CoreErrorCode::InvalidArgument,
                                     "Binding connect cannot use the lease-required route.",
