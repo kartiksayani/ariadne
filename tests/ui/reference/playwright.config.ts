@@ -11,8 +11,9 @@ export default defineConfig({
   updateSnapshots: 'none',
   reporter: [['list'], ['html', { outputFolder: resolve('coverage/reference/report'), open: 'never' }]],
   use: { browserName: 'chromium', deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: 'dark', reducedMotion: 'reduce', trace: 'retain-on-failure' },
-  projects: ['dark', 'light'].flatMap(theme => [
+  projects: [...['dark', 'light'].flatMap(theme => [
     { name: `${theme}-1600x960`, use: { viewport: { width: 1600, height: 960 } } },
     { name: `${theme}-1000x700`, use: { viewport: { width: 1000, height: 700 } } },
-  ]),
+  ]), { name: 'graph-2000', testDir: resolve('tests/e2e/graph'), testMatch: '*.spec.mts',
+    use: { viewport: { width: 1000, height: 700 } } }],
 });

@@ -1,0 +1,25 @@
+.owner-input .owner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.owner-input .owner-options { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+.owner-input .owner-editor-label {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.owner-input textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.owner-input [aria-pressed="true"] {
+  box-shadow: 0 0 0 1px var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+.owner-input .ref-warning { flex-wrap: wrap; }
