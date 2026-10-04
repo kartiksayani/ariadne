@@ -27,6 +27,13 @@ and runs owning shutdown off the UI thread before allowing exit. An unconfirmed
 preference operation or failed shutdown keeps the process running. Wake is
 coalesced and serialized with shutdown; it cannot acquire another owner.
 
+Actual macOS wake comes from `NSWorkspaceDidWakeNotification` on the workspace
+notification center. `RunEvent::Resumed` maps to the event-loop poll cause in the
+pinned Tauri/Tao implementation and is not a system-wake signal. One UI-thread
+owned observer retains its token, schedules the existing trusted reconciliation
+off the UI thread, and unregisters on exit. macOS Dock `RunEvent::Reopen` reuses
+main-window show/unminimize/focus without resetting routes or selection.
+
 Before the main webview acknowledges readiness after subscribing to the route
 event, retain the latest valid explicit route. Another valid route supersedes
 that navigation intent; an invalid or unregistered route cannot erase it. This

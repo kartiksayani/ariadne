@@ -23,6 +23,12 @@ tempfile.workspace = true
 tauri-plugin-wdio = { workspace = true, optional = true }
 tauri-plugin-wdio-webdriver = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = { version = "=0.6.2", default-features = false, features = ["std"] }
+objc2 = { version = "=0.6.4", default-features = false, features = ["std"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSNotification", "NSObject", "NSString", "NSOperation", "block2"] }
+
 [dev-dependencies]
 ariadne-store = { path = "../../../crates/ariadne-store" }
 ariadne-core = { path = "../../../crates/ariadne-core", features = ["test-support"] }

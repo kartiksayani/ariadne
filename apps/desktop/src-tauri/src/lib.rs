@@ -189,6 +189,31 @@ fn desktop_handler<R: tauri::Runtime>(
     ]
 }
 
+#[cfg(target_os = "macos")]
+fn reconcile_after_wake<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    quitting: Arc<AtomicBool>,
+    waking: Arc<AtomicBool>,
+) {
+    if quitting.load(Ordering::Acquire) || waking.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let lifecycle = app
+        .state::<native::window::lifecycle::NativeLifecycle>()
+        .inner()
+        .clone();
+    tauri::async_runtime::spawn(async move {
+        let result = tauri::async_runtime::spawn_blocking(move || lifecycle.reconcile()).await;
+        if !matches!(result, Ok(Ok(()))) {
+            eprintln!("Ariadne could not confirm owning-runtime wake reconciliation.");
+        }
+        // Display restoration is independent of dispatch readiness.
+        app.state::<native::window::NativeWindow>()
+            .reconcile(app.clone(), true);
+        waking.store(false, Ordering::Release);
+    });
+}
+
 fn establish_lifecycle<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     startup: impl FnOnce(
@@ -230,8 +255,13 @@ pub fn run_with_startup(
     let owner = Some(owner);
     let exit_allowed = Arc::new(AtomicBool::new(false));
     let quitting = Arc::new(AtomicBool::new(false));
+    #[cfg(target_os = "macos")]
     let waking = Arc::new(AtomicBool::new(false));
     let window_quitting = quitting.clone();
+    #[cfg(target_os = "macos")]
+    let wake_quitting = quitting.clone();
+    #[cfg(target_os = "macos")]
+    let wake_active = waking.clone();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             native::routes::receive_launch(app.clone(), args);
@@ -277,6 +307,22 @@ pub fn run_with_startup(
             establish_lifecycle(app.handle(), startup).map_err(|_| {
                 std::io::Error::other("Native ownership/startup could not be established.")
             })?;
+            #[cfg(target_os = "macos")]
+            {
+                let handle = app.handle().clone();
+                native::window::wake::install(move || {
+                    reconcile_after_wake(
+                        handle.clone(),
+                        wake_quitting.clone(),
+                        wake_active.clone(),
+                    );
+                })
+                .map_err(|_| {
+                    std::io::Error::other(
+                        "Native workspace wake observation could not be established.",
+                    )
+                })?;
+            }
             native::routes::receive_launch(app.handle().clone(), std::env::args().collect());
             app.state::<native::window::NativeWindow>()
                 .reconcile(app.handle().clone(), true);
@@ -290,7 +336,10 @@ pub fn run_with_startup(
         .invoke_handler(desktop_handler())
         .build(tauri::generate_context!())
         .expect("Tauri startup failed")
-        .run_return(move |app, event| match event {
+        .run_return(move |app, event| {
+            match event {
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => native::routes::reopen(app),
             tauri::RunEvent::ExitRequested { api, code, .. } => {
                 if exit_allowed.load(Ordering::Acquire) {
                     return;
@@ -321,28 +370,15 @@ pub fn run_with_startup(
                     }
                 });
             }
-            tauri::RunEvent::Resumed => {
-                if quitting.load(Ordering::Acquire) || waking.swap(true, Ordering::AcqRel) {
-                    return;
-                }
-                let lifecycle = app
-                    .state::<native::window::lifecycle::NativeLifecycle>()
-                    .inner()
-                    .clone();
-                let app = app.clone();
-                let waking = waking.clone();
-                tauri::async_runtime::spawn(async move {
-                    let result = tauri::async_runtime::spawn_blocking(move || lifecycle.reconcile()).await;
-                    if !matches!(result, Ok(Ok(()))) {
-                        eprintln!("Ariadne could not confirm owning-runtime wake reconciliation.");
-                    }
-                    // Display restoration is independent of dispatch readiness.
-                    app.state::<native::window::NativeWindow>().reconcile(app.clone(), true);
-                    waking.store(false, Ordering::Release);
-                });
+            tauri::RunEvent::Exit => {
+                #[cfg(target_os = "macos")]
+                native::window::wake::remove();
             }
             _ => {}
+            }
         });
+    #[cfg(target_os = "macos")]
+    native::window::wake::remove();
     std::process::exit(complete_run(owner, exit_code));
 }
 

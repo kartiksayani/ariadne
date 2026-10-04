@@ -91,18 +91,27 @@ pub(crate) fn receive_launch<R: tauri::Runtime>(app: tauri::AppHandle<R>, args: 
                 }
             });
         }
-        Ok(None) => {
-            let handle = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                if let Some(window) = handle.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
-            });
-        }
+        Ok(None) => show_main_window(&app),
         Err(_) => eprintln!("Ariadne rejected invalid native route arguments."),
     }
+}
+
+/// Used by ordinary second launches and macOS Dock reopen. This deliberately
+/// leaves pending routes, webview readiness and renderer selection untouched.
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn reopen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    show_main_window(app);
 }
 
 #[tauri::command]

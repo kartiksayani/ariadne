@@ -193,8 +193,22 @@ fn qualification_replaces_slots_but_heartbeats_do_not_refresh_prior_evidence() {
     let old = ModEvidenceSlot::default();
     let new = ModEvidenceSlot::default();
     let selected = d.snapshot().unwrap().candidates.remove(0);
-    rt.block_on(d.qualify_claude(selected.clone(), files.options.clone(), old.clone()))
+    let qualified_facts = d
+        .qualify_claude_host_before(
+            selected.clone(),
+            files.options.clone(),
+            old.clone(),
+            std::time::Instant::now() + Duration::from_secs(5),
+        )
         .unwrap();
+    assert_eq!(
+        qualified_facts.identity().external_session_id,
+        selected.external_session_id
+    );
+    assert_eq!(qualified_facts.identity().project_root, selected.cwd);
+    assert_eq!(qualified_facts.observed_at(), &selected.observed_at);
+    assert!(qualified_facts.is_fresh());
+    assert!(!qualified_facts.capabilities().domain_cli.supported);
     assert_eq!(
         files.availability(&rt, old.clone()),
         Availability::Available
@@ -267,6 +281,41 @@ fn qualification_replaces_slots_but_heartbeats_do_not_refresh_prior_evidence() {
     rt.block_on(call(home.path().into(), request(changed)))
         .unwrap();
     assert_eq!(files.availability(&rt, new), Availability::Unavailable);
+    assert!(core.history().unwrap().is_empty());
+    server.stop(&rt);
+}
+
+#[test]
+fn blocking_pre_id_qualification_preserves_short_original_deadline_without_a_runtime() {
+    let files = ClaudeFiles::new();
+    let home = home();
+    let rt = runtime();
+    let d = Discovery::new(Arc::new(time), None);
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let server = Running::start(&rt, home.path(), core.clone(), Some(d.clone()));
+    rt.block_on(call(home.path().into(), request(files.announcement())))
+        .unwrap();
+    let selected = d.snapshot().unwrap().candidates.remove(0);
+    fs::write(&files.options.executable, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+    let slot = ModEvidenceSlot::default();
+    let started = std::time::Instant::now();
+    let error = d
+        .qualify_claude_host_before(
+            selected,
+            files.options.clone(),
+            slot.clone(),
+            started + Duration::from_millis(100),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, CoreErrorCode::HostUnreachable);
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "absolute caller budget must not become a fresh 5s probe"
+    );
+    assert_eq!(
+        d.snapshot().unwrap().candidates[0].compatibility,
+        Compatibility::Unknown
+    );
     assert!(core.history().unwrap().is_empty());
     server.stop(&rt);
 }

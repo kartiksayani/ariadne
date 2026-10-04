@@ -231,6 +231,9 @@ diagnostic-only exit, without claiming runtime shutdown. Quit joins the native
 preference writer and owning callbacks off the UI thread; an unconfirmed write or
 failed shutdown keeps the app running. Wake reconciliation cannot infer Idle,
 clear owner pauses or automatically resend uncertain delivery (ADR0053).
+macOS system wake uses one owned workspace did-wake observer, removed on exit;
+event-loop polling is not wake. Dock reopen shows, unminimizes and focuses the
+existing main window without changing its registered route or selection.
 
 The tray uses a template icon, numeric `waiting_unanswered` count (blank at zero), oldest 10 eligible waiting entries with project/session labels, separate binding/lifecycle diagnostics, Show Ariadne, Pin, and Quit. Sent generic requests do not increment the task-question count. Coalesce rebuilds at most every 250 ms. If registered roots are inaccessible, show an incomplete count and diagnostic row rather than a false total. No approval action exists in the tray.
 
