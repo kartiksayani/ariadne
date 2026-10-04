@@ -98,6 +98,94 @@ fn registration_canonicalizes_roots_preserves_receipts_and_never_persists_zero_r
 }
 
 #[test]
+fn fixed_registration_replay_binds_mode_and_exact_expected_identity_before_preflight() {
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::open(home.path()).unwrap();
+    let first = registry
+        .register_fixed(root.path(), &id(100), &id(1))
+        .unwrap();
+    assert_eq!(first.project_id, id(1));
+    let before = fs::read(home.path().join(".ariadne/projects.json")).unwrap();
+    fs::rename(
+        root.path().join(".ariadne"),
+        root.path().join("unavailable"),
+    )
+    .unwrap();
+    assert_eq!(
+        registry
+            .register_fixed(root.path(), &id(100), &id(1))
+            .unwrap(),
+        first
+    );
+    for error in [
+        registry
+            .register_fixed(root.path(), &id(100), &id(2))
+            .unwrap_err(),
+        registry
+            .register(root.path(), &id(100), || {
+                panic!("mode conflict before allocation")
+            })
+            .unwrap_err(),
+    ] {
+        assert!(matches!(
+            error,
+            RegistryError::Store(StoreError::OperationReused)
+        ));
+    }
+    assert_eq!(
+        fs::read(home.path().join(".ariadne/projects.json")).unwrap(),
+        before
+    );
+
+    let ordinary = tempfile::tempdir().unwrap();
+    // Restore the registered root before a valid new ordinary registration.
+    fs::rename(
+        root.path().join("unavailable"),
+        root.path().join(".ariadne"),
+    )
+    .unwrap();
+    registry
+        .register(ordinary.path(), &id(101), || id(2))
+        .unwrap();
+    assert!(matches!(
+        registry.register_fixed(ordinary.path(), &id(101), &id(2)),
+        Err(RegistryError::Store(StoreError::OperationReused))
+    ));
+}
+
+#[test]
+fn fixed_registration_rejects_existing_metadata_without_a_registry_receipt_or_write() {
+    let home = tempfile::tempdir().unwrap();
+    let other_home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let other = Registry::open(other_home.path()).unwrap();
+    registration(&other, root.path(), 2);
+    let metadata = root.path().join(".ariadne/project.json");
+    let before = fs::read(&metadata).unwrap();
+    let registry = Registry::open(home.path()).unwrap();
+    let error = registry
+        .register_fixed(root.path(), &id(100), &id(1))
+        .unwrap_err();
+    let RegistryError::Conflict { paths } = error else {
+        panic!("{error:?}")
+    };
+    assert_eq!(paths, vec![metadata.canonicalize().unwrap()]);
+    assert_eq!(fs::read(&metadata).unwrap(), before);
+    assert!(!home.path().join(".ariadne/projects.json").exists());
+    assert!(registry.registered_projects().unwrap().is_empty());
+    // Rejection saved no receipt; the same operation can register the actual
+    // matching fixed identity after the caller corrects its first attempt.
+    assert_eq!(
+        registry
+            .register_fixed(root.path(), &id(100), &id(2))
+            .unwrap()
+            .project_id,
+        id(2)
+    );
+}
+
+#[test]
 fn restored_project_metadata_after_absence_keeps_bytes_and_cannot_publish_wrong_identity() {
     let home = tempfile::tempdir().unwrap();
     let registered_root = tempfile::tempdir().unwrap();
@@ -586,4 +674,39 @@ fn separate_process_registration_reuses_project_identity_and_keeps_both_operatio
             registry.registered_projects().unwrap()[0].project_id
         );
     }
+}
+
+#[test]
+fn explicit_data_setup_creates_only_missing_private_final_component_and_never_repairs_paths() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let parent = tempfile::tempdir().unwrap();
+    let data = parent.path().join("custom-data");
+    assert!(Registry::open_data_directory(&data).is_err());
+    assert!(!data.exists());
+    Registry::create_data_directory(&data).unwrap();
+    assert_eq!(
+        fs::metadata(&data).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    Registry::open_data_directory(&data).unwrap();
+    let file = parent.path().join("existing-file");
+    fs::write(&file, b"preserve").unwrap();
+    assert!(Registry::create_data_directory(&file).is_err());
+    assert_eq!(fs::read(&file).unwrap(), b"preserve");
+    let link = parent.path().join("link");
+    symlink(&data, &link).unwrap();
+    assert!(Registry::create_data_directory(&link).is_err());
+    assert!(fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    fs::set_permissions(&data, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(Registry::create_data_directory(&data).is_err());
+    assert_eq!(
+        fs::metadata(&data).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    let nested = parent.path().join("missing-parent/data");
+    assert!(Registry::create_data_directory(&nested).is_err());
+    assert!(!nested.parent().unwrap().exists());
 }
