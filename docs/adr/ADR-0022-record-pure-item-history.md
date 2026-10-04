@@ -1,8 +1,8 @@
 # ADR-0022: Record pure item history without owning submission or delivery
 
-Status: accepted
+Status: partially superseded (imported-message interpretation only)
 Supersedes: none
-Superseded by: none
+Superseded by: [ADR-0043](ADR-0043-copy-validated-topic-history-into-one-target-commit.md), provenance-only imported Replies
 Implementation: P1.2
 
 ## Context

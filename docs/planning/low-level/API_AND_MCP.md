@@ -206,6 +206,15 @@ binding/history stays intact and its inactive former route is freed for a new
 default-connect session. A different enabled binding or route conflict returns
 `binding_conflict`; no queued message is silently retargeted.
 
+Within that guarded different-host transaction, current item Agent owners and
+recipient bindings matching the retired selected binding move to the new binding,
+including closed items and archived topics. Each changed item advances its item
+revision once and updates its timestamp, invalidating captured draft guards.
+Question revisions, rounds, immutable messages, inputs and attempts stay intact;
+Me/Other and unrelated binding assignments remain unchanged. Exact connect
+replay changes neither assignments nor revisions/timestamps again. Same-host
+reconnect keeps its existing assignments.
+
 An explicit owner rebind to an existing session that creates a new binding also
 issues its structured history: under the same session transaction, after these
 guards, set the new binding's `issued_through_message_number` to the maximum
@@ -584,15 +593,32 @@ is closed. Timeouts retain the original op_id/parameters and never authorize an
 automatic retry or imply an unsaved operation. This leaves direct domain CLI,
 apply and lifecycle report behavior when desktop is closed unchanged.
 
+Owner stdin accepts the complete canonical wrapper, bounded to 512KiB, and
+returns canonical JSON by default; its command tag must match the noun/verb.
+Owner session routing resolves explicit registered membership without a mutable
+eligibility check before Core's locked replay. Global/preferences commands use
+session:null. The CLI never infers a session from cwd or an active selection.
+Saved BindingConnect replay runs before host qualification and returns the exact
+original instruction, IDs and generation. A new connect requires the running
+desktop's trusted candidate qualification; absence is actionable unavailability,
+not permission to launch a provider or fabricate connection facts.
 Connect returns the stable binding handle and an instruction snippet:
 
 ```text
-This conversation is connected to Ariadne binding <B>, generation <G>.
-Use ariadne session read --binding <B> --generation <G> --view items --json.
+Use these routing IDs for Ariadne commands: binding <B>, generation <G>.
+Use ariadne read --binding <B> --generation <G> --view items --json.
 Publish substantive findings/replies with ariadne apply --binding <B>
 --generation <G> --json-stdin, or the equivalent configured MCP tool.
 Use explicit item references; normal terminal prose does not update Ariadne.
 ```
+
+The saved setup instruction retains the exact verified prefix and appends the
+concrete binding/generation commands after allocation. Its routing wording makes
+no Connected/ready assertion for Unknown or disconnected observations. Validate
+the complete nonblank, NUL-free instruction within 64KiB and its actual canonical
+response within 1MiB before saving any state. Replay returns saved bytes even if
+the shared rules later change. `integrations/rules/source.md` generates the Claude
+and Codex rule outputs; it does not rewrite already-saved instructions.
 
 The owner can paste that snippet in the existing terminal for initial findings;
 no automatic boot inference is needed. Each dispatched message repeats current
@@ -685,3 +711,32 @@ source/target sessions and an active target with a valid binding. An unavailable
 host can receive a durable queued continuation, labelled queued, but an unknown
 or ambiguous binding cannot. Source may be closed or topic archived because
 copying is read-only there. No provider is launched by either action.
+
+Native `HistoryActionService` returns canonical lifecycle blockers and saved
+receipts. Exact operation replay precedes mutable guards. Continue preview binds
+the deterministic full source Session/topic hash and source revision; commit
+checks target replay before source IO and captures a validated immutable source
+Session under its read lock, the freshness observation/linearization point. It
+releases that lock, compares the owned snapshot revision/hash and uses one
+replay-first target transaction. The source is
+never written and no simultaneous session locks are held. A source change after
+validation leaves the recorded snapshot provenance unchanged. Reject same-session
+copies. Live Agent owner/recipient fields move to the explicit target binding;
+source message authorship/binding history and Me/Other ownership remain. Preview
+states this assignment and the explicit Dropped transformation for replacement
+edges outside the copied topic.
+
+Confirmed `topic_continue.summary` uses the existing 16KiB UTF-8 OwnerInput bound.
+The staged handoff also must fit the actual 64KiB formatted delivery payload;
+capacity errors save no target effects. Full copied history is never truncated.
+The single queued input references its immutable continuation operation/map.
+CLI and NativeCoreService routing are later consumer joins.
+
+
+Copied message provenance retains a required fully qualified `source_target`
+(project/session plus nullable direct topic/item/round). A Reply directly aimed
+outside the continued topic remains complete Reply history with all local direct
+pointers null; exact continuation mapping/origin validation is required. Repeated
+continuation preserves that original historical target. Local item conversations
+use direct local item matches, so coincidentally equal foreign ItemRefs and
+`items_touched` backlinks cannot reanchor a Reply.

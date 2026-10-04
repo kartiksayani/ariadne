@@ -2346,12 +2346,16 @@
         "source_revision": {
           "$ref": "#/$defs/PositiveSafeInteger"
         },
+        "source_target": {
+          "$ref": "#/$defs/MessageSourceTarget"
+        },
         "topic_id": {
           "$ref": "#/$defs/UuidV4"
         }
       },
       "additionalProperties": false,
       "required": [
+        "source_target",
         "project_id",
         "session_id",
         "topic_id",
@@ -2361,6 +2365,56 @@
         "binding_id",
         "adapter_id",
         "external_session_id"
+      ]
+    },
+    "MessageSourceTarget": {
+      "description": "Historical direct route; these qualified IDs never provide local routing or authority.",
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "round_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "topic_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "session_id",
+        "topic_id",
+        "item_id",
+        "round_id"
       ]
     },
     "NavigationSelection": {

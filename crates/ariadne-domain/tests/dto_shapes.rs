@@ -68,6 +68,8 @@ fn message() -> Value {
     provenance["binding_id"] = json!(ID);
     provenance["adapter_id"] = json!("original.adapter");
     provenance["external_session_id"] = json!("original-host-thread");
+    provenance["source_target"] = json!({"project_id":ID,"session_id":ID,
+        "topic_id":ID,"item_id":"2.1","round_id":ID});
     json!({"id":ID,"number":1,"author":"agent","kind":"reply","body":"Complete reply\nwith all lines.",
         "created_at":TIME,"item_id":"1","topic_id":ID,"items_touched":["1"],"binding_id":ID,
         "input_id":ID,"attempt_id":ID,"host_turn_id":"turn-1","round_id":ID,"origin":provenance})

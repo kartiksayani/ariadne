@@ -190,6 +190,14 @@ impl Registry {
     /// Its final component is opened relative to its canonical parent without
     /// following links; no additional `.ariadne` directory or root is created.
     pub fn open_data_directory(path: &Path) -> Result<Self, RegistryError> {
+        Self::data_directory(path, false)
+    }
+    /// Explicit owner setup may create only the private final component beneath
+    /// an existing trusted parent. Existing paths are validated, never repaired.
+    pub fn create_data_directory(path: &Path) -> Result<Self, RegistryError> {
+        Self::data_directory(path, true)
+    }
+    fn data_directory(path: &Path, create: bool) -> Result<Self, RegistryError> {
         if !path.is_absolute()
             || path
                 .components()
@@ -204,7 +212,7 @@ impl Registry {
         let parent = path
             .parent()
             .ok_or_else(|| StoreError::UnsafePath { path: path.into() })?;
-        let data = Directory::root(parent)?.child(name, false)?;
+        let data = Directory::root(parent)?.child(name, create)?;
         Self::from_directory(data)
     }
     fn from_directory(data: Directory) -> Result<Self, RegistryError> {
@@ -222,9 +230,39 @@ impl Registry {
         operation_id: &UuidV4,
         allocate_project_id: impl FnOnce() -> UuidV4,
     ) -> Result<RegistrationReceipt, RegistryError> {
+        self.register_inner(root, operation_id, None, allocate_project_id)
+    }
+
+    /// Native offline demo requires its fixed identity before any publication.
+    /// Its semantic receipt key is distinct from ordinary registration.
+    pub fn register_fixed(
+        &self,
+        root: &Path,
+        operation_id: &UuidV4,
+        expected_project_id: &UuidV4,
+    ) -> Result<RegistrationReceipt, RegistryError> {
+        self.register_inner(root, operation_id, Some(expected_project_id), || {
+            expected_project_id.clone()
+        })
+    }
+
+    fn register_inner(
+        &self,
+        root: &Path,
+        operation_id: &UuidV4,
+        expected_project_id: Option<&UuidV4>,
+        allocate_project_id: impl FnOnce() -> UuidV4,
+    ) -> Result<RegistrationReceipt, RegistryError> {
         let root_text = root.to_str().ok_or(RegistryError::InvalidArgument)?;
-        let digest = digest(&serde_json::json!({ "actor_scope": "local_setup",
-            "command": { "kind": "project_register", "canonical_root": root_text } }))?;
+        let intent = if let Some(expected) = expected_project_id {
+            serde_json::json!({ "actor_scope": "local_setup", "command": {
+                "kind": "project_register_fixed", "canonical_root": root_text,
+                "expected_project_id": expected } })
+        } else {
+            serde_json::json!({ "actor_scope": "local_setup",
+                "command": { "kind": "project_register", "canonical_root": root_text } })
+        };
+        let digest = digest(&intent)?;
         lock::with_lock(&self.data, "registry.lock", || {
             let mut projects = self.projects()?;
             let create_registry = projects.revision.value() == 0;
@@ -261,6 +299,11 @@ impl Registry {
                         display_name: display_name.to_owned(),
                     }
                 };
+                if expected_project_id.is_some_and(|expected| expected != &project.id) {
+                    return Err(RegistryError::Conflict {
+                        paths: vec![data.path.join("project.json")],
+                    });
+                }
                 for registered in &projects.projects {
                     if registered.root == canonical && registered.project_id != project.id
                         || registered.project_id == project.id && registered.root != canonical

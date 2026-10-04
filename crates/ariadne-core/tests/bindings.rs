@@ -948,7 +948,15 @@ fn rebind_blocks_every_outstanding_state_then_preserves_history_and_frees_only_h
         0
     );
     assert_eq!(after.messages, before.messages);
-    assert_eq!(after.items, before.items);
+    let mut expected_items = before.items.clone();
+    for item in expected_items.0.values_mut() {
+        item.owner = ItemOwner::Agent {
+            binding_id: new_binding.clone(),
+        };
+        item.revision = PositiveSafeInteger::new(item.revision.value() + 1).unwrap();
+        item.updated_at = at();
+    }
+    assert_eq!(after.items, expected_items);
     assert_eq!(after.bindings.0[&id(3)], before.bindings.0[&id(3)]);
     assert!(matches!(
         s.registry.resolve_binding(&id(3)),
@@ -1026,6 +1034,10 @@ fn resolved_history() -> Session {
         message.attempt_id = None;
         message.host_turn_id = None;
         let origin = message.origin.as_mut().unwrap();
+        // These new copied topic-level messages have no direct source item or
+        // round; do not retain the cloned Reply's mapped direct targets.
+        origin.source_target.item_id = None;
+        origin.source_target.round_id = None;
         origin.author = author;
         origin.entity_id = id(910 + offset);
         session
@@ -1099,7 +1111,24 @@ fn explicit_rebind_issues_only_the_locked_history_snapshot_and_replay_never_wide
         ceiling
     );
     assert_eq!(bound.messages, original.messages);
-    assert_eq!(bound.items, original.items);
+    let mut expected_items = original.items.clone();
+    for key in ["2", "5"] {
+        let item = expected_items
+            .0
+            .get_mut(&ItemRef::new(key).unwrap())
+            .unwrap();
+        item.owner = ItemOwner::Agent {
+            binding_id: binding.clone(),
+        };
+        item.revision = PositiveSafeInteger::new(item.revision.value() + 1).unwrap();
+        item.updated_at = at();
+    }
+    expected_items
+        .0
+        .get_mut(&ItemRef::new("2").unwrap())
+        .unwrap()
+        .recipient_binding_id = Some(binding.clone());
+    assert_eq!(bound.items, expected_items);
     assert_eq!(bound.topics, original.topics);
     assert_eq!(bound.rounds, original.rounds);
     assert_eq!(bound.answers, original.answers);
@@ -1301,6 +1330,249 @@ fn explicit_rebind_issues_only_the_locked_history_snapshot_and_replay_never_wide
             at()
         )
         .is_err());
+}
+
+#[test]
+fn rebind_retargets_current_assignments_and_allows_existing_reply_answer_and_closed_followup() {
+    use ariadne_core::{apply::ApplyService, inputs::InputService};
+    let s = Setup::new(1);
+    let mut original = resolved_history();
+    let retired = id(0x20);
+    let terminal = ItemRef::new("1").unwrap();
+    let waiting = ItemRef::new("2").unwrap();
+    let archived = ItemRef::new("8").unwrap();
+    original.items.0.get_mut(&terminal).unwrap().owner = ItemOwner::Agent {
+        binding_id: retired.clone(),
+    };
+    original.items.0.get_mut(&archived).unwrap().owner = ItemOwner::Agent {
+        binding_id: retired.clone(),
+    };
+    original.topics.0.get_mut(&id(0x11)).unwrap().archived_at = Some(at());
+    original
+        .items
+        .0
+        .get_mut(&ItemRef::new("5").unwrap())
+        .unwrap()
+        .owner = ItemOwner::Agent {
+        binding_id: id(0x21),
+    };
+    // An Other owner remains Other while its current recipient is transferred.
+    original
+        .items
+        .0
+        .get_mut(&ItemRef::new("3").unwrap())
+        .unwrap()
+        .recipient_binding_id = Some(retired.clone());
+    s.store(1).create(&original).unwrap();
+    let cmd = command(1, "resuming-host", 300, Some(id(2)));
+    let saved = s.connect(&cmd);
+    let (binding, generation) = handle(&saved);
+    let bound = s.store(1).read(&id(2)).unwrap();
+    for key in [&terminal, &waiting, &archived] {
+        assert_eq!(
+            bound.items.0[key].owner,
+            ItemOwner::Agent {
+                binding_id: binding.clone()
+            }
+        );
+        assert_eq!(
+            bound.items.0[key].revision.value(),
+            original.items.0[key].revision.value() + 1
+        );
+        assert_eq!(
+            bound.items.0[key].question_revision,
+            original.items.0[key].question_revision
+        );
+        assert_eq!(
+            bound.items.0[key].current_round_id,
+            original.items.0[key].current_round_id
+        );
+        assert_eq!(bound.items.0[key].updated_at, at());
+    }
+    assert_eq!(
+        bound.items.0[&waiting].recipient_binding_id,
+        Some(binding.clone())
+    );
+    for key in ["3", "4", "5"] {
+        let key = ItemRef::new(key).unwrap();
+        assert_eq!(bound.items.0[&key].owner, original.items.0[&key].owner);
+    }
+    assert_eq!(
+        bound.items.0[&ItemRef::new("3").unwrap()].recipient_binding_id,
+        Some(binding.clone())
+    );
+    assert_eq!(
+        bound.items.0[&ItemRef::new("3").unwrap()].revision.value(),
+        2
+    );
+    assert_eq!(
+        bound.items.0[&ItemRef::new("5").unwrap()],
+        original.items.0[&ItemRef::new("5").unwrap()]
+    );
+    assert_eq!(bound.messages, original.messages);
+    assert_eq!(bound.rounds, original.rounds);
+    assert_eq!(bound.answers, original.answers);
+    assert_eq!(bound.inputs, original.inputs);
+    assert_eq!(bound.continuations, original.continuations);
+    let context = history_context(
+        &binding,
+        &generation,
+        bound.bindings.0[&binding]
+            .issued_through_message_number
+            .value(),
+    );
+    let mut reply = ApplyRequest {
+        op_id: id(301),
+        source_input_id: None,
+        attempt_id: None,
+        expected_item_revisions: UniqueMap(
+            [(waiting.clone(), original.items.0[&waiting].revision)].into(),
+        ),
+        expected_topic_revisions: UniqueMap(Default::default()),
+        summary: "Resume existing item".into(),
+        operations: vec![Operation::Reply {
+            r#ref: RequestRef::new("resumed_reply").unwrap(),
+            item: EntityRef::Existing(ExistingRef {
+                id: waiting.clone(),
+            }),
+            text: "Full reply from the explicitly selected new host.".into(),
+            round_id: bound.items.0[&waiting].current_round_id.clone(),
+        }],
+        input_result: None,
+    };
+    let before = fs::read(s.live(1, &id(2))).unwrap();
+    let stale = ApplyService::new(&s.registry)
+        .execute(
+            &context,
+            &reply,
+            || panic!("stale item guard before allocation"),
+            at(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        stale,
+        ariadne_core::apply::ApplyError::Core(CoreError {
+            code: CoreErrorCode::RevisionConflict,
+            ..
+        })
+    ));
+    assert_eq!(fs::read(s.live(1, &id(2))).unwrap(), before);
+    reply
+        .expected_item_revisions
+        .0
+        .insert(waiting.clone(), bound.items.0[&waiting].revision);
+    let old = history_context(&retired, &id(0x22), 5);
+    let rejected = ApplyService::new(&s.registry)
+        .execute(
+            &old,
+            &reply,
+            || panic!("retired route before allocation"),
+            at(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        rejected,
+        ariadne_core::apply::ApplyError::Core(CoreError {
+            code: CoreErrorCode::BindingMismatch,
+            ..
+        })
+    ));
+    assert_eq!(fs::read(s.live(1, &id(2))).unwrap(), before);
+    ApplyService::new(&s.registry)
+        .execute(&context, &reply, || s.allocate(), at())
+        .unwrap();
+    for (op, item, kind, question_guard) in [
+        (
+            302,
+            waiting.clone(),
+            InputKind::Answer,
+            Some(bound.items.0[&waiting].question_revision),
+        ),
+        (303, terminal.clone(), InputKind::Followup, None),
+    ] {
+        let command = OwnerCommand::InputSubmit {
+            api_version: one(),
+            op_id: id(op),
+            params: InputSubmitParams {
+                binding_id: binding.clone(),
+                target: InputTarget {
+                    topic_id: bound.items.0[&item].topic_id.clone(),
+                    item_id: Some(item),
+                },
+                kind,
+                text: "Owner response on the preserved episode.".into(),
+                selected_option_id: None,
+                expected_question_revision: question_guard,
+                supersedes_answer_id: None,
+            },
+        };
+        InputService::new(&s.registry)
+            .execute(&route(1, &id(2)), &command, || s.allocate(), at())
+            .unwrap();
+    }
+    let after = s.store(1).read(&id(2)).unwrap();
+    assert_eq!(after.items.0[&terminal].status, ItemStatus::Done);
+    assert_eq!(
+        after.items.0[&terminal].outcome,
+        original.items.0[&terminal].outcome
+    );
+    assert!(after.answers.iter().any(|answer| answer.item_id == waiting
+        && answer.text == "Owner response on the preserved episode."));
+    assert_eq!(
+        after
+            .inputs
+            .0
+            .values()
+            .filter(|input| input.binding_id == binding && input.state == InputState::Queued)
+            .count(),
+        2
+    );
+    let bytes = fs::read(s.live(1, &id(2))).unwrap();
+    assert_eq!(
+        receipt(
+            s.service()
+                .connect(
+                    &owner(),
+                    &cmd,
+                    |_| panic!("exact replay before verifier"),
+                    || panic!("exact replay before allocation"),
+                    UtcMillis::new("2026-10-05T00:00:00.000Z").unwrap()
+                )
+                .unwrap()
+        ),
+        saved
+    );
+    assert_eq!(fs::read(s.live(1, &id(2))).unwrap(), bytes);
+}
+
+#[test]
+fn rebind_item_revision_overflow_aborts_all_routes_receipts_and_timestamps() {
+    let s = Setup::new(1);
+    let mut original = resolved_history();
+    original
+        .items
+        .0
+        .get_mut(&ItemRef::new("2").unwrap())
+        .unwrap()
+        .revision = PositiveSafeInteger::new(9_007_199_254_740_991).unwrap();
+    s.store(1).create(&original).unwrap();
+    let bytes = fs::read(s.live(1, &id(2))).unwrap();
+    let error = s
+        .service()
+        .connect(
+            &owner(),
+            &command(1, "new-host", 350, Some(id(2))),
+            |p| Ok(facts(p)),
+            || s.allocate(),
+            at(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        BindingError::Store(StoreError::CounterOverflow)
+    ));
+    assert_eq!(fs::read(s.live(1, &id(2))).unwrap(), bytes);
+    assert!(!s.home.path().join(".ariadne/bindings.json").exists());
 }
 
 #[test]
@@ -1518,5 +1790,139 @@ fn separate_writers_converge_on_one_host_route_and_keep_exact_or_distinct_operat
             assert_ne!(handle(&receipts[0]).1, handle(&receipts[1]).1);
         }
         assert_eq!(s.registry.rebuild().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn replay_connect_recovers_saved_routing_without_provider_or_mutable_guards() {
+    let setup = Setup::new(1);
+    let command = command(1, "host-a", 200, None);
+    assert!(setup
+        .service()
+        .replay_connect(&owner(), &command)
+        .unwrap()
+        .is_none());
+    let saved = setup.connect(&command);
+    let before = fs::read(setup.live(1, &saved.session_id)).unwrap();
+    let replayed = receipt(
+        setup
+            .service()
+            .replay_connect(&owner(), &command)
+            .unwrap()
+            .unwrap(),
+    );
+    assert_eq!(replayed, saved);
+    assert_eq!(fs::read(setup.live(1, &saved.session_id)).unwrap(), before);
+    let wrong_scope = route(1, &saved.session_id);
+    assert_eq!(
+        core_code(
+            setup
+                .service()
+                .replay_connect(&wrong_scope, &command)
+                .unwrap_err()
+        ),
+        CoreErrorCode::PermissionDenied
+    );
+    let mut changed = command.clone();
+    let OwnerCommand::BindingConnect { params, .. } = &mut changed else {
+        unreachable!()
+    };
+    params.existing_session_id = Some(saved.session_id.clone());
+    assert!(setup.service().replay_connect(&owner(), &changed).is_err());
+    assert_eq!(fs::read(setup.live(1, &saved.session_id)).unwrap(), before);
+}
+
+#[test]
+fn saved_instructions_keep_verified_bytes_and_concrete_routes_even_for_unknown_connection() {
+    let setup = Setup::new(1);
+    let command = command(1, "host-a", 200, None);
+    let original = "Verified exact body.  \nStructured history is not host memory.\n";
+    let saved = receipt(
+        setup
+            .service()
+            .connect(
+                &owner(),
+                &command,
+                |params| {
+                    let mut host = facts(params);
+                    host.connection_state = ConnectionState::Unknown;
+                    host.setup_instruction = original.into();
+                    Ok(host)
+                },
+                || setup.allocate(),
+                at(),
+            )
+            .unwrap(),
+    );
+    let (binding, generation) = handle(&saved);
+    let SavedReceiptData::BindingConnect {
+        setup_instruction, ..
+    } = &saved.data
+    else {
+        unreachable!()
+    };
+    assert!(setup_instruction.starts_with(original));
+    assert!(setup_instruction.contains(&format!(
+        "Use these routing IDs for Ariadne commands: binding {}, generation {}.",
+        binding.as_str(),
+        generation.as_str()
+    )));
+    assert!(setup_instruction.contains(&format!(
+        "ariadne read --binding {} --generation {} --view items --json",
+        binding.as_str(),
+        generation.as_str()
+    )));
+    assert!(setup_instruction.contains(&format!(
+        "ariadne apply --binding {} --generation {} --json-stdin",
+        binding.as_str(),
+        generation.as_str()
+    )));
+    assert!(!setup_instruction.contains("conversation is connected"));
+    assert_eq!(
+        setup.store(1).read(&saved.session_id).unwrap().bindings.0[&binding].connection_state,
+        ConnectionState::Unknown
+    );
+    assert_eq!(
+        receipt(
+            setup
+                .service()
+                .replay_connect(&owner(), &command)
+                .unwrap()
+                .unwrap()
+        ),
+        saved
+    );
+}
+
+#[test]
+fn oversized_final_instruction_or_response_has_no_persisted_session_effects() {
+    for response in [false, true] {
+        let setup = Setup::new(1);
+        let command = command(1, "host-a", 200, None);
+        let result = setup.service().connect(
+            &owner(),
+            &command,
+            |params| {
+                let mut host = facts(params);
+                if response {
+                    host.capabilities.existing_session.conditions = vec!["x".repeat(1024 * 1024)];
+                } else {
+                    host.setup_instruction = "x".repeat(64 * 1024);
+                }
+                Ok(host)
+            },
+            || setup.allocate(),
+            at(),
+        );
+        assert_eq!(
+            core_code(result.unwrap_err()),
+            CoreErrorCode::CapacityExceeded
+        );
+        assert!(setup.store(1).sessions().unwrap().is_empty());
+        assert!(setup
+            .service()
+            .replay_connect(&owner(), &command)
+            .unwrap()
+            .is_none());
     }
 }
