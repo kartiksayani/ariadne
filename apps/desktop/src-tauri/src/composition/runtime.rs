@@ -551,10 +551,13 @@ impl NativeRuntime {
     }
     pub fn reconcile_after_wake(&self) -> Result<(), CoreError> {
         {
-            let _workers = self.workers.lock().map_err(|_| unavailable())?;
+            let workers = self.workers.lock().map_err(|_| unavailable())?;
             if self.stopping.load(Ordering::Acquire) || self.replacing.swap(true, Ordering::AcqRel)
             {
                 return Err(unavailable());
+            }
+            if let Some(workers) = workers.as_ref() {
+                workers.activation.stop_admission()?;
             }
         }
         let _lifecycle = self.shutdown_gate.lock().map_err(|_| unavailable())?;
@@ -635,8 +638,11 @@ impl NativeRuntime {
     pub(crate) fn begin_shutdown(&self) -> Result<(), CoreError> {
         // Quit wins before waiting for wake's lifecycle gate. Its flag and
         // wake publication are serialized by the short admission lock.
-        let _workers = self.workers.lock().map_err(|_| unavailable())?;
+        let workers = self.workers.lock().map_err(|_| unavailable())?;
         self.stopping.store(true, Ordering::Release);
+        if let Some(workers) = workers.as_ref() {
+            workers.activation.stop_admission()?;
+        }
         Ok(())
     }
 }

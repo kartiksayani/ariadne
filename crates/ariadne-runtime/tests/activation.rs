@@ -458,7 +458,11 @@ struct CodexDaemon {
     worker: Option<std::thread::JoinHandle<()>>,
 }
 impl CodexDaemon {
-    fn new(root: PathBuf, wrong_final_root: bool) -> Self {
+    fn new(
+        root: PathBuf,
+        wrong_final_root: bool,
+        final_read: Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>,
+    ) -> Self {
         use std::os::unix::net::UnixListener;
         let home = home();
         let executable = home.path().join("codex");
@@ -514,6 +518,12 @@ impl CodexDaemon {
                     serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
                 if method == "thread/read" {
                     reads += 1;
+                    if reads == 2 {
+                        if let Some((entered, release)) = &final_read {
+                            entered.send(()).unwrap();
+                            release.recv_timeout(Duration::from_secs(3)).unwrap();
+                        }
+                    }
                     result["thread"]["id"] = request["params"]["threadId"].clone();
                     result["thread"]["cwd"] = serde_json::json!(if wrong_final_root && reads > 1 {
                         PathBuf::from("/tmp")
@@ -552,7 +562,15 @@ impl Drop for CodexDaemon {
         self.worker.take().unwrap().join().unwrap();
     }
 }
-fn codex_activation(wrong_final_root: bool) {
+#[derive(Clone, Copy, PartialEq)]
+enum CodexCase {
+    Connected,
+    WrongRoot,
+    StopInstalling,
+    StopActive,
+}
+fn codex_activation(case: CodexCase) {
+    let wrong_final_root = case == CodexCase::WrongRoot;
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(3)
         .enable_all()
@@ -561,7 +579,13 @@ fn codex_activation(wrong_final_root: bool) {
     let project = home();
     let home = home();
     let root = project.path().canonicalize().unwrap();
-    let daemon = CodexDaemon::new(root.clone(), wrong_final_root);
+    let (entered, waiting) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let daemon = CodexDaemon::new(
+        root.clone(),
+        wrong_final_root,
+        (case == CodexCase::StopInstalling).then_some((entered, released)),
+    );
     let next = Arc::new(AtomicU64::new(200));
     let allocated = next.clone();
     let core = Arc::new(NativeCoreService::new(
@@ -639,9 +663,13 @@ fn codex_activation(wrong_final_root: bool) {
         },
     };
     let wire = wire_request(id(21), ControlMethod::BindingConnect(Box::new(request)));
-    let ControlResult::BindingConnect(receipt) =
-        rt.block_on(call(home.path().into(), wire.clone())).unwrap()
-    else {
+    let connected = rt.spawn(call(home.path().into(), wire.clone()));
+    if case == CodexCase::StopInstalling {
+        waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+        activation.stop_admission().unwrap();
+        release.send(()).unwrap();
+    }
+    let ControlResult::BindingConnect(receipt) = rt.block_on(connected).unwrap().unwrap() else {
         panic!()
     };
     let MutationReceipt::Session(saved) = &receipt else {
@@ -660,7 +688,7 @@ fn codex_activation(wrong_final_root: bool) {
         generation: generation.clone(),
     };
     let until = Instant::now() + Duration::from_secs(3);
-    if wrong_final_root {
+    if wrong_final_root || case == CodexCase::StopInstalling {
         assert_eq!(
             rt.block_on(call(
                 home.path().into(),
@@ -675,9 +703,17 @@ fn codex_activation(wrong_final_root: bool) {
                 .bindings
                 .0[binding_id]
                 .connection_state,
-            ConnectionState::Disconnected
+            if wrong_final_root {
+                ConnectionState::Disconnected
+            } else {
+                ConnectionState::Unknown
+            }
         );
-        assert!(outcomes.lock().unwrap().iter().any(|outcome| matches!(outcome, ActivationOutcome::ConnectFailed { failure, .. } if failure.cause.code==CoreErrorCode::BindingMismatch && failure.pending.is_none())));
+        if wrong_final_root {
+            assert!(outcomes.lock().unwrap().iter().any(|outcome| matches!(outcome, ActivationOutcome::ConnectFailed { failure, .. } if failure.cause.code==CoreErrorCode::BindingMismatch && failure.pending.is_none())));
+        } else {
+            assert!(outcomes.lock().unwrap().iter().any(|outcome| matches!(outcome, ActivationOutcome::Failed { error, .. } if error.code == CoreErrorCode::HostUnreachable)));
+        }
     } else {
         loop {
             match rt.block_on(call(
@@ -707,9 +743,100 @@ fn codex_activation(wrong_final_root: bool) {
             }),
         );
         assert_eq!(
-            rt.block_on(call(home.path().into(), claim)).unwrap(),
+            rt.block_on(call(home.path().into(), claim.clone()))
+                .unwrap(),
             ControlResult::Claim(None)
         );
+        if case == CodexCase::StopActive {
+            activation.stop_admission().unwrap();
+            assert_eq!(
+                rt.block_on(call(home.path().into(), claim))
+                    .unwrap_err()
+                    .code,
+                CoreErrorCode::NotFound
+            );
+            // A real, enabled input becomes eligible while native preference
+            // draining could still keep the executor alive. Neither the active
+            // supervisor nor its removed route may claim or submit that input.
+            let session = RegisteredSession::from_trusted_entrypoint(
+                project.project_id.clone(),
+                saved.session_id.clone(),
+            );
+            let apply: ApplyRequest = serde_json::from_value(serde_json::json!({
+                "op_id":id(24), "source_input_id":null, "attempt_id":null,
+                "expected_item_revisions":{}, "expected_topic_revisions":{},
+                "summary":"Eligible input after synchronous admission fence",
+                "operations":[
+                    {"op":"topic.add","ref":"topic","name":"Fence regression"},
+                    {"op":"item.add","ref":"item","topic":{"ref":"topic"},
+                     "parent":null,"question":"Reply while preference drain waits",
+                     "type":"task","status":"open","owner":{"kind":"me"},
+                     "ask":null,"options":null,"note":null,"links":null,
+                     "outcome":null,"why":null,"replaced_by":null,"source_round_id":null}
+                ], "input_result":null
+            }))
+            .unwrap();
+            core.apply(
+                AgentContext::from_trusted_entrypoint(
+                    session.clone(),
+                    binding_id.clone(),
+                    generation.clone(),
+                    AgentReadScope::Terminal {
+                        issued_through_message_number: NonnegativeSafeInteger::new(0).unwrap(),
+                    },
+                ),
+                apply,
+            )
+            .unwrap();
+            let topic_id = read(&core, project.project_id.clone(), saved.session_id.clone())
+                .topics
+                .0
+                .keys()
+                .next()
+                .unwrap()
+                .clone();
+            let MutationReceipt::Session(submitted) = core
+                .execute_owner(
+                    OwnerContext::from_trusted_entrypoint(OwnerScope::Session(session)),
+                    OwnerCommand::InputSubmit {
+                        api_version: SchemaVersion::new(1).unwrap(),
+                        op_id: id(25),
+                        params: InputSubmitParams {
+                            binding_id: binding_id.clone(),
+                            target: InputTarget {
+                                topic_id,
+                                item_id: Some(ItemRef::new("1").unwrap()),
+                            },
+                            kind: InputKind::Reply,
+                            text: "A real eligible owner input".into(),
+                            selected_option_id: None,
+                            expected_question_revision: None,
+                            supersedes_answer_id: None,
+                        },
+                    },
+                )
+                .unwrap()
+            else {
+                panic!("input receipt")
+            };
+            let SavedReceiptData::InputSubmit { input_id, .. } = submitted.data else {
+                panic!("input")
+            };
+            std::thread::sleep(Duration::from_millis(600));
+            let persisted = read(&core, project.project_id.clone(), saved.session_id.clone());
+            assert!(persisted.inputs.0[&input_id].attempts.is_empty());
+            assert_eq!(persisted.bindings.0[binding_id].generation, *generation);
+            assert!(!daemon
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|method| method == "thread/queue/add"));
+            assert!(
+                DesktopOwner::acquire(home.path()).is_err(),
+                "fencing cannot release the owner lease"
+            );
+        }
     }
     assert_eq!(
         rt.block_on(call(home.path().into(), wire)).unwrap(),
@@ -737,9 +864,18 @@ fn codex_activation(wrong_final_root: bool) {
 }
 #[test]
 fn codex_owns_one_preflight_reader_then_rechecks_final_ids_before_route_activation() {
-    codex_activation(false);
+    codex_activation(CodexCase::Connected);
 }
 #[test]
 fn codex_changed_final_root_reports_disconnect_without_route_or_new_preflight() {
-    codex_activation(true);
+    codex_activation(CodexCase::WrongRoot);
+}
+
+#[test]
+fn synchronous_stop_fences_active_claims_and_provider_submission_before_drain() {
+    codex_activation(CodexCase::StopActive);
+}
+#[test]
+fn synchronous_stop_prevents_installing_worker_from_publishing_after_fence() {
+    codex_activation(CodexCase::StopInstalling);
 }
