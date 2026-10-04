@@ -226,7 +226,7 @@ impl Discovery {
                 // Dropping the caller future cannot admit unbounded blocking probes.
                 let _permit = permit;
                 discovery
-                    .qualify_claude_checked(&candidate, &options, slot, deadline)
+                    .qualify_claude_checked(&candidate, &options, slot, deadline, None)
                     .map(|_| ())
             })
             .await
@@ -244,6 +244,16 @@ impl Discovery {
         slot: ModEvidenceSlot,
         deadline: Instant,
     ) -> Result<QualifiedClaudeHost, CoreError> {
+        self.qualify_claude_host_matching_before(candidate, options, slot, deadline, None)
+    }
+    pub(crate) fn qualify_claude_host_matching_before(
+        &self,
+        candidate: Candidate,
+        options: ClaudeOptions,
+        slot: ModEvidenceSlot,
+        deadline: Instant,
+        expected: Option<&ariadne_agent_protocol::EndpointFingerprint>,
+    ) -> Result<QualifiedClaudeHost, CoreError> {
         let _permit = self.qualification_slots.clone().try_acquire_owned().map_err(|_| {
             CoreError::new(CoreErrorCode::CapacityExceeded, "Native discovery qualification is busy.", "Wait for the bounded read-only probes; no binding or delivery has been granted.")
         })?;
@@ -252,6 +262,7 @@ impl Discovery {
             &options,
             slot,
             deadline.min(Instant::now() + Duration::from_secs(5)),
+            expected,
         )
     }
     fn qualify_claude_checked(
@@ -260,8 +271,9 @@ impl Discovery {
         options: &ClaudeOptions,
         slot: ModEvidenceSlot,
         deadline: Instant,
+        expected: Option<&ariadne_agent_protocol::EndpointFingerprint>,
     ) -> Result<QualifiedClaudeHost, CoreError> {
-        let result = self.qualify_claude_blocking(candidate, options, slot, deadline);
+        let result = self.qualify_claude_blocking(candidate, options, slot, deadline, expected);
         if result.is_err() {
             // An older failed probe cannot clear a newer heartbeat's qualification.
             let mut state = self.lock()?;
@@ -288,6 +300,7 @@ impl Discovery {
         options: &ClaudeOptions,
         slot: ModEvidenceSlot,
         deadline: Instant,
+        expected: Option<&ariadne_agent_protocol::EndpointFingerprint>,
     ) -> Result<QualifiedClaudeHost, CoreError> {
         within(deadline)?;
         if candidate.adapter_id != "claude_code_mod"
@@ -331,6 +344,13 @@ impl Discovery {
                 deadline,
             )
             .map_err(CoreError::from)?;
+        if expected.is_some_and(|fingerprint| fingerprint != qualified.endpoint_fingerprint()) {
+            return Err(CoreError::new(
+                CoreErrorCode::BindingMismatch,
+                "Bound Claude resources differ from the saved host identity.",
+                "Keep the original route; explicitly reconnect and qualify changed host identity.",
+            ));
+        }
         // Resolver releases all registry/store locks before the memory publication lock.
         if self.resolve(announcement)? != candidate.binding {
             return Err(invalid(

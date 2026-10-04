@@ -31,6 +31,13 @@ impl Worker {
         operation: impl FnOnce(&mut State, Instant) -> Result<T, AdapterError> + Send + 'static,
     ) -> AdapterFuture<'static, T> {
         let deadline = Instant::now() + Duration::from_secs(5);
+        self.call_before(deadline, operation)
+    }
+    pub(crate) fn call_before<T: Send + 'static>(
+        &self,
+        deadline: Instant,
+        operation: impl FnOnce(&mut State, Instant) -> Result<T, AdapterError> + Send + 'static,
+    ) -> AdapterFuture<'static, T> {
         let (reply, receive) = oneshot::channel();
         let job: Job = Box::new(move |state| {
             if !reply.is_canceled() {

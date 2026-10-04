@@ -35,6 +35,13 @@ validates its dispatch lease; core owns persisted claims, results and joins.
 Never hold a store lock across a host wait. The existing local OS-user trust
 boundary remains unchanged.
 
+Native binding fresh-work admission follows registration/session scans and the
+final Store lock, with exact replay preceding the guard. Store's additive
+`create_with_receipt_guarded` checks after validation and before the first temp
+write; existing `create_with_receipt` remains a compatible no-op wrapper. Existing
+session mutation checks in `transact`'s apply callback. Deadline rejection never
+cancels persistence already begun or changes commit uncertainty/replay semantics.
+
 ## Streams and owned shared files
 
 | Stream | First independent assignment | Subsequent module work |

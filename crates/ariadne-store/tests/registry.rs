@@ -2,7 +2,7 @@
 mod support;
 use ariadne_domain::models::*;
 use ariadne_store::registry::{Registry, RegistryError};
-use ariadne_store::session::{Store, StoreError};
+use ariadne_store::session::{Store, StoreError, TransactionError};
 use serde_json::json;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
@@ -596,6 +596,95 @@ fn receipt_creation_is_first_commit_replayable_and_index_failure_is_uncertain_wi
         )
         .unwrap(),
         bytes
+    );
+}
+
+#[test]
+fn guarded_creation_checks_final_lock_admission_and_exact_replay_precedes_guard() {
+    use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt};
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::open(home.path()).unwrap();
+    registration(&registry, root.path(), 1);
+    let session = blank(1, 2, 3, "host");
+    let operation = id(100);
+    let command = json!({"kind":"binding_connect","host":"host"});
+    let data = SavedReceiptData::BindingConnect {
+        binding_id: id(3),
+        generation: id(4),
+        capabilities: session.bindings.0[&id(3)].capabilities.clone(),
+        setup_instruction: "Explicit binding instruction".into(),
+    };
+    let store = Store::open_registered(root.path(), id(1)).unwrap();
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(
+            root.path()
+                .join(format!(".ariadne/locks/{}.lock", session.id.as_str())),
+        )
+        .unwrap();
+    file.try_lock().unwrap();
+    let deadline = Instant::now() + Duration::from_millis(200);
+    let unlocker = std::thread::spawn(move || {
+        std::thread::sleep(
+            deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(80),
+        );
+        drop(file);
+    });
+    let result = store.create_with_receipt_guarded(
+        &session,
+        &ReceiptActorScope::Owner {},
+        &operation,
+        &command,
+        data.clone(),
+        || {
+            if Instant::now() >= deadline {
+                Err("expired admission")
+            } else {
+                Ok(())
+            }
+        },
+    );
+    unlocker.join().unwrap();
+    assert!(matches!(
+        result,
+        Err(TransactionError::Command("expired admission"))
+    ));
+    assert!(fs::read_dir(root.path().join(".ariadne/sessions"))
+        .unwrap()
+        .next()
+        .is_none());
+    assert!(fs::read_dir(root.path().join(".ariadne/backups"))
+        .unwrap()
+        .next()
+        .is_none());
+    let saved = store
+        .create_with_receipt(
+            &session,
+            &ReceiptActorScope::Owner {},
+            &operation,
+            &command,
+            data.clone(),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .create_with_receipt_guarded(
+                &session,
+                &ReceiptActorScope::Owner {},
+                &operation,
+                &command,
+                data,
+                || -> Result<(), &'static str> {
+                    panic!("exact replay must precede expired guard")
+                },
+            )
+            .unwrap(),
+        saved
     );
 }
 

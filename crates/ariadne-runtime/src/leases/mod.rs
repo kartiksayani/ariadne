@@ -39,11 +39,26 @@ impl DesktopOwner {
         Ok(BindingLease {
             inner: Arc::new(LeaseInner {
                 _file: file,
+                _owner: None,
                 session,
                 binding_id,
                 generation,
             }),
         })
+    }
+    /// Dynamic composition keeps the one real instance owner alive through every
+    /// lease clone, including started blocking calls surviving caller timeout.
+    pub fn binding_lease_shared(
+        self: &Arc<Self>,
+        session: RegisteredSession,
+        binding_id: UuidV4,
+        generation: UuidV4,
+    ) -> Result<BindingLease, CoreError> {
+        let mut lease = self.binding_lease(session, binding_id, generation)?;
+        Arc::get_mut(&mut lease.inner)
+            .expect("new lease is exclusively owned")
+            ._owner = Some(self.clone());
+        Ok(lease)
     }
     pub fn control_path(&self) -> std::path::PathBuf {
         self.run.path.join("control.sock")
@@ -51,6 +66,7 @@ impl DesktopOwner {
 }
 struct LeaseInner {
     _file: File,
+    _owner: Option<Arc<DesktopOwner>>,
     session: RegisteredSession,
     binding_id: UuidV4,
     generation: UuidV4,
