@@ -53,7 +53,8 @@ export function WaitingPanel({ store, revealItem, openSession, answerControl }: 
     waiting={editable ? cards.map((card, index) => ({ ...card, answer: editable(state.waiting[index]) })) : []}
     readOnlyWaiting={editable ? [] : cards} sent={state.sent.map(row => {
       const captured = state.sessions.find(session => session.session.id === row.session.session_id);
-      const evidence = deliveryEvidence(row.input, captured?.summary.active_binding ?? null, captured?.session.operation_receipts);
+      const observed = store.sessionState(row.session)?.presence[row.input.binding_id] ?? null;
+      const evidence = deliveryEvidence(row.input, captured?.summary.active_binding ?? null, captured?.session.operation_receipts, observed);
       const target = row.input.payload.target_snapshot;
       const option = target.options.find(option => option.id === row.input.payload.selected_option_id);
       return { id: row.id, question: target.item_question ?? target.topic_name, delivery: deliveryLabel(evidence),

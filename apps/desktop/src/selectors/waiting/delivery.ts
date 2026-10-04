@@ -1,4 +1,4 @@
-import type { BindingSummary, Input, Session } from '../../generated/domain/models';
+import type { BindingSummary, Input, PresenceObservation, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data';
 
 export type DeliveryKind = 'cancelled' | 'skipped' | 'handled' | 'uncertain' | 'rejected' | 'failed'
@@ -29,12 +29,13 @@ function evidence(kind: DeliveryKind): DeliveryEvidence {
   return Object.freeze({ kind, label: labels[kind][0], detail: labels[kind][1] });
 }
 export function deliveryEvidence(input: Immutable<Input>, binding: Immutable<BindingSummary> | null,
-  receipts: Immutable<Session>['operation_receipts'] = {}): DeliveryEvidence {
+  receipts: Immutable<Session>['operation_receipts'] = {},
+  observedPresence: Immutable<PresenceObservation> | null = null): DeliveryEvidence {
   if (input.state === 'cancelled' || input.state === 'skipped' || input.state === 'handled') return evidence(input.state);
   if (input.active_attempt_id === null) {
     if (input.state !== 'queued') return evidence('unavailable');
     if (binding && binding.id !== input.binding_id) return evidence('unavailable');
-    const presence = binding?.presence;
+    const presence = observedPresence ?? binding?.presence;
     const busy = presence?.generation === binding?.generation && presence?.freshness === 'fresh'
       && presence.connection_state === 'connected' && ['running', 'waiting_for_approval'].includes(presence.execution_state);
     return evidence(!binding || binding.connection_state !== 'connected' || binding.owner_paused

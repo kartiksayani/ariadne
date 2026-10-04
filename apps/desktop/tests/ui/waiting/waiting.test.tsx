@@ -177,6 +177,7 @@ describe('delivery evidence', () => {
       result: { operation_id: inputId('99'), session_id: demo.id, revision: demo.revision,
         data: { kind: 'event_conflict', event_id: 'conflicting-event', input_id: value.id, attempt_id: value.active_attempt_id } } }] };
     expect(deliveryEvidence(value, binding, receipts).kind).toBe('uncertain');
+    expect(deliveryEvidence(value, binding, receipts, { ...binding.presence!, execution_state: 'running', freshness: 'fresh' }).kind).toBe('uncertain');
     expect(value.attempts[0].error?.code).toBe('result_missing');
     for (const changed of [
       { actor_scope: { kind: 'agent' as const, binding_id: value.binding_id } },
@@ -192,6 +193,16 @@ describe('delivery evidence', () => {
     value.state = 'in_flight'; value.active_attempt_id = newer.id; value.attempts.push(newer);
     expect(deliveryEvidence(value, binding, receipts).kind).toBe('sent');
     value.state = 'handled'; expect(deliveryEvidence(value, binding, receipts).kind).toBe('handled');
+  });
+  it('live busy presence cannot override persisted terminal and active-conflict facts', () => {
+    const value = input(); const running = { ...binding.presence!, freshness: 'fresh' as const,
+      generation: binding.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
+    value.state = 'handled'; expect(deliveryEvidence(value, binding, {}, running).kind).toBe('handled');
+    value.state = 'needs_attention'; value.attempts[0].acceptance = 'uncertain';
+    expect(deliveryEvidence(value, binding, {}, running).kind).toBe('uncertain');
+    value.state = 'queued'; value.active_attempt_id = null;
+    const available = { ...binding, presence: null };
+    expect(deliveryEvidence(value, available, {}, { ...running, generation: inputId('99') }).kind).toBe('saved');
   });
   it('does not use a different active binding to claim that queued work is available', () => {
     const value = input(); value.state = 'queued'; value.active_attempt_id = null;
@@ -295,6 +306,44 @@ describe('registered global capture', () => {
 });
 
 describe('source-backed Waiting and Sent panel', () => {
+  it('renders live scoped session presence when catalogue summaries have no observation', async () => {
+    const { store, transport, opened } = setup(), seed = mutableSession();
+    const summary = fixture().summary; summary.active_binding!.presence = null;
+    const queued = seed.inputs[inputId('76')]!;
+    queued.state = 'queued'; queued.active_attempt_id = null;
+    transport.push('project_list', projectPage()); transport.push('session_list', sessionPage([summary])); transport.push('session_get', loaded(seed));
+    await store.start(); render(<WaitingPanel store={store} revealItem={vi.fn()} openSession={vi.fn()} />);
+    const card = screen.getAllByRole('button').find(element => element.textContent?.includes(queued.payload.target_snapshot.item_question!))!;
+    expect(card.textContent).toContain('Saved');
+    const active = summary.active_binding!, running = { ...structuredClone(binding.presence!), freshness: 'fresh' as const,
+      generation: active.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
+    const publish = async (observation: typeof running, generation = active.generation) => {
+      // Keep reconciliation pending to prove that the shared cache update itself
+      // reaches the rendered label before another catalogue read completes.
+      const hold = deferred<QueryEnvelope>(); transport.push('project_list', hold.promise);
+      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation, observation }); });
+      return hold;
+    };
+    const pending = await publish(running);
+    expect(card.textContent).toContain('Queued · waiting for connection');
+    expect(opened.open(route).getSnapshot().presence[active.id].execution_state).toBe('running');
+    expect(store.getSnapshot().sessions[0].summary.active_binding!.presence).toBeNull();
+    for (const observation of [
+      { ...running, freshness: 'stale' as const }, { ...running, freshness: 'unknown' as const },
+      { ...running, execution_state: 'unknown' as const },
+    ]) {
+      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation }); });
+      expect(card.textContent).toContain('Saved');
+      expect(card.textContent).not.toContain('Idle');
+    }
+    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: inputId('99'),
+      observation: { ...running, generation: inputId('99') } }); });
+    expect(card.textContent).toContain('Saved');
+    const captured = store.getSnapshot(); store.stop();
+    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
+    expect(store.getSnapshot()).toBe(captured);
+    pending.resolve({ api_version: 1, ok: false, error }); await store.refresh();
+  });
   it('routes waiting/current and original Sent targets, including a topic-only input', async () => {
     const { store, transport } = setup(); transport.capture(); await store.start();
     const reveal = vi.fn(), open = vi.fn();
