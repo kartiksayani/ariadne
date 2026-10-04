@@ -15,4 +15,5 @@ tokio = { version = "=1.53.1", default-features = false, features = ["net", "rt-
 
 [dev-dependencies]
 ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
+ariadne-agent-protocol = { path = "../ariadne-agent-protocol", features = ["test-support"] }
 tempfile.workspace = true
