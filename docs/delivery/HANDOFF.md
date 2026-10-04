@@ -13,7 +13,7 @@ while CI runs. Do not keep implementation idle just because a parent awaits CI.
 review and evidence audit:89.77% coverage, all175 required sources, three FIFO tests,
 actual native receipt and clean exit/port. The test stop now parks observation after
 prior Core work settles; production uncertainty behavior is unchanged. Check main's
-new push CI asynchronously. PRs80–84 were already merged.
+new push CI asynchronously. PRs80–82 and84 were already merged.
 
 | Open PR | Code checkpoint / base | CI and review |
 | --- | --- | --- |
