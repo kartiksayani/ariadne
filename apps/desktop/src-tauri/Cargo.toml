@@ -12,12 +12,18 @@ crate-type = ["rlib"]
 tauri-build.workspace = true
 
 [dependencies]
+ariadne-core = { path = "../../../crates/ariadne-core" }
+ariadne-domain = { path = "../../../crates/ariadne-domain" }
 tauri.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tauri-plugin-wdio = { workspace = true, optional = true }
 tauri-plugin-wdio-webdriver = { workspace = true, optional = true }
+
+[dev-dependencies]
+ariadne-core = { path = "../../../crates/ariadne-core", features = ["test-support"] }
+tauri = { workspace = true, features = ["test"] }
 
 [features]
 e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
