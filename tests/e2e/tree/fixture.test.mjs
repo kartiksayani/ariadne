@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { treeBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { treeBatch, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
 
-test('all 2,000 native tree fixture operations pass real CLI wire validation and reach the Core dispatch barrier', { timeout: 60000 }, async () => {
+test('2,000-item / 5,000-message corpus requests pass real CLI wire validation and reach the Core dispatch barrier', { timeout: 60000 }, async () => {
   const cli = process.env.ARIADNE_TREE_TEST_CLI;
   assert.ok(cli, 'Run with the existing built CLI in ARIADNE_TREE_TEST_CLI');
   const root = await mkdtemp(join(tmpdir(), 'ariadne-tree-fixture-'));
@@ -20,9 +20,10 @@ test('all 2,000 native tree fixture operations pass real CLI wire validation and
     const sessionPath = join(project, '.ariadne/sessions', `${demo.value.data.session_id}.json`);
     const read = async () => JSON.parse(await readFile(sessionPath, 'utf8'));
     const beforeBytes = await readFile(sessionPath), before = await read(), binding = before.bindings[before.active_binding_id];
-    const publish = async operations => {
-      const request = { op_id: randomUUID(), source_input_id: null, attempt_id: null, expected_item_revisions: {},
-        expected_topic_revisions: {}, summary: '', operations, input_result: null };
+    const publish = async (operations, summary = '') => {
+      const revisions = Object.fromEntries(operations.filter(operation => operation.op === 'reply').map(operation => [operation.item.id, 1]));
+      const request = { op_id: randomUUID(), source_input_id: null, attempt_id: null, expected_item_revisions: revisions,
+        expected_topic_revisions: {}, summary, operations, input_result: null };
       assert.ok(Buffer.byteLength(JSON.stringify(request)) < 512 * 1024);
       const result = await cliRequest(cli, ['apply', '--binding', binding.id, '--generation', binding.generation, '--json-stdin', '--json'], request, env);
       assert.equal(result.code, 3, result.output); assert.equal(result.value.error.code, 'binding_mismatch');
@@ -40,6 +41,13 @@ test('all 2,000 native tree fixture operations pass real CLI wire validation and
     assert.equal(operations.filter(item => item.status === 'done').length, 680);
     assert.equal(operations.filter(item => item.owner.kind === 'me').length, 1000);
     assert.ok(operations.some(item => item.question.includes('Native café needle.')));
+    const replies = [];
+    for (let first = 1; first <= 5000; first += 100) {
+      const batch = treeMessageBatch(first, 100); replies.push(...batch); await publish(batch, 'Publish complete native message history.');
+    }
+    await publish([], 'Publish complete native message history.');
+    assert.equal(replies.length, 5000); assert.equal(new Set(replies.map(reply => reply.ref)).size, 5000);
+    assert.ok(replies.every(reply => reply.text.includes('\nFull retained message body') && reply.text.includes('\nUnique history_token_')));
     assert.deepEqual(await readFile(sessionPath), beforeBytes,
       'Disconnected demo remains unchanged; real native acceptance proves publication against its qualified binding');
   } finally { await rm(root, { recursive: true, force: true }); }

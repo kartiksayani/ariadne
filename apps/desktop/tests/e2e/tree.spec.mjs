@@ -10,8 +10,8 @@ const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
 const search = () => browser.$('.sentence-search input');
 const applyRequest = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
-async function apply(configuration, operations, expectedItemRevisions = {}) {
-  const request = { ...applyRequest(operations), expected_item_revisions: expectedItemRevisions };
+async function apply(configuration, operations, expectedItemRevisions = {}, summary = '') {
+  const request = { ...applyRequest(operations), expected_item_revisions: expectedItemRevisions, summary };
   assert.ok(Buffer.byteLength(JSON.stringify(request)) < 512 * 1024, 'Every real CLI request remains within its protocol limit');
   const result = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request);
   assert.equal(result.code, 0); assert.equal(result.value.session_id, configuration.sessionId);
@@ -35,6 +35,13 @@ export function treeBatch(topicId, branch) {
   }
   return operations;
 }
+export function treeMessageBatch(first, count) {
+  return Array.from({ length: count }, (_, index) => {
+    const number = first + index, itemId = `${1 + (number - 1) % 20}.${1 + Math.floor((number - 1) / 20) % 99}`;
+    return { op: 'reply', ref: `native_message_${number}`, item: { id: itemId }, round_id: null,
+      text: `Native recorded reply ${number}\nFull retained message body for item ${itemId}.\nUnique history_token_${number}_end.` };
+  });
+}
 async function seedTree(configuration) {
   const selected = configuration.tree;
   const registered = await cliRequest(configuration.cli, ['project', 'register', '--json-stdin'], {
@@ -56,7 +63,17 @@ async function seedTree(configuration) {
   const publication = [await apply(tree, [{ op: 'topic.add', ref: 'native_tree_topic', name: 'Native tree acceptance' }])];
   const topic = Object.values((await snapshot(tree)).topics).find(topic => topic.name === 'Native tree acceptance'); assert.ok(topic);
   for (let branch = 1; branch <= 20; branch++) publication.push(await apply(tree, treeBatch(topic.id, branch)));
+  let live = await snapshot(tree), nextMessage = 1;
+  while (live.messages.length < 5000) {
+    // Every nonempty apply adds one genuine activity message as well as its
+    // explicit replies. The final activity-only batch closes an exact count.
+    const operations = treeMessageBatch(nextMessage, Math.min(100, 5000 - live.messages.length - 1));
+    const revisions = Object.fromEntries(operations.map(operation => [operation.item.id, live.items[operation.item.id].revision]));
+    publication.push(await apply(tree, operations, revisions, 'Publish complete native message history.'));
+    nextMessage += operations.length; live = await snapshot(tree);
+  }
   const session = await snapshot(tree); assert.equal(Object.keys(session.items).length, 2000); assert.equal(Object.keys(session.inputs).length, 0);
+  assert.equal(session.messages.length, 5000, 'The native performance corpus must meet the complete 2,000-item / 5,000-message target');
   assert.equal(session.bindings[tree.bindingId].external_session_id, selected.externalSessionId);
   tree.topicId = topic.id;
   return { tree, publication, initialSession: session };
@@ -110,6 +127,46 @@ async function anchor() {
     return { id: element.dataset.itemId, offset: element.getBoundingClientRect().top - top, scrollTop: tree.scrollTop };
   });
 }
+async function completeRowLayout(id, item) {
+  const layout = await browser.execute(id => {
+    const row = document.querySelector(`.sentence-rows [data-item-id="${id}"]`);
+    const bounds = element => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, height: value.height }; };
+    const parts = ['.ref-tree-question', '.ref-tree-outcome'].map(selector => {
+      const element = row.querySelector(selector); if (!element) return null;
+      const range = document.createRange(); range.selectNodeContents(element);
+      const fragments = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0)
+        .map(rect => ({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }));
+      const containers = [];
+      for (let parent = element; parent; parent = parent.parentElement) {
+        const style = window.getComputedStyle(parent);
+        containers.push({ bounds: bounds(parent), clientHeight: parent.clientHeight, scrollHeight: parent.scrollHeight,
+          clientWidth: parent.clientWidth, scrollWidth: parent.scrollWidth,
+          lineClamp: style.getPropertyValue('-webkit-line-clamp'), textOverflow: style.textOverflow });
+        if (parent === row) break;
+      }
+      return { text: element.textContent, bounds: bounds(element), fragments, containers,
+        lineHeight: Number.parseFloat(window.getComputedStyle(element).lineHeight) };
+    });
+    return { row: bounds(row), question: parts[0], outcome: parts[1] };
+  }, id);
+  for (const [name, text] of [['question', item.question], ['outcome', item.outcome]]) {
+    if (text === null) continue;
+    const part = layout[name]; assert.ok(part); assert.equal(part.text, text);
+    assert.ok(part.fragments.length > 0, `${id} ${name} must have actual native text layout`);
+    const lines = new Set(part.fragments.map(rect => Math.round(rect.top)));
+    assert.ok(lines.size >= text.split('\n').length, `${id} ${name} must retain its complete multiline layout`);
+    for (const container of part.containers) {
+      assert.ok(!Number.parseInt(container.lineClamp, 10), `${id} ${name} must not use a line clamp`);
+      assert.notEqual(container.textOverflow, 'ellipsis', `${id} ${name} must not truncate with an ellipsis`);
+      assert.ok(container.scrollHeight <= container.clientHeight + 1 && container.scrollWidth <= container.clientWidth + 1,
+        `${id} ${name} must fit every containing row box without overflow`);
+      for (const fragment of part.fragments) assert.ok(fragment.top >= container.bounds.top - 1 && fragment.bottom <= container.bounds.bottom + 1
+        && fragment.left >= container.bounds.left - 1 && fragment.right <= container.bounds.right + 1,
+      `${id} ${name} text fragments must fit inside their native row and content bounds`);
+    }
+  }
+  return layout;
+}
 async function isolated(configuration, original, journal, demoBytes) {
   assert.deepEqual(await snapshot(configuration), original);
   assert.deepEqual(await admissions(configuration), journal); assert.equal(journal.length, 5);
@@ -126,8 +183,7 @@ export async function runTreeAcceptance(configuration) {
   const usableMs = await measureAction('click', `[data-session-id="${tree.sessionId}"]`, expectedIds, () => sessionButton.click());
   assert.deepEqual(await visibleIds(), expectedIds); await roving();
   assert.equal(await (await row('1')).getAttribute('aria-level'), '1'); assert.equal(await (await row('1.1')).getAttribute('aria-level'), '2');
-  assert.ok((await (await row('1')).getText()).includes(initialSession.items['1'].question));
-  assert.ok((await (await row('1')).getText()).includes(initialSession.items['1'].outcome));
+  const initialLayouts = await Promise.all(['1', '1.1', '1.3'].map(id => completeRowLayout(id, initialSession.items[id])));
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-2000.png'));
 
   const searchMs = [];
@@ -189,8 +245,12 @@ export async function runTreeAcceptance(configuration) {
   await (await search()).waitForEnabled();
   const beforeEdit = await anchor(); assert.ok(beforeEdit.scrollTop > 0);
   const live = await snapshot(tree), longer = `${live.items['1'].question}\n${'A complete upstream sentence wraps across the native row. '.repeat(40)}`;
+  const beforeRowLayout = await completeRowLayout('1', live.items['1']);
   const edit = await apply(tree, [{ op: 'item.edit', item: { id: '1' }, patch: { question: longer } }], { 1: live.items['1'].revision });
   await wait(async () => (await (await row('1')).getText()).includes(longer), 'Real CLI edit did not reach the native shared session');
+  const afterRowLayout = await completeRowLayout('1', { ...live.items['1'], question: longer });
+  assert.ok(afterRowLayout.row.height - beforeRowLayout.row.height >= Math.max(64, 2 * beforeRowLayout.question.lineHeight),
+    'The real upstream edit must materially grow its native row before it can prove scroll anchoring');
   const afterEdit = await anchor(); assert.equal(afterEdit.id, beforeEdit.id); assert.ok(Math.abs(afterEdit.offset - beforeEdit.offset) <= 2, 'Live wrapped-row growth must preserve the actual visible scroll anchor');
   assert.equal(await focusedId(), '10.50', 'Live update must not steal native keyboard focus');
   await (await search()).click();
@@ -200,10 +260,10 @@ export async function runTreeAcceptance(configuration) {
   assert.ok(saved.snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'));
   assert.ok(!saved.view.expanded_item_ids.includes('2')); assert.equal(saved.view.filters.search, '');
   await isolated(configuration, original, journal, demoBytes);
-  const performance = { environment: 'Actual embedded WKWebView with real Core/Store', rows: 2000, firstUsableMs: usableMs,
+  const performance = { environment: 'Actual embedded WKWebView with real Core/Store', rows: 2000, messages: initialSession.messages.length, firstUsableMs: usableMs,
     localSearchSamplesMs: searchMs, localSearchP95Ms: [...searchMs].sort((a, b) => a - b)[Math.ceil(searchMs.length * 0.95) - 1], targets: { firstUsableMs: 2000, localSearchP95Ms: 150 } };
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-acceptance.json'), JSON.stringify({ tree, publication, edit, finalSession, savedView: saved.view, savedLater: saved.snapshot.later,
-    beforeEdit, afterEdit, performance, originalAdmissions: journal.length }, null, 2));
+    initialLayouts, beforeRowLayout, afterRowLayout, beforeEdit, afterEdit, performance, originalAdmissions: journal.length }, null, 2));
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-anchor.png'));
   assert.ok(usableMs <= performance.targets.firstUsableMs, `Native first usable tree ${usableMs}ms exceeds the 2s target`);
   assert.ok(performance.localSearchP95Ms <= performance.targets.localSearchP95Ms, `Native local search p95 ${performance.localSearchP95Ms}ms exceeds the 150ms target`);
