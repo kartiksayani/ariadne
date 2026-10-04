@@ -93,6 +93,15 @@ unsaved. Only verified replay-first transactional rejections permit a corrected
 new deliberate action. Actual restart reloads canonical state without automatic
 resend or a new persisted client journal.
 
+Ordinary App assembly reuses NavigationWorkspace and ReferenceWorkspace with
+optional Waiting and rail content, the existing detail slot, and explicit
+query/view/rail/theme callbacks. Default reference-gallery output remains stable.
+NavigationStore keeps canonical theme changes on its existing serialized
+preferences writer; graph display mode stays local because it is not a canonical
+session preference. Application-lifetime routing and recovery controllers share
+one desktop service. Nonvisual session/item data attributes on the real controls
+support native acceptance without adding a separate test flow.
+
 ## Streams and owned shared files
 
 | Stream | First independent assignment | Subsequent module work |
