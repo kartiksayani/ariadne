@@ -50,6 +50,17 @@ admissions and drains admitted work before replacing activation; Quit wins over
 wake and retains ownership until admitted work has drained. No ordinary worker
 lock is held across Core/provider IO or result waits.
 
+The composition-only `DesktopService::with_native_preferences_write` callback
+preserves existing request and receipt validation. It serves the two native
+window/tray preference writers on the same owned executor. Before Quit, track
+at most two already-attempted immutable preference requests under the admission
+lock. During shutdown, only those exact requests may be confirmed; new IDs,
+changed bodies and other command kinds remain rejected. This is not a renderer
+or CoreService admission bypass. Drain off the UI thread before releasing the
+executor, without holding the worker lock across IO. Unknown failures retain
+the original request; only a validated receipt or a replay-first preference
+revision rejection with a differing canonical current revision clears it.
+
 The tray consumes the existing validated desktop query envelope through the
 additive `DesktopService::native_query` method. Composition installs `NativeTray`
 after managing the real service, feeds `refresh` from existing watcher/fallback/
