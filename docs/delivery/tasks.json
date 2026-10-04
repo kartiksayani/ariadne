@@ -868,7 +868,6 @@
     },
     {
       "id": "P3.3",
-      "active": true,
       "title": "Ship Claude Mod claims and captured turn callbacks",
       "phase": "M3",
       "depends_on": [
