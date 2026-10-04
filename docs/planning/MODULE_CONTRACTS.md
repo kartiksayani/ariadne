@@ -56,8 +56,14 @@ private bridge admits Core calls onto that owned executor and returns their
 authoritative results; it must not mask saved replay or persistence with an outer
 deadline. Provider admission retains the original deadline. Wake fences new
 admissions and drains admitted work before replacing activation; Quit wins over
-wake and retains ownership until admitted work has drained. No ordinary worker
-lock is held across Core/provider IO or result waits.
+wake and retains ownership until admitted work has drained. Both fences also
+synchronously stop the current activation's claim/delivery gates before any
+preference or admitted-work drain. Activation supervisor start/installation is
+serialized with that fence; wake fences the old activation before taking it out
+of shared runtime state. Its later replacement is published only while Quit has
+not begun. The synchronous fence performs no Core/provider IO or waits; actual
+worker shutdown remains off the UI thread. No ordinary worker lock is held
+across Core/provider IO or result waits.
 
 The composition-only `DesktopService::with_native_preferences(read, write)`
 builder preserves existing request and receipt validation. Its parameterless
