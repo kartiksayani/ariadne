@@ -16,6 +16,7 @@ libc.workspace = true
 tokio = { version = "=1.53.1", default-features = false, features = ["net", "rt-multi-thread", "io-util", "time", "sync", "macros"] }
 
 [dev-dependencies]
+tungstenite = { version = "=0.29.0", default-features = false, features = ["handshake"] }
 ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
 ariadne-agent-protocol = { path = "../ariadne-agent-protocol", features = ["test-support"] }
 tempfile.workspace = true

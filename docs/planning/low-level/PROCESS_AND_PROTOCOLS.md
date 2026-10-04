@@ -100,6 +100,20 @@ A saved connection receipt grants no dispatch lease or supervisor readiness. Act
 provider verification, final adapter connect and dynamic supervisor/claim-route
 activation remain native composition work, not behavior supplied by this relay.
 
+The native runtime library now supplies `ProviderFactory` and `NativeActivation`
+for that join (ADR-0056); installed desktop startup remains a consuming integration.
+The native Core `connect_before` seam keeps both exact replay checks before
+deadline guards and prevents fresh allocation/write after a registry-lock wait
+exhausts the original deadline. It never cancels a transaction already started.
+Concrete adapter `connect_before` methods carry that same deadline through their
+existing worker queues without changing the shared Adapter trait. Claude still
+returns Unknown/Disconnected bootstrap IDs before a separately bounded matching
+bound announcement can activate it. Qualified active heartbeats reuse the same
+evidence slot after saved identity/fingerprint checks. Dynamic control routes
+publish real lease/gate pairs only after canonical reporting, reconciliation and
+an authoritative current-generation reread; stale completion removes only its
+own generation. Shared desktop ownership survives in-flight blocking calls.
+
 Stable owned single-link regular lease files have mode 0600. Home, run and
 lease directories have mode 0700; opening these targets does not follow
 symlinks. The runtime-instance lock is `run/runtime.lock`. Socket setup/removal

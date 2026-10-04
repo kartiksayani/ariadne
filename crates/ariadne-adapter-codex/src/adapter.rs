@@ -1,12 +1,22 @@
 //! Async provider-neutral seam; all blocking socket and child IO runs on one bounded worker.
 use crate::{queue::Worker, CodexOptions, QualifiedCodexThread};
 use ariadne_agent_protocol::*;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct CodexAdapter {
     worker: Worker,
 }
 impl CodexAdapter {
+    /// Carry native activation's original deadline into the same bounded worker.
+    pub fn connect_before(
+        &self,
+        request: ConnectRequest,
+        deadline: Instant,
+    ) -> AdapterFuture<'_, ConnectResult> {
+        self.worker.call_before(deadline, move |state, deadline| {
+            state.connect(request, deadline)
+        })
+    }
     /// Consume the already initialized reader for one selected thread/root/endpoint.
     /// Final binding/generation IDs arrive through Adapter.connect. Reconnect never
     /// retargets this selection or silently replaces its qualified fingerprint.
