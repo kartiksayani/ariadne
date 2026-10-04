@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import type { QueryResult } from '../../../src/generated/core';
 import { ItemDetail, itemTimeline } from '../../../src/components/history/ItemDetail';
 import { MessageRail } from '../../../src/components/rail/MessageRail';
@@ -116,6 +117,38 @@ describe('complete item detail', () => {
 });
 
 describe('complete message rail', () => {
+  it('accepts ordinary inline parent callbacks without republishing unchanged selection, then updates the latest callback and cleans up once', async () => {
+    const value = await ready();
+    let renders = 0, calls = 0;
+    const cleanupCalls: ReadonlySet<string>[] = [];
+    function Parent() {
+      const [selection, setSelection] = useState({ items: new Set<string>(), messages: new Set<string>() });
+      const [generation, setGeneration] = useState(1);
+      ++renders;
+      return <><button type="button" onClick={() => setGeneration(current => current + 1)}>New parent callback</button>
+        <output aria-label="Parent highlights">{generation}:{[...selection.items].join(',')}:{[...selection.messages].join(',')}</output>
+        <MessageRail {...value} onReveal={vi.fn()} onHighlight={(items, messages) => {
+          ++calls;
+          if (generation === 2) cleanupCalls.push(messages);
+          setSelection({ items: new Set(items), messages: new Set(messages) });
+        }} /></>;
+    }
+    const rendered = render(<Parent />);
+    const log = screen.getByRole('log');
+    await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(value.transport.session.messages.length));
+    expect(renders).toBeLessThan(10);
+    const before = calls;
+    fireEvent.click(screen.getByRole('button', { name: 'New parent callback' }));
+    expect(calls).toBe(before);
+    const message = value.transport.session.messages.find(message => message.item_id === '1')!;
+    fireEvent.mouseEnter(log.querySelector(`[data-message-id="${message.id}"]`)!);
+    expect(screen.getByLabelText('Parent highlights').textContent).toBe(`2:1:${message.id}`);
+    expect(calls).toBe(before + 1);
+    expect(cleanupCalls.at(-1)).toEqual(new Set([message.id]));
+    rendered.unmount();
+    expect(calls).toBe(before + 2);
+    expect(cleanupCalls.at(-1)).toEqual(new Set());
+  });
   it('cross-highlights canonical item links on hover/pin and selected item, preserving registered reveal', async () => {
     const value = await ready(), highlight = vi.fn(), reveal = vi.fn();
     const rendered = render(<MessageRail {...value} selectedItemId="2" onHighlight={highlight} onReveal={reveal} />);
