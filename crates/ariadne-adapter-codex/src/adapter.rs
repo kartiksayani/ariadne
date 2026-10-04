@@ -1,5 +1,5 @@
 //! Async provider-neutral seam; all blocking socket and child IO runs on one bounded worker.
-use crate::{queue::Worker, CodexOptions};
+use crate::{queue::Worker, CodexOptions, QualifiedCodexThread};
 use ariadne_agent_protocol::*;
 use std::time::Duration;
 
@@ -7,6 +7,17 @@ pub struct CodexAdapter {
     worker: Worker,
 }
 impl CodexAdapter {
+    /// Consume the already initialized reader for one selected thread/root/endpoint.
+    /// Final binding/generation IDs arrive through Adapter.connect. Reconnect never
+    /// retargets this selection or silently replaces its qualified fingerprint.
+    pub fn from_qualified_thread(
+        qualified: QualifiedCodexThread,
+        instance_id: UuidV4,
+    ) -> Result<Self, AdapterError> {
+        Ok(Self {
+            worker: Worker::from_qualified_thread(qualified, instance_id)?,
+        })
+    }
     /// The instance identifies qualified presence. Observation tokens also carry a fresh private
     /// worker nonce, so recreating an adapter requires persisted-attempt reconciliation.
     pub fn new(options: CodexOptions, instance_id: UuidV4) -> Result<Self, AdapterError> {

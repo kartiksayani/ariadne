@@ -246,11 +246,11 @@ fn initialization_and_qualification_share_one_short_native_admission_budget() {
                 // Retain the real response until the client has exhausted its
                 // admission budget. Bounded fallback also allows a failing test
                 // to finish and reap its fixture server.
-                let _ = hold.recv_timeout(Duration::from_secs(2));
+                let _ = hold.recv_timeout(Duration::from_secs(6));
             } else if method == "initialize" {
                 // A successful initialization consumes part of the SAME budget.
                 assert_eq!(
-                    hold.recv_timeout(Duration::from_millis(250)),
+                    hold.recv_timeout(Duration::from_secs(1)),
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout)
                 );
             }
@@ -261,13 +261,15 @@ fn initialization_and_qualification_share_one_short_native_admission_budget() {
             Some(Action::Result(value))
         });
         let started = Instant::now();
-        let deadline = started + Duration::from_secs(1);
+        let deadline = started + Duration::from_secs(4);
         let result = CodexDaemonReader::open_before(h.options(), h.request().endpoint, deadline)
             .and_then(|reader| reader.qualify_selected_thread(THREAD, project.path(), deadline));
         let elapsed = started.elapsed();
         let _ = release.send(());
         assert_eq!(result.err().unwrap().code, Code::HostUnreachable);
-        assert!(elapsed < Duration::from_secs(2));
+        // A reset after the mandatory one-second initialization would take
+        // at least five seconds; retain scheduling room below that threshold.
+        assert!(elapsed < Duration::from_millis(4750));
         assert_eq!(
             h.methods(),
             if held_method == "initialize" {

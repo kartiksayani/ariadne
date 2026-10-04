@@ -693,3 +693,65 @@ impl CoreService for FaultyErrorCore {
         Err(self.0.clone())
     }
 }
+
+#[test]
+fn native_binding_connect_client_forwards_exact_owner_wrapper_and_preserves_saved_receipt() {
+    let routing = cases::load(root()).routing;
+    let request: OwnerMutationRequest = serde_json::from_value(serde_json::json!({
+        "session":null,
+        "command":{"api_version":1,"command":"binding_connect","op_id":routing.source_input_id,
+            "params":{"project_id":routing.project_id,"adapter_id":"claude_code_mod",
+                "external_session_id":"explicit-existing-host","endpoint":{"kind":"local_bridge","name":"claude-mod"},
+                "configuration":{"namespace":"claude_code_mod","values":{}},"existing_session_id":routing.session_id}}
+    })).unwrap();
+    let session: ariadne_domain::models::Session = serde_json::from_slice(
+        &fs::read(root().join("fixtures/domain/demo/session.json")).unwrap(),
+    )
+    .unwrap();
+    let receipt: MutationReceipt = serde_json::from_value(serde_json::json!({
+        "operation_id":routing.source_input_id,"session_id":routing.session_id,"revision":21,
+        "data":{"kind":"binding_connect","binding_id":routing.binding_id,"generation":routing.generation,
+            "capabilities":session.bindings.0.values().next().unwrap().capabilities,
+            "setup_instruction":"Exact canonical café instruction\nPreserve trailing bytes.  "}
+    })).unwrap();
+    let h = home();
+    let owner = DesktopOwner::acquire(h.path()).unwrap();
+    let listener = UnixListener::bind(owner.control_path()).unwrap();
+    fs::set_permissions(owner.control_path(), fs::Permissions::from_mode(0o600)).unwrap();
+    let expected = request.clone();
+    let reply = receipt.clone();
+    let server = std::thread::spawn(move || {
+        let _owner = owner;
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut length = [0; 4];
+        stream.read_exact(&mut length).unwrap();
+        let mut bytes = vec![0; u32::from_be_bytes(length) as usize];
+        stream.read_exact(&mut bytes).unwrap();
+        let wire: ControlRequest = serde_json::from_slice(&bytes).unwrap();
+        wire.validate().unwrap();
+        assert_eq!(wire.id, *expected.command.operation_id());
+        assert_eq!(
+            wire.method,
+            ControlMethod::BindingConnect(Box::new(expected))
+        );
+        let bytes = serde_json::to_vec(
+            &serde_json::json!({"v":1,"kind":"response","id":wire.id,"result":reply}),
+        )
+        .unwrap();
+        stream
+            .write_all(&(bytes.len() as u32).to_be_bytes())
+            .unwrap();
+        stream.write_all(&bytes).unwrap();
+    });
+    assert_eq!(
+        bridge::binding_connect(h.path().into(), request).unwrap(),
+        receipt
+    );
+    server.join().unwrap();
+}
