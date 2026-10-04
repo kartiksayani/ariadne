@@ -748,7 +748,10 @@
       "checks": [
         "rtk proxy cargo test -p ariadne-core --test delivery_join"
       ],
-      "estimate_days": 2
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/55"
+      }
     },
     {
       "id": "P2.3",
@@ -779,7 +782,10 @@
       "estimate_days": 1,
       "implementation_depends_on": [
         "P0.6"
-      ]
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/56"
+      }
     },
     {
       "id": "P2.4",
@@ -1012,7 +1018,8 @@
       "implementation_depends_on": [
         "P3.3",
         "P0.5"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/59"
     },
     {
       "id": "P3.5",
@@ -1033,7 +1040,7 @@
       ],
       "acceptance": [
         "Respect CODEX_HOME; resolve permitted socket symlink deliberately, verify final UID/socket and initialize over Unix WebSocket without launching daemon/thread.",
-        "Decode full item history/null/optional fields using private generated types; poll exact thread, preserve correlation and stop on unknown required variants.",
+        "Decode full item history/null/optional fields using private generated types; poll exact thread, preserve correlation and stop on unknown required variants. Native pre-ID selected-thread/root qualification with one initialization-plus-read deadline is implemented in https://github.com/kartiksayani/ariadne/pull/63; consuming composition remains separate.",
         "CLI/daemon mismatch, changed executable identity or unsupported version disables dispatch and retains durable saved inputs."
       ],
       "checks": [
@@ -1113,12 +1120,18 @@
         "P3.1",
         "P3.3",
         "P3.5"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/62"
     },
     {
       "id": "P3.8",
       "title": "Implement explicit day-to-day recovery and audited CLI actions",
       "phase": "M3",
+      "implementation_depends_on": [
+        "P2.2",
+        "P2.3",
+        "P0.6"
+      ],
       "depends_on": [
         "P2.2",
         "P3.2",
@@ -1374,7 +1387,8 @@
         "P4.1",
         "P4.3",
         "P4.4"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/60"
     },
     {
       "id": "P4.7",

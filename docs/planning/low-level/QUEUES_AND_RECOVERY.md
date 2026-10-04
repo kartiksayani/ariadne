@@ -134,6 +134,35 @@ not machine-proven absence. Show target identity and prior result/side effects.
   store owner attribution. This never fabricates an agent result or successful
   turn. Owner may then skip; automatic 'handled' still needs host/domain evidence.
 
+The native `recovery::RecoveryService` commits these decisions through the same
+replay-first session transaction. Its optional native-only `RecoveryObservation`
+binds qualified presence to the selected binding, adapter instance and current
+generation. Runtime owns freshness qualification; mismatched, stale or
+unqualified observations mean Unknown. Process hints cannot prove idle. Fresh
+qualified Running/WaitingForApproval blocks all resolutions; otherwise unknown
+liveness requires idle attestation supplied by this deliberate request. Ordinary
+Core composition defaults to Unknown and does not contact a host under lock.
+
+Prepare/retry/resend/repair and Skip seal only the replaced attempt, clear active
+IDs, preserve original input sequence/content/effects and persist owner pause.
+They never allocate or send an attempt. Separate Resume remains mandatory; a later
+legitimate claim allocates fresh delivery identity from the retained preparation
+resolution. Retry/Resend preserve the replaced purpose, so retrying a repair
+never delivers the original action prompt. Result repair uses a result-only prompt with original effect
+references, and repeated repairs point directly to original machine-observed
+Completed Work. Neither an owner assertion nor time expiry creates completion.
+
+ConfirmEvidence normally appends owner attribution without changing machine facts,
+result, queue state or barriers. A sealed input permits this append-only audit
+while its Attempt/result/payload/prior effects remain unchanged. A matching
+acknowledgement covers only scoped EventConflict receipts through the guarded
+snapshot revision. Binding Uncertain can clear only when every attributable
+conflict is acknowledged and no other unresolved attempt or recovery cause
+remains; unscoped/unmatched conflicts and StoreError/Incompatible/HostFailure
+remain blocked. Clearing still persists owner pause and requires separate Resume.
+Exact old operation replay never acknowledges later conflicts or widens effects.
+Actual recovery CLI and qualified runtime observations remain consuming joins.
+
 Queue cancel is only before attempt preparation. Once delivered into the host's
 native queue, Pause means no additional sends and does not retract it. Release1
 has no 'Stop agent' button. UI tells the owner to interrupt in the terminal.
