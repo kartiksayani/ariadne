@@ -352,6 +352,23 @@ under the target lock.
 
 Tools: `session_read`, `item_messages`, `item_rounds`, `apply`.
 Public CLI equivalent: `ariadne apply --binding UUID --generation UUID --json-stdin`.
+Agent reads use `ariadne read --binding UUID --generation UUID --view items`,
+`ariadne item messages --binding UUID --generation UUID --item ITEM`, and
+`ariadne item rounds` with the same route/item flags. `--json-stdin` supplies the
+complete canonical read/history parameters, including every nested continuation;
+it cannot be combined with convenience parameter flags. Read calls may pass the
+paired `--source-input UUID --attempt UUID`; Apply keeps that pair in its canonical
+stdin request. `--json` emits exactly one application envelope on stdout, while
+text failures use stderr and the canonical exit code. Help includes valid stdin
+and invalid-routing examples.
+
+The native CLI resolves retained binding IDs across authoritative registered
+sessions so exact Apply replay survives rebind. It derives terminal issuance or
+the exact source-message ceiling from persisted data, releases catalogue locks,
+and forwards the caller's generation unchanged; core rechecks it under its own
+read/transaction. CLI and bridge use one `ARIADNE_HOME` application data directory
+(default `HOME/.ariadne`), with no caller-selected registry/project/session path
+or second registry environment variable. See [ADR-0039](../../adr/ADR-0039-native-agent-cli-routing-and-data-root.md).
 MCP `apply` takes the same binding/generation and request as tool arguments.
 The MCP server may serve several sessions, so **every call** has explicit routing;
 no cwd/latest-session default, global mutable 'current agent', or inferred PID.
