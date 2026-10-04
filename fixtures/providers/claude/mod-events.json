@@ -1,0 +1,129 @@
+[
+  {
+    "event_id": "7ba4895e9984a3e022bb8ad8c27e63fbe7440f55bcae0fd657312e201aecd08c",
+    "binding_id": "33333333-3333-4333-8333-333333333333",
+    "generation": "44444444-4444-4444-8444-444444444444",
+    "input_id": "55555555-5555-4555-8555-555555555555",
+    "attempt_id": "66666666-6666-4666-8666-666666666666",
+    "host_turn_id": null,
+    "observed_at": "2026-10-04T00:00:00.123Z",
+    "kind": "accepted",
+    "payload": {
+      "receipt": null
+    }
+  },
+  {
+    "event_id": "cfa29a339d00813cea053be3688e9ba969b0112404bfc0b6ddc06506ae9cd6a9",
+    "binding_id": "33333333-3333-4333-8333-333333333333",
+    "generation": "44444444-4444-4444-8444-444444444444",
+    "input_id": "55555555-5555-4555-8555-555555555555",
+    "attempt_id": "66666666-6666-4666-8666-666666666666",
+    "host_turn_id": "actual-turn",
+    "observed_at": "2026-10-04T00:00:00.123Z",
+    "kind": "accepted",
+    "payload": {
+      "receipt": {
+        "provider_reference": "fixture-provider-reference",
+        "observed_at": "2026-10-03T23:59:59.999Z"
+      }
+    }
+  },
+  {
+    "event_id": "55c0def5048a11550d393449b8fe47e4777a165636c879f25b57f0f62ceb5f29",
+    "binding_id": "33333333-3333-4333-8333-333333333333",
+    "generation": "44444444-4444-4444-8444-444444444444",
+    "input_id": "55555555-5555-4555-8555-555555555555",
+    "attempt_id": "66666666-6666-4666-8666-666666666666",
+    "host_turn_id": "actual-turn",
+    "observed_at": "2026-10-04T00:00:00.123Z",
+    "kind": "turn_started",
+    "payload": {}
+  },
+  {
+    "event_id": "b16562cb32305070e6e37575fecaed587c83c6b76652f25485eb92e4ff759d80",
+    "binding_id": "33333333-3333-4333-8333-333333333333",
+    "generation": "44444444-4444-4444-8444-444444444444",
+    "input_id": "55555555-5555-4555-8555-555555555555",
+    "attempt_id": "66666666-6666-4666-8666-666666666666",
+    "host_turn_id": "actual-turn",
+    "observed_at": "2026-10-04T00:00:00.123Z",
+    "kind": "turn_finished",
+    "payload": {
+      "status": "completed",
+      "reason": "answer",
+      "diagnostic_text": "Exact visible answer 😀",
+      "truncated": false
+    }
+  },
+  {
+    "event_id": "b16562cb32305070e6e37575fecaed587c83c6b76652f25485eb92e4ff759d80",
+    "binding_id": "33333333-3333-4333-8333-333333333333",
+    "generation": "44444444-4444-4444-8444-444444444444",
+    "input_id": "55555555-5555-4555-8555-555555555555",
+    "attempt_id": "66666666-6666-4666-8666-666666666666",
+    "host_turn_id": "actual-turn",
+    "observed_at": "2026-10-04T00:00:00.123Z",
+    "kind": "turn_finished",
+    "payload": {
+      "status": "interrupted",
+      "reason": "aborted",
+      "diagnostic_text": null,
+      "truncated": false
+    }
+  },
+  {
+    "event_id": "b16562cb32305070e6e37575fecaed587c83c6b76652f25485eb92e4ff759d80",
+    "binding_id": "33333333-3333-4333-8333-333333333333",
+    "generation": "44444444-4444-4444-8444-444444444444",
+    "input_id": "55555555-5555-4555-8555-555555555555",
+    "attempt_id": "66666666-6666-4666-8666-666666666666",
+    "host_turn_id": "actual-turn",
+    "observed_at": "2026-10-04T00:00:00.123Z",
+    "kind": "turn_finished",
+    "payload": {
+      "status": "failed",
+      "reason": "error",
+      "diagnostic_text": "Visible failure",
+      "truncated": false
+    }
+  },
+  {
+    "event_id": "b6255ecc098e052e459057d8153846e43a9bc882c8db4d45358dc584b8309add",
+    "binding_id": "33333333-3333-4333-8333-333333333333",
+    "generation": "44444444-4444-4444-8444-444444444444",
+    "input_id": "55555555-5555-4555-8555-555555555555",
+    "attempt_id": "66666666-6666-4666-8666-666666666666",
+    "host_turn_id": null,
+    "observed_at": "2026-10-04T00:00:00.123Z",
+    "kind": "rejected",
+    "payload": {
+      "reason": "Claude prompt submission was dropped before matching turn evidence."
+    }
+  },
+  {
+    "event_id": "5872328ea41d590dea5040f51915e9e525361ed98bcef31cb582e36f33bf9190",
+    "binding_id": "33333333-3333-4333-8333-333333333333",
+    "generation": "44444444-4444-4444-8444-444444444444",
+    "input_id": "55555555-5555-4555-8555-555555555555",
+    "attempt_id": "66666666-6666-4666-8666-666666666666",
+    "host_turn_id": null,
+    "observed_at": "2026-10-04T00:00:00.123Z",
+    "kind": "uncertain",
+    "payload": {
+      "reason": "Prompt submission failed with unknown delivery; reconcile the original attempt."
+    }
+  },
+  {
+    "event_id": "77777777-7777-4777-8777-777777777777",
+    "binding_id": "33333333-3333-4333-8333-333333333333",
+    "generation": "44444444-4444-4444-8444-444444444444",
+    "input_id": null,
+    "attempt_id": null,
+    "host_turn_id": null,
+    "observed_at": "2026-10-04T00:00:00.123Z",
+    "kind": "disconnected",
+    "payload": {
+      "reason": "Original Claude session ended."
+    }
+  }
+]

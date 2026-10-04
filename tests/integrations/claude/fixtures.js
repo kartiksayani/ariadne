@@ -32,7 +32,7 @@ export function host({claim = null, submit = () => Promise.resolve({text:claim.f
   let timer = null;
   let external = binding.external_session_id;
   const $ = {
-    plugin:{version:'0.1.0'},session:{id:async () => external,cwd:async () => '/project/original',version:async () => ({version})},
+    plugin:{name:'ariadne',root:'/sdk-reported/plugin'},session:{id:async () => external,cwd:async () => '/project/original',version:async () => ({version})},
     ui:{log:text => logs.push(text)},command:{register:async spec => {commands.push(spec);}},
     clock:{every:(ms,callback) => {timer={ms,callback,cancelled:false,cancel(){this.cancelled=true;}};return timer;}},
     prompt:{submit:args => {prompts.push(args);return submit(args);}},
