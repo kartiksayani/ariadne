@@ -12,9 +12,22 @@ pub mod codex_wire;
 pub mod core_models;
 pub mod domain_models;
 pub mod protocol_models;
+pub mod rules;
 
 pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
-    if args.first().map(String::as_str) == Some("gen-codex-wire") {
+    if args.first().map(String::as_str) == Some("gen-rules") {
+        let check = match args
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
+            ["gen-rules"] => false,
+            ["gen-rules", "--check"] => true,
+            _ => return Err("Usage: cargo xtask gen-rules [--check]".into()),
+        };
+        rules::generate(root, check)
+    } else if args.first().map(String::as_str) == Some("gen-codex-wire") {
         let (version, check) = codex_wire::arguments(args)?;
         codex_wire::generate(root, version, check)
     } else {

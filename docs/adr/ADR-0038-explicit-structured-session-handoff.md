@@ -1,8 +1,8 @@
 # ADR-0038: Explicitly hand off structured session context
 
-Status: accepted
+Status: accepted; partially superseded for new saved instruction construction
 Supersedes: none
-Superseded by: none
+Superseded by: [ADR-0046](ADR-0046-explicit-owner-cli-and-saved-routing-instructions.md), only for new saved instruction construction; existing saved bytes and handoff authority remain unchanged
 
 ## Context
 
