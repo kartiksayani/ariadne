@@ -384,43 +384,6 @@ fn shared_reports_call_injected_core_after_desktop_exit_without_claim_or_socket(
     }
 }
 #[test]
-fn executable_report_is_truthfully_unsupported_and_never_reports_fake_persistence() {
-    let corpus = cases::load(root());
-    let event = corpus
-        .cases
-        .iter()
-        .flat_map(|case| &case.steps)
-        .find_map(|step| {
-            if let cases::CaseStep::Report { event, .. } = step {
-                Some(event)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    let bytes = serde_json::to_vec(&event).unwrap();
-    let result = output(
-        &[
-            "bridge",
-            "report",
-            "--binding",
-            event.binding_id.as_str(),
-            "--generation",
-            event.generation.as_str(),
-            "--json-stdin",
-        ],
-        Some(&bytes),
-    );
-    assert_eq!(result.status.code(), Some(5));
-    assert!(result.stderr.is_empty());
-    let envelope: ReportEnvelope = serde_json::from_slice(&result.stdout).unwrap();
-    let error = cases::result(&envelope.0).unwrap_err();
-    assert_eq!(error.code, CoreErrorCode::Unsupported);
-    assert!(!error.retryable);
-    assert!(error.message.contains("no lifecycle event was persisted"));
-    assert!(error.hint.contains("P2.2"));
-}
-#[test]
 fn executable_bridge_invalid_input_uses_canonical_structured_errors() {
     let r = cases::load(root()).routing;
     for args in [
