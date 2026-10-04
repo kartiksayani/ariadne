@@ -26,6 +26,7 @@ class FrontendCoverage(unittest.TestCase):
             (root / "package.json").write_text('{"type":"module"}\n')
             (root / "node_modules").symlink_to(ROOT / "node_modules", target_is_directory=True)
             shutil.copyfile(ROOT / "apps/desktop/vite.config.ts", desktop / "vite.config.ts")
+            shutil.copyfile(ROOT / "quality-gates.json", root / "quality-gates.json")
             # Actual pinned compiler outputs, not a claim about the domain generator.
             generator = """
 const ts = require('typescript');
