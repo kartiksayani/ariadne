@@ -30,7 +30,9 @@ fn add(target: &mut NonnegativeSafeInteger, value: u64) -> Result<(), CoreError>
         .map_err(|_| capacity())?;
     Ok(())
 }
-pub(super) fn waiting(session: &Session, item: &Item) -> bool {
+/// Canonical unanswered predicate shared by global counts and native queue rows.
+/// Topic archive eligibility remains the caller's scope filter.
+pub fn waiting_unanswered(session: &Session, item: &Item) -> bool {
     item.status == ItemStatus::WaitingOnMe
         && !session.answers.iter().any(|answer| {
             answer.item_id == item.id
@@ -68,7 +70,7 @@ pub(super) fn session(session: &Session) -> Result<SummaryCounts, CoreError> {
             ItemStatus::Replaced => &mut result.items_by_status.replaced,
         };
         add(count, 1)?;
-        if waiting(session, item) {
+        if waiting_unanswered(session, item) {
             add(&mut result.waiting_unanswered, 1)?;
         }
     }

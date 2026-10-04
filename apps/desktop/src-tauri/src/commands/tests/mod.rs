@@ -428,3 +428,65 @@ fn mutation_receipts_keep_the_saved_shape_and_validate_operation_route_and_kind(
     };
     assert!(validate_receipt(&wrapper, &MutationReceipt::Session(wrong)).is_err());
 }
+
+#[test]
+fn qualified_connect_keeps_admission_deadline_and_validation_before_native_handoff() {
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let command: OwnerCommand = serde_json::from_value(
+        inventory()["owner_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["command"] == "binding_connect")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    let expected = Instant::now() - std::time::Duration::from_secs(1);
+    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let record = observed.clone();
+    let service = DesktopService::from_trusted_startup_with_connect(
+        core.clone(),
+        resolve,
+        move |_, deadline| {
+            record
+                .lock()
+                .unwrap()
+                .push((deadline, std::thread::current().id()));
+            Err(CoreError::new(
+                CoreErrorCode::HostUnreachable,
+                "Test admission expired.",
+                "Retain the original operation.",
+            ))
+        },
+    );
+    let wrapper = OwnerMutationRequest {
+        session: None,
+        command,
+    };
+    assert_eq!(
+        failure(&service.owner_before(wrapper.clone(), true, expected)).code,
+        CoreErrorCode::HostUnreachable
+    );
+    assert_eq!(observed.lock().unwrap()[0].0, expected);
+    assert_eq!(
+        failure(&service.owner_before(wrapper.clone(), false, expected)).code,
+        CoreErrorCode::InvalidArgument
+    );
+    let mut wrong_scope = wrapper.clone();
+    wrong_scope.session = Some(route());
+    assert_eq!(
+        failure(&service.owner_before(wrong_scope, true, expected)).code,
+        CoreErrorCode::InvalidArgument
+    );
+    assert_eq!(observed.lock().unwrap().len(), 1);
+    let ipc_thread = std::thread::current().id();
+    let window = window(service);
+    let before = Instant::now();
+    let response = invoke(&window, "binding_connect", json!({"request": wrapper})).unwrap();
+    assert_eq!(response["error"]["code"], "host_unreachable");
+    let calls = observed.lock().unwrap();
+    assert!(calls[1].0 >= before + ariadne_runtime::control::CONTROL_TIMEOUT);
+    assert_ne!(calls[1].1, ipc_thread);
+    assert!(core.history().unwrap().is_empty());
+}

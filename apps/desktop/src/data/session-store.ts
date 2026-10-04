@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
-import type { PresenceChangedHint, SessionChangedHint, SessionRef, SessionSnapshot } from '../generated/core';
-import type { PresenceObservation } from '../generated/domain/models';
+import type { PresenceChangedHint, SessionChangedHint, SessionListResult, SessionRef, SessionSnapshot } from '../generated/core';
+import type { PresenceObservation, QueryCursor } from '../generated/domain/models';
 import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } from './service';
 
 export type Immutable<T> = T extends readonly (infer V)[] ? readonly Immutable<V>[]
@@ -32,6 +32,7 @@ export class SessionStore {
   private requested = false;
   private closed = false;
   private hintedRevision = 0;
+  private readonly presenceVersions = new Map<string, number>();
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly reconcile = () => { void this.refresh(); };
   private readonly visibility = () => { if (document.visibilityState === 'visible') this.reconcile(); };
@@ -66,9 +67,45 @@ export class SessionStore {
   private observed = (hint: PresenceChangedHint): void => {
     const binding = this.state.snapshot?.session.bindings[hint.binding_id];
     if (this.closed || !binding || !hint.observation
+        || this.state.snapshot?.session.active_binding_id !== hint.binding_id
         || hint.generation !== hint.observation.generation || hint.generation !== binding.generation) return;
+    const previous = this.state.presence[hint.binding_id];
+    if (previous?.instance_id === hint.observation.instance_id) {
+      const previousAt = previous.last_seen_at ? Date.parse(previous.last_seen_at) : -Infinity;
+      const nextAt = hint.observation.last_seen_at ? Date.parse(hint.observation.last_seen_at) : -Infinity;
+      if (nextAt < previousAt || (nextAt === previousAt && hint.observation.freshness === 'fresh')) return;
+    }
+    this.presenceVersions.set(hint.binding_id, (this.presenceVersions.get(hint.binding_id) ?? 0) + 1);
     this.publish({ presence: Object.freeze({ ...this.state.presence, [hint.binding_id]: immutable(hint.observation) }) });
   };
+  private async seedPresence(snapshot: SessionSnapshot): Promise<void> {
+    const id = snapshot.session.active_binding_id, binding = id ? snapshot.session.bindings[id] : null;
+    if (!id || !binding || binding.dispatch_state === 'disconnected') return;
+    const version = this.presenceVersions.get(id) ?? 0;
+    let cursor: QueryCursor | null = null;
+    // The canonical list is paged at its existing bound. Stop at this session;
+    // never load unrelated domain snapshots or accumulate the whole project.
+    for (;;) {
+      const result: SessionListResult = await this.service.query({ session: null, request: { command: 'session_list', params: {
+        project_id: this.state.route.project_id, state: null, cursor, limit: 100,
+      } } });
+      if (this.closed || this.requested || this.state.snapshot?.session.active_binding_id !== id
+          || this.state.snapshot.session.bindings[id]?.generation !== binding.generation
+          || (this.presenceVersions.get(id) ?? 0) !== version) return;
+      const page = result?.sessions;
+      if (!page || !Array.isArray(page.items)) return;
+      const summary = page.items.find(value => value.project_id === this.state.route.project_id && value.session_id === this.state.route.session_id);
+      if (summary) {
+        const selected = summary.active_binding;
+        if (selected?.id === id && selected.generation === binding.generation && selected.presence) {
+          this.observed({ binding_id: id, generation: binding.generation, observation: selected.presence });
+        }
+        return;
+      }
+      if (!page.next_cursor || JSON.stringify(page.next_cursor) === JSON.stringify(cursor)) return;
+      cursor = page.next_cursor;
+    }
+  }
   private ensureSubscriptions(): Promise<void> {
     if (this.setup) return this.setup;
     this.setup = (async () => {
@@ -112,7 +149,8 @@ export class SessionStore {
           throw new ServiceFailure('invalid_response');
         }
         const presence = Object.fromEntries(Object.entries(this.state.presence).filter(([id, observation]) =>
-          snapshot.session.bindings[id]?.generation === observation.generation));
+          snapshot.session.active_binding_id === id && snapshot.session.bindings[id]?.generation === observation.generation
+          && snapshot.session.bindings[id]?.dispatch_state !== 'disconnected'));
         const previous = this.state.snapshot;
         // Durable contents change with the canonical session revision. Keep the
         // immutable session identity when polling only refreshes qualification.
@@ -120,6 +158,9 @@ export class SessionStore {
           ? Object.freeze({ session: previous.session, freshness: snapshot.freshness }) : immutable(snapshot);
         this.publish({ snapshot: next, presence: Object.freeze(presence), error: null,
           status: revision < this.hintedRevision || snapshot.freshness !== 'fresh' ? 'stale' : 'ready' });
+        // Presence is volatile and separate from durable session freshness. A
+        // failed seed keeps the actual snapshot; later refresh/live hints recover.
+        try { await this.seedPresence(snapshot); } catch { /* retain known facts */ }
       } catch (error: unknown) {
         const failure = error instanceof CoreFailure || error instanceof ServiceFailure ? error : new ServiceFailure('transport');
         const inaccessible = failure instanceof CoreFailure && ['permission_denied', 'not_found', 'io_error'].includes(failure.error.code);

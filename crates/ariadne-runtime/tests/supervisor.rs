@@ -301,6 +301,127 @@ fn empty_reconcile() -> ReconcileResult {
         next_checkpoint: None,
     }
 }
+
+#[test]
+fn presence_follows_validated_receipts_and_exact_connected_instance() {
+    let rt = rt();
+    let home = home();
+    let owner = DesktopOwner::acquire(home.path()).unwrap();
+    let scope = Scope::new(1, 2, 3, DeliveryMode::Pull);
+    let mut observation = scope.connection().observation;
+    observation.execution_state = ExecutionState::Running;
+    let observed = scope.event(
+        "presence:accepted",
+        EventPayload::Presence {
+            observation: observation.clone(),
+        },
+        None,
+        None,
+    );
+    let mut foreign = observation.clone();
+    foreign.instance_id = id(0x3999);
+    let foreign_event = scope.event(
+        "presence:foreign-instance",
+        EventPayload::Presence {
+            observation: foreign,
+        },
+        None,
+        None,
+    );
+    let core = Arc::new(service::ScriptedCoreService::new(vec![
+        scope.saved(scope.connected(), false),
+        scope.inputs(vec![]),
+        scope.saved(observed.clone(), false),
+        scope.saved(foreign_event.clone(), false),
+    ]));
+    let mut steps = scope.provider_start(vec![], empty_reconcile());
+    steps.push(scope.observe(None, vec![observed, foreign_event], None));
+    let adapter = IdleProvider::new(steps);
+    let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = updates.clone();
+    let connected = rt
+        .block_on(ConnectedSupervisor::connect(
+            core.clone(),
+            adapter.clone(),
+            scope.session.clone(),
+            scope.binding.clone(),
+            scope.facts(),
+        ))
+        .unwrap()
+        .with_presence_observer(Arc::new(move |update| sink.lock().unwrap().push(update)));
+    let lease = owner
+        .binding_lease(
+            scope.session.clone(),
+            scope.binding.id.clone(),
+            scope.binding.generation.clone(),
+        )
+        .unwrap();
+    let handle = rt.block_on(async { connected.start(lease) }).unwrap();
+    rt.block_on(progress(handle.progress(), |p| p.validated_reports == 3));
+    let exit = rt.block_on(handle.stop()).unwrap();
+    assert!(exit.error.is_none());
+    let updates = updates.lock().unwrap();
+    assert_eq!(updates.len(), 3);
+    assert!(
+        matches!(&updates[0], PresenceUpdate::Connected { hint, endpoint } if hint.observation.instance_id == id(0x3000) && endpoint == &scope.binding.endpoint_fingerprint)
+    );
+    assert!(
+        matches!(&updates[1], PresenceUpdate::Observed { hint, .. } if hint.observation == observation)
+    );
+    assert!(
+        matches!(&updates[2], PresenceUpdate::Stopped { hint, .. } if hint.observation.last_seen_at == observation.last_seen_at && hint.observation.execution_state == ExecutionState::Unknown)
+    );
+}
+
+#[test]
+fn stopped_presence_observer_drains_before_releasing_real_binding_lease() {
+    let rt = rt();
+    let home = home();
+    let owner = DesktopOwner::acquire(home.path()).unwrap();
+    let scope = Scope::new(1, 2, 3, DeliveryMode::Pull);
+    let core = Arc::new(service::ScriptedCoreService::new(vec![
+        scope.saved(scope.connected(), false)
+    ]));
+    let adapter = IdleProvider::new(vec![scope
+        .provider_start(vec![], empty_reconcile())
+        .remove(0)]);
+    let (entered, admitted) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let released = std::sync::Mutex::new(released);
+    let connected = rt
+        .block_on(ConnectedSupervisor::connect(
+            core,
+            adapter,
+            scope.session.clone(),
+            scope.binding.clone(),
+            scope.facts(),
+        ))
+        .unwrap()
+        .with_presence_observer(Arc::new(move |update| {
+            if matches!(update, PresenceUpdate::Connected { .. }) {
+                entered.send(()).unwrap();
+                released.lock().unwrap().recv().unwrap();
+            }
+        }));
+    let lease = owner
+        .binding_lease(
+            scope.session.clone(),
+            scope.binding.id.clone(),
+            scope.binding.generation.clone(),
+        )
+        .unwrap();
+    let handle = rt.block_on(async { connected.start(lease) }).unwrap();
+    admitted.recv_timeout(Duration::from_secs(2)).unwrap();
+    let stop = rt.spawn(handle.stop());
+    std::thread::sleep(Duration::from_millis(30));
+    assert!(!stop.is_finished());
+    probe_lease(home.path(), &scope.binding.id, false);
+    release.send(()).unwrap();
+    let exit = rt.block_on(stop).unwrap().unwrap();
+    assert!(exit.pending.is_none());
+    assert!(exit.error.is_none());
+    probe_lease(home.path(), &scope.binding.id, true);
+}
 fn prepared() -> PreparedAttempt {
     cases::load(root())
         .cases

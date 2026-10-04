@@ -8,7 +8,9 @@ use std::sync::{
 };
 use tauri::Manager;
 pub mod commands;
+pub mod composition;
 pub mod native;
+pub mod watchers;
 
 #[derive(Deserialize)]
 pub struct PingRequest {
@@ -152,10 +154,12 @@ fn native_ping(
 }
 
 pub fn run() {
-    run_with_startup(commands::DesktopService::default(), |_| {
-        // This diagnostic entrypoint starts no owning runtime or watchers.
-        Ok(native::window::lifecycle::NativeLifecycle::diagnostic_only())
-    });
+    // Parsing is pure. Single-instance ownership is established by the plugin
+    // before trusted startup can create directories, probes, leases or workers.
+    let configuration =
+        composition::NativeConfiguration::from_startup_args(&std::env::args().collect::<Vec<_>>())
+            .expect("Invalid native startup configuration");
+    run_native(None, move |app| composition::establish(app, configuration));
 }
 
 fn desktop_handler<R: tauri::Runtime>(
@@ -163,6 +167,7 @@ fn desktop_handler<R: tauri::Runtime>(
     tauri::generate_handler![
         native_ping,
         native::routes::route_ready,
+        native::notifications::notification_permission,
         commands::project_list,
         commands::session_list,
         commands::session_get,
@@ -245,6 +250,18 @@ pub fn run_with_startup(
         + Send
         + 'static,
 ) {
+    run_native(Some(service), startup);
+}
+
+fn run_native(
+    service: Option<commands::DesktopService>,
+    startup: impl FnOnce(
+            &tauri::AppHandle,
+        )
+            -> Result<native::window::lifecycle::NativeLifecycle, ariadne_core::CoreError>
+        + Send
+        + 'static,
+) {
     #[cfg(feature = "e2e")]
     let state = PingState::environment().expect("Invalid E2E startup");
     #[cfg(feature = "e2e")]
@@ -267,11 +284,13 @@ pub fn run_with_startup(
             native::routes::receive_launch(app.clone(), args);
         }))
         .manage(state)
-        .manage(service)
         .manage(native::routes::NativeRoutes::default())
         .manage(native::window::NativeWindow::default())
         .on_window_event(move |window, event| {
             if window.label() != "main" {
+                return;
+            }
+            if window.try_state::<commands::DesktopService>().is_none() {
                 return;
             }
             match event {
@@ -289,6 +308,17 @@ pub fn run_with_startup(
                         .state::<native::window::NativeWindow>()
                         .reconcile(window.app_handle().clone(), true);
                 }
+                tauri::WindowEvent::Focused(true) => {
+                    if !window_quitting.load(Ordering::Acquire) {
+                        if let Some(runtime) = window.try_state::<Arc<composition::NativeRuntime>>()
+                        {
+                            let _ = runtime.refresh_snapshots();
+                        }
+                        if let Some(tray) = window.try_state::<native::tray::NativeTray>() {
+                            tray.refresh();
+                        }
+                    }
+                }
                 _ => {}
             }
         })
@@ -304,9 +334,22 @@ pub fn run_with_startup(
         .setup(move |app| {
             // Plugin setup runs first: ordinary second launches are intercepted
             // before this callback can acquire authority or start owned workers.
+            if let Some(service) = service {
+                app.manage(service);
+            }
             establish_lifecycle(app.handle(), startup).map_err(|_| {
                 std::io::Error::other("Native ownership/startup could not be established.")
             })?;
+            if app.try_state::<commands::DesktopService>().is_none() {
+                return Err(std::io::Error::other(
+                    "Trusted startup did not install the desktop service.",
+                )
+                .into());
+            }
+            let tray = native::tray::NativeTray::install(app.handle()).map_err(|_| {
+                std::io::Error::other("Native Waiting feed could not be established.")
+            })?;
+            app.manage(tray);
             #[cfg(target_os = "macos")]
             {
                 let handle = app.handle().clone();
@@ -348,6 +391,18 @@ pub fn run_with_startup(
                 if quitting.swap(true, Ordering::AcqRel) {
                     return;
                 }
+                app.state::<native::window::NativeWindow>().begin_stop();
+                if let Some(tray) = app.try_state::<native::tray::NativeTray>() {
+                    tray.begin_stop();
+                }
+                // Fence wake publication and new runtime admission at the Quit
+                // event, before off-UI window/tray drains can wait for IO.
+                if let Some(runtime) = app.try_state::<Arc<composition::NativeRuntime>>() {
+                    if runtime.begin_shutdown().is_err() {
+                        eprintln!("Ariadne could not fence its owning-runtime shutdown.");
+                        return;
+                    }
+                }
                 let lifecycle = app
                     .state::<native::window::lifecycle::NativeLifecycle>()
                     .inner()
@@ -356,9 +411,14 @@ pub fn run_with_startup(
                 let app = app.clone();
                 let exit_allowed = exit_allowed.clone();
                 let quitting = quitting.clone();
+                let service = app.state::<commands::DesktopService>().inner().clone();
+                let tray = app.try_state::<native::tray::NativeTray>().map(|tray| tray.inner().clone());
                 tauri::async_runtime::spawn(async move {
                     let result = tauri::async_runtime::spawn_blocking(move || {
-                        window.join_writer()?;
+                        window.join_writer(&service)?;
+                        if let Some(tray) = tray {
+                            tray.stop()?;
+                        }
                         lifecycle.prepare_exit()
                     }).await;
                     if matches!(result, Ok(Ok(()))) {

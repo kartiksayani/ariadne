@@ -74,6 +74,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         PageLimit,
         PreferencesSnapshot,
         GlobalPreferences,
+        NotificationEpisode,
         NavigationSelection,
         Theme,
         WindowGeometry,
