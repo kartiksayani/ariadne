@@ -1018,6 +1018,27 @@ fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay()
             .unwrap(),
         registered
     );
+    let old_input = submit(&core, 76);
+    let current = Store::open_registered(root.path(), id(1))
+        .unwrap()
+        .read(&id(2))
+        .unwrap();
+    core.execute_owner(
+        session_owner(),
+        OwnerCommand::InputCancel {
+            api_version: one(),
+            op_id: id(77),
+            params: InputCancelParams {
+                input_id: old_input,
+                expected_revision: current.revision,
+            },
+        },
+    )
+    .unwrap();
+    let history = Store::open_registered(root.path(), id(1))
+        .unwrap()
+        .read(&id(2))
+        .unwrap();
     core.execute_owner(
         session_owner(),
         OwnerCommand::BindingPause {
@@ -1068,7 +1089,64 @@ fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay()
         .unwrap()
         .read(&id(2))
         .unwrap();
-    assert_eq!(live.messages, seed.messages);
+    assert_eq!(live.messages, history.messages);
+    assert_eq!(live.inputs, history.inputs);
+    assert_eq!(
+        live.bindings.0[&binding_id]
+            .issued_through_message_number
+            .value(),
+        2
+    );
+    let read_context = QueryContext::agent(AgentContext::from_trusted_entrypoint(
+        route(),
+        binding_id.clone(),
+        generation.clone(),
+        AgentReadScope::Terminal {
+            issued_through_message_number: NonnegativeSafeInteger::new(2).unwrap(),
+        },
+    ));
+    let read_request = QueryRequest::SessionRead(SessionReadRequest {
+        selection: ReadView::Messages {
+            topic_id: None,
+            item_id: None,
+        },
+        cursor: None,
+        limit: PageLimit::new(100).unwrap(),
+        item_pages: vec![],
+    });
+    let QueryResult::SessionRead(SessionReadResult::Messages(page)) = core
+        .query(read_context.clone(), read_request.clone())
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(page.items, history.messages);
+    core.execute_owner(
+        session_owner(),
+        OwnerCommand::InputSubmit {
+            api_version: one(),
+            op_id: id(84),
+            params: InputSubmitParams {
+                binding_id: binding_id.clone(),
+                target: InputTarget {
+                    topic_id: id(5),
+                    item_id: Some(ItemRef::new("1").unwrap()),
+                },
+                kind: InputKind::Note,
+                text: "future owner context remains private until issued".into(),
+                selected_option_id: None,
+                expected_question_revision: None,
+                supersedes_answer_id: None,
+            },
+        },
+    )
+    .unwrap();
+    let QueryResult::SessionRead(SessionReadResult::Messages(page)) =
+        core.query(read_context, read_request).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(page.items, history.messages);
     assert_eq!(
         live.bindings.0[&binding_id].connection_state,
         ConnectionState::Unknown
