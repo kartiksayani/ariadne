@@ -161,6 +161,9 @@ export async function runHistoryActionsAcceptance(configuration) {
   try {
     await click(await browser.$(`.copied-provenance button=Source item ${originalItem.id}`));
     await wait(async () => (await browser.$('.copied-provenance').getText()).includes('Full copied history remains here'), 'Unavailable original project did not expose copied local fallback');
+    const unavailableReason = await browser.$('.copied-provenance').getText();
+    assert.ok(unavailableReason.includes(sourceProject), 'The registered source failure must retain its actual project path');
+    assert.ok(unavailableReason.includes('NotFound'), 'The registered source failure must retain the actual missing-directory reason');
     await click(await browser.$(`.copied-provenance button=Open copied item ${copiedItemId}`));
     await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(`Item ${copiedItemId}`), 'Copied provenance fallback did not use the local registered item');
     await click(await browser.$('[aria-label="Item history view"] button*=Timeline'));
