@@ -85,11 +85,17 @@ fn version_component(version: &str) -> bool {
         && Path::new(version).components().count() == 1
 }
 
+/// Exact package paths validated from the current version descriptor.
+pub struct InstalledPackage {
+    pub version_root: PathBuf,
+    pub application: PathBuf,
+}
+
 /// Read only the exact version selected by `current`, anchored before decoding.
-pub fn installed_application(
+pub fn installed_package(
     package_root: &Path,
     helper_version: &str,
-) -> Result<PathBuf, CoreError> {
+) -> Result<InstalledPackage, CoreError> {
     if !version_component(helper_version) {
         return Err(invalid("Invalid installed helper version."));
     }
@@ -167,7 +173,18 @@ pub fn installed_application(
             "The installed application is unavailable or the current package changed.",
         ));
     }
-    Ok(application)
+    Ok(InstalledPackage {
+        version_root: expected,
+        application,
+    })
+}
+
+/// Application-only compatibility entrypoint for existing native route callers.
+pub fn installed_application(
+    package_root: &Path,
+    helper_version: &str,
+) -> Result<PathBuf, CoreError> {
+    installed_package(package_root, helper_version).map(|package| package.application)
 }
 
 /// `-n` creates a short-lived second process for single-instance argv delivery.

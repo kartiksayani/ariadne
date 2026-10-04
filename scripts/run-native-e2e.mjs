@@ -9,6 +9,17 @@ export const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const desktop = join(repo, 'apps/desktop');
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export const digest = async path => createHash('sha256').update(await readFile(path)).digest('hex');
+export function sourceState(cwd = repo) {
+  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8' }).trimEnd();
+  const statusPorcelain = git(['status', '--porcelain']);
+  return {
+    head: git(['rev-parse', 'HEAD']),
+    indexTree: git(['write-tree']),
+    dirty: Boolean(statusPorcelain.trim()),
+    statusPorcelain,
+    trackedDiffNameStatus: git(['diff', '--name-status', 'HEAD', '--']),
+  };
+}
 export function toolchain() {
   const versions = [
     ['rustc', ['--version']], ['cargo', ['--version']],
@@ -19,11 +30,7 @@ export function toolchain() {
   ];
   return { node: process.version,
     versions: versions.map(([binary, args]) => ({ binary, args, output: execFileSync(binary, args, { encoding: 'utf8' }).trim() })),
-    source: {
-    head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
-    indexTree: execFileSync('git', ['write-tree'], { cwd: repo, encoding: 'utf8' }).trim(),
-    dirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }).trim()),
-  } };
+    source: sourceState() };
 }
 export async function json(path, value) {
   await mkdir(dirname(path), { recursive: true });

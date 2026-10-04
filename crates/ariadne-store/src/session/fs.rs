@@ -11,9 +11,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) struct Directory {
+pub struct Directory {
     file: File,
     pub path: PathBuf,
+}
+
+fn component(value: &str, path: &Path) -> Result<(), StoreError> {
+    if value.is_empty() || matches!(value, "." | "..") || value.contains(['/', '\\', '\0']) {
+        return Err(StoreError::UnsafePath { path: path.into() });
+    }
+    Ok(())
 }
 
 fn c_name(value: &[u8], path: &Path) -> Result<CString, StoreError> {
@@ -98,6 +105,7 @@ impl Directory {
 
     pub fn child(&self, name: &str, create: bool) -> Result<Self, StoreError> {
         let path = self.path.join(name);
+        component(name, &path)?;
         let name = c_name(name.as_bytes(), &path)?;
         if create {
             // SAFETY: parent descriptor and relative single-component name are valid.
@@ -123,8 +131,9 @@ impl Directory {
         })
     }
 
-    pub fn open(&self, name: &str, create: bool) -> Result<File, StoreError> {
+    pub(crate) fn open(&self, name: &str, create: bool) -> Result<File, StoreError> {
         let path = self.path.join(name);
+        component(name, &path)?;
         let name = c_name(name.as_bytes(), &path)?;
         let flags = libc::O_NOFOLLOW
             | libc::O_CLOEXEC
@@ -141,12 +150,113 @@ impl Directory {
         checked_file(fd, &path, false, true)
     }
 
-    pub fn read(&self, name: &str) -> Result<Vec<u8>, StoreError> {
+    pub(crate) fn read(&self, name: &str) -> Result<Vec<u8>, StoreError> {
         let mut file = self.open(name, false)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)
             .map_err(|error| StoreError::io("read", &self.path.join(name), error))?;
         Ok(bytes)
+    }
+
+    /// Limit applies to the stream, including growth after opening.
+    pub fn read_bounded(&self, name: &str, maximum: usize) -> Result<Vec<u8>, StoreError> {
+        let file = self.diagnostic_open(name)?;
+        let mut bytes = Vec::new();
+        file.take(maximum.saturating_add(1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|e| StoreError::io("read", &self.path.join(name), e))?;
+        if bytes.len() > maximum {
+            return Err(StoreError::InvalidSnapshot);
+        }
+        Ok(bytes)
+    }
+
+    fn diagnostic_open(&self, name: &str) -> Result<File, StoreError> {
+        match self.open(name, false) {
+            Ok(file) => Ok(file),
+            Err(original) => {
+                component(name, &self.path.join(name))?;
+                let c = c_name(name.as_bytes(), &self.path.join(name))?;
+                let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+                // SAFETY: live anchored directory, checked name and writable stat.
+                let result = unsafe {
+                    libc::fstatat(
+                        self.file.as_raw_fd(),
+                        c.as_ptr(),
+                        stat.as_mut_ptr(),
+                        libc::AT_SYMLINK_NOFOLLOW,
+                    )
+                };
+                if result == 0 {
+                    // SAFETY: fstatat succeeded and initialized stat.
+                    let stat = unsafe { stat.assume_init() };
+                    if stat.st_mode & libc::S_IFMT != libc::S_IFREG {
+                        return Err(StoreError::UnsafePath {
+                            path: self.path.join(name),
+                        });
+                    }
+                }
+                Err(original)
+            }
+        }
+    }
+
+    pub(crate) fn read_diagnostic(&self, name: &str) -> Result<Vec<u8>, StoreError> {
+        let mut file = self.diagnostic_open(name)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|e| StoreError::io("read", &self.path.join(name), e))?;
+        Ok(bytes)
+    }
+
+    /// Existing-only diagnostics use `create=false`; setup uses its owned lock.
+    pub fn with_lock<T, E: From<StoreError>>(
+        &self,
+        name: &str,
+        create: bool,
+        work: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
+        component(name, &self.path.join(name))?;
+        super::lock::with_lock_mode(self, name, create, work)
+    }
+
+    /// Call only while holding the owned-resource lock. Changed files survive.
+    pub fn remove_if_unchanged(&self, name: &str, expected: &[u8]) -> Result<bool, StoreError> {
+        let file = self.diagnostic_open(name)?;
+        let before = file
+            .metadata()
+            .map_err(|e| StoreError::io("stat", &self.path.join(name), e))?;
+        let mut actual = Vec::new();
+        file.take(expected.len().saturating_add(1) as u64)
+            .read_to_end(&mut actual)
+            .map_err(|e| StoreError::io("read", &self.path.join(name), e))?;
+        if actual != expected {
+            return Ok(false);
+        }
+        let current = self
+            .open(name, false)?
+            .metadata()
+            .map_err(|e| StoreError::io("stat", &self.path.join(name), e))?;
+        if before.dev() != current.dev()
+            || before.ino() != current.ino()
+            || before.len() != current.len()
+            || before.mtime() != current.mtime()
+            || before.mtime_nsec() != current.mtime_nsec()
+            || before.ctime() != current.ctime()
+            || before.ctime_nsec() != current.ctime_nsec()
+        {
+            return Ok(false);
+        }
+        let path = self.path.join(name);
+        let name = c_name(name.as_bytes(), &path)?;
+        // SAFETY: checked single-component name is anchored to this live directory.
+        os_result(
+            unsafe { libc::unlinkat(self.file.as_raw_fd(), name.as_ptr(), 0) },
+            "unlink",
+            &path,
+        )?;
+        self.sync()?;
+        Ok(true)
     }
 
     pub fn verify_target(&self, name: &str) -> Result<bool, StoreError> {
@@ -161,6 +271,7 @@ impl Directory {
     }
 
     pub fn temp(&self, stem: &str, bytes: &[u8]) -> Result<Temporary<'_>, StoreError> {
+        component(stem, &self.path.join(stem))?;
         loop {
             let number = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
             let name = format!(".{stem}.tmp-{}-{number}", std::process::id());
@@ -272,7 +383,7 @@ impl Directory {
     }
 }
 
-pub(crate) struct Temporary<'a> {
+pub struct Temporary<'a> {
     directory: &'a Directory,
     name: String,
     present: bool,
@@ -298,6 +409,7 @@ impl Temporary<'_> {
 
     /// Atomically publish first creation without replacing any existing entry.
     pub fn create(mut self, target: &str) -> Result<(), StoreError> {
+        component(target, &self.directory.path.join(target))?;
         let (source, _source_file) = self.verified_source()?;
         let destination = c_name(target.as_bytes(), &self.directory.path)?;
         // SAFETY: both single-component names are anchored to our live directory;
@@ -330,6 +442,7 @@ impl Temporary<'_> {
     }
 
     pub fn replace(mut self, target: &str) -> Result<(), StoreError> {
+        component(target, &self.directory.path.join(target))?;
         let (source, _source_file) = self.verified_source()?;
         self.directory.verify_target(target)?;
         let destination = c_name(target.as_bytes(), &self.directory.path)?;
