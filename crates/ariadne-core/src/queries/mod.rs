@@ -1,5 +1,6 @@
 //! Native bounded reads of current registered authoritative snapshots.
 mod counts;
+pub use counts::waiting_unanswered;
 mod error;
 mod items;
 mod page;

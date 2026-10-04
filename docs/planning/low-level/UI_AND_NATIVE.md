@@ -282,6 +282,15 @@ The tray uses a template icon, numeric `waiting_unanswered` count (blank at zero
 
 Use one native UserNotifications bridge in the macOS module with a single long-lived Rust `objc2` delegate. It owns permission request, schedule/remove, foreground policy, and click routing; do not initialize a second notification delegate. Notification identity is `ariadne:<session>:<item>:<waiting-episode>` and payload contains IDs resolved through the registry. Default body is generic; item text preview is opt-in. Deduplicate episodes in a bounded preference ledger. Establish a watermark on first launch rather than notifying the backlog. Group bursts over three arrivals within 500 ms; all entries remain in the queue. Denied notification permission leaves in-app queue working. Never put host permission approval controls in a notification.
 
+The canonical preferences ledger retains at most 256 typed session/item/question-revision
+episode identities. Empty ledger and disabled preview preserve existing normalized
+preference bytes. Establish the first watermark only from a complete consistent
+registered capture; an initial partial catalogue keeps notifications unavailable.
+Subsequent partial captures may notify within ledger capacity. Pause on capacity
+pressure; advance/compact only after a complete capture and retain identities at
+the watermark boundary. Confirm the preferences patch before scheduling observed
+arrivals, without introducing a durable notification delivery journal (ADR0061).
+
 Click focuses/unhides, restores a minimized window, and calls the common reveal route. Cold launch stores the route until app readiness. If the item was answered, open its current detail; do not fail routing. A quit app cannot report new external changes until reopened, but already delivered notification routes must work. Packaged click and cold-launch routing have native proof acceptance coverage in `DESIGN_TRACEABILITY.md`.
 
 `ariadne open` resolves project/session and optional item route explicitly, locates the installed app from its package manifest, and passes structured launch arguments. Never place user-authored item text in a command line or shell string.
