@@ -73,12 +73,19 @@ impl CoreService for CoreBridge {
         command: OwnerCommand,
     ) -> Result<MutationReceipt, CoreError> {
         let core = self.core.clone();
-        self.runtime
+        let runtime = self
+            .runtime
             .upgrade()
-            .ok_or_else(super::runtime::unavailable)?
-            .run_owned(super::runtime::uncertain(), move || {
+            .ok_or_else(super::runtime::unavailable)?;
+        let admitted = runtime.clone();
+        runtime.run_owned(super::runtime::uncertain(), move || {
+            if matches!(command, OwnerCommand::InputResolve { .. }) {
+                let observation = admitted.recovery_observation(&context, &command);
+                core.execute_recovery_with_observation(context, command, observation.as_ref())
+            } else {
                 core.execute_owner(context, command)
-            })
+            }
+        })
     }
     fn apply(
         &self,
