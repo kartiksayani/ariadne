@@ -1,11 +1,14 @@
 import { coverageConfigDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
+const qualityGates = JSON.parse(readFileSync(resolve(root, '../../quality-gates.json'), 'utf8')) as { coverage_exclusions: string[] };
+const coverageExclusions = qualityGates.coverage_exclusions.map(pattern => relative(root, resolve(root, '../..', pattern)));
 const e2e = process.env.VITE_ARIADNE_E2E === '1';
 const output = resolve(root, e2e ? '../../target/native-e2e/desktop-dist' : '../../target/desktop-dist');
 export default defineConfig({
@@ -33,6 +36,6 @@ export default defineConfig({
       { test: { name: 'desktop', environment: 'jsdom', include: ['tests/ui/**/*.test.tsx'] } },
       { test: { name: 'reference', environment: 'jsdom', include: [resolve(root, '../../tests/ui/reference/**/*.test.{ts,tsx}')] } },
     ],
-    coverage: { provider: 'v8', allowExternal: true, include: ['src/**/*.{ts,tsx}', resolve(root, '../../integrations/claude/**/*.js')], exclude: [...coverageConfigDefaults.exclude, '**/generated/**'], reporter: [['lcov', { projectRoot: resolve(root, '../..') }], 'text'], reportsDirectory: resolve(root, '../../coverage/web') },
+    coverage: { provider: 'v8', allowExternal: true, include: ['src/**/*.{ts,tsx}', resolve(root, '../../integrations/claude/**/*.js')], exclude: [...coverageConfigDefaults.exclude, '**/generated/**', ...coverageExclusions], reporter: [['lcov', { projectRoot: resolve(root, '../..') }], 'text'], reportsDirectory: resolve(root, '../../coverage/web') },
   },
 });

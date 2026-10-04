@@ -921,6 +921,7 @@
         "session_not_closable",
         "preview_stale",
         "snapshot_changed",
+        "io_error",
         "store_busy",
         "capacity_exceeded",
         "commit_uncertain",

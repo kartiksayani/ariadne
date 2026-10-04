@@ -208,6 +208,18 @@ Tauri command names use the snake_case names above; CLI uses nouns/verbs
 names with dots below. All commands document `--help` and stdin JSON examples.
 `session_get` is local desktop-only; MCP queries use bounded `session_read`.
 
+Tauri invokes each exact command with `{request:OwnerQueryRequest}` or
+`{request:OwnerMutationRequest}`. The command must match the nested canonical
+request/command tag; mismatches are `invalid_argument`, never alternate routing.
+Trusted Rust startup supplies CoreService and registered-session lookup, verifies
+resolved project/session IDs and validates canonical responses before emitting an
+application envelope. Continue resolves both sessions. Registry bootstrap commands
+retain Registry owner scope and Core performs their project/root trust checks.
+An ordinary uncomposed entrypoint returns nonretryable `unsupported` with the
+specific unavailable feature. Renderer code cannot install a service or assert
+registration. Successful durable session mutations publish best-effort revision
+hints; event publication failure cannot turn a saved receipt into a failed command.
+
 ### Summary projections and command naming
 
 `SummaryCounts={items_by_status:{<seven statuses>:count},waiting_unanswered,
@@ -472,7 +484,11 @@ commit without its receipt. Same rule source shipped for all adapters.
 
 Tauri events: `ariadne://session_changed {session_id,revision}`,
 `ariadne://presence_changed {binding_id,generation,observation}`,
-`ariadne://route {project_id,session_id,item_id?}`. Events are hints; subscribe,
+`ariadne://route {project_id,session_id,item_id}` (explicit null for a session-only
+route). The canonical core records are `SessionChangedHint`, `PresenceChangedHint`
+and `OpenRoute`; presence generation must match its observation. Non-null item
+routes reuse `ItemRoute` and resolve registered membership before revealing.
+Events are hints; subscribe,
 load, compare revisions, reconcile on focus/wake and every2s. CLI/MCP mutations
 are observed by directory watch even if they cannot publish in-memory events.
 
@@ -482,12 +498,18 @@ Errors include `invalid_argument`, `not_found`, `binding_ambiguous`,
 `invalid_transition`, `operation_reused`, `result_already_committed`,
 `attempt_sealed`, `result_missing`, `delivery_uncertain`, `queue_full`,
 `topic_not_archivable`, `session_not_closable`, `preview_stale`, `snapshot_changed`,
-`store_busy`, `capacity_exceeded`, `commit_uncertain`, `corrupt_session`,
+`io_error`, `store_busy`, `capacity_exceeded`, `commit_uncertain`, `corrupt_session`,
 `future_schema`, `permission_denied`, `unsupported`, `protocol_conflict`.
 
 `protocol_conflict` is the PROCESS error for contradictory normalized turn IDs
 or outcomes; it pauses the affected binding. Existing process-specific errors
 retain their documented recovery; P0.6 publishes their typed transport mapping.
+
+`io_error` is a definite ordinary local I/O failure (CLI exit4), nonretryable by
+default. A classified transient failure may explicitly permit the same operation
+to retry. Prefer permission, capacity, busy or commit-uncertain codes when known.
+This code does not assert that an irreversible operation was unsent; uncertain
+provider delivery retains `delivery_uncertain` and must never authorize a resend.
 
 Error messages explain a concrete recovery action and contain bounded IDs/revisions,
 not raw stderr/environment/content dumps. Retryable means the **same operation**

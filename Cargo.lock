@@ -132,6 +132,8 @@ dependencies = [
 name = "ariadne-desktop"
 version = "0.1.0"
 dependencies = [
+ "ariadne-core",
+ "ariadne-domain",
  "serde",
  "serde_json",
  "tauri",

@@ -31,7 +31,28 @@ export function verifyProductionSecurity(config) {
   assert.ok(!config.app.security.dangerousDisableAssetCspModification, 'Bundled CSP hashes/nonces must remain enabled');
   assert.equal(config.bundle.macOS.minimumSystemVersion, '13.0');
 }
-export function buildArtifacts(stdout, metadata) {
+export function normalBuildFeatures(stdout, metadata) {
+  const records = stdout.trim().split('\n').map(line => {
+    const fields = line.split('|');
+    assert.equal(fields.length, 2, 'Malformed normal/build dependency graph entry');
+    return fields;
+  });
+  const features = {};
+  for (const name of ['ariadne-desktop', 'tauri']) {
+    const packages = metadata.packages.filter(pkg => pkg.name === name);
+    assert.equal(packages.length, 1, `Ambiguous dependency package: ${name}`);
+    const pkg = packages[0];
+    assert.ok(pkg.source === null || pkg.source?.startsWith('registry+'), 'Unsupported dependency package identity');
+    const label = `${pkg.name} v${pkg.version}${pkg.source === null ? ` (${dirname(pkg.manifest_path)})` : ''}`;
+    const matches = records.filter(([identity]) => identity === label);
+    assert.ok(matches.length > 0, `Missing normal/build dependency package: ${name}`);
+    const expected = matches[0][1].split(',').filter(Boolean).sort();
+    for (const [, value] of matches) assert.deepEqual(value.split(',').filter(Boolean).sort(), expected, 'Ambiguous normal/build dependency features');
+    features[pkg.id] = expected;
+  }
+  return features;
+}
+export function buildArtifacts(stdout, metadata, normalFeatures) {
   const desktop = metadata.packages.find(pkg => pkg.name === 'ariadne-desktop');
   const tauri = metadata.packages.find(pkg => pkg.name === 'tauri');
   const events = stdout.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line));
@@ -40,11 +61,12 @@ export function buildArtifacts(stdout, metadata) {
   for (const pkg of [desktop, tauri]) {
     const artifact = events.find(event => event.reason === 'compiler-artifact' && event.package_id === pkg.id && !event.target.kind.includes('custom-build'));
     assert.ok(artifact, `Missing compiler artifact: ${pkg.name}`);
-    const features = metadata.resolve.nodes.find(node => node.id === pkg.id).features;
+    const features = normalFeatures[pkg.id];
+    assert.ok(Array.isArray(features), `Missing normal/build features: ${pkg.name}`);
     assert.deepEqual([...artifact.features].sort(), [...features].sort(), 'Compiler features differ from resolved graph');
   }
-  assert.ok(!metadata.resolve.nodes.find(node => node.id === desktop.id).features.includes('e2e'));
-  assert.ok(metadata.resolve.nodes.find(node => node.id === tauri.id).features.includes('custom-protocol'));
+  assert.ok(!normalFeatures[desktop.id].includes('e2e'));
+  assert.ok(normalFeatures[tauri.id].includes('custom-protocol'));
   return builds[0].out_dir;
 }
 export async function frontendModules(inventory, output, started) {
@@ -85,8 +107,12 @@ export async function checkRelease() {
   await json(join(evidence, 'run.json'), { toolchain: toolchain(), buildCommand: [process.execPath, cli, 'build', '--ci', '--bundles', 'app', '--', '--locked', '--no-default-features', '--target-dir', target, '--message-format=json-render-diagnostics'], cwd: desktop });
   const source = join(desktop, 'src-tauri'), started = Date.now();
   const metadata = JSON.parse((await command('cargo', ['metadata', '--locked', '--offline', '--format-version', '1', '--filter-platform', 'aarch64-apple-darwin', '--no-default-features', '--features', 'tauri/custom-protocol'], { cwd: source, env })).stdout);
+  // Metadata includes dev-feature unions. Resolver 2's normal/build graph is the
+  // feature set used by this ordinary release build, with the same target/flags.
+  const featureGraph = await command('cargo', ['tree', '--locked', '--offline', '--package', 'ariadne-desktop', '--target', 'aarch64-apple-darwin', '--no-default-features', '--features', 'tauri/custom-protocol', '--edges', 'normal,build', '--prefix', 'none', '--format', '{p}|{f}', '--no-dedupe'], { cwd: source, env, log: join(evidence, 'normal-build-features.txt') });
+  const normalFeatures = normalBuildFeatures(featureGraph.stdout, metadata);
   const build = await command(process.execPath, [cli, 'build', '--ci', '--bundles', 'app', '--', '--locked', '--no-default-features', '--target-dir', target, '--message-format=json-render-diagnostics'], { cwd: desktop, env, log: join(evidence, 'build.log') });
-  const out = buildArtifacts(build.stdout, metadata);
+  const out = buildArtifacts(build.stdout, metadata, normalFeatures);
   assert.ok(out.startsWith(join(target, 'release/build/')), 'Unexpected compiler output');
   const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
   const inputs = await readdir(source);
@@ -121,7 +147,7 @@ export async function checkRelease() {
       observed = identity(child.pid); assert.equal(observed.exe, binary);
       await portFree(port); assert.equal(listeners(port), ''); assert.deepEqual(await readdir(root), []);
     }
-    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, runtimeCommand: [binary], minimumSystemVersion, binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
+    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, runtimeCommand: [binary], minimumSystemVersion, binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, normalFeatures, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
   } catch (error) { failure = error; }
   finally {
     let portReleased = false;

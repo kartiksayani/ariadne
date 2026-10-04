@@ -112,6 +112,38 @@ fn shared_cases_validate_against_exact_generated_transport_schemas() {
         .keys()
         .any(|path| path.to_string_lossy().contains("Context")));
 }
+
+#[test]
+fn desktop_hints_and_io_errors_use_canonical_generated_wire_records() {
+    let files = artifacts().unwrap();
+    let routing = cases::load(root()).routing;
+    let route = serde_json::json!({"project_id":routing.project_id,"session_id":routing.session_id,"item_id":null});
+    validate(&files, "OpenRoute", &route);
+    let schema: Value =
+        serde_json::from_str(&files[&Path::new(SCHEMAS).join("OpenRoute.schema.json")]).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let mut invalid = route.clone();
+    invalid["path"] = serde_json::json!("/unregistered/root");
+    assert!(!validator.is_valid(&invalid));
+    invalid = route.clone();
+    invalid["item_id"] = serde_json::json!("0.1");
+    assert!(!validator.is_valid(&invalid));
+    validate(
+        &files,
+        "SessionChangedHint",
+        &serde_json::json!({"session_id":routing.session_id,"revision":2}),
+    );
+    let error = CoreError::new(
+        CoreErrorCode::IoError,
+        "Cannot read session.",
+        "Check local access.",
+    );
+    validate(&files, "CoreError", &serde_json::to_value(error).unwrap());
+    let declaration = &files[&Path::new(TYPES).join("index.ts")];
+    assert!(declaration.contains("item_id: ItemRef | null"));
+    assert!(declaration.contains("observation: PresenceObservation"));
+    assert!(declaration.contains("\"io_error\""));
+}
 #[test]
 fn independent_typescript_consumer_accepts_all_shared_cases_and_rejects_local_forks() {
     let temp = tempfile::tempdir().unwrap();
