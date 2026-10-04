@@ -62,6 +62,30 @@ exact operation on the owner's next connect attempt. Do not invent Connected,
 enable claims early, or allocate new IDs to recover a lost response. Session-end
 and outstanding original-scope report guards remain in force.
 
+An actual Claude SDK `session.end` is terminal for that saved binding generation,
+including when its original native activation is still pending. Reserve the
+normalized event ID `claude:session-ended:<binding UUID>:<generation UUID>` for
+that non-attempt `Disconnected` fact on a Claude binding only. Validate its exact
+scope and kind; ordinary transport-disconnection events keep ordinary IDs and
+remain reconnectable. The Mod retains the original event and retries unchanged.
+
+Core records this terminal fact in the existing durable Event receipt even when
+the binding was already disconnected. Under the same Store transaction lock,
+a fresh Connected event cannot re-enable a generation with that terminal receipt.
+Preserve Store's existing exact-event replay before mutable guards: replaying an
+old Connected receipt does not change the now-disconnected state. Native
+activation checks the authoritative terminal receipt at its current-scope
+admission and publication checks; claims still require Core's current dispatch
+admission. Qualification, timeouts, lost acknowledgements, restarts, and replay
+must not remove this fence. A new explicit connect rotates generation and is not
+fenced by the previous generation's receipt. No new DTO or CoreService method is
+needed; shared receipt lookup/identity helpers must have one implementation.
+
+Prove the actual installed-Mod/native activation race, already-disconnected end,
+failed-report identity preservation, delayed/replayed Connected, restart, ordinary
+disconnect/reconnect and a new generation with real Core/Store. This is a durable
+ordering correction; do not interpret arbitrary diagnostic reason text as a fence.
+
 After that joined proof, `domain_cli` may report support for the current supported
 installed helper release only following existing native qualification: fresh SDK
 identity/project, qualified Claude version, exact selected helper path/version,
