@@ -198,7 +198,21 @@ impl CodexHistoryClient {
         scan: &mut HistoryScan,
         observed_at: UtcMillis,
     ) -> Result<ReconcileResult, AdapterError> {
-        let result = self.read_history_inner(&request, scan, observed_at);
+        self.read_history_before(
+            request,
+            scan,
+            observed_at,
+            Instant::now() + Duration::from_secs(10),
+        )
+    }
+    pub(crate) fn read_history_before(
+        &mut self,
+        request: ReconcileRequest,
+        scan: &mut HistoryScan,
+        observed_at: UtcMillis,
+        deadline: Instant,
+    ) -> Result<ReconcileResult, AdapterError> {
+        let result = self.read_history_inner(&request, scan, observed_at, deadline);
         self.fence(result)
     }
     fn read_history_inner(
@@ -206,6 +220,7 @@ impl CodexHistoryClient {
         request: &ReconcileRequest,
         scan: &mut HistoryScan,
         observed_at: UtcMillis,
+        deadline: Instant,
     ) -> Result<ReconcileResult, AdapterError> {
         request.validate()?;
         if request.attempts.len() > 100 {
@@ -257,7 +272,6 @@ impl CodexHistoryClient {
             result.validate_for(request)?;
             return Ok(result);
         }
-        let deadline = Instant::now() + Duration::from_secs(10);
         // Reverify exact selected thread identity/status before accepting page evidence.
         let thread = self.read_thread(deadline)?;
         if matches!(
@@ -402,7 +416,11 @@ impl CodexHistoryClient {
             freshness: Freshness::Fresh,
         }
     }
-    fn verify_scope(&self, binding_id: &UuidV4, generation: &UuidV4) -> Result<(), AdapterError> {
+    pub(crate) fn verify_scope(
+        &self,
+        binding_id: &UuidV4,
+        generation: &UuidV4,
+    ) -> Result<(), AdapterError> {
         if binding_id != &self.binding_id {
             return Err(error(
                 Code::BindingMismatch,
@@ -417,8 +435,45 @@ impl CodexHistoryClient {
         }
         Ok(())
     }
-    fn verify_identity(&self) -> Result<(), AdapterError> {
+    pub(crate) fn verify_identity(&self) -> Result<(), AdapterError> {
         self.daemon.verify_identity()
+    }
+    /// Fresh pre-submit anchor, captured before the native sender is spawned.
+    pub(crate) fn prepare_queue(
+        &mut self,
+        deadline: Instant,
+    ) -> Result<Option<String>, AdapterError> {
+        let result = self.prepare_queue_inner(deadline);
+        self.fence(result)
+    }
+    fn prepare_queue_inner(&mut self, deadline: Instant) -> Result<Option<String>, AdapterError> {
+        let thread = self.read_thread(deadline)?;
+        if matches!(
+            thread.status,
+            wire::thread_read_response::ThreadStatus::NotLoaded
+                | wire::thread_read_response::ThreadStatus::SystemError
+        ) {
+            return Err(error(
+                Code::HostUnreachable,
+                "Selected Codex thread is unavailable; sender was not spawned.",
+            ));
+        }
+        let page = self.turn_page(None, 20, deadline)?;
+        self.verify_identity()?;
+        Ok(page.data.first().map(|turn| turn.id.clone()))
+    }
+    pub(crate) fn queue_executable(&self) -> &Path {
+        self.daemon.queue_executable()
+    }
+    pub(crate) fn presence_before(
+        &mut self,
+        observed_at: UtcMillis,
+        deadline: Instant,
+    ) -> Result<PresenceObservation, AdapterError> {
+        let result = self
+            .read_thread(deadline)
+            .map(|thread| self.presence_for(&thread, observed_at));
+        self.fence(result)
     }
     fn fence<T>(&mut self, result: Result<T, AdapterError>) -> Result<T, AdapterError> {
         self.daemon.fence(result)
