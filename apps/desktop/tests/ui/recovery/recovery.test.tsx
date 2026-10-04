@@ -4,7 +4,7 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { CoreError, MutationEnvelope, OwnerMutationRequest } from '../../../src/generated/core';
 import type { Binding, Input, PresenceObservation, SavedReceipt, Session } from '../../../src/generated/domain/models';
 import { createDesktopService, CoreFailure, OpenSessions, type DesktopTransport, type HintPayloads } from '../../../src/data';
-import { SessionActions } from '../../../src/components/bindings/actions';
+import { SessionActions, SessionActionControllers } from '../../../src/components/bindings/actions';
 import { BindingControls } from '../../../src/components/bindings/BindingControls';
 import { qualifiedPresence } from '../../../src/components/bindings/presence';
 import { RecoveryPanel, recoveryTargets } from '../../../src/components/recovery/RecoveryPanel';
@@ -165,6 +165,42 @@ describe('audited recovery', () => {
 });
 
 describe('receipt uncertainty across navigation', () => {
+  it('reopens a closed tab with its exact pending operation and a fresh session reader', async () => {
+    const { actions, transport, store, sessions } = await setup();
+    const controllers = new SessionActionControllers(actions.service, () => opId);
+    const retained = controllers.forSession(store), binding = currentBinding(transport.session);
+    transport.replies.push(new Error('Lost acknowledgement'));
+    await retained.execute({ api_version: 1, op_id: '', command: 'binding_pause',
+      params: { binding_id: binding.id, expected_generation: binding.generation } }, transport.session.revision);
+    const request = structuredClone(transport.mutations[0]);
+    sessions.close(route);
+    expect(store.getSnapshot().status).toBe('closed');
+    transport.session.revision += 1;
+    const reopened = sessions.open(route); await reopened.refresh();
+    expect(reopened).not.toBe(store);
+    expect(controllers.forSession(reopened)).toBe(retained);
+    expect(retained.session).toBe(reopened);
+    expect(retained.getSnapshot().pending).toEqual(request);
+    expect(transport.mutations).toHaveLength(1);
+    transport.replies.push(transport.receipt('binding_state'));
+    expect(await retained.retry()).toBe(true);
+    expect(transport.mutations).toEqual([request, request]);
+    expect(retained.getSnapshot().pending).toBeNull();
+    expect(reopened.getSnapshot().status).toBe('ready');
+  });
+  it('isolates controllers by project and session and rejects cross-route attachment', async () => {
+    const { actions, store, sessions } = await setup();
+    const controllers = new SessionActionControllers(actions.service, () => opId);
+    const retained = controllers.forSession(store);
+    const other = sessions.open({ ...route, session_id: opId }); await other.refresh();
+    expect(controllers.forSession(other)).not.toBe(retained);
+    expect(() => retained.attachSession(other)).toThrow(/cannot change its registered route/);
+    const otherProject = sessions.open({ ...route, project_id: opId }); await otherProject.refresh();
+    expect(controllers.forSession(otherProject)).not.toBe(retained);
+    expect(() => retained.attachSession(otherProject)).toThrow(/cannot change its registered route/);
+    expect(retained.session).toBe(store);
+    expect(controllers.forSession(store)).toBe(retained);
+  });
   it('serializes repeated clicks and retains the request after a malformed success', async () => {
     const { actions, transport, store } = await setup(); const binding = currentBinding(transport.session);
     let resolve!: (value: MutationEnvelope) => void;
@@ -190,11 +226,46 @@ describe('receipt uncertainty across navigation', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
     expect(transport.mutations).toEqual([request, request]); expect(actions.getSnapshot().pending).toBeNull(); view.unmount();
   });
-  it.each(['commit_uncertain', 'revision_conflict'] as const)('retains only ambiguous commit requests after Core %s', async code => {
+  it.each(['commit_uncertain', 'revision_conflict', 'stale_generation', 'delivery_uncertain', 'host_unreachable', 'not_found', 'invalid_argument', 'invalid_ref', 'store_busy', 'io_error', 'operation_reused'] as const)('keeps uncertain lifecycle requests after Core %s', async code => {
     const { actions, transport, store } = await setup(); transport.replies.push(failure(code));
     const binding = currentBinding(transport.session);
     expect(await actions.execute({ api_version: 1, op_id: '', command: 'binding_pause', params: { binding_id: binding.id, expected_generation: binding.generation } }, store.getSnapshot().snapshot!.session.revision)).toBe(false);
-    expect(actions.getSnapshot().pending !== null).toBe(code === 'commit_uncertain');
+    expect(actions.getSnapshot().pending !== null).toBe(!['revision_conflict', 'stale_generation'].includes(code));
+  });
+  it('retains a saved-possibly Resume after a bridge error before Core replay', async () => {
+    const { actions, transport, store } = await setup(), binding = currentBinding(transport.session);
+    transport.replies.push(new Error('Lost acknowledgement'), failure('host_unreachable'));
+    expect(await actions.execute({ command: 'binding_resume', api_version: 1, op_id: '',
+      params: { binding_id: binding.id, expected_generation: binding.generation } }, transport.session.revision)).toBe(false);
+    const request = structuredClone(transport.mutations[0]);
+    expect(await actions.retry()).toBe(false);
+    expect(actions.getSnapshot().pending).toEqual(request);
+    expect(transport.mutations).toEqual([request, request]);
+    expect(await actions.execute({ command: 'binding_pause', api_version: 1, op_id: '',
+      params: { binding_id: binding.id, expected_generation: binding.generation } }, store.getSnapshot().snapshot!.session.revision)).toBe(false);
+    expect(transport.mutations).toHaveLength(2);
+  });
+  it('allows a corrected deliberate recovery action after a precommit liveness rejection', async () => {
+    const { actions, transport, store } = await setup();
+    let id = 0;
+    const corrected = new SessionActions(actions.service, store, () => `${opId.slice(0, -1)}${++id}`);
+    const input = currentInput(transport.session);
+    const command = { command: 'input_resolve' as const, api_version: 1 as const, op_id: '', params: {
+      input_id: input.id, attempt_id: input.active_attempt_id!, expected_revision: transport.session.revision,
+      decision: 'skip' as const, reason: 'Reviewed current work.', evidence: null,
+    } };
+    transport.replies.push(failure('delivery_uncertain'));
+    expect(await corrected.execute(command, transport.session.revision)).toBe(false);
+    expect(corrected.getSnapshot().pending).toBeNull();
+    expect(await corrected.retry()).toBe(false);
+    expect(transport.mutations).toHaveLength(1);
+    transport.replies.push(new Error('Lost acknowledgement'));
+    expect(await corrected.execute({ ...command, params: { ...command.params, evidence: {
+      source: 'owner_attestation', owner_attested_idle: true, turn_state: 'unknown', host_turn_id: null, at: demo.updated_at,
+    } } }, transport.session.revision)).toBe(false);
+    expect(transport.mutations[1].command.op_id).not.toBe(transport.mutations[0].command.op_id);
+    expect(corrected.getSnapshot().pending).toEqual(transport.mutations[1]);
+    expect(transport.mutations[1].command).toMatchObject({ params: { evidence: { owner_attested_idle: true } } });
   });
   it('new app controller reloads persisted pause and uncertain attempt without automatic retry/resume', async () => {
     const { actions, transport, store } = await setup(); currentBinding(transport.session).owner_paused = true; transport.session.revision += 1; await store.refresh();
