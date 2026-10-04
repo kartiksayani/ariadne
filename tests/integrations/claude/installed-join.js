@@ -12,6 +12,7 @@ const reports = [];
 const replies = [];
 const submissions = [];
 let running = 0;
+let loseStatusAck = false;
 async function execute(argv, options) {
   running += 1;
   try {
@@ -25,6 +26,10 @@ async function execute(argv, options) {
       child.stdin.end(options.stdin ?? '');
     });
     replies.push({ argv, result });
+    if (loseStatusAck && argv[1] === 'bridge' && argv[2] === 'connection-status') {
+      loseStatusAck = false;
+      throw new Error('Scripted SDK lost the actual helper status result');
+    }
     if (argv[1] === 'bridge' && argv[2] === 'report' && result.exitCode === 0) reports.push(JSON.parse(options.stdin));
     return result;
   } finally { running -= 1; }
@@ -62,6 +67,7 @@ for await (const line of createInterface({input:process.stdin})) {
       case 'start': value = await hooks.get('session.start:')(fixture.$,{},next); break;
       case 'connect': value = await hooks.get('command.run:ariadne-connect')(fixture.$,{args:request.session}); break;
       case 'heartbeat': await fixture.timers().find(timer => timer.ms === 30000).callback(); break;
+      case 'lose-status-ack': loseStatusAck = true; break;
       case 'poll': {
         const previousReplies = replies.length, previousPrompts = fixture.prompts.length, previousLogs = fixture.logs.length;
         fixture.timer().callback();

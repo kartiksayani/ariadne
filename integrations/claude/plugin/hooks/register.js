@@ -18,13 +18,22 @@ export function createRegister(descriptor) {
     let announcementTimer = null;
     let announcementScope = null;
     let loop = null;
+    let loopBinding = null;
+    let pending = null;
     let qualified = false;
     let ownerTransition = false;
     let sessionEnded = false;
     const discovery = announcements(descriptor);
     const owner = descriptor ? setup(descriptor.helperPath,async ($,binding) => {
       announcementScope = {binding_id:binding.binding_id,generation:binding.generation};
-      if (sessionEnded) return;
+      if (!pending || pending.binding.binding_id !== binding.binding_id || pending.binding.generation !== binding.generation) {
+        if (pending?.loop.outstanding()) throw new ModError('Original saved-scope lifecycle evidence remains pending; recover it before changing the binding.');
+        const sameScope = loopBinding?.binding_id === binding.binding_id && loopBinding?.generation === binding.generation;
+        pending = {binding,loop:sameScope ? loop : claimLoop(descriptor.helperPath,binding)};
+        // The saved scope owns lifecycle reporting before it owns claim admission.
+        await pending.loop.quiesce();
+      }
+      if (sessionEnded) { await pending.loop.stop($,true); return; }
       if (!await discovery.announce($,announcementScope)) {
         throw new ModError('Bound announcement is pending or the original session ended; no claims were admitted.');
       }
@@ -50,7 +59,7 @@ export function createRegister(descriptor) {
       try {
         if (loop) await loop.quiesce();
         if (sessionEnded) return {text:'The original Claude session ended; no new Ariadne owner operation was admitted.'};
-        if (loop?.outstanding()) return {text:'Ariadne recovery_required: an original claim or lifecycle report is outstanding; recover it before changing the binding.'};
+        if (loop?.outstanding() || pending?.loop.outstanding()) return {text:'Ariadne recovery_required: an original claim or lifecycle report is outstanding; recover it before changing the binding.'};
         return await action();
       } finally { ownerTransition = false; }
     }
@@ -79,8 +88,10 @@ export function createRegister(descriptor) {
           if (!sessionEnded) timer ??= $.clock.every(1000,() => { if (loop) void loop.poll($); }); }
         if (sessionEnded) return {text:'The original Claude session ended; no new Ariadne owner operation was admitted.'};
         const result = await owner.connect($,requestedSessionId);
-        if (loop?.outstanding()) return {text:`Ariadne recovery_required: late original-scope evidence remains retained; no new claim loop was admitted. Owner receipt: ${JSON.stringify(result)}`};
-        loop = claimLoop(descriptor.helperPath,result.binding);
+        if (loop?.outstanding() || pending?.loop.outstanding()) return {text:`Ariadne recovery_required: late original-scope evidence remains retained; no new claim loop was admitted. Owner receipt: ${JSON.stringify(result)}`};
+        loop = sessionEnded ? pending.loop : claimLoop(descriptor.helperPath,result.binding);
+        loopBinding = result.binding;
+        pending = null;
         announcementScope = {binding_id:result.binding.binding_id,generation:result.binding.generation};
         if (sessionEnded) await loop.stop($,true);
         const guidance = requestedSessionId === null ? '' : `\nResume structured Ariadne context for project ${result.binding.session.project_id}, session ${result.binding.session.session_id}: read its topics, items, questions, answers and results; summarize completed work, remaining work and missing context; reuse existing items and respect cancelled work. This does not transfer the old host transcript or dispatch an input.`;
@@ -96,8 +107,10 @@ export function createRegister(descriptor) {
       if (sessionEnded) return {text:'The original Claude session ended; no new Ariadne owner operation was admitted.'};
       if (loop) await loop.stop($);
       const receipt = await owner.disconnect($);
-      if (loop?.outstanding()) return {text:`Ariadne recovery_required: late original-scope evidence remains retained. Owner receipt: ${JSON.stringify(receipt)}`};
+      if (loop?.outstanding() || pending?.loop.outstanding()) return {text:`Ariadne recovery_required: late original-scope evidence remains retained. Owner receipt: ${JSON.stringify(receipt)}`};
       loop = null;
+      loopBinding = null;
+      pending = null;
       announcementScope = null;
       return {text:JSON.stringify(receipt)};
     })));
@@ -117,6 +130,7 @@ export function createRegister(descriptor) {
       announcementTimer?.cancel();
       discovery.stop();
       if (loop) await loop.stop($,true);
+      if (pending && pending.loop !== loop) await pending.loop.stop($,true);
       return next(event);
     });
   };

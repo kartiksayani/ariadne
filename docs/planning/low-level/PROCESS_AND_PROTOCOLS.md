@@ -403,8 +403,13 @@ into shell commands. Helper resolves state via explicit binding handles.
    binding/generation through the existing bound announcement before requesting
    lease-backed status. Retain saved scope and the original connect request when
    its acknowledgement or status is pending; explicitly retry the same selector
-   once native reconciliation publishes the route. Pending status admits no claim
-   loop and cannot manufacture Connected or a fresh binding.
+   once native reconciliation publishes the route. Pending status enables no
+   claims and cannot manufacture Connected or a fresh binding.
+   Retain a quiesced existing claim-loop reporter for the validated saved scope
+   before those awaits: actual session end still reports Disconnected while status
+   or its acknowledgement is pending, including a late saved receipt. Preserve
+   distinct original-loop callbacks and unsaved reports, and reuse identical
+   scope/report identities on failure instead of overwriting them.
    Reconnect with outstanding work is recovery_required, not an automatic replay.
 3. When no local active claim, poll desktop through `bridge claim`. Desktop alone
    decides eligibility; no claim if app absent, paused or incompatible.

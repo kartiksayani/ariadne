@@ -605,3 +605,42 @@ fn missing_installed_helper_or_resource_cannot_advertise_a_qualified_connection(
             .all(|reply| reply["result"]["exitCode"] != 0));
     }
 }
+
+#[test]
+fn installed_session_end_reports_saved_scope_after_sdk_loses_actual_status_result() {
+    let mut fixture = Fixture::new();
+    fixture.sdk.command(json!({"action":"start"}));
+    fixture.sdk.command(json!({"action":"lose-status-ack"}));
+    let pending = fixture
+        .sdk
+        .command(json!({"action":"connect","session":id(2)}));
+    assert!(pending["logs"].as_array().unwrap().iter().any(|log| log
+        .as_str()
+        .unwrap()
+        .contains("was saved; connection status remains pending")));
+    assert!(pending["prompts"].as_array().unwrap().is_empty());
+    let saved = fixture.saved();
+    let binding = saved.active_binding_id.as_ref().unwrap();
+    assert_ne!(binding, &id(3));
+    let generation = &saved.bindings.0[binding].generation;
+    let ended = fixture
+        .sdk
+        .command(json!({"action":"event","name":"session.end","event":{}}));
+    assert!(!ended["reports"].as_array().unwrap().is_empty(), "{ended}");
+    let event = ended["reports"].as_array().unwrap().last().unwrap();
+    assert_eq!(event["kind"], "disconnected");
+    assert_eq!(event["binding_id"], json!(binding));
+    assert_eq!(event["generation"], json!(generation));
+    assert!(event["input_id"].is_null());
+    assert!(event["attempt_id"].is_null());
+    assert!(ended["prompts"].as_array().unwrap().is_empty());
+    assert_eq!(
+        fixture.saved().bindings.0[binding].connection_state,
+        ConnectionState::Disconnected
+    );
+    assert!(ended["replies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|reply| reply["argv"][2] != "claim"));
+}

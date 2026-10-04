@@ -57,9 +57,15 @@ publishing that exact bound scope through its existing announcement path, then
 asks for route-dependent connection status. It retains that announcement scope
 and the original connect request/operation ID when the announcement acknowledgement
 or status is unavailable. The owner explicitly retries the same selector once
-native reconciliation publishes the route. Pending status creates no claim loop,
+native reconciliation publishes the route. Pending status enables no claims,
 Connected fact or new binding. Session-end and retained original-scope report
 guards still fence admission and rotation.
+The validated saved scope immediately retains a quiesced existing claim-loop
+reporter before announcement/status awaits. Actual session end uses that reporter
+even while activation is pending or the receipt arrives after session end. A
+distinct original loop keeps its captured callbacks and unsaved reports; identical
+scope reuse preserves report event IDs. Neither reporter's outstanding evidence
+may be discarded by a later owner receipt.
 
 ## Consequences
 
