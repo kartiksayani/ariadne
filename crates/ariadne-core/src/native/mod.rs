@@ -1,6 +1,7 @@
 //! Concrete synchronous delegates. Entrypoints retain responsibility for trusted
 //! routes, provider qualification, actual leases, scheduler ticks and UI hints.
 mod agent;
+mod connection;
 pub use agent::AgentResolver;
 mod errors;
 mod preferences;

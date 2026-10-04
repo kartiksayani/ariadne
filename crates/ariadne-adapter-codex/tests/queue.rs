@@ -1119,6 +1119,34 @@ fn qualified_adapter_reuses_initialization_and_final_checks_before_native_queue(
 }
 
 #[test]
+fn native_final_connect_keeps_callers_shorter_original_deadline() {
+    let h = Harness::new("success");
+    let adapter = CodexAdapter::from_qualified_thread(h.qualified(), id(9)).unwrap();
+    *h.read_delay.lock().unwrap() = Duration::from_millis(1500);
+    let started = Instant::now();
+    let error = block_on(adapter.connect_before(h.connect(), started + Duration::from_millis(600)))
+        .unwrap_err();
+    assert_eq!(error.code, AdapterErrorCode::HostUnreachable);
+    assert!(
+        started.elapsed() < Duration::from_millis(1200),
+        "native connect renewed its worker IO deadline"
+    );
+    assert_eq!(
+        h.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call["method"] == "initialize")
+            .count(),
+        1
+    );
+    assert!(
+        !h.argv.exists(),
+        "final connect must not submit or launch a host"
+    );
+}
+
+#[test]
 fn qualified_adapter_rejects_retargeting_without_consuming_selected_reader() {
     let h = Harness::new("success");
     let adapter = CodexAdapter::from_qualified_thread(h.qualified(), id(9)).unwrap();

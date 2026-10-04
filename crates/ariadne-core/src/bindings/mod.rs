@@ -53,8 +53,20 @@ impl<'a> BindingService<'a> {
         context: &OwnerContext,
         command: &OwnerCommand,
         verify: impl FnOnce(&BindingConnectParams) -> Result<VerifiedHost, CoreError>,
+        allocate: impl FnMut() -> UuidV4,
+        at: UtcMillis,
+    ) -> Result<MutationReceipt, BindingError> {
+        self.connect_guarded(context, command, verify, allocate, at, || Ok(()))
+    }
+
+    pub(crate) fn connect_guarded(
+        &self,
+        context: &OwnerContext,
+        command: &OwnerCommand,
+        verify: impl FnOnce(&BindingConnectParams) -> Result<VerifiedHost, CoreError>,
         mut allocate: impl FnMut() -> UuidV4,
         at: UtcMillis,
+        before_commit: impl FnOnce() -> Result<(), CoreError>,
     ) -> Result<MutationReceipt, BindingError> {
         require_registry(context)?;
         command.validate_wire()?;
@@ -78,6 +90,7 @@ impl<'a> BindingService<'a> {
                 setup.synchronize(op_id)?;
                 return Ok(MutationReceipt::Session(Box::new(saved)));
             }
+            before_commit()?;
             let verified = verified?;
             verified.validate(params)?;
             let sessions = setup.sessions()?;

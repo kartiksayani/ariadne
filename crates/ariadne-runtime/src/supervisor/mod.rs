@@ -9,7 +9,11 @@ use crate::{control::validated_error, leases::BindingLease};
 use ariadne_agent_protocol::*;
 use ariadne_core::*;
 use ariadne_domain::models::{Binding, ConnectionState, Freshness, InputState, PresenceSource};
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     sync::{oneshot, watch},
     task::JoinHandle,
@@ -92,6 +96,30 @@ impl ConnectedSupervisor {
         binding: Binding,
         facts: NativeFacts,
     ) -> Result<Self, Box<ConnectFailure>> {
+        let initial = adapter.clone();
+        Self::connect_before(
+            core,
+            adapter,
+            session,
+            binding,
+            facts,
+            Instant::now() + Duration::from_secs(10),
+            move |request| Box::pin(async move { initial.connect(request).await }),
+        )
+        .await
+    }
+    /// Native composition supplies the real provider's deadline-aware initial
+    /// connect, invoked exactly once after request validation and before leasing.
+    pub async fn connect_before(
+        core: Arc<dyn CoreService>,
+        adapter: Arc<dyn Adapter>,
+        session: RegisteredSession,
+        binding: Binding,
+        facts: NativeFacts,
+        deadline: Instant,
+        connect: impl FnOnce(ConnectRequest) -> AdapterFuture<'static, ConnectResult>,
+    ) -> Result<Self, Box<ConnectFailure>> {
+        crate::providers::within(deadline).map_err(ConnectFailure::before_attempt)?;
         let request = ConnectRequest {
             binding_id: binding.id.clone(),
             generation: binding.generation.clone(),
@@ -104,10 +132,15 @@ impl ConnectedSupervisor {
             .map_err(adapter_error)
             .map_err(ConnectFailure::before_attempt)?;
         let attempted = async {
-            let connected = timeout(Duration::from_secs(10), adapter.connect(request.clone()))
-                .await
-                .map_err(|_| host_error("Adapter connection exceeded its 10-second bound."))?
-                .map_err(adapter_error)?;
+            let connected = tokio::time::timeout_at(
+                tokio::time::Instant::from_std(deadline),
+                connect(request.clone()),
+            )
+            .await
+            .map_err(|_| {
+                host_error("Adapter connection exceeded its original admission deadline.")
+            })?
+            .map_err(adapter_error)?;
             connected.validate_for(&request).map_err(adapter_error)?;
             if connected.endpoint_fingerprint != binding.endpoint_fingerprint
                 || connected.observation.connection_state != ConnectionState::Connected
