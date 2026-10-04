@@ -24,6 +24,7 @@ tauri-plugin-wdio = { workspace = true, optional = true }
 tauri-plugin-wdio-webdriver = { workspace = true, optional = true }
 
 [dev-dependencies]
+ariadne-store = { path = "../../../crates/ariadne-store" }
 ariadne-core = { path = "../../../crates/ariadne-core", features = ["test-support"] }
 tauri = { workspace = true, features = ["test"] }
 

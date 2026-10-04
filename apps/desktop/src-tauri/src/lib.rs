@@ -200,6 +200,27 @@ pub fn run_with_service(service: commands::DesktopService) {
         .manage(state)
         .manage(service)
         .manage(native::routes::NativeRoutes::default())
+        .manage(native::window::NativeWindow::default())
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                    window.state::<native::window::NativeWindow>().moved(window);
+                }
+                tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                    window
+                        .state::<native::window::NativeWindow>()
+                        .reconcile(window.app_handle().clone(), true);
+                }
+                _ => {}
+            }
+        })
         .on_page_load(|webview, payload| {
             if webview.label() == "main"
                 && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
@@ -213,6 +234,8 @@ pub fn run_with_service(service: commands::DesktopService) {
             // Owning runtime/watchers must start here only after their existing
             // native control ownership/physical lease checks succeed.
             native::routes::receive_launch(app.handle().clone(), std::env::args().collect());
+            app.state::<native::window::NativeWindow>()
+                .reconcile(app.handle().clone(), true);
             Ok(())
         });
     #[cfg(feature = "e2e")]

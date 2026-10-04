@@ -149,6 +149,7 @@ version = "0.1.0"
 dependencies = [
  "ariadne-core",
  "ariadne-domain",
+ "ariadne-store",
  "serde",
  "serde_json",
  "tauri",

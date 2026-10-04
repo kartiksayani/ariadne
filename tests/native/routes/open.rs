@@ -2,6 +2,8 @@
 mod launch;
 #[path = "../../../crates/ariadne-cli/src/open.rs"]
 mod open;
+#[path = "../../../apps/desktop/src-tauri/src/native/window/preferences.rs"]
+mod preferences;
 
 use ariadne_core::CoreErrorCode;
 use serde_json::{json, Value};
