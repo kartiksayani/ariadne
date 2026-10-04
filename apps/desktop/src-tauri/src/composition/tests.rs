@@ -300,6 +300,8 @@ fn desktop_composes_canonical_receipt_control_leases_watch_and_quit_without_host
     let bridge = runtime.bridge();
     runtime.select(Some(route.clone())).unwrap();
     runtime.set_connection_ui_open(true).unwrap();
+    let desktop = bridge.desktop_service();
+    desktop.set_connection_ui_open(true).unwrap();
     runtime.refresh_snapshots().unwrap();
     assert_eq!(
         runtime
@@ -320,8 +322,25 @@ fn desktop_composes_canonical_receipt_control_leases_watch_and_quit_without_host
             .binding
             .as_ref()
             .is_some_and(|binding| binding.generation == scope.generation)));
+    let projected = desktop.discovery().unwrap();
+    let candidate = projected
+        .candidates
+        .iter()
+        .find(|candidate| candidate.binding_id.as_ref() == Some(&scope.binding_id))
+        .unwrap();
+    assert_eq!(candidate.session.as_ref(), Some(&route));
+    let wire = serde_json::to_value(&projected).unwrap();
+    assert!(wire["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|candidate| candidate.get("received").is_none()
+            && candidate.get("announcement").is_none()));
+    desktop.set_connection_ui_open(false).unwrap();
     runtime.shutdown().unwrap();
     runtime.shutdown().unwrap();
+    assert!(desktop.discovery().is_err());
+    assert!(desktop.set_connection_ui_open(true).is_err());
     let after = read(bridge.core(), &route);
     assert_eq!(before, after);
     assert_eq!(
