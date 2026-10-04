@@ -122,6 +122,17 @@ session preference. Application-lifetime routing and recovery controllers share
 one desktop service. Nonvisual session/item data attributes on the real controls
 support native acceptance without adding a separate test flow.
 
+History/rail composition owns transient cross-highlights for the current session.
+`NavigationSentenceTree` and `SentenceTree` accept optional
+`highlightedItemIds: ReadonlySet<string>` and `onHoverItem(itemId: string | null)`
+props. Rail hover/pin uses its existing item/message refs to highlight both tree
+rows and detail messages; tree hover feeds the existing rail `hoveredItemId`.
+Selection retains its existing reveal route. Highlights never write preferences,
+change selection, move focus or scroll. Clear transient refs on session changes
+and view disposal; memoized rows must update when their highlight changes.
+The App owns this wiring, reusing existing TreeRow touched styling and rail
+callbacks. No CoreService, persisted DTO or second session reader is introduced.
+
 ## Desktop discovery consumer
 
 DesktopService receives trusted composition callbacks for the existing native
