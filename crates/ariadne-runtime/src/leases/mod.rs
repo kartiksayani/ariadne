@@ -3,13 +3,14 @@ pub(crate) mod fs;
 use self::fs::{error, Directory};
 use ariadne_core::{CoreError, CoreErrorCode, RegisteredSession, ValidatedDispatchContext};
 use ariadne_domain::models::UuidV4;
-use std::{fs::File, path::Path, sync::Arc};
+use std::{fs::File, os::fd::AsRawFd, path::Path, sync::Arc};
 
 pub struct DesktopOwner {
     pub(crate) home: Directory,
     pub(crate) run: Directory,
     leases: Directory,
     _instance: File,
+    acquiring_process: u32,
 }
 impl DesktopOwner {
     /// Blocking native setup; entrypoints call this off the UI/executor thread.
@@ -23,6 +24,7 @@ impl DesktopOwner {
             run,
             leases,
             _instance: instance,
+            acquiring_process: std::process::id(),
         })
     }
     /// Caller has resolved the session and binding through trusted registration.
@@ -40,6 +42,7 @@ impl DesktopOwner {
             inner: Arc::new(LeaseInner {
                 _file: file,
                 _owner: None,
+                acquiring_process: std::process::id(),
                 session,
                 binding_id,
                 generation,
@@ -64,12 +67,33 @@ impl DesktopOwner {
         self.run.path.join("control.sock")
     }
 }
+impl Drop for DesktopOwner {
+    fn drop(&mut self) {
+        unlock_acquired(&self._instance, self.acquiring_process);
+    }
+}
 struct LeaseInner {
     _file: File,
     _owner: Option<Arc<DesktopOwner>>,
+    acquiring_process: u32,
     session: RegisteredSession,
     binding_id: UuidV4,
     generation: UuidV4,
+}
+impl Drop for LeaseInner {
+    fn drop(&mut self) {
+        unlock_acquired(&self._file, self.acquiring_process);
+    }
+}
+fn unlock_acquired(file: &File, acquiring_process: u32) {
+    // A forked child can retain this open file description until exec despite
+    // CLOEXEC. Final Arc destruction in the acquiring process must release the
+    // lock independently of those inherited descriptors. A child dropping its
+    // inherited Rust object must never unlock the still-live parent's lease.
+    if std::process::id() == acquiring_process {
+        // SAFETY: the final owner still owns this live fd; LOCK_UN never waits.
+        let _ = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+    }
 }
 /// Cloning retains the actual OS lease, including throughout a blocking core call.
 #[derive(Clone)]
