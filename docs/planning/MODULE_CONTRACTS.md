@@ -42,6 +42,36 @@ write; existing `create_with_receipt` remains a compatible no-op wrapper. Existi
 session mutation checks in `transact`'s apply callback. Deadline rejection never
 cancels persistence already begun or changes commit uncertainty/replay semantics.
 
+### Claude installed-helper acceptance join
+
+P3.3 joins the actual setup-rendered immutable Mod, executable CLI, native
+activation/private control and Core/Store in one deterministic fixture. Only the
+Claude SDK/host and its version response are scripted. Prove explicit attachment
+to a populated existing session, the saved historical snapshot ceiling, isolation
+of later unissued inputs, no implicit prompt, exact claim/payload/turn/result
+correlation in both completion orders, and captured late CLI reports after desktop
+closure. Reuse existing transport and normalization tests; do not add a parallel
+transport framework. This is installed-composition evidence, not live-host M7.
+
+After that joined proof, `domain_cli` may report support for the current supported
+installed helper release only following existing native qualification: fresh SDK
+identity/project, qualified Claude version, exact selected helper path/version,
+and loaded/installed resource parity. Unsupported helper releases remain false;
+`domain_mcp` remains false. Pre-ID `QualifiedClaudeHost` and final Adapter.connect
+must use the same conditional capability constructor so saved and Connected facts
+agree. Support grants neither binding authority nor dispatch admission and does
+not promise host approval or success of an individual operation.
+
+This uses the existing immutable release/version identity assumption: version
+checks do not distinguish different helper builds sharing a version. A release
+changing the supported command contract must change its release identity; no
+cryptographic attestation is claimed. Keep the qualification limit in ADR-0051
+and PROCESS_AND_PROTOCOLS with the implementation. This amendment changes no
+CoreService signature or serialized provider DTO. The maintainer owns this
+contract; the assigned worker owns the adapter condition, joined fixture and
+affected conformance tests, and reports any insufficient qualification facts
+before changing the contract.
+
 ## Streams and owned shared files
 
 | Stream | First independent assignment | Subsequent module work |
