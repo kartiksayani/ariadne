@@ -92,7 +92,7 @@ function Workspace({ application }: { application: Application }) {
   const theme = preferences?.global.theme ?? 'system';
   const query = searchEdit?.route === key ? searchEdit.text : view?.filters.search ?? '';
   useEffect(() => { setDetailOpen(true); setLocalReveal(null); }, [key]);
-  useEffect(() => { setHighlightedItems(new Set()); setHighlightedMessages(new Set()); setHoveredItem(null); }, [key, graph, view?.rail]);
+  useEffect(() => { setHighlightedItems(new Set()); setHighlightedMessages(new Set()); setHoveredItem(null); }, [key, view?.rail]);
   useEffect(() => { setDetailOpen(true); }, [view?.selected_item_id, state.reveal]);
   useEffect(() => { setLocalReveal(null); }, [state.reveal]);
   // The header uses navigation's existing serialized preference writer. Keep

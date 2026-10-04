@@ -128,12 +128,24 @@ describe('ordinary desktop composition', () => {
     expect(card.classList.contains('history-pinned')).toBe(true); expect(mark.style.background).toContain('75%'); unchanged();
     fireEvent.click(within(card).getByRole('button', { name: `Unpin message ${message.number}` }));
     await waitFor(() => expect(mark.style.background).toBe('transparent')); unchanged();
-    fireEvent.mouseEnter(card); expect(mark.style.background).toContain('75%');
+    fireEvent.mouseEnter(row); expect(card.classList.contains('history-highlight')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
     await screen.findAllByRole('region', { name: /Topic graph/ });
+    expect(card.classList.contains('history-highlight')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     const restored = await screen.findByRole('tree', { name: 'Sentences' });
     expect(restored.querySelector<HTMLElement>('[data-item-id="2"] .ref-tree-mark')!.style.background).toBe('transparent');
+    fireEvent.click(card.querySelector('.history-body')!);
+    expect(card.classList.contains('history-pinned')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
+    await screen.findAllByRole('region', { name: /Topic graph/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
+    const returned = await screen.findByRole('tree', { name: 'Sentences' });
+    expect(returned.querySelector<HTMLElement>('[data-item-id="2"] .ref-tree-mark')!.style.background).toContain('75%');
+    expect(card.classList.contains('history-pinned')).toBe(true);
+    expect(transport.preferences).toEqual(before); expect(transport.mutations).toHaveLength(writes);
+    fireEvent.click(screen.getByRole('button', { name: 'Close message rail' }));
+    await waitFor(() => expect(returned.querySelector<HTMLElement>('[data-item-id="2"] .ref-tree-mark')!.style.background).toBe('transparent'));
   });
   it('submits a deliberate owner reply through the shared draft service and renders its real Sent and conversation text', async () => {
     const { transport } = setup(); await openSession();
