@@ -129,6 +129,7 @@ dependencies = [
  "ariadne-agent-protocol",
  "ariadne-domain",
  "ariadne-store",
+ "chrono",
  "jsonschema",
  "schemars 1.2.2",
  "serde",
@@ -162,6 +163,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "sha2",
  "ts-rs",
  "uuid",
 ]

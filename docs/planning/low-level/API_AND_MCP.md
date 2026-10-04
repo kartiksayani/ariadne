@@ -58,6 +58,17 @@ reported event and persisted revision/effect, including a consistent replay;
 ephemeral presence need not produce a new durable session receipt.
 Its exact record is `{event_id,session_id,revision:positive_safe_integer|null,
 durable_effect,replayed}`; consistent replay preserves saved revision/effect.
+P2.2's native `DeliveryService` now persists Claim receipts containing only
+input/attempt IDs; replay derives immutable PreparedAttempt bytes from retained
+history. Native report uses full opaque event identity, omitting only the two
+observation timestamps prescribed by PROCESS. Unchanged observations allocate
+nothing and have no saved revision. Contradictory verified facts atomically retain
+an EventConflict receipt and binding barrier before returning `protocol_conflict`;
+exact conflict replay does not write again. A sealed attempt is never rewritten.
+`expire_missing_result` saves a typed DeliveryExpiry receipt after five seconds
+from persisted completion; its real native timer and CoreService/provider wiring
+remain explicit integration work, outside UI and Store locks.
+
 An invalid lease is `permission_denied`; disconnected dispatch is
 `host_unreachable`. Explicit owner pause and otherwise blocked recovery are
 `invalid_transition` with typed `details.reason=owner_paused|recovery_required`.
@@ -329,8 +340,9 @@ canonical Page and completeness counts; session lists separately carry active
 and closed totals. No inaccessible data becomes a complete zero.
 
 Preference records belong to the local owner backend. `PreferencesSnapshot`
-contains schema/revision, global theme (system/light/dark), optional window
-geometry/monitor, pin and notification watermark; per-session selection, tab
+contains schema/revision, global theme (system/light/dark), required
+`selected_navigation:NavigationSelection`, optional window geometry/monitor,
+pin and notification watermark; per-session required `tab_open`, selection, tab
 order, expansion, filters, rail and scroll; qualified Later routes; and unsent
 `OwnerDraft` records. Drafts retain a stable operation ID, registered session,
 binding, canonical target, intent, exact text/option and target/question revisions.
@@ -339,6 +351,21 @@ They are never submitted inputs or agent query data. A revision-checked
 upsert or delete drafts. Explicit null clears nullable UI fields; deleting a draft
 is explicit. The existing request/entity/page bounds apply. See
 [UI state](UI_AND_NATIVE.md).
+
+`NavigationSelection` is a strict `kind` union: `projects`, `all_sessions`,
+`project{project_id}` or `session{session:SessionRef}`. SetGlobal/SetSessionView
+remain the only navigation preference patches. Closing a tab sets `tab_open`
+false and retains its view data and drafts. These required fields precede any
+production preferences writer; no compatibility defaults or migration apply.
+
+Explicit owner attachment of a fresh host conversation uses `binding_connect`
+with its actual external session ID and a project-scoped `existing_session_id`;
+the Registry wrapper route is null. Names and cwd never select the target.
+Successful saved setup instruction/capabilities come from the verified receipt;
+dispatch and connection labels require current BindingSummary facts. The
+existing-session handoff acceptance additionally requires visibility of the
+locked historical owner-context ceiling and isolation of later unissued inputs;
+its backend/Mod follow-up remains pending until implemented and tested.
 
 Continue previews identify the validated source revision/hash, full approved
 summary, source item IDs and proposed copy or imported-drop action for external

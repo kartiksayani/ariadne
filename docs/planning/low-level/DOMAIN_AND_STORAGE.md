@@ -387,7 +387,7 @@ No `received` bool or answer-fetch cursor controls dispatch.
 `OperationReceipt={operation_id,actor_scope,command_digest:Sha256,result}`;
 `actor_scope={kind:owner}|{kind:agent,binding_id}|{kind:adapter,binding_id}`.
 `SavedReceipt={operation_id,session_id,revision,data}` has a tagged `data.kind`
-union of exact saved success shapes:
+union of exact saved outcome shapes:
 
 | kind | data members other than kind |
 | --- | --- |
@@ -399,7 +399,10 @@ union of exact saved success shapes:
 | binding_connect | binding_id, generation, capabilities, setup_instruction |
 | binding_state | binding_id, generation, dispatch_state, owner_paused, pause_reason nullable, connection_state |
 | apply | allocated_refs, messages, item_revisions, topic_revisions, input_result_state nullable, queue_join_state nullable |
+| claim | input_id, attempt_id |
+| delivery_expiry | input_id, attempt_id |
 | event | event_id, input_id nullable, attempt_id nullable, durable_effect |
+| event_conflict | event_id, input_id nullable, attempt_id nullable |
 | continuation | continuation: ContinuationReceipt |
 
 Apply `messages` is an array of `{id,number}`, never parallel positional arrays.
@@ -576,12 +579,22 @@ The transaction follows this algorithm:
 7. Rename candidate over live file and sync sessions directory. If rename succeeded but sync failed, return `commit_uncertain` with op ID. Retry re-reads receipt to resolve it. It must not blindly repeat the mutation.
 8. Release lock; publish invalidation hints only after commit. Slow UI or dead watchers do not roll back a saved command.
 
+Native event transactions use the same lock/reread/validation/atomic saver and
+scan full opaque event ID plus adapter actor. Exact successful or conflicting
+proposal replay precedes new command guards. `Unchanged` requires a structurally
+unchanged candidate and has no UUID allocation, receipt or revision. Core can
+commit `EventConflict` and its original-scope recovery barrier atomically before
+returning `protocol_conflict`; original event facts and receipts remain retained.
+There is no hashed event UUID, additional index, TTL or pruning.
+
 Current store validation composes typed shape/primitive decoding, P1.1
-`validate_session_items`, P1.2 `validate_session_history` and receipt bucket/result
-identity, revision bounds and actor-scope uniqueness. Core/history helpers own
-append-only assembly and command authorization. These checks do not claim future
-delivery/result joins or queue/lifecycle state machines; their owning tasks extend
-pure validation as the behavior is introduced. Store errors separate ordinary
+`validate_session_items`, P1.2 `validate_session_history`, P2.2
+`validate_session_delivery` and receipt bucket/result identity, revision bounds and
+actor-scope uniqueness. Delivery validation checks saved identity/backlinks,
+receipt attempt scope and canonical prepared marker/LF/full-byte digest, retaining
+historical/sealed/repair records. Core/history helpers own append-only assembly,
+authorization and delivery joins; these checks do not claim future lifecycle or
+recovery state machines. Owning tasks extend pure validation as behavior appears. Store errors separate ordinary
 IO/path failures, invalid/future data, identity mismatch, item/history validation,
 busy/poisoned locks, existing creation, operation reuse, counter overflow and
 uncertain commit. `TransactionError::Command(E)` preserves core's typed rejection

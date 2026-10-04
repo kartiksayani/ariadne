@@ -43,6 +43,16 @@ join(input, attempt):
     input=needs_attention; dispatch=recovery_required
 ```
 
+P2.2 implements this native core path with typed Claim receipts referencing the
+retained immutable Attempt. Full opaque report IDs are scanned under the same
+session lock. Conflicting proposals retain EventConflict plus the original-scope
+binding barrier in one commit, then return protocol_conflict; exact normal and
+conflict replay allocate/write nothing. Fresh redundant sealed facts are unchanged;
+contradictions pause the binding without changing sealed Input/Attempt bytes.
+A native idempotent expiry entrypoint uses saved completion time and a typed
+DeliveryExpiry receipt. Its actual off-UI native timer and service/provider wiring
+remain separately owned integration work, with no lock held between ticks.
+
 A successful result may say deferred/unable; that handles this owner message but
 leaves domain items exactly as the agent explicitly set them. Parent/children
 never close because a host turn ended. No receipt is a tool approval.

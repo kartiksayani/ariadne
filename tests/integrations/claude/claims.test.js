@@ -101,7 +101,30 @@ describe('captured Claude claim lifecycle', () => {
     const other = claimLoop(descriptor.helperPath,binding);await other.poll(changed.$);
     expect(changed.prompts).toEqual([]);expect(changed.events.at(-1).kind).toBe('uncertain');
   });
-  it('keeps a terminal pending after an ephemeral/mismatched receipt and retries identical bytes before another claim', async () => {
+  it('accepts valid unchanged lifecycle facts without writes while retaining a detached submission fence', async () => {
+    const value = await prepared();const submission = deferred();const observed = [];
+    const h = host({claim:value,submit:() => submission.promise,handler:(argv,options) => {
+      if (argv[2] === 'report') {
+        const event = JSON.parse(options.stdin);observed.push(event.kind);
+        return success({event_id:event.event_id,session_id:ids.session,revision:null,durable_effect:false,replayed:false});
+      }
+    }});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);
+    await loop.start(h.$,{text:value.formatted_payload,turnId:'turn'});
+    await loop.complete(h.$,{turnId:'turn',answer:'answer',reason:'answer',isAborted:false});
+    expect(observed).toEqual(['accepted','turn_started','turn_finished']);
+    expect(loop.status().pending_reports).toBe(0);
+    expect(loop.status().active).toBe(null);
+    expect(loop.outstanding()).toBe(true);
+    expect(h.prompts).toHaveLength(1);
+    submission.resolve({text:value.formatted_payload});
+    await loop.stop(h.$,true);
+    expect(observed.at(-1)).toBe('disconnected');
+    expect(loop.status().pending_reports).toBe(0);
+    await expect.poll(() => loop.outstanding(), { timeout:1000 }).toBe(false);
+  });
+  it('keeps a terminal pending after a mismatched receipt and retries identical bytes before another claim', async () => {
     const value = await prepared();const submission = deferred();let corrupt = true;const terminalBytes = [];
     const h = host({claim:value,submit:() => submission.promise,handler:(argv,options) => {
       if (argv[2] === 'report' && JSON.parse(options.stdin).kind === 'turn_finished') {

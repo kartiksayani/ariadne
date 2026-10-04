@@ -525,7 +525,10 @@ fn capacity_replay_and_cancelled_slots_do_not_lose_saved_inputs() {
     assert_eq!(setup.saved().counters.next_input, p(102));
 }
 
-fn prepared_attempt() -> Attempt {
+fn prepared_attempt(input_id: &UuidV4) -> Attempt {
+    use sha2::{Digest, Sha256 as Hasher};
+    let marker = format!("[ARIADNE_INPUT:{}:{}]", input_id.as_str(), id(900).as_str());
+    let payload = format!("{marker}\nExact immutable prepared payload");
     Attempt {
         id: id(900),
         purpose: AttemptPurpose::Work,
@@ -533,9 +536,9 @@ fn prepared_attempt() -> Attempt {
         claim_request_id: id(901),
         binding_generation: id(4),
         prepared_at: at(),
-        formatted_payload: "Exact immutable prepared payload".into(),
-        payload_sha256: Sha256::new("a".repeat(64)).unwrap(),
-        wire_marker: "[INPUT:1]".into(),
+        payload_sha256: Sha256::new(format!("{:x}", Hasher::digest(payload.as_bytes()))).unwrap(),
+        formatted_payload: payload,
+        wire_marker: marker,
         acceptance: AcceptanceState::Prepared,
         acceptance_receipt: None,
         acceptance_observed_at: None,
@@ -558,9 +561,9 @@ fn cancellation_refuses_prepared_history_active_attempt_and_every_nonqueued_stat
         setup.edit(80, |s| {
             let input = s.inputs.0.get_mut(&input_id).unwrap();
             match case {
-                0 => input.attempts.push(prepared_attempt()),
+                0 => input.attempts.push(prepared_attempt(&input_id)),
                 1 => {
-                    input.attempts.push(prepared_attempt());
+                    input.attempts.push(prepared_attempt(&input_id));
                     input.active_attempt_id = Some(id(900));
                 }
                 2 => input.state = InputState::InFlight,
