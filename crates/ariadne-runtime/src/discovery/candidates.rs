@@ -1,5 +1,6 @@
 use super::{bounded, capacity, invalid, AnnouncementAck, SessionAnnouncement};
 use crate::control::BindingScope;
+use ariadne_adapter_claude::{ClaudeOptions, LoadedModIdentity, ModEvidenceSlot};
 use ariadne_agent_protocol::{Availability, Compatibility, EndpointRef};
 use ariadne_core::{CoreError, CoreErrorCode, SessionRef};
 use ariadne_domain::models::{Freshness, UtcMillis};
@@ -58,6 +59,7 @@ pub struct DiscoverySnapshot {
 }
 struct State {
     candidates: BTreeMap<(String, String, String), Candidate>,
+    slots: BTreeMap<(String, String, String), ModEvidenceSlot>,
     errors: BTreeMap<String, CoreError>,
 }
 #[derive(Clone)]
@@ -65,6 +67,7 @@ pub struct Discovery {
     state: Arc<Mutex<State>>,
     pub(crate) now: Arc<dyn Fn() -> UtcMillis + Send + Sync>,
     resolver: Option<Arc<BindingResolver>>,
+    qualification_slots: Arc<tokio::sync::Semaphore>,
 }
 impl Discovery {
     pub fn new(
@@ -74,10 +77,12 @@ impl Discovery {
         Self {
             state: Arc::new(Mutex::new(State {
                 candidates: BTreeMap::new(),
+                slots: BTreeMap::new(),
                 errors: BTreeMap::new(),
             })),
             now,
             resolver,
+            qualification_slots: Arc::new(tokio::sync::Semaphore::new(16)),
         }
     }
     /// Blocking path checks run on the existing runtime IO offload, never under a store lock.
@@ -187,8 +192,159 @@ impl Discovery {
         if !state.candidates.contains_key(&key) && state.candidates.len() >= CAP {
             return Err(capacity());
         }
+        if state
+            .candidates
+            .get(&key)
+            .is_some_and(|old| !same_identity(old, &candidate))
+        {
+            if let Some(slot) = state.slots.remove(&key) {
+                slot.clear().map_err(CoreError::from)?;
+            }
+        }
         state.candidates.insert(key, candidate);
         Ok(())
+    }
+    /// Native qualification only; no binding allocation, Core write or dispatch authority.
+    /// All executable/resource IO and registered resolution run on the existing offload.
+    pub async fn qualify_claude(
+        &self,
+        candidate: Candidate,
+        options: ClaudeOptions,
+        slot: ModEvidenceSlot,
+    ) -> Result<(), CoreError> {
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|_| invalid("Native qualification requires the owned runtime IO offload."))?;
+        let permit = self.qualification_slots.clone().try_acquire_owned().map_err(|_| {
+            CoreError::new(CoreErrorCode::CapacityExceeded, "Native discovery qualification is busy.", "Wait for the bounded read-only probes; no binding or delivery has been granted.")
+        })?;
+        let discovery = self.clone();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        runtime
+            .spawn_blocking(move || {
+                // Dropping the caller future cannot admit unbounded blocking probes.
+                let _permit = permit;
+                let result =
+                    discovery.qualify_claude_blocking(&candidate, &options, slot, deadline);
+                if result.is_err() {
+                    // An older failed probe cannot clear a newer heartbeat's qualification.
+                    let mut state = discovery.lock()?;
+                    let key = claude_key(&candidate);
+                    if state
+                        .candidates
+                        .get(&key)
+                        .is_some_and(|current| same_snapshot(current, &candidate))
+                    {
+                        if let Some(slot) = state.slots.remove(&key) {
+                            slot.clear().map_err(CoreError::from)?;
+                        }
+                        if let Some(current) = state.candidates.get_mut(&key) {
+                            current.compatibility = Compatibility::Unknown;
+                            current.availability = Availability::Unknown;
+                        }
+                    }
+                }
+                result
+            })
+            .await
+            .map_err(|_| {
+                invalid("Native qualification did not complete; refresh the original candidate.")
+            })?
+    }
+    fn qualify_claude_blocking(
+        &self,
+        candidate: &Candidate,
+        options: &ClaudeOptions,
+        slot: ModEvidenceSlot,
+        deadline: Instant,
+    ) -> Result<(), CoreError> {
+        within(deadline)?;
+        if candidate.adapter_id != "claude_code_mod"
+            || candidate.endpoint
+                != (EndpointRef::LocalBridge {
+                    name: "claude-mod".into(),
+                })
+        {
+            return Err(invalid(
+                "Select the original Claude Mod candidate for qualification.",
+            ));
+        }
+        let announcement = candidate
+            .announcement
+            .as_ref()
+            .ok_or_else(|| invalid("Claude qualification requires the actual SDK announcement."))?;
+        self.current_candidate(candidate)?;
+        if self.resolve(announcement)? != candidate.binding {
+            return Err(invalid(
+                "Registered association changed; refresh the original candidate.",
+            ));
+        }
+        let evidence = options
+            .qualify_identity(
+                LoadedModIdentity {
+                    plugin_name: announcement.plugin.name.clone(),
+                    plugin_root: PathBuf::from(&announcement.plugin.root),
+                    helper_path: PathBuf::from(&announcement.descriptor.helper_path),
+                    app_version: announcement.descriptor.app_version.clone(),
+                    api_version: announcement.descriptor.api_version,
+                    engine_version: announcement.host_version.clone(),
+                    external_session_id: announcement.external_session_id.clone(),
+                    project_root: candidate.cwd.clone(),
+                    binding_scope: announcement
+                        .binding_scope
+                        .as_ref()
+                        .map(|scope| (scope.binding_id.clone(), scope.generation.clone())),
+                },
+                candidate.observed_at.clone(),
+                candidate.received,
+                deadline,
+            )
+            .map_err(CoreError::from)?;
+        // Resolver releases all registry/store locks before the memory publication lock.
+        if self.resolve(announcement)? != candidate.binding {
+            return Err(invalid(
+                "Registered association changed during qualification; retain original scope.",
+            ));
+        }
+        within(deadline)?;
+        let mut state = self.lock()?;
+        expire(&mut state);
+        let key = claude_key(candidate);
+        if !state
+            .candidates
+            .get(&key)
+            .is_some_and(|current| same_snapshot(current, candidate))
+        {
+            return Err(invalid(
+                "Claude candidate was replaced, expired or invalidated during qualification.",
+            ));
+        }
+        if let Some(previous) = state.slots.remove(&key) {
+            previous.clear().map_err(CoreError::from)?;
+        }
+        slot.publish(evidence).map_err(CoreError::from)?;
+        state.slots.insert(key.clone(), slot);
+        let current = state
+            .candidates
+            .get_mut(&key)
+            .expect("checked candidate under the same lock");
+        current.compatibility = Compatibility::Compatible;
+        current.availability = Availability::Available;
+        Ok(())
+    }
+    fn current_candidate(&self, candidate: &Candidate) -> Result<(), CoreError> {
+        let mut state = self.lock()?;
+        expire(&mut state);
+        if state
+            .candidates
+            .get(&claude_key(candidate))
+            .is_some_and(|current| same_snapshot(current, candidate))
+        {
+            Ok(())
+        } else {
+            Err(invalid(
+                "Claude candidate was replaced, expired or invalidated; refresh discovery.",
+            ))
+        }
     }
     pub fn snapshot(&self) -> Result<DiscoverySnapshot, CoreError> {
         let mut state = self.lock()?;
@@ -241,8 +397,14 @@ impl Discovery {
     }
     pub fn refresh_after_wake(&self) -> Result<(), CoreError> {
         let mut state = self.lock()?;
+        for slot in state.slots.values() {
+            slot.clear().map_err(CoreError::from)?;
+        }
+        state.slots.clear();
         for candidate in state.candidates.values_mut() {
             candidate.freshness = Freshness::Unknown;
+            candidate.compatibility = Compatibility::Unknown;
+            candidate.availability = Availability::Unknown;
         }
         Ok(())
     }
@@ -260,6 +422,35 @@ fn expire(state: &mut State) {
     state
         .candidates
         .retain(|_, candidate| candidate.received.elapsed() < LIFETIME);
+    // Outside consumers retain the original aged evidence; expiry invents no disconnect.
+    state
+        .slots
+        .retain(|key, _| state.candidates.contains_key(key));
+}
+fn claude_key(candidate: &Candidate) -> (String, String, String) {
+    (
+        candidate.adapter_id.clone(),
+        "claude-mod".into(),
+        candidate.external_session_id.clone(),
+    )
+}
+fn same_identity(a: &Candidate, b: &Candidate) -> bool {
+    a.adapter_id == b.adapter_id
+        && a.endpoint == b.endpoint
+        && a.external_session_id == b.external_session_id
+        && a.cwd == b.cwd
+        && a.title == b.title
+        && a.host_version == b.host_version
+        && a.binding == b.binding
+        && a.loaded == b.loaded
+        && a.announcement == b.announcement
+}
+fn same_snapshot(current: &Candidate, selected: &Candidate) -> bool {
+    same_identity(current, selected)
+        && current.received == selected.received
+        && current.observed_at == selected.observed_at
+        && current.freshness == Freshness::Fresh
+        && current.received.elapsed() < LIFETIME
 }
 fn within(deadline: Instant) -> Result<(), CoreError> {
     if Instant::now() >= deadline {
@@ -514,5 +705,76 @@ mod tests {
         let snap = d.snapshot().unwrap();
         assert_eq!(snap.candidates[0].freshness, Freshness::Unknown);
         assert_eq!(snap.candidates[0].observed_at, time());
+    }
+    #[test]
+    fn expired_candidates_release_only_the_tracked_slot_reference() {
+        let root = tempfile::tempdir().unwrap();
+        let d = discovery();
+        admit(&d, announcement(root.path())).unwrap();
+        let selected = d.snapshot().unwrap().candidates.remove(0);
+        let key = claude_key(&selected);
+        let slot = ModEvidenceSlot::default();
+        let original = Instant::now() - LIFETIME;
+        slot.publish(
+            ariadne_adapter_claude::ModEvidence::received_at(
+                LoadedModIdentity {
+                    plugin_name: "ariadne".into(),
+                    plugin_root: root.path().into(),
+                    helper_path: "/installed/ariadne".into(),
+                    app_version: "0.1.0".into(),
+                    api_version: 1,
+                    engine_version: "2.1.287".into(),
+                    external_session_id: selected.external_session_id.clone(),
+                    project_root: root.path().into(),
+                    binding_scope: None,
+                },
+                time(),
+                original,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        {
+            let mut state = d.lock().unwrap();
+            state.candidates.get_mut(&key).unwrap().received = original;
+            state.slots.insert(key, slot);
+        }
+        assert!(d.snapshot().unwrap().candidates.is_empty());
+        assert!(d.lock().unwrap().slots.is_empty());
+    }
+    #[test]
+    fn bounded_probe_admission_rejects_busy_before_resolver_or_host_io() {
+        let d = Discovery::new(
+            Arc::new(time),
+            Some(Arc::new(|_| {
+                panic!("busy qualification must not resolve registration")
+            })),
+        );
+        let held: Vec<_> = (0..16)
+            .map(|_| d.qualification_slots.clone().try_acquire_owned().unwrap())
+            .collect();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let options = ClaudeOptions {
+            executable: "/absent/claude".into(),
+            installed_plugin: "/absent/plugin".into(),
+            helper: "/absent/ariadne".into(),
+            project_root: "/absent/project".into(),
+            app_version: "0.1.0".into(),
+        };
+        assert_eq!(
+            rt.block_on(d.qualify_claude(
+                candidate(1, Instant::now()),
+                options,
+                ModEvidenceSlot::default()
+            ))
+            .unwrap_err()
+            .code,
+            CoreErrorCode::CapacityExceeded
+        );
+        assert!(d.snapshot().unwrap().candidates.is_empty());
+        drop(held);
     }
 }

@@ -577,8 +577,14 @@ fill its Claude evidence slot. Preserve the original receipt Instant and UTC
 time through the bounded qualifier, never qualification-completion time. Recheck
 the exact candidate plus current registered association before publication;
 expired, replaced or rotated evidence cannot refresh or retarget a binding.
-Changed project/loaded-root/descriptor identity invalidates earlier qualification
-and requires explicit requalification. Missing/stale evidence remains Unknown;
+Track only one evidence-slot reference per live candidate. Replacing that slot
+or changing project/loaded-root/descriptor/engine-version/registered-generation
+clears prior qualification and requires explicit requalification. An identical
+heartbeat updates the candidate without refreshing earlier qualified evidence.
+Wake clears qualification; expiry drops the cache reference and lets outside
+readers age the original evidence to stale. Sixteen bounded offloaded probes
+retain their permits after caller cancellation; busy admission returns actionable
+`capacity_exceeded`. Missing/stale evidence remains Unknown;
 it never means Idle or authorizes reconnect, claims or resending. See
 [ADR-0042](../../adr/ADR-0042-native-discovery-and-announcement-intake.md).
 

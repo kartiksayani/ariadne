@@ -1,5 +1,8 @@
+use ariadne_adapter_claude::{ClaudeAdapter, ClaudeOptions, ModEvidenceSlot};
 use ariadne_adapter_codex::CodexOptions;
-use ariadne_agent_protocol::{Availability, Compatibility};
+use ariadne_agent_protocol::{
+    Adapter, AdapterConfig, Availability, Compatibility, EndpointRef, ProbeRequest,
+};
 use ariadne_core::{fake::ScriptedCoreService, CoreErrorCode, SessionRef};
 use ariadne_domain::models::{Freshness, UtcMillis, UuidV4};
 use ariadne_runtime::{
@@ -19,7 +22,7 @@ use std::{
     },
     path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc, Mutex,
     },
     time::Duration,
@@ -46,6 +49,82 @@ fn runtime() -> Runtime {
         .enable_all()
         .build()
         .unwrap()
+}
+struct ClaudeFiles {
+    _root: tempfile::TempDir,
+    options: ClaudeOptions,
+    loaded: std::path::PathBuf,
+}
+impl ClaudeFiles {
+    fn new() -> Self {
+        let root = home();
+        let installed = root.path().join("installed");
+        let loaded = root.path().join("loaded");
+        let project = root.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let executable = root.path().join("claude");
+        let helper = root.path().join("ariadne");
+        for (path, text) in [
+            (&executable, "2.1.287 (Claude Code)"),
+            (&helper, "ariadne 0.1.0"),
+        ] {
+            fs::write(path, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' '{text}'\n")).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        for root in [&installed, &loaded] {
+            for (name, bytes) in [
+                (
+                    ".claude-plugin/plugin.json",
+                    "{\"name\":\"ariadne\",\"version\":\"0.1.0\"}",
+                ),
+                ("hooks/hooks.json", "{}"),
+                ("hooks/register.js", "// register"),
+                ("hooks/contracts.js", "// contracts"),
+                ("hooks/setup.js", "// setup"),
+                ("hooks/claims.js", "// claims"),
+                ("hooks/discovery.js", "// discovery"),
+                ("hooks/installed.js", "export default null;"),
+                ("skills/ariadne/SKILL.md", "# Structured context"),
+            ] {
+                let path = root.join(name);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, bytes).unwrap();
+            }
+        }
+        Self {
+            _root: root,
+            options: ClaudeOptions {
+                executable,
+                installed_plugin: installed,
+                helper,
+                project_root: project,
+                app_version: "0.1.0".into(),
+            },
+            loaded,
+        }
+    }
+    fn announcement(&self) -> SessionAnnouncement {
+        let mut a = announcement(&self.options.project_root);
+        a.plugin.root = self.loaded.to_str().unwrap().into();
+        a.descriptor.helper_path = self.options.helper.to_str().unwrap().into();
+        a
+    }
+    fn availability(&self, rt: &Runtime, slot: ModEvidenceSlot) -> Availability {
+        let adapter = ClaudeAdapter::new(self.options.clone(), slot, id(99)).unwrap();
+        rt.block_on(
+            adapter.probe(ProbeRequest {
+                endpoint: EndpointRef::LocalBridge {
+                    name: "claude-mod".into(),
+                },
+                configuration: serde_json::from_value::<AdapterConfig>(
+                    serde_json::json!({"namespace":"claude_code_mod","values":{}}),
+                )
+                .unwrap(),
+            }),
+        )
+        .unwrap()
+        .availability
+    }
 }
 fn announcement(root: &Path) -> SessionAnnouncement {
     SessionAnnouncement {
@@ -98,6 +177,196 @@ impl Running {
             .unwrap()
             .unwrap();
     }
+}
+
+#[test]
+fn qualification_replaces_slots_but_heartbeats_do_not_refresh_prior_evidence() {
+    let files = ClaudeFiles::new();
+    let home = home();
+    let rt = runtime();
+    let d = Discovery::new(Arc::new(time), None);
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let server = Running::start(&rt, home.path(), core.clone(), Some(d.clone()));
+    let a = files.announcement();
+    rt.block_on(call(home.path().into(), request(a.clone())))
+        .unwrap();
+    let old = ModEvidenceSlot::default();
+    let new = ModEvidenceSlot::default();
+    let selected = d.snapshot().unwrap().candidates.remove(0);
+    rt.block_on(d.qualify_claude(selected.clone(), files.options.clone(), old.clone()))
+        .unwrap();
+    assert_eq!(
+        files.availability(&rt, old.clone()),
+        Availability::Available
+    );
+    rt.block_on(d.qualify_claude(selected.clone(), files.options.clone(), new.clone()))
+        .unwrap();
+    assert_eq!(files.availability(&rt, old), Availability::Unavailable);
+    assert_eq!(
+        files.availability(&rt, new.clone()),
+        Availability::Available
+    );
+    let qualified = d.snapshot().unwrap().candidates.remove(0);
+    assert_eq!(qualified.compatibility, Compatibility::Compatible);
+    assert_eq!(qualified.observed_at, selected.observed_at);
+    // Same-identity heartbeat replaces only the candidate, not qualified slot age.
+    rt.block_on(call(home.path().into(), request(a.clone())))
+        .unwrap();
+    assert_eq!(
+        d.snapshot().unwrap().candidates[0].compatibility,
+        Compatibility::Unknown
+    );
+    assert!(rt
+        .block_on(d.qualify_claude(selected, files.options.clone(), new.clone()))
+        .is_err());
+    assert_eq!(
+        files.availability(&rt, new.clone()),
+        Availability::Available
+    );
+    // A concrete resource mismatch invalidates the current selected slot.
+    let selected = d.snapshot().unwrap().candidates.remove(0);
+    fs::write(
+        files.loaded.join("hooks/discovery.js"),
+        "// incompatible installed bytes",
+    )
+    .unwrap();
+    assert_eq!(
+        rt.block_on(d.qualify_claude(selected, files.options.clone(), new.clone()))
+            .unwrap_err()
+            .code,
+        CoreErrorCode::IncompatibleAdapter
+    );
+    assert_eq!(
+        files.availability(&rt, new.clone()),
+        Availability::Unavailable
+    );
+    fs::write(files.loaded.join("hooks/discovery.js"), "// discovery").unwrap();
+    let selected = d.snapshot().unwrap().candidates.remove(0);
+    rt.block_on(d.qualify_claude(selected, files.options.clone(), new.clone()))
+        .unwrap();
+    d.refresh_after_wake().unwrap();
+    assert_eq!(
+        files.availability(&rt, new.clone()),
+        Availability::Unavailable
+    );
+    assert_eq!(
+        d.snapshot().unwrap().candidates[0].freshness,
+        Freshness::Unknown
+    );
+    // A genuine heartbeat, followed by actual requalification, restores evidence.
+    rt.block_on(call(home.path().into(), request(a.clone())))
+        .unwrap();
+    rt.block_on(d.qualify_claude(
+        d.snapshot().unwrap().candidates.remove(0),
+        files.options.clone(),
+        new.clone(),
+    ))
+    .unwrap();
+    let mut changed = a;
+    changed.host_version = "2.1.289".into();
+    rt.block_on(call(home.path().into(), request(changed)))
+        .unwrap();
+    assert_eq!(files.availability(&rt, new), Availability::Unavailable);
+    assert!(core.history().unwrap().is_empty());
+    server.stop(&rt);
+}
+
+#[test]
+fn candidate_replacement_during_qualification_cannot_publish_into_old_slot() {
+    qualification_race(false);
+}
+
+#[test]
+fn registered_generation_rotation_during_qualification_cannot_grant_old_scope() {
+    qualification_race(true);
+}
+
+fn qualification_race(rotate: bool) {
+    let files = ClaudeFiles::new();
+    let home = home();
+    let rt = runtime();
+    let facts = AnnouncementBinding {
+        binding_id: id(2),
+        session: SessionRef {
+            project_id: id(4),
+            session_id: id(5),
+        },
+        canonical_root: fs::canonicalize(&files.options.project_root).unwrap(),
+        adapter_id: "claude_code_mod".into(),
+        external_session_id: "original-session".into(),
+        generation: id(3),
+    };
+    let current = Arc::new(Mutex::new(facts));
+    let native = current.clone();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let (entered, received) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let released = Mutex::new(released);
+    let d = Discovery::new(
+        Arc::new(time),
+        Some(Arc::new(move |_| {
+            // Two admission resolutions, two first qualification resolutions, then
+            // pause the second qualification after resource IO without holding any lock.
+            if count.fetch_add(1, Ordering::SeqCst) == 5 {
+                entered.send(()).unwrap();
+                released
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap();
+            }
+            Ok(native.lock().unwrap().clone())
+        })),
+    );
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let server = Running::start(&rt, home.path(), core.clone(), Some(d.clone()));
+    let mut a = files.announcement();
+    a.binding_scope = Some(BindingScope {
+        binding_id: id(2),
+        generation: id(3),
+    });
+    rt.block_on(call(home.path().into(), request(a.clone())))
+        .unwrap();
+    let slot = ModEvidenceSlot::default();
+    let selected = d.snapshot().unwrap().candidates.remove(0);
+    rt.block_on(d.qualify_claude(selected.clone(), files.options.clone(), slot.clone()))
+        .unwrap();
+    let pending = {
+        let d = d.clone();
+        let options = files.options.clone();
+        let slot = slot.clone();
+        rt.spawn(async move { d.qualify_claude(selected, options, slot).await })
+    };
+    received.recv_timeout(Duration::from_secs(2)).unwrap();
+    if rotate {
+        current.lock().unwrap().generation = id(6);
+    } else {
+        // This announced loaded root exists, but has never been resource-qualified.
+        a.plugin.root = files.options.installed_plugin.to_str().unwrap().into();
+        rt.block_on(call(home.path().into(), request(a))).unwrap();
+        assert_eq!(
+            files.availability(&rt, slot.clone()),
+            Availability::Unavailable
+        );
+    }
+    release.send(()).unwrap();
+    let error = rt.block_on(pending).unwrap().unwrap_err();
+    assert_eq!(
+        error.code,
+        if rotate {
+            CoreErrorCode::StaleGeneration
+        } else {
+            CoreErrorCode::InvalidArgument
+        }
+    );
+    assert_eq!(files.availability(&rt, slot), Availability::Unavailable);
+    assert_eq!(
+        d.snapshot().unwrap().candidates[0].compatibility,
+        Compatibility::Unknown
+    );
+    assert!(core.history().unwrap().is_empty());
+    server.stop(&rt);
 }
 
 #[test]

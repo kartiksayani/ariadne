@@ -11,6 +11,47 @@ function callbacks(descriptor) {
 }
 const next = async event => event;
 describe('supported Mod entry convention', () => {
+  it('announces on startup and thirty-second ticks with validated scope, then cancels intake on session end', async () => {
+    const recorded = [];
+    const h = host({handler:(argv,options) => {
+      if (argv[2] === 'announce') recorded.push(JSON.parse(options.stdin));
+    }});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);
+    expect(recorded).toHaveLength(1);expect(recorded[0].binding_scope).toBe(null);
+    const timer = h.timers().find(timer => timer.ms === 30000);
+    expect(timer).toBeDefined();
+    await hooks.get('ariadne-connect')(h.$);
+    await timer.callback();
+    expect(recorded[1].binding_scope).toEqual({binding_id:ids.binding,generation:ids.generation});
+    await hooks.get('ariadne-disconnect')(h.$);
+    await timer.callback();
+    expect(recorded[2].binding_scope).toBe(null);
+    await hooks.get('session.end')(h.$,{},next);
+    expect(timer.cancelled).toBe(true);await timer.callback();
+    expect(recorded).toHaveLength(3);expect(h.prompts).toEqual([]);
+  });
+  it('can announce an unqualified engine without admitting claims, and heartbeat failure cannot fabricate connection', async () => {
+    const h = host({version:'2.1.289'}), hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);
+    expect(h.calls.map(call => call.argv[2])).toEqual(['announce']);
+    expect(h.timer()).toBe(null);expect(h.events).toEqual([]);expect(h.prompts).toEqual([]);
+    await hooks.get('session.end')(h.$,{},next);
+    const unsupported = host({handler:argv => argv[2] === 'announce' ? failure('unsupported') : undefined});
+    await callbacks(descriptor).get('session.start')(unsupported.$,{},next);
+    expect(unsupported.logs.some(log => log.includes('unsupported'))).toBe(true);
+    expect(unsupported.calls.filter(call => call.argv[2] === 'claim')).toEqual([]);
+    expect(unsupported.events).toEqual([]);
+  });
+  it('does not create a poll timer after session end overtakes the bounded startup announcement', async () => {
+    const entered = deferred(), reply = deferred();
+    const h = host({handler:async argv => {if (argv[2] === 'announce') {entered.resolve();await reply.promise;}}});
+    const hooks = callbacks(descriptor), starting = hooks.get('session.start')(h.$,{},next);
+    await entered.promise;await hooks.get('session.end')(h.$,{},next);reply.resolve();await starting;
+    expect(h.timer()).toBe(null);expect(h.timers()).toHaveLength(1);
+    expect(h.timers()[0].cancelled).toBe(true);expect(h.calls).toHaveLength(1);
+    expect(h.prompts).toEqual([]);expect(h.events).toEqual([]);
+  });
   it('uses the SDK optional session selector and appends resume guidance without changing canonical instructions', async () => {
     const h = host();const hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);
@@ -28,7 +69,7 @@ describe('supported Mod entry convention', () => {
     for (const event of [{},{args:42},{args:'ProjectA'},{args:`${ids.session} ${ids.input}`},{args:'x'.repeat(65)}]) {
       expect((await hooks.get('ariadne-connect')(h.$,event)).text).toContain('did not complete');
     }
-    expect(h.calls.filter(call => call.options.stdin)).toEqual([]);
+    expect(h.calls.filter(call => call.argv[1] === 'binding' || call.argv[1] === 'project')).toEqual([]);
     await hooks.get('ariadne-connect')(h.$,{args:''});
     expect(JSON.parse(h.calls.find(call => call.argv[1] === 'binding').options.stdin).command.params.existing_session_id).toBe(null);
     expect(h.prompts).toEqual([]);
@@ -53,10 +94,10 @@ describe('supported Mod entry convention', () => {
     for (const [config,version] of [[null,'2.1.287'],[descriptor,'2.1.289'],[{...descriptor,helperPath:'ariadne'},'2.1.287']]) {
       const h = host({version});const hooks = callbacks(config);
       await hooks.get('session.start')(h.$,{},next);
-      expect(h.timer()).toBe(null);expect(h.calls).toEqual([]);
+      expect(h.timer()).toBe(null);expect(h.calls.filter(call => call.argv[2] !== 'announce')).toEqual([]);
       expect((await hooks.get('ariadne-connect')(h.$)).text).toContain('did not complete');
       expect(h.logs.some(log => log.includes('matching') || log.includes('2.1.287'))).toBe(true);
-      expect(h.calls).toEqual([]);
+      expect(h.calls.filter(call => call.argv[2] !== 'announce')).toEqual([]);
     }
   });
   it('forwards matching captured turn callbacks and blocks reconnect/disconnect with unsettled original work', async () => {

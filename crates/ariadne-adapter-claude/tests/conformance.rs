@@ -88,7 +88,7 @@ impl Fixture {
             for (name,bytes) in [
                 (".claude-plugin/plugin.json",r#"{"name":"ariadne","version":"0.1.0"}"#),
                 ("hooks/hooks.json","{}"),("hooks/register.js","// register"),("hooks/contracts.js","// contracts"),
-                ("hooks/setup.js","// setup"),("hooks/claims.js","// claims"),
+                ("hooks/setup.js","// setup"),("hooks/claims.js","// claims"),("hooks/discovery.js","// discovery"),
                 ("hooks/installed.js","export default Object.freeze({helperPath:'/installed/helper',appVersion:'0.1.0',apiVersion:1});"),
                 ("skills/ariadne/SKILL.md","# Structured Ariadne context"),
             ] { let path = dir.join(name); fs::create_dir_all(path.parent().unwrap()).unwrap(); fs::write(path,bytes).unwrap(); }
@@ -149,6 +149,93 @@ impl Fixture {
 fn executable_file(path: &Path, bytes: &str) {
     fs::write(path, bytes).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[test]
+fn native_qualifier_preserves_original_receipt_time_and_rejects_expired_evidence() {
+    let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+    let observed = UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap();
+    let evidence = fixture
+        .options
+        .qualify_identity(
+            fixture.identity(),
+            observed.clone(),
+            Instant::now() - Duration::from_secs(1),
+            Instant::now() + Duration::from_secs(20),
+        )
+        .unwrap();
+    fixture.slot.publish(evidence).unwrap();
+    let result = wait(fixture.adapter().connect(connect())).unwrap();
+    assert_eq!(result.observation.last_seen_at, Some(observed.clone()));
+    assert_eq!(result.observation.freshness, Freshness::Fresh);
+    let error = fixture
+        .options
+        .qualify_identity(
+            fixture.identity(),
+            observed,
+            Instant::now() - Duration::from_secs(90),
+            Instant::now() + Duration::from_secs(20),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, AdapterErrorCode::HostUnreachable);
+    assert!(error.message.contains("stale"));
+    let error = fixture
+        .options
+        .qualify_identity(
+            fixture.identity(),
+            UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap(),
+            Instant::now(),
+            Instant::now(),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, AdapterErrorCode::HostUnreachable);
+}
+
+#[test]
+fn discovery_resource_is_required_and_compared_at_exact_loaded_root() {
+    for missing in [true, false] {
+        let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+        let path = fixture.loaded.join("hooks/discovery.js");
+        if missing {
+            fs::remove_file(path).unwrap();
+        } else {
+            fs::write(path, "different discovery bytes").unwrap();
+        }
+        assert!(fixture
+            .options
+            .qualify_identity(
+                fixture.identity(),
+                UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap(),
+                Instant::now(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .is_err());
+    }
+}
+
+#[test]
+fn native_qualifier_caps_a_longer_caller_deadline_at_five_seconds() {
+    let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+    // exec makes sleep the owned --version child itself, with no orphan subprocess.
+    executable_file(
+        &fixture.options.executable,
+        "#!/bin/sh\nexec /bin/sleep 30\n",
+    );
+    let started = Instant::now();
+    let error = fixture
+        .options
+        .qualify_identity(
+            fixture.identity(),
+            UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap(),
+            started,
+            started + Duration::from_secs(20),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, AdapterErrorCode::HostUnreachable);
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "longer caller deadline must not extend the native qualifier maximum"
+    );
 }
 
 #[test]

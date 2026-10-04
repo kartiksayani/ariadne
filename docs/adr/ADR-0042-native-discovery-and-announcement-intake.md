@@ -34,8 +34,8 @@ locks end before path/resource IO, and association is checked again afterward.
 Unbound admission needs no resolver or binding lease. Existing claim gates and
 replay-first routing remain unchanged when discovery is absent or enabled.
 
-After the actual P3.4 surface is merged, its narrow native qualifier reuses
-existing executable/version/resource comparisons and returns opaque verified Mod
+The merged P3.4 surface's narrow native qualifier reuses existing
+executable/version/resource comparisons and returns opaque verified Mod
 evidence. A received_at constructor preserves the original native Instant and
 UTC time; qualification cannot create a new heartbeat. The caller's shorter
 deadline wins, with 5 seconds as the maximum. Runtime offloads probes and rechecks
@@ -44,6 +44,20 @@ filling its slot. Failed, expired, replaced or rotated candidates remain Unknown
 Include discovery.js in the exact installed/loaded resource inventory. P6's
 immutable version directories refuse same-version replacement with different
 bytes; this is version/cache compatibility, not memory-byte attestation.
+
+Track at most one evidence-slot reference per live candidate, within the 256
+candidate cap. Replacing a slot or changing project, loaded root, descriptor,
+engine version or registered generation clears the previous slot. Identical
+heartbeats update only the candidate; they do not refresh earlier qualified
+evidence. A successful explicit requalification publishes that heartbeat's
+original times after resolving association outside all memory locks and checking
+the unchanged snapshot under the short publication lock. A failed older probe
+cannot invalidate a newer snapshot. Wake clears qualification; expiry removes
+the tracked reference while outside readers retain the original aged evidence,
+which becomes stale without a synthetic Disconnected/Idle fact. No resolver or
+resource IO spans this lock. Sixteen existing-runtime blocking probe permits,
+retained by started work after caller cancellation, bound simultaneous probes;
+busy admission returns actionable capacity_exceeded without granting authority.
 
 Codex discovery reuses the verified initialized unbound reader. Only native
 `set_connection_ui_open(true)` starts scans, every 30 seconds. Use absolute
@@ -61,7 +75,11 @@ claim routes, exact acknowledgement correlation, current association checks and
 native UI activation/stop. Candidate tests cover capacity/expiry, canonical paths,
 rotation and incomplete-scan retention; provider fixture transport tests prove
 read-only initialized reuse and identity/deadline checks. SDK tests use actual
-source with helper barriers, no live model calls.
+source with helper barriers, no live model calls. Native tests cover generation
+rotation and candidate replacement during qualification, slot replacement,
+resource mismatch, heartbeat/wake invalidation and original-age expiry. Mod
+startup/timer tests prove unbound and captured bound announcements, even for an
+unqualified engine, without enabling claims or fabricating Connected evidence.
 
 Lifecycle facts retain the existing Mod bridge report-to-Core path. Candidate
 presence cannot override persisted terminal/conflict state or establish execution.
