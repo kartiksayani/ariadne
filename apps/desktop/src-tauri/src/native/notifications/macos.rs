@@ -55,8 +55,7 @@ define_class!(
         ) {
             let state = self.ivars();
             if state.active.load(Ordering::Acquire)
-                && response.actionIdentifier().as_ref()
-                    == unsafe { UNNotificationDefaultActionIdentifier }
+                && &*response.actionIdentifier() == unsafe { UNNotificationDefaultActionIdentifier }
             {
                 let dictionary = response.notification().request().content().userInfo();
                 let key = NSString::from_str("ariadne_route");
