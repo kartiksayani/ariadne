@@ -39,3 +39,11 @@ trusted native Claude qualification, discovery announcements, and live host
 acceptance remain the P6/P2.4/P2.2/P3.4/P3.7 joins. The currently shipped helper
 truthfully cannot perform those owner/report operations, so this Mod fails clearly
 instead of pretending to connect or persist. No live host was launched or prompted.
+
+Native compatibility/normalization follows ADR0037: actual SDK plugin{name,root},
+immutable imported descriptor and exact-root native resource/version checks. There is
+no SDK plugin.version property. Lifecycle timestamps are canonical ISO UTC milliseconds;
+the same source-backed fixtures are consumed by Rust. Missing fresh native announcement
+is Unknown/unavailable;2.1.289 remains unqualified. P3.7 intake/P6 installation and the
+production owner/report/Core join remain pending. PR54/ADR0038 tracks the optional
+existing-session selector and structured context handoff; it does not transfer host memory.

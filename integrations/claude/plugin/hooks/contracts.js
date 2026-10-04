@@ -18,11 +18,13 @@ export async function hash(text) {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', encoder.encode(text));
   return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
 }
-export function descriptorValid(descriptor, pluginVersion) {
+export function descriptorValid(descriptor, plugin) {
   return fields(descriptor, ['helperPath', 'appVersion', 'apiVersion'])
     && bounded(descriptor.helperPath) && descriptor.helperPath.startsWith('/')
     && descriptor.helperPath.split('/').every(part => part !== '.' && part !== '..')
-    && bounded(pluginVersion) && descriptor.appVersion === pluginVersion
+    && bounded(descriptor.appVersion) && fields(plugin,['name','root']) && plugin.name === 'ariadne'
+    && bounded(plugin.root) && plugin.root.startsWith('/')
+    && plugin.root.split('/').every(part => part !== '.' && part !== '..')
     && descriptor.apiVersion === API_VERSION;
 }
 export function envelope(result) {
@@ -95,5 +97,5 @@ export async function lifecycle(scope, claim, kind, payload, turn = null) {
     : ['claude-mod',scope.binding_id,scope.generation,claim.attempt_id,turn,kind];
   return { event_id: await hash(JSON.stringify(identity)), binding_id: scope.binding_id,
     generation: scope.generation, input_id: claim.input_id, attempt_id: claim.attempt_id,
-    host_turn_id: turn, observed_at: Date.now(), kind, payload };
+    host_turn_id: turn, observed_at: new Date().toISOString(), kind, payload };
 }

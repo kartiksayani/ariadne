@@ -1,7 +1,7 @@
 import { API_VERSION, HOST_VERSION, ModError, bounded, descriptorValid, envelope, fields, uuid } from './contracts.js';
 
 export async function qualify($, descriptor) {
-  if (!descriptorValid(descriptor,$.plugin.version)) {
+  if (!descriptorValid(descriptor,$.plugin)) {
     throw new ModError('Install the matching Ariadne app and Mod; the installed helper descriptor is missing or incompatible.');
   }
   if ((await $.session.version()).version !== HOST_VERSION) {

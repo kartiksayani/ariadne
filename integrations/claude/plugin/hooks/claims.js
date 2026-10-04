@@ -173,7 +173,7 @@ export function claimLoop(helperPath, binding) {
     if (sessionEnd && !disconnected) {
       disconnected = true;
       pending.push({event:{event_id:globalThis.crypto.randomUUID(),binding_id:binding.binding_id,generation:binding.generation,
-        input_id:null,attempt_id:null,host_turn_id:null,observed_at:Date.now(),kind:'disconnected',payload:{reason:'Original Claude session ended.'}},terminal:false});
+        input_id:null,attempt_id:null,host_turn_id:null,observed_at:new Date().toISOString(),kind:'disconnected',payload:{reason:'Original Claude session ended.'}},terminal:false});
     }
     try { await flush($); }
     catch { log($,'Lifecycle evidence remains unpersisted at session end; recover it in the app.'); }
