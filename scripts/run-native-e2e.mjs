@@ -162,7 +162,7 @@ export async function runNative() {
     await json(join(evidence, 'run.json'), details);
     await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: buildEnv(join(repo, 'target/native-e2e'), true), log: join(evidence, 'build.log') });
     await command('cargo', ['build', '-p', 'ariadne-cli', '--locked'], { env: buildEnv(join(repo, 'target/native-e2e')), log: join(evidence, 'cli-build.log') });
-    await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs'], {
+    await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs', 'tests/e2e/graph/native-helper.test.mjs'], {
       env: { ...process.env, ARIADNE_FIXTURE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'fixture-cli.log'),
     });
     await command(process.execPath, ['--test', 'tests/e2e/tree/fixture.test.mjs'], {
