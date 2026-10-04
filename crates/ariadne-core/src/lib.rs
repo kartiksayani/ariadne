@@ -8,6 +8,8 @@ mod errors;
 #[cfg(any(test, feature = "test-support"))]
 #[path = "service/fake.rs"]
 pub mod fake;
+pub mod inputs;
+mod receipts;
 #[path = "service/validation.rs"]
 mod validation;
 #[path = "service/wire.rs"]
