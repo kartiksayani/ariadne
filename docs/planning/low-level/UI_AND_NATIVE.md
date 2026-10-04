@@ -80,7 +80,8 @@ registered reveal/session-open callbacks and optional real answer control;
 without that control the panel is read-only. Stopping the reader removes its
 subscriptions/poll and never closes another screen's session store. Current
 delivery labels use the active attempt and persisted facts, including Waiting
-for result during grace; no renderer timer creates Missing result or Handled.
+for result during grace. Queued/busy presentation subscribes to the shared scoped
+SessionStore presence cache, qualified by current generation and freshness; no renderer timer creates Missing result or Handled.
 Actual owner/draft actions, core/store/runtime composition and native Waiting
 acceptance remain their original task joins, not completion through a scripted
 transport.

@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Page, ProjectSummary, QueryCursor, SessionSummary, SummaryCounts } from '../../generated/domain/models';
-import type { ProjectListResult, SessionListResult } from '../../generated/core';
-import { CoreFailure, ServiceFailure, immutable, type Immutable, type OpenSessions, type RendererService, type Unsubscribe } from '../../data';
+import type { ProjectListResult, SessionListResult, SessionRef } from '../../generated/core';
+import { CoreFailure, ServiceFailure, immutable, type Immutable, type OpenSessions, type RendererService, type SessionStore, type SessionState, type Unsubscribe } from '../../data';
 import { sentRows, waitingRows, type SentRow, type WaitingRow, type WaitingSession } from './rows';
 
 export interface WaitingState {
@@ -71,6 +71,8 @@ export class WaitingStore {
   private state: WaitingState = Object.freeze({ status: 'loading', counts: null, waiting: Object.freeze([]), sent: Object.freeze([]), sessions: Object.freeze([]), unavailableProjects: Object.freeze([]), error: null });
   private readonly listeners = new Set<() => void>();
   private subscriptions: Unsubscribe[] = [];
+  private capturedStores = new Map<string, SessionStore>();
+  private sessionSubscriptions: Unsubscribe[] = [];
   private setup: Promise<void> | null = null;
   private flight: Promise<void> | null = null;
   private requested = false;
@@ -80,6 +82,11 @@ export class WaitingStore {
   private readonly visible = () => { if (document.visibilityState === 'visible') this.reconcile(); };
   constructor(private readonly service: RendererService, private readonly opened: OpenSessions) {}
   readonly getSnapshot = (): WaitingState => this.state;
+  // Only stores from the complete registered capture are exposed. Presence is
+  // read from the shared canonical cache, never copied into durable summaries.
+  sessionState(route: SessionRef): SessionState | null {
+    return this.capturedStores.get(JSON.stringify([route.project_id, route.session_id]))?.getSnapshot() ?? null;
+  }
   readonly subscribe = (receive: () => void): Unsubscribe => {
     this.listeners.add(receive); return () => { this.listeners.delete(receive); };
   };
@@ -135,6 +142,7 @@ export class WaitingStore {
         if (this.stopped) return;
         const projects = new Map(capture.projects.map(project => [project.project_id, project]));
         const sessions: WaitingSession[] = [];
+        const capturedStores = new Map<string, SessionStore>();
         // Sequential registered reads bound concurrent IO without truncating the catalogue.
         for (const summary of capture.sessions) {
           const project = projects.get(summary.project_id);
@@ -145,9 +153,13 @@ export class WaitingStore {
           const state = store.getSnapshot();
           if (state.error) throw state.error;
           if (!state.snapshot || state.snapshot.session.revision !== summary.revision) throw new ServiceFailure('invalid_response');
+          capturedStores.set(JSON.stringify([summary.project_id, summary.session_id]), store);
           sessions.push(Object.freeze({ project: immutable(project), summary: immutable(summary), session: state.snapshot.session }));
         }
         const waiting = waitingRows(sessions), sent = sentRows(sessions);
+        this.sessionSubscriptions.forEach(unsubscribe => unsubscribe());
+        this.capturedStores = capturedStores;
+        this.sessionSubscriptions = [...capturedStores.values()].map(store => store.subscribe(() => this.publish({})));
         this.publish({ sessions: Object.freeze(sessions), waiting, sent, counts: immutable(capture.result.counts),
           unavailableProjects: immutable(capture.projects.filter(project => project.availability === 'unavailable')),
           status: this.requested || sessions.some(session => this.opened.open({ project_id: session.session.project_id,
@@ -165,6 +177,8 @@ export class WaitingStore {
     window.removeEventListener('focus', this.reconcile); window.removeEventListener('pageshow', this.reconcile);
     document.removeEventListener('visibilitychange', this.visible);
     this.subscriptions.forEach(unsubscribe => unsubscribe()); this.subscriptions = [];
+    this.sessionSubscriptions.forEach(unsubscribe => unsubscribe()); this.sessionSubscriptions = [];
+    this.capturedStores.clear();
     this.listeners.clear();
   }
 }
