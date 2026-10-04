@@ -99,3 +99,4 @@ pub fn report(
     Ok(receipt)
 }
 pub mod command;
+mod native;
