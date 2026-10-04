@@ -1,0 +1,91 @@
+.session-topic-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  color: var(--color-text);
+}
+
+.session-topic-graph header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.session-topic-graph h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.topic-graph-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topic-graph-controls output {
+  min-width: 42px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.topic-graph-canvas {
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: 10px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.topic-graph-canvas:active {
+  cursor: grabbing;
+}
+
+.topic-graph-node {
+  cursor: pointer;
+}
+
+.topic-graph-node rect {
+  fill: var(--color-surface);
+  stroke: var(--color-divider);
+  stroke-width: 1;
+}
+
+.topic-graph-node[aria-pressed="true"] rect, .topic-graph-node:focus rect {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+}
+
+.topic-graph-context {
+  opacity: 0.55;
+}
+
+.topic-node-id {
+  fill: var(--color-text);
+  font: 600 12px var(--font-body);
+}
+
+.topic-node-preview {
+  fill: color-mix(in srgb, var(--color-text) 68%, transparent);
+  font: 12px var(--font-body);
+}
+
+.topic-replacement-label {
+  fill: var(--st-replaced);
+  font: 11px var(--font-body);
+}
+
+.session-topic-graph footer, .topic-replacement-links {
+  color: color-mix(in srgb, var(--color-text) 68%, transparent);
+  font-size: 12px;
+}
+
+.topic-replacement-links {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.topic-replacement-links:empty {
+  display: none;
+}

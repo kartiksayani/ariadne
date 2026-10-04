@@ -1,0 +1,166 @@
+.item-history, .message-history-rail {
+  color: var(--color-text);
+  background: var(--a-card);
+  border-left: 1px solid var(--color-divider);
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  box-sizing: border-box;
+
+}
+
+.item-history {
+  width: 400px;
+  min-width: 400px;
+
+}
+
+.history-header, .history-meta, .history-tabs, .history-actions, .history-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+
+}
+
+.history-header {
+  justify-content: space-between;
+  margin-bottom: 16px;
+
+}
+
+.history-meta {
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  font-size: 11px;
+  line-height: 1.6;
+
+}
+
+.history-meta time {
+  overflow-wrap: anywhere;
+
+}
+
+.history-body, .history-round h3, .item-history h2 {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+
+}
+
+.history-body {
+  font-size: 13px;
+  margin: 8px 0;
+
+}
+
+.item-history h2 {
+  font-size: 20px;
+  font-weight: 600;
+
+}
+
+.history-round h3 {
+  font-size: 14px;
+  font-weight: 600;
+
+}
+
+.history-round, .history-former {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+
+}
+
+.history-current {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+
+}
+
+.history-message {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-divider);
+
+}
+
+.history-highlight {
+  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
+
+}
+
+.history-pinned {
+  box-shadow: inset 3px 0 var(--color-accent);
+
+}
+
+.history-answer {
+  margin: 10px 0;
+  color: var(--a-acc-text);
+
+}
+
+.history-result {
+  padding: 10px 0;
+  border-top: 1px dashed var(--color-divider);
+
+}
+
+.history-options {
+  padding-left: 20px;
+  font-size: 13px;
+
+}
+
+.history-fork {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  margin-top: 8px;
+
+}
+
+.history-fork span {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 65%, transparent);
+
+}
+
+.item-history button, .message-history-rail button {
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  border-radius: 5px;
+  padding: 5px 8px;
+
+}
+
+.history-tabs {
+  margin-top: 20px;
+
+}
+
+.history-tabs [aria-pressed="true"] {
+  color: var(--a-acc-text);
+  border-color: var(--color-accent);
+
+}
+
+.history-link, .history-links button {
+  font-size: 12px !important;
+
+}
+
+.item-history button:disabled {
+  opacity: .6;
+  cursor: default;
+
+}

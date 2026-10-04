@@ -78,6 +78,21 @@ Global Waiting contains an item only when its status is `waiting_on_me` and it h
 
 Use the API's `SummaryCounts` projection consistently: `waiting_unanswered` drives global/project Waiting counts and the tray; `sent_inputs` counts inputs by `queued`, `in_flight`, and `needs_attention`; `items_by_status` is the separate raw seven-status count. Topic/session chips count nonarchived items before local search/filter. Footer shows visible and total scope. Archived topic counts stay in Archive. Inaccessible roots make counts partial and display an incomplete marker, never zero. These counts are not recomputed from whatever rows happen to be visible after filtering.
 
+The early P4.3 read module publishes `WaitingStore`, `waitingRows`, `sentRows`,
+`deliveryEvidence` and `WaitingPanel` over the merged renderer service. It pages
+the complete registered catalogue, matches every snapshot to its backend summary
+revision, preserves the last complete read on failure, and retains backend counts
+and partial metadata. Composition supplies the shared `OpenSessions` cache,
+registered reveal/session-open callbacks and optional real answer control;
+without that control the panel is read-only. Stopping the reader removes its
+subscriptions/poll and never closes another screen's session store. Current
+delivery labels use the active attempt and persisted facts, including Waiting
+for result during grace. Queued/busy presentation subscribes to the shared scoped
+SessionStore presence cache, qualified by current generation and freshness; no renderer timer creates Missing result or Handled.
+Actual owner/draft actions, core/store/runtime composition and native Waiting
+acceptance remain their original task joins, not completion through a scripted
+transport.
+
 ## 3. Tree, detail, message rail, search, and filters
 
 Build `childrenByParent`, `itemById`, `messagesByItem`, `roundsByItem`, and active-descendant counts once per changed snapshot. Sort siblings by stable numeric item reference while never reassigning references. Store topic order explicitly.
@@ -113,6 +128,16 @@ P4.4 acceptance remain pending; these reusable module tests do not complete them
 Render SVG for the selected topic. Use deterministic ordered tree layout: 190x66 px nodes, 254 px horizontal depth step, minimum 94 px leaf-center spacing, 32 px extra spacing between roots. Leaves follow stable item order; parent center is midway between first and last child. Parent edges are cubic curves from right-center to left-center. Replacement edges are dashed and labelled and do not participate in parent layout or cycle checks.
 
 Keep viewport transform `{x,y,scale}` local to the view; clamp scale to 0.25–2.0. Wheel zoom anchors cursor, dragging blank canvas pans, Fit adds 32 px bounds padding. Tree/graph share item selection and filters. Graph selection opens the same detail. A two-line node preview is allowed; detail always shows the complete sentence. Accessible Fit/Zoom/Switch to tree controls mean graph is never the only route to an action.
+
+The explicit selected topic must exist and agree with a nonnull saved topic
+filter. Keep exact filtered membership and ordinary ancestor context. Draw a
+replacement edge only when both endpoints are in that layout; a hidden or
+cross-topic replacement stays accessible through the registered reveal route,
+without adding context nodes or rewriting filters. Fit centers the complete
+uncropped bounds with 32px padding, then clamps to the universal zoom range. When
+minimum zoom cannot fit those bounds, show the actual zoom and a concise overflow
+status with pan/tree access rather than implying all geometry fits. See
+[ADR-0050](../../adr/ADR-0050-graph-filter-membership-and-bounded-fit.md).
 
 Lay out the complete filtered topic when its structure or filter changes; pan/zoom
 does not recompute geometry. Above 300 layout nodes, cull SVG elements to the
