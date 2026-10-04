@@ -1026,6 +1026,10 @@ fn resolved_history() -> Session {
         message.attempt_id = None;
         message.host_turn_id = None;
         let origin = message.origin.as_mut().unwrap();
+        // These new copied topic-level messages have no direct source item or
+        // round; do not retain the cloned Reply's mapped direct targets.
+        origin.source_target.item_id = None;
+        origin.source_target.round_id = None;
         origin.author = author;
         origin.entity_id = id(910 + offset);
         session
