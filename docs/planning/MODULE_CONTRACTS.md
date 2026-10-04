@@ -42,6 +42,32 @@ write; existing `create_with_receipt` remains a compatible no-op wrapper. Existi
 session mutation checks in `transact`'s apply callback. Deadline rejection never
 cancels persistence already begun or changes commit uncertainty/replay semantics.
 
+Desktop composition owns the native startup, executor and shutdown wiring. Its
+private bridge admits Core calls onto that owned executor and returns their
+authoritative results; it must not mask saved replay or persistence with an outer
+deadline. Provider admission retains the original deadline. Wake fences new
+admissions and drains admitted work before replacing activation; Quit wins over
+wake and retains ownership until admitted work has drained. No ordinary worker
+lock is held across Core/provider IO or result waits.
+
+The tray consumes the existing validated desktop query envelope through the
+additive `DesktopService::native_query` method. Composition installs `NativeTray`
+after managing the real service, feeds `refresh` from existing watcher/fallback/
+focus events, and calls `stop` before runtime shutdown. Tray owns its bounded
+coalescing feed and notification policy, not a second global scanner. Lifecycle
+diagnostics replace a bounded display snapshot; they never consume recovery
+facts or grant dispatch authority. Install the single notification delegate on
+the main thread before launch callbacks, retain it there, and fence callbacks
+before draining the feed. Shutdown failure does not reactivate callbacks.
+
+Recovery action controllers live for the application lifetime, independently of
+open views. Reopening a session may attach its new data reader only to the same
+immutable project/session route; pending request bodies and operation IDs remain
+frozen. Generic pre-Core errors cannot prove an earlier uncertain action was
+unsaved. Only verified replay-first transactional rejections permit a corrected
+new deliberate action. Actual restart reloads canonical state without automatic
+resend or a new persisted client journal.
+
 ## Streams and owned shared files
 
 | Stream | First independent assignment | Subsequent module work |
