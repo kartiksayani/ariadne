@@ -24,6 +24,7 @@
     "apps/desktop/src-tauri/build.rs",
     "apps/desktop/src-tauri/src/native/mod.rs",
     "apps/desktop/src-tauri/src/native/window/mod.rs",
+    "apps/desktop/src-tauri/src/native/tray/mod.rs",
     "integrations/claude/plugin/hooks/installed.js"
   ]
 }

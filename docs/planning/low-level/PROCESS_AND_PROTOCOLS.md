@@ -399,6 +399,17 @@ into shell commands. Helper resolves state via explicit binding handles.
    `/ariadne-disconnect`; install a1s `$.clock.every` poll with reentrancy guard.
 2. Connect gets `$.session.id()` and `$.session.cwd()`, registers/validates project
    and host binding through CLI, returns IDs/instruction snippet and generation.
+   After validating the full saved receipt and explicit target, publish its exact
+   binding/generation through the existing bound announcement before requesting
+   lease-backed status. Retain saved scope and the original connect request when
+   its acknowledgement or status is pending; explicitly retry the same selector
+   once native reconciliation publishes the route. Pending status enables no
+   claims and cannot manufacture Connected or a fresh binding.
+   Retain a quiesced existing claim-loop reporter for the validated saved scope
+   before those awaits: actual session end still reports Disconnected while status
+   or its acknowledgement is pending, including a late saved receipt. Preserve
+   distinct original-loop callbacks and unsaved reports, and reuse identical
+   scope/report identities on failure instead of overwriting them.
    Reconnect with outstanding work is recovery_required, not an automatic replay.
 3. When no local active claim, poll desktop through `bridge claim`. Desktop alone
    decides eligibility; no claim if app absent, paused or incompatible.
@@ -494,8 +505,23 @@ Retain original and first contradictory terminal snapshot with the same terminal
 fallback identity, pause claims and require reconciliation. Further unsupported
 distinct terminal revisions retain one bounded explicit uncertainty/gap fact,
 stop intake for that claim and expose failure; additional raw callbacks are not
-claimed persisted. They never overwrite retained unsaved facts. P3.3 source
-consumers do not complete the actual P2.2/P2.4/P3.4/P3.7/P6 joins; see ADR0035.
+claimed persisted. They never overwrite retained unsaved facts. The consuming
+installed test renders shipped immutable setup resources, imports that actual
+Mod and forwards helper argv/stdin to the production executable, with actual
+native activation/private control/Core/Store. Only Claude SDK/host and its version
+response are scripted. Existing-session history and future-input isolation,
+result/completion ordering and late original-scope reports are deterministic
+installed-composition evidence; live-host M7 remains separate.
+
+Following native qualification, pre-ID facts and final Adapter.connect share the
+same conditional capability constructor: installed helper release `0.1.0` supports
+domain CLI commands, unknown releases and domain MCP remain unsupported. Support
+still requires the exact selected helper/version, fresh SDK identity/project,
+Claude `2.1.287` and all nine loaded/installed resources. It grants no Core authority,
+dispatch admission, host approval or individual operation success. Immutable release
+identity cannot distinguish different helper builds reporting the same version;
+changed command semantics require a changed release identity. No cryptographic
+helper attestation is claimed. See ADR-0051.
 
 ## 4. Codex 0.160.0 adapter
 
