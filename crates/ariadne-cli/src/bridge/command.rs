@@ -1,5 +1,5 @@
 //! Structured executable bridge route; production report composition stays explicit.
-use super::claim;
+use super::{claim, connection_status};
 use ariadne_core::{
     ApplicationEnvelope, ClaimRequest, CoreError, CoreErrorCode, FailureEnvelope, FailureFlag,
     SuccessEnvelope, SuccessFlag,
@@ -88,6 +88,21 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
     let binding_id = binding.ok_or_else(|| invalid("Explicit --binding is required."))?;
     let generation = generation.ok_or_else(|| invalid("Explicit --generation is required."))?;
     match *method {
+        "connection-status" => {
+            if json_stdin {
+                return Err(invalid("Connection status does not accept stdin payloads."));
+            }
+            let request_id = request_id.ok_or_else(|| {
+                invalid("Explicit --request-id is required for status correlation.")
+            })?;
+            serde_json::to_value(connection_status(
+                home_from_environment()?,
+                binding_id,
+                generation,
+                request_id,
+            )?)
+            .map_err(|_| invalid("Cannot serialize canonical binding summary."))
+        }
         "claim" => {
             if json_stdin {
                 return Err(invalid("Claim does not accept stdin payloads."));

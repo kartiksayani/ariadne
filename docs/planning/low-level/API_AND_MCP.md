@@ -472,6 +472,18 @@ A reference to the wrong topic/parent rejects the entire batch.
 `project register` and `binding connect` are setup/owner commands, not model tools.
 Claude /ariadne-connect supplies actual $.session.id/cwd through bridge; Codex
 connect takes user-selected known thread and validates thread/read before writing.
+
+The Mod sends `project register --json-stdin`, `binding connect --json-stdin` and
+`binding disconnect --json-stdin` exact OwnerMutationRequest `{session,command}`
+bodies; command must match argv. Bootstrap uses session:null, disconnect the
+registered SessionRef. Helpers return canonical ApplicationEnvelope<MutationReceipt>.
+`bridge claim --binding B --generation G --request-id UUID` keeps the original
+request ID after uncertainty. Read-only `bridge connection-status` uses the same
+explicit flags with a fresh request UUID and returns ApplicationEnvelope<BindingSummary>
+from the existing private control projection. `bridge report --binding B
+--generation G --json-stdin` receives one canonical NormalizedEvent and returns
+ApplicationEnvelope<EventReceipt>; exact pending event IDs/bytes survive failures.
+None of these helper consumers add a local DTO or authorize dispatch from status.
 Connect returns the stable binding handle and an instruction snippet:
 
 ```text

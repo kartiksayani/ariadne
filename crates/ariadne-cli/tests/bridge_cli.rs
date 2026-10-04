@@ -117,6 +117,85 @@ fn executable_claim_uses_fixed_private_socket_and_preserves_saved_shared_receipt
     server.join().unwrap();
 }
 #[test]
+fn executable_status_preserves_unknown_host_state_and_explicit_correlation() {
+    let r = cases::load(root()).routing;
+    let home = home();
+    let owner = DesktopOwner::acquire(home.path()).unwrap();
+    let path = owner.control_path();
+    let listener = UnixListener::bind(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let status = serde_json::json!({
+        "id":r.binding_id,"generation":r.generation,"adapter_id":"claude_code_mod",
+        "external_session_id":"original-session","dispatch_state":"recovery_required",
+        "owner_paused":false,"pause_reason":null,"connection_state":"unknown","presence":null
+    });
+    let expected = status.clone();
+    let request_id = r.generation.clone();
+    let scope = BindingScope {
+        binding_id: r.binding_id.clone(),
+        generation: r.generation.clone(),
+    };
+    let server = std::thread::spawn(move || {
+        let _owner = owner;
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut length = [0; 4];
+        stream.read_exact(&mut length).unwrap();
+        let mut bytes = vec![0; u32::from_be_bytes(length) as usize];
+        stream.read_exact(&mut bytes).unwrap();
+        let request: ControlRequest = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(request.id, request_id);
+        assert_eq!(request.method, ControlMethod::ConnectionStatus(scope));
+        let bytes = serde_json::to_vec(
+            &serde_json::json!({"v":1,"kind":"response","id":request.id,"result":status}),
+        )
+        .unwrap();
+        stream
+            .write_all(&(bytes.len() as u32).to_be_bytes())
+            .unwrap();
+        stream.write_all(&bytes).unwrap();
+    });
+    let child = command()
+        .args([
+            "bridge",
+            "connection-status",
+            "--binding",
+            r.binding_id.as_str(),
+            "--generation",
+            r.generation.as_str(),
+            "--request-id",
+            r.generation.as_str(),
+        ])
+        .env("ARIADNE_HOME", home.path())
+        .output()
+        .unwrap();
+    assert!(child.status.success(), "{:?}", child);
+    assert!(child.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&child.stdout).unwrap(),
+        serde_json::json!({"api_version":1,"ok":true,"data":expected})
+    );
+    server.join().unwrap();
+    for extra in [vec![], vec!["--json-stdin"]] {
+        let mut args = vec![
+            "bridge",
+            "connection-status",
+            "--binding",
+            r.binding_id.as_str(),
+            "--generation",
+            r.generation.as_str(),
+        ];
+        args.extend(extra);
+        let result = output(&args, None);
+        assert_eq!(result.status.code(), Some(2));
+    }
+}
+#[test]
 fn shared_reports_call_injected_core_after_desktop_exit_without_claim_or_socket() {
     let corpus = cases::load(root());
     let home = home();
