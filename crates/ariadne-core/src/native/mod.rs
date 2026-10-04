@@ -14,7 +14,7 @@ use crate::{
     history_actions::HistoryActionService,
     inputs::InputService,
     queries::QueryService,
-    recovery::RecoveryService,
+    recovery::{RecoveryObservation, RecoveryService},
     *,
 };
 use ariadne_domain::models::*;
@@ -52,6 +52,27 @@ impl NativeCoreService {
 
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Native-only recovery wiring supplies provider-qualified presence. Ordinary
+    /// owner calls retain Unknown; replay and current binding checks stay inside
+    /// the recovery transaction. This call never queries or contacts a host.
+    pub fn execute_recovery_with_observation(
+        &self,
+        context: OwnerContext,
+        command: OwnerCommand,
+        observation: Option<&RecoveryObservation>,
+    ) -> Result<MutationReceipt, CoreError> {
+        command.validate_wire()?;
+        if !matches!(command, OwnerCommand::InputResolve { .. }) {
+            return Err(errors::local(
+                CoreErrorCode::InvalidArgument,
+                "Expected input_resolve",
+            ));
+        }
+        RecoveryService::new(&self.registry)
+            .execute(&context, &command, observation, (self.now)())
+            .map_err(errors::recovery)
     }
 
     /// Resolve only registered project/session membership. Mutation eligibility,
@@ -161,9 +182,9 @@ impl CoreService for NativeCoreService {
                     .execute(&context, &command, || (self.allocate)(), (self.now)())
                     .map_err(errors::input)
             }
-            OwnerCommand::InputResolve { .. } => RecoveryService::new(&self.registry)
-                .execute(&context, &command, None, (self.now)())
-                .map_err(errors::recovery),
+            OwnerCommand::InputResolve { .. } => {
+                self.execute_recovery_with_observation(context, command, None)
+            }
             OwnerCommand::TopicArchive { .. }
             | OwnerCommand::TopicRestore { .. }
             | OwnerCommand::SessionClose { .. }
