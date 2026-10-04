@@ -19,8 +19,8 @@ entrypoints call one `serve_stdio` library. Advertise only the existing generate
 Rust-authored input/output schemas. Every call carries binding and generation;
 no path, actor or mutable current-session selector is introduced.
 
-Move the existing CLI authoritative agent resolver into native Core after its
-actual NativeCoreService prerequisite merges. CLI and MCP then consume that one
+The existing CLI authoritative agent resolver lives in native Core, alongside
+the actual merged NativeCoreService. CLI and MCP then consume that one
 resolver and its existing canonical error classification. Preserve its retained
 historical lookup, exact source-message issuance ceiling and caller generation;
 Core still performs current read authorization and replay-first transactional
@@ -31,8 +31,10 @@ lookup plus synchronous query/apply runs on Tokio's existing blocking pool. The
 renderer/tool caller cannot install a service, choose a trusted actor or supply
 storage paths. Transport tests may inject the default-off scripted CoreService;
 they prove framing and canonical forwarding, not persistence or a state machine.
-Installed native routing, real dual-process replay/race and Store parity remain
-required before claiming P2.5 completion.
+Installed entrypoints compose the real NativeCoreService with native UUID/time
+and a verifier that reports Unsupported; agent tools do not call providers.
+Native registered-session resolution checks Registry/Store membership through
+that same canonical error mapping, without mutable eligibility prechecks.
 
 Wrap AsyncRead before SDK JSON decode. A request line has at most 1 MiB before
 its LF; complete typed canonical arguments have the existing 512 KiB budget.
@@ -62,6 +64,9 @@ MCP configuration or a connector.
 Focused SDK transport cases cover initialize/tool schema inventory, identical
 structured/text failures, unknown methods, split/exact/overflow/EOF lines and no
 mutation after framing failure. Real installed-entrypoint acceptance additionally
-requires multi-session reads, complete history/cursor behavior, visibility,
-generation checks, Apply replay/conflict and separate CLI/MCP writers sharing real
-Store receipts. Expensive native and release proof stays in CI.
+covers complete history/cursor behavior, private owner visibility, generation
+checks, Apply replay/conflict and concurrent real CLI/MCP processes plus a Store
+writer. Native routing rejects ambiguous/missing/unavailable registered routes;
+focused CLI cases preserve the same authority and replay behavior. Shared native
+I/O classification now returns valid bounded io_error directly instead of letting
+the former oversized CLI mapper fall through to malformed-envelope fallback. Expensive native and release proof stays in CI.
