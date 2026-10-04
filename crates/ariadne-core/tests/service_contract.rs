@@ -100,6 +100,51 @@ fn patch_omission_null_and_exact_text_remain_distinct() {
 }
 
 #[test]
+fn navigation_preferences_are_required_typed_and_preserve_closed_view_data() {
+    let inventory: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root().join("fixtures/contracts/core/inventory.json")).unwrap(),
+    )
+    .unwrap();
+    let entries = &inventory["owner_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|value| value["command"] == "preferences_patch")
+        .unwrap()["params"]["entries"];
+    let global = entries[0]["preferences"].clone();
+    let mut view = entries[1]["preferences"].clone();
+    for selection in [
+        json!({"kind":"projects"}),
+        json!({"kind":"all_sessions"}),
+        json!({"kind":"project","project_id":"00000000-0000-4000-8000-000000000001"}),
+        json!({"kind":"session","session":view["session"]}),
+    ] {
+        let mut wire = global.clone();
+        wire["selected_navigation"] = selection;
+        let decoded: GlobalPreferences = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+        wire["selected_navigation"]["unexpected"] = json!(true);
+        assert!(serde_json::from_value::<GlobalPreferences>(wire).is_err());
+    }
+    let mut missing = global;
+    missing
+        .as_object_mut()
+        .unwrap()
+        .remove("selected_navigation");
+    assert!(serde_json::from_value::<GlobalPreferences>(missing).is_err());
+    let before = view.clone();
+    view["tab_open"] = json!(false);
+    let decoded: SessionPreferences = serde_json::from_value(view.clone()).unwrap();
+    assert!(!decoded.tab_open);
+    assert_eq!(serde_json::to_value(decoded).unwrap(), view);
+    view["tab_open"] = before["tab_open"].clone();
+    assert_eq!(view, before);
+    view.as_object_mut().unwrap().remove("tab_open");
+    assert!(serde_json::from_value::<SessionPreferences>(view).is_err());
+    assert!(serde_json::from_value::<NavigationSelection>(json!({"kind":"candidate"})).is_err());
+}
+
+#[test]
 fn exact_envelope_and_request_nullability_reject_invalid_shapes() {
     let schema = SchemaVersion::new(1).unwrap();
     let good = ClaimEnvelope(ApplicationEnvelope::Success(SuccessEnvelope {
