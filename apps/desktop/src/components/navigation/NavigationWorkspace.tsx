@@ -8,6 +8,8 @@ import { ProjectCard, SessionCard } from '../reference/ProjectSessionCard';
 import { ReferenceWorkspace, type ReferenceWorkspaceProps } from '../reference/ReferenceWorkspace';
 import type { GlobalWaitingPanelProps } from '../reference/GlobalWaitingPanel';
 import { RegisterProject, BindSession } from './Registration';
+import { DiscoverProjects } from './Discovery';
+import type { DiscoveryController } from '../../data/discovery';
 import '../../styles/navigation.css';
 
 export interface AdapterChoice { readonly adapter_id: string; readonly label: string; readonly configuration: AdapterConfig }
@@ -19,6 +21,7 @@ export interface OpenedSessionView {
 }
 export interface NavigationWorkspaceProps {
   readonly store: NavigationStore;
+  readonly discovery?: DiscoveryController;
   readonly waiting?: GlobalWaitingPanelProps;
   readonly waitingContent?: ReactNode;
   readonly detail?: ReactNode;
@@ -81,9 +84,10 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, waiting, waitingContent, detail, railContent, chrome, context, onQueryChange, onToggleRail, onThemeChange, onCloseDetail, adapterChoices, renderSession }: NavigationWorkspaceProps) {
+export function NavigationWorkspace({ store, discovery, waiting, waitingContent, detail, railContent, chrome, context, onQueryChange, onToggleRail, onThemeChange, onCloseDetail, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const [registering, setRegistering] = useState(false);
+  const [registrationRoot, setRegistrationRoot] = useState('');
   const [binding, setBinding] = useState<Immutable<ProjectSummary> | null>(null);
   // The composition that owns this injected store disposes it. A view mount
   // must not permanently stop a shared store during React's effect replay.
@@ -132,9 +136,10 @@ export function NavigationWorkspace({ store, waiting, waitingContent, detail, ra
     {selection.kind === 'session' ? <SelectedSession navigation={store} renderSession={renderSession} /> : <>
       <div className="ref-page-heading"><div><h1>{selection.kind === 'projects' ? 'Projects' : selection.kind === 'all_sessions' ? 'All sessions' : selectedProject ? projectName(selectedProject) : 'Unavailable project'}</h1>
         <p>{selection.kind === 'projects' ? 'Register a local root, then explicitly connect an existing host session.' : selection.kind === 'project' ? selectedProject?.canonical_root : 'Registered sessions, grouped by project.'}</p></div>
-        <button type="button" className="ref-button ref-secondary" disabled={state.writing || state.pendingOperationId !== null} onClick={() => setRegistering(true)}>Register project</button>
+        <button type="button" className="ref-button ref-secondary" disabled={state.writing || state.pendingOperationId !== null} onClick={() => { setRegistrationRoot(''); setRegistering(true); }}>Register project</button>
       </div>
       {counts && <p className="nav-counts">{countsText(counts)}</p>}
+      {discovery && <DiscoverProjects controller={discovery} visible={selection.kind === 'projects'} register={root => { setRegistrationRoot(root); setRegistering(true); }} />}
       {showSessions && matchingSessions && <p className="nav-counts">{matchingSessions.active_total} active · {matchingSessions.closed_total} closed</p>}
       {showSessions && !matchingSessions && <p role="status">{state.error ? 'Sessions are unavailable for this view.' : 'Loading sessions…'}</p>}
       {selection.kind === 'projects' && <div className="ref-project-grid">{projects.map(project => <ProjectCard key={project.project_id}
@@ -162,7 +167,7 @@ export function NavigationWorkspace({ store, waiting, waitingContent, detail, ra
     query: '', views: [], railColor: muted, themeIcon: 'ph ph-moon', themeTitle: 'Theme', ...chrome }} tabs={tabs} waiting={waiting ?? { count: '—', emptyText: 'Reading registered sessions…', waiting: [], sent: [] }} waitingContent={waitingContent} detail={detail} railContent={railContent}
     onQueryChange={onQueryChange} onToggleRail={onToggleRail} onThemeChange={onThemeChange} onCloseDetail={onCloseDetail} chromeDisabled={disabled}
     center={center} summary={counts ? countsText(counts) : 'Catalogue unavailable'} overlay={registering
-      ? <RegisterProject store={store} disabled={state.writing || state.pendingOperationId !== null} close={() => setRegistering(false)} />
+      ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={state.writing || state.pendingOperationId !== null} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}
-        adapters={adapterChoices} disabled={state.writing || state.pendingOperationId !== null} close={() => setBinding(null)} /> : undefined} />;
+        adapters={adapterChoices} discovery={discovery} disabled={state.writing || state.pendingOperationId !== null} close={() => setBinding(null)} /> : undefined} />;
 }

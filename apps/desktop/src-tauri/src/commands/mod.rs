@@ -8,6 +8,12 @@ use ariadne_domain::models::SchemaVersion;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{Emitter, Manager};
+mod discovery;
+pub(crate) use discovery::project as project_discovery;
+pub use discovery::{
+    __cmd__discovery_snapshot, __cmd__discovery_ui_open, __tauri_command_name_discovery_snapshot,
+    __tauri_command_name_discovery_ui_open, discovery_snapshot, discovery_ui_open,
+};
 
 type ResolveSession = dyn Fn(&SessionRef) -> Result<RegisteredSession, CoreError> + Send + Sync;
 type NativeConnect =
@@ -15,6 +21,8 @@ type NativeConnect =
 type NativePreferencesWrite =
     dyn Fn(&OwnerMutationRequest) -> Result<PreferencesPatchedReceipt, CoreError> + Send + Sync;
 type NativePreferencesRead = dyn Fn() -> Result<PreferencesSnapshot, CoreError> + Send + Sync;
+type NativeDiscovery = dyn Fn() -> Result<DesktopDiscoverySnapshot, CoreError> + Send + Sync;
+type NativeDiscoveryOpen = dyn Fn(bool) -> Result<(), CoreError> + Send + Sync;
 
 #[derive(Clone, Default)]
 pub struct DesktopService {
@@ -27,6 +35,8 @@ struct Composition {
     connect: Option<Arc<NativeConnect>>,
     native_preferences_write: Option<Arc<NativePreferencesWrite>>,
     native_preferences_read: Option<Arc<NativePreferencesRead>>,
+    discovery: Option<Arc<NativeDiscovery>>,
+    discovery_open: Option<Arc<NativeDiscoveryOpen>>,
 }
 impl DesktopService {
     /// Trusted native consumers use the same validated owner envelope as IPC.
@@ -113,6 +123,8 @@ impl DesktopService {
                 connect: None,
                 native_preferences_write: None,
                 native_preferences_read: None,
+                discovery: None,
+                discovery_open: None,
             }),
         }
     }
@@ -153,6 +165,31 @@ impl DesktopService {
         self.composition.as_ref().ok_or_else(|| {
             unsupported("Desktop CoreService and registered session lookup are not composed yet.")
         })
+    }
+    pub(crate) fn with_native_discovery(
+        mut self,
+        read: impl Fn() -> Result<DesktopDiscoverySnapshot, CoreError> + Send + Sync + 'static,
+        open: impl Fn(bool) -> Result<(), CoreError> + Send + Sync + 'static,
+    ) -> Self {
+        let composition = self.composition.as_mut().expect("trusted composition");
+        composition.discovery = Some(Arc::new(read));
+        composition.discovery_open = Some(Arc::new(open));
+        self
+    }
+    pub(crate) fn discovery(&self) -> Result<DesktopDiscoverySnapshot, CoreError> {
+        let result =
+            self.composition()?
+                .discovery
+                .as_ref()
+                .ok_or_else(|| unsupported("Native discovery is unavailable."))?()?;
+        discovery::validate(&result)?;
+        Ok(result)
+    }
+    pub(crate) fn set_connection_ui_open(&self, open: bool) -> Result<(), CoreError> {
+        self.composition()?
+            .discovery_open
+            .as_ref()
+            .ok_or_else(|| unsupported("Native discovery is unavailable."))?(open)
     }
     fn query(&self, request: OwnerQueryRequest, command_matches: bool) -> QueryEnvelope {
         QueryEnvelope(envelope((|| {
