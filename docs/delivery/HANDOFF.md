@@ -1,35 +1,35 @@
 # Ariadne handoff
 
-Checked 2026-10-04, 22:26 UTC. This is a point-in-time checkpoint; verify current
+Checked 2026-10-04, 22:40 UTC. This is a point-in-time checkpoint; verify current
 GitHub heads/checks before acting. Owner requests autonomous delivery; delegates use
 only Sol 6.1 High. Ten subagent slots are available; four concurrent agents were
-verified. Claude is fixing review feedback; native tree, Codex acceptance and
-personal packaging are coding in disjoint paths.
+verified. Claude is fixing review feedback; native tree and personal packaging
+are coding in disjoint paths. Codex acceptance is published in90 for review/CI.
 Reviewed parent code may be stacked
 while CI runs. Do not keep implementation idle just because a parent awaits CI.
 
-**Main:** `e4d8bdb6ce67b0012301f12cd73cd6b31124d2a5`; [CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37237477719).
-PR84 merged with independent review, 89.77% coverage and native receipt/cleanup
-audit; its squash tree equals the tested head. PRs80–82 were already merged.
-The final FIFO test stop raced an outstanding claim. Production correctly kept
-uncertainty; test-only PR89 parks observation after prior Core work settles.
-Further merges wait for this repair; implementation and reviews continue.
+**Main:** `79c0d86705d688f5504672e4d79d4d76cbd5ec3c`;89 merged after
+[green CI](https://github.com/kartiksayani/ariadne/actions/runs/37239394526), independent
+review and evidence audit:89.77% coverage, all175 required sources, three FIFO tests,
+actual native receipt and clean exit/port. The test stop now parks observation after
+prior Core work settles; production uncertainty behavior is unchanged. Check main's
+new push CI asynchronously. PRs80–84 were already merged.
 
 | Open PR | Code checkpoint / base | CI and review |
 | --- | --- | --- |
-| [83](https://github.com/kartiksayani/ariadne/pull/83) | `b1e5cfa` / `e4d8bdb` | Independent source review clear; [CI failed during toolchain setup](https://github.com/kartiksayani/ariadne/actions/runs/37238789118), before Rust tests. Explicit core components being published; inspect live checks for next head |
+| [83](https://github.com/kartiksayani/ariadne/pull/83) | code checkpoint `79bad2f`, incorporating main `79c0d86` | Workflow fix independently clear; current main integration + checkpoint being published. [Live checks](https://github.com/kartiksayani/ariadne/pull/83/checks); native test evidence still required |
 | [85, draft](https://github.com/kartiksayani/ariadne/pull/85) | `495f8c6` / `e4d8bdb` | Required pending-scope late-announcement/end race being fixed; [checks](https://github.com/kartiksayani/ariadne/pull/85/checks) |
 | [86, draft](https://github.com/kartiksayani/ariadne/pull/86) | `6f6e1fa` / `b1e5cfa` | Five native inputs and genuine quit/relaunch; independent review clear, [CI](https://github.com/kartiksayani/ariadne/actions/runs/37239015770) running |
 | [88, draft](https://github.com/kartiksayani/ariadne/pull/88) | `48042dc` / `6f6e1fa` | Discovery UI/native join; independent review clear, [CI](https://github.com/kartiksayani/ariadne/actions/runs/37239323967) running |
-| [89, draft](https://github.com/kartiksayani/ariadne/pull/89) | `acb17f0` / `e4d8bdb` | Main test-race repair; independent source clear, [CI](https://github.com/kartiksayani/ariadne/actions/runs/37239394526) running |
+| [90, draft](https://github.com/kartiksayani/ariadne/pull/90) | `8963489` / `79c0d86` | Codex real Core/Store/queue uncertainty and no-resend acceptance; independent review and [CI](https://github.com/kartiksayani/ariadne/pull/90/checks) running |
 
 | Owner | Worktree / branch | Current work |
 | --- | --- | --- |
 | Maintainer | `.worktrees/resume-integration` / `maintenance/resume-integration` | Publishing explicit Rust core components plus this checkpoint; native shutdown-test result still awaits actual CI |
 | `prove_three_binding_fifo` | `.worktrees/native-tree-acceptance` / `task/native-tree-acceptance` | P4.4 remaining native tree acceptance atop86;86 and89 fully pushed, their worktrees clean |
-| `claude_installed_join` | `.worktrees/claude-installed-join` / `task/claude-installed-join` | Uncommitted pending-scope reporter fix and installed regression; exact current push in85 checks |
-| `codex_join_acceptance` | `.worktrees/codex-native-join` / `task/codex-native-join` | Test-only P3.6 real Core/Store/supervisor/Codex join, busy/lost receipt/ambiguous marker/reconnect; no published checkpoint yet |
-| `desktop_discovery_join` | `.worktrees/desktop-discovery-join` / `task/desktop-discovery-join` |88 fully pushed and clean; awaiting independent review |
+| `fix_claude_terminal_scope` | `.worktrees/claude-installed-join` / `task/claude-installed-join` | Root contract7003dda unpushed; author implementing terminal generation fence for actual SDK end. Prior read-only author context released ownership |
+| `review_codex_native90` | Separate review worktree |90 fully pushed and author tree clean; no unpushed commits |
+| `desktop_discovery_join` | `.worktrees/desktop-discovery-join` / `task/desktop-discovery-join` | Local checked merge b22fbec unpushed; waiting final86 parent with main repair and valid fixture RequestRefs |
 | `personal_package_install` | `.worktrees/personal-package-install` / `task/personal-package-install` | P6.4 bounded package ownership/install/uninstall atop88; root resource-export contract amended, implementation underway |
 
 Primary owns new native tree acceptance; shared harness callsites need root assignment.
@@ -44,8 +44,8 @@ root approved announce-after-exact-receipt, pending status with exact retry IDs.
 
 **Next three steps**
 
-1. Review and merge89 after green full CI; incorporate actual main into open work.
-   Diagnose any83 failure, then audit its native/coverage/release proof and merge.
+1. Incorporate repaired main into open work. Diagnose any83 failure, then audit
+   its native/coverage/release proof and merge.
    Close P2.4/P3.1/P3.2 only after their required proof and merges.
 2. Keep three product streams moving while independent reviews/CI run. Native
    GitHub stack87 already links83 →86 →88. Delta review fixes; only merge qualified
