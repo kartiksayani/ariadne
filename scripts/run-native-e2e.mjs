@@ -165,6 +165,9 @@ export async function runNative() {
     await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs'], {
       env: { ...process.env, ARIADNE_FIXTURE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'fixture-cli.log'),
     });
+    await command(process.execPath, ['--test', 'tests/e2e/tree/fixture.test.mjs'], {
+      env: { ...process.env, ARIADNE_TREE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'tree-fixture.log'),
+    });
     await json(join(evidence, 'run.json'), { ...details, binarySha256: await digest(binary) });
     const env = { ...buildEnv(join(repo, 'target/native-e2e')), ARIADNE_HOME: join(root, 'data'), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: nonce, ARIADNE_E2E_BINARY: binary, ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: evidence };
     provider = await (await import('../apps/desktop/tests/e2e/scripted-provider.mjs')).startScriptedProvider(root, join(repo, 'target/native-e2e/debug/ariadne'), evidence, env);

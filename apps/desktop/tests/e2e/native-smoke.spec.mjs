@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { alive, delay, identity, listeners, json, proveQuit } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
+import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
 const nonce = process.env.ARIADNE_E2E_NONCE;
@@ -167,8 +168,9 @@ describe('native owner FIFO and real process restoration', () => {
       await assert.rejects(stat(receiptPath), { code: 'ENOENT' });
       await delivery(configuration);
       await runDiscoveryAcceptance(configuration);
+      await runTreeAcceptance(configuration);
     }
-    else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); }
+    else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); await restoreTreeAcceptance(configuration); }
 
     const payload = `native-domain-${nonce}`, ping = await invoke('native_ping', { nonce, payload }); assert.equal(ping.ok, true);
     const bytes = await readFile(receiptPath), disk = JSON.parse(bytes); assert.deepEqual(ping.data, disk);
