@@ -86,3 +86,5 @@ native_error!(binding, crate::bindings::BindingError);
 native_error!(input, crate::inputs::InputError);
 native_error!(apply, crate::apply::ApplyError);
 native_error!(delivery, crate::delivery::DeliveryError);
+
+native_error!(recovery, crate::recovery::RecoveryError);

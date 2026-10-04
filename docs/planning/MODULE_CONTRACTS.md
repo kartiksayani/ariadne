@@ -73,6 +73,12 @@ recorded only for full acceptance; contract doubles or an early implementation
 merge never count as completion. Any remaining integration work stays with the
 original task and owner. No test, coverage, native or release check is waived.
 
+P3.8's durable recovery module can start on merged P2.2/P2.3/P0.6. The merged
+supervisor contracts already publish its consumer boundary; completed native
+supervisor composition is an acceptance join, not a prerequisite for pure Core/
+Store recovery decisions. Full P3.8 retains its original P3.2 dependency, audited
+CLI and actual runtime composition acceptance.
+
 P7.1 joins every product module and unresolved task integration acceptance.
 P7.2/P7.3 retain live five-input existing-host acceptance with owner approval;
 P8.1 retains the clean-install release handoff. There is no fixed integration

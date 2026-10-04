@@ -15,6 +15,7 @@ pub mod inputs;
 pub mod native;
 pub mod queries;
 mod receipts;
+pub mod recovery;
 #[path = "service/validation.rs"]
 mod validation;
 #[path = "service/wire.rs"]

@@ -10,6 +10,7 @@ use crate::{
     delivery::DeliveryService,
     inputs::InputService,
     queries::QueryService,
+    recovery::RecoveryService,
     *,
 };
 use ariadne_domain::models::*;
@@ -116,6 +117,9 @@ impl CoreService for NativeCoreService {
                     .execute(&context, &command, || (self.allocate)(), (self.now)())
                     .map_err(errors::input)
             }
+            OwnerCommand::InputResolve { .. } => RecoveryService::new(&self.registry)
+                .execute(&context, &command, None, (self.now)())
+                .map_err(errors::recovery),
             OwnerCommand::PreferencesPatch { .. } => PreferencesService::new(&self.registry)
                 .patch(&context, &command)
                 .map(MutationReceipt::PreferencesPatched),
