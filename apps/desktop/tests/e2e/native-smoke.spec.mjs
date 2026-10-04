@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { alive, delay, identity, listeners, json, proveQuit } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
+import { runHistoryActionsAcceptance } from './history-actions.spec.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
 const nonce = process.env.ARIADNE_E2E_NONCE;
@@ -167,6 +168,7 @@ describe('native owner FIFO and real process restoration', () => {
       await assert.rejects(stat(receiptPath), { code: 'ENOENT' });
       await delivery(configuration);
       await runDiscoveryAcceptance(configuration);
+      await runHistoryActionsAcceptance(configuration);
     }
     else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); }
 
