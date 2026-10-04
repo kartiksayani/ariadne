@@ -75,8 +75,20 @@ impl<'a> BindingService<'a> {
         context: &OwnerContext,
         command: &OwnerCommand,
         verify: impl FnOnce(&BindingConnectParams) -> Result<VerifiedHost, CoreError>,
+        allocate: impl FnMut() -> UuidV4,
+        at: UtcMillis,
+    ) -> Result<MutationReceipt, BindingError> {
+        self.connect_guarded(context, command, verify, allocate, at, || Ok(()))
+    }
+
+    pub(crate) fn connect_guarded(
+        &self,
+        context: &OwnerContext,
+        command: &OwnerCommand,
+        verify: impl FnOnce(&BindingConnectParams) -> Result<VerifiedHost, CoreError>,
         mut allocate: impl FnMut() -> UuidV4,
         at: UtcMillis,
+        before_commit: impl Fn() -> Result<(), CoreError>,
     ) -> Result<MutationReceipt, BindingError> {
         require_registry(context)?;
         command.validate_wire()?;
@@ -157,6 +169,9 @@ impl<'a> BindingService<'a> {
                             op_id,
                             &normalized,
                             |session| {
+                                // The final session lock and exact replay precede
+                                // fresh mutation or allocation in this callback.
+                                before_commit()?;
                                 connect_existing(
                                     session,
                                     &verified,
@@ -170,6 +185,9 @@ impl<'a> BindingService<'a> {
                         )
                         .map_err(BindingError::from)
                 } else {
+                    // Registration scans and project Store admission can wait.
+                    // Recheck before allocating even speculative new IDs.
+                    before_commit()?;
                     let session_id = fresh(&mut occupied, &mut allocate)?;
                     let binding_id = fresh(&mut occupied, &mut allocate)?;
                     let generation = fresh(&mut occupied, &mut allocate)?;
@@ -177,7 +195,7 @@ impl<'a> BindingService<'a> {
                         new_binding(binding_id.clone(), generation.clone(), &verified, &at);
                     let session = new_session(session_id, params.project_id.clone(), binding, &at);
                     store
-                        .create_with_receipt(
+                        .create_with_receipt_guarded(
                             &session,
                             &ReceiptActorScope::Owner {},
                             op_id,
@@ -190,6 +208,7 @@ impl<'a> BindingService<'a> {
                                 op_id,
                                 session.revision,
                             )?,
+                            || before_commit().map_err(BindingError::from),
                         )
                         .map_err(BindingError::from)
                 }

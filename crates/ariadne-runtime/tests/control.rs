@@ -514,12 +514,13 @@ fn dropped_connection_and_shutdown_retain_actual_lease_until_blocking_claim_fini
     started.recv_timeout(Duration::from_secs(2)).unwrap();
     drop(stream);
     server.stop(&rt);
-    let owner = DesktopOwner::acquire(h.path()).unwrap();
-    assert!(owner
-        .binding_lease(r.session(), r.binding_id.clone(), r.generation.clone())
-        .is_err());
+    assert!(
+        DesktopOwner::acquire(h.path()).is_err(),
+        "started claim retains the real desktop instance and binding ownership"
+    );
     release.send(()).unwrap();
     rt.shutdown_timeout(Duration::from_secs(2));
+    let owner = DesktopOwner::acquire(h.path()).unwrap();
     let _lease = owner
         .binding_lease(r.session(), r.binding_id.clone(), r.generation.clone())
         .unwrap();

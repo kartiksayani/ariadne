@@ -152,6 +152,26 @@ fn executable_file(path: &Path, bytes: &str) {
 }
 
 #[test]
+fn original_expired_connect_deadline_starts_no_resource_probe() {
+    let fixture = Fixture::new("2.1.287 (Claude Code)");
+    fixture.publish();
+    let marker = fixture._root.path().join("inspected");
+    executable_file(
+        &fixture.options.executable,
+        &format!("#!/bin/sh\ntouch '{}'\nexit 7\n", marker.display()),
+    );
+    let error = wait(
+        fixture
+            .adapter()
+            .connect_before(connect(), Instant::now() - Duration::from_secs(1)),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, AdapterErrorCode::HostUnreachable);
+    assert!(error.message.contains("expired"));
+    assert!(!marker.exists());
+}
+
+#[test]
 fn native_qualifier_preserves_original_receipt_time_and_rejects_expired_evidence() {
     let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
     let observed = UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap();
