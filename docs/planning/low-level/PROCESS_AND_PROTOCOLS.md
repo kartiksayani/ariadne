@@ -103,9 +103,12 @@ Adapter.connect with those durable IDs outside locks before lease/dispatch;
 failure reports generation-scoped disconnected and never dispatches. Unknown
 preflight connection remains Unknown with a disconnected dispatch barrier.
 Provider/runtime tasks own that final connection and report wiring. Codex's
-current reader qualifies its selected thread during bind, so production setup
-also needs a provider-private read-only qualifier before IDs; P1.4 does not add a
-placeholder-ID connection or an unused shared adapter method.
+initialized reader now supplies an owned pre-ID qualification for the exact
+selected thread and canonical registered project root; its final bind rechecks
+that same thread/root and transport identity. Native composition still owns
+configuration validation, copying verified facts into Core and establishing the
+final runtime connection. No placeholder-ID connection or shared adapter method
+is added.
 
 See [Agent adapters](../AGENT_ADAPTERS.md) for the shared interface and later
 executable-extension design. Public registration/negotiation is deferred. Rust trait

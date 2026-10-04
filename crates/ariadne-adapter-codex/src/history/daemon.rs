@@ -4,7 +4,7 @@ use super::*;
 pub struct CodexDaemonReader {
     pub(super) rpc: RpcClient,
     pub(super) socket: SocketIdentity,
-    configured_socket: PathBuf,
+    pub(super) configured_socket: PathBuf,
     executable: ExecutableIdentity,
     configured_executable: PathBuf,
     usable: bool,
@@ -92,6 +92,16 @@ impl CodexDaemonReader {
         observed_at: UtcMillis,
         deadline: Instant,
     ) -> Result<(CodexHistoryClient, ConnectResult), AdapterError> {
+        self.bind_with_root(request, instance_id, observed_at, None, deadline)
+    }
+    pub(super) fn bind_with_root(
+        mut self,
+        request: ConnectRequest,
+        instance_id: UuidV4,
+        observed_at: UtcMillis,
+        expected_root: Option<&Path>,
+        deadline: Instant,
+    ) -> Result<(CodexHistoryClient, ConnectResult), AdapterError> {
         request.validate()?;
         self.verify_identity()?;
         let EndpointRef::UnixSocket { path } = &request.endpoint else {
@@ -106,49 +116,21 @@ impl CodexDaemonReader {
                 "Selected Codex binding uses another endpoint; initialize it explicitly.",
             ));
         }
-        let mut client = CodexHistoryClient {
+        let selected =
+            self.selected_thread(&request.external_session_id, expected_root, deadline)?;
+        let client = CodexHistoryClient {
             daemon: self,
             binding_id: request.binding_id.clone(),
             generation: request.generation.clone(),
             instance_id,
             thread_id: request.external_session_id.clone(),
-            latest_anchor: None,
+            latest_anchor: selected.latest_anchor,
         };
-        let metadata = client.read_thread(deadline)?;
-        if matches!(
-            metadata.status,
-            wire::thread_read_response::ThreadStatus::NotLoaded
-                | wire::thread_read_response::ThreadStatus::SystemError
-        ) {
-            return Err(error(
-                Code::HostUnreachable,
-                "Selected Codex thread is not available in the existing daemon.",
-            ));
-        }
-        let queue: wire::thread_queue_list_response::ThreadQueueListResponse =
-            client.daemon.rpc.request(
-                "thread/queue/list",
-                &wire::thread_queue_list_params::ThreadQueueListParams {
-                    thread_id: client.thread_id.clone(),
-                    cursor: None,
-                    limit: Some(20),
-                },
-                deadline,
-            )?;
-        if queue.data.len() > 20 {
-            return Err(error(
-                Code::IncompatibleAdapter,
-                "Codex queue probe exceeded its page bound.",
-            ));
-        }
-        let turns = client.turn_page(None, 20, deadline)?;
-        client.latest_anchor = turns.data.first().map(|turn| turn.id.clone());
-        client.verify_identity()?;
         let result = ConnectResult {
             external_session_id: client.thread_id.clone(),
             endpoint_fingerprint: client.daemon.socket.fingerprint(),
             capabilities: read_capabilities(),
-            observation: client.presence_for(&metadata, observed_at),
+            observation: client.presence_for(&selected.metadata, observed_at),
         };
         result.validate_for(&request)?;
         Ok((client, result))
