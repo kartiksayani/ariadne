@@ -588,6 +588,20 @@ retain their permits after caller cancellation; busy admission returns actionabl
 it never means Idle or authorizes reconnect, claims or resending. See
 [ADR-0042](../../adr/ADR-0042-native-discovery-and-announcement-intake.md).
 
+Native Claude pre-ID qualification returns owned provider facts from those same
+checks, with the original receipt age and endpoint fingerprint; it grants no
+future binding/generation connection or lease. The already-blocking owner
+verifier may use the existing bounded discovery qualifier with its original
+absolute deadline outside all Registry/Store locks. Bootstrap composition saves
+connection Unknown (therefore disconnected dispatch readiness) and returns the
+immutable receipt before awaiting a bound Mod announcement. The actual matching
+saved binding/generation announcement must be qualified before final
+Adapter.connect; persist canonical Connected and all reconciliation receipts
+before activating the physical-lease/ClaimGate route. Owner pause/recovery
+barriers remain. Exact bootstrap replay returns the original receipt even after
+state progresses. Native activation and Core fact mapping remain a consuming
+join; see [ADR-0051](../../adr/ADR-0051-claude-native-pre-id-qualification-facts.md).
+
 For Codex, enumerate the existing daemon's loaded-thread IDs and join read-only
 thread metadata to get cwd/title. Probe the pinned schema's thread/loaded/list
 and thread/read; paginate and refresh every 30 seconds while the connection UI is
