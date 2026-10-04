@@ -11,6 +11,7 @@ mod errors;
 #[cfg(any(test, feature = "test-support"))]
 #[path = "service/fake.rs"]
 pub mod fake;
+pub mod history_actions;
 pub mod inputs;
 pub mod queries;
 mod receipts;

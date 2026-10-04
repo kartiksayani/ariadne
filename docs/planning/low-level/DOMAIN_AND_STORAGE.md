@@ -721,6 +721,13 @@ messages preserve original author identity in origin metadata and do not claim
 the target agent authored them. Live target binding IDs are not retroactively
 substituted for source authors. Round has an origin field as well.
 
+The native `HistoryActionService` implements guarded archive/restore, close/reopen,
+read-only preview and target-only continuation. Archive/close errors identify the
+actual blocking item/input IDs; close requires the selected binding's persisted
+Paused dispatch state. Restore/reopen preserve domain/delivery history, IDs and
+binding state and never resume dispatch implicitly. CLI/CoreService consumer
+routing is a separate composition task.
+
 Continue is a **copy**, not shared mutable topic membership. Read a validated
 source snapshot and include source revision/hash in preview. Owner chooses an
 existing bound target session and confirms. Under target lock allocate new topic,
@@ -733,6 +740,26 @@ approved summary. Source remains untouched; no two-session transaction or hidden
 retargeting. Duplicate operation returns the original mapping. Source changed
 since preview returns `preview_stale` before any target mutation; origin is the
 validated snapshot revision even if source changes just after that check.
+
+The canonical hash covers deterministic full Session serialization plus selected
+topic ID; unrelated source revision changes conservatively stale the preview.
+Target receipt replay occurs before source IO and again under the target lock.
+The stable locked read captures the validated immutable source snapshot and is
+the freshness observation/linearization point. Hash/revision checks use that owned
+snapshot after releasing its lock, before the sole target transaction. There are
+no simultaneous session locks, source publication or cross-file journal. Reject source == target.
+Two-pass maps include answers as well as topics/items/messages/rounds. Only live
+Agent owner/recipient routing moves to the explicitly selected target binding;
+Me/Other owners and source authorship/history remain. The preview discloses this
+assignment and each imported external replacement transformation.
+
+The concise owner-approved summary is bounded by the existing 16KiB UTF-8
+OwnerInput limit, while full copied bodies remain complete separate history. The
+staged target input passes the actual delivery formatter's 64KiB payload bound
+before publication. Its frozen context points to the immutable continuation
+operation/mapping; it does not duplicate every copied body's IDs or copy source
+inputs/attempts/delivery authority. Oversized summaries/payloads, target conflicts
+and definite prepublication failures save no target entities or handoff.
 
 Unavailable projects stay registered and show their missing path. Initial
 registration/forget and reconnect to a known project are enough for normal use.

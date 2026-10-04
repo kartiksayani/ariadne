@@ -286,7 +286,12 @@ impl OwnerCommand {
                 text(&params.text, 16 * 1024, !option_only)?;
             }
             Self::InputResolve { params, .. } => text(&params.reason, 4096, true)?,
-            Self::TopicContinue { params, .. } => text(&params.summary, 512 * 1024, true)?,
+            Self::TopicContinue { params, .. } => {
+                if params.summary.len() > 16 * 1024 {
+                    return Err(CoreError::new(CoreErrorCode::CapacityExceeded, "The complete continuation summary exceeds the saved 16 KiB owner-input bound", "Use a concise complete summary; full history is copied separately."));
+                }
+                text(&params.summary, 16 * 1024, true)?;
+            }
             Self::PreferencesPatch { params, .. } => {
                 for entry in &params.entries {
                     match entry {
