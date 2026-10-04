@@ -21,6 +21,7 @@
     "apps/desktop/vite.config.ts",
     "apps/desktop/src/data/index.ts",
     "apps/desktop/wdio.native.conf.mjs",
-    "apps/desktop/src-tauri/build.rs"
+    "apps/desktop/src-tauri/build.rs",
+    "integrations/claude/plugin/hooks/installed.js"
   ]
 }

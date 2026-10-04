@@ -1,0 +1,6 @@
+{
+  "name": "ariadne",
+  "version": "0.1.0",
+  "description": "Ariadne input claims and lifecycle reporting for the original Claude conversation",
+  "author": { "name": "Ariadne" }
+}

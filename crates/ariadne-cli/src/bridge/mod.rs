@@ -3,6 +3,7 @@ use ariadne_core::{
     AdapterContext, ClaimRequest, CoreError, CoreErrorCode, CoreService, EventReceipt,
     PreparedAttempt,
 };
+use ariadne_domain::models::{BindingSummary, UuidV4};
 use ariadne_runtime::control::{self, ControlMethod, ControlRequest, ControlResult};
 use std::path::PathBuf;
 
@@ -18,6 +19,29 @@ pub fn claim(home: PathBuf, request: ClaimRequest) -> Result<Option<PreparedAtte
         ));
     };
     Ok(prepared)
+}
+/// Read-only desktop projection; reachability alone never establishes host readiness.
+pub fn connection_status(
+    home: PathBuf,
+    binding_id: UuidV4,
+    generation: UuidV4,
+    request_id: UuidV4,
+) -> Result<BindingSummary, CoreError> {
+    let request = ControlRequest::new(
+        request_id,
+        ControlMethod::ConnectionStatus(control::BindingScope {
+            binding_id,
+            generation,
+        }),
+    )?;
+    let ControlResult::Status(status) = control::call_blocking(home, request)? else {
+        return Err(CoreError::new(
+            CoreErrorCode::ProtocolConflict,
+            "Desktop returned a different result to bridge connection-status.",
+            "Check matching app/helper versions; a status response does not authorize submission.",
+        ));
+    };
+    Ok(status)
 }
 /// Trusted registered routing is supplied by native composition, never deserialized
 /// from model JSON. No socket/lease dependency: completion survives desktop exit.
