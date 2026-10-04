@@ -44,7 +44,8 @@
     "typescript-eslint": "8.71.0",
     "stylelint": "17.16.0",
     "stylelint-config-standard": "40.0.0",
-    "@playwright/test": "1.63.0"
+    "@playwright/test": "1.63.0",
+    "ws": "8.22.0"
   },
   "packageManager": "npm@10.9.8",
   "engines": {

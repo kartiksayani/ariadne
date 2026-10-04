@@ -6,9 +6,12 @@ use ariadne_core::*;
 use ariadne_domain::models::SavedReceiptData;
 use ariadne_domain::models::SchemaVersion;
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::{Emitter, Manager};
 
 type ResolveSession = dyn Fn(&SessionRef) -> Result<RegisteredSession, CoreError> + Send + Sync;
+type NativeConnect =
+    dyn Fn(OwnerMutationRequest, Instant) -> Result<MutationReceipt, CoreError> + Send + Sync;
 
 #[derive(Clone, Default)]
 pub struct DesktopService {
@@ -18,6 +21,7 @@ pub struct DesktopService {
 struct Composition {
     core: Arc<dyn CoreService>,
     resolve: Arc<ResolveSession>,
+    connect: Option<Arc<NativeConnect>>,
 }
 impl DesktopService {
     /// The Rust startup caller resolves IDs through actual registered project and
@@ -30,8 +34,27 @@ impl DesktopService {
             composition: Some(Composition {
                 core,
                 resolve: Arc::new(resolve),
+                connect: None,
             }),
         }
+    }
+    /// Native-only setup supplies the qualified runtime handoff. The deadline
+    /// originates at command admission, before its blocking worker is scheduled.
+    pub fn from_trusted_startup_with_connect(
+        core: Arc<dyn CoreService>,
+        resolve: impl Fn(&SessionRef) -> Result<RegisteredSession, CoreError> + Send + Sync + 'static,
+        connect: impl Fn(OwnerMutationRequest, Instant) -> Result<MutationReceipt, CoreError>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        let mut service = Self::from_trusted_startup(core, resolve);
+        service
+            .composition
+            .as_mut()
+            .expect("trusted composition")
+            .connect = Some(Arc::new(connect));
+        service
     }
     fn composition(&self) -> Result<&Composition, CoreError> {
         self.composition.as_ref().ok_or_else(|| {
@@ -75,7 +98,20 @@ impl DesktopService {
             Ok(result)
         })()))
     }
+    #[cfg(test)]
     fn owner(&self, request: OwnerMutationRequest, command_matches: bool) -> MutationEnvelope {
+        self.owner_before(
+            request,
+            command_matches,
+            Instant::now() + ariadne_runtime::control::CONTROL_TIMEOUT,
+        )
+    }
+    fn owner_before(
+        &self,
+        request: OwnerMutationRequest,
+        command_matches: bool,
+        deadline: Instant,
+    ) -> MutationEnvelope {
         MutationEnvelope(envelope((|| {
             if !command_matches {
                 return Err(mismatched_command());
@@ -93,10 +129,16 @@ impl DesktopService {
             if let OwnerCommand::TopicContinue { params, .. } = &request.command {
                 composition.session(&params.source)?;
             }
-            let result = composition.core.execute_owner(
-                OwnerContext::from_trusted_entrypoint(scope),
-                request.command.clone(),
-            )?;
+            let result = if let (OwnerCommand::BindingConnect { .. }, Some(connect)) =
+                (&request.command, &composition.connect)
+            {
+                connect(request.clone(), deadline)?
+            } else {
+                composition.core.execute_owner(
+                    OwnerContext::from_trusted_entrypoint(scope),
+                    request.command.clone(),
+                )?
+            };
             validate_owner_receipt(&request, &result)?;
             Ok(result)
         })()))
@@ -201,11 +243,12 @@ macro_rules! mutations {
     ($($name:ident => $variant:ident),+ $(,)?) => { $(
         #[tauri::command]
         pub async fn $name<R: tauri::Runtime>(request: OwnerMutationRequest, app: tauri::AppHandle<R>) -> MutationEnvelope {
+            let deadline = Instant::now() + ariadne_runtime::control::CONTROL_TIMEOUT;
             let matches = matches!(&request.command, OwnerCommand::$variant { .. });
             let service = app.state::<DesktopService>().inner().clone();
             let operation_id = request.command.operation_id().clone();
             blocking(move || {
-            let envelope = service.owner(request, matches);
+            let envelope = service.owner_before(request, matches, deadline);
             if let ApplicationEnvelope::Success(SuccessEnvelope { data: MutationReceipt::Session(receipt), .. }) = &envelope.0 {
                 // Revision hints are best effort. A failed event publication must
                 // never turn an already durable receipt into a failed mutation.

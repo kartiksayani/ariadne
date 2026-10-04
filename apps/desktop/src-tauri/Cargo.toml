@@ -14,6 +14,14 @@ tauri-build.workspace = true
 [dependencies]
 ariadne-core = { path = "../../../crates/ariadne-core" }
 ariadne-domain = { path = "../../../crates/ariadne-domain" }
+ariadne-store = { path = "../../../crates/ariadne-store" }
+ariadne-runtime = { path = "../../../crates/ariadne-runtime" }
+ariadne-adapter-claude = { path = "../../../crates/ariadne-adapter-claude" }
+ariadne-adapter-codex = { path = "../../../crates/ariadne-adapter-codex" }
+tokio = { version = "=1.53.1", default-features = false, features = ["rt-multi-thread", "sync", "time", "net"] }
+uuid = { workspace = true, features = ["v4"] }
+chrono.workspace = true
+notify = { version = "=8.2.0", default-features = false, features = ["macos_fsevent"] }
 tauri.workspace = true
 serde.workspace = true
 serde_json.workspace = true
