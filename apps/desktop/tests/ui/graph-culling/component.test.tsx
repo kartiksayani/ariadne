@@ -57,6 +57,9 @@ describe('2,000-node rendered viewport', () => {
     act(() => other.focus());
     const canvas = screen.getByLabelText('Topic sentences'); pointer(canvas, 'pointerdown', 0, 0); pointer(canvas, 'pointermove', 2000, 30000); flush();
     expect(document.activeElement).toBe(other); expect(node('20.99')).toBeTruthy(); expect(nodes()).toContain(other);
+    const panned = world(); fixture.session.revision++;
+    await act(async () => { await fixture.store.refresh(); }); flush();
+    expect(world()).toBe(panned); expect(document.activeElement).toBe(other);
     fireEvent.click(screen.getByRole('button', { name: 'Fit' })); flush();
     const full = geometry.layoutGraph(Object.values(fixture.session.items).flatMap(item => item ? [item] : [])), fit = fitBounds(full.bounds, 800, 420);
     expect(world()).toBe(`translate(${fit.x} ${fit.y}) scale(${fit.scale})`);
