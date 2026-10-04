@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
 import { binding as fixtureBinding, host, ids, prepared as fixturePrepared } from './fixtures.js';
 import modEvents from '../../../fixtures/providers/claude/mod-events.json';
-import { bytes, clip, descriptorValid, envelope, hash, lifecycle, prepared, reportReceipt } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { bytes, claudeSessionEndEventId, clip, descriptorValid, envelope, hash, lifecycle, prepared, reportReceipt } from '../../../integrations/claude/plugin/hooks/contracts.js';
 
 const binding = { binding_id:'11111111-1111-4111-8111-111111111111', generation:'22222222-2222-4222-8222-222222222222' };
 const input = '33333333-3333-4333-8333-333333333333';
@@ -14,6 +14,13 @@ async function claim() {
   return {input_id:input,attempt_id:attempt,binding_generation:binding.generation,wire_marker,formatted_payload,payload_sha256:await hash(formatted_payload)};
 }
 describe('published wire consumers', () => {
+  it('uses the reserved Rust identity for the exact saved session-end scope', () => {
+    expect(claudeSessionEndEventId(binding.binding_id,binding.generation)).toBe(`claude:session-ended:${binding.binding_id}:${binding.generation}`);
+    for (const value of ['',null,'not-a-uuid']) {
+      expect(() => claudeSessionEndEventId(value,binding.generation)).toThrow();
+      expect(() => claudeSessionEndEventId(binding.binding_id,value)).toThrow();
+    }
+  });
   it('requires immutable descriptor and actual SDK loaded plugin identity without path fallback', () => {
     const descriptor = {helperPath:'/home/owner/.local/share/ariadne/current/bin/ariadne',appVersion:'0.1.0',apiVersion:1};
     const plugin = {name:'ariadne',root:'/sdk-reported/plugin'};

@@ -6,6 +6,38 @@ use serde_json::{json, Value};
 mod common;
 use common::*;
 
+#[test]
+fn reserved_claude_session_end_identity_is_exact_and_non_attempt() {
+    let mut event = events()[0].clone();
+    event.input_id = None;
+    event.attempt_id = None;
+    event.host_turn_id = None;
+    event.event = EventPayload::Disconnected { reason: None };
+    event.event_id = claude_session_end_event_id(&event.binding_id, &event.generation);
+    assert_eq!(
+        event.event_id,
+        format!(
+            "claude:session-ended:{}:{}",
+            event.binding_id.as_str(),
+            event.generation.as_str()
+        )
+    );
+    assert!(is_claude_session_end_event(&event));
+    event.validate().unwrap();
+    for mutation in 0..5 {
+        let mut invalid = event.clone();
+        match mutation {
+            0 => invalid.binding_id = id('f'),
+            1 => invalid.generation = id('f'),
+            2 => invalid.input_id = Some(id('c')),
+            3 => invalid.event = events()[0].event.clone(),
+            _ => invalid.event_id.push_str(":extra"),
+        }
+        assert!(!is_claude_session_end_event(&invalid));
+        assert!(invalid.validate().is_err());
+    }
+}
+
 fn emitted<T: Serialize + JsonSchema>(value: &T) -> Value {
     let schema = schemars::generate::SchemaSettings::default()
         .for_serialize()

@@ -104,6 +104,7 @@ impl NativeActivation {
         if self.stopping.load(Ordering::Acquire) {
             return Err(unavailable());
         }
+        let (session, binding) = self.current(&scope)?;
         if self
             .state
             .lock()
@@ -114,7 +115,6 @@ impl NativeActivation {
         {
             return Ok(());
         }
-        let (session, binding) = self.current(&scope)?;
         if binding.adapter_id == "claude_code_mod" {
             return self.announce_before(scope, deadline);
         }
@@ -260,6 +260,7 @@ impl NativeActivation {
         deadline: Instant,
     ) -> Result<(), CoreError> {
         within(deadline)?;
+        self.current_async(scope.clone()).await?;
         if self
             .state
             .lock()
@@ -535,6 +536,17 @@ fn current_binding(
             CoreErrorCode::StaleGeneration,
             "Activation generation changed.",
             "Retain the original scope; qualify the explicitly selected current generation.",
+        ));
+    }
+    if ariadne_core::lifecycle::claude_generation_ended(
+        &snapshot.session,
+        &scope.binding_id,
+        &scope.generation,
+    ) {
+        return Err(CoreError::new(
+            CoreErrorCode::HostUnreachable,
+            "The original Claude session ended for this binding generation.",
+            "Retain original reports; a new explicit connect must select a new generation.",
         ));
     }
     Ok((session, binding))
