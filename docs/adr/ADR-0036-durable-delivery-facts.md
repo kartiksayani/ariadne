@@ -28,6 +28,10 @@ envelope and accepted host-receipt observation timestamps are omitted from the
 semantic digest. New effects allocate an ordinary native UUID after validation.
 Unchanged means the candidate equals live structurally: no allocation, receipt,
 revision or write. Successful and rejected durable facts are distinct outcomes.
+Runtime and the Claude Mod accept a matching validated successful receipt for both changed and
+unchanged observations before releasing the pending fact or checkpoint. It does
+not demand a fabricated durable write for a redundant lifecycle observation;
+errors and invalid receipts retain the original pending evidence.
 
 A contradictory known-ID proposal preserves the original receipt scope; incoming
 replacement IDs cannot retarget another input or binding. Core validates current

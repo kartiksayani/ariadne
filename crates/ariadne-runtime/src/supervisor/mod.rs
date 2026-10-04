@@ -160,11 +160,6 @@ impl ConnectedSupervisor {
                 let report = core_io::unleased(move || {
                     let receipt = core.report(scope.clone(), reported.clone())?;
                     receipt.validate_for(&scope, &reported)?;
-                    if !receipt.durable_effect {
-                        return Err(protocol_error(
-                            "Disconnected fact received an ephemeral Core receipt.",
-                        ));
-                    }
                     Ok(receipt)
                 })
                 .await;
@@ -352,15 +347,6 @@ impl Worker {
             core_io::call(self.lease.clone(), move || {
                 let receipt = core.report(context.clone(), reported.clone())?;
                 receipt.validate_for(&context, &reported)?;
-                if !matches!(
-                    reported.event,
-                    EventPayload::Presence { .. } | EventPayload::VisibleOutput { .. }
-                ) && !receipt.durable_effect
-                {
-                    return Err(protocol_error(
-                        "Core returned an ephemeral receipt for a durable lifecycle fact.",
-                    ));
-                }
                 Ok(receipt)
             })
             .await?;
