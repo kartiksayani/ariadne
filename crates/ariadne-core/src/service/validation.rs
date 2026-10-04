@@ -310,6 +310,11 @@ impl OwnerCommand {
                             }
                         }
                         PreferencesPatchEntry::SetSessionView { preferences } => {
+                            for owner in &preferences.filters.owners {
+                                if let ItemOwner::Other { name } = owner {
+                                    text(name, usize::MAX, true)?;
+                                }
+                            }
                             if preferences
                                 .scroll
                                 .as_ref()

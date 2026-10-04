@@ -366,6 +366,10 @@ is explicit. The existing request/entity/page bounds apply. See
 remain the only navigation preference patches. Closing a tab sets `tab_open`
 false and retains its view data and drafts. These required fields precede any
 production preferences writer; no compatibility defaults or migration apply.
+`ViewFilters.owners` is required and uses the canonical `ItemOwner` union. Empty
+means all owners; selected exact owner values combine with OR, and with search,
+status, topic, Archive and Later filters through AND. Other-owner names preserve
+their exact bytes and follow the existing nonblank/NUL-free owner constraint.
 
 Explicit owner attachment of a fresh host conversation uses `binding_connect`
 with its actual external session ID and a project-scoped `existing_session_id`;

@@ -90,6 +90,17 @@ Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notif
 
 Start with variable-height DOM rows memoized by item revision. Add virtualization only if the documented 2,000-item performance target is missed; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
 
+The early P4.4 module publishes `SentenceTree`, `NavigationSentenceTree` and the
+canonical snapshot projection. It preserves complete sentence/outcome text,
+contextual ancestors, exact owner filters, roving focus, saved collapse/Later and
+scroll anchors. It reuses the registered reveal route and NavigationStore's typed
+revision-checked preference writes; no renderer-local persistence is added.
+Active branches initialize expanded only for a newly created session view, and
+explicit collapse remains saved across later snapshots. A focused 2,000-row
+jsdom measurement records complete initial DOM rendering before any virtualization
+choice. Native layout/scroll performance, App composition and the original native
+P4.4 acceptance remain pending; these reusable module tests do not complete them.
+
 ## 4. Graph
 
 Render SVG for the selected topic. Use deterministic ordered tree layout: 190x66 px nodes, 254 px horizontal depth step, minimum 94 px leaf-center spacing, 32 px extra spacing between roots. Leaves follow stable item order; parent center is midway between first and last child. Parent edges are cubic curves from right-center to left-center. Replacement edges are dashed and labelled and do not participate in parent layout or cycle checks.
