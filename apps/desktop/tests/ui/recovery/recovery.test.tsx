@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import demo from '../../../../../fixtures/domain/demo/session.json';
+import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import type { CoreError, MutationEnvelope, OwnerMutationRequest } from '../../../src/generated/core';
 import type { Binding, Input, PresenceObservation, SavedReceipt, Session } from '../../../src/generated/domain/models';
 import { createDesktopService, CoreFailure, OpenSessions, type DesktopTransport, type HintPayloads } from '../../../src/data';
@@ -35,6 +36,14 @@ class Transport implements DesktopTransport {
   async invoke<T>(name: string, { request }: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
     if (name === 'session_get') return (this.readError ? { api_version: 1, ok: false, error: this.readError }
       : { api_version: 1, ok: true, data: { kind: 'session_get', data: { session: structuredClone(this.session), freshness: 'fresh' } } }) as T;
+    if (name === 'session_list') {
+      const binding = currentBinding(this.session), summary = structuredClone(sessionsFixture.items[0]);
+      return { api_version: 1, ok: true, data: { kind: 'session_list', data: {
+        sessions: { items: [{ ...summary, session_id: this.session.id, project_id: this.session.project_id, revision: this.session.revision,
+          active_binding: { ...summary.active_binding, id: binding.id, generation: binding.generation, presence: null } }],
+        next_cursor: null, snapshot_revision: this.session.revision }, active_total: 1, closed_total: 0, counts: summary.counts,
+      } } } as T;
+    }
     this.mutations.push(structuredClone(request) as OwnerMutationRequest);
     const next = this.replies.shift();
     if (next instanceof Error || !next) throw new Error('Unavailable');
