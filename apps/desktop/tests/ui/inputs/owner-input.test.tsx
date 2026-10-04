@@ -112,6 +112,46 @@ describe('owner input component and durable draft controller', () => {
     const restored = await value.restart(); view.rerender(<OwnerInput drafts={restored} session={value.store} itemId="2" />);
     expect(editor().value).toBe('Keep this draft'); expect(editor().disabled).toBe(false); expect(value.calls).toHaveLength(0);
   });
+  it('persists the latest logical edits queued behind an uncertain preference operation after explicit reconciliation', async () => {
+    const value = await setup(), id = value.drafts.begin(value.store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    value.preferenceOutcome('uncertain');
+    value.drafts.edit(id, { text: 'First keystroke' });
+    value.drafts.edit(id, { text: 'Latest complete explanation' });
+    await waitFor(() => expect(value.drafts.getSnapshot().preferenceUncertain).toBe(true));
+    expect(value.drafts.getSnapshot().entries[id]?.draft.text).toBe('Latest complete explanation');
+    const original = structuredClone(value.writes[0]); value.preferenceOutcome('ok');
+    expect(await value.drafts.retryPreferences()).toBe(true);
+    const restored = await value.restart();
+    expect(restored.getSnapshot().entries[id]?.draft.text).toBe('Latest complete explanation');
+    expect(value.writes[1]).toEqual(original);
+    expect(value.writes[2]?.command.op_id).not.toBe(original?.command.op_id);
+    expect(value.writes[2]?.command.command === 'preferences_patch' && value.writes[2].command.params.expected_preferences_revision).toBe(2);
+    expect(value.calls).toHaveLength(0);
+  });
+  it.each(['in_progress', 'replaced'] as const)('keeps a restored attempted answer reachable and exactly retryable after the item becomes %s', async status => {
+    const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome('uncertain');
+    fireEvent.change(editor(), { target: { value: 'Frozen original answer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' })); await screen.findByRole('button', { name: 'Retry saved input' });
+    const original = structuredClone(value.calls[0]), restored = await value.restart();
+    value.session.items['2']!.status = status; value.session.items['2']!.revision++; value.session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    view.rerender(<OwnerInput drafts={restored} session={value.store} itemId="2" />);
+    expect(screen.getByRole('button', { name: 'Retry saved input' }).hasAttribute('disabled')).toBe(false);
+    expect(editor().value).toBe('Frozen original answer'); expect(editor().disabled).toBe(true); expect(value.calls).toHaveLength(1);
+    value.outcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Retry saved input' }));
+    await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls[1]).toEqual(original);
+  });
+  it('lets a different preferred form reveal a retained attempted answer without submitting either intent', async () => {
+    const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome('uncertain');
+    fireEvent.change(editor(), { target: { value: 'Retained answer while viewing reply' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' })); await screen.findByRole('button', { name: 'Retry saved input' });
+    const restored = await value.restart(); value.session.items['2']!.status = 'in_progress'; value.session.items['2']!.revision++; value.session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    view.rerender(<OwnerInput key="reply-form" drafts={restored} session={value.store} itemId="2" initialIntent="reply" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Review saved answer input' }));
+    expect(screen.getByRole('button', { name: 'Retry saved input' })).toBeTruthy();
+    expect(editor().value).toBe('Retained answer while viewing reply'); expect(editor().disabled).toBe(true); expect(value.calls).toHaveLength(1);
+  });
   it.each(['uncertain', 'malformed'] as const)('freezes exact op/body after %s receipt and explicitly replays it across restart and a changed target', async outcome => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome(outcome);
     fireEvent.change(editor(), { target: { value: 'Exact untrimmed bytes  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
