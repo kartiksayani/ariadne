@@ -17,6 +17,8 @@ import { SessionActionControllers } from './components/bindings/actions';
 import { BindingControls } from './components/bindings/BindingControls';
 import { qualifiedPresence } from './components/bindings/presence';
 import { RecoveryPanel } from './components/recovery/RecoveryPanel';
+import { HistoryActions } from './components/history-actions/HistoryActions';
+import { CopiedProvenance } from './components/history-actions/CopiedProvenance';
 import { EdgeState, SessionNotice } from './components/edge-states/EdgeState';
 
 const adapters: readonly AdapterChoice[] = [
@@ -53,10 +55,12 @@ function ThemeAppearance({ theme }: { theme: Theme }) {
   }, [theme]);
   return null;
 }
-function SessionCenter({ application, view, graph, onReveal, switchToTree }: {
-  application: Application; view: OpenedSessionView; graph: boolean; onReveal: (result: RevealedItem) => void; switchToTree: () => void;
+function SessionCenter({ application, view, graph, onReveal, revealItem, switchToTree }: {
+  application: Application; view: OpenedSessionView; graph: boolean; onReveal: (result: RevealedItem) => void;
+  revealItem: (route: ItemRoute) => void; switchToTree: () => void;
 }) {
   const state = useSession(view.store), session = state.snapshot?.session;
+  const navigation = useNavigation(application.navigation);
   const actions = application.actions.forSession(view.store);
   const topics = Object.values(session?.topics ?? {}).filter((topic): topic is NonNullable<typeof topic> => !!topic && (view.preferences?.filters.archived ? topic.archived_at !== null : topic.archived_at === null)
     && (!view.preferences?.filters.topic_id || topic.id === view.preferences.filters.topic_id)).sort((a, b) => a.order - b.order);
@@ -64,6 +68,10 @@ function SessionCenter({ application, view, graph, onReveal, switchToTree }: {
     <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />
     <BindingControls actions={actions} />
     <RecoveryPanel actions={actions} />
+    <HistoryActions actions={actions} targets={(navigation.sessions?.sessions.items ?? []).map(target => ({
+      route: { project_id: target.project_id, session_id: target.session_id }, label: target.title,
+    }))} actionsForTarget={target => application.actions.forSession(application.navigation.opened.open(target))}
+      revealItem={revealItem} openSession={target => { void application.navigation.navigate({ kind: 'session', session: target }); }} />
     {session && Object.keys(session.items).length === 0 && <EdgeState kind="empty" />}
     {graph ? topics.map(topic => <NavigationTopicGraph key={topic.id} navigation={application.navigation} store={view.store}
       topicId={topic.id} onReveal={onReveal} onSwitchToTree={switchToTree} />)
@@ -143,13 +151,16 @@ function Workspace({ application }: { application: Application }) {
       onThemeChange={() => { if (preferences) void navigation.saveTheme(theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system', preferences.revision); }}
       waitingContent={<div className="app-waiting">{routeError && <p role="alert">{routeError}</p>}<OwnerWaitingPanel drafts={application.drafts} store={application.waiting} revealItem={revealItem}
         openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} /></div>}
-      detail={store && selectedId && detailOpen ? <OwnerItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} service={application.service} store={store}
+      detail={store && selectedId && detailOpen ? <><OwnerItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} service={application.service} store={store}
         itemId={selectedId} routes={navigation.routes} onReveal={reveal} onClose={closeDetail} highlightedMessageIds={highlightedMessages} later={later}
-        onLater={value => route && preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}
+        onLater={value => route && preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} />
+        <CopiedProvenance key={`source:${key}:${selectedId}`} store={store} itemId={selectedId} revealItem={async target => {
+          const result = await navigation.routes.revealItem(target); if (result) reveal(result);
+        }} /></> : undefined}
       onCloseDetail={closeDetail}
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} routes={navigation.routes}
         selectedItemId={selectedId} onHighlight={(_items, messages) => setHighlightedMessages(messages)} onReveal={reveal} onClose={toggleRail} /> : undefined}
-      renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} onReveal={selected} switchToTree={switchToTree} />} />
+      renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} onReveal={selected} revealItem={revealItem} switchToTree={switchToTree} />} />
   </div>;
 }
 

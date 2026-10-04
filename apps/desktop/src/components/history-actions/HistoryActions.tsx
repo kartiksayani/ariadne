@@ -27,6 +27,8 @@ export function HistoryActions({ actions, targets, actionsForTarget, revealItem,
   const error = operation.error instanceof CoreFailure ? operation.error.error : undefined;
   const blockers = review && guarded ? lifecycleBlockers(session, review.topicId, error) : [];
   const mustPause = review?.kind === 'session_close' && binding?.dispatch_state !== 'paused';
+  const historyPending = operation.pending?.command.command.startsWith('topic_') || operation.pending?.command.command.startsWith('session_');
+  const historyReceipt = operation.receipt && 'data' in operation.receipt && ['topic_lifecycle', 'session_lifecycle', 'continuation'].includes(operation.receipt.data.kind);
   const label = review?.kind.replace(/_/g, ' ') ?? '';
   const resetReview = () => { setReview(null); setPauseReview(false); };
   const prepare = (kind: Lifecycle, topicId: string | null = null) => setReview({ kind, topicId,
@@ -57,9 +59,9 @@ export function HistoryActions({ actions, targets, actionsForTarget, revealItem,
         {topic.archived_at ? 'Restore' : 'Archive'} {topic.name}</button>
       <button type="button" className="ref-button ref-secondary" disabled={state.status !== 'ready' || !!state.error || operation.writing} onClick={() => setContinuing(topic.id)}>Continue {topic.name}</button>
     </div>)}
-    {!review && operation.error && <p role="alert">{operation.error.message}</p>}
-    {!review && operation.pending && <button type="button" className="ref-button ref-secondary" disabled={operation.writing} onClick={() => { void actions.retry(); }}>Reconcile saved action</button>}
-    {operation.receipt && !review && <p role="status">History action saved. Full history is retained.</p>}
+    {!review && historyPending && operation.error && <p role="alert">{operation.error.message}</p>}
+    {!review && historyPending && <button type="button" className="ref-button ref-secondary" disabled={operation.writing} onClick={() => { void actions.retry(); }}>Reconcile saved action</button>}
+    {historyReceipt && !review && <p role="status">History action saved. Full history is retained.</p>}
     {review && <ReferenceDialog title={pauseReview ? 'Confirm Pause dispatch' : `Confirm ${label}`} onCancel={() => { if (!operation.writing) resetReview(); }} actions={<>
       <button type="button" className="ref-button ref-secondary" disabled={operation.writing} onClick={resetReview}>Cancel</button>
       {operation.pending ? <button type="button" className="ref-button ref-primary" disabled={operation.writing} onClick={() => {

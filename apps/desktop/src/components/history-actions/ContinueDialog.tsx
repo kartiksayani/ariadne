@@ -80,7 +80,7 @@ function TargetPreview({ sourceActions, topicId, target, actions, revealItem, on
       </>}
       {stale && <p role="alert">Source or target changed. Prepare a new preview before sending.</p>}
       {operation.error && <p role="alert">{operation.error.message} {operation.pending ? 'Completion is unknown. Reconcile the original action before preparing another Send.' : 'Source unchanged. Prepare a new preview, then send explicitly.'}</p>}
-      {pending && <p>Pending handoff from session {pending.params.source.session_id}, revision {pending.params.source_revision}, to session {pending.params.target.session_id}. Its approved summary and operation ID are retained.</p>}
+      {pending && <p data-operation-id={pending.op_id}>Pending handoff from session {pending.params.source.session_id}, revision {pending.params.source_revision}, to session {pending.params.target.session_id}. Its approved summary and operation ID are retained.</p>}
       {!operation.pending && !operation.writing && <button type="button" className="ref-button ref-secondary" disabled={loading} onClick={() => setAttempt(value => value + 1)}>Prepare new preview</button>}
     </div>
   </ReferenceDialog>;
