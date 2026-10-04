@@ -17,6 +17,8 @@ jobs:
     name: quality
     runs-on: macos-26
     env:
+      # Avoid partial toolchains/configuration inherited from the hosted runner image.
+      RUSTUP_HOME: "${{ runner.temp }}/ariadne-rustup"
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
