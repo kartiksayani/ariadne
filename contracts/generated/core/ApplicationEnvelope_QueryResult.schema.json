@@ -5244,6 +5244,12 @@
         "hide_later": {
           "type": "boolean"
         },
+        "owners": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemOwner"
+          }
+        },
         "search": {
           "type": "string"
         },
@@ -5268,6 +5274,7 @@
       "required": [
         "search",
         "statuses",
+        "owners",
         "topic_id",
         "archived",
         "hide_later"

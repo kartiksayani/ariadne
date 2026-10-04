@@ -1,14 +1,15 @@
 import { useSyncExternalStore } from 'react';
-import type { BindingConnectParams, MutationReceipt, NavigationSelection, OwnerMutationRequest,
+import type { BindingConnectParams, ItemRoute, MutationReceipt, NavigationSelection, OwnerMutationRequest,
   PreferencesPatchEntry, PreferencesSnapshot, ProjectListResult, SessionListResult, SessionPreferences, SessionRef } from '../../generated/core';
 import type { RevealedItem } from '../../data/routes';
 import { RegisteredRoutes } from '../../data/routes';
 import { immutable, OpenSessions, type Immutable, type SessionStore } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } from '../../data/service';
+import { initialExpansion } from '../../selectors/tree/rows';
 import * as catalogue from './catalogue';
 
 type Failure = CoreFailure | ServiceFailure;
-type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' }>;
+type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' }>;
 export interface NavigationState {
   readonly preferences: Immutable<PreferencesSnapshot> | null;
   readonly projects: Immutable<ProjectListResult> | null;
@@ -28,7 +29,7 @@ const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b
 
 export class NavigationStore {
   readonly opened: OpenSessions;
-  private readonly routes: RegisteredRoutes;
+  readonly routes: RegisteredRoutes;
   private state: NavigationState = Object.freeze({ preferences: null, projects: null, sessions: null,
     sessionProjectId: null, status: 'loading', error: null, writing: false, pendingOperationId: null, reveal: null, setup: null });
   private readonly listeners = new Set<() => void>();
@@ -146,16 +147,48 @@ export class NavigationStore {
         saved.revision = receipt.preferences_revision;
         for (const entry of entries) {
           if (entry.kind === 'set_global') saved.global = structuredClone(entry.preferences);
-          else {
+          else if (entry.kind === 'set_session_view') {
             const index = saved.sessions.findIndex(view => sameRoute(view.session, entry.preferences.session));
             if (index < 0) saved.sessions.push(structuredClone(entry.preferences));
             else saved.sessions[index] = structuredClone(entry.preferences);
+          } else {
+            saved.later = saved.later.filter(item => !sameRoute(item, entry.item) || item.item_id !== entry.item.item_id);
+            if (entry.later) saved.later.push(structuredClone(entry.item));
           }
         }
         this.publish({ preferences: immutable(saved) });
       }
       confirmed();
     });
+  }
+  private async editingPreferences(expectedRevision: number): Promise<PreferencesSnapshot | null> {
+    if (this.stopped || this.pending) return null;
+    const preferences = this.preferences();
+    if (preferences.revision === expectedRevision) return preferences;
+    this.publish({ error: new CoreFailure({ code: 'revision_conflict', message: 'These preferences changed after this view was rendered.',
+      hint: 'Reload the view before choosing this edit again.', retryable: false, field_errors: [], current_revision: preferences.revision }) });
+    await this.refresh();
+    return null;
+  }
+  async saveSessionView(view: SessionPreferences, expectedPreferencesRevision: number): Promise<boolean> {
+    try {
+      const preferences = await this.editingPreferences(expectedPreferencesRevision);
+      if (!preferences || this.stopped || this.pending) return false;
+      const current = preferences.sessions.find(saved => sameRoute(saved.session, view.session));
+      if (!current) throw new ServiceFailure('invalid_response');
+      // Tree edits retain navigation's tab lifetime/order. The captured revision
+      // prevents older selection/filter/scroll values overwriting newer views.
+      return await this.patch(preferences, [{ kind: 'set_session_view', preferences: {
+        ...structuredClone(view), tab_open: current.tab_open, tab_order: current.tab_order,
+      } }]);
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
+  async setLater(item: ItemRoute, later: boolean, expectedPreferencesRevision: number): Promise<boolean> {
+    try {
+      const preferences = await this.editingPreferences(expectedPreferencesRevision);
+      if (!preferences || this.stopped || this.pending) return false;
+      return await this.patch(preferences, [{ kind: 'set_later', item: structuredClone(item), later }]);
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   async navigate(selection: NavigationSelection, reveal: RevealedItem | null = null): Promise<boolean> {
     if (this.stopped || this.pending) return false;
@@ -171,8 +204,8 @@ export class NavigationStore {
         }
         const existing = preferences.sessions.find(view => sameRoute(view.session, selection.session));
         const view: SessionPreferences = existing ?? { session: selection.session, tab_open: true, selected_item_id: null,
-          tab_order: Math.max(-1, ...preferences.sessions.map(session => session.tab_order)) + 1, expanded_item_ids: [],
-          filters: { search: '', statuses: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
+          tab_order: Math.max(-1, ...preferences.sessions.map(session => session.tab_order)) + 1, expanded_item_ids: [...initialExpansion(snapshot.session)],
+          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
         entries.push({ kind: 'set_session_view', preferences: { ...view, tab_open: true,
           selected_item_id: reveal?.kind === 'item' ? reveal.route.item_id : view.selected_item_id } });
         if (equal(preferences.global.selected_navigation, selection) && existing?.tab_open && !reveal) {
@@ -242,6 +275,7 @@ export class NavigationStore {
       // Definitive typed rejection permits a new, explicitly chosen action.
       if (failure instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(failure.error.code)) this.pending = null;
       this.publish({ writing: false, pendingOperationId: this.pending?.request.command.op_id ?? null, error: failure });
+      if (failure instanceof CoreFailure && failure.error.code === 'revision_conflict') await this.refresh();
       return false;
     }
   }

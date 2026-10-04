@@ -1225,7 +1225,8 @@
       "implementation_depends_on": [
         "P4.1",
         "P0.5"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/53"
     },
     {
       "id": "P4.3",
@@ -1270,8 +1271,16 @@
         "apps/desktop/src/components/tree/**",
         "apps/desktop/src/selectors/tree/**",
         "apps/desktop/src/routes/**",
-        "tests/ui/tree/**",
-        "tests/e2e/tree/**"
+        "apps/desktop/tests/ui/tree/**",
+        "tests/e2e/tree/**",
+        "apps/desktop/src/state/navigation/store.ts",
+        "apps/desktop/tests/ui/navigation/**",
+        "apps/desktop/src/styles/tree.css",
+        "crates/ariadne-core/src/dto/preferences.rs",
+        "crates/ariadne-core/src/service/validation.rs",
+        "crates/ariadne-core/tests/service_contract.rs",
+        "contracts/generated/core/**",
+        "apps/desktop/src/generated/core/**"
       ],
       "spec": [
         "docs/planning/low-level/UI_AND_NATIVE.md#3-tree-detail-message-rail-search-and-filters",
@@ -1285,12 +1294,13 @@
         "Measure 2,000-item target before adding virtualization; preserve roving ARIA focus and scroll anchors."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project tree",
+        "rtk proxy npm run test:ui -- --project desktop tests/ui/tree tests/ui/navigation",
         "rtk proxy npm run test:e2e -- --suite tree"
       ],
       "estimate_days": 1.5,
       "implementation_depends_on": [
-        "P4.1"
+        "P4.1",
+        "P4.2"
       ]
     },
     {
