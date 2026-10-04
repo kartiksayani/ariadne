@@ -13,6 +13,9 @@ If the system `python3` is older, choose an existing supported interpreter with
 architecture and selected tool versions before building; it does not install
 toolchains or providers. Builds use the repository lockfiles, check generated
 contracts/rules, and use ordinary release features.
+Rustup preflight selects only an already installed pin, and build children have
+automatic toolchain installation disabled. Missing Rust components require
+explicit setup before retrying.
 
 The app, CLI, MCP and canonical Mod/rules live together in a version directory.
 The owned Applications and optional existing PATH-directory links go through

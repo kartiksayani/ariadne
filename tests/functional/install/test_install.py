@@ -8,6 +8,8 @@ from pathlib import Path
 import plistlib
 import stat
 import sys
+import subprocess
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -213,6 +215,26 @@ class InstallationTests(unittest.TestCase):
         self.assertFalse(installer.exists(self.home / ".local/bin/ariadne"))
         self.assertFalse((self.root / "versions/0.1.0").exists())
 
+    def test_failed_publication_cleanup_uses_retained_versions_not_foreign_tree(self):
+        outside = self.base / "foreign-published-versions"
+        outside.mkdir()
+        saved = self.root / "saved-versions"
+        captured = {}
+        def swap_then_fail(*args, **kwargs):
+            version = self.root / "versions/0.1.0"
+            foreign = outside / version.name
+            shutil.copytree(version, foreign, symlinks=True)
+            captured["inventory"] = installer.inventory(foreign)
+            (self.root / "versions").rename(saved)
+            (self.root / "versions").symlink_to(outside)
+            raise OSError("publication after ancestor swap")
+        with patch.object(installer.os, "replace", side_effect=swap_then_fail):
+            with self.assertRaisesRegex(OSError, "ancestor swap"):
+                self.install()
+        self.assertEqual(installer.inventory(outside / "0.1.0"), captured["inventory"])
+        self.assertTrue((outside / "0.1.0/install.json").exists())
+        self.assertFalse((saved / "0.1.0").exists())
+
     def test_unknown_manifest_inventory_never_unlinks_paths(self):
         final = self.install()
         foreign = self.home / "foreign.txt"
@@ -337,6 +359,60 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(foreign.read_bytes(), b"fixture claude rules")
         self.assertFalse((moved / "claude.md").exists())
 
+    def test_ancestor_swap_before_package_open_never_removes_equal_foreign_file(self):
+        final = self.install()
+        name = "integrations/rules/claude.md"
+        expected = installer.json_read(final / "install.json")["owned_files"][name]
+        outside = self.base / "foreign-versions"
+        foreign = outside / final.name / name
+        foreign.parent.mkdir(parents=True)
+        foreign.write_bytes((final / name).read_bytes())
+        foreign.chmod(expected["mode"])
+        versions = self.root / "versions"
+        saved = self.root / "saved-versions"
+        real_open = installer.os.open
+        swapped = False
+        def swap_before_root_open(path, flags, *args, **kwargs):
+            nonlocal swapped
+            # Covers the original absolute-root implementation and the new
+            # component walk, so the regression fails against the reviewed bug.
+            if not swapped and (Path(path) == final or str(path) == "versions"):
+                versions.rename(saved)
+                versions.symlink_to(outside)
+                swapped = True
+            return real_open(path, flags, *args, **kwargs)
+        with patch.object(installer.os, "open", side_effect=swap_before_root_open):
+            with self.assertRaises((installer.InstallError, OSError)):
+                installer.remove_owned(final, name, expected)
+        self.assertTrue(swapped)
+        self.assertEqual(foreign.read_bytes(), b"fixture claude rules")
+        self.assertEqual((saved / final.name / name).read_bytes(), b"fixture claude rules")
+
+    def test_uninstall_retained_anchors_protect_foreign_tree_after_versions_swap(self):
+        final = self.install()
+        outside = self.base / "foreign-version-tree"
+        foreign = outside / final.name / "integrations/rules/claude.md"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_bytes((final / "integrations/rules/claude.md").read_bytes())
+        foreign.chmod(0o600)
+        versions = self.root / "versions"
+        saved = self.root / "saved-versions"
+        remove = installer.remove_owned
+        swapped = False
+        def swap_before_first_removal(root, name, expected):
+            nonlocal swapped
+            if not swapped:
+                versions.rename(saved)
+                versions.symlink_to(outside)
+                swapped = True
+            return remove(root, name, expected)
+        with patch.object(installer, "remove_owned", side_effect=swap_before_first_removal):
+            installer.uninstall(self.home)
+        self.assertTrue(swapped)
+        self.assertEqual(foreign.read_bytes(), b"fixture claude rules")
+        self.assertTrue((outside / final.name).is_dir())
+        self.assertFalse((saved / final.name).exists())
+
     def test_file_identity_change_after_read_is_retained(self):
         final = self.install()
         name = "integrations/rules/claude.md"
@@ -394,18 +470,17 @@ class InstallationTests(unittest.TestCase):
 
 
 def shutil_error():
-    import shutil
     return shutil.Error
 
 
 class BuildTests(unittest.TestCase):
     def test_preflight_records_exact_supported_tools_and_rejects_unsupported(self):
-        answers = {"node": "v22.23.2", "npm": "10.9.8", "rustc": "rustc 1.98.1 (fixture)",
+        answers = {"node": "v22.23.2", "npm": "10.9.8", "rustc": "rustc 1.98.1 (fixture)", "cargo": "cargo 1.98.1 (fixture)",
                    "xcode-select": "/Xcode", "xcrun": "/SDK"}
         with patch.object(installer.platform, "system", return_value="Darwin"), \
                 patch.object(installer.platform, "mac_ver", return_value=("13.7", (), "")), \
                 patch.object(installer.platform, "machine", return_value="arm64"), \
-                patch.object(installer, "run", side_effect=lambda args, **kwargs: answers[args[0]]):
+                patch.object(installer, "run", side_effect=lambda args, **kwargs: answers[args[3] if args[0] == "rustup" else args[0]]):
             self.assertEqual(installer.preflight()["architecture"], "arm64")
             answers["npm"] = "wrong"
             with self.assertRaisesRegex(installer.InstallError, "pinned npm"):
@@ -429,8 +504,40 @@ class BuildTests(unittest.TestCase):
             self.assertIn("--locked", call.args[0])
             self.assertNotIn("RUSTFLAGS", call.kwargs["env"])
             self.assertNotIn("VITE_ARIADNE_E2E", call.kwargs["env"])
+            self.assertEqual(call.kwargs["env"]["RUSTUP_AUTO_INSTALL"], "0")
+            self.assertEqual(call.kwargs["env"]["RUSTUP_TOOLCHAIN"], "1.98.1")
         self.assertIn("--no-default-features", calls[-1].args[0])
         self.assertEqual(calls[-1].kwargs["env"]["MACOSX_DEPLOYMENT_TARGET"], "13.0")
+
+    def test_missing_rustup_toolchain_refuses_without_channel_sync_or_download(self):
+        with tempfile.TemporaryDirectory(prefix="ariadne missing rustup ") as temporary:
+            errors = []
+            probes = []
+            def probe(args, **kwargs):
+                probes.append(args)
+                if args[0] == "node":
+                    return "v22.23.2"
+                if args[0] == "npm":
+                    return "10.9.8"
+                env = {**kwargs["env"], "RUSTUP_HOME": str(Path(temporary) / "empty-rustup"),
+                       "RUSTUP_DIST_SERVER": "http://127.0.0.1:9"}
+                result = subprocess.run(args, cwd=installer.ROOT, env=env, text=True,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+                errors.append(result.stderr)
+                result.check_returncode()
+                return result.stdout
+            with patch.object(installer.platform, "system", return_value="Darwin"), \
+                    patch.object(installer.platform, "mac_ver", return_value=("13.7", (), "")), \
+                    patch.object(installer.platform, "machine", return_value="arm64"), \
+                    patch.object(installer, "run", side_effect=probe):
+                with self.assertRaisesRegex(installer.InstallError, "Install/select Rust 1.98.1"):
+                    installer.preflight()
+            self.assertEqual(probes[-1], ["rustup", "run", "1.98.1", "rustc", "--version"])
+            self.assertNotIn("--install", probes[-1])
+            self.assertIn("not installed", "".join(errors))
+            self.assertNotIn("syncing channel", "".join(errors))
+            self.assertNotIn("downloading", "".join(errors))
+            self.assertFalse((Path(temporary) / "empty-rustup/toolchains").exists())
 
 
 if __name__ == "__main__":

@@ -18,8 +18,11 @@ only the three fixed external install links and originally staged directories.
 Unsupported or malformed ownership inventory cannot authorize removal. An
 unchanged installed helper supplies the canonical integration names through its
 read-only exporter; an edited/missing helper preserves the entire package.
-Uninstall compares bytes/modes and anchored
-no-follow directory/file identities before unlinking; modified files, unknown
+Uninstall compares bytes/modes and retains no-follow directory descriptors from
+the complete home ancestor chain through each validated package. File removal,
+directory removal, descriptor cleanup and failed-publication cleanup use those
+handles, so a later pathname/ancestor symlink swap cannot redirect deletion.
+Modified files, unknown
 files and nonempty directories survive. Session history and host settings are
 outside this inventory. The stable install lock remains as coordination state.
 
@@ -33,7 +36,10 @@ renders resources against the final immutable version path before publication.
 `make install` records macOS/architecture and pinned toolchain preflight, checks
 generated artifacts, uses locked dependencies and ordinary release features,
 then runs the installed read-only doctor. It never installs toolchains/providers,
-uses sudo, edits shell profiles or performs host registration/trust. Failure
+uses sudo, edits shell profiles or performs host registration/trust. Rust
+preflight uses `rustup run` without `--install` to inspect only an existing pin;
+all build children select that pin with automatic Rustup installation disabled.
+Missing toolchains/components require an explicit owner setup action. Failure
 before pointer publication preserves the previous install and cleans only the
 new attempt's paths. This is a personal unsigned source install, not a public
 distribution or a general deployment/rollback framework.

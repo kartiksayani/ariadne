@@ -15,12 +15,13 @@ import selectors
 import stat
 import subprocess
 import sys
-import tempfile
 import time
+import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 LIMIT = 512 * 1024
 BINARIES = ("ariadne", "ariadne-mcp")
+RUST_VERSION = "1.98.1"
 
 
 class InstallError(ValueError):
@@ -50,6 +51,14 @@ def exists(path):
     return os.path.lexists(path)
 
 
+def exists_at(parent_fd, name):
+    try:
+        os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def directory(path, create=False):
     if path.parent != path:
         directory(path.parent, create)
@@ -61,18 +70,44 @@ def directory(path, create=False):
 
 
 @contextlib.contextmanager
-def anchored_parent(root, relative):
-    """Keep removal inside opened no-follow directories across pathname changes."""
-    parts = safe_name(relative).parts
-    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+def anchored_directory(path, parent_fd=None, create=False):
+    """Walk each directory component without following any ancestor symlink."""
+    if parent_fd is None:
+        path = Path(path)
+        require(path.is_absolute(), "Directory anchor requires an absolute path.")
+        parts = path.parts[1:]
+        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    else:
+        parts = safe_name(str(path)).parts
+        fd = os.dup(parent_fd)
     try:
-        for part in parts[:-1]:
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+        for part in parts:
+            try:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except FileNotFoundError:
+                require(create, f"Missing directory: {path}")
+                os.mkdir(part, mode=0o700, dir_fd=fd)
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as error:
+                raise InstallError(f"Unsafe directory: {path}") from error
             os.close(fd)
             fd = child
-        yield fd, parts[-1]
+        yield fd
     finally:
         os.close(fd)
+
+
+@contextlib.contextmanager
+def anchored_parent(root, relative):
+    """Retain the package inode or walk its complete absolute no-follow chain."""
+    parts = safe_name(relative).parts
+    with contextlib.ExitStack() as stack:
+        fd = os.dup(root) if isinstance(root, int) else stack.enter_context(anchored_directory(root))
+        if isinstance(root, int):
+            stack.callback(os.close, fd)
+        for part in parts[:-1]:
+            fd = stack.enter_context(anchored_directory(part, parent_fd=fd))
+        yield fd, parts[-1]
 
 
 def unchanged_identity(before, after):
@@ -104,10 +139,12 @@ def remove_owned(root, name, expected):
         return True
 
 
-def remove_owned_directory(root, name, mode):
+def remove_owned_directory(root, name, mode, identity=None):
     with anchored_parent(root, name) as (parent, leaf):
         info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
         if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != mode:
+            return False
+        if identity is not None and (info.st_dev, info.st_ino) != identity:
             return False
         os.rmdir(leaf, dir_fd=parent)
         return True
@@ -250,20 +287,20 @@ def current(root, home):
 @contextlib.contextmanager
 def locked(home):
     require(home.is_absolute() and home.is_dir() and not home.is_symlink(), "HOME must be a real absolute directory.")
-    root = directory(home / ".local/share/ariadne", True)
-    directory(root / "versions", True)
-    lock = root / "install.lock"
-    fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
-    try:
+    root = home / ".local/share/ariadne"
+    with contextlib.ExitStack() as stack:
+        home_fd = stack.enter_context(anchored_directory(home))
+        root_fd = stack.enter_context(anchored_directory(".local/share/ariadne", parent_fd=home_fd, create=True))
+        versions_fd = stack.enter_context(anchored_directory("versions", parent_fd=root_fd, create=True))
+        fd = os.open("install.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=root_fd)
+        stack.callback(os.close, fd)
         require(stat.S_ISREG(os.fstat(fd).st_mode), "Install coordination file is not regular.")
         require(os.fstat(fd).st_uid == os.getuid(), "Install coordination file belongs to another user.")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise InstallError("Another install/uninstall owns the package lock; retry later.") from error
-        yield root
-    finally:
-        os.close(fd)
+        yield root, home_fd, root_fd, versions_fd
 
 
 def run(args, cwd=ROOT, env=None, capture=False):
@@ -279,10 +316,18 @@ def preflight():
     require(os_version and int(os_version.split(".")[0]) >= 13, "macOS 13 or newer is required.")
     arch = platform.machine()
     require(arch in ("arm64", "x86_64"), "Only arm64 and x86_64 macOS are supported.")
-    expected = {"node": "v22.23.2", "npm": "10.9.8", "rustc": "rustc 1.98.1"}
-    observed = {name: run([name, "--version"], capture=True).strip() for name in expected}
+    expected = {"node": "v22.23.2", "npm": "10.9.8", "rustc": f"rustc {RUST_VERSION}", "cargo": f"cargo {RUST_VERSION}"}
+    env = {**os.environ, "RUSTUP_AUTO_INSTALL": "0", "RUSTUP_TOOLCHAIN": RUST_VERSION}
+    observed = {name: run([name, "--version"], capture=True, env=env).strip() for name in ("node", "npm")}
+    try:
+        # `rustup run` without --install only selects an already installed
+        # toolchain; invoking the rustc proxy in this checkout could install it.
+        observed["rustc"] = run(["rustup", "run", RUST_VERSION, "rustc", "--version"], capture=True, env=env).strip()
+        observed["cargo"] = run(["rustup", "run", RUST_VERSION, "cargo", "--version"], capture=True, env=env).strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        raise InstallError(f"Install/select Rust {RUST_VERSION} with rustc and cargo explicitly before retrying; no toolchain download was attempted.") from error
     for name, version in expected.items():
-        require(observed[name] == version if name != "rustc" else observed[name].startswith(version + " "),
+        require(observed[name] == version if name in ("node", "npm") else observed[name].startswith(version + " "),
                 f"Use the pinned {name} version {version}; no toolchain was installed.")
     observed["xcode"] = run(["xcode-select", "-p"], capture=True).strip()
     require(observed["xcode"], "Install/select Xcode command line tools explicitly.")
@@ -299,7 +344,8 @@ def build():
     for name in list(env):
         if re.match(r"^(ARIADNE_E2E_|CARGO_FEATURE_|CARGO_ENCODED_RUSTFLAGS$|RUSTFLAGS$|TAURI_CONFIG$|TAURI_WEBDRIVER_PORT$|WDIO_EMBEDDED_SERVER$|VITE_ARIADNE_E2E$)", name):
             del env[name]
-    env.update(CARGO_TARGET_DIR=str(target), MACOSX_DEPLOYMENT_TARGET="13.0")
+    env.update(CARGO_TARGET_DIR=str(target), MACOSX_DEPLOYMENT_TARGET="13.0",
+               RUSTUP_AUTO_INSTALL="0", RUSTUP_TOOLCHAIN=RUST_VERSION)
     run(["npm", "ci", "--ignore-scripts", "--engine-strict"], env=env)
     for command in ("gen-contracts", "gen-rules", "gen-codex-wire"):
         arguments = ["cargo", "run", "--locked", "-p", "ariadne-xtask", "--", command]
@@ -349,7 +395,7 @@ def resources(helper, final_helper):
 
 
 def install(home, artifacts, facts, resource_loader=resources):
-    with locked(home) as root:
+    with locked(home) as (root, home_fd, root_fd, versions_fd):
         before = current(root, home)
         require(not exists(root / ".current-next"), "Unexpected pointer staging path.")
         expected_links = links(home)
@@ -380,7 +426,8 @@ def install(home, artifacts, facts, resource_loader=resources):
         bundle = resource_loader(artifacts / "ariadne", final / "bin/ariadne")
         if before:
             require(inventory(before[0]) == before[1]["owned_files"], "Installed package contains edits or foreign files; preserve it and inspect manually.")
-        stage = Path(tempfile.mkdtemp(prefix=".stage-", dir=root / "versions"))
+        stage = root / "versions" / f".stage-{uuid.uuid4()}"
+        os.mkdir(stage.name, mode=0o700, dir_fd=versions_fd)
         created_links = []
         published = False
         try:
@@ -414,35 +461,36 @@ def install(home, artifacts, facts, resource_loader=resources):
                         existing["owned_directories"] == directories and
                         existing["owned_links"] == owned_links,
                         "Same-version package identity differs; use a new release version.")
-                shutil.rmtree(stage)
+                shutil.rmtree(stage.name, dir_fd=versions_fd)
             else:
-                stage.rename(final)
+                os.rename(stage.name, final.name, src_dir_fd=versions_fd, dst_dir_fd=versions_fd)
                 published = True
             for name, target in owned_links.items():
                 path = home / name
                 directory(path.parent, True)
                 if not exists(path):
-                    path.symlink_to(target)
+                    with anchored_parent(home_fd, name) as (parent, leaf):
+                        os.symlink(target, leaf, dir_fd=parent)
                     created_links.append(path)
             temporary = root / ".current-next"
             require(not exists(temporary), f"Unexpected pointer staging path: {temporary}")
-            temporary.symlink_to(f"versions/{version}")
-            os.replace(temporary, root / "current")
+            os.symlink(f"versions/{version}", ".current-next", dir_fd=root_fd)
+            os.replace(".current-next", "current", src_dir_fd=root_fd, dst_dir_fd=root_fd)
         except BaseException:
             for path in reversed(created_links):
                 if path.is_symlink() and os.readlink(path) == owned_links[str(path.relative_to(home))]:
-                    path.unlink()
+                    remove_owned(home_fd, str(path.relative_to(home)), {"kind": "symlink", "target": owned_links[str(path.relative_to(home))]})
             temporary = root / ".current-next"
             if temporary.is_symlink() and os.readlink(temporary) == f"versions/{version}":
-                temporary.unlink()
+                remove_owned(root_fd, ".current-next", {"kind": "symlink", "target": f"versions/{version}"})
             # This directory was created by this attempt and remains unpublished.
             if published and not (root / "current").resolve() == final:
                 if inventory(final) == files:
-                    shutil.rmtree(final)
+                    shutil.rmtree(final.name, dir_fd=versions_fd)
             raise
         finally:
-            if exists(stage):
-                shutil.rmtree(stage)
+            if exists_at(versions_fd, stage.name):
+                shutil.rmtree(stage.name, dir_fd=versions_fd)
         print(f"Installed Ariadne {version}: {home / 'Applications/Ariadne.app'}\nHelpers: {final / 'bin'}", flush=True)
         if not exists(home / ".local/bin"):
             print(f"PATH directory is absent. Add {root / 'current/bin'} to PATH explicitly; shell startup files were not edited.")
@@ -455,55 +503,61 @@ def uninstall(home):
         print("No personal Ariadne package installed.")
         return []
     retained = []
-    with locked(home) as root:
+    with locked(home) as (root, home_fd, root_fd, versions_fd):
         selected = current(root, home)
-        versions = directory(root / "versions")
         packages = []
         # Validate every receipt before removing anything; unknown versions are retained.
-        for child in sorted(versions.iterdir()):
-            try:
-                directory(child)
-                packages.append((child, descriptor(child, home)))
-            except (InstallError, OSError, ValueError):
-                retained.append(str(child))
-        for package, receipt in packages:
-            for name, expected in receipt["owned_files"].items():
+        with contextlib.ExitStack() as anchors:
+            for name in sorted(os.listdir(versions_fd)):
+                child = root / "versions" / name
                 try:
-                    if not remove_owned(package, name, expected):
-                        retained.append(str(package / name))
-                except FileNotFoundError:
-                    pass
-                except (InstallError, OSError):
-                    retained.append(str(package / name))
-            for name, target in receipt["owned_links"].items():
-                path = home / name
-                if exists(path):
-                    if path.is_symlink() and os.readlink(path) == target:
-                        if not remove_owned(home, name, {"kind": "symlink", "target": target}):
-                            retained.append(str(path))
-                    else:
-                        retained.append(str(path))
-            # Foreign files and nonempty directories survive. Keep descriptor for retained files.
-            for name in sorted(receipt["owned_directories"], key=lambda p: len(PurePosixPath(p).parts), reverse=True):
-                with contextlib.suppress(OSError):
-                    remove_owned_directory(package, name, receipt["owned_directories"][name])
-            if list(package.iterdir()) == [package / "install.json"]:
-                expected = {"kind": "file", "mode": 0o600,
-                            "sha256": hashlib.sha256(encode(receipt)).hexdigest()}
-                if remove_owned(package, "install.json", expected):
-                    package.rmdir()
-                else:
-                    retained.append(str(package))
-            else:
-                retained.append(str(package))
-        if selected and not exists(selected[0]):
-            if not remove_owned(root, "current", {"kind": "symlink", "target": f"versions/{selected[0].name}"}):
-                retained.append(str(root / "current"))
+                    package_fd = anchors.enter_context(anchored_directory(name, parent_fd=versions_fd))
+                    packages.append((child, descriptor(child, home), package_fd))
+                except (InstallError, OSError, ValueError):
+                    retained.append(str(child))
+            _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained)
     for path in sorted(set(retained)):
         print(f"Retained edited, foreign or unverifiable path: {path}")
     print("Personal package uninstall finished. Project history and host configuration were preserved.")
     return retained
 
+
+def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained):
+    for package, receipt, package_fd in packages:
+        for name, expected in receipt["owned_files"].items():
+            try:
+                if not remove_owned(package_fd, name, expected):
+                    retained.append(str(package / name))
+            except FileNotFoundError:
+                pass
+            except (InstallError, OSError):
+                retained.append(str(package / name))
+        for name, target in receipt["owned_links"].items():
+            path = home / name
+            if exists(path):
+                if path.is_symlink() and os.readlink(path) == target:
+                    if not remove_owned(home_fd, name, {"kind": "symlink", "target": target}):
+                        retained.append(str(path))
+                else:
+                    retained.append(str(path))
+        # Foreign files and nonempty directories survive. Keep descriptor for retained files.
+        for name in sorted(receipt["owned_directories"], key=lambda p: len(PurePosixPath(p).parts), reverse=True):
+            with contextlib.suppress(OSError):
+                remove_owned_directory(package_fd, name, receipt["owned_directories"][name])
+        if os.listdir(package_fd) == ["install.json"]:
+            expected = {"kind": "file", "mode": 0o600,
+                        "sha256": hashlib.sha256(encode(receipt)).hexdigest()}
+            if remove_owned(package_fd, "install.json", expected):
+                info = os.fstat(package_fd)
+                if not remove_owned_directory(versions_fd, package.name, 0o700, (info.st_dev, info.st_ino)):
+                    retained.append(str(package))
+            else:
+                retained.append(str(package))
+        else:
+            retained.append(str(package))
+    if selected and not exists_at(versions_fd, selected[0].name):
+        if not remove_owned(root_fd, "current", {"kind": "symlink", "target": f"versions/{selected[0].name}"}):
+            retained.append(str(root / "current"))
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
