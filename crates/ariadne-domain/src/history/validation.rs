@@ -36,7 +36,7 @@ pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
                 HistoryError::MissingReference,
             )?;
         }
-        if message.kind == MessageKind::Reply
+        if (message.kind == MessageKind::Reply && message.item_id.is_some())
             || (message.kind == MessageKind::OwnerInput && message.item_id.is_some())
         {
             let item = message
@@ -53,6 +53,10 @@ pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
         if let Some(origin) = &message.origin {
             copied_message(session, message, origin)?;
         } else {
+            require(
+                message.kind != MessageKind::Reply || message.item_id.is_some(),
+                HistoryError::MissingReference,
+            )?;
             match (&message.author, &message.kind) {
                 (MessageAuthor::Owner, MessageKind::OwnerInput) => owner(session, message)?,
                 (MessageAuthor::Agent, MessageKind::Reply | MessageKind::Activity) => {
@@ -654,7 +658,7 @@ fn source_matches(
         && &receipt.source_topic_id == topic
         && receipt.source_revision == revision
 }
-fn copied_message(
+pub(crate) fn copied_message(
     session: &Session,
     message: &Message,
     origin: &MessageOrigin,
@@ -672,14 +676,62 @@ fn copied_message(
             &origin.session_id,
             &origin.topic_id,
             origin.source_revision,
-        ) && message.topic_id.as_ref() == Some(&receipt.target_topic_id)
-            && message.author == origin.author
+        ) && message.author == origin.author
             && message
                 .binding_id
                 .as_ref()
                 .is_none_or(|id| origin.binding_id.as_ref() == Some(id)),
         HistoryError::InvalidProvenance,
     )?;
+    // Source direct targets are fully qualified provenance, never target-local IDs.
+    let source = &origin.source_target;
+    let immediate = source.project_id == receipt.source_project_id
+        && source.session_id == receipt.source_session_id;
+    let mapped_item = if immediate {
+        source
+            .item_id
+            .as_ref()
+            .and_then(|id| receipt.item_id_map.0.get(id))
+    } else {
+        None
+    };
+    let mapped_round = if immediate {
+        source
+            .round_id
+            .as_ref()
+            .and_then(|id| receipt.round_id_map.0.get(id))
+    } else {
+        None
+    };
+    require(
+        message.item_id.as_ref() == mapped_item && message.round_id.as_ref() == mapped_round,
+        HistoryError::InvalidProvenance,
+    )?;
+    if message.kind == MessageKind::Reply {
+        require(
+            source.item_id.is_some() && source.topic_id.is_some(),
+            HistoryError::InvalidProvenance,
+        )?;
+        if mapped_item.is_some() {
+            require(
+                immediate
+                    && source.topic_id.as_ref() == Some(&receipt.source_topic_id)
+                    && message.topic_id.as_ref() == Some(&receipt.target_topic_id),
+                HistoryError::InvalidProvenance,
+            )?;
+        } else {
+            require(
+                message.topic_id.is_none() && message.round_id.is_none(),
+                HistoryError::InvalidProvenance,
+            )?;
+        }
+    } else {
+        // Activities/lifecycle entries retain the continuation's contextual grouping.
+        require(
+            message.topic_id.as_ref() == Some(&receipt.target_topic_id),
+            HistoryError::InvalidProvenance,
+        )?;
+    }
     require(
         match (&message.author, &message.kind) {
             (MessageAuthor::Owner, MessageKind::OwnerInput) => {
