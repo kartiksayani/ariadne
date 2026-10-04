@@ -50,9 +50,11 @@ admissions and drains admitted work before replacing activation; Quit wins over
 wake and retains ownership until admitted work has drained. No ordinary worker
 lock is held across Core/provider IO or result waits.
 
-The composition-only `DesktopService::with_native_preferences_write` callback
-preserves existing request and receipt validation. It serves the two native
-window/tray preference writers on the same owned executor. Quit fences ordinary
+The composition-only `DesktopService::with_native_preferences(read, write)`
+builder preserves existing request and receipt validation. Its parameterless
+read returns only the fixed global preferences snapshot; its write accepts only
+the validated global preferences patch. It serves the two native window/tray
+preference writers on the same owned executor. Quit fences ordinary
 renderer/control/provider admission and the two preference producers, then
 drains their already queued or frozen saves through this preferences-only
 callback before releasing the executor. A writer-owned save may reach its first
