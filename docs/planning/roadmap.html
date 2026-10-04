@@ -686,7 +686,10 @@
       "checks": [
         "rtk proxy cargo test -p ariadne-core --test projections"
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/49"
+      }
     },
     {
       "id": "P2.1",
@@ -714,7 +717,10 @@
       "checks": [
         "rtk proxy cargo test -p ariadne-core --test apply"
       ],
-      "estimate_days": 2
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/51"
+      }
     },
     {
       "id": "P2.2",
@@ -939,7 +945,8 @@
         "P3.1",
         "P0.5",
         "P0.6"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/50"
     },
     {
       "id": "P3.3",
@@ -962,7 +969,8 @@
       "acceptance": [
         "Installed version-matched Mod registers connect/status/disconnect and guarded 1-second claim poll; helper receives argv and stdin JSON, never shell interpolation.",
         "Capture binding/generation/attempt before detached prompt.submit; match exact envelope marker/digest to main turn and ignore unrelated/subagent turns.",
-        "Persist accepted/start/end/reject/uncertain callbacks through CLI, including late acceptance/rejection and desktop closure; terminal text stays diagnostic."
+        "Persist accepted/start/end/reject/uncertain callbacks through CLI, including late acceptance/rejection and desktop closure; terminal text stays diagnostic.",
+        "Explicit connect may select a canonical existing Ariadne session UUID in the registered project; target identity is never inferred from cwd/name. Saved setup/rules resume from structured Ariadne context, with an atomic historical owner-context ceiling, future-input isolation, stable replay and all existing-session rebind guards."
       ],
       "checks": [
         "rtk proxy npm run test:integration -- --project claude-mod"
@@ -972,7 +980,8 @@
         "P0.5",
         "P0.6",
         "P3.1"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/52"
     },
     {
       "id": "P3.4",
@@ -1066,7 +1075,8 @@
       "implementation_depends_on": [
         "P3.5",
         "P0.5"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/43"
     },
     {
       "id": "P3.7",
@@ -1174,7 +1184,8 @@
       "implementation_depends_on": [
         "P0.4",
         "P0.6"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/46"
     },
     {
       "id": "P4.2",
@@ -1187,8 +1198,13 @@
       "paths": [
         "apps/desktop/src/components/navigation/**",
         "apps/desktop/src/state/navigation/**",
-        "tests/ui/navigation/**",
-        "tests/e2e/navigation/**"
+        "apps/desktop/src/styles/navigation.css",
+        "apps/desktop/tests/ui/navigation/**",
+        "tests/e2e/navigation/**",
+        "crates/ariadne-core/src/dto/preferences.rs",
+        "crates/ariadne-core/tests/service_contract.rs",
+        "contracts/generated/core/**",
+        "apps/desktop/src/generated/core/**"
       ],
       "spec": [
         "docs/planning/DESIGN_TRACEABILITY.md#board-frame-mapping",
@@ -1198,10 +1214,11 @@
       ],
       "acceptance": [
         "Implement Projects, project detail, All sessions and tabs with explicit registered/bound/candidate/closed/unavailable states (D02; frames 1p/1w/1z/1aa/1ab/1ac).",
-        "Navigation preserves per-session selection/tabs/filters/drafts; tab close changes navigation only; candidate selection explicitly binds and no tab guesses host ownership."
+        "Navigation preserves per-session selection/tabs/filters/drafts; tab close changes navigation only; candidate selection explicitly binds and no tab guesses host ownership.",
+        "Explicitly attach a fresh Claude conversation to an owner-selected registered Ariadne session in the same project, preserving topics/items/history; new versus existing is visible, unfinished items/topics do not block, and canonical rebind guards remain authoritative. Acceptance joins the backend/Mod handoff proof: historical structured owner context is visible only through the locked connection snapshot, future unissued inputs stay isolated, and no host transcript/memory or implicit dispatch is promised."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project navigation",
+        "rtk proxy npm run test:ui -- --project desktop tests/ui/navigation",
         "rtk proxy npm run test:e2e -- --suite navigation"
       ],
       "estimate_days": 1,

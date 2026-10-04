@@ -1294,6 +1294,9 @@
         "pinned": {
           "type": "boolean"
         },
+        "selected_navigation": {
+          "$ref": "#/$defs/NavigationSelection"
+        },
         "theme": {
           "$ref": "#/$defs/Theme"
         },
@@ -1311,6 +1314,7 @@
       "additionalProperties": false,
       "required": [
         "theme",
+        "selected_navigation",
         "window",
         "pinned",
         "notification_watermark"
@@ -2494,6 +2498,70 @@
         "binding_id",
         "adapter_id",
         "external_session_id"
+      ]
+    },
+    "NavigationSelection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "projects"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "all_sessions"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "project"
+            },
+            "project_id": {
+              "$ref": "#/$defs/UuidV4"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "project_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "session"
+            },
+            "session": {
+              "$ref": "#/$defs/SessionRef"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "session"
+          ]
+        }
       ]
     },
     "NonnegativeSafeInteger": {
@@ -4244,6 +4312,9 @@
         "session": {
           "$ref": "#/$defs/SessionRef"
         },
+        "tab_open": {
+          "type": "boolean"
+        },
         "tab_order": {
           "$ref": "#/$defs/NonnegativeSafeInteger"
         }
@@ -4251,6 +4322,7 @@
       "additionalProperties": false,
       "required": [
         "session",
+        "tab_open",
         "selected_item_id",
         "tab_order",
         "expanded_item_ids",
