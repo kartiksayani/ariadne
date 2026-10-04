@@ -13,16 +13,34 @@ struct OwnedCallbacks {
 #[derive(Clone, Default)]
 pub struct NativeLifecycle {
     owned: Option<Arc<Mutex<OwnedCallbacks>>>,
+    diagnostic_only: bool,
 }
 fn unavailable() -> CoreError {
     CoreError::new(CoreErrorCode::Unsupported,"Native owning-runtime lifecycle is not composed.","Compose actual owned shutdown and reconciliation before reporting those operations complete.")
 }
 impl NativeLifecycle {
+    /// Trusted startup explicitly established that no runtime/watchers were started.
+    /// This permits process exit without claiming an owning-runtime shutdown.
+    pub fn diagnostic_only() -> Self {
+        Self {
+            owned: None,
+            diagnostic_only: true,
+        }
+    }
+    /// Call off the UI thread before permitting explicit process exit.
+    pub(crate) fn prepare_exit(&self) -> Result<(), CoreError> {
+        if self.diagnostic_only {
+            Ok(())
+        } else {
+            self.shutdown()
+        }
+    }
     pub fn from_trusted_owner(
         shutdown: impl Fn() -> Result<(), CoreError> + Send + Sync + 'static,
         reconcile: impl Fn() -> Result<(), CoreError> + Send + Sync + 'static,
     ) -> Self {
         Self {
+            diagnostic_only: false,
             owned: Some(Arc::new(Mutex::new(OwnedCallbacks {
                 shutdown: Box::new(shutdown),
                 reconcile: Box::new(reconcile),

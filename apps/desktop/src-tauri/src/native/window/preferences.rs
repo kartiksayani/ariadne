@@ -9,6 +9,14 @@ pub(crate) struct WindowPreferenceWrite {
 }
 
 impl WindowPreferenceWrite {
+    pub(crate) fn ready_to_exit(&self) -> Result<(), CoreError> {
+        if self.pending.is_some() {
+            return Err(CoreError::new(CoreErrorCode::CommitUncertain,
+                "The native preference operation is still unconfirmed.",
+                "Keep the app running and reconcile the same operation; saved effects may already exist."));
+        }
+        Ok(())
+    }
     /// `false` means only an older exact operation was reconciled; the current
     /// unsent geometry must be captured against a fresh snapshot afterward.
     pub(crate) fn save(

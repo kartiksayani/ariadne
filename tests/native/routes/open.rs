@@ -2,8 +2,7 @@
 mod launch;
 #[path = "../../../apps/desktop/src-tauri/src/native/window/lifecycle.rs"]
 mod lifecycle;
-#[path = "../../../crates/ariadne-cli/src/open.rs"]
-mod open;
+use ariadne_cli::open;
 #[path = "../../../apps/desktop/src-tauri/src/native/window/preferences.rs"]
 mod preferences;
 
@@ -240,4 +239,163 @@ fn redirected_versions_directory_is_rejected() {
     fs::rename(package.path.join("versions"), &redirected).unwrap();
     symlink(&redirected, package.path.join("versions")).unwrap();
     assert!(open::installed_application(&package.path, VERSION).is_err());
+}
+
+fn registered_core() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    ariadne_core::native::NativeCoreService,
+) {
+    use ariadne_domain::models::{Session, UtcMillis, UuidV4};
+    use ariadne_store::{registry::Registry, session::Store};
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::open(home.path()).unwrap();
+    let session: Session =
+        serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap();
+    registry
+        .register(
+            root.path(),
+            &UuidV4::new("00000000-0000-4000-8000-000000000099").unwrap(),
+            || session.project_id.clone(),
+        )
+        .unwrap();
+    Store::open_registered(root.path(), session.project_id.clone())
+        .unwrap()
+        .create(&session)
+        .unwrap();
+    let core = ariadne_core::native::NativeCoreService::new(
+        registry,
+        || UuidV4::new("00000000-0000-4000-8000-000000000098").unwrap(),
+        || UtcMillis::new("2026-10-04T12:00:00.000Z").unwrap(),
+        |_| {
+            Err(ariadne_core::CoreError::new(
+                CoreErrorCode::Unsupported,
+                "No test provider is composed.",
+                "This fixture resolves registered navigation only.",
+            ))
+        },
+    );
+    (home, root, core)
+}
+
+#[test]
+fn actual_registered_membership_precedes_launch_and_missing_item_uses_same_session() {
+    let (_home, root, core) = registered_core();
+    let package = Package::new();
+    let route = open::parse(&[
+        "open",
+        "--project",
+        PROJECT,
+        "--session",
+        SESSION,
+        "--item",
+        "999",
+    ])
+    .unwrap();
+    let before = fs::read(
+        root.path()
+            .join(format!(".ariadne/sessions/{SESSION}.json")),
+    )
+    .unwrap();
+    let opened = open::open_with(
+        route.clone(),
+        &package.path,
+        VERSION,
+        |route| core.resolve_session(route),
+        |program, args| {
+            assert_eq!(program, Path::new("/usr/bin/open"));
+            assert_eq!(
+                args,
+                open::launch_args(&fs::canonicalize(&package.app).unwrap(), &route).unwrap()
+            );
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(opened, route);
+    assert_eq!(
+        fs::read(
+            root.path()
+                .join(format!(".ariadne/sessions/{SESSION}.json"))
+        )
+        .unwrap(),
+        before
+    );
+    let mut wrong = route;
+    wrong.project_id =
+        ariadne_domain::models::UuidV4::new("00000000-0000-4000-8000-000000000088").unwrap();
+    assert!(open::open_with(
+        wrong,
+        Path::new("/not-a-package"),
+        VERSION,
+        |route| core.resolve_session(route),
+        |_, _| panic!("must not launch unregistered route")
+    )
+    .is_err());
+}
+
+#[test]
+fn contradictory_resolver_and_launch_failure_do_not_publish_success() {
+    let (_home, _root, core) = registered_core();
+    let package = Package::new();
+    let route = open::parse(&["open", "--project", PROJECT, "--session", SESSION]).unwrap();
+    let error = open::open_with(
+        route.clone(),
+        &package.path,
+        VERSION,
+        |_| {
+            Ok(ariadne_core::RegisteredSession::from_trusted_entrypoint(
+                route.project_id.clone(),
+                ariadne_domain::models::UuidV4::new("00000000-0000-4000-8000-000000000088")
+                    .unwrap(),
+            ))
+        },
+        |_, _| panic!("contradictory route cannot launch"),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, CoreErrorCode::PermissionDenied);
+    let failure = ariadne_core::CoreError::new(
+        CoreErrorCode::IoError,
+        "macOS launch failed.",
+        "Check the installed app.",
+    );
+    assert_eq!(
+        open::open_with(
+            route,
+            &package.path,
+            VERSION,
+            |route| core.resolve_session(route),
+            |_, _| Err(failure.clone())
+        )
+        .unwrap_err(),
+        failure
+    );
+}
+
+#[test]
+fn installed_cli_open_help_and_invalid_routes_keep_output_and_exit_contracts() {
+    let home = tempfile::tempdir().unwrap();
+    let invoke = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_ariadne"))
+            .args(args)
+            .env("HOME", home.path())
+            .env("ARIADNE_HOME", home.path().join("missing-data"))
+            .output()
+            .unwrap()
+    };
+    let help = invoke(&["open", "--help"]);
+    assert!(help.status.success());
+    assert!(String::from_utf8(help.stdout)
+        .unwrap()
+        .contains("--project UUID --session UUID"));
+    assert!(help.stderr.is_empty());
+    let invalid = invoke(&["open", "--project", "not-a-uuid", "--session", SESSION]);
+    assert_eq!(invalid.status.code(), Some(2));
+    assert!(invalid.stdout.is_empty());
+    assert!(!invalid.stderr.is_empty());
+    let inaccessible = invoke(&["open", "--project", PROJECT, "--session", SESSION]);
+    assert!(!inaccessible.status.success());
+    assert!(inaccessible.stdout.is_empty());
+    assert!(!inaccessible.stderr.is_empty());
 }

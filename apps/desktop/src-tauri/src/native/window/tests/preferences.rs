@@ -86,6 +86,10 @@ fn uncertainty_reconciles_exact_operation_without_a_fresh_revision_or_geometry()
         )
         .unwrap_err();
     assert_eq!(error.code, CoreErrorCode::CommitUncertain);
+    assert_eq!(
+        writer.ready_to_exit().unwrap_err().code,
+        CoreErrorCode::CommitUncertain
+    );
     assert!(!writer
         .save(
             geometry(90.0),
@@ -98,6 +102,7 @@ fn uncertainty_reconciles_exact_operation_without_a_fresh_revision_or_geometry()
         )
         .unwrap());
     assert!(writer.pending.is_none());
+    writer.ready_to_exit().unwrap();
 }
 
 #[test]

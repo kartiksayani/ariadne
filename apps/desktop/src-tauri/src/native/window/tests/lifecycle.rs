@@ -63,3 +63,41 @@ fn failed_shutdown_is_not_reported_as_complete() {
     lifecycle.shutdown().unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
+
+#[test]
+fn only_explicit_diagnostic_startup_allows_exit_without_shutdown_claim() {
+    assert_eq!(
+        NativeLifecycle::default().prepare_exit().unwrap_err().code,
+        CoreErrorCode::Unsupported
+    );
+    let diagnostic = NativeLifecycle::diagnostic_only();
+    diagnostic.prepare_exit().unwrap();
+    assert_eq!(
+        diagnostic.shutdown().unwrap_err().code,
+        CoreErrorCode::Unsupported
+    );
+    assert_eq!(
+        diagnostic.reconcile().unwrap_err().code,
+        CoreErrorCode::Unsupported
+    );
+}
+
+#[test]
+fn exit_waits_for_owned_shutdown_and_keeps_failure_visible() {
+    let lifecycle = NativeLifecycle::from_trusted_owner(
+        || {
+            Err(CoreError::new(
+                CoreErrorCode::CommitUncertain,
+                "Owned shutdown is not confirmed.",
+                "Keep the current owner and reconcile its shutdown.",
+            ))
+        },
+        || Ok(()),
+    );
+    assert_eq!(
+        lifecycle.prepare_exit().unwrap_err().code,
+        CoreErrorCode::CommitUncertain
+    );
+    // Failed exit has not fabricated a stopped owner.
+    lifecycle.reconcile().unwrap();
+}

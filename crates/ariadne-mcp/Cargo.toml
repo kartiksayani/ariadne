@@ -4,6 +4,21 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[dependencies]
+ariadne-core = { path = "../ariadne-core" }
+ariadne-domain = { path = "../ariadne-domain" }
+ariadne-store = { path = "../ariadne-store" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+rmcp = { version = "=3.5.0", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "=1.53.1", default-features = false, features = ["rt-multi-thread", "macros", "io-std"] }
+
+[dev-dependencies]
+ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
+tempfile.workspace = true
+
 [[bin]]
 name = "ariadne-mcp"
 path = "src/main.rs"

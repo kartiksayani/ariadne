@@ -223,7 +223,14 @@ subscription is installed. Before that acknowledgement, retain the latest valid
 explicit `OpenRoute`; a later valid navigation intent supersedes it, while an
 invalid or unregistered request cannot erase it. This does not discard durable
 work. Trusted runtime callbacks own actual quit shutdown and wake reconciliation;
-an absent composition cannot report that those operations succeeded (ADR0053).
+an absent or unknown composition keeps explicit Quit unsupported. Trusted startup
+runs once after first-plugin interception and returns lifecycle callbacks only
+after existing native control ownership succeeds; startup failure aborts setup.
+Only an explicit trusted declaration that no runtime/watchers were started permits
+diagnostic-only exit, without claiming runtime shutdown. Quit joins the native
+preference writer and owning callbacks off the UI thread; an unconfirmed write or
+failed shutdown keeps the app running. Wake reconciliation cannot infer Idle,
+clear owner pauses or automatically resend uncertain delivery (ADR0053).
 
 The tray uses a template icon, numeric `waiting_unanswered` count (blank at zero), oldest 10 eligible waiting entries with project/session labels, separate binding/lifecycle diagnostics, Show Ariadne, Pin, and Quit. Sent generic requests do not increment the task-question count. Coalesce rebuilds at most every 250 ms. If registered roots are inaccessible, show an incomplete count and diagnostic row rather than a false total. No approval action exists in the tray.
 

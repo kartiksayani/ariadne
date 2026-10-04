@@ -1,6 +1,9 @@
 //! Explicit native navigation through the package-owned install descriptor.
-use ariadne_core::{CoreError, CoreErrorCode, OpenRoute};
-use ariadne_domain::models::{ItemRef, UuidV4};
+use ariadne_core::{
+    native::{AgentResolver, NativeCoreService},
+    CoreError, CoreErrorCode, OpenRoute, RegisteredSession, SessionRef,
+};
+use ariadne_domain::models::{ItemRef, UtcMillis, UuidV4};
 use serde::Deserialize;
 use std::ffi::{CString, OsString};
 use std::fs::{File, OpenOptions};
@@ -182,4 +185,98 @@ pub fn launch_args(application: &Path, route: &OpenRoute) -> Result<Vec<OsString
             .map_err(|_| invalid("The registered route cannot be encoded."))?
             .into(),
     ])
+}
+
+pub const HELP: &str = "Open a registered Ariadne route:\n  ariadne open --project UUID --session UUID [--item ItemRef]\nThe matching installed package supplies the app path; there is no cwd or app scan.\n";
+
+/// Trusted native composition; the resolver must use authoritative membership.
+/// Optional missing items remain the renderer's registered session fallback.
+pub fn open_with(
+    route: OpenRoute,
+    package_root: &Path,
+    version: &str,
+    resolve: impl FnOnce(&SessionRef) -> Result<RegisteredSession, CoreError>,
+    launch: impl FnOnce(&Path, &[OsString]) -> Result<(), CoreError>,
+) -> Result<OpenRoute, CoreError> {
+    let registered = resolve(&SessionRef {
+        project_id: route.project_id.clone(),
+        session_id: route.session_id.clone(),
+    })?;
+    if registered.project_id() != &route.project_id || registered.session_id() != &route.session_id
+    {
+        return Err(CoreError::new(
+            CoreErrorCode::PermissionDenied,
+            "The resolved registered session does not match the requested route.",
+            "Use explicit IDs belonging to the same registered project/session.",
+        ));
+    }
+    let application = installed_application(package_root, version)?;
+    let args = launch_args(&application, &route)?;
+    launch(Path::new("/usr/bin/open"), &args)?;
+    Ok(route)
+}
+
+pub fn run(args: &[&str], output: &mut dyn std::io::Write, errors: &mut dyn std::io::Write) -> i32 {
+    if matches!(args, ["open", "--help" | "-h"]) {
+        return if output.write_all(HELP.as_bytes()).is_ok() {
+            0
+        } else {
+            4
+        };
+    }
+    let result = (|| {
+        let route = parse(args)?;
+        let data = crate::bridge::command::home_from_environment()?;
+        let registry = AgentResolver::open_data_directory(&data)?;
+        let core = NativeCoreService::new(
+            registry,
+            || UuidV4::new(uuid::Uuid::new_v4().to_string()).expect("UUIDv4 generator"),
+            || {
+                UtcMillis::new(
+                    chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
+                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                )
+                .expect("native UTC clock")
+            },
+            |_| {
+                Err(CoreError::new(
+                    CoreErrorCode::Unsupported,
+                    "Open routing has no provider verifier.",
+                    "Use native owner setup to connect an installed adapter.",
+                ))
+            },
+        );
+        let home = std::env::var_os("HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| {
+                invalid("An absolute native HOME is required for the installed package.")
+            })?;
+        let route = open_with(
+            route,
+            &home.join(".local/share/ariadne"),
+            env!("CARGO_PKG_VERSION"),
+            |route| core.resolve_session(route),
+            |program, args| {
+                let status = std::process::Command::new(program)
+                    .args(args)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map_err(io)?;
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(CoreError::new(CoreErrorCode::IoError,
+                        "macOS could not open the installed Ariadne application.",
+                        "Check the matching package and application permissions; no alternative application was launched."))
+                }
+            },
+        )?;
+        serde_json::to_value(route)
+            .map_err(|_| invalid("The registered open route cannot be encoded."))
+    })();
+    crate::output::write(result, false, output, errors)
 }

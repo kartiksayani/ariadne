@@ -17,6 +17,16 @@ control ownership and physical binding leases succeed. A losing startup cannot
 start its own workers or disturb the established socket, owner or external host.
 Simultaneous cold-start packaged proof remains an acceptance requirement.
 
+Trusted Rust startup supplies one `FnOnce` executed in Tauri setup after the
+first-plugin interception. It returns owning shutdown/wake callbacks only after
+existing control ownership succeeds; failure aborts setup. Unknown composition
+keeps explicit Quit unsupported. Only startup that explicitly establishes no
+owned runtime/watchers may permit diagnostic-only process exit, without claiming
+runtime shutdown. Quit suppresses new geometry writes, joins the native writer,
+and runs owning shutdown off the UI thread before allowing exit. An unconfirmed
+preference operation or failed shutdown keeps the process running. Wake is
+coalesced and serialized with shutdown; it cannot acquire another owner.
+
 Before the main webview acknowledges readiness after subscribing to the route
 event, retain the latest valid explicit route. Another valid route supersedes
 that navigation intent; an invalid or unregistered route cannot erase it. This

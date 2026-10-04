@@ -13,6 +13,8 @@ pub struct NativeWindow {
     writer: Arc<Mutex<WindowPreferenceWrite>>,
     latest_geometry: Arc<Mutex<Option<WindowGeometry>>>,
     writing: Arc<AtomicBool>,
+    worker: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
+    worker_failed: Arc<AtomicBool>,
     applied_revision: Arc<AtomicU64>,
     movement: Arc<AtomicU64>,
 }
@@ -142,13 +144,45 @@ impl NativeWindow {
         if self.writing.swap(true, Ordering::AcqRel) {
             return;
         }
-        drop(latest);
+        // Hold the admission lock until the owned handle is installed. Quit
+        // suppresses subsequent movement before joining this exact worker.
+        let Ok(mut worker) = self.worker.lock() else {
+            self.writing.store(false, Ordering::Release);
+            return;
+        };
+        if let Some(previous) = worker.take() {
+            let _ = previous.join();
+        }
         let manager = self.clone();
         let service = window.state::<DesktopService>().inner().clone();
-        tauri::async_runtime::spawn(async move {
-            let _ =
-                tauri::async_runtime::spawn_blocking(move || manager.save_latest(&service)).await;
-        });
+        match std::thread::Builder::new()
+            .name("ariadne-window-preferences".into())
+            .spawn(move || manager.save_latest(&service))
+        {
+            Ok(handle) => *worker = Some(handle),
+            Err(_) => {
+                self.writing.store(false, Ordering::Release);
+                eprintln!("Ariadne could not start its native preference writer.");
+            }
+        }
+        drop(latest);
+    }
+    /// Movement admission has stopped on the UI thread. Join this native
+    /// writer before exiting; uncertainty still retains its original request.
+    pub(crate) fn join_writer(&self) -> Result<(), CoreError> {
+        let worker = self.worker.lock().map_err(|_| unavailable())?.take();
+        if worker.is_some_and(|worker| worker.join().is_err()) {
+            self.worker_failed.store(true, Ordering::Release);
+        }
+        if self.worker_failed.load(Ordering::Acquire) {
+            return Err(CoreError::new(CoreErrorCode::CommitUncertain,
+                "The native preference writer did not finish normally.",
+                "Keep the app running and reconcile the original preference operation; saved effects may already exist."));
+        }
+        self.writer
+            .lock()
+            .map_err(|_| unavailable())?
+            .ready_to_exit()
     }
     fn save_latest(&self, service: &DesktopService) {
         loop {
