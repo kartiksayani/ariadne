@@ -117,6 +117,144 @@ fn executable_claim_uses_fixed_private_socket_and_preserves_saved_shared_receipt
     server.join().unwrap();
 }
 #[test]
+fn executable_announcement_is_unbound_and_checks_exact_native_identity_ack() {
+    use ariadne_runtime::discovery::{LoadedPlugin, ModDescriptor, SessionAnnouncement};
+    let r = cases::load(root()).routing;
+    let home = home();
+    let owner = DesktopOwner::acquire(home.path()).unwrap();
+    let listener = UnixListener::bind(owner.control_path()).unwrap();
+    fs::set_permissions(owner.control_path(), fs::Permissions::from_mode(0o600)).unwrap();
+    let announcement = SessionAnnouncement {
+        adapter_id: "claude_code_mod".into(),
+        external_session_id: "original-session".into(),
+        cwd: "/project/original".into(),
+        host_version: "2.1.287".into(),
+        plugin: LoadedPlugin {
+            name: "ariadne".into(),
+            root: "/installed/0.1.0".into(),
+        },
+        descriptor: ModDescriptor {
+            helper_path: "/Applications/Ariadne/helper".into(),
+            app_version: "0.1.0".into(),
+            api_version: 1,
+        },
+        binding_scope: None,
+    };
+    let expected = announcement.clone();
+    let request_id = r.generation.clone();
+    let server = std::thread::spawn(move || {
+        let _owner = owner;
+        for mismatched in [false, true] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut length = [0; 4];
+            stream.read_exact(&mut length).unwrap();
+            let mut bytes = vec![0; u32::from_be_bytes(length) as usize];
+            stream.read_exact(&mut bytes).unwrap();
+            let wire: ControlRequest = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(wire.id, request_id);
+            assert_eq!(
+                wire.method,
+                ControlMethod::SessionAnnouncement(expected.clone())
+            );
+            assert!(wire.scope().is_none());
+            let mut ack = expected.acknowledgement();
+            if mismatched {
+                ack.external_session_id = "different-session".into();
+            }
+            let bytes = serde_json::to_vec(
+                &serde_json::json!({"v":1,"kind":"response","id":wire.id,"result":ack}),
+            )
+            .unwrap();
+            stream
+                .write_all(&(bytes.len() as u32).to_be_bytes())
+                .unwrap();
+            stream.write_all(&bytes).unwrap();
+        }
+    });
+    for mismatched in [false, true] {
+        let mut child = command()
+            .args([
+                "bridge",
+                "announce",
+                "--request-id",
+                r.generation.as_str(),
+                "--json-stdin",
+            ])
+            .env("ARIADNE_HOME", home.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&announcement).unwrap())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(output.stderr.is_empty());
+        if mismatched {
+            assert!(!output.status.success());
+            assert_eq!(value["error"]["code"], "protocol_conflict");
+            assert_eq!(value["error"]["retryable"], false);
+        } else {
+            assert!(output.status.success());
+            assert_eq!(
+                value["data"],
+                serde_json::to_value(announcement.acknowledgement()).unwrap()
+            );
+        }
+    }
+    server.join().unwrap();
+}
+
+#[test]
+fn announcement_cli_rejects_route_flags_and_untrusted_payload_without_a_socket_call() {
+    let r = cases::load(root()).routing;
+    for args in [
+        vec!["bridge", "announce", "--request-id", r.generation.as_str()],
+        vec![
+            "bridge",
+            "announce",
+            "--binding",
+            r.binding_id.as_str(),
+            "--request-id",
+            r.generation.as_str(),
+            "--json-stdin",
+        ],
+        vec![
+            "bridge",
+            "announce",
+            "--generation",
+            r.generation.as_str(),
+            "--request-id",
+            r.generation.as_str(),
+            "--json-stdin",
+        ],
+        vec![
+            "bridge",
+            "announce",
+            "--request-id",
+            r.generation.as_str(),
+            "--json-stdin",
+        ],
+    ] {
+        let output = output(&args, Some(b"{\"compatibility\":\"compatible\"}"));
+        assert!(!output.status.success());
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["code"], "invalid_argument");
+        assert_eq!(value["error"]["retryable"], false);
+    }
+}
+#[test]
 fn executable_status_preserves_unknown_host_state_and_explicit_correlation() {
     let r = cases::load(root()).routing;
     let home = home();

@@ -30,11 +30,12 @@ export function host({claim = null, submit = () => Promise.resolve({text:claim.f
   const calls = [], events = [], prompts = [], logs = [], commands = [];
   const waiters = [];
   let timer = null;
+  const timers = [];
   let external = binding.external_session_id;
   const $ = {
     plugin:{name:'ariadne',root:'/sdk-reported/plugin'},session:{id:async () => external,cwd:async () => '/project/original',version:async () => ({version})},
     ui:{log:text => logs.push(text)},command:{register:async spec => {commands.push(spec);}},
-    clock:{every:(ms,callback) => {timer={ms,callback,cancelled:false,cancel(){this.cancelled=true;}};return timer;}},
+    clock:{every:(ms,callback) => {timer={ms,callback,cancelled:false,cancel(){this.cancelled=true;}};timers.push(timer);return timer;}},
     prompt:{submit:args => {prompts.push(args);return submit(args);}},
     process:{run:async (argv,options) => {
       calls.push({argv,options});
@@ -51,6 +52,10 @@ export function host({claim = null, submit = () => Promise.resolve({text:claim.f
           : {kind:'binding_state',binding_id:ids.binding,generation:ids.generation,dispatch_state:'disconnected',owner_paused:false,pause_reason:null,connection_state:'disconnected'}});
       }
       if (argv[2] === 'connection-status') return success(status);
+      if (argv[2] === 'announce') {
+        const body = JSON.parse(options.stdin);
+        return success({adapter_id:body.adapter_id,external_session_id:body.external_session_id});
+      }
       if (argv[2] === 'claim') return success(claim);
       if (argv[2] === 'report') {
         const event = JSON.parse(options.stdin);events.push(event);
@@ -60,7 +65,7 @@ export function host({claim = null, submit = () => Promise.resolve({text:claim.f
       throw new Error('Unexpected fixture helper argv');
     }},
   };
-  return {$,calls,events,prompts,logs,commands,timer:() => timer,switchSession:value => {external=value;},
+  return {$,calls,events,prompts,logs,commands,timer:() => timers.find(timer => timer.ms === 1000) ?? null,timers:() => timers,switchSession:value => {external=value;},
     reported:kind => events.find(event => event.kind === kind) ? Promise.resolve(events.find(event => event.kind === kind))
       : new Promise(resolve => waiters.push({kind,resolve}))};
 }

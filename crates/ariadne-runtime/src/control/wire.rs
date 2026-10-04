@@ -1,5 +1,6 @@
 //! Private control framing DTOs, shared with the installed bridge client.
 use super::{error, validated_error};
+use crate::discovery::{AnnouncementAck, SessionAnnouncement};
 use ariadne_core::{ClaimRequest, CoreError, CoreErrorCode, PreparedAttempt};
 use ariadne_domain::models::{BindingSummary, UuidV4};
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,7 @@ pub enum ControlMethod {
     Ping(BindingScope),
     Claim(ClaimRequest),
     ConnectionStatus(BindingScope),
+    SessionAnnouncement(SessionAnnouncement),
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ControlRequest {
@@ -47,6 +49,7 @@ impl<'de> Deserialize<'de> for ControlRequest {
         enum Params {
             Claim(ClaimRequest),
             Scope(BindingScope),
+            Announcement(SessionAnnouncement),
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -62,6 +65,9 @@ impl<'de> Deserialize<'de> for ControlRequest {
             ("ping", Params::Scope(scope)) => ControlMethod::Ping(scope),
             ("claim", Params::Claim(request)) => ControlMethod::Claim(request),
             ("connection_status", Params::Scope(scope)) => ControlMethod::ConnectionStatus(scope),
+            ("session_announcement", Params::Announcement(announcement)) => {
+                ControlMethod::SessionAnnouncement(announcement)
+            }
             _ => {
                 return Err(serde::de::Error::custom(
                     "Unknown private control method or mismatched params",
@@ -102,15 +108,21 @@ impl ControlRequest {
                 ));
             }
         }
+        if let ControlMethod::SessionAnnouncement(announcement) = &self.method {
+            announcement.validate()?;
+        }
         Ok(())
     }
-    pub fn scope(&self) -> BindingScope {
+    pub fn scope(&self) -> Option<BindingScope> {
         match &self.method {
-            ControlMethod::Ping(scope) | ControlMethod::ConnectionStatus(scope) => scope.clone(),
-            ControlMethod::Claim(request) => BindingScope {
+            ControlMethod::Ping(scope) | ControlMethod::ConnectionStatus(scope) => {
+                Some(scope.clone())
+            }
+            ControlMethod::Claim(request) => Some(BindingScope {
                 binding_id: request.binding_id.clone(),
                 generation: request.generation.clone(),
-            },
+            }),
+            ControlMethod::SessionAnnouncement(_) => None,
         }
     }
 }
@@ -119,6 +131,7 @@ impl ControlRequest {
 pub enum ControlResult {
     Status(BindingSummary),
     Ping(BindingScope),
+    Announcement(AnnouncementAck),
     Claim(Option<PreparedAttempt>),
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -176,6 +189,10 @@ impl ControlResponse {
             Self::Error(response) => return Err(validated_error(response.error)),
         };
         match (&request.method, &response.result) {
+            (
+                ControlMethod::SessionAnnouncement(announcement),
+                ControlResult::Announcement(result),
+            ) if announcement.acknowledgement() == *result => {}
             (ControlMethod::Ping(scope), ControlResult::Ping(result)) if scope == result => {}
             (ControlMethod::ConnectionStatus(scope), ControlResult::Status(result))
                 if scope.binding_id == result.id && scope.generation == result.generation => {}

@@ -47,6 +47,14 @@ and no inference that effects were absent. Typed methods are:
 | `ping` | `{binding_id:UuidV4,generation:UuidV4}` | the same binding/generation; proves scoped control reachability only |
 | `claim` | canonical `ClaimRequest={binding_id,generation,request_id}`; envelope `id=request_id` | canonical `PreparedAttempt|null`, validated against that request |
 | `connection_status` | `{binding_id:UuidV4,generation:UuidV4}` | canonical `BindingSummary` from the current registered binding; presence is null unless actually qualified |
+| `session_announcement` | strict private SDK identity described in section 5; no client timestamp or compatibility claim | `{adapter_id:"claude_code_mod",external_session_id:string}` matching the request exactly; candidate admission only |
+
+Announcement intake uses this same UID-checked socket and framing, separately
+from lease-required claim routes. `ariadne bridge announce --request-id UUID
+--json-stdin` forwards its strict params and emits the existing application
+envelope containing only that acknowledgement. It accepts no binding/generation
+argv flags; optional captured bound scope is part of the validated private body.
+An unbound announcement needs neither a route nor lease and never calls Core.
 
 Ping/status require the current held generation. Claim routing verifies request
 syntax, peer UID and the registered binding, and retains the actual current
@@ -103,9 +111,12 @@ Adapter.connect with those durable IDs outside locks before lease/dispatch;
 failure reports generation-scoped disconnected and never dispatches. Unknown
 preflight connection remains Unknown with a disconnected dispatch barrier.
 Provider/runtime tasks own that final connection and report wiring. Codex's
-current reader qualifies its selected thread during bind, so production setup
-also needs a provider-private read-only qualifier before IDs; P1.4 does not add a
-placeholder-ID connection or an unused shared adapter method.
+initialized reader now supplies an owned pre-ID qualification for the exact
+selected thread and canonical registered project root; its final bind rechecks
+that same thread/root and transport identity. Native composition still owns
+configuration validation, copying verified facts into Core and establishing the
+final runtime connection. No placeholder-ID connection or shared adapter method
+is added.
 
 See [Agent adapters](../AGENT_ADAPTERS.md) for the shared interface and later
 executable-extension design. Public registration/negotiation is deferred. Rust trait
@@ -545,6 +556,41 @@ are ignored until the next timer; no inference is triggered. The app keeps these
 candidates in memory, expires their freshness after 90 seconds and offers Connect.
 A fresh announcement after app launch makes an already-open session discoverable.
 
+The private announcement params are exactly
+`{adapter_id:"claude_code_mod",external_session_id,cwd,host_version,
+plugin:{name:"ariadne",root},descriptor:{helperPath,appVersion,apiVersion:1},
+binding_scope:{binding_id:UuidV4,generation:UuidV4}|null}`. SDK plugin name/root
+and imported immutable descriptor are actual loaded identity inputs; no imaginary
+SDK plugin version, own registration capture or guessed cache root is used.
+All metadata strings are nonempty UTF-8 at most 4 KiB, and paths must be absolute
+without traversal. Native intake canonicalizes cwd and loaded root. Native
+receipt time alone controls age; a caller cannot supply freshness or parity.
+
+At most 256 live candidates are retained across providers. Expire native-age
+90 seconds before admission, refresh the same provider/endpoint/session in place,
+and return actionable `capacity_exceeded` rather than evicting a fresh candidate.
+An announcement acknowledges an Unknown candidate, not compatibility, readiness,
+dispatch, execution or Ariadne identity. A bound scope is a claim checked against
+trusted registration: exact binding, SessionRef, canonical project, provider,
+external session and current generation. Resolve owned facts before path IO and
+recheck afterward; no Registry/Store lock spans provider/resource IO.
+
+Only explicit native version/resource comparison may qualify the candidate and
+fill its Claude evidence slot. Preserve the original receipt Instant and UTC
+time through the bounded qualifier, never qualification-completion time. Recheck
+the exact candidate plus current registered association before publication;
+expired, replaced or rotated evidence cannot refresh or retarget a binding.
+Track only one evidence-slot reference per live candidate. Replacing that slot
+or changing project/loaded-root/descriptor/engine-version/registered-generation
+clears prior qualification and requires explicit requalification. An identical
+heartbeat updates the candidate without refreshing earlier qualified evidence.
+Wake clears qualification; expiry drops the cache reference and lets outside
+readers age the original evidence to stale. Sixteen bounded offloaded probes
+retain their permits after caller cancellation; busy admission returns actionable
+`capacity_exceeded`. Missing/stale evidence remains Unknown;
+it never means Idle or authorizes reconnect, claims or resending. See
+[ADR-0042](../../adr/ADR-0042-native-discovery-and-announcement-intake.md).
+
 For Codex, enumerate the existing daemon's loaded-thread IDs and join read-only
 thread metadata to get cwd/title. Probe the pinned schema's thread/loaded/list
 and thread/read; paginate and refresh every 30 seconds while the connection UI is
@@ -556,6 +602,19 @@ complex; do not silently remove discovery from the release. No transcript crawle
 Never infer idle from an absence of events.
 PID+process-start identity may support connection evidence but not per-thread
 activity, especially for shared daemons. Lost heartbeat marks stale, not dead.
+
+Native discovery starts with connection UI closed. The consuming desktop sets
+`set_connection_ui_open(bool)` and calls `refresh_after_wake()`; only an actually
+open UI starts 30-second Codex scans. Each blocking page reuses the verified
+unbound reader on the existing runtime offload with an absolute 10-second bound
+covering initialization/metadata. Closing the UI or stopping discovery prevents
+later pages/publication; started IO finishes within its original bound, without
+signalling an external host. Cursor progress, duplicate IDs, 50 pages and 256
+candidates bound complete scans. An incomplete/overflow scan retains the last
+complete snapshot as stale/error, never silently clips a healthy list. Owned
+read-only snapshots leave response-size-bounded serialization and actual UI
+activation to the desktop consumer; no renderer-selected endpoint/root or new
+public UI DTO is introduced here.
 
 ## 6. Compatibility and permissions
 

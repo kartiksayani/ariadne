@@ -1,9 +1,9 @@
 //! Bounded read-only version and exact SDK-root resource inspection.
 use crate::{
-    evidence::{absolute, ModEvidence},
+    evidence::{absolute, fresh, LoadedModIdentity, ModEvidence},
     normalization::error,
 };
-use ariadne_agent_protocol::{AdapterError, AdapterErrorCode};
+use ariadne_agent_protocol::{AdapterError, AdapterErrorCode, EndpointFingerprint, UtcMillis};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
@@ -18,13 +18,14 @@ use std::{
 
 pub const SUPPORTED_HOST_VERSION: &str = "2.1.287";
 type FileIdentity = (u64, u64, u64, i64, i64, i64, i64);
-const RESOURCES: [&str; 8] = [
+const RESOURCES: [&str; 9] = [
     ".claude-plugin/plugin.json",
     "hooks/hooks.json",
     "hooks/register.js",
     "hooks/contracts.js",
     "hooks/setup.js",
     "hooks/claims.js",
+    "hooks/discovery.js",
     "hooks/installed.js",
     "skills/ariadne/SKILL.md",
 ];
@@ -39,6 +40,23 @@ pub struct ClaudeOptions {
     pub app_version: String,
 }
 impl ClaudeOptions {
+    /// Blocking trusted native qualification of a UID-checked SDK announcement.
+    /// Offload outside Registry/Store locks, then recheck candidate/association before
+    /// publishing. The original receipt time is retained; this creates no heartbeat.
+    pub fn qualify_identity(
+        &self,
+        identity: LoadedModIdentity,
+        observed_at: UtcMillis,
+        received: Instant,
+        deadline: Instant,
+    ) -> Result<ModEvidence, AdapterError> {
+        let deadline = deadline.min(Instant::now() + Duration::from_secs(5));
+        check_deadline(deadline)?;
+        self.validate()?;
+        let evidence = ModEvidence::received_at(identity, observed_at, received)?;
+        qualify(self, &evidence, deadline)?;
+        Ok(evidence)
+    }
     pub(crate) fn validate(&self) -> Result<(), AdapterError> {
         for path in [
             &self.executable,
@@ -56,6 +74,30 @@ impl ClaudeOptions {
         }
         Ok(())
     }
+}
+
+pub(crate) fn qualify(
+    options: &ClaudeOptions,
+    evidence: &ModEvidence,
+    deadline: Instant,
+) -> Result<EndpointFingerprint, AdapterError> {
+    if !fresh(evidence) {
+        return Err(error(
+            AdapterErrorCode::HostUnreachable,
+            "The original native Mod announcement is stale; qualification cannot refresh its age",
+        ));
+    }
+    if version(options, deadline)? != SUPPORTED_HOST_VERSION
+        || evidence.identity.engine_version != SUPPORTED_HOST_VERSION
+    {
+        return Err(error(AdapterErrorCode::UnsupportedHostVersion, "Claude executable and loaded SDK must both match qualified 2.1.287; observed 2.1.289 is unqualified"));
+    }
+    let fingerprint = resource_identity(options, evidence, deadline)?;
+    check_deadline(deadline)?;
+    if !fresh(evidence) {
+        return Err(error(AdapterErrorCode::HostUnreachable, "The original Mod announcement expired during qualification; refresh its actual heartbeat"));
+    }
+    Ok(EndpointFingerprint(fingerprint))
 }
 
 pub(crate) fn version(options: &ClaudeOptions, deadline: Instant) -> Result<String, AdapterError> {
