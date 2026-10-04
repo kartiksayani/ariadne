@@ -22,6 +22,10 @@ capabilities, compatibility and availability; neither type deserializes trusted
 authority or allocates Ariadne IDs. Dropping the qualification closes only the
 observer transport. Initialization and qualification share the caller's absolute
 admission deadline; qualification is additionally capped at ten seconds.
+Native callers use public `open_before(options, endpoint, deadline)` followed by
+`qualify_selected_thread(..., deadline)`. The existing `open` convenience retains
+its ten-second default. A fixture holds initialization or the following thread
+response to prove that a shorter combined budget is not reset between stages.
 
 Pre-ID qualification and final binding reuse the same executable/socket identity,
 thread/read, bounded queue/list and full turn-items checks. After Core persists

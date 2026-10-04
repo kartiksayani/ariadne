@@ -16,7 +16,10 @@ impl CodexDaemonReader {
     pub fn open(options: CodexOptions, endpoint: EndpointRef) -> Result<Self, AdapterError> {
         Self::open_before(options, endpoint, Instant::now() + Duration::from_secs(10))
     }
-    pub(crate) fn open_before(
+    /// Blocking native initialization under the caller's absolute admission deadline.
+    /// Pass that same deadline to selected-thread qualification; run outside locks
+    /// and off the executor. `open` retains its ten-second convenience default.
+    pub fn open_before(
         options: CodexOptions,
         endpoint: EndpointRef,
         deadline: Instant,

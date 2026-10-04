@@ -235,6 +235,51 @@ fn project_harness(root: &Path) -> Harness {
 }
 
 #[test]
+fn initialization_and_qualification_share_one_short_native_admission_budget() {
+    let project = tempfile::tempdir().unwrap();
+    for held_method in ["initialize", "thread/read"] {
+        let (release, hold) = std::sync::mpsc::channel::<()>();
+        let root = project.path().to_owned();
+        let h = Harness::new(move |request, _| {
+            let method = request["method"].as_str().unwrap();
+            if method == held_method {
+                // Retain the real response until the client has exhausted its
+                // admission budget. Bounded fallback also allows a failing test
+                // to finish and reap its fixture server.
+                let _ = hold.recv_timeout(Duration::from_secs(2));
+            } else if method == "initialize" {
+                // A successful initialization consumes part of the SAME budget.
+                assert_eq!(
+                    hold.recv_timeout(Duration::from_millis(250)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                );
+            }
+            let mut value = default_result(request);
+            if method == "thread/read" {
+                value["thread"]["cwd"] = json!(root);
+            }
+            Some(Action::Result(value))
+        });
+        let started = Instant::now();
+        let deadline = started + Duration::from_secs(1);
+        let result = CodexDaemonReader::open_before(h.options(), h.request().endpoint, deadline)
+            .and_then(|reader| reader.qualify_selected_thread(THREAD, project.path(), deadline));
+        let elapsed = started.elapsed();
+        let _ = release.send(());
+        assert_eq!(result.err().unwrap().code, Code::HostUnreachable);
+        assert!(elapsed < Duration::from_secs(2));
+        assert_eq!(
+            h.methods(),
+            if held_method == "initialize" {
+                vec!["initialize"]
+            } else {
+                vec!["initialize", "initialized", "thread/read"]
+            }
+        );
+    }
+}
+
+#[test]
 fn pre_id_qualification_uses_exact_reader_thread_and_root_before_final_binding_ids() {
     let project = tempfile::tempdir().unwrap();
     let alias = project.path().join("alias");
