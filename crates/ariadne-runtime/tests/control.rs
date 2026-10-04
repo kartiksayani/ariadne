@@ -648,7 +648,7 @@ impl CoreService for FaultyErrorCore {
         _: OwnerContext,
         _: OwnerCommand,
     ) -> Result<MutationReceipt, CoreError> {
-        unreachable!("unexpected owner command")
+        Err(self.0.clone())
     }
     fn apply(&self, _: AgentContext, _: ApplyRequest) -> Result<ApplyReceipt, CoreError> {
         unreachable!("unexpected apply")
@@ -666,5 +666,352 @@ impl CoreService for FaultyErrorCore {
         _: ariadne_agent_protocol::NormalizedEvent,
     ) -> Result<EventReceipt, CoreError> {
         unreachable!("unexpected report")
+    }
+}
+
+fn connect_request() -> OwnerMutationRequest {
+    let r = corpus().routing;
+    OwnerMutationRequest {
+        session: None,
+        command: OwnerCommand::BindingConnect {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: r.source_input_id,
+            params: BindingConnectParams {
+                project_id: r.project_id,
+                adapter_id: "claude_code_mod".into(),
+                external_session_id: "exact-existing-host".into(),
+                endpoint: EndpointRef::LocalBridge {
+                    name: "claude-mod".into(),
+                },
+                configuration: AdapterConfig {
+                    namespace: "claude_code_mod".into(),
+                    values: UniqueMap(std::collections::BTreeMap::new()),
+                },
+                existing_session_id: Some(r.session_id),
+            },
+        },
+    }
+}
+fn connect_receipt(request: &OwnerMutationRequest) -> MutationReceipt {
+    let r = corpus().routing;
+    let session: Session = serde_json::from_slice(
+        &fs::read(root().join("fixtures/domain/demo/session.json")).unwrap(),
+    )
+    .unwrap();
+    MutationReceipt::Session(Box::new(SavedReceipt {
+        operation_id: request.command.operation_id().clone(),
+        session_id: r.session_id,
+        revision: PositiveSafeInteger::new(21).unwrap(),
+        data: SavedReceiptData::BindingConnect {
+            binding_id: r.binding_id,
+            generation: r.generation,
+            capabilities: session
+                .bindings
+                .0
+                .values()
+                .next()
+                .unwrap()
+                .capabilities
+                .clone(),
+            setup_instruction: "Exact canonical instruction\nKeep these bytes.  ".into(),
+        },
+    }))
+}
+fn connect_wire(request: OwnerMutationRequest) -> ControlRequest {
+    ControlRequest::new(
+        request.command.operation_id().clone(),
+        ControlMethod::BindingConnect(Box::new(request)),
+    )
+    .unwrap()
+}
+fn connect_server(
+    rt: &Runtime,
+    home: &Path,
+    core: Arc<dyn CoreService>,
+    configured: bool,
+) -> Running {
+    let owner = DesktopOwner::acquire(home).unwrap();
+    let mut server = ControlServer::bind(owner, core, vec![]).unwrap();
+    if configured {
+        server = server.with_binding_connect();
+    }
+    let (stop, stopped) = oneshot::channel();
+    Running {
+        stop,
+        task: rt.spawn(server.serve(stopped)),
+    }
+}
+#[test]
+fn binding_connect_bootstrap_preserves_canonical_request_and_receipt_without_dispatch_lease() {
+    let rt = runtime();
+    let h = home();
+    let request = connect_request();
+    let receipt = connect_receipt(&request);
+    let registry = OwnerContext::from_trusted_entrypoint(OwnerScope::Registry);
+    let core = Arc::new(ScriptedCoreService::new((0..2).map(|_| ScriptStep {
+        request: RecordedRequest::Owner(registry.clone(), Box::new(request.command.clone())),
+        response: ScriptedResponse::Owner(Box::new(Ok(receipt.clone()))),
+    })));
+    let server = connect_server(&rt, h.path(), core.clone(), true);
+    for _ in 0..2 {
+        assert_eq!(
+            rt.block_on(call(h.path().into(), connect_wire(request.clone())))
+                .unwrap(),
+            ControlResult::BindingConnect(receipt.clone())
+        );
+    }
+    // A saved binding receipt has not created a supervisor, lease or claim route.
+    assert_eq!(
+        rt.block_on(call(h.path().into(), ping(&corpus().routing)))
+            .unwrap_err()
+            .code,
+        CoreErrorCode::NotFound
+    );
+    assert_eq!(core.history().unwrap().len(), 2);
+    assert_eq!(core.remaining().unwrap(), 0);
+    server.stop(&rt);
+}
+#[test]
+fn binding_connect_whitelist_rejects_scoped_other_owner_and_changed_operation_before_core() {
+    let rt = runtime();
+    let h = home();
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let server = connect_server(&rt, h.path(), core.clone(), true);
+    let valid = serde_json::to_value(connect_wire(connect_request())).unwrap();
+    for changed in ["session", "command", "operation", "unknown"] {
+        let mut invalid = valid.clone();
+        match changed {
+            "session" => {
+                invalid["params"]["session"] = serde_json::json!({"project_id":corpus().routing.project_id,"session_id":corpus().routing.session_id})
+            }
+            "command" => {
+                invalid["params"]["command"] = serde_json::json!({"command":"project_register","api_version":1,"op_id":valid["id"],"params":{"canonical_root":"/tmp/explicit-project"}})
+            }
+            "operation" => {
+                invalid["id"] = serde_json::to_value(corpus().routing.attempt_id).unwrap()
+            }
+            _ => invalid["params"]["authority"] = true.into(),
+        }
+        let bytes = serde_json::to_vec(&invalid).unwrap();
+        let response = raw(h.path(), &bytes, bytes.len()).unwrap();
+        let error: CoreError = serde_json::from_value(response["error"].clone()).unwrap();
+        assert_eq!(error.code, CoreErrorCode::InvalidArgument, "{changed}");
+    }
+    assert!(core.history().unwrap().is_empty());
+    server.stop(&rt);
+}
+#[test]
+fn binding_connect_unconfigured_or_missing_desktop_is_actionable_and_never_retries() {
+    let rt = runtime();
+    let h = home();
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let server = connect_server(&rt, h.path(), core.clone(), false);
+    let error = rt
+        .block_on(call(h.path().into(), connect_wire(connect_request())))
+        .unwrap_err();
+    assert_eq!(error.code, CoreErrorCode::Unsupported);
+    assert!(!error.retryable);
+    assert!(error.hint.contains("original operation ID"));
+    assert!(core.history().unwrap().is_empty());
+    server.stop(&rt);
+    let missing = home();
+    let error = rt
+        .block_on(call(missing.path().into(), connect_wire(connect_request())))
+        .unwrap_err();
+    assert_eq!(error.code, CoreErrorCode::HostUnreachable);
+    assert!(!error.retryable);
+    assert!(error.hint.contains("effects may already exist"));
+}
+#[test]
+fn binding_connect_producer_and_consumer_preserve_valid_errors_without_unsafe_retry_advice() {
+    let rt = runtime();
+    let h = home();
+    for (valid, error) in error_cases() {
+        let server = connect_server(
+            &rt,
+            h.path(),
+            Arc::new(FaultyErrorCore(error.clone())),
+            true,
+        );
+        let request = connect_wire(connect_request());
+        checked_error(
+            rt.block_on(call(h.path().into(), request.clone()))
+                .unwrap_err(),
+            valid,
+            &error,
+        );
+        let response: ControlResponse = serde_json::from_value(
+            serde_json::json!({"v":1,"kind":"response","id":request.id,"error":error}),
+        )
+        .unwrap();
+        checked_error(response.into_result(&request).unwrap_err(), valid, &error);
+        server.stop(&rt);
+    }
+}
+struct ConnectCore {
+    response: Result<MutationReceipt, CoreError>,
+    calls: Mutex<Vec<(OwnerContext, OwnerCommand)>>,
+    blocking: Option<ConnectBlock>,
+}
+struct ConnectBlock {
+    started: mpsc::Sender<()>,
+    finished: mpsc::Sender<()>,
+    release: Arc<(Mutex<bool>, std::sync::Condvar)>,
+}
+impl CoreService for ConnectCore {
+    fn execute_owner(
+        &self,
+        context: OwnerContext,
+        command: OwnerCommand,
+    ) -> Result<MutationReceipt, CoreError> {
+        self.calls.lock().unwrap().push((context, command));
+        if let Some(block) = &self.blocking {
+            block.started.send(()).unwrap();
+            let (lock, changed) = &*block.release;
+            let (released, timeout) = changed
+                .wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(9), |released| {
+                    !*released
+                })
+                .unwrap();
+            assert!(
+                *released && !timeout.timed_out(),
+                "bounded test owner call was not released"
+            );
+            block.finished.send(()).unwrap();
+        }
+        self.response.clone()
+    }
+    fn query(&self, _: QueryContext, _: QueryRequest) -> Result<QueryResult, CoreError> {
+        unreachable!("no query in bootstrap")
+    }
+    fn apply(&self, _: AgentContext, _: ApplyRequest) -> Result<ApplyReceipt, CoreError> {
+        unreachable!("no apply in bootstrap")
+    }
+    fn claim(
+        &self,
+        _: ValidatedDispatchContext,
+        _: ClaimRequest,
+    ) -> Result<Option<PreparedAttempt>, CoreError> {
+        unreachable!("no claim in bootstrap")
+    }
+    fn report(
+        &self,
+        _: AdapterContext,
+        _: ariadne_agent_protocol::NormalizedEvent,
+    ) -> Result<EventReceipt, CoreError> {
+        unreachable!("no report in bootstrap")
+    }
+}
+#[test]
+fn binding_connect_rejects_wrong_saved_data_target_operation_and_unbounded_instruction_on_both_sides(
+) {
+    let rt = runtime();
+    let h = home();
+    let request = connect_request();
+    let wire = connect_wire(request.clone());
+    for changed in ["kind", "session", "operation", "empty", "nul", "large"] {
+        let mut receipt = connect_receipt(&request);
+        let MutationReceipt::Session(saved) = &mut receipt else {
+            unreachable!()
+        };
+        match changed {
+            "kind" => {
+                saved.data = SavedReceiptData::Claim {
+                    input_id: corpus().routing.source_input_id,
+                    attempt_id: corpus().routing.attempt_id,
+                }
+            }
+            "session" => saved.session_id = corpus().routing.attempt_id,
+            "operation" => saved.operation_id = corpus().routing.attempt_id,
+            _ => {
+                let SavedReceiptData::BindingConnect {
+                    setup_instruction, ..
+                } = &mut saved.data
+                else {
+                    unreachable!()
+                };
+                *setup_instruction = match changed {
+                    "empty" => String::new(),
+                    "nul" => "bad\0text".into(),
+                    _ => "x".repeat(64 * 1024 + 1),
+                };
+            }
+        }
+        let core = Arc::new(ConnectCore {
+            response: Ok(receipt.clone()),
+            calls: Mutex::new(vec![]),
+            blocking: None,
+        });
+        let server = connect_server(&rt, h.path(), core.clone(), true);
+        let error = rt
+            .block_on(call(h.path().into(), wire.clone()))
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::ProtocolConflict, "{changed}");
+        assert!(!error.retryable);
+        assert_eq!(core.calls.lock().unwrap().len(), 1);
+        let response: ControlResponse = serde_json::from_value(
+            serde_json::json!({"v":1,"kind":"response","id":wire.id,"result":receipt}),
+        )
+        .unwrap();
+        assert_eq!(
+            response.into_result(&wire).unwrap_err().code,
+            CoreErrorCode::ProtocolConflict
+        );
+        server.stop(&rt);
+    }
+}
+#[test]
+fn timed_out_binding_connect_retains_all_admitted_permits_until_original_core_work_finishes() {
+    let rt = runtime();
+    let h = home();
+    let request = connect_request();
+    let (started, entered) = mpsc::channel();
+    let (finished, completed) = mpsc::channel();
+    let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let core = Arc::new(ConnectCore {
+        response: Ok(connect_receipt(&request)),
+        calls: Mutex::new(vec![]),
+        blocking: Some(ConnectBlock {
+            started,
+            finished,
+            release: release.clone(),
+        }),
+    });
+    let server = connect_server(&rt, h.path(), core.clone(), true);
+    let bytes = serde_json::to_vec(&connect_wire(request)).unwrap();
+    let mut streams = Vec::new();
+    for _ in 0..16 {
+        let mut stream = UnixStream::connect(h.path().join("run/control.sock")).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(7)))
+            .unwrap();
+        stream
+            .write_all(&(bytes.len() as u32).to_be_bytes())
+            .unwrap();
+        stream.write_all(&bytes).unwrap();
+        streams.push(stream);
+    }
+    for _ in 0..16 {
+        entered.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+    // Wait for the actual five-second server deadline, rather than sleeping.
+    let mut length = [0; 4];
+    assert!(streams[0].read_exact(&mut length).is_err());
+    drop(streams);
+    assert!(raw(h.path(), &bytes, bytes.len()).is_none());
+    assert_eq!(
+        core.calls.lock().unwrap().len(),
+        16,
+        "caller loss cannot free started owner permits"
+    );
+    *release.0.lock().unwrap() = true;
+    release.1.notify_all();
+    for _ in 0..16 {
+        completed.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+    server.stop(&rt);
+    for (context, command) in core.calls.lock().unwrap().iter() {
+        assert!(matches!(context.scope(), OwnerScope::Registry));
+        assert_eq!(command, &connect_request().command);
     }
 }
