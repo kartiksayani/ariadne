@@ -387,7 +387,15 @@ fn summaries_preserve_incompleteness_and_all_seven_status_counts() {
     assert_eq!(assert_wire::<SummaryCounts>(counts()), counts());
     let project = json!({"schema_version":1,"id":ID,"display_name":"Example"});
     assert_wire::<ProjectSummary>(
-        json!({"project":project,"canonical_root":"/registered/project",
+        json!({"project_id":ID,"project":project,"canonical_root":"/registered/project",
+        "availability":"unavailable","counts":counts()}),
+    );
+    assert_wire::<ProjectSummary>(
+        json!({"project_id":ID,"project":null,"canonical_root":"/unavailable/project",
+        "availability":"unavailable","counts":counts()}),
+    );
+    reject_wire::<ProjectSummary>(
+        json!({"project_id":ID,"canonical_root":"/unavailable/project",
         "availability":"unavailable","counts":counts()}),
     );
     assert_wire::<SessionSummary>(

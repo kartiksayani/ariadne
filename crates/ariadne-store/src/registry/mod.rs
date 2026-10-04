@@ -50,6 +50,18 @@ pub struct RegisteredProject {
     pub project_id: UuidV4,
     pub root: PathBuf,
 }
+/// Native read catalogue; unavailable roots retain their trusted ID/path and
+/// original cause. It neither publishes an index nor proves setup uniqueness.
+#[derive(Debug)]
+pub struct RegisteredProjectRead {
+    pub registered: RegisteredProject,
+    pub result: Result<crate::session::ProjectCatalogue, StoreError>,
+}
+#[derive(Debug)]
+pub struct RegistryCatalogue {
+    pub revision: NonnegativeSafeInteger,
+    pub projects: Vec<RegisteredProjectRead>,
+}
 /// Native local-setup result; transport uses its canonical core DTO.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -284,6 +296,24 @@ impl Registry {
     pub fn registered_projects(&self) -> Result<Vec<RegisteredProject>, RegistryError> {
         lock::with_lock(&self.data, "registry.lock", || {
             Ok(self.projects()?.projects)
+        })
+    }
+    pub fn catalogue(&self) -> Result<RegistryCatalogue, RegistryError> {
+        let projects = lock::with_lock(&self.data, "registry.lock", || self.projects())?;
+        // Capture registration identity once, then release the registry lock.
+        // Each project read obeys metadata -> session lock order; ordinary
+        // mutations remain independently locked and all counts use these results.
+        let outcomes = projects
+            .projects
+            .into_iter()
+            .map(|registered| {
+                let result = Store::inspect_registered(&registered.root, &registered.project_id);
+                RegisteredProjectRead { registered, result }
+            })
+            .collect();
+        Ok(RegistryCatalogue {
+            revision: projects.revision,
+            projects: outcomes,
         })
     }
     pub fn resolve_project(&self, project_id: &UuidV4) -> Result<RegisteredProject, RegistryError> {

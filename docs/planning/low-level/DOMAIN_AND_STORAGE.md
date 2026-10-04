@@ -646,7 +646,12 @@ Queries use `QueryCursor`, the structured sequence/keyset cursor
 `Page<T>={items:T[],next_cursor:QueryCursor|null,snapshot_revision}`; nested round
 message collections use their own `Page<Message>`. Rust-generated domain types
 own both shapes; no opaque-string cursor or consumer-local entity copy is added.
-Reject mismatched filters. Current-page consistency is one snapshot; if revision
+Single-session queries reject mismatched filters. Aggregate queries bind the full
+captured inventory (registered roots, current verified Project metadata, session
+revisions and availability) plus actor/route/filter in filter_digest; any digest
+mismatch, including changed aggregate filters, returns snapshot_changed. Their
+positive revision is the captured registry revision or one for an empty registry.
+Current-page counts and rows share captured snapshots; if session revision
 changes between pages, return `snapshot_changed` so UI restarts rather than
 mixing histories. `session_get` may return the full validated snapshot to local
 Tauri; agent tools use bounded projections.
@@ -663,6 +668,18 @@ round_answers|round_owner_messages|round_agent_messages|round_results|round_fork
 item_status_history|item_updated_messages`. Nested views identify continuation
 cursor scopes within existing queries; they add no endpoints. Execution validates
 the view, filter, sort key and snapshot revision together.
+
+ProjectSummary carries required project_id and required nullable project.
+Available requires matching current verified Project metadata; Unavailable may
+retain verified metadata when session reads fail, or null when metadata itself
+is unreadable. Partial counts identify only known unreadable session IDs; [] is
+valid when the catalogue is unknown. Reads preserve authoritative content and
+do not create missing session/backup directories; only genuine catalogue absence
+is complete empty data. Existing stable coordination locks may be created.
+Nested pages reserve the fixed parent and truthful continuations, prioritize
+requested families, then defaults. A deferred default can be empty with an
+after:null continuation; explicitly selecting it progresses when a complete
+entity fits. No saved historical body is truncated. See ADR-0033.
 
 ## 6. Continuation, repair and migration
 
