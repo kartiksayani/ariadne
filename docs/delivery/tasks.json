@@ -875,7 +875,7 @@
         "Explicit connect may select a canonical existing Ariadne session UUID in the registered project; target identity is never inferred from cwd/name. Saved setup/rules resume from structured Ariadne context, with an atomic historical owner-context ceiling, future-input isolation, stable replay and all existing-session rebind guards."
       ],
       "checks": [
-        "rtk proxy npm run test:integration -- --suite claude-mod"
+        "rtk proxy npm run test:integration -- --project claude-mod"
       ],
       "estimate_days": 1.5,
       "implementation_depends_on": [

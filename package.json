@@ -12,7 +12,8 @@
     "test:coverage": "vitest run --coverage --config apps/desktop/vite.config.ts",
     "capture:reference": "playwright test --config tests/ui/reference/playwright.config.ts",
     "test:native": "node scripts/run-native-e2e.mjs --suite native",
-    "test:e2e": "node scripts/run-native-e2e.mjs"
+    "test:e2e": "node scripts/run-native-e2e.mjs",
+    "test:integration": "vitest run --config apps/desktop/vite.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

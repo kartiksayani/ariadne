@@ -154,6 +154,20 @@ not kill or restart Claude. A queued input stays saved until the app/bridge is
 available again. An input already claimed or submitted without conclusive host
 evidence becomes uncertain and requires reconciliation before resend.
 
+P6 renders plugin/hooks/installed.js as a static ESM export of
+`Object.freeze({helperPath:absoluteInstalledHelperPath,appVersion:matchingAppAndPluginVersion,apiVersion:1})`.
+The source artifact exports null. The Mod uses supported plugin-local static
+imports and SDK argv/stdin calls, with no Node/filesystem/environment/PATH/cache
+fallback. Missing or mismatched resources give actionable local status and no
+connect/poll. Exact supported SDK engine2.1.287 remains required; observed CLI
+2.1.289 is unqualified until P3.4 verifies compatibility.
+
+Connect uses canonical owner receipts plus scoped BindingSummary to show the
+actual connection state. It does not invent canonical Connected from receipts
+that lack a verified endpoint fingerprint; native qualified connection owns
+that evidence under PROCESS §2. Current owner/durable report composition and
+installer generation remain explicit P2.4/P2.2/P3.4/P6 acceptance work.
+
 The Mod announces its session ID, working directory, and Claude version to the
 private app control socket at startup and every 30 seconds, whether bound or not.
 Announcements do not claim input, prompt the model, or write domain data. Keep

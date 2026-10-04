@@ -1,0 +1,5 @@
+{
+  "name": "ariadne-local",
+  "owner": { "name": "Ariadne" },
+  "plugins": [{ "name": "ariadne", "source": "./plugin" }]
+}
