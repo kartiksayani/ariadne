@@ -134,13 +134,18 @@ Receipt admission verifies the registered target session, operation ID and
 positive revision, plus the command-specific result: topic ID, next topic revision
 and archive state; next session revision, requested state and close timestamp;
 or continuation operation/source IDs, source revision/hash and approved summary.
-The existing renderer response validation still checks canonical result shapes.
+Continuation receipt admission also validates canonical target IDs and map
+key/value shapes and uniqueness; envelope/kind validation alone is insufficient.
 Only errors proven to arise after atomic receipt replay may clear pending work:
 lifecycle revision/transition/blocker guards, and Continue queue/target-state/
 adapter guards inside its target transaction. Generic routing, source IO and
-validation errors retain pending work. `preview_stale` must also retain it while
-its check remains outside that final transaction; an earlier timed-out request
-can still be completing. No new DTO or alternate mutation path is introduced.
+validation errors retain pending work. Continue captures an owned source snapshot
+without holding both session locks, then checks its preview revision/hash inside
+the replay-first target transaction, before any copy or allocation. Therefore a
+saved concurrent operation wins over stale-preview rejection, and an unsaved
+`preview_stale` safely clears pending work for explicit preparation of a new
+preview. Source read/hash failures before that transaction remain uncertain.
+No new DTO or alternate mutation path is introduced.
 
 ## Desktop discovery consumer
 
