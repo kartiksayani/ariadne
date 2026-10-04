@@ -27,13 +27,9 @@ pub struct GlobalPreferences {
     #[schemars(length(max = 256))]
     #[ts(as = "Option<Vec<NotificationEpisode>>", optional)]
     pub notification_ledger: Vec<NotificationEpisode>,
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[ts(as = "Option<bool>", optional)]
     pub notification_preview: bool,
-}
-
-fn is_false(value: &bool) -> bool {
-    !value
 }
 
 pub const NOTIFICATION_LEDGER_CAPACITY: usize = 256;
