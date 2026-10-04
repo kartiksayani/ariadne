@@ -22,7 +22,7 @@ impl Setup {
         let root = config.claude.take().unwrap().project_root;
         fs::create_dir_all(&config.home).unwrap();
         fs::set_permissions(&config.home, fs::Permissions::from_mode(0o700)).unwrap();
-        let registry = Registry::open(&config.home).unwrap();
+        let registry = Registry::open_data_directory(&config.home).unwrap();
         registry.register(&root, &id(99), || id(1)).unwrap();
         let seed: Session = serde_json::from_str(include_str!(
             "../../../../../../fixtures/domain/history/seed.json"

@@ -37,11 +37,18 @@ fn queued_geometry_before_quit_finishes_its_first_read_and_save_after_the_fence(
     let write = service.clone();
     let (started, began) = mpsc::channel();
     let (released, release) = mpsc::channel();
-    let release = Mutex::new(release);
+    let release = Mutex::new(Some(release));
     let delayed = service.with_native_preferences(
         move || {
-            started.send(()).unwrap();
-            release.lock().unwrap().recv().unwrap();
+            // Delay only the queued writer's first read. Later reads must reach
+            // runtime admission, including the final post-shutdown assertion.
+            let first_read = release.lock().unwrap().take();
+            if let Some(release) = first_read {
+                started.send(()).unwrap();
+                // The sender also drops before runtime cleanup on assertion
+                // failure; a bounded wait cannot strand the native writer.
+                release.recv_timeout(Duration::from_secs(3)).unwrap();
+            }
             read.native_preferences()
         },
         move |request| write.native_preferences_write(request),
