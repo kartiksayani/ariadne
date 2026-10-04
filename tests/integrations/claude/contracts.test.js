@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
+import { binding as fixtureBinding, host, ids, prepared as fixturePrepared } from './fixtures.js';
+import modEvents from '../../../fixtures/providers/claude/mod-events.json';
 import { bytes, clip, descriptorValid, envelope, hash, lifecycle, prepared, reportReceipt } from '../../../integrations/claude/plugin/hooks/contracts.js';
 
 const binding = { binding_id:'11111111-1111-4111-8111-111111111111', generation:'22222222-2222-4222-8222-222222222222' };
@@ -11,11 +14,15 @@ async function claim() {
   return {input_id:input,attempt_id:attempt,binding_generation:binding.generation,wire_marker,formatted_payload,payload_sha256:await hash(formatted_payload)};
 }
 describe('published wire consumers', () => {
-  it('requires installed immutable descriptor and exact version/API without path fallback', () => {
+  it('requires immutable descriptor and actual SDK loaded plugin identity without path fallback', () => {
     const descriptor = {helperPath:'/home/owner/.local/share/ariadne/current/bin/ariadne',appVersion:'0.1.0',apiVersion:1};
-    expect(descriptorValid(descriptor,'0.1.0')).toBe(true);
-    for (const value of [null,{...descriptor,helperPath:'ariadne'},{...descriptor,helperPath:'/app/../ariadne'},{...descriptor,apiVersion:2},{...descriptor,appVersion:'0.2.0'},{...descriptor,extra:true}]) {
-      expect(descriptorValid(value,'0.1.0')).toBe(false);
+    const plugin = {name:'ariadne',root:'/sdk-reported/plugin'};
+    expect(descriptorValid(descriptor,plugin)).toBe(true);
+    for (const value of [null,{...descriptor,helperPath:'ariadne'},{...descriptor,helperPath:'/app/../ariadne'},{...descriptor,apiVersion:2},{...descriptor,appVersion:''},{...descriptor,extra:true}]) {
+      expect(descriptorValid(value,plugin)).toBe(false);
+    }
+    for (const value of [{version:'0.1.0'},{...plugin,name:'other'},{...plugin,root:'relative'},{...plugin,root:'/app/../plugin'}, {...plugin,version:'0.1.0'}]) {
+      expect(descriptorValid(descriptor,value)).toBe(false);
     }
   });
   it('requires complete bounded success envelopes and never interprets CLI text as success', () => {
@@ -59,6 +66,34 @@ describe('published wire consumers', () => {
     for (const value of [{...receipt,event_id:'other'},{...receipt,session_id:attempt},{...receipt,revision:null},{...receipt,durable_effect:'false'},{...receipt,replayed:'yes'}, {...receipt,revision:0}, {...receipt,revision:1.5}, {...receipt,revision:Number.MAX_SAFE_INTEGER+1}, {...receipt,revision:'1'}]) {
       expect(() => reportReceipt(value,event,session)).toThrow();
     }
+  });
+  it('emits canonical ISO timestamps and source-backed lifecycle fixtures including session end', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-04T00:00:00.123Z'));
+    const identity = vi.spyOn(globalThis.crypto,'randomUUID').mockReturnValue('77777777-7777-4777-8777-777777777777');
+    try {
+      const claim = await fixturePrepared();
+      const events = [];
+      for (const [kind,payload,turn] of [
+        ['accepted',{receipt:null},null],
+        ['accepted',{receipt:{provider_reference:'fixture-provider-reference',observed_at:'2026-10-03T23:59:59.999Z'}},'actual-turn'],
+        ['turn_started',{},'actual-turn'],
+        ['turn_finished',{status:'completed',reason:'answer',diagnostic_text:'Exact visible answer 😀',truncated:false},'actual-turn'],
+        ['turn_finished',{status:'interrupted',reason:'aborted',diagnostic_text:null,truncated:false},'actual-turn'],
+        ['turn_finished',{status:'failed',reason:'error',diagnostic_text:'Visible failure',truncated:false},'actual-turn'],
+        ['rejected',{reason:'Claude prompt submission was dropped before matching turn evidence.'},null],
+        ['uncertain',{reason:'Prompt submission failed with unknown delivery; reconcile the original attempt.'},null],
+      ]) events.push(await lifecycle(fixtureBinding,claim,kind,payload,turn));
+      const fixture = host();
+      await claimLoop('/installed/helper',fixtureBinding).stop(fixture.$,true);
+      events.push(...fixture.events);
+      expect(events).toEqual(modEvents);
+      expect(events.every(event => event.observed_at === '2026-10-04T00:00:00.123Z')).toBe(true);
+      expect(events.at(-1).kind).toBe('disconnected');
+      expect(events.at(-1).input_id).toBe(null);
+      expect(events.at(-1).attempt_id).toBe(null);
+      expect(ids.binding).toBe(events[0].binding_id);
+    } finally { identity.mockRestore(); vi.useRealTimers(); }
   });
   it('bounds diagnostics by UTF8 bytes without splitting Unicode or altering short exact text', () => {
     expect(clip(' exact\n')).toEqual({text:' exact\n',truncated:false});
