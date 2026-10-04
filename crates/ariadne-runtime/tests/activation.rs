@@ -11,7 +11,7 @@ use ariadne_runtime::{
     discovery::*,
     leases::DesktopOwner,
     providers::*,
-    supervisor::NativeFacts,
+    supervisor::{NativeFacts, PresenceUpdate},
 };
 use std::{
     fs,
@@ -46,6 +46,25 @@ struct Fixture {
     options: ClaudeOptions,
     loaded: PathBuf,
 }
+struct ReleaseQualification(std::os::unix::net::UnixStream);
+impl Drop for ReleaseQualification {
+    fn drop(&mut self) {
+        use std::io::Write;
+        let _ = self.0.write_all(&[1]);
+    }
+}
+#[test]
+fn qualification_version_child_process() {
+    use std::io::Read;
+    let Some(path) = std::env::var_os("ARIADNE_QUALIFICATION_BARRIER") else {
+        return;
+    };
+    let mut stream = std::os::unix::net::UnixStream::connect(path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream.read_exact(&mut [0]).unwrap();
+}
 impl Fixture {
     fn new() -> Self {
         let files = home();
@@ -55,11 +74,24 @@ impl Fixture {
         fs::create_dir(&project).unwrap();
         let executable = files.path().join("claude");
         let helper = files.path().join("ariadne");
+        let barrier = files.path().join("qualification.sock");
+        let shell_path = |path: &std::path::Path| {
+            format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+        };
         for (path, version) in [
             (&executable, "2.1.287 (Claude Code)"),
             (&helper, "ariadne 0.1.0"),
         ] {
-            fs::write(path, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' '{version}'\n")).unwrap();
+            let pause = if path == &helper {
+                format!(
+                    "if [ -S {socket} ]; then ARIADNE_QUALIFICATION_BARRIER={socket} {test} --exact qualification_version_child_process >/dev/null || exit 4; fi\n",
+                    socket = shell_path(&barrier),
+                    test = shell_path(&std::env::current_exe().unwrap()),
+                )
+            } else {
+                String::new()
+            };
+            fs::write(path, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n{pause}printf '%s\\n' '{version}'\n")).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
         }
         for root in [&installed, &loaded] {
@@ -94,6 +126,23 @@ impl Fixture {
             },
         }
     }
+    fn pause_qualification(&self, rt: &tokio::runtime::Runtime) -> ReleaseQualification {
+        let path = self._files.path().join("qualification.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let stream = rt.block_on(async {
+            let listener = tokio::net::UnixListener::from_std(listener).unwrap();
+            tokio::time::timeout(Duration::from_secs(3), listener.accept())
+                .await
+                .unwrap()
+                .unwrap()
+                .0
+        });
+        fs::remove_file(path).unwrap();
+        let stream = stream.into_std().unwrap();
+        stream.set_nonblocking(false).unwrap();
+        ReleaseQualification(stream)
+    }
     fn announcement(&self, scope: Option<BindingScope>) -> SessionAnnouncement {
         SessionAnnouncement {
             adapter_id: "claude_code_mod".into(),
@@ -127,6 +176,15 @@ fn read(core: &NativeCoreService, project: UuidV4, session: UuidV4) -> Session {
 
 #[test]
 fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
+    claude_activation(false);
+}
+
+#[test]
+fn claude_session_end_rejects_active_shortcuts_and_activation_after_restart() {
+    claude_activation(true);
+}
+
+fn claude_activation(terminal: bool) {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(3)
         .enable_all()
@@ -197,13 +255,30 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
     let routes = ControlRoutes::new();
     let outcomes = Arc::new(Mutex::new(Vec::new()));
     let reported = outcomes.clone();
-    let activation = NativeActivation::new(
+    let (observation, observed) = std::sync::mpsc::channel();
+    let stopped = observation.clone();
+    let activation = NativeActivation::new_with_presence(
         core.clone(),
         factory,
         owner.clone(),
         routes.clone(),
         rt.handle().clone(),
-        Arc::new(move |outcome| reported.lock().unwrap().push(outcome)),
+        Arc::new(move |outcome| {
+            if matches!(&outcome, ActivationOutcome::Stopped { .. }) {
+                let _ = stopped.send(false);
+            }
+            reported.lock().unwrap().push(outcome);
+        }),
+        Some(Arc::new(move |update| {
+            if matches!(update, PresenceUpdate::Observed { hint, .. }
+                if hint.observation.connection_state == ConnectionState::Unknown
+                && hint.observation.freshness == Freshness::Unknown
+                && hint.observation.last_seen_at.is_none()
+                && hint.observation.source.is_none())
+            {
+                let _ = observation.send(true);
+            }
+        })),
     );
     let server = ControlServer::bind_shared(owner.clone(), core.clone(), vec![])
         .unwrap()
@@ -374,6 +449,7 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
     );
     // Wake invalidation cannot renew the retained announcement's evidence. The
     // next independently qualified heartbeat must reuse the same active slot.
+    let qualification = files.pause_qualification(&rt);
     discovery.refresh_after_wake().unwrap();
     assert_eq!(
         activation
@@ -390,6 +466,11 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
             .unwrap_err()
             .code,
         CoreErrorCode::StaleGeneration
+    );
+    drop(qualification);
+    assert!(
+        observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+        "clearing evidence during observation must report Unknown without stopping the supervisor"
     );
     rt.block_on(call(
         home.path().into(),
@@ -412,6 +493,36 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
             .generation,
         *generation
     );
+    if terminal {
+        let ended = ariadne_agent_protocol::NormalizedEvent {
+            event_id: ariadne_agent_protocol::claude_session_end_event_id(binding_id, generation),
+            binding_id: binding_id.clone(),
+            generation: generation.clone(),
+            input_id: None,
+            attempt_id: None,
+            host_turn_id: None,
+            observed_at: at(),
+            event: ariadne_agent_protocol::EventPayload::Disconnected { reason: None },
+        };
+        let context = AdapterContext::from_trusted_entrypoint(
+            RegisteredSession::from_trusted_entrypoint(
+                project.project_id.clone(),
+                session_id.clone(),
+            ),
+            binding_id.clone(),
+            generation.clone(),
+            None,
+        );
+        core.report(context, ended).unwrap();
+        for result in [
+            activation
+                .activate_registered_before(scope.clone(), Instant::now() + Duration::from_secs(2)),
+            activation.announce_before(scope.clone(), Instant::now() + Duration::from_secs(2)),
+            activation.resolve_announcement(&scope).map(|_| ()),
+        ] {
+            assert_eq!(result.unwrap_err().code, CoreErrorCode::HostUnreachable);
+        }
+    }
     rt.block_on(activation.shutdown()).unwrap();
     stop.send(()).unwrap();
     rt.block_on(task).unwrap().unwrap();
@@ -419,7 +530,11 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
     assert_eq!(after.bindings.0[binding_id].generation, *generation);
     assert_eq!(
         after.bindings.0[binding_id].connection_state,
-        ConnectionState::Connected
+        if terminal {
+            ConnectionState::Disconnected
+        } else {
+            ConnectionState::Connected
+        }
     );
     assert!(outcomes.lock().unwrap().iter().all(|outcome| matches!(outcome, ActivationOutcome::Stopped { exit: Ok(exit), .. } if exit.error.is_none() && exit.pending.is_none())));
     drop(activation);
@@ -447,6 +562,66 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
         .unwrap()
         .validate_for(&context, &event)
         .unwrap();
+    if terminal {
+        // Reopen real persisted Core/Store and construct a fresh activation. The
+        // end receipt is authoritative before any host qualification or route.
+        let allocated = facts_ids.clone();
+        let reopened = Arc::new(NativeCoreService::new(
+            AgentResolver::open_data_directory(home.path()).unwrap(),
+            move || id(allocated.fetch_add(1, Ordering::SeqCst)),
+            at,
+            |_| panic!("restart cannot qualify terminal generation"),
+        ));
+        let native = reopened.clone();
+        let roots: Arc<ProjectRootResolver> =
+            Arc::new(move |project| Ok(native.registry().resolve_project(project)?.root));
+        let discovery = Discovery::new(
+            Arc::new(at),
+            Some(registered_announcement_resolver(
+                reopened.clone(),
+                roots.clone(),
+            )),
+        );
+        let allocated = facts_ids.clone();
+        let factory = ProviderFactory::new(
+            roots,
+            discovery,
+            Some(files.options.clone()),
+            None,
+            NativeFacts {
+                next_id: Arc::new(move || id(allocated.fetch_add(1, Ordering::SeqCst))),
+                now: Arc::new(at),
+            },
+            ProviderInstructions {
+                claude: "Retain terminal scope.".into(),
+                codex: "Unused".into(),
+            },
+        );
+        let routes = ControlRoutes::new();
+        let restarted = NativeActivation::new(
+            reopened,
+            factory,
+            Arc::new(DesktopOwner::acquire(home.path()).unwrap()),
+            routes,
+            rt.handle().clone(),
+            Arc::new(|_| {}),
+        );
+        assert_eq!(
+            restarted
+                .activate_registered_before(scope.clone(), Instant::now() + Duration::from_secs(2))
+                .unwrap_err()
+                .code,
+            CoreErrorCode::HostUnreachable
+        );
+        assert_eq!(
+            restarted
+                .announce_before(scope, Instant::now() + Duration::from_secs(2))
+                .unwrap_err()
+                .code,
+            CoreErrorCode::HostUnreachable
+        );
+        rt.block_on(restarted.shutdown()).unwrap();
+    }
 }
 
 type DaemonBarrier = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);

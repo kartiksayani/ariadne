@@ -168,9 +168,9 @@ impl Fixture {
         else {
             panic!("setup")
         };
-        assert!(
-            setup_instruction.contains(include_str!("../../../../../integrations/rules/claude.md"))
-        );
+        assert!(setup_instruction.contains(include_str!(
+            "../../../../../../integrations/rules/claude.md"
+        )));
         let scope = BindingScope {
             binding_id: binding_id.clone(),
             generation: generation.clone(),
