@@ -55,6 +55,14 @@ contains the current lease generation, while the original ClaimRequest is
 forwarded unchanged. Core replays the exact saved claim before generation/state
 guards; a fresh stale request still rejects. A socket timeout, caller drop or
 shutdown cannot release a lease while its already-started core call may commit.
+Every installed claim route has a mandatory native claim gate, initially closed.
+The binding supervisor opens it only after its complete startup scan and verified
+reconciliation have been reported through validated Core receipts. Stop closes
+it before admitting more blocking claims. Closed gates return nonretryable
+host_unreachable with the original claim ID and no inference about prior effects.
+After the gate opens, exact existing-claim replay retains the routing and current
+lease context described above; the original request is still forwarded unchanged.
+
 Reuse the same claim ID after a possibly saved claim; no local claim cache or
 new-ID retry is authorized. Core calls run off the executor and socket waits
 never overlap a store transaction. Connection admission is bounded to 16,
@@ -153,6 +161,64 @@ Optional reads accept omitted/null fields and emit explicit null; collections
 remain required. Method DTOs are protocol-owned
 records using canonical primitives, not copies of persisted entity schemas.
 
+### Runtime supervision and acknowledgment
+
+Each binding has an independent supervisor over the canonical CoreService and
+Adapter seams. Native composition supplies a trusted RegisteredSession, durable
+Binding and fresh UUID/time factories. Adapter.connect and all host IO run outside
+store locks; connect precedes acquiring the dispatch lease. An actual failed or
+timed-out connection reports generation-scoped disconnected through the trusted
+registered route without a dispatch lease. This describes failure to establish
+Ariadne's connection, never host termination or non-delivery. A failed Core report
+returns both connection cause and the exact unacknowledged event/context; no stale
+failure is retargeted to a new generation. Precondition rejection before a host
+attempt does not fabricate a connection observation.
+
+Startup pages owner Inputs (in_flight/needs_attention, limit 100), retaining
+unsealed attempts for this binding. SnapshotChanged restarts the entire scan;
+three failed scans stop with that typed error. Sequences and continuation cursors
+must make actual progress. The compact input scan shares the existing 16 MiB
+session budget, without a duplicate serialized buffer; exceeding it returns
+capacity_exceeded with the gate closed, never omits persisted attempts. Reconcile
+uses batches of at most 100 exact persisted evidence records and fresh tokens,
+including originating generations. Only genuinely verified reconciliation facts
+receive native historical scope. Unresolved attempts keep the claim gate closed.
+Pull bindings never proactively claim or submit; push bindings ask Core for FIFO
+eligibility and send only its exact saved PreparedAttempt. Core alone owns pauses,
+one active attempt, replay, authorization and result joins.
+
+Supervisors serialize one bounded provider response and its Core reports. They do
+not read another response while lifecycle receipts are outstanding. An 8 MiB
+provider response may include a full diagnostic ring plus durable facts; 256 is
+the lossy diagnostic record capacity, not a lifecycle event limit. Validate each
+fact, canonical error and correlated receipt before advancing. Lifecycle receipts
+must confirm durable effect. Text stays diagnostic, never a domain reply; the
+separate display copy is redacted and bounded to 256 records/2 MiB with explicit
+gap/truncation. It does not alter the event submitted to Core.
+
+A next checkpoint is candidate progress. Runtime echoes it only after every
+corresponding Core receipt has been validated. That acknowledgment is volatile:
+this implementation has no durable checkpoint writer or journal, and does not
+claim that Attempt.reconciliation_checkpoint has been saved. Restart explicitly
+reconciles persisted attempts with a fresh observer; an absent/old token never
+proves delivery absence. Receipt failure stops upstream and returns the exact
+remaining events, trusted contexts and candidate checkpoint for composition.
+
+Quit closes claim gates, stops scheduling and bounds its own pending-fact flush
+to five seconds, then disconnects observation within the adapter's five-second
+bound. A failed flush returns a pending page plus typed error, never clean success.
+A possibly saved interrupted claim retains its request ID. Submission cancellation
+after possible admission reports uncertainty, never automatically resends. Native
+composition also stops the control listener and releases its route-held lease
+clones; an already-started blocking Core call retains its actual lease until it
+finishes even after timeout or caller drop. Normal Quit emits no domain disconnected
+fact, changes no generation/user pause, and sends no signal to external hosts.
+
+P3.2 publishes this scheduling/control implementation against test-only canonical
+Core/provider seams. Real registration composition, durable queue/report/checkpoint
+production and end-to-end acceptance remain joined with P1.4/P2.2 and the provider
+wiring tasks. A scripted test service is never production persistence or fallback.
+
 `cargo xtask gen-contracts` emits adapter JSON Schemas under
 `contracts/generated/adapter` and TypeScript under
 `apps/desktop/src/generated/adapter`. TypeScript imports canonical domain types.
@@ -247,7 +313,9 @@ executable plugin draft uses JSONL with the same 1MiB bound. Drain
 stdout/stderr concurrently. Frame before UTF8/JSON decoding, reject malformed
 required fields, split Unicode safely, bound unterminated lines. Unknown optional
 events may be ignored; unknown requests return unsupported. Use bounded channels
-256 events; lifecycle events backpressure/pause dispatch rather than drop.
+256 diagnostic records; lifecycle facts backpressure/pause dispatch rather than
+drop. The in-process supervisor may instead serialize one bounded response,
+retaining all lifecycle facts until validated Core receipts.
 Transient visible text may coalesce33ms/8KiB or drop with explicit gap notice.
 Diagnostics ring max2MiB/binding in memory, individual displayed text64KiB with
 truncation label; no private reasoning/raw tool args/env/auth payloads.

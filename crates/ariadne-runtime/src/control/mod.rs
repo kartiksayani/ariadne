@@ -5,6 +5,7 @@ use crate::leases::{
     fs::{error, io_error, uid, Directory},
     BindingLease, DesktopOwner,
 };
+use crate::supervisor::ClaimGate;
 use ariadne_core::{
     CoreError, CoreErrorCode, CoreService, OwnerContext, OwnerScope, QueryContext, QueryRequest,
     QueryResult,
@@ -86,14 +87,14 @@ pub struct ControlServer {
     _owner: DesktopOwner,
     listener: std::os::unix::net::UnixListener,
     core: Arc<dyn CoreService>,
-    bindings: Arc<HashMap<String, BindingLease>>,
+    bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
 }
 impl ControlServer {
     /// Blocking native setup. Holding DesktopOwner proves stale removal is permitted.
     pub fn bind(
         owner: DesktopOwner,
         core: Arc<dyn CoreService>,
-        bindings: Vec<BindingLease>,
+        bindings: Vec<(BindingLease, ClaimGate)>,
     ) -> Result<Self, CoreError> {
         owner.home.validate_path()?;
         owner.run.validate_path()?;
@@ -121,9 +122,9 @@ impl ControlServer {
             .set_nonblocking(true)
             .map_err(|e| io_error("Set control listener nonblocking", e))?;
         let mut routes = HashMap::new();
-        for lease in bindings {
+        for (lease, gate) in bindings {
             if routes
-                .insert(lease.binding_id().as_str().to_owned(), lease)
+                .insert(lease.binding_id().as_str().to_owned(), (lease, gate))
                 .is_some()
             {
                 return Err(error(
@@ -173,7 +174,7 @@ impl ControlServer {
 async fn handle(
     mut stream: UnixStream,
     core: Arc<dyn CoreService>,
-    bindings: Arc<HashMap<String, BindingLease>>,
+    bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
     slot: Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<(), CoreError> {
     let bytes = codec::read_frame(&mut stream).await?;
@@ -208,7 +209,7 @@ async fn handle(
                         CoreErrorCode::NotFound,
                         "No current desktop supervisor holds this binding lease.",
                     )),
-                    Some(lease) => match lease.context(
+                    Some((lease, gate)) => match lease.context(
                         &scope.binding_id,
                         if matches!(request.method, ControlMethod::Claim(_)) {
                             lease.generation()
@@ -222,13 +223,13 @@ async fn handle(
                             ControlMethod::Claim(request) => {
                                 let lease = lease.clone();
                                 let slot = slot.clone();
-                                tokio::task::spawn_blocking(move || {
+                                gate.admit(|| tokio::task::spawn_blocking(move || {
                                     let _retained_lease = lease;
                                     let _retained_slot = slot;
                                     let result = core.claim(context, request.clone())?;
                                     if let Some(result) = &result { result.validate_for(&request)?; }
                                     Ok(ControlResult::Claim(result))
-                                }).await.map_err(|_| error(CoreErrorCode::HostUnreachable, "Blocking core claim failed; reuse the same claim request ID to recover its possibly saved receipt."))?
+                                }))?.await.map_err(|_| error(CoreErrorCode::HostUnreachable, "Blocking core claim failed; reuse the same claim request ID to recover its possibly saved receipt."))?
                             }
                             ControlMethod::ConnectionStatus(_) => {
                                 let lease = lease.clone();
