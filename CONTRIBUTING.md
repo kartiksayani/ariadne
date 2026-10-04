@@ -35,8 +35,11 @@ manual milestone checks run the full suite. Live paid hosts require owner approv
 
 An independent context reviews the latest GitHub diff at the exact head.
 The author fixes findings; one targeted re-review follows. Required unresolved
-issues remain unmerged. The maintainer checks current head/base, independent
-review and green quality, squash merges, then verifies main. No structured
+issues remain unmerged. Before squash merge, update the PR against current main
+and verify its head/base, independent exact-head review and green quality on that
+integrated state. Monitor main's CI asynchronously after merging; a pending main
+run does not block the next qualified PR, but a failed main run pauses further
+merges until diagnosed and corrected. No structured
 receipts or separate patcher are required. Never fake test results or skip hooks.
 
 Important architecture decisions get short [ADRs](docs/adr/README.md).

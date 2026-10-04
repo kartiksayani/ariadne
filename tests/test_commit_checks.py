@@ -2,6 +2,7 @@
 import importlib.util
 import contextlib
 import io
+import json
 import os
 import re
 import subprocess
@@ -32,12 +33,15 @@ class ScopeTests(unittest.TestCase):
             (["crates/ariadne-core/src/queue.rs"], ("application", True)),
             (["crates/ariadne-agent-protocol/src/fake.rs"], ("application", True)),
             (["crates/ariadne-agent-protocol/src/lib.rs"], ("application", True)),
-            (["crates/ariadne-agent-protocol/tests/contract.rs"], ("application", True)),
+            (["crates/ariadne-agent-protocol/tests/contract.rs"], ("application", False)),
             (["crates/ariadne-agent-protocol/README.md"], ("application", False)),
             (["crates/ariadne-agent-protocol-extra/src/fake.rs"], ("application", False)),
             (["crates/ariadne-core/src/service/fake.rs"], ("application", True)),
             (["crates/ariadne-core/src/lib.rs"], ("application", True)),
-            (["crates/ariadne-core/tests/service_contract.rs"], ("application", True)),
+            (["crates/ariadne-core/tests/service_contract.rs"], ("application", False)),
+            (["crates/ariadne-core/tests/native.rs"], ("application", False)),
+            (["crates/ariadne-core/tests/native.rs", "crates/ariadne-core/src/native/mod.rs"], ("application", True)),
+            (["crates/ariadne-core/tests/Cargo.toml"], ("application", True)),
             (["crates/ariadne-core/README.md"], ("application", False)),
             (["crates/ariadne-core-extra/src/fake.rs"], ("application", False)),
             (["crates/ariadne-domain/src/validation.rs"], ("application", False)),
@@ -64,6 +68,17 @@ class ScopeTests(unittest.TestCase):
             (["apps/desktop/src-tauri/src/commands/query.rs", "Cargo.toml"], False),
             (["rust-toolchain.toml", "docs/delivery/tasks.json", "docs/planning/roadmap.html"], False),
             (["crates/ariadne-core/tests/service_contract.rs"], False),
+            (["apps/desktop/src/components/history/ItemDetail.tsx", "apps/desktop/src/components/history/history.css"], False),
+            (["apps/desktop/src/components/rail/MessageRail.tsx", "apps/desktop/src/components/rail/rail.css"], False),
+            (["apps/desktop/tests/ui/history/component.test.tsx", "apps/desktop/tests/ui/history/fixtures.ts"], False),
+            (["apps/desktop/src/components/history/ItemDetail.tsx", "apps/desktop/src/components/reference/MessageExcerpt.tsx"], True),
+            (["apps/desktop/src/components/rail/rail.css", "apps/desktop/src/styles/reference.css"], True),
+            (["apps/desktop/src/components/rail/rail.css", "apps/desktop/src/styles/assembled-reference.css"], True),
+            (["apps/desktop/src/components/history/future.json"], True),
+            (["apps/desktop/src/components/history/config.ts"], True),
+            (["apps/desktop/tests/ui/history/playwright.config.ts"], True),
+            (["apps/desktop/src/components/history-extra/ItemDetail.tsx"], True),
+            (["apps/desktop/src/components/graph/SessionTopicGraph.tsx"], True),
             (["apps/desktop/src/App.tsx"], True),
             (["crates/ariadne-core/src/lib.rs", "apps/desktop/src/data/service.ts"], True),
             (["designs/reference.md"], True),
@@ -81,11 +96,15 @@ class ScopeTests(unittest.TestCase):
             with self.subTest(paths=paths):
                 self.assertEqual(commit.reference_capture_for(paths), expected)
         self.assertTrue(commit.reference_capture_for(["crates/core/src/lib.rs"], full=True))
+        self.assertTrue(commit.reference_capture_for(["apps/desktop/src/components/history/ItemDetail.tsx"], full=True))
 
     def test_print_scope_uses_same_paths_and_full_override_for_reference(self):
         for paths, extra, expected in [
             (["crates/ariadne-core/src/lib.rs"], [], "application release=true reference=false"),
             (["apps/desktop/src/App.tsx"], [], "application release=false reference=true"),
+            (["crates/ariadne-core/tests/native.rs"], [], "application release=false reference=false"),
+            (["crates/ariadne-core/tests/native.rs"], ["--full"], "application release=true reference=true"),
+            (["apps/desktop/src/components/history/history.css"], [], "application release=true reference=false"),
             (None, [], "application release=true reference=true"),
             (["crates/ariadne-core/src/lib.rs"], ["--full"], "application release=true reference=true"),
         ]:
@@ -201,11 +220,45 @@ class ScopeTests(unittest.TestCase):
             paths.assert_called_once_with("origin/main", False, True)
 
 
+class LintTests(unittest.TestCase):
+    def test_frontend_check_owns_one_eslint_pass_and_js_only_changes_keep_lint(self):
+        script = json.loads((ROOT / "package.json").read_text())["scripts"]["check"]
+        self.assertTrue(script.startswith("eslint . --max-warnings=0 && "))
+        for changed, full, frontend, javascript in [
+            (["apps/desktop/src/view.tsx"], False, True, False),
+            (["apps/desktop/src/view.tsx", "scripts/helper.mjs"], False, True, False),
+            (["apps/desktop/src/style.css"], False, True, False),
+            (["scripts/helper.mjs"], False, False, True),
+            (["scripts/helper.js"], False, False, True),
+            (["crates/core/src/lib.rs"], False, False, False),
+            ([], True, True, False),
+        ]:
+            with self.subTest(changed=changed, full=full), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                for name in changed:
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("// test-owned command selection fixture\n")
+                with mock.patch.object(commit, "ROOT", root), mock.patch.object(commit, "run") as run:
+                    commit.lint(changed, full=full)
+                calls = [call.args for call in run.call_args_list]
+                self.assertEqual(calls.count(("npm", "run", "check")), int(frontend))
+                self.assertEqual(calls.count(("node", root / "node_modules/eslint/bin/eslint.js", ".", "--max-warnings=0")), int(javascript))
+                self.assertIn(("git", "diff", "--check"), calls)
+                self.assertIn(("git", "diff", "--cached", "--check"), calls)
+                if full:
+                    self.assertIn(("ruff", "check", "."), calls)
+                if full or any(name.endswith(".rs") for name in changed):
+                    self.assertIn(("cargo", "fmt", "--all", "--", "--check"), calls)
+
+
 class CoverageTests(unittest.TestCase):
     def test_ci_exports_independent_xtask_report_from_workspace_profiles(self):
         for changed, native_command in [
             ("crates/ariadne-domain/src/validation.rs", "test:native"),
             ("crates/ariadne-core/src/service.rs", "test:e2e"),
+            ("crates/ariadne-core/tests/native.rs", "test:native"),
+            ("crates/ariadne-agent-protocol/tests/contract.rs", "test:native"),
         ]:
             with self.subTest(changed=changed), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)

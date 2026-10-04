@@ -46,10 +46,14 @@ issues stay unmerged. No separate patcher, JSON context proof or service-wide
 pre-mortem checklist is required.
 
 Before squash merge, the maintainer checks:
-- current PR head and base;
+- the PR is updated against current main and its current head/base are verified;
 - genuine independent review at that head and resolved required findings;
-- green quality for that head and acceptance evidence;
-- squash merge, followed by a check of main.
+- green quality for that integrated head and acceptance evidence;
+- squash merge, then monitor main's CI asynchronously.
+
+Do not wait for each successful merge's main run before preparing or merging the
+next independently reviewed, green PR integrated against current main. If main
+fails, pause further merges until the failure is diagnosed and corrected.
 
 Changed head/base requires relevant checks and current-head review. If a merge
 reply is lost, read PR/main state before retrying. Only the maintainer merges.
