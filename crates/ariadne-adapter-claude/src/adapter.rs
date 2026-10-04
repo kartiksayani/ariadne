@@ -15,6 +15,17 @@ pub struct ClaudeAdapter {
     worker: Worker,
 }
 impl ClaudeAdapter {
+    /// Native activation retains one original deadline through worker admission
+    /// and resource IO. Ordinary Adapter.connect keeps its existing default.
+    pub fn connect_before(
+        &self,
+        request: ConnectRequest,
+        deadline: Instant,
+    ) -> AdapterFuture<'_, ConnectResult> {
+        self.worker.call_before(deadline, move |state, deadline| {
+            state.connect(request, deadline)
+        })
+    }
     pub fn new(
         options: ClaudeOptions,
         evidence: ModEvidenceSlot,

@@ -1,5 +1,6 @@
 //! UID-checked Unix-only control; socket IO never spans a store transaction.
 mod codec;
+mod routes;
 mod wire;
 use crate::discovery::Discovery;
 use crate::leases::{
@@ -12,6 +13,7 @@ use ariadne_core::{
     QueryResult,
 };
 use ariadne_domain::models::BindingSummary;
+pub use routes::ControlRoutes;
 use std::{
     collections::HashMap,
     fs,
@@ -84,18 +86,34 @@ pub fn control_path(home: &Path) -> Result<PathBuf, CoreError> {
     socket_metadata(&path)?;
     Ok(path)
 }
+pub type NativeConnect = dyn Fn(
+        ariadne_core::OwnerMutationRequest,
+        Instant,
+    ) -> Result<ariadne_core::MutationReceipt, CoreError>
+    + Send
+    + Sync;
+pub type NativeAnnouncement = dyn Fn(BindingScope, Instant) -> Result<(), CoreError> + Send + Sync;
 pub struct ControlServer {
-    _owner: DesktopOwner,
+    _owner: Arc<DesktopOwner>,
     listener: std::os::unix::net::UnixListener,
     core: Arc<dyn CoreService>,
-    bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
+    bindings: ControlRoutes,
     binding_connect: bool,
+    native_connect: Option<Arc<NativeConnect>>,
+    native_announcement: Option<Arc<NativeAnnouncement>>,
     discovery: Option<Discovery>,
 }
 impl ControlServer {
     /// Blocking native setup. Holding DesktopOwner proves stale removal is permitted.
     pub fn bind(
         owner: DesktopOwner,
+        core: Arc<dyn CoreService>,
+        bindings: Vec<(BindingLease, ClaimGate)>,
+    ) -> Result<Self, CoreError> {
+        Self::bind_shared(Arc::new(owner), core, bindings)
+    }
+    pub fn bind_shared(
+        owner: Arc<DesktopOwner>,
         core: Arc<dyn CoreService>,
         bindings: Vec<(BindingLease, ClaimGate)>,
     ) -> Result<Self, CoreError> {
@@ -124,24 +142,15 @@ impl ControlServer {
         listener
             .set_nonblocking(true)
             .map_err(|e| io_error("Set control listener nonblocking", e))?;
-        let mut routes = HashMap::new();
-        for (lease, gate) in bindings {
-            if routes
-                .insert(lease.binding_id().as_str().to_owned(), (lease, gate))
-                .is_some()
-            {
-                return Err(error(
-                    CoreErrorCode::BindingConflict,
-                    "Duplicate binding supplied to the desktop control server.",
-                ));
-            }
-        }
+        let routes = ControlRoutes::from_bindings(bindings)?;
         Ok(Self {
             _owner: owner,
             listener,
             core,
-            bindings: Arc::new(routes),
+            bindings: routes,
             binding_connect: false,
+            native_connect: None,
+            native_announcement: None,
             discovery: None,
         })
     }
@@ -149,6 +158,19 @@ impl ControlServer {
     /// This bootstrap route grants no dispatch lease or supervisor readiness.
     pub fn with_binding_connect(mut self) -> Self {
         self.binding_connect = true;
+        self
+    }
+    pub fn with_native_connect(mut self, connect: Arc<NativeConnect>) -> Self {
+        self.binding_connect = true;
+        self.native_connect = Some(connect);
+        self
+    }
+    pub fn with_native_announcement(mut self, announcement: Arc<NativeAnnouncement>) -> Self {
+        self.native_announcement = Some(announcement);
+        self
+    }
+    pub fn with_routes(mut self, routes: ControlRoutes) -> Self {
+        self.bindings = routes;
         self
     }
     /// Native composition enables read-only announcements on this existing
@@ -165,7 +187,10 @@ impl ControlServer {
         loop {
             let accepted = tokio::select! {
                 biased;
-                _ = &mut stop => return Ok(()),
+                _ = &mut stop => {
+                    self.bindings.close()?;
+                    return Ok(());
+                },
                 _ = connections.join_next(), if !connections.is_empty() => continue,
                 accepted = listener.accept() => accepted,
             };
@@ -182,6 +207,9 @@ impl ControlServer {
             let core = self.core.clone();
             let bindings = self.bindings.clone();
             let binding_connect = self.binding_connect;
+            let native_connect = self.native_connect.clone();
+            let native_announcement = self.native_announcement.clone();
+            let owner = self._owner.clone();
             let discovery = self.discovery.clone();
             let deadline = Instant::now() + CONTROL_TIMEOUT;
             connections.spawn(async move {
@@ -190,12 +218,17 @@ impl ControlServer {
                     tokio::time::Instant::from_std(deadline),
                     handle(
                         stream,
-                        core,
-                        bindings,
-                        binding_connect,
-                        discovery,
-                        slot,
-                        deadline,
+                        Connection {
+                            core,
+                            bindings,
+                            binding_connect,
+                            discovery,
+                            native_connect,
+                            native_announcement,
+                            owner,
+                            slot,
+                            deadline,
+                        },
                     ),
                 )
                 .await;
@@ -203,15 +236,29 @@ impl ControlServer {
         }
     }
 }
-async fn handle(
-    mut stream: UnixStream,
+struct Connection {
     core: Arc<dyn CoreService>,
-    bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
+    bindings: ControlRoutes,
     binding_connect: bool,
     discovery: Option<Discovery>,
+    native_connect: Option<Arc<NativeConnect>>,
+    native_announcement: Option<Arc<NativeAnnouncement>>,
+    owner: Arc<DesktopOwner>,
     slot: Arc<tokio::sync::OwnedSemaphorePermit>,
     deadline: Instant,
-) -> Result<(), CoreError> {
+}
+async fn handle(mut stream: UnixStream, connection: Connection) -> Result<(), CoreError> {
+    let Connection {
+        core,
+        bindings,
+        binding_connect,
+        discovery,
+        native_connect,
+        native_announcement,
+        owner,
+        slot,
+        deadline,
+    } = connection;
     let bytes = codec::read_frame(&mut stream).await?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| {
         error(
@@ -249,8 +296,13 @@ async fn handle(
                             let observed_at = (discovery.now)();
                             tokio::task::spawn_blocking(move || {
                                 let _retained_slot = slot;
-                                discovery.announce(announcement, received, observed_at, deadline)
-                                    .map(ControlResult::Announcement)
+                                let _owner = owner;
+                                let scope = announcement.binding_scope.clone();
+                                let ack = discovery.announce(announcement, received, observed_at, deadline)?;
+                                if let (Some(callback), Some(scope)) = (native_announcement, scope) {
+                                    callback(scope, deadline)?;
+                                }
+                                Ok(ControlResult::Announcement(ack))
                             }).await.map_err(|_| error(CoreErrorCode::HostUnreachable,
                                 "Native announcement validation failed; refresh the original conversation."))?
                         }
@@ -265,11 +317,16 @@ async fn handle(
                     } else {
                         tokio::task::spawn_blocking(move || {
                             let _retained_slot = slot;
+                            let _owner = owner;
                             if Instant::now() >= deadline {
                                 return Err(connect_unavailable());
                             }
-                            let context = OwnerContext::from_trusted_entrypoint(OwnerScope::Registry);
-                            let receipt = core.execute_owner(context, request.command.clone())?;
+                            let receipt = if let Some(callback) = native_connect {
+                                callback(*request.clone(), deadline)?
+                            } else {
+                                let context = OwnerContext::from_trusted_entrypoint(OwnerScope::Registry);
+                                core.execute_owner(context, request.command.clone())?
+                            };
                             wire::validate_connect_receipt(&request, &receipt)?;
                             Ok(ControlResult::BindingConnect(receipt))
                         }).await.map_err(|_| CoreError::new(CoreErrorCode::HostUnreachable,
@@ -283,7 +340,7 @@ async fn handle(
                             "Control method requires its declared binding scope.",
                         )
                     })?;
-                    match bindings.get(scope.binding_id.as_str()) {
+                    match bindings.get(&scope.binding_id)? {
                         None => Err(error(
                             CoreErrorCode::NotFound,
                             "No current desktop supervisor holds this binding lease.",
@@ -305,6 +362,7 @@ async fn handle(
                                     gate.admit(|| tokio::task::spawn_blocking(move || {
                                     let _retained_lease = lease;
                                     let _retained_slot = slot;
+                                    let _owner = owner;
                                     let result = core.claim(context, request.clone())?;
                                     if let Some(result) = &result { result.validate_for(&request)?; }
                                     Ok(ControlResult::Claim(result))
@@ -315,6 +373,7 @@ async fn handle(
                                     let slot = slot.clone();
                                     tokio::task::spawn_blocking(move || {
                                         let _retained_slot = slot;
+                                        let _owner = owner;
                                         status(core.as_ref(), &lease)
                                     })
                                     .await

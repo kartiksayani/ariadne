@@ -20,6 +20,53 @@ struct Composition {
     resolve: Arc<ResolveSession>,
 }
 impl DesktopService {
+    pub(crate) fn native_preferences(&self) -> Result<PreferencesSnapshot, CoreError> {
+        match self
+            .query(
+                OwnerQueryRequest {
+                    session: None,
+                    request: QueryRequest::PreferencesGet {},
+                },
+                true,
+            )
+            .0
+        {
+            ApplicationEnvelope::Success(SuccessEnvelope {
+                data: QueryResult::PreferencesGet(snapshot),
+                ..
+            }) => Ok(snapshot),
+            ApplicationEnvelope::Failure(FailureEnvelope { error, .. }) => Err(error),
+            _ => Err(mismatched_command()),
+        }
+    }
+    pub(crate) fn native_preferences_write(
+        &self,
+        request: &OwnerMutationRequest,
+    ) -> Result<PreferencesPatchedReceipt, CoreError> {
+        match self
+            .owner(
+                request.clone(),
+                matches!(request.command, OwnerCommand::PreferencesPatch { .. }),
+            )
+            .0
+        {
+            ApplicationEnvelope::Success(SuccessEnvelope {
+                data: MutationReceipt::PreferencesPatched(receipt),
+                ..
+            }) => Ok(receipt),
+            ApplicationEnvelope::Failure(FailureEnvelope { error, .. }) => Err(error),
+            _ => Err(mismatched_command()),
+        }
+    }
+    pub(crate) fn resolve_open_route(&self, route: &OpenRoute) -> Result<(), CoreError> {
+        self.composition()?.session(&SessionRef {
+            project_id: route.project_id.clone(),
+            session_id: route.session_id.clone(),
+        })?;
+        // Item existence remains the shared renderer reveal's responsibility,
+        // including its validated session fallback for a concurrently deleted item.
+        Ok(())
+    }
     /// The Rust startup caller resolves IDs through actual registered project and
     /// session membership. This installer is never exposed as a Tauri command.
     pub fn from_trusted_startup(
@@ -212,6 +259,12 @@ macro_rules! mutations {
                 let _ = app.emit("ariadne://session_changed", SessionChangedHint {
                     session_id: receipt.session_id.clone(), revision: receipt.revision,
                 });
+            }
+            if matches!(&envelope.0, ApplicationEnvelope::Success(SuccessEnvelope {data:MutationReceipt::PreferencesPatched(_),..})) {
+                // OS reconciliation cannot change an already saved receipt.
+                if let Some(window) = app.try_state::<crate::native::window::NativeWindow>() {
+                    window.reconcile(app.clone(), false);
+                }
             }
             envelope
             }).await.unwrap_or_else(|()| {

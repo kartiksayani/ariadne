@@ -4,6 +4,7 @@ pub mod bridge;
 pub mod demo;
 pub mod doctor;
 pub mod mcp;
+pub mod open;
 pub mod output;
 pub mod owner;
 pub mod setup;

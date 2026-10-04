@@ -148,3 +148,51 @@ fn process_environment_requires_both_values_and_writes_real_startup() {
         }
     }
 }
+
+#[test]
+fn trusted_setup_failure_aborts_before_installing_lifecycle_authority() {
+    use ariadne_core::{CoreError, CoreErrorCode};
+    use native::window::lifecycle::NativeLifecycle;
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    let error = establish_lifecycle(app.handle(), |_| {
+        Err(CoreError::new(
+            CoreErrorCode::StoreBusy,
+            "Native control is already owned.",
+            "Keep the existing owner; this startup cannot start supervisors.",
+        ))
+    })
+    .unwrap_err();
+    assert_eq!(error.code, CoreErrorCode::StoreBusy);
+    assert!(app.try_state::<NativeLifecycle>().is_none());
+}
+
+#[test]
+fn trusted_setup_installs_the_returned_owner_once_without_running_shutdown() {
+    use native::window::lifecycle::NativeLifecycle;
+    use std::sync::atomic::AtomicUsize;
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    let shutdown = Arc::new(AtomicUsize::new(0));
+    let calls = shutdown.clone();
+    // Move-only captured state demonstrates the startup FnOnce composition.
+    let startup = Box::new(7);
+    establish_lifecycle(app.handle(), move |_| {
+        assert_eq!(*startup, 7);
+        Ok(NativeLifecycle::from_trusted_owner(
+            move || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            || Ok(()),
+        ))
+    })
+    .unwrap();
+    assert_eq!(shutdown.load(Ordering::SeqCst), 0);
+    let lifecycle = app.state::<NativeLifecycle>();
+    lifecycle.prepare_exit().unwrap();
+    lifecycle.prepare_exit().unwrap();
+    assert_eq!(shutdown.load(Ordering::SeqCst), 1);
+}
