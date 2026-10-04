@@ -29,9 +29,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     projects: [
+      { test: { name: "claude-mod", environment: "node", include: [resolve(root, "../../tests/integrations/claude/**/*.test.js")] } },
       { test: { name: 'desktop', environment: 'jsdom', include: ['tests/ui/**/*.test.tsx'] } },
       { test: { name: 'reference', environment: 'jsdom', include: [resolve(root, '../../tests/ui/reference/**/*.test.{ts,tsx}')] } },
     ],
-    coverage: { provider: 'v8', include: ['src/**/*.{ts,tsx}'], exclude: [...coverageConfigDefaults.exclude, '**/generated/**'], reporter: [['lcov', { projectRoot: resolve(root, '../..') }], 'text'], reportsDirectory: resolve(root, '../../coverage/web') },
+    coverage: { provider: 'v8', allowExternal: true, include: ['src/**/*.{ts,tsx}', resolve(root, '../../integrations/claude/**/*.js')], exclude: [...coverageConfigDefaults.exclude, '**/generated/**'], reporter: [['lcov', { projectRoot: resolve(root, '../..') }], 'text'], reportsDirectory: resolve(root, '../../coverage/web') },
   },
 });

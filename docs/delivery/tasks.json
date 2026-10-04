@@ -854,7 +854,7 @@
         "Persist accepted/start/end/reject/uncertain callbacks through CLI, including late acceptance/rejection and desktop closure; terminal text stays diagnostic."
       ],
       "checks": [
-        "rtk proxy npm run test:integration -- --suite claude-mod"
+        "rtk proxy npm run test:integration -- --project claude-mod"
       ],
       "estimate_days": 1.5,
       "implementation_depends_on": [
