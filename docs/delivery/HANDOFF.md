@@ -1,6 +1,6 @@
 # Ariadne handoff
 
-Updated 2026-10-04, 21:15 UTC. Owner requests autonomous delivery; delegates use
+Updated 2026-10-04, 21:32 UTC. Owner requests autonomous delivery; delegates use
 only Sol 6.1 High. Ten subagent slots are available; four concurrent agents were
 verified. Current focus is two product workers, not filling every slot.
 
@@ -13,20 +13,23 @@ verified. Current focus is two product workers, not filling every slot.
 
 | Owner | Worktree / branch | Current work |
 | --- | --- | --- |
-| Maintainer | `.worktrees/resume-integration` / `maintenance/resume-integration` | PR83 fully pushed; awaiting CI and evidence audit |
+| Maintainer | `.worktrees/resume-integration` / `maintenance/resume-integration` | Local `6fbbe2d` replaces a helper in an excluded DTO with the existing standard predicate; 36 focused tests and generated contracts pass. One unpushed commit awaits current CI evidence to batch any further fixes |
 | `prove_three_binding_fifo` | `.worktrees/three-binding-fifo` / `task/three-binding-fifo` | FIFO and real supervisor stop/restart proof pushed; no unpushed commits; awaiting83, then continues P3.2 → P4.1 → P4.4 |
 | Maintainer | `.worktrees/delivery-focus` / `maintenance/delivery-focus` | ADR0060, ORCHESTRATOR rules and this handoff; published checkpoint queued for84, no separate process PR |
+| Maintainer | `.worktrees/claude-installed-join` / `task/claude-installed-join` | Local `7c86b86` settles the canonical installed-helper join contract; one unpushed documentation commit, implementation waits for83 |
 
 Primary worker owns `crates/ariadne-runtime/tests/supervisor_native_fifo.rs` and
 exclusively uses `.worktrees/native-provider-activation/target` for focused checks.
 Second worker will own P3.3 after83. Claude qualification scoping is finished; no
-other module is staffed. Shared native files, manifests, Tauri configuration and
+other module is staffed. `audit_pr83_evidence` independently checks CI artifacts
+and merge readiness; no coding worker is currently active. Shared native files, manifests, Tauri configuration and
 generator registration remain with the maintainer until explicitly reassigned.
 
 **Next three steps**
 
-1. Recheck GitHub head/base; finish83 CI and independent evidence audit; squash
-   merge and check main. Close only P2.4 and P3.1 with actual evidence.
+1. Finish83's current evidence audit, publish the bounded coverage repair with any
+   other actual failures, then exact-head delta review and full CI. Squash merge
+   and check main. Close only P2.4 and P3.1 with actual evidence.
 2. Finish P3.2 real Core/Store stop/restart proof in84; integrate actual83 main.
    Then keep this worker on P4.1 native five-input/relaunch and P4.4 tree acceptance.
    Start the second worker on the Claude join after83.
