@@ -5,7 +5,23 @@ use ariadne_core::{
 };
 use ariadne_domain::models::{BindingSummary, UuidV4};
 use ariadne_runtime::control::{self, ControlMethod, ControlRequest, ControlResult};
+use ariadne_runtime::discovery::{AnnouncementAck, SessionAnnouncement};
 use std::path::PathBuf;
+
+/// Read-only candidate intake on the existing private endpoint, with no binding
+/// route or lease required. An acknowledgement is never host qualification.
+pub fn announce(
+    home: PathBuf,
+    request_id: UuidV4,
+    announcement: SessionAnnouncement,
+) -> Result<AnnouncementAck, CoreError> {
+    let request =
+        ControlRequest::new(request_id, ControlMethod::SessionAnnouncement(announcement))?;
+    let ControlResult::Announcement(ack) = control::call_blocking(home, request)? else {
+        return Err(CoreError::new(CoreErrorCode::ProtocolConflict, "Desktop returned a different result to bridge announce.", "Refresh the original conversation; this result grants no binding or dispatch authority."));
+    };
+    Ok(ack)
+}
 
 /// Claim always contacts the desktop; there is no direct disk/core claim fallback.
 pub fn claim(home: PathBuf, request: ClaimRequest) -> Result<Option<PreparedAttempt>, CoreError> {
