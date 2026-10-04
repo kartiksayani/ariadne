@@ -142,6 +142,31 @@ Archive and close are guarded metadata operations. Render the returned blocking 
 - `session.close` requires every item terminal, no `queued`, `in_flight`, or `needs_attention` input, and persisted dispatch state `paused`. If dispatch is enabled, show an explicit Pause dispatch step; wait until the paused state is confirmed, then offer a separately confirmed Close action. Keep close disabled and show blockers while active items or inputs remain. It marks Ariadne metadata only; it never signals or terminates the terminal process. `session.reopen` reactivates the record without changing its binding or implicitly resuming dispatch.
 - Tab close changes navigation only. It does not close a session, remove its project registration, or discard drafts.
 
+Persist navigation through the canonical owner preferences: global
+`selected_navigation` chooses Projects, All sessions, a registered project ID or
+a registered SessionRef; per-session `tab_open` controls tab visibility without
+deleting selection, expansion, filters, scroll or drafts. A rejected write keeps
+the last valid view. Unknown completion retains the original operation ID and
+exact patch for explicit same-operation reconciliation.
+
+Manual connection explicitly chooses a new Ariadne session or an existing
+registered session in that project. A fresh Claude conversation may attach to
+Session X while retaining its topics, items and history; unfinished topics/items
+do not block this choice. The native rebind guards still require an active target,
+paused/disconnected old binding and no pending/running/unresolved inputs. The
+backend handoff follow-up must prove historical structured owner-context visibility
+at the connection snapshot and isolation of future unissued inputs; it does not
+transfer host transcript/memory, copy old host authority or resume dispatch.
+
+The reusable registration UI receives composition-owned installed adapter choices
+`{adapter_id,label,configuration:AdapterConfig}`. They are presentation inputs,
+not authorization or a new query contract. The owner supplies the explicit host
+ID and typed endpoint; native core validates adapter/configuration/host identity
+and may reject them as unsupported or unknown. Show saved setup instructions only
+after a validated receipt, and keep rebind guard errors visible in the dialog.
+Real candidate discovery/choices are a later native composition join; do not
+invent candidates or infer ownership from read-only provider metadata.
+
 Automatic provider discovery and manual project/session connection are both first-version paths. Discovery presents candidates for owner review and binding; private transcripts are not scanned. Read-only provider session metadata never establishes ownership by itself. Claude Mod and Codex queue/history bridges deliver inputs and report lifecycle; the agent sends explicit item/message/result operations through CLI/MCP. `binding.connect`, `binding.pause`, `binding.resume`, and `binding.disconnect` describe bridge lifecycle only. Disconnected/external states remain labelled as such. Do not claim the UI controls a host process.
 
 ## 7. Keyboard and accessibility

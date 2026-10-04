@@ -169,6 +169,7 @@
             "kind": "set_global",
             "preferences": {
               "theme": "system",
+              "selected_navigation": { "kind": "projects" },
               "window": {
                 "x": 10.0,
                 "y": 10.0,
@@ -188,6 +189,7 @@
                 "session_id": "00000000-0000-4000-8000-000000000002"
               },
               "selected_item_id": null,
+              "tab_open": true,
               "tab_order": 0,
               "expanded_item_ids": [],
               "filters": {
