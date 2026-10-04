@@ -1,6 +1,6 @@
 # Ariadne handoff
 
-Updated 2026-10-04, 21:13 UTC. Owner requests autonomous delivery; delegates use
+Updated 2026-10-04, 21:15 UTC. Owner requests autonomous delivery; delegates use
 only Sol 6.1 High. Ten subagent slots are available; four concurrent agents were
 verified. Current focus is two product workers, not filling every slot.
 
@@ -9,7 +9,7 @@ verified. Current focus is two product workers, not filling every slot.
 | Open PR | Head / base | CI and review |
 | --- | --- | --- |
 | [83](https://github.com/kartiksayani/ariadne/pull/83) | `447fc43` / `b41829c` | [CI running](https://github.com/kartiksayani/ariadne/actions/runs/37234889765); [independent delta clear](https://github.com/kartiksayani/ariadne/pull/83#pullrequestreview-5408224020); desktop-only regression moved out of CLI-included preferences; 23 CLI tests independently pass |
-| [84, draft](https://github.com/kartiksayani/ariadne/pull/84) | `3f0d813` / `b41829c` | [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37233989440); [independent delta clear](https://github.com/kartiksayani/ariadne/pull/84#pullrequestreview-5408186250); independently repeated 23 tests and Clippy; acceptance awaits83 |
+| [84, draft](https://github.com/kartiksayani/ariadne/pull/84) | `3f0d813` / `b41829c` | [CI green](https://github.com/kartiksayani/ariadne/actions/runs/37233989440); [independent delta clear](https://github.com/kartiksayani/ariadne/pull/84#pullrequestreview-5408186250); independently repeated 23 tests and Clippy; held behind83, then update against actual main and revalidate |
 
 | Owner | Worktree / branch | Current work |
 | --- | --- | --- |
