@@ -10,6 +10,7 @@ ariadne-core = { path = "../ariadne-core" }
 ariadne-domain = { path = "../ariadne-domain" }
 ariadne-store = { path = "../ariadne-store" }
 ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
+ariadne-mcp = { path = "../ariadne-mcp" }
 serde_json.workspace = true
 chrono.workspace = true
 uuid = { workspace = true, features = ["v4"] }

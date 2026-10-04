@@ -23,10 +23,14 @@ fn truthful_entrypoint_process_contract() {
                 format!("ariadne-mcp {}\n", env!("CARGO_PKG_VERSION"))
             );
         } else {
-            assert!(stdout.contains("Usage:") && stdout.contains("not implemented"));
+            assert!(
+                stdout.contains("Usage:")
+                    && stdout.contains("session_read")
+                    && !stdout.contains("scaffold")
+            );
         }
     }
-    for args in [vec!["unknown"], vec!["--help", "unknown"], vec!["serve"]] {
+    for args in [vec!["unknown"], vec!["--help", "unknown"]] {
         let output = Command::new(env!("CARGO_BIN_EXE_ariadne-mcp"))
             .args(&args)
             .output()
@@ -34,10 +38,6 @@ fn truthful_entrypoint_process_contract() {
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
         let stderr = String::from_utf8(output.stderr).unwrap();
-        assert!(stderr.contains(if args == vec!["serve"] {
-            "no service was started"
-        } else {
-            "Unsupported"
-        }));
+        assert!(stderr.contains("Unsupported"));
     }
 }

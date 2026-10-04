@@ -1,13 +1,10 @@
 //! Thin installed agent tools; native facts come from Registry, semantics from Core.
-mod native;
 use ariadne_core::{
-    apply::{ApplyError, ApplyService},
-    queries::{QueryError, QueryService},
+    native::{AgentResolver, NativeCoreService},
     *,
 };
 use ariadne_domain::models::*;
-use ariadne_store::registry::Registry;
-use native::invalid;
+
 use std::{
     collections::BTreeMap,
     io::{Read, Write},
@@ -79,7 +76,25 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
         Tool::Apply(request) => request.validate_wire()?,
     }
     let data = crate::bridge::command::home_from_environment()?;
-    let registry = Registry::open_data_directory(&data).map_err(native::registry_error)?;
+    let registry = AgentResolver::open_data_directory(&data)?;
+    let core = NativeCoreService::new(
+        registry,
+        || UuidV4::new(uuid::Uuid::new_v4().to_string()).expect("UUIDv4 generator"),
+        || {
+            UtcMillis::new(
+                chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            )
+            .expect("native UTC clock")
+        },
+        |_| {
+            Err(CoreError::new(
+                CoreErrorCode::Unsupported,
+                "No provider verifier is composed for the agent CLI.",
+                "Use native owner setup with an installed adapter.",
+            ))
+        },
+    );
     let (binding, generation, source, attempt) = match &tool {
         Tool::Read(request) => (
             &request.binding_id,
@@ -106,8 +121,8 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
             &request.request.attempt_id,
         ),
     };
-    let context = native::context(
-        &registry,
+    let context = AgentResolver::resolve(
+        core.registry(),
         binding.clone(),
         generation.clone(),
         source.clone(),
@@ -115,22 +130,7 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
     )?;
     match tool {
         Tool::Apply(request) => {
-            let at = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            let at = UtcMillis::new(at)
-                .map_err(|_| invalid("Native clock is outside the supported UTC range."))?;
-            let result = ApplyService::new(&registry)
-                .execute(
-                    &context,
-                    &request.request,
-                    || UuidV4::new(uuid::Uuid::new_v4().to_string()).expect("UUIDv4 generator"),
-                    at,
-                )
-                .map_err(|error| match error {
-                    ApplyError::Core(e) => e,
-                    ApplyError::Store(e) => native::store_error(e),
-                    ApplyError::Registry(e) => native::registry_error(e),
-                })?;
+            let result = core.apply(context, request.request)?;
             value(serde_json::to_value(result))
         }
         query => {
@@ -141,13 +141,7 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
                 Tool::Apply(_) => unreachable!("handled above"),
             };
             value(serde_json::to_value(
-                QueryService::new(&registry)
-                    .query(&QueryContext::agent(context), &request)
-                    .map_err(|error| match error {
-                        QueryError::Core(e) => e,
-                        QueryError::Store(e) => native::store_error(e),
-                        QueryError::Registry(e) => native::registry_error(e),
-                    })?,
+                core.query(QueryContext::agent(context), request)?,
             ))
         }
     }
@@ -377,4 +371,12 @@ fn read_stdin(input: &mut dyn Read) -> Result<Vec<u8>, CoreError> {
         return Err(invalid("Agent request exceeds 512KiB."));
     }
     Ok(bytes)
+}
+
+fn invalid(message: &str) -> CoreError {
+    CoreError::new(
+        CoreErrorCode::InvalidArgument,
+        message,
+        "Use ariadne --help; supply explicit binding/generation and canonical JSON parameters.",
+    )
 }
