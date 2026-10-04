@@ -166,6 +166,8 @@ export async function checkRelease() {
   }
   if (cleanupError) throw cleanupError;
   if (failure) throw failure;
+  await command('cargo', ['build', '--release', '--locked', '--no-default-features', '-p', 'ariadne-cli', '-p', 'ariadne-mcp'], { env, log: join(evidence, 'helpers-build.log') });
+  await command(join(repo, '.venv-quality/bin/python'), [join(repo, 'tests/functional/install/check_packaged.py'), '--artifacts', join(target, 'release'), '--evidence', join(evidence, 'install')], { env, log: join(evidence, 'install.log') });
   console.log(`Release isolation evidence: ${evidence}`);
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) checkRelease().catch(error => { console.error(error.message); process.exitCode = 1; });
