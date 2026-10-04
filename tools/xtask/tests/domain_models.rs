@@ -128,7 +128,10 @@ const itemKeys: keyof ItemSnapshot = 'updated_message_ids';
 // @ts-expect-error round historical messages must be independent pages
 const roundKeys: keyof RoundSnapshot = 'owner_message_ids';
 const messageOrigin: Message['origin'] = {project_id:'id',session_id:'id',topic_id:'id',entity_id:'id',source_revision:1,
+    source_target:{project_id:'source-project',session_id:'source-session',topic_id:null,item_id:null,round_id:null},
     author:'agent',binding_id:null,adapter_id:'source.adapter',external_session_id:'source-thread'};
+// @ts-expect-error direct source provenance is required
+const missingSourceTarget: Message['origin'] = {project_id:'id',session_id:'id',topic_id:'id',entity_id:'id',source_revision:1,author:'agent',binding_id:null,adapter_id:null,external_session_id:null};
 // @ts-expect-error provenance keeps its author
 const badOrigin: Message['origin'] = {project_id:'id',session_id:'id',topic_id:'id',entity_id:'id',source_revision:1};
 "#).unwrap();

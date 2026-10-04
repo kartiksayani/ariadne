@@ -9,6 +9,7 @@ mod validation;
 
 pub use owner::record_owner_history;
 pub use rounds::{close_round, link_result_history, link_round_fork, open_ask_round};
+pub(crate) use validation::copied_message;
 pub use validation::validate_session_history;
 
 use crate::models::*;

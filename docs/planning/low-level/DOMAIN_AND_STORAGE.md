@@ -706,7 +706,9 @@ entity fits. No saved historical body is truncated. See ADR-0033.
 Item/Message/Round `origin`, when copied, is
 `{project_id,session_id,topic_id,entity_id,source_revision}`; original entities
 have null origin. Item entity_id is an ItemRef; message/round entity_id is UUID.
-MessageOrigin additionally carries `author,binding_id,adapter_id,external_session_id`
+MessageOrigin additionally carries required `source_target`
+`{project_id,session_id,topic_id,item_id,round_id}` (the last three nullable) and
+`author,binding_id,adapter_id,external_session_id`
 with the three identity strings/IDs nullable, preserving actual source authorship.
 Copied message author/binding provenance never becomes that of the target agent.
 `ContinuationReceipt={operation_id,source_project_id,source_session_id,
@@ -720,6 +722,15 @@ the UI displays unavailable-source metadata and the complete local copy. Copied
 messages preserve original author identity in origin metadata and do not claim
 the target agent authored them. Live target binding IDs are not retroactively
 substituted for source authors. Round has an origin field as well.
+
+A copied Reply whose direct item is outside the copy retains its kind/full body and qualified `source_target`, with all local
+topic/item/round pointers null. Only exact continuation-map and origin validation
+permit this provenance-only form; live Replies remain strictly targeted. Included
+direct pointers must match source mappings. Recopying that form preserves its
+original qualified source target, while a normally targeted copy may record its
+immediate source route. Activity/Lifecycle contextual topic grouping stays intact.
+These source pointers never grant target routing/authority or create item
+conversation links through `items_touched`.
 
 The native `HistoryActionService` implements guarded archive/restore, close/reopen,
 read-only preview and target-only continuation. Archive/close errors identify the

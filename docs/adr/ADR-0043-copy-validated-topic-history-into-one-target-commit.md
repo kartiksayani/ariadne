@@ -1,7 +1,7 @@
 # ADR-0043: Copy validated topic history into one target commit
 
 Status: accepted
-Supersedes: none
+Supersedes: ADR-0022 imported-message interpretation, only for provenance-only copied Replies
 Superseded by: none
 
 ## Context
@@ -34,6 +34,22 @@ recipients use the explicitly selected target binding. A replacement outside the
 copied topic becomes an imported Dropped item with an explicit outcome/reason and
 its prior replacement/outcome retained in source-qualified history. New system
 provenance explains the transformation.
+
+Every copied Message records a required `source_target` with the source project's
+and session's IDs and the message's actual nullable direct topic/item/round route.
+`MessageOrigin.topic_id` remains the continuation lineage scope. When a Reply's
+direct item is outside the copied topic, preserve Reply kind, full body and actual
+author, but clear all local topic/item/round pointers. It is historical provenance,
+not a reply to a coincidentally equal target ItemRef. Acceptance requires validated
+origin and an exact continuation message map. Included direct item/round pointers
+must agree with the qualified source mapping. Live Replies still require a local
+direct item. Recopying a provenance-only Reply retains its fully qualified original
+`source_target`; it does not replace that route with nulls. Normal targeted copies
+record their immediate source route. Activities/lifecycle messages retain their
+existing contextual target-topic grouping and truthful source targets. This
+partially supersedes ADR-0022's imported-message interpretation without changing
+its live Reply or author/lineage rules. Item conversations use direct local item
+matches, never `items_touched` activity/provenance backlinks.
 
 The target atomically saves the immutable continuation mapping, one owner handoff
 message and one FIFO Continue input. Its inert frozen context references the saved

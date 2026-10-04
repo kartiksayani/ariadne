@@ -1041,6 +1041,13 @@ fn copied_history() -> Session {
         let source = id(1600 + message.number.value());
         message_map.insert(source.clone(), message.id.clone());
         message.origin = Some(MessageOrigin {
+            source_target: MessageSourceTarget {
+                project_id: project.clone(),
+                session_id: source_session.clone(),
+                topic_id: Some(topic.clone()),
+                item_id: message.item_id.clone(),
+                round_id: message.round_id.as_ref().map(|_| id(1701)),
+            },
             project_id: project.clone(),
             session_id: source_session.clone(),
             topic_id: topic.clone(),
@@ -1313,5 +1320,79 @@ fn results_accept_earlier_same_input_creation_and_verified_repair_created_childr
         }
         assert!(link_result_history(&invalid, &id(401), &id(601), &[], at()).is_err());
         assert!(validate_session_history(&invalid).is_err());
+    }
+}
+
+#[test]
+fn imported_reply_direct_targets_are_qualified_and_map_checked() {
+    let original: Session =
+        serde_json::from_str(include_str!("../../../fixtures/domain/demo/session.json")).unwrap();
+    validate_session_history(&original).unwrap();
+    let original_reply = original
+        .messages
+        .iter()
+        .position(|m| m.id == id(0x112))
+        .unwrap();
+    for variant in 0..4 {
+        let mut invalid = original.clone();
+        let route = &mut invalid.messages[original_reply]
+            .origin
+            .as_mut()
+            .unwrap()
+            .source_target;
+        match variant {
+            0 => route.item_id = Some(item("9")),
+            1 => route.round_id = Some(id(999)),
+            2 => route.session_id = id(999),
+            _ => route.topic_id = Some(id(999)),
+        }
+        assert_eq!(
+            validate_session_history(&invalid),
+            Err(HistoryError::InvalidProvenance)
+        );
+    }
+    let mut provenance = original;
+    let mut message = provenance.messages[original_reply].clone();
+    message.id = id(12000);
+    message.number = provenance.counters.next_message;
+    provenance.counters.next_message = p(message.number.value() + 1);
+    message.item_id = None;
+    message.topic_id = None;
+    message.round_id = None;
+    let origin = message.origin.as_mut().unwrap();
+    origin.entity_id = id(12001);
+    let route = &mut origin.source_target;
+    route.item_id = Some(item("9"));
+    route.topic_id = Some(id(999));
+    route.round_id = None;
+    let receipt = provenance
+        .continuations
+        .0
+        .values_mut()
+        .find(|r| {
+            r.message_id_map
+                .0
+                .values()
+                .any(|id| id == &provenance.messages[original_reply].id)
+        })
+        .unwrap();
+    receipt
+        .message_id_map
+        .0
+        .insert(origin.entity_id.clone(), message.id.clone());
+    let original_reply = provenance.messages.len();
+    provenance.messages.push(message);
+    validate_session_history(&provenance).unwrap();
+    ariadne_domain::validation::validate_session_items(&provenance).unwrap();
+    for variant in 0..3 {
+        let mut invalid = provenance.clone();
+        let message = &mut invalid.messages[original_reply];
+        match variant {
+            0 => message.origin = None,
+            1 => message.origin.as_mut().unwrap().entity_id = id(999),
+            _ => message.origin.as_mut().unwrap().source_target.item_id = None,
+        }
+        assert!(validate_session_history(&invalid).is_err());
+        assert!(ariadne_domain::validation::validate_session_items(&invalid).is_err());
     }
 }

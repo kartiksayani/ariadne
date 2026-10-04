@@ -291,11 +291,36 @@ fn copy(
             .as_ref()
             .and_then(|id| round_map.get(id))
             .cloned();
+        if m.kind == MessageKind::Reply && m.item_id.is_none() {
+            m.topic_id = None;
+            m.round_id = None;
+        }
+        let source_target = if old.kind == MessageKind::Reply && old.item_id.is_none() {
+            old.origin
+                .as_ref()
+                .ok_or_else(|| {
+                    core(
+                        CoreErrorCode::CorruptSession,
+                        "Copied Reply has no source provenance",
+                    )
+                })?
+                .source_target
+                .clone()
+        } else {
+            MessageSourceTarget {
+                project_id: source.project_id.clone(),
+                session_id: source.id.clone(),
+                topic_id: old.topic_id.clone(),
+                item_id: old.item_id.clone(),
+                round_id: old.round_id.clone(),
+            }
+        };
         let identity = old
             .binding_id
             .as_ref()
             .and_then(|id| source.bindings.0.get(id));
         m.origin = Some(MessageOrigin {
+            source_target,
             project_id: source.project_id.clone(),
             session_id: source.id.clone(),
             topic_id: params.source_topic_id.clone(),
