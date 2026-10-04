@@ -142,7 +142,7 @@ function Workspace({ application }: { application: Application }) {
       waitingContent={<div className="app-waiting">{routeError && <p role="alert">{routeError}</p>}<OwnerWaitingPanel drafts={application.drafts} store={application.waiting} revealItem={revealItem}
         openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} /></div>}
       detail={store && selectedId && detailOpen ? <OwnerItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} service={application.service} store={store}
-        itemId={selectedId} routes={navigation.routes} onReveal={reveal} highlightedMessageIds={highlightedMessages} later={later}
+        itemId={selectedId} routes={navigation.routes} onReveal={reveal} onClose={closeDetail} highlightedMessageIds={highlightedMessages} later={later}
         onLater={value => route && preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}
       onCloseDetail={closeDetail}
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} routes={navigation.routes}
