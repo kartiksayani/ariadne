@@ -1,6 +1,7 @@
 //! Read-only existing-daemon history. Run these blocking operations off an async executor.
 mod daemon;
 mod normalize;
+mod preflight;
 use crate::{
     generated::v0_160_0 as wire,
     transport::{error, ExecutableIdentity, RpcClient, SocketIdentity},
@@ -12,6 +13,7 @@ use ariadne_agent_protocol::{
 };
 use ariadne_domain::models::{ConnectionState, ExecutionState, Freshness, PresenceSource};
 pub use daemon::CodexDaemonReader;
+pub use preflight::{CodexHostFacts, QualifiedCodexThread};
 use std::{
     collections::{HashMap, HashSet},
     env,
@@ -343,35 +345,10 @@ impl CodexHistoryClient {
         limit: u32,
         deadline: Instant,
     ) -> Result<wire::thread_turns_list_response::ThreadTurnsListResponse, AdapterError> {
-        let page: wire::thread_turns_list_response::ThreadTurnsListResponse =
-            self.daemon.rpc.request(
-                "thread/turns/list",
-                &wire::thread_turns_list_params::ThreadTurnsListParams {
-                    thread_id: self.thread_id.clone(),
-                    cursor,
-                    limit: Some(limit),
-                    sort_direction: Some(wire::thread_turns_list_params::SortDirection::Desc),
-                    items_view: Some(wire::thread_turns_list_params::TurnItemsView::Full),
-                },
-                deadline,
-            )?;
-        if page.data.len() > limit as usize {
-            return Err(error(
-                Code::IncompatibleAdapter,
-                "Codex history page exceeded its requested turn bound.",
-            ));
-        }
-        for turn in &page.data {
-            bounded_identifier(&turn.id)?;
-            if turn.items_view != wire::thread_turns_list_response::TurnItemsView::Full {
-                return Err(error(
-                    Code::UnsupportedHostVersion,
-                    "Codex did not return full history items; reconciliation cannot proceed.",
-                ));
-            }
-        }
-        Ok(page)
+        self.daemon
+            .turn_page_id(&self.thread_id, cursor, limit, deadline)
     }
+
     fn read_thread(
         &mut self,
         deadline: Instant,

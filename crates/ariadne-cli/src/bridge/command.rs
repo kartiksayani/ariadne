@@ -1,5 +1,5 @@
 //! Structured executable bridge route; production report composition stays explicit.
-use super::{claim, connection_status};
+use super::{announce, claim, connection_status};
 use ariadne_core::{
     ApplicationEnvelope, ClaimRequest, CoreError, CoreErrorCode, FailureEnvelope, FailureFlag,
     SuccessEnvelope, SuccessFlag,
@@ -84,6 +84,33 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
                 .map_err(|_| invalid("Bridge routing flags require canonical UUIDv4 values."))?,
         );
         index += 2;
+    }
+    if *method == "announce" {
+        if binding.is_some() || generation.is_some() || !json_stdin {
+            return Err(invalid(
+                "Announce requires --request-id UUID --json-stdin and no binding/generation flags.",
+            ));
+        }
+        let request_id = request_id.ok_or_else(|| {
+            invalid("Announce requires an explicit request-id for private response correlation.")
+        })?;
+        let mut bytes = Vec::new();
+        input
+            .take((control_limit() + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|_| invalid("Cannot read the complete announcement JSON from stdin."))?;
+        if bytes.len() > control_limit() {
+            return Err(invalid("Bridge announcement JSON exceeds 1MiB."));
+        }
+        let announcement = serde_json::from_slice(&bytes).map_err(|_| {
+            invalid("Announcement stdin must contain one strict SDK session announcement.")
+        })?;
+        return serde_json::to_value(announce(
+            home_from_environment()?,
+            request_id,
+            announcement,
+        )?)
+        .map_err(|_| invalid("Cannot serialize the discovery acknowledgement."));
     }
     let binding_id = binding.ok_or_else(|| invalid("Explicit --binding is required."))?;
     let generation = generation.ok_or_else(|| invalid("Explicit --generation is required."))?;
