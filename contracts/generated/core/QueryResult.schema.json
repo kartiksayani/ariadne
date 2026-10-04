@@ -1294,6 +1294,9 @@
         "pinned": {
           "type": "boolean"
         },
+        "selected_navigation": {
+          "$ref": "#/$defs/NavigationSelection"
+        },
         "theme": {
           "$ref": "#/$defs/Theme"
         },
@@ -1311,6 +1314,7 @@
       "additionalProperties": false,
       "required": [
         "theme",
+        "selected_navigation",
         "window",
         "pinned",
         "notification_watermark"
@@ -2494,6 +2498,70 @@
         "binding_id",
         "adapter_id",
         "external_session_id"
+      ]
+    },
+    "NavigationSelection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "projects"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "all_sessions"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "project"
+            },
+            "project_id": {
+              "$ref": "#/$defs/UuidV4"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "project_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "session"
+            },
+            "session": {
+              "$ref": "#/$defs/SessionRef"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "session"
+          ]
+        }
       ]
     },
     "NonnegativeSafeInteger": {
@@ -3939,6 +4007,48 @@
           "type": "object",
           "properties": {
             "attempt_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "claim"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "attempt_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "delivery_expiry"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "attempt_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
               "anyOf": [
                 {
                   "$ref": "#/$defs/UuidV4"
@@ -3976,6 +4086,45 @@
             "input_id",
             "attempt_id",
             "durable_effect"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "event_id": {
+              "type": "string"
+            },
+            "input_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "event_conflict"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "input_id",
+            "attempt_id"
           ]
         },
         {
@@ -4244,6 +4393,9 @@
         "session": {
           "$ref": "#/$defs/SessionRef"
         },
+        "tab_open": {
+          "type": "boolean"
+        },
         "tab_order": {
           "$ref": "#/$defs/NonnegativeSafeInteger"
         }
@@ -4251,6 +4403,7 @@
       "additionalProperties": false,
       "required": [
         "session",
+        "tab_open",
         "selected_item_id",
         "tab_order",
         "expanded_item_ids",

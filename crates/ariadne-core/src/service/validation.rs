@@ -3,7 +3,6 @@ use crate::service::*;
 use ariadne_agent_protocol::NormalizedEvent;
 use ariadne_domain::models::*;
 use serde::Serialize;
-use sha2::{Digest, Sha256 as Hasher};
 
 fn invalid(message: &str) -> CoreError {
     CoreError::new(
@@ -333,24 +332,14 @@ impl PreparedAttempt {
         if self.binding_generation != request.generation {
             return Err(scope_error());
         }
-        text(&self.formatted_payload, 64 * 1024, true)?;
-        let expected = format!(
-            "[ARIADNE_INPUT:{}:{}]",
-            self.input_id.as_str(),
-            self.attempt_id.as_str()
-        );
-        if self.wire_marker != expected
-            || self
-                .formatted_payload
-                .split_once('\n')
-                .is_none_or(|(first, _)| first != self.wire_marker)
-            || self.payload_sha256.as_str()
-                != format!("{:x}", Hasher::digest(self.formatted_payload.as_bytes()))
-        {
-            return Err(invalid(
-                "Prepared marker or digest does not match persisted payload",
-            ));
-        }
+        ariadne_domain::validation::validate_prepared_payload(
+            &self.input_id,
+            &self.attempt_id,
+            &self.formatted_payload,
+            &self.payload_sha256,
+            &self.wire_marker,
+        )
+        .map_err(|_| invalid("Prepared marker or digest does not match persisted payload"))?;
         Ok(())
     }
 }

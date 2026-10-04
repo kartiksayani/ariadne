@@ -244,6 +244,10 @@ fn tagged_variants_and_typed_receipts_have_exact_payloads() {
         json!({"kind":"binding_state","binding_id":ID,"generation":ID,"dispatch_state":"paused","owner_paused":true,
             "pause_reason":null,"connection_state":"connected"}),
         apply_data(),
+        json!({"kind":"claim","input_id":ID,"attempt_id":ID}),
+        json!({"kind":"delivery_expiry","input_id":ID,"attempt_id":ID}),
+        json!({"kind":"event_conflict","event_id":"opaque/事实/✓","input_id":ID,"attempt_id":ID}),
+        json!({"kind":"event_conflict","event_id":"binding-fact","input_id":null,"attempt_id":null}),
         json!({"kind":"event","event_id":"source-event","input_id":null,"attempt_id":null,"durable_effect":true}),
         json!({"kind":"continuation","continuation":continuation()}),
     ] {

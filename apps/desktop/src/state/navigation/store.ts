@@ -1,0 +1,264 @@
+import { useSyncExternalStore } from 'react';
+import type { BindingConnectParams, MutationReceipt, NavigationSelection, OwnerMutationRequest,
+  PreferencesPatchEntry, PreferencesSnapshot, ProjectListResult, SessionListResult, SessionPreferences, SessionRef } from '../../generated/core';
+import type { RevealedItem } from '../../data/routes';
+import { RegisteredRoutes } from '../../data/routes';
+import { immutable, OpenSessions, type Immutable, type SessionStore } from '../../data/session-store';
+import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } from '../../data/service';
+import * as catalogue from './catalogue';
+
+type Failure = CoreFailure | ServiceFailure;
+type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' }>;
+export interface NavigationState {
+  readonly preferences: Immutable<PreferencesSnapshot> | null;
+  readonly projects: Immutable<ProjectListResult> | null;
+  readonly sessions: Immutable<SessionListResult> | null;
+  readonly sessionProjectId: string | null;
+  readonly status: 'loading' | 'ready' | 'stale' | 'unavailable';
+  readonly error: Failure | null;
+  readonly writing: boolean;
+  readonly pendingOperationId: string | null;
+  readonly reveal: RevealedItem | null;
+  readonly setup: Immutable<Extract<MutationReceipt, { session_id: string }>> | null;
+}
+const sameRoute = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
+const fail = (error: unknown): Failure => error instanceof CoreFailure || error instanceof ServiceFailure
+  ? error : new ServiceFailure('transport');
+const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+export class NavigationStore {
+  readonly opened: OpenSessions;
+  private readonly routes: RegisteredRoutes;
+  private state: NavigationState = Object.freeze({ preferences: null, projects: null, sessions: null,
+    sessionProjectId: null, status: 'loading', error: null, writing: false, pendingOperationId: null, reveal: null, setup: null });
+  private readonly listeners = new Set<() => void>();
+  private subscriptions: Unsubscribe[] = [];
+  private setup: Promise<void> | null = null;
+  private flight: Promise<void> | null = null;
+  private requested = false;
+  private stopped = false;
+  private epoch = 0;
+  private navigationRequest = 0;
+  private preferencesFloor = 0;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private pending: { request: OwnerMutationRequest; confirmed: (receipt: MutationReceipt) => void } | null = null;
+  private readonly reconcile = () => { void this.refresh(); };
+  private readonly visibility = () => { if (document.visibilityState === 'visible') this.reconcile(); };
+
+  constructor(private readonly service: RendererService, private readonly operationId = () => crypto.randomUUID()) {
+    this.opened = new OpenSessions(service);
+    this.routes = new RegisteredRoutes(service, this.opened);
+  }
+  readonly getSnapshot = () => this.state;
+  readonly subscribe = (receive: () => void): Unsubscribe => {
+    this.listeners.add(receive);
+    return () => { this.listeners.delete(receive); };
+  };
+  private publish(update: Partial<NavigationState>): void {
+    if (this.stopped) return;
+    this.state = Object.freeze({ ...this.state, ...update });
+    this.listeners.forEach(receive => receive());
+  }
+  async start(): Promise<void> {
+    if (this.stopped) return;
+    if (!this.timer) {
+      this.timer = setInterval(this.reconcile, 2000);
+      window.addEventListener('focus', this.reconcile);
+      window.addEventListener('pageshow', this.reconcile);
+      document.addEventListener('visibilitychange', this.visibility);
+    }
+    await this.refresh();
+  }
+  private ensureSubscriptions(): Promise<void> {
+    if (this.setup) return this.setup;
+    this.setup = (async () => {
+      const results = await Promise.allSettled([
+        this.service.subscribe('ariadne://session_changed', () => { this.requested = true; this.reconcile(); }),
+        this.routes.subscribe((route, reveal) => { void this.navigate({ kind: 'session', session: {
+          project_id: route.project_id, session_id: route.session_id,
+        } }, reveal); },
+          error => this.publish({ error })),
+      ]);
+      const subscriptions = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+      if (this.stopped || results.some(result => result.status === 'rejected')) {
+        subscriptions.forEach(unsubscribe => unsubscribe());
+        if (!this.stopped) throw new ServiceFailure('transport');
+      } else this.subscriptions = subscriptions;
+    })().catch((error: unknown) => { this.setup = null; throw error; });
+    return this.setup;
+  }
+  refresh(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    this.requested = true;
+    if (this.flight) return this.flight;
+    this.flight = this.load().finally(() => { this.flight = null; });
+    return this.flight;
+  }
+  private async load(): Promise<void> {
+    while (this.requested && !this.stopped) {
+      this.requested = false;
+      const epoch = this.epoch;
+      try {
+        await this.ensureSubscriptions();
+        if (this.stopped) return;
+        const preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
+        if (this.stopped || epoch !== this.epoch) continue;
+        if (preferences.revision < Math.max(this.state.preferences?.revision ?? 0, this.preferencesFloor)) {
+          throw new ServiceFailure('invalid_response');
+        }
+        const selection = preferences.global.selected_navigation;
+        const projectId = selection.kind === 'project' ? selection.project_id : null;
+        const [projects, sessions] = await Promise.all([catalogue.projects(this.service), catalogue.sessions(this.service, projectId)]);
+        if (this.stopped || epoch !== this.epoch) continue;
+        const registered = new Set(projects.projects.items.map(project => project.project_id));
+        if (sessions.sessions.items.some(session => !registered.has(session.project_id))) {
+          // Independent read captures can straddle registration. Keep the last
+          // complete pair and restart instead of silently dropping orphan rows.
+          throw new ServiceFailure('invalid_response');
+        }
+        this.publish({ preferences: immutable(preferences), projects: immutable(projects), sessions: immutable(sessions),
+          sessionProjectId: projectId, status: 'ready', error: this.pending ? this.state.error : null });
+      } catch (error: unknown) {
+        if (epoch === this.epoch) this.publish({ status: this.state.projects ? 'stale' : 'unavailable', error: fail(error) });
+      }
+    }
+  }
+  selectedSession(): SessionStore | null {
+    const selection = this.state.preferences?.global.selected_navigation;
+    return selection?.kind === 'session' ? this.opened.open(selection.session) : null;
+  }
+  private preferences(): PreferencesSnapshot {
+    if (!this.state.preferences) throw new ServiceFailure('transport');
+    return structuredClone(this.state.preferences) as PreferencesSnapshot;
+  }
+  private patch(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void = () => {}): Promise<boolean> {
+    return this.execute({ session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(),
+      params: { expected_preferences_revision: preferences.revision, entries } } }, receipt => {
+      if (!('preferences_revision' in receipt) || receipt.preferences_revision < preferences.revision) {
+        throw new ServiceFailure('invalid_response');
+      }
+      this.preferencesFloor = Math.max(this.preferencesFloor, receipt.preferences_revision);
+      // The receipt confirms these exact typed view writes. Reflect their saved
+      // effect even if the follow-up read fails; an older replay cannot replace
+      // a newer authoritative preferences snapshot.
+      if ((this.state.preferences?.revision ?? 0) <= receipt.preferences_revision) {
+        const saved = structuredClone(preferences);
+        saved.revision = receipt.preferences_revision;
+        for (const entry of entries) {
+          if (entry.kind === 'set_global') saved.global = structuredClone(entry.preferences);
+          else {
+            const index = saved.sessions.findIndex(view => sameRoute(view.session, entry.preferences.session));
+            if (index < 0) saved.sessions.push(structuredClone(entry.preferences));
+            else saved.sessions[index] = structuredClone(entry.preferences);
+          }
+        }
+        this.publish({ preferences: immutable(saved) });
+      }
+      confirmed();
+    });
+  }
+  async navigate(selection: NavigationSelection, reveal: RevealedItem | null = null): Promise<boolean> {
+    if (this.stopped || this.pending) return false;
+    const request = ++this.navigationRequest;
+    try {
+      const preferences = this.preferences();
+      const entries: NavigationPatch[] = [{ kind: 'set_global', preferences: { ...preferences.global, selected_navigation: selection } }];
+      if (selection.kind === 'session') {
+        const snapshot = await this.service.query({ session: selection.session, request: { command: 'session_get', params: {} } });
+        if (this.stopped || this.pending || request !== this.navigationRequest) return false;
+        if (!sameRoute(selection.session, { project_id: snapshot.session.project_id, session_id: snapshot.session.id })) {
+          throw new ServiceFailure('invalid_response');
+        }
+        const existing = preferences.sessions.find(view => sameRoute(view.session, selection.session));
+        const view: SessionPreferences = existing ?? { session: selection.session, tab_open: true, selected_item_id: null,
+          tab_order: Math.max(-1, ...preferences.sessions.map(session => session.tab_order)) + 1, expanded_item_ids: [],
+          filters: { search: '', statuses: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
+        entries.push({ kind: 'set_session_view', preferences: { ...view, tab_open: true,
+          selected_item_id: reveal?.kind === 'item' ? reveal.route.item_id : view.selected_item_id } });
+        if (equal(preferences.global.selected_navigation, selection) && existing?.tab_open && !reveal) {
+          await this.opened.open(selection.session).refresh();
+          return true;
+        }
+      } else if (selection.kind === 'project' && !this.state.projects?.projects.items.some(project => project.project_id === selection.project_id)) {
+        throw new ServiceFailure('invalid_response');
+      }
+      return await this.patch(preferences, entries, () => {
+        this.publish({ reveal });
+        if (selection.kind === 'session') this.opened.open(selection.session);
+      });
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
+  async closeTab(route: SessionRef): Promise<boolean> {
+    if (this.stopped || this.pending) return false;
+    ++this.navigationRequest;
+    try {
+      const preferences = this.preferences();
+      const view = preferences.sessions.find(session => sameRoute(session.session, route));
+      if (!view?.tab_open) return true;
+      const entries: NavigationPatch[] = [{ kind: 'set_session_view', preferences: { ...view, tab_open: false } }];
+      const selected = preferences.global.selected_navigation;
+      if (selected.kind === 'session' && sameRoute(selected.session, route)) {
+        entries.push({ kind: 'set_global', preferences: { ...preferences.global, selected_navigation: { kind: 'projects' } } });
+      }
+      return await this.patch(preferences, entries, () => { this.opened.close(route); this.publish({ reveal: null }); });
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
+  async register(canonicalRoot: string): Promise<boolean> {
+    return this.execute({ session: null, command: { api_version: 1, command: 'project_register',
+      op_id: this.operationId(), params: { canonical_root: canonicalRoot } } }, receipt => {
+      if (!('project_id' in receipt)) throw new ServiceFailure('invalid_response');
+    });
+  }
+  async bind(params: BindingConnectParams): Promise<boolean> {
+    if (this.stopped || this.pending) return false;
+    this.publish({ setup: null });
+    return this.execute({ session: null, command: { api_version: 1, command: 'binding_connect',
+      op_id: this.operationId(), params } }, receipt => {
+      if (!('session_id' in receipt) || receipt.data.kind !== 'binding_connect') throw new ServiceFailure('invalid_response');
+      this.publish({ setup: immutable(receipt) });
+    });
+  }
+  private async execute(request: OwnerMutationRequest, confirmed: (receipt: MutationReceipt) => void): Promise<boolean> {
+    if (this.stopped || this.pending) return false;
+    this.pending = { request: structuredClone(request), confirmed };
+    return this.retryMutation();
+  }
+  async retryMutation(): Promise<boolean> {
+    const pending = this.pending;
+    if (this.stopped || !pending || this.state.writing) return false;
+    ++this.epoch;
+    this.publish({ writing: true, pendingOperationId: pending.request.command.op_id, error: null });
+    try {
+      const receipt = await this.service.executeOwner(pending.request);
+      if (this.stopped) return false;
+      pending.confirmed(receipt);
+      this.pending = null;
+      this.publish({ writing: false, pendingOperationId: null });
+      await this.refresh();
+      return true;
+    } catch (error: unknown) {
+      const failure = fail(error);
+      // An unknown completion retains the exact command and operation ID.
+      // Definitive typed rejection permits a new, explicitly chosen action.
+      if (failure instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(failure.error.code)) this.pending = null;
+      this.publish({ writing: false, pendingOperationId: this.pending?.request.command.op_id ?? null, error: failure });
+      return false;
+    }
+  }
+  stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    ++this.epoch;
+    if (this.timer) clearInterval(this.timer);
+    window.removeEventListener('focus', this.reconcile);
+    window.removeEventListener('pageshow', this.reconcile);
+    document.removeEventListener('visibilitychange', this.visibility);
+    this.subscriptions.forEach(unsubscribe => unsubscribe());
+    this.opened.closeAll();
+    this.listeners.clear();
+  }
+}
+
+export function useNavigation(store: NavigationStore): NavigationState {
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+}

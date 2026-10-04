@@ -1,0 +1,103 @@
+.nav-content {
+  padding: 28px 32px;
+}
+
+.nav-counts {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  font-size: 13px;
+}
+
+.nav-banner {
+  margin: 12px 0;
+  padding: 14px 18px;
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.nav-banner p {
+  margin: 0 0 8px;
+}
+
+.nav-banner pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+
+.nav-group-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+}
+
+.nav-group-heading h2 {
+  margin-bottom: 4px;
+  font-size: 18px;
+}
+
+.nav-group-heading p {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  font-size: 13px;
+}
+
+.nav-empty {
+  margin: 48px 0;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.nav-registration p {
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.nav-registration fieldset {
+  padding: 0;
+  border: 0;
+}
+
+.nav-registration label {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.nav-registration input, .nav-registration select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid var(--color-divider);
+  border-radius: 6px;
+  background: var(--a-bg);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.nav-registration .nav-session-choice {
+  margin-top: 20px;
+}
+
+.nav-session-choice label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-session-choice input {
+  width: auto;
+}
+
+.nav-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.nav-content button:disabled, .nav-registration button:disabled {
+  opacity: .5;
+  cursor: default;
+}

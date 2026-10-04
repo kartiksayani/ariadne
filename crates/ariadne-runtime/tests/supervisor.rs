@@ -550,6 +550,59 @@ fn checkpoint_echo_waits_for_all_validated_receipts_and_repeated_provider_facts_
 }
 
 #[test]
+fn successful_unchanged_lifecycle_receipts_acknowledge_without_fabricating_writes() {
+    let rt = rt();
+    let home = home();
+    let owner = DesktopOwner::acquire(home.path()).unwrap();
+    let scope = Scope::new(1, 2, 0x20, DeliveryMode::Pull);
+    let p = prepared();
+    let started = scope.event(
+        "redundant:start",
+        EventPayload::TurnStarted {},
+        Some(&p),
+        Some("turn-1"),
+    );
+    let completed = scope.event(
+        "redundant:completed",
+        EventPayload::TurnFinished {
+            status: TurnFinishedStatus::Completed,
+            reason: None,
+            diagnostic_text: None,
+            truncated: false,
+        },
+        Some(&p),
+        Some("turn-1"),
+    );
+    let connected = scope.connected();
+    let core = Arc::new(service::ScriptedCoreService::new([
+        scope.report(
+            connected.clone(),
+            Ok(scope.receipt(&connected, false)),
+            false,
+        ),
+        scope.inputs(vec![]),
+        scope.report(started.clone(), Ok(scope.receipt(&started, false)), false),
+        scope.report(
+            completed.clone(),
+            Ok(scope.receipt(&completed, false)),
+            false,
+        ),
+    ]));
+    let cp = Checkpoint::new("page:unchanged-facts").unwrap();
+    let mut provider = scope.provider_start(vec![], empty_reconcile());
+    provider.push(scope.observe(None, vec![started, completed], Some(cp.clone())));
+    let adapter = IdleProvider::new(provider);
+    let handle = scope.start(&rt, &owner, core.clone(), adapter.clone());
+    rt.block_on(progress(handle.progress(), |p| p.validated_reports == 3));
+    let result = rt.block_on(handle.stop()).unwrap();
+    assert_eq!(result.acknowledged_checkpoint, Some(cp));
+    assert!(result.pending.is_none());
+    assert!(result.error.is_none());
+    assert_eq!(core.remaining().unwrap(), 0);
+    assert_eq!(adapter.script.remaining().unwrap(), 0);
+}
+
+#[test]
 fn failed_receipt_retains_page_original_fact_and_checkpoint_and_stops_upstream() {
     let rt = rt();
     let home = home();
@@ -859,10 +912,11 @@ fn startup_unresolved_attempts_keep_real_control_claim_gate_closed() {
 }
 #[test]
 fn failed_connection_reports_current_scoped_disconnect_without_a_dispatch_lease() {
-    for error in [
-        None,
-        Some(CoreErrorCode::StaleGeneration),
-        Some(CoreErrorCode::StoreBusy),
+    for (error, durable) in [
+        (None, true),
+        (None, false),
+        (Some(CoreErrorCode::StaleGeneration), false),
+        (Some(CoreErrorCode::StoreBusy), false),
     ] {
         let rt = rt();
         let home = home();
@@ -878,7 +932,7 @@ fn failed_connection_reports_current_scoped_disconnect_without_a_dispatch_lease(
             None,
         );
         let result = match error {
-            None => Ok(scope.receipt(&event, true)),
+            None => Ok(scope.receipt(&event, durable)),
             Some(code) => Err(CoreError::new(
                 code,
                 "Connection fact could not be saved",
@@ -938,6 +992,7 @@ struct FaultCore {
 enum Fault {
     Error(CoreError),
     Receipt,
+    ReceiptScope,
 }
 impl CoreService for FaultCore {
     fn query(&self, c: QueryContext, r: QueryRequest) -> Result<QueryResult, CoreError> {
@@ -965,21 +1020,26 @@ impl CoreService for FaultCore {
         if e.event_id == self.target {
             match &self.fault {
                 Fault::Error(error) => result = Err(error.clone()),
-                Fault::Receipt => result.as_mut().unwrap().durable_effect = false,
+                Fault::Receipt => result.as_mut().unwrap().revision = None,
+                Fault::ReceiptScope => result.as_mut().unwrap().event_id = "different-event".into(),
             }
         }
         result
     }
 }
 #[test]
-fn malformed_core_errors_and_ephemeral_lifecycle_receipts_never_acknowledge() {
+fn malformed_core_errors_and_inconsistent_lifecycle_receipts_never_acknowledge() {
     let mut bad = CoreError::new(
         CoreErrorCode::DeliveryUncertain,
         "Delivery uncertain",
         "Keep original IDs.",
     );
     bad.retryable = true;
-    for fault in [Fault::Error(bad), Fault::Receipt] {
+    for (fault, expected_code) in [
+        (Fault::Error(bad), CoreErrorCode::ProtocolConflict),
+        (Fault::Receipt, CoreErrorCode::InvalidArgument),
+        (Fault::ReceiptScope, CoreErrorCode::BindingMismatch),
+    ] {
         let rt = rt();
         let home = home();
         let owner = DesktopOwner::acquire(home.path()).unwrap();
@@ -1008,7 +1068,7 @@ fn malformed_core_errors_and_ephemeral_lifecycle_receipts_never_acknowledge() {
         rt.block_on(ended(h.progress()));
         let exit = rt.block_on(h.stop()).unwrap();
         let error = exit.error.unwrap();
-        assert_eq!(error.code, CoreErrorCode::ProtocolConflict);
+        assert_eq!(error.code, expected_code);
         assert!(!error.retryable);
         assert_eq!(exit.acknowledged_checkpoint, None);
         let pending = exit.pending.unwrap();
