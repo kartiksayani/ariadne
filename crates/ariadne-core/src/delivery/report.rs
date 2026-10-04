@@ -1,6 +1,8 @@
 use super::{error::core, DeliveryError, DeliveryService};
 use crate::*;
-use ariadne_agent_protocol::{EventPayload, NormalizedEvent, TurnFinishedStatus};
+use ariadne_agent_protocol::{
+    is_claude_session_end_event, EventPayload, NormalizedEvent, TurnFinishedStatus,
+};
 use ariadne_domain::models::*;
 use ariadne_store::session::{EventIdentity, EventMutation, EventTransaction};
 
@@ -87,6 +89,14 @@ impl DeliveryService<'_> {
                     event.input_id.as_ref(),
                     event.attempt_id.as_ref(),
                 )?;
+                if is_claude_session_end_event(event)
+                    && session.bindings.0[&event.binding_id].adapter_id != "claude_code_mod"
+                {
+                    return Err(core(
+                        CoreErrorCode::BindingMismatch,
+                        "Reserved session-end fact requires a Claude binding",
+                    ));
+                }
                 if event.input_id.is_some() {
                     apply_attempt(session, event)
                 } else {
@@ -455,6 +465,14 @@ fn apply_binding(
     if matches!(event.event, EventPayload::Presence { .. }) {
         return Ok(EventMutation::Unchanged);
     }
+    if matches!(event.event, EventPayload::Connected { .. })
+        && crate::lifecycle::claude_generation_ended(session, &event.binding_id, &event.generation)
+    {
+        return Err(core(
+            CoreErrorCode::HostUnreachable,
+            "The original Claude session ended for this binding generation",
+        ));
+    }
     let before = session.clone();
     let binding = session
         .bindings
@@ -490,7 +508,7 @@ fn apply_binding(
         }
         _ => unreachable!("connection event"),
     }
-    if *session == before {
+    if *session == before && !is_claude_session_end_event(event) {
         return Ok(EventMutation::Unchanged);
     }
     session.updated_at = event.observed_at.clone();
