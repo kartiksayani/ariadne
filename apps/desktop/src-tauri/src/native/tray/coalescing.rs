@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) const REBUILD_INTERVAL: Duration = Duration::from_millis(250);
 
-/// A pending refresh retains the newest complete capture. The first build is
+/// A pending refresh retains the newest invalidation. The first build is
 /// immediate; later changes share a deadline without extending it on every hint.
 #[derive(Default)]
 pub(crate) struct Coalesced<T> {
@@ -11,6 +11,14 @@ pub(crate) struct Coalesced<T> {
 }
 
 impl<T> Coalesced<T> {
+    pub(crate) fn deadline(&self, now: Instant) -> Option<Instant> {
+        self.latest.as_ref()?;
+        Some(
+            self.last
+                .map_or(now, |last| last + REBUILD_INTERVAL)
+                .max(now),
+        )
+    }
     pub(crate) fn replace(&mut self, latest: T) {
         self.latest = Some(latest);
     }
@@ -36,9 +44,15 @@ mod tests {
     fn newest_capture_is_built_once_without_starvation() {
         let now = Instant::now();
         let mut pending = Coalesced::default();
+        assert_eq!(pending.deadline(now), None);
         pending.replace(1);
+        assert_eq!(pending.deadline(now), Some(now));
         assert_eq!(pending.take_due(now), Some(1));
         pending.replace(2);
+        assert_eq!(
+            pending.deadline(now + Duration::from_millis(249)),
+            Some(now + REBUILD_INTERVAL)
+        );
         assert_eq!(pending.take_due(now + Duration::from_millis(249)), None);
         pending.replace(3);
         assert_eq!(pending.take_due(now + REBUILD_INTERVAL), Some(3));

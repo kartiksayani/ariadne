@@ -135,6 +135,16 @@
     "GlobalPreferences": {
       "type": "object",
       "properties": {
+        "notification_ledger": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NotificationEpisode"
+          },
+          "maxItems": 256
+        },
+        "notification_preview": {
+          "type": "boolean"
+        },
         "notification_watermark": {
           "anyOf": [
             {
@@ -473,6 +483,27 @@
       "type": "integer",
       "maximum": 9007199254740991,
       "minimum": 0
+    },
+    "NotificationEpisode": {
+      "description": "Waiting episode identity is item + question revision within a registered session.",
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "question_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionRef"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "item_id",
+        "question_revision"
+      ]
     },
     "OwnerCommand": {
       "oneOf": [

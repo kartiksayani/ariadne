@@ -1,12 +1,18 @@
 //! Exercise the production pure native modules without building or launching Tauri.
+#[path = "../../../apps/desktop/src-tauri/src/native/notifications/burst.rs"]
+mod burst;
 #[path = "../../../apps/desktop/src-tauri/src/native/tray/capture.rs"]
 mod capture;
 #[path = "../../../apps/desktop/src-tauri/src/native/tray/coalescing.rs"]
 mod coalescing;
+#[path = "../../../apps/desktop/src-tauri/src/native/tray/diagnostics.rs"]
+mod diagnostics;
 #[path = "../../../apps/desktop/src-tauri/src/native/notifications/policy.rs"]
 mod policy;
 #[path = "../../../apps/desktop/src-tauri/src/native/tray/projection.rs"]
 mod projection;
+#[path = "../../../apps/desktop/src-tauri/src/native/notifications/writer.rs"]
+mod writer;
 use ariadne_core::*;
 use ariadne_domain::models::*;
 use capture::*;
@@ -63,6 +69,188 @@ fn queue(rows: Vec<WaitingRow>, complete: bool) -> WaitingCapture {
         rows,
         diagnostics: vec![],
     }
+}
+
+fn preferences(global: GlobalPreferences, revision: u64) -> PreferencesSnapshot {
+    PreferencesSnapshot {
+        schema_version: SchemaVersion::new(1).unwrap(),
+        revision: PositiveSafeInteger::new(revision).unwrap(),
+        global,
+        sessions: vec![],
+        later: vec![],
+        drafts: vec![],
+    }
+}
+fn operation_id() -> UuidV4 {
+    UuidV4::new("00000000-0000-4000-8000-000000000003").unwrap()
+}
+fn receipt(request: &OwnerMutationRequest) -> PreferencesPatchedReceipt {
+    PreferencesPatchedReceipt {
+        operation_id: request.command.operation_id().clone(),
+        preferences_revision: PositiveSafeInteger::new(2).unwrap(),
+    }
+}
+
+#[test]
+fn bursts_dedupe_with_a_fixed_deadline_and_group_only_more_than_three() {
+    let now = std::time::Instant::now();
+    let mut pending = burst::Burst::default();
+    pending.push(vec![row(1, 1), row(2, 2)], now);
+    pending.push(
+        vec![row(2, 2), row(3, 3)],
+        now + std::time::Duration::from_millis(499),
+    );
+    assert_eq!(pending.deadline(), Some(now + burst::BURST_WINDOW));
+    assert!(pending
+        .take_due(now + std::time::Duration::from_millis(499))
+        .is_none());
+    let rows = pending.take_due(now + burst::BURST_WINDOW).unwrap();
+    assert_eq!(rows.len(), 3);
+    let notices = burst::announcements(&rows, false);
+    assert_eq!(notices.len(), 3);
+    assert_eq!(notices[0].identifier, row(1, 1).identifier());
+    assert_eq!(notices[0].title, "Ariadne");
+    assert_eq!(notices[0].route, row(1, 1).route());
+    assert!(!notices[0].body.contains("Private"));
+    assert_eq!(
+        burst::announcements(&rows, true)[0].body,
+        row(1, 1).question
+    );
+    pending.push(
+        (1..=4).map(|revision| row(revision, revision)).collect(),
+        now,
+    );
+    let rows = pending.take_due(now + burst::BURST_WINDOW).unwrap();
+    let notices = burst::announcements(&rows, true);
+    assert_eq!(notices.len(), 1);
+    assert_eq!(
+        notices[0].identifier,
+        format!("{}:burst", row(1, 1).identifier())
+    );
+    assert_eq!(notices[0].body, "4 questions are waiting for your answer.");
+    assert!(pending.take_due(now + burst::BURST_WINDOW).is_none());
+}
+
+#[test]
+fn complete_capture_removes_resolved_pending_bursts_but_partial_does_not_infer_absence() {
+    let now = std::time::Instant::now();
+    let mut pending = burst::Burst::default();
+    pending.push(vec![row(1, 1), row(2, 2)], now);
+    pending.retain(&[], false);
+    pending.retain(&[row(2, 2)], true);
+    assert_eq!(
+        pending.take_due(now + burst::BURST_WINDOW).unwrap().len(),
+        1
+    );
+    pending.push(vec![row(3, 3)], now);
+    pending.retain(&[], true);
+    assert!(pending
+        .take_due(now + burst::BURST_WINDOW)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn preference_writer_freezes_uncertain_request_before_releasing_arrivals() {
+    let baseline = policy::evaluate(&global(), &queue(vec![row(1, 1)], true), at(1));
+    let captured = queue(vec![row(2, 2)], true);
+    let mut writer = writer::PreferenceWriter::default();
+    assert!(writer
+        .observe(
+            preferences(baseline.preferences, 1),
+            &captured,
+            at(3),
+            operation_id
+        )
+        .unwrap()
+        .is_none());
+    let mut original = None;
+    let error = writer
+        .confirm(|request| {
+            original = Some(request.clone());
+            Err(CoreError::new(
+                CoreErrorCode::CommitUncertain,
+                "Receipt was lost.",
+                "Reconcile the same operation.",
+            ))
+        })
+        .err()
+        .unwrap();
+    assert_eq!(error.code, CoreErrorCode::CommitUncertain);
+    assert!(writer.pending());
+    assert!(writer
+        .observe(preferences(global(), 99), &captured, at(4), || panic!(
+            "must not allocate another operation"
+        ))
+        .unwrap()
+        .is_none());
+    let plan = writer
+        .confirm(|request| {
+            assert_eq!(Some(request), original.as_ref());
+            Ok(receipt(request))
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(plan.arrivals[0].identifier(), row(2, 2).identifier());
+    assert!(!writer.pending());
+    assert!(writer
+        .confirm(|_| panic!("nothing pending"))
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn preference_writer_rejects_mismatched_receipt_and_refreshes_after_definite_conflict() {
+    let captured = queue(vec![row(1, 1)], true);
+    let mut writer = writer::PreferenceWriter::default();
+    writer
+        .observe(preferences(global(), 1), &captured, at(1), operation_id)
+        .unwrap();
+    let error = writer
+        .confirm(|request| {
+            let mut response = receipt(request);
+            response.operation_id = UuidV4::new("00000000-0000-4000-8000-000000000004").unwrap();
+            Ok(response)
+        })
+        .err()
+        .unwrap();
+    assert_eq!(error.code, CoreErrorCode::ProtocolConflict);
+    assert!(writer.pending());
+    writer
+        .pin(preferences(global(), 2), || {
+            panic!("pending operation must be reconciled first")
+        })
+        .unwrap();
+    let error = writer
+        .confirm(|_| {
+            Err(CoreError::new(
+                CoreErrorCode::RevisionConflict,
+                "Preferences changed.",
+                "Read a fresh snapshot.",
+            ))
+        })
+        .err()
+        .unwrap();
+    assert_eq!(error.code, CoreErrorCode::RevisionConflict);
+    assert!(!writer.pending());
+    writer.pin(preferences(global(), 2), operation_id).unwrap();
+    let plan = writer
+        .confirm(|request| Ok(receipt(request)))
+        .unwrap()
+        .unwrap();
+    assert!(plan.preferences.pinned);
+    assert!(plan.arrivals.is_empty());
+    let no_change = writer
+        .observe(
+            preferences(plan.preferences.clone(), 3),
+            &queue(vec![], false),
+            at(4),
+            || panic!("partial baseline cannot write"),
+        )
+        .unwrap()
+        .unwrap();
+    assert!(no_change.diagnostic.is_some());
+    assert!(!writer.pending());
 }
 
 #[test]
@@ -202,6 +390,22 @@ fn capture_uses_global_counts_labels_and_registered_snapshots() {
     };
     assert_eq!(
         capture(changed).unwrap_err().code,
+        CoreErrorCode::RevisionConflict
+    );
+    let lists = std::cell::Cell::new(0);
+    let changed_after_snapshot = |request: OwnerQueryRequest| {
+        let mut result = read(request)?;
+        if let QueryResult::SessionList(list) = &mut result {
+            lists.set(lists.get() + 1);
+            if lists.get() == 2 {
+                list.sessions.items[0].revision =
+                    PositiveSafeInteger::new(list.sessions.items[0].revision.value() + 1).unwrap();
+            }
+        }
+        Ok(result)
+    };
+    assert_eq!(
+        capture(changed_after_snapshot).unwrap_err().code,
         CoreErrorCode::RevisionConflict
     );
 }
