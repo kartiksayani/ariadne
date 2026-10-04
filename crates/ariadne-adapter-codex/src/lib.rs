@@ -25,6 +25,6 @@ mod transport;
 pub use adapter::CodexAdapter;
 pub use discovery::CodexDiscovery;
 pub use history::{
-    CodexDaemonReader, CodexHistoryClient, CodexOptions, DiscoveryPage, HistoryScan, ScanProgress,
-    ThreadCandidate, UserMessageIdentity,
+    CodexDaemonReader, CodexHistoryClient, CodexHostFacts, CodexOptions, DiscoveryPage,
+    HistoryScan, QualifiedCodexThread, ScanProgress, ThreadCandidate, UserMessageIdentity,
 };

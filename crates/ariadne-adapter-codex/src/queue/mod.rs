@@ -18,6 +18,10 @@ use std::{
 };
 
 pub(crate) const MAX_CONTEXTS: usize = 100;
+pub(crate) fn queue_capabilities(mut capabilities: Capabilities) -> Capabilities {
+    capabilities.deferred_delivery = Capability { supported: true, conditions: vec!["Installed pinned Codex queue, explicit existing endpoint and thread; runtime owns durable claim and lease validation.".to_owned()] };
+    capabilities
+}
 type Job = Box<dyn FnOnce(&mut State) + Send>;
 #[derive(Clone)]
 pub(crate) struct Record {
@@ -238,7 +242,7 @@ impl State {
                 return Err(error(AdapterErrorCode::BindingMismatch, "Same-generation Codex reconnect changed endpoint/thread identity; use a fresh generation and reconcile persisted attempts."));
             }
         }
-        result.capabilities.deferred_delivery = Capability { supported: true, conditions: vec!["Installed pinned Codex queue, explicit existing endpoint and thread; runtime owns durable claim and lease validation.".to_owned()] };
+        result.capabilities = queue_capabilities(result.capabilities);
         result.validate_for(&request)?;
         shared.records.retain(|_, record| {
             record.request.binding_id == request.binding_id
