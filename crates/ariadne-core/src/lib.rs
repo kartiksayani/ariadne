@@ -11,10 +11,12 @@ mod errors;
 #[cfg(any(test, feature = "test-support"))]
 #[path = "service/fake.rs"]
 pub mod fake;
+pub mod history_actions;
 pub mod inputs;
 pub mod native;
 pub mod queries;
 mod receipts;
+pub mod recovery;
 #[path = "service/validation.rs"]
 mod validation;
 #[path = "service/wire.rs"]
@@ -23,7 +25,7 @@ pub mod service {
     pub use crate::context::*;
     pub use crate::dto::*;
     pub use crate::errors::*;
-    pub use crate::validation::validate_apply_receipt;
+    pub use crate::validation::{validate_apply_receipt, validate_owner_receipt};
     /// Blocking, owned, provider-neutral calls. Real implementations recheck persisted
     /// routing, leases and visibility, validate the complete candidate, then commit.
     /// Replay precedes revision/generation/state guards. Report order never substitutes

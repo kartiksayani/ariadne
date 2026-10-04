@@ -86,3 +86,21 @@ native_error!(binding, crate::bindings::BindingError);
 native_error!(input, crate::inputs::InputError);
 native_error!(apply, crate::apply::ApplyError);
 native_error!(delivery, crate::delivery::DeliveryError);
+
+native_error!(recovery, crate::recovery::RecoveryError);
+native_error!(history, crate::history_actions::HistoryActionError);
+impl From<ariadne_store::session::StoreError> for CoreError {
+    fn from(error: ariadne_store::session::StoreError) -> Self {
+        store(error)
+    }
+}
+impl From<ariadne_store::registry::RegistryError> for CoreError {
+    fn from(error: ariadne_store::registry::RegistryError) -> Self {
+        registry(error)
+    }
+}
+impl From<crate::bindings::BindingError> for CoreError {
+    fn from(error: crate::bindings::BindingError) -> Self {
+        binding(error)
+    }
+}

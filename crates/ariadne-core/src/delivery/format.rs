@@ -3,7 +3,7 @@ use crate::*;
 use ariadne_domain::models::*;
 use serde_json::{json, Value};
 
-pub(super) fn body(session: &Session, input: &Input) -> Result<String, CoreError> {
+pub(crate) fn body(session: &Session, input: &Input) -> Result<String, CoreError> {
     let owner = session
         .messages
         .iter()
@@ -68,6 +68,55 @@ pub(super) fn body(session: &Session, input: &Input) -> Result<String, CoreError
         return Err(core(
             CoreErrorCode::CapacityExceeded,
             "The complete prepared input/current target exceeds the 64 KiB payload budget",
+        ));
+    }
+    Ok(body)
+}
+
+/// References retained effects without repeating the original action prompt.
+pub(super) fn repair_body(
+    session: &Session,
+    input: &Input,
+    original: &Attempt,
+) -> Result<String, CoreError> {
+    let owner = session
+        .messages
+        .iter()
+        .find(|m| m.id == input.message_id)
+        .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Repair owner message is missing"))?;
+    let messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|m| {
+            m.input_id.as_ref() == Some(&input.id) && m.attempt_id.as_ref() == Some(&original.id)
+        })
+        .map(|m| &m.id)
+        .collect();
+    let items: Vec<_> = session
+        .items
+        .0
+        .values()
+        .filter(|i| {
+            messages.contains(&&i.created_message_id)
+                || i.updated_message_ids
+                    .iter()
+                    .any(|id| messages.contains(&id))
+        })
+        .map(|i| &i.id)
+        .collect();
+    let body = json!({
+        "instruction":"This is an explicit result-only repair turn. Inspect the retained original attempt and its existing replies/children/effects through Ariadne queries; do not repeat the original action or redo its mutations. Publish a structured result for this NEW attempt and the same immutable input scope using verified original reply/child references where appropriate. The prior action may already have effects. Host completion alone is not a result and this instruction is not tool approval.",
+        "project_id":session.project_id,"session_id":session.id,"binding_id":input.binding_id,
+        "generation":session.bindings.0[&input.binding_id].generation,"source_input_id":input.id,
+        "owner_message_number":owner.number,"target":input.target,"purpose":"result_repair",
+        "repair_for_attempt_id":original.id,"original_domain_result":original.domain_result,
+        "original_message_ids":messages,"affected_item_ids":items,
+        "tools":{"queries":["items_list","item_get","topic_get","inputs_list"],"mutation":"apply"},
+    }).to_string();
+    if body.len() + "[ARIADNE_INPUT::]\n".len() + 2 * 36 > 64 * 1024 {
+        return Err(core(
+            CoreErrorCode::CapacityExceeded,
+            "The complete repair references exceed the 64 KiB delivery budget",
         ));
     }
     Ok(body)

@@ -943,7 +943,7 @@ fn concrete_native_expiry_and_cancel_delegate_preserve_owned_history() {
         )
         .unwrap_err()
         .code,
-        CoreErrorCode::Unsupported
+        CoreErrorCode::SessionNotClosable
     );
 }
 

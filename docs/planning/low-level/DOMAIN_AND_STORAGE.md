@@ -274,8 +274,14 @@ prepared/in-flight/needs-attention work or an existing recovery reason requires
 reconciliation; never-prepared queued work and resolved/sealed attempts do not
 alone imply uncertain delivery. Different-host rebind requires an active session,
 paused/disconnected old binding and no queued/in-flight/needs-attention inputs.
-History stays intact; the former inactive host route becomes available for a new
-default-connect session, never implicit reactivation or retargeting.
+History stays intact. In the same different-host transaction, current item Agent
+owners and recipient assignments matching the retired selected binding move to
+the new binding, including terminal items and archived topics. Me, Other and
+unrelated binding assignments remain unchanged. Each changed item advances its
+revision once and records the connect timestamp; question revision, round and
+all message/input/attempt provenance remain unchanged. Overflow rejects the whole
+transaction. The former inactive host route becomes available for a new
+default-connect session and is never implicitly reactivated.
 
 Trusted read-only verification precedes persistence outside all filesystem locks.
 Native `core::bindings::VerifiedHost` retains canonical endpoint/configuration,
@@ -720,7 +726,9 @@ entity fits. No saved historical body is truncated. See ADR-0033.
 Item/Message/Round `origin`, when copied, is
 `{project_id,session_id,topic_id,entity_id,source_revision}`; original entities
 have null origin. Item entity_id is an ItemRef; message/round entity_id is UUID.
-MessageOrigin additionally carries `author,binding_id,adapter_id,external_session_id`
+MessageOrigin additionally carries required `source_target`
+`{project_id,session_id,topic_id,item_id,round_id}` (the last three nullable) and
+`author,binding_id,adapter_id,external_session_id`
 with the three identity strings/IDs nullable, preserving actual source authorship.
 Copied message author/binding provenance never becomes that of the target agent.
 `ContinuationReceipt={operation_id,source_project_id,source_session_id,
@@ -735,6 +743,22 @@ messages preserve original author identity in origin metadata and do not claim
 the target agent authored them. Live target binding IDs are not retroactively
 substituted for source authors. Round has an origin field as well.
 
+A copied Reply whose direct item is outside the copy retains its kind/full body and qualified `source_target`, with all local
+topic/item/round pointers null. Only exact continuation-map and origin validation
+permit this provenance-only form; live Replies remain strictly targeted. Included
+direct pointers must match source mappings. Recopying that form preserves its
+original qualified source target, while a normally targeted copy may record its
+immediate source route. Activity/Lifecycle contextual topic grouping stays intact.
+These source pointers never grant target routing/authority or create item
+conversation links through `items_touched`.
+
+The native `HistoryActionService` implements guarded archive/restore, close/reopen,
+read-only preview and target-only continuation. Archive/close errors identify the
+actual blocking item/input IDs; close requires the selected binding's persisted
+Paused dispatch state. Restore/reopen preserve domain/delivery history, IDs and
+binding state and never resume dispatch implicitly. CLI/CoreService consumer
+routing is a separate composition task.
+
 Continue is a **copy**, not shared mutable topic membership. Read a validated
 source snapshot and include source revision/hash in preview. Owner chooses an
 existing bound target session and confirms. Under target lock allocate new topic,
@@ -747,6 +771,26 @@ approved summary. Source remains untouched; no two-session transaction or hidden
 retargeting. Duplicate operation returns the original mapping. Source changed
 since preview returns `preview_stale` before any target mutation; origin is the
 validated snapshot revision even if source changes just after that check.
+
+The canonical hash covers deterministic full Session serialization plus selected
+topic ID; unrelated source revision changes conservatively stale the preview.
+Target receipt replay occurs before source IO and again under the target lock.
+The stable locked read captures the validated immutable source snapshot and is
+the freshness observation/linearization point. Hash/revision checks use that owned
+snapshot after releasing its lock, before the sole target transaction. There are
+no simultaneous session locks, source publication or cross-file journal. Reject source == target.
+Two-pass maps include answers as well as topics/items/messages/rounds. Only live
+Agent owner/recipient routing moves to the explicitly selected target binding;
+Me/Other owners and source authorship/history remain. The preview discloses this
+assignment and each imported external replacement transformation.
+
+The concise owner-approved summary is bounded by the existing 16KiB UTF-8
+OwnerInput limit, while full copied bodies remain complete separate history. The
+staged target input passes the actual delivery formatter's 64KiB payload bound
+before publication. Its frozen context points to the immutable continuation
+operation/mapping; it does not duplicate every copied body's IDs or copy source
+inputs/attempts/delivery authority. Oversized summaries/payloads, target conflicts
+and definite prepublication failures save no target entities or handoff.
 
 Unavailable projects stay registered and show their missing path. Initial
 registration/forget and reconnect to a known project are enough for normal use.
