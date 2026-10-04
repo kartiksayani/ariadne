@@ -1,5 +1,6 @@
 //! Private control framing DTOs, shared with the installed bridge client.
 use super::{error, validated_error};
+use crate::discovery::{AnnouncementAck, SessionAnnouncement};
 use ariadne_core::{
     ClaimRequest, CoreError, CoreErrorCode, MutationReceipt, OwnerCommand, OwnerMutationRequest,
     PreparedAttempt,
@@ -35,6 +36,7 @@ pub enum ControlMethod {
     Claim(ClaimRequest),
     ConnectionStatus(BindingScope),
     BindingConnect(Box<OwnerMutationRequest>),
+    SessionAnnouncement(SessionAnnouncement),
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ControlRequest {
@@ -52,6 +54,7 @@ impl<'de> Deserialize<'de> for ControlRequest {
             Owner(Box<OwnerMutationRequest>),
             Claim(ClaimRequest),
             Scope(BindingScope),
+            Announcement(SessionAnnouncement),
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -68,6 +71,9 @@ impl<'de> Deserialize<'de> for ControlRequest {
             ("claim", Params::Claim(request)) => ControlMethod::Claim(request),
             ("connection_status", Params::Scope(scope)) => ControlMethod::ConnectionStatus(scope),
             ("binding_connect", Params::Owner(request)) => ControlMethod::BindingConnect(request),
+            ("session_announcement", Params::Announcement(announcement)) => {
+                ControlMethod::SessionAnnouncement(announcement)
+            }
             _ => {
                 return Err(serde::de::Error::custom(
                     "Unknown private control method or mismatched params",
@@ -118,6 +124,9 @@ impl ControlRequest {
                     "Control binding_connect requires the canonical null-session BindingConnect request and id equal to op_id; retain the original operation."));
             }
         }
+        if let ControlMethod::SessionAnnouncement(announcement) = &self.method {
+            announcement.validate()?;
+        }
         Ok(())
     }
     pub fn scope(&self) -> Option<BindingScope> {
@@ -130,6 +139,7 @@ impl ControlRequest {
                 generation: request.generation.clone(),
             }),
             ControlMethod::BindingConnect(_) => None,
+            ControlMethod::SessionAnnouncement(_) => None,
         }
     }
 }
@@ -138,6 +148,7 @@ impl ControlRequest {
 pub enum ControlResult {
     Status(BindingSummary),
     Ping(BindingScope),
+    Announcement(AnnouncementAck),
     Claim(Option<PreparedAttempt>),
     BindingConnect(MutationReceipt),
 }
@@ -196,6 +207,10 @@ impl ControlResponse {
             Self::Error(response) => return Err(validated_error(response.error)),
         };
         match (&request.method, &response.result) {
+            (
+                ControlMethod::SessionAnnouncement(announcement),
+                ControlResult::Announcement(result),
+            ) if announcement.acknowledgement() == *result => {}
             (ControlMethod::Ping(scope), ControlResult::Ping(result)) if scope == result => {}
             (ControlMethod::ConnectionStatus(scope), ControlResult::Status(result))
                 if scope.binding_id == result.id && scope.generation == result.generation => {}

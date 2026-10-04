@@ -1090,7 +1090,7 @@
       "paths": [
         "crates/ariadne-runtime/src/discovery/**",
         "crates/ariadne-adapter-codex/src/discovery.rs",
-        "integrations/claude/discovery.js",
+        "integrations/claude/plugin/hooks/discovery.js",
         "crates/ariadne-runtime/tests/discovery.rs",
         "tests/integrations/claude/discovery.test.js"
       ],
@@ -1106,7 +1106,7 @@
       ],
       "checks": [
         "rtk proxy cargo test -p ariadne-runtime --test discovery",
-        "rtk proxy npm run test:integration -- --suite claude-discovery"
+        "rtk proxy npm run test:integration -- --project claude-mod tests/integrations/claude/discovery.test.js"
       ],
       "estimate_days": 1,
       "implementation_depends_on": [

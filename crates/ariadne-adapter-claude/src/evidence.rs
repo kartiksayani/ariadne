@@ -4,7 +4,7 @@ use ariadne_agent_protocol::{AdapterError, AdapterErrorCode, UtcMillis, UuidV4};
 use std::{
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 /// Actual SDK fields and imported descriptor values, not a claimed parity boolean.
@@ -34,6 +34,16 @@ impl ModEvidence {
         identity: LoadedModIdentity,
         observed_at: UtcMillis,
     ) -> Result<Self, AdapterError> {
+        Self::received_at(identity, observed_at, Instant::now())
+    }
+
+    /// Preserve the original native socket receipt time across resource qualification.
+    /// This timestamp is trusted native state, never supplied by announcement JSON.
+    pub fn received_at(
+        identity: LoadedModIdentity,
+        observed_at: UtcMillis,
+        received: Instant,
+    ) -> Result<Self, AdapterError> {
         for value in [
             &identity.plugin_name,
             &identity.app_version,
@@ -57,9 +67,13 @@ impl ModEvidence {
         Ok(Self {
             identity,
             observed_at,
-            received: Instant::now(),
+            received,
         })
     }
+}
+
+pub(crate) fn fresh(evidence: &ModEvidence) -> bool {
+    evidence.received.elapsed() < Duration::from_secs(90)
 }
 
 /// One latest presence snapshot, no lifecycle broker or transcript cache.
