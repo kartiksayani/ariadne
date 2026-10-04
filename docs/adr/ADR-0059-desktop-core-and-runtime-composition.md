@@ -94,7 +94,16 @@ inspection, rather than interpreting missing receipts as non-delivery.
 The native lifecycle wrapper clones its wake callback under a brief lock and
 invokes it outside that lock, so Quit can reach the runtime fence while wake is
 draining. Accepted Quit synchronously fences both native preference producers
-and ordinary runtime admission before joining anything. Window geometry and tray
+and ordinary runtime admission before joining anything. The same short admission
+lock synchronously stops NativeActivation admission, stops the existing active
+claim gates, requests worker stop and closes routes; it performs no Core/provider
+IO or waits. Wake applies this fence before taking its old Workers. Worker start
+and active installation share the activation state lock with that fence, so an
+installing worker cannot escape it or publish a route afterward. This is necessary
+because active supervisors call NativeCoreService through their own claim gates:
+the outer bridge fence alone cannot prevent dispatch while preference draining
+keeps the executor alive. Previously admitted work and leases still drain in the
+existing off-UI shutdown. Window geometry and tray
 Pin intents already owned by those producers may finish their first read/save
 after that fence; their frozen pending requests alone own exact retry identity.
 `DesktopService::with_native_preferences` installs one private paired Rust-only

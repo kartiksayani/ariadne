@@ -578,6 +578,7 @@ fn quit_confirms_frozen_native_writer_operations_on_the_real_core() {
         Arc::new(|_| true),
     )
     .unwrap();
+    let (session, scope, _, _) = fixture.connected(&runtime);
     let service = runtime.bridge().desktop_service();
     let mut window = WindowPreferenceWrite::default();
     let mut tray = PreferenceWriter::default();
@@ -639,8 +640,65 @@ fn quit_confirms_frozen_native_writer_operations_on_the_real_core() {
     assert!(persisted.global.pinned);
     assert!(persisted.global.window.is_some());
     assert_eq!(persisted.revision.value(), 3);
-    runtime.begin_shutdown().unwrap();
     let frozen = frozen_window.unwrap();
+    let drain_request = frozen.clone();
+    let drain_runtime = runtime.clone();
+    let drain_core = runtime.bridge().core().clone();
+    let (entered, draining) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let drain = std::thread::spawn(move || {
+        let command = drain_request.command.clone();
+        drain_runtime.native_preferences_owned(&drain_request, move || {
+            entered.send(()).unwrap();
+            released.recv_timeout(Duration::from_secs(3)).unwrap();
+            let MutationReceipt::PreferencesPatched(receipt) = drain_core.execute_owner(
+                OwnerContext::from_trusted_entrypoint(OwnerScope::Preferences),
+                command,
+            )?
+            else {
+                panic!("preference drain receipt")
+            };
+            Ok(receipt)
+        })
+    });
+    draining.recv_timeout(Duration::from_secs(3)).unwrap();
+    runtime.begin_shutdown().unwrap();
+    // Accepted Quit must fence the activation's own route/gate immediately,
+    // even while an actual admitted native preference closure is still held.
+    assert_eq!(
+        fixture
+            .call(
+                72,
+                ControlMethod::Claim(ClaimRequest {
+                    binding_id: scope.binding_id.clone(),
+                    generation: scope.generation.clone(),
+                    request_id: id(72),
+                })
+            )
+            .unwrap_err()
+            .code,
+        CoreErrorCode::NotFound
+    );
+    assert!(DesktopOwner::acquire(&fixture.home).is_err());
+    let QueryResult::SessionGet(current) = runtime
+        .bridge()
+        .core()
+        .query(
+            QueryContext::owner(OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+                runtime.bridge().core().resolve_session(&session).unwrap(),
+            ))),
+            QueryRequest::SessionGet {},
+        )
+        .unwrap()
+    else {
+        panic!("session")
+    };
+    assert_eq!(
+        current.session.bindings.0[&scope.binding_id].generation,
+        scope.generation
+    );
+    release.send(()).unwrap();
+    assert_eq!(Some(drain.join().unwrap().unwrap()), window_receipt);
     let mut changed = frozen.clone();
     let OwnerCommand::PreferencesPatch { params, .. } = &mut changed.command else {
         panic!("patch")
