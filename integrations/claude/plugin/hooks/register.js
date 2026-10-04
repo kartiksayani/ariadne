@@ -1,7 +1,15 @@
 import installed from './installed.js';
 import { claimLoop } from './claims.js';
 import { qualify, setup } from './setup.js';
-import { ModError } from './contracts.js';
+import { ModError, uuid } from './contracts.js';
+
+function selectedSession(event) {
+  if (typeof event?.args !== 'string' || event.args.length > 64) throw new ModError('Connect requires bounded SDK command arguments; use /ariadne-connect [session-id].');
+  const argument = event.args.trim();
+  if (argument === '') return null;
+  if (!uuid(argument)) throw new ModError('Use /ariadne-connect followed by one canonical Ariadne session UUID.');
+  return argument;
+}
 
 export function createRegister(descriptor) {
   return function register(on) {
@@ -33,7 +41,7 @@ export function createRegister(descriptor) {
     }
     on('session.start',async ($,event,next) => {
       for (const [name,description] of [['ariadne-connect','Bind this original conversation to Ariadne'],['ariadne-status','Show the registered Ariadne connection'],['ariadne-disconnect','Disconnect Ariadne without stopping Claude']]) {
-        await $.command.register({name,description});
+        await $.command.register({name,description,...(name === 'ariadne-connect' ? {argumentHint:'[session-id]'} : {})});
       }
       try {
         await qualify($,descriptor);
@@ -42,16 +50,20 @@ export function createRegister(descriptor) {
       } catch (error) { failure($,error); }
       return next(event);
     });
-    on('command.run',{command:'ariadne-connect'},($) => checked($,() => transition($,async () => {
-      if (!qualified) { await qualify($,descriptor); qualified = true;
-        timer ??= $.clock.every(1000,() => { if (loop) void loop.poll($); }); }
-      if (sessionEnded) return {text:'The original Claude session ended; no new Ariadne owner operation was admitted.'};
-      const result = await owner.connect($);
-      if (loop?.outstanding()) return {text:`Ariadne recovery_required: late original-scope evidence remains retained; no new claim loop was admitted. Owner receipt: ${JSON.stringify(result)}`};
-      loop = claimLoop(descriptor.helperPath,result.binding);
-      if (sessionEnded) await loop.stop($,true);
-      return {text:JSON.stringify(result)};
-    })));
+    on('command.run',{command:'ariadne-connect'},($,event) => checked($,() => {
+      const requestedSessionId = selectedSession(event);
+      return transition($,async () => {
+        if (!qualified) { await qualify($,descriptor); qualified = true;
+          timer ??= $.clock.every(1000,() => { if (loop) void loop.poll($); }); }
+        if (sessionEnded) return {text:'The original Claude session ended; no new Ariadne owner operation was admitted.'};
+        const result = await owner.connect($,requestedSessionId);
+        if (loop?.outstanding()) return {text:`Ariadne recovery_required: late original-scope evidence remains retained; no new claim loop was admitted. Owner receipt: ${JSON.stringify(result)}`};
+        loop = claimLoop(descriptor.helperPath,result.binding);
+        if (sessionEnded) await loop.stop($,true);
+        const guidance = requestedSessionId === null ? '' : `\nResume structured Ariadne context for project ${result.binding.session.project_id}, session ${result.binding.session.session_id}: read its topics, items, questions, answers and results; summarize completed work, remaining work and missing context; reuse existing items and respect cancelled work. This does not transfer the old host transcript or dispatch an input.`;
+        return {text:JSON.stringify(result) + guidance};
+      });
+    }));
     on('command.run',{command:'ariadne-status'},($) => checked($,async () => {
       if (!qualified) await qualify($,descriptor);
       return {text:JSON.stringify({binding:await owner.status($),local:loop?.status() ?? null})};

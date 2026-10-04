@@ -5,17 +5,40 @@ function callbacks(descriptor) {
   const hooks = new Map();
   createRegister(descriptor)((name, pattern, handler) => {
     if (typeof pattern === 'function') {handler=pattern;pattern=null;}
-    hooks.set(pattern?.command ?? name,handler);
+    hooks.set(pattern?.command ?? name,pattern?.command ? ($,event = {args:''}) => handler($,event) : handler);
   });
   return hooks;
 }
 const next = async event => event;
 describe('supported Mod entry convention', () => {
+  it('uses the SDK optional session selector and appends resume guidance without changing canonical instructions', async () => {
+    const h = host();const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);
+    const result = await hooks.get('ariadne-connect')(h.$,{args:` ${ids.session} `});
+    const [encoded,...guidance] = result.text.split('\n');
+    expect(JSON.parse(encoded).instruction).toBe('Use published Ariadne domain commands.');
+    expect(guidance.join('\n')).toContain(`project ${ids.project}, session ${ids.session}`);
+    expect(guidance.join('\n')).toContain('respect cancelled work');
+    expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => JSON.parse(call.options.stdin).command.params.existing_session_id)).toEqual([ids.session]);
+    expect(h.prompts).toEqual([]);
+  });
+  it('rejects malformed selectors before owner transitions and never infers a session', async () => {
+    const h = host();const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);
+    for (const event of [{},{args:42},{args:'ProjectA'},{args:`${ids.session} ${ids.input}`},{args:'x'.repeat(65)}]) {
+      expect((await hooks.get('ariadne-connect')(h.$,event)).text).toContain('did not complete');
+    }
+    expect(h.calls.filter(call => call.options.stdin)).toEqual([]);
+    await hooks.get('ariadne-connect')(h.$,{args:''});
+    expect(JSON.parse(h.calls.find(call => call.argv[1] === 'binding').options.stdin).command.params.existing_session_id).toBe(null);
+    expect(h.prompts).toEqual([]);
+  });
   it('registers all commands, guarded one-second poll, scoped status/disconnect and session-end timer cancellation', async () => {
     const h = host();const hooks = callbacks(descriptor);
     const start = {kind:'existing-session'};
     expect(await hooks.get('session.start')(h.$,start,next)).toBe(start);
     expect(h.commands.map(command => command.name)).toEqual(['ariadne-connect','ariadne-status','ariadne-disconnect']);
+    expect(h.commands[0].argumentHint).toBe('[session-id]');
     expect(h.timer().ms).toBe(1000);
     const result = await hooks.get('ariadne-connect')(h.$);
     expect(JSON.parse(result.text).binding.external_session_id).toBe('original-host-session');

@@ -1,5 +1,6 @@
 use ariadne_agent_protocol::{Availability, Compatibility};
 use ariadne_core::bindings::{BindingError, BindingService, VerifiedHost};
+use ariadne_core::queries::{QueryError, QueryService};
 use ariadne_core::*;
 use ariadne_domain::models::*;
 use ariadne_store::registry::{Registry, RegistryError};
@@ -255,6 +256,12 @@ fn new_connect_creates_revision_one_and_exact_replay_skips_provider_and_ids() {
     assert_eq!(first, again);
     assert_eq!(fs::read(s.live(1, &first.session_id)).unwrap(), before);
     let (binding, generation) = handle(&first);
+    assert_eq!(
+        s.store(1).read(&first.session_id).unwrap().bindings.0[&binding]
+            .issued_through_message_number
+            .value(),
+        0
+    );
     let route = s.registry.resolve_binding(&binding).unwrap();
     assert_eq!(route.session_id, first.session_id);
     assert_eq!(route.generation, generation);
@@ -312,6 +319,12 @@ fn same_host_reconnect_preserves_history_pause_and_old_receipt_before_closed_gua
     assert_eq!(first.session_id, id(2));
     assert_eq!(handle(&first).0, id(3));
     let after = s.store(1).read(&id(2)).unwrap();
+    assert_eq!(
+        after.bindings.0[&id(3)]
+            .issued_through_message_number
+            .value(),
+        0
+    );
     assert_eq!(after.messages, before.messages);
     assert_eq!(after.items, before.items);
     assert!(after.bindings.0[&id(3)].owner_paused);
@@ -928,6 +941,12 @@ fn rebind_blocks_every_outstanding_state_then_preserves_history_and_frees_only_h
     let (new_binding, _) = handle(&new);
     assert_ne!(new_binding, id(3));
     let after = s.store(1).read(&id(2)).unwrap();
+    assert_eq!(
+        after.bindings.0[&new_binding]
+            .issued_through_message_number
+            .value(),
+        0
+    );
     assert_eq!(after.messages, before.messages);
     assert_eq!(after.items, before.items);
     assert_eq!(after.bindings.0[&id(3)], before.bindings.0[&id(3)]);
@@ -950,6 +969,338 @@ fn rebind_blocks_every_outstanding_state_then_preserves_history_and_frees_only_h
         ),
         CoreErrorCode::BindingMismatch
     );
+}
+
+// Frozen populated domain fixture after explicit resolution of its pending work.
+// This only supplies persisted history to the real binding/query services; it
+// does not implement claim, delivery, reconciliation or a queue transition.
+fn resolved_history() -> Session {
+    let mut session: Session =
+        serde_json::from_str(include_str!("../../../fixtures/domain/demo/session.json")).unwrap();
+    for input in session.inputs.0.values_mut() {
+        if matches!(
+            input.state,
+            InputState::Queued | InputState::InFlight | InputState::NeedsAttention
+        ) {
+            input.state = InputState::Skipped;
+        }
+        input.active_attempt_id = None;
+        for attempt in &mut input.attempts {
+            attempt.sealed_at.get_or_insert_with(at);
+        }
+    }
+    for binding in session.bindings.0.values_mut() {
+        binding.active_input_id = None;
+        binding.owner_paused = true;
+        binding.dispatch_state = DispatchState::Paused;
+    }
+    // Add source-owned copied context to the existing canonical continuation.
+    // A following agent message proves issuance uses max OWNER number, not the
+    // next-message counter or last message in the conversation.
+    let copied = session
+        .messages
+        .iter()
+        .find(|m| m.origin.is_some())
+        .unwrap()
+        .clone();
+    for (offset, author) in [(0, MessageAuthor::Owner), (1, MessageAuthor::Agent)] {
+        let mut message = copied.clone();
+        message.id = id(900 + offset);
+        message.number = PositiveSafeInteger::new(session.counters.next_message.value()).unwrap();
+        message.author = author.clone();
+        message.kind = if author == MessageAuthor::Owner {
+            MessageKind::OwnerInput
+        } else {
+            MessageKind::Activity
+        };
+        message.body = if author == MessageAuthor::Owner {
+            "Copied owner context.\nPreserve the source snapshot."
+        } else {
+            "Later copied agent context."
+        }
+        .into();
+        message.item_id = None;
+        message.items_touched.clear();
+        message.round_id = None;
+        message.input_id = None;
+        message.attempt_id = None;
+        message.host_turn_id = None;
+        let origin = message.origin.as_mut().unwrap();
+        origin.author = author;
+        origin.entity_id = id(910 + offset);
+        session
+            .continuations
+            .0
+            .values_mut()
+            .next()
+            .unwrap()
+            .message_id_map
+            .0
+            .insert(origin.entity_id.clone(), message.id.clone());
+        session.counters.next_message =
+            PositiveSafeInteger::new(message.number.value() + 1).unwrap();
+        session.messages.push(message);
+    }
+    session
+}
+
+fn history_context(binding: &UuidV4, generation: &UuidV4, grant: u64) -> AgentContext {
+    AgentContext::from_trusted_entrypoint(
+        RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+        binding.clone(),
+        generation.clone(),
+        AgentReadScope::Terminal {
+            issued_through_message_number: NonnegativeSafeInteger::new(grant).unwrap(),
+        },
+    )
+}
+fn read_messages(s: &Setup, context: &AgentContext) -> Result<Vec<Message>, QueryError> {
+    let QueryResult::SessionRead(SessionReadResult::Messages(page)) =
+        QueryService::new(&s.registry).query(
+            &QueryContext::agent(context.clone()),
+            &QueryRequest::SessionRead(SessionReadRequest {
+                selection: ReadView::Messages {
+                    topic_id: None,
+                    item_id: None,
+                },
+                cursor: None,
+                limit: PageLimit::new(100).unwrap(),
+                item_pages: vec![],
+            }),
+        )?
+    else {
+        panic!("messages")
+    };
+    assert!(page.next_cursor.is_none());
+    Ok(page.items)
+}
+
+#[test]
+fn explicit_rebind_issues_only_the_locked_history_snapshot_and_replay_never_widens_it() {
+    let s = Setup::new(1);
+    let original = resolved_history();
+    s.store(1).create(&original).unwrap();
+    let cmd = command(1, "fresh-conversation", 10, Some(id(2)));
+    let saved = s.connect(&cmd);
+    let (binding, generation) = handle(&saved);
+    let bound = s.store(1).read(&id(2)).unwrap();
+    let ceiling = original
+        .messages
+        .iter()
+        .filter(|m| m.author == MessageAuthor::Owner)
+        .map(|m| m.number.value())
+        .max()
+        .unwrap();
+    assert!(ceiling < original.messages.last().unwrap().number.value());
+    assert_eq!(
+        bound.bindings.0[&binding]
+            .issued_through_message_number
+            .value(),
+        ceiling
+    );
+    assert_eq!(bound.messages, original.messages);
+    assert_eq!(bound.items, original.items);
+    assert_eq!(bound.topics, original.topics);
+    assert_eq!(bound.rounds, original.rounds);
+    assert_eq!(bound.answers, original.answers);
+    assert_eq!(bound.inputs, original.inputs);
+    assert_eq!(bound.continuations, original.continuations);
+    for (id, old) in &original.bindings.0 {
+        assert_eq!(&bound.bindings.0[id], old);
+    }
+    let context = history_context(&binding, &generation, ceiling);
+    assert_eq!(read_messages(&s, &context).unwrap(), original.messages);
+    for item in original
+        .items
+        .0
+        .values()
+        .filter(|i| original.rounds.0.values().any(|r| r.item_id == i.id))
+    {
+        let QueryResult::ItemRounds(result) = QueryService::new(&s.registry)
+            .query(
+                &QueryContext::agent(context.clone()),
+                &QueryRequest::ItemRounds(ItemRoundsRequest {
+                    item_id: item.id.clone(),
+                    cursor: None,
+                    limit: PageLimit::new(100).unwrap(),
+                    round_pages: vec![],
+                }),
+            )
+            .unwrap()
+        else {
+            panic!("round history")
+        };
+        assert!(result.rounds.next_cursor.is_none());
+        assert_eq!(
+            result.rounds.items.len(),
+            original
+                .rounds
+                .0
+                .values()
+                .filter(|r| r.item_id == item.id)
+                .count()
+        );
+        for answer in original.answers.iter().filter(|a| a.item_id == item.id) {
+            assert!(result
+                .rounds
+                .items
+                .iter()
+                .any(|r| r.answers.items.contains(answer)));
+        }
+    }
+    let future = OwnerCommand::InputSubmit {
+        api_version: one(),
+        op_id: id(20),
+        params: InputSubmitParams {
+            binding_id: binding.clone(),
+            target: InputTarget {
+                topic_id: original.items.0[&ItemRef::new("1").unwrap()]
+                    .topic_id
+                    .clone(),
+                item_id: Some(ItemRef::new("1").unwrap()),
+            },
+            kind: InputKind::Note,
+            text: "Future owner context must remain hidden.".into(),
+            selected_option_id: None,
+            expected_question_revision: None,
+            supersedes_answer_id: None,
+        },
+    };
+    ariadne_core::inputs::InputService::new(&s.registry)
+        .execute(&route(1, &id(2)), &future, || s.allocate(), at())
+        .unwrap();
+    let after_future = s.store(1).read(&id(2)).unwrap();
+    assert!(after_future
+        .messages
+        .iter()
+        .any(|m| m.body == "Future owner context must remain hidden."));
+    assert!(!read_messages(&s, &context)
+        .unwrap()
+        .iter()
+        .any(|m| m.body == "Future owner context must remain hidden."));
+    assert!(read_messages(&s, &history_context(&binding, &generation, ceiling + 1)).is_err());
+    let bytes = fs::read(s.live(1, &id(2))).unwrap();
+    let replay = receipt(
+        s.service()
+            .connect(
+                &owner(),
+                &cmd,
+                |_| panic!("replay before qualification"),
+                || panic!("replay before allocation"),
+                at(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(replay, saved);
+    assert_eq!(fs::read(s.live(1, &id(2))).unwrap(), bytes);
+    assert_eq!(
+        s.store(1).read(&id(2)).unwrap().bindings.0[&binding]
+            .issued_through_message_number
+            .value(),
+        ceiling
+    );
+    // Reconnecting the SAME host does not issue newly appended owner context.
+    let reconnect = s.connect(&command(1, "fresh-conversation", 21, Some(id(2))));
+    let (same_binding, new_generation) = handle(&reconnect);
+    assert_eq!(same_binding, binding);
+    assert_eq!(
+        s.store(1).read(&id(2)).unwrap().bindings.0[&binding]
+            .issued_through_message_number
+            .value(),
+        ceiling
+    );
+    assert!(
+        !read_messages(&s, &history_context(&binding, &new_generation, ceiling))
+            .unwrap()
+            .iter()
+            .any(|m| m.body == "Future owner context must remain hidden.")
+    );
+    assert_eq!(
+        core_code(
+            s.service()
+                .state(
+                    &route(1, &id(2)),
+                    &state("resume", id(0x20), id(0x22), 22),
+                    at()
+                )
+                .unwrap_err()
+        ),
+        CoreErrorCode::BindingMismatch
+    );
+    let request = ApplyRequest {
+        op_id: id(23),
+        source_input_id: None,
+        attempt_id: None,
+        expected_item_revisions: UniqueMap(Default::default()),
+        expected_topic_revisions: UniqueMap(Default::default()),
+        summary: "Old binding cannot obtain new authority.".into(),
+        operations: vec![],
+        input_result: None,
+    };
+    let mut terminal_change = request.clone();
+    terminal_change.op_id = id(25);
+    let item_id = ItemRef::new("1").unwrap();
+    terminal_change
+        .expected_item_revisions
+        .0
+        .insert(item_id.clone(), after_future.items.0[&item_id].revision);
+    terminal_change.operations = vec![Operation::ItemStatus {
+        item: EntityRef::Existing(ExistingRef { id: item_id }),
+        status: ItemStatus::Done,
+        outcome: Some("Read history alone cannot consume future input.".into()),
+        why: Some("Structured-context snapshot".into()),
+        reason: None,
+    }];
+    let before_rejected_change = fs::read(s.live(1, &id(2))).unwrap();
+    let error = ariadne_core::apply::ApplyService::new(&s.registry)
+        .execute(
+            &history_context(&binding, &new_generation, ceiling),
+            &terminal_change,
+            || s.allocate(),
+            at(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ariadne_core::apply::ApplyError::Core(CoreError {
+            code: CoreErrorCode::UnhandledOwnerMessage,
+            ..
+        })
+    ));
+    assert_eq!(fs::read(s.live(1, &id(2))).unwrap(), before_rejected_change);
+    let old = history_context(&id(0x20), &id(0x22), 5);
+    let error = ariadne_core::apply::ApplyService::new(&s.registry)
+        .execute(&old, &request, || panic!("old binding before IDs"), at())
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ariadne_core::apply::ApplyError::Core(CoreError {
+            code: CoreErrorCode::BindingMismatch,
+            ..
+        })
+    ));
+    let forged = AgentContext::from_trusted_entrypoint(
+        RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+        binding,
+        new_generation,
+        AgentReadScope::Dispatched {
+            source_input_id: id(0x72),
+            attempt_id: id(0x62),
+            issued_through_message_number: NonnegativeSafeInteger::new(ceiling).unwrap(),
+        },
+    );
+    let mut old_attempt = request;
+    old_attempt.op_id = id(24);
+    old_attempt.source_input_id = Some(id(0x72));
+    old_attempt.attempt_id = Some(id(0x62));
+    assert!(ariadne_core::apply::ApplyService::new(&s.registry)
+        .execute(
+            &forged,
+            &old_attempt,
+            || panic!("old attempt before IDs"),
+            at()
+        )
+        .is_err());
 }
 
 #[test]
