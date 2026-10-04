@@ -148,6 +148,21 @@ describe('ordinary desktop composition', () => {
     expect(await screen.findByLabelText('Owner input for #2')).toBeTruthy();
     expect(transport.preferences.sessions[0].filters).toEqual(filters);
   });
+  it('closes detail with Escape in the owner editor and keeps its draft for reopening', async () => {
+    const { transport } = setup(); await openSession();
+    fireEvent.click(document.querySelector('[data-item-id="1"]')!);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));
+    const editor = await screen.findByLabelText('Reply message');
+    fireEvent.change(editor, { target: { value: 'Retain this draft when Escape closes detail.' } });
+    await waitFor(() => expect(transport.preferences.drafts.some(draft => draft.text === 'Retain this draft when Escape closes detail.')).toBe(true));
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(screen.queryByRole('group', { name: 'Owner actions' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Close detail' })).toBeNull();
+    fireEvent.click(document.querySelector('[data-item-id="1"]')!);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));
+    expect((await screen.findByLabelText('Reply message') as HTMLTextAreaElement).value).toBe('Retain this draft when Escape closes detail.');
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
+  });
   it('retains an unsent owner draft across tab close and reopen', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
