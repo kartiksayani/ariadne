@@ -9,6 +9,14 @@ CLI launch, second-instance delivery and renderer reveal. User-authored text and
 filesystem paths are never routing authority. Single-instance registration runs
 before other plugins. Native window actions run on the main thread.
 
+The macOS single-instance plugin is navigation/convergence convenience, not
+dispatch authority: notify/bind failures can permit another process to continue.
+Owning runtime and watcher startup occurs only in application setup after the
+first plugin intercepts ordinary second launches, and only after existing native
+control ownership and physical binding leases succeed. A losing startup cannot
+start its own workers or disturb the established socket, owner or external host.
+Simultaneous cold-start packaged proof remains an acceptance requirement.
+
 Before the main webview acknowledges readiness after subscribing to the route
 event, retain the latest valid explicit route. Another valid route supersedes
 that navigation intent; an invalid or unregistered route cannot erase it. This
@@ -20,8 +28,13 @@ The package owns one install descriptor at
 `schema_version: 1`, `version` and absolute `app_path`. Resolve `current` only
 inside the existing `versions/<version>` directory, require helper/version
 agreement and bounded validated manifest input, and pass structured arguments
-to `/usr/bin/open`. There is no app scan or guessed fallback. P6.4 writes this
-same descriptor and may extend its owned-file inventory for uninstall.
+to `/usr/bin/open -n -a <app_path> --args --ariadne-route <OpenRoute JSON>`.
+Each value is a separate argument, including paths with spaces. There is no app
+scan or guessed fallback. Only `current` is constrained to the exact versioned
+directory; the manifest may locate the installed app in `~/Applications`.
+P6.4 writes this same descriptor and may extend its owned-file inventory for
+uninstall. Unknown non-routing fields are ignored within v1; required fields,
+duplicate known fields and unsupported schema versions remain strict.
 
 Window geometry and pin use canonical revision-checked global preferences,
 preserving unrelated preferences. Display reconciliation clamps the whole

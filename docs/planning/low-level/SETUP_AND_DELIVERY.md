@@ -292,7 +292,10 @@ open routing. Its required v1 fields are `schema_version: 1`, `version` and
 absolute `app_path`; helper and manifest versions must agree. `current` must
 resolve inside the existing `versions/<version>` directory. A later owned-file
 inventory for uninstall extends this manifest rather than introducing another
-descriptor. P6.1 tests use temporary package fixtures and never alter an actual
+descriptor. Unknown non-routing inventory fields may be added within v1;
+required fields and versions remain strict. Only `current` is constrained to the
+versioned directory; `app_path` may point to the installed `~/Applications` app.
+P6.1 tests use temporary package fixtures and never alter an actual
 installation (ADR0053).
 
 The commit hook runs cheap changed-language format, lint and type checks. CI

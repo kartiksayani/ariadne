@@ -239,6 +239,10 @@ whose v1 required fields are `schema_version: 1`, `version` and absolute
 `app_path`. Validate its bounded input and helper/version agreement, and resolve
 `current` only within Ariadne's `versions/<version>` directory. Use
 `/usr/bin/open` argument arrays; never scan for an app or guess a fallback.
+Use `-n -a <app_path> --args --ariadne-route <OpenRoute JSON>` so a running
+instance receives explicit route arguments through single-instance handling.
+That plugin is not dispatch authority: existing control ownership and physical
+binding leases must succeed before primary setup starts owned workers.
 
 ## 9. Renderer boundary and diagnostics
 

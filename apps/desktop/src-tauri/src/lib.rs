@@ -3,6 +3,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tauri::Manager;
 pub mod commands;
 pub mod native;
 
@@ -193,9 +194,27 @@ pub fn run_with_service(service: commands::DesktopService) {
     #[cfg(not(feature = "e2e"))]
     let owner = Some(owner);
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            native::routes::receive_launch(app.clone(), args);
+        }))
         .manage(state)
         .manage(service)
-        .manage(native::routes::NativeRoutes::default());
+        .manage(native::routes::NativeRoutes::default())
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+            {
+                webview
+                    .state::<native::routes::NativeRoutes>()
+                    .webview_loading();
+            }
+        })
+        .setup(|app| {
+            // Owning runtime/watchers must start here only after their existing
+            // native control ownership/physical lease checks succeed.
+            native::routes::receive_launch(app.handle().clone(), std::env::args().collect());
+            Ok(())
+        });
     #[cfg(feature = "e2e")]
     let builder = builder
         .plugin(tauri_plugin_wdio::init())

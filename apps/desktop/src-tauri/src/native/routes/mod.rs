@@ -1,3 +1,4 @@
+mod launch;
 mod pending;
 
 use crate::commands::DesktopService;
@@ -29,6 +30,11 @@ fn main_window(label: &str) -> Result<(), CoreError> {
     }
 }
 impl NativeRoutes {
+    pub(crate) fn webview_loading(&self) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.set_ready(false);
+        }
+    }
     /// Native callers provide explicit IDs, never paths or model-chosen scope.
     pub async fn open<R: tauri::Runtime>(
         &self,
@@ -70,6 +76,32 @@ impl NativeRoutes {
             }
         })
         .map_err(|_| unavailable())
+    }
+}
+
+/// The first plugin intercepts second launches before any owning startup code.
+pub(crate) fn receive_launch<R: tauri::Runtime>(app: tauri::AppHandle<R>, args: Vec<String>) {
+    match launch::parse(&args) {
+        Ok(Some(route)) => {
+            tauri::async_runtime::spawn(async move {
+                let routes = app.state::<NativeRoutes>().inner().clone();
+                if routes.open(app, route).await.is_err() {
+                    // Do not print untrusted argv or registered owner content.
+                    eprintln!("Ariadne could not open the requested registered route.");
+                }
+            });
+        }
+        Ok(None) => {
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            });
+        }
+        Err(_) => eprintln!("Ariadne rejected invalid native route arguments."),
     }
 }
 
