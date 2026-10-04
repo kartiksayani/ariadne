@@ -84,6 +84,7 @@ fn view() -> SessionPreferences {
         filters: ViewFilters {
             search: " exact café\n".into(),
             statuses: vec![ItemStatus::WaitingOnMe],
+            owners: vec![],
             topic_id: Some(id(703)),
             archived: true,
             hide_later: false,
