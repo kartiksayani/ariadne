@@ -89,6 +89,52 @@ describe('guarded history controls', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
     expect(transport.mutations).toEqual([request, request]);
   });
+  it('recomputes blockers after deliberately reviewing resolved canonical state', async () => {
+    const { props, topic, transport, store, actions } = await setup(true); render(<HistoryActions {...props} />);
+    const item = Object.values(transport.source.items).find(item => item?.topic_id === topic.id)!;
+    const rejected = failure('topic_not_archivable');
+    if (rejected.ok) throw new Error('test rejection');
+    rejected.error.details = { reason: null, binding_id: null, input_id: null, attempt_id: null,
+      blocking_item_ids: [item.id], blocking_input_ids: [], dispatch_must_pause: false };
+    fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` }));
+    item.status = 'open'; ++transport.source.revision;
+    transport.replies.push(rejected);
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm topic archive' })); });
+    expect(dialog().getByRole('button', { name: `Item ${item.id} · ${item.question}` })).toBeDefined();
+    expect((dialog().getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(actions.getSnapshot().pending).toBeNull();
+    const previousError = actions.getSnapshot().error;
+    item.status = 'done'; ++transport.source.revision; await act(async () => { await store.refresh(); });
+    fireEvent.click(dialog().getByRole('button', { name: 'Review current state' }));
+    expect(dialog().queryByRole('button', { name: `Item ${item.id} · ${item.question}` })).toBeNull();
+    expect(dialog().queryByText('Rejected topic_not_archivable')).toBeNull();
+    expect(actions.getSnapshot().error).toBe(previousError);
+    expect((dialog().getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm topic archive' })); });
+    expect(topic.archived_at).not.toBeNull(); expect(transport.mutations).toHaveLength(2);
+  });
+  it.each(['same topic', 'different topic'])('does not reuse a rejected review when opening %s', async selection => {
+    const { props, topic, transport, actions } = await setup(true);
+    const other = { ...structuredClone(topic), id: op, name: 'Another terminal topic', order: topic.order + 1 };
+    transport.source.topics[other.id] = other; ++transport.source.revision; await props.actions.session.refresh();
+    render(<HistoryActions {...props} />);
+    const rejected = failure('topic_not_archivable');
+    if (rejected.ok) throw new Error('test rejection');
+    rejected.error.details = { reason: null, binding_id: null, input_id: null, attempt_id: null,
+      blocking_item_ids: ['999'], blocking_input_ids: [], dispatch_must_pause: false };
+    fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); transport.replies.push(rejected);
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm topic archive' })); });
+    expect(dialog().getByRole('button', { name: 'Item 999 · Active item' })).toBeDefined();
+    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    const chosen = selection === 'same topic' ? topic : other;
+    fireEvent.click(screen.getByRole('button', { name: `Archive ${chosen.name}` }));
+    expect(actions.getSnapshot().error).toBeInstanceOf(CoreFailure); expect(actions.getSnapshot().pending).toBeNull();
+    expect(dialog().queryByRole('button', { name: 'Item 999 · Active item' })).toBeNull();
+    expect(dialog().queryByText('Rejected topic_not_archivable')).toBeNull();
+    expect((dialog().getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm topic archive' })); });
+    expect(transport.mutations[1].command).toMatchObject({ command: 'topic_archive', params: { topic_id: chosen.id } });
+  });
 });
 
 describe('explicit Continue preview and request identity', () => {
