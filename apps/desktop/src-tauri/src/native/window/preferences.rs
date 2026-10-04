@@ -50,11 +50,22 @@ impl WindowPreferenceWrite {
             request.validate_wire()?;
             self.pending = Some(request);
         }
-        let request = self.pending.as_ref().expect("prepared above");
+        self.confirm(execute)?;
+        Ok(new)
+    }
+    /// Explicit Quit may confirm only this already frozen operation. It never
+    /// captures new geometry, reads a fresh revision or allocates a new ID.
+    pub(crate) fn confirm(
+        &mut self,
+        execute: impl FnOnce(&OwnerMutationRequest) -> Result<PreferencesPatchedReceipt, CoreError>,
+    ) -> Result<(), CoreError> {
+        let Some(request) = self.pending.as_ref() else {
+            return Ok(());
+        };
         match execute(request) {
             Ok(receipt) if &receipt.operation_id == request.command.operation_id() => {
                 self.pending = None;
-                Ok(new)
+                Ok(())
             }
             Ok(_) => Err(CoreError::new(
                 CoreErrorCode::ProtocolConflict,
@@ -62,7 +73,14 @@ impl WindowPreferenceWrite {
                 "Reconcile the original operation before another geometry mutation; its effects may already exist.",
             )),
             Err(error) => {
-                if !matches!(error.code, CoreErrorCode::CommitUncertain | CoreErrorCode::ProtocolConflict) {
+                let OwnerCommand::PreferencesPatch { params, .. } = &request.command else {
+                    unreachable!("native writer freezes only preferences patches")
+                };
+                if error.code == CoreErrorCode::RevisionConflict
+                    && error.current_revision.is_some_and(|revision| {
+                        revision != params.expected_preferences_revision
+                    })
+                {
                     self.pending = None;
                 }
                 Err(error)

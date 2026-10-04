@@ -260,3 +260,30 @@ fn wake_reconcile_prioritizes_registered_selection_and_coalesces_bounded_signals
     assert!(receive.recv_timeout(Duration::from_millis(250)).is_err());
     drop(watcher);
 }
+
+#[test]
+fn unchanged_fallback_scans_notify_native_consumers_without_fabricating_revisions() {
+    let files = Files::new();
+    let (hints, revisions) = mpsc::channel();
+    let (refresh, completed) = mpsc::channel();
+    let watcher = RegisteredWatcher::start_observer(
+        files.registry(),
+        files.data.clone(),
+        move |hint| hints.send(hint).is_ok(),
+        Duration::from_millis(100),
+        Arc::new(move || {
+            let _ = refresh.send(());
+        }),
+    )
+    .unwrap();
+    revisions.recv_timeout(Duration::from_secs(2)).unwrap();
+    completed.recv_timeout(Duration::from_secs(2)).unwrap();
+    completed.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(revisions.try_recv().is_err());
+    drop(watcher);
+    while completed.try_recv().is_ok() {}
+    assert!(matches!(
+        completed.try_recv(),
+        Err(mpsc::TryRecvError::Disconnected)
+    ));
+}

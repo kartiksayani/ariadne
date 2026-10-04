@@ -20,6 +20,8 @@ impl CoreBridge {
     pub fn desktop_service(&self) -> DesktopService {
         let resolver = self.core.clone();
         let runtime = self.runtime.clone();
+        let preferences = self.runtime.clone();
+        let preferences_read = self.runtime.clone();
         DesktopService::from_trusted_startup_with_connect(
             Arc::new(self.clone()),
             move |route| resolver.resolve_session(route),
@@ -28,6 +30,20 @@ impl CoreBridge {
                     .upgrade()
                     .ok_or_else(super::runtime::unavailable)?
                     .connect_before(request, deadline)
+            },
+        )
+        .with_native_preferences(
+            move || {
+                preferences_read
+                    .upgrade()
+                    .ok_or_else(super::runtime::unavailable)?
+                    .native_preferences_read()
+            },
+            move |request| {
+                preferences
+                    .upgrade()
+                    .ok_or_else(super::runtime::unavailable)?
+                    .native_preferences_write(request)
             },
         )
     }

@@ -167,6 +167,7 @@ fn desktop_handler<R: tauri::Runtime>(
     tauri::generate_handler![
         native_ping,
         native::routes::route_ready,
+        native::notifications::notification_permission,
         commands::project_list,
         commands::session_list,
         commands::session_get,
@@ -307,6 +308,17 @@ fn run_native(
                         .state::<native::window::NativeWindow>()
                         .reconcile(window.app_handle().clone(), true);
                 }
+                tauri::WindowEvent::Focused(true) => {
+                    if !window_quitting.load(Ordering::Acquire) {
+                        if let Some(runtime) = window.try_state::<Arc<composition::NativeRuntime>>()
+                        {
+                            let _ = runtime.refresh_snapshots();
+                        }
+                        if let Some(tray) = window.try_state::<native::tray::NativeTray>() {
+                            tray.refresh();
+                        }
+                    }
+                }
                 _ => {}
             }
         })
@@ -334,6 +346,10 @@ fn run_native(
                 )
                 .into());
             }
+            let tray = native::tray::NativeTray::install(app.handle()).map_err(|_| {
+                std::io::Error::other("Native Waiting feed could not be established.")
+            })?;
+            app.manage(tray);
             #[cfg(target_os = "macos")]
             {
                 let handle = app.handle().clone();
@@ -375,6 +391,18 @@ fn run_native(
                 if quitting.swap(true, Ordering::AcqRel) {
                     return;
                 }
+                app.state::<native::window::NativeWindow>().begin_stop();
+                if let Some(tray) = app.try_state::<native::tray::NativeTray>() {
+                    tray.begin_stop();
+                }
+                // Fence wake publication and new runtime admission at the Quit
+                // event, before off-UI window/tray drains can wait for IO.
+                if let Some(runtime) = app.try_state::<Arc<composition::NativeRuntime>>() {
+                    if runtime.begin_shutdown().is_err() {
+                        eprintln!("Ariadne could not fence its owning-runtime shutdown.");
+                        return;
+                    }
+                }
                 let lifecycle = app
                     .state::<native::window::lifecycle::NativeLifecycle>()
                     .inner()
@@ -383,9 +411,14 @@ fn run_native(
                 let app = app.clone();
                 let exit_allowed = exit_allowed.clone();
                 let quitting = quitting.clone();
+                let service = app.state::<commands::DesktopService>().inner().clone();
+                let tray = app.try_state::<native::tray::NativeTray>().map(|tray| tray.inner().clone());
                 tauri::async_runtime::spawn(async move {
                     let result = tauri::async_runtime::spawn_blocking(move || {
-                        window.join_writer()?;
+                        window.join_writer(&service)?;
+                        if let Some(tray) = tray {
+                            tray.stop()?;
+                        }
                         lifecycle.prepare_exit()
                     }).await;
                     if matches!(result, Ok(Ok(()))) {
