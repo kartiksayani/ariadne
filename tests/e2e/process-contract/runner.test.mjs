@@ -5,9 +5,9 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState } from '../../../scripts/run-native-e2e.mjs';
+import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
-import { startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
+import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import WebSocket from 'ws';
 async function assertExited(pid) {
   const end = Date.now() + 1000;
@@ -32,14 +32,35 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     assert.match((await rpc(1, 'initialize', {})).result.userAgent, /0\.160\.0/);
     const read = await rpc(2, 'thread/read', { threadId: thread });
     assert.equal(read.result.thread.id, thread); assert.equal(read.result.thread.cwd, config.project);
+    assert.deepEqual((await rpc(10, 'thread/loaded/list', {})).result.data, [thread, config.discovery.externalSessionId]);
+    const unbound = await rpc(11, 'thread/read', { threadId: config.discovery.externalSessionId });
+    assert.equal(unbound.result.thread.id, config.discovery.externalSessionId); assert.equal(unbound.result.thread.cwd, config.discovery.projectRoot);
+    assert.deepEqual((await rpc(12, 'thread/turns/list', { threadId: config.discovery.externalSessionId })).result.data, []);
+    await assert.rejects(readFile(join(config.discovery.projectRoot, '.ariadne/project.json')), { code: 'ENOENT' });
     assert.deepEqual((await rpc(3, 'thread/turns/list', { threadId: thread })).result.data, []);
-    const payload = '[ARIADNE_INPUT:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222]\nExact owner input';
+    const inputId = '11111111-1111-4111-8111-111111111111', attemptId = '22222222-2222-4222-8222-222222222222';
+    const body = { source_input_id: inputId, binding_id: '33333333-3333-4333-8333-333333333333', generation: '44444444-4444-4444-8444-444444444444', saved_input: { text: 'Exact owner input\nComplete second line' } };
+    const payload = `[ARIADNE_INPUT:${inputId}:${attemptId}]\n${JSON.stringify(body)}`;
     await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', payload]);
-    assert.equal(JSON.parse(await readFile(config.queuedPath, 'utf8')).payload, payload);
+    const [admitted] = await admissions(config); assert.equal(admitted.payload, payload); assert.equal(admitted.attemptId, attemptId);
+    await assert.rejects(command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', config.discovery.externalSessionId, '--message', payload]), /failed \(3\)/);
     const turns = (await rpc(4, 'thread/turns/list', { threadId: thread })).result;
     assert.equal(turns.data[0].status, 'inProgress');
     assert.equal(turns.data[0].items[0].content[0].text, payload);
     assert.equal(turns.data[0].items.length, 1, 'Provider transport creates no domain reply or result');
+    await assert.rejects(command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', payload]), /failed \(3\)/);
+    await assert.rejects(completeTurn(config, { ...admitted, generation: inputId }), /exact existing/);
+    await assert.rejects(readFile(config.completePath), { code: 'ENOENT' });
+    await completeTurn(config, admitted);
+    const secondInput = '55555555-5555-4555-8555-555555555555', secondAttempt = '66666666-6666-4666-8666-666666666666';
+    const secondPayload = `[ARIADNE_INPUT:${secondInput}:${secondAttempt}]\n${JSON.stringify({ ...body, source_input_id: secondInput })}`;
+    await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', secondPayload]);
+    const journal = await admissions(config); assert.equal(journal.length, 2); assert.notEqual(journal[0].turnId, journal[1].turnId);
+    const after = (await rpc(5, 'thread/turns/list', { threadId: thread })).result.data;
+    assert.deepEqual(after.map(turn => turn.status), ['completed', 'inProgress']);
+    assert.deepEqual(after.map(turn => turn.items[0].content[0].text), [payload, secondPayload]);
+    assert.equal(after[1].id, journal[1].turnId, 'Completing the first admission cannot complete the successor');
+    await assert.rejects(completeTurn(config, admitted), /occurs once/);
   } finally { client?.terminate(); await provider?.stop(); await rm(root, { recursive: true }); }
 });
 test('selectors are explicit and default runs the complete gate', () => {
@@ -152,6 +173,47 @@ test('runner observes startup ancestry before any UI bridge assertion', async ()
     await rm(join(root, 'startup.json'));
     await assert.rejects(observeOwned(root, exe, 'nonce', process.pid, 50), /deadline/);
   } finally { await stop(child); await rm(root, { recursive: true }); }
+});
+test('fresh launch rejects stale nonce and retains separate PID/birth/ancestry evidence', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-relaunch-'));
+  let first, second;
+  try {
+    first = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { detached: true, stdio: 'ignore' });
+    const exe = identity(first.pid).exe;
+    await json(join(root, 'startup.json'), { pid: first.pid, nonce: 'first' });
+    const prior = await observeOwned(root, exe, 'first', process.pid);
+    await stop(first); await assertExited(first.pid);
+    second = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { detached: true, stdio: 'ignore' });
+    await json(join(root, 'startup.json'), { pid: second.pid, nonce: 'second' });
+    await assert.rejects(observeOwned(root, exe, 'first', process.pid), /nonce/);
+    const fresh = await observeOwned(root, exe, 'second', process.pid);
+    assert.notEqual(fresh.pid, prior.pid); assert.equal(fresh.birth, identity(second.pid).birth);
+    assert.equal(fresh.ancestry.at(-1).pid, process.pid); assert.equal(alive(prior.pid), false);
+  } finally { if (first) await stop(first); if (second) await stop(second); await rm(root, { recursive: true }); }
+});
+test('Quit proof requires actual owned PID exit, free port and released physical leases', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-quit-')), home = join(root, 'data'), bindingId = 'binding';
+  await mkdir(join(home, 'run/leases'), { recursive: true });
+  const files = [join(home, 'run/runtime.lock'), join(home, 'run/leases', `${bindingId}.lock`)];
+  for (const file of files) await writeFile(file, '');
+  const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port; await new Promise(resolve => server.close(resolve));
+  let child;
+  try {
+    const source = 'import fcntl,sys\nlocks=[open(path,"r+b") for path in sys.argv[1:]]\nfor lock in locks: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)\nprint("locked",flush=True)\nsys.stdin.readline()\n';
+    child = spawn('python3', ['-c', source, ...files], { stdio: ['pipe', 'pipe', 'pipe'] });
+    await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); });
+    const owned = identity(child.pid);
+    await assert.rejects(releasedLeases(home, bindingId), /failed/);
+    await json(join(root, 'quit-request.json'), { pid: child.pid, nonce: 'wrong' });
+    await assert.rejects(proveQuit(root, owned.exe, 'expected', owned, home, bindingId, port), /identity mismatch/);
+    assert.ok(alive(child.pid), 'A rejected witness cannot signal the process');
+    await json(join(root, 'quit-request.json'), { pid: child.pid, nonce: 'expected' });
+    const exit = new Promise(resolve => child.once('close', resolve)); child.stdin.end('\n'); await exit;
+    const proof = await proveQuit(root, owned.exe, 'expected', owned, home, bindingId, port);
+    assert.equal(proof.pidExited, true); assert.equal(proof.portFree, true); assert.equal(proof.leases.released, true);
+    assert.deepEqual(proof.leases.paths, files);
+  } finally { if (child && alive(child.pid)) child.kill(); await rm(root, { recursive: true }); }
 });
 test('occupied loopback port fails without touching listener, invalid ports fail', async () => {
   const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
