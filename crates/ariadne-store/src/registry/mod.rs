@@ -172,6 +172,15 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// Owner preferences are global to this same trusted application data root.
+    /// Core owns typed validation and replay; the fixed file guard owns only IO.
+    pub fn with_ui_file<T, E: From<StoreError>>(
+        &self,
+        work: impl FnOnce(crate::ui::UiFile<'_>) -> Result<T, E>,
+    ) -> Result<T, E> {
+        crate::ui::with_file(&self.data, work)
+    }
+
     /// Trusted native entry-point chooses the user home; tests inject owned homes.
     pub fn open(home: &Path) -> Result<Self, RegistryError> {
         let data = Directory::root(home)?.child(".ariadne", true)?;

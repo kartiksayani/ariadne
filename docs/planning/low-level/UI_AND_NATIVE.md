@@ -33,6 +33,13 @@ Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, d
 | Theme, window geometry, pin, notification watermark | Versioned global preferences |
 
 Drafts are unsent and invisible to the agent. Preserve them across unrelated snapshots, tab close, and detail navigation. A changed target revision shows a review banner and requires renewed submission. Never auto-send a draft after restart. Preferences corruption backs up the file and allows resetting UI preferences without modifying session data. Follow exact caps, file modes, and write/atomicity behavior in the domain and storage specifications.
+
+The native preferences writer preserves malformed/future `ui.json` unchanged
+with a bounded actionable error. It never resets or repairs records automatically.
+The explicit owner backup/reset flow remains Settings/native acceptance; the
+writer's valid previous-file backup is not that recovery action. Persisted drafts
+and unavailable session view state survive unrelated writes and restart without
+dispatch. See [ADR-0041](../../adr/ADR-0041-native-core-and-owner-preferences.md).
 The canonical owner-only preference read and typed revision-checked patch records
 are published by [CoreService](API_AND_MCP.md#service-owned-read-and-preference-records).
 
@@ -89,6 +96,17 @@ Search normalizes NFKC and locale-independent lowercase for indexing only; store
 Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, scroll nearest, and open detail. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
 
 Start with variable-height DOM rows memoized by item revision. Add virtualization only if the documented 2,000-item performance target is missed; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
+
+The early P4.4 module publishes `SentenceTree`, `NavigationSentenceTree` and the
+canonical snapshot projection. It preserves complete sentence/outcome text,
+contextual ancestors, exact owner filters, roving focus, saved collapse/Later and
+scroll anchors. It reuses the registered reveal route and NavigationStore's typed
+revision-checked preference writes; no renderer-local persistence is added.
+Active branches initialize expanded only for a newly created session view, and
+explicit collapse remains saved across later snapshots. A focused 2,000-row
+jsdom measurement records complete initial DOM rendering before any virtualization
+choice. Native layout/scroll performance, App composition and the original native
+P4.4 acceptance remain pending; these reusable module tests do not complete them.
 
 ## 4. Graph
 

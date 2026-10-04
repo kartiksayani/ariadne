@@ -92,5 +92,5 @@ export type Theme = "system" | "light" | "dark";
 export type TopicContinueParams = { source: SessionRef, source_topic_id: UuidV4, source_revision: PositiveSafeInteger, source_sha256: Sha256, target: SessionRef, target_binding_id: UuidV4, summary: string, };
 export type TopicLifecycleParams = { topic_id: UuidV4, expected_revision: PositiveSafeInteger, };
 export type UuidRef = ExistingUuidRef | LocalRef;
-export type ViewFilters = { search: string, statuses: Array<ItemStatus>, topic_id: UuidV4 | null, archived: boolean, hide_later: boolean, };
+export type ViewFilters = { search: string, statuses: Array<ItemStatus>, owners: Array<ItemOwner>, topic_id: UuidV4 | null, archived: boolean, hide_later: boolean, };
 export type WindowGeometry = { x: number, y: number, width: number, height: number, monitor_id: string | null, };
