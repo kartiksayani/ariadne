@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
-import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay } from '../../../scripts/run-native-e2e.mjs';
-import { resolvedNames, verifyGraph, mergedConfig, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
+import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 async function assertExited(pid) {
   const end = Date.now() + 1000;
   while (alive(pid) && Date.now() < end) await delay(10);
@@ -109,9 +109,47 @@ test('compiler config and artifact evidence rejects unexpected inherited inputs 
   const metadata = { packages: [{ id: 'd', name: 'ariadne-desktop' }, { id: 't', name: 'tauri' }], resolve: { nodes: [{ id: 'd', features: [] }, { id: 't', features: ['custom-protocol'] }] } };
   const events = [{ reason: 'build-script-executed', package_id: 'd', out_dir: '/fresh/out' }, ...metadata.resolve.nodes.map(node => ({ reason: 'compiler-artifact', package_id: node.id, features: node.features, target: { kind: ['lib'] } }))];
   const output = value => value.map(event => JSON.stringify(event)).join('\n');
-  assert.equal(buildArtifacts(output(events), metadata), '/fresh/out');
-  assert.throws(() => buildArtifacts(output(events.slice(1)), metadata));
-  events[1].features = ['e2e']; assert.throws(() => buildArtifacts(output(events), metadata));
+  const features = { d: [], t: ['custom-protocol'] };
+  assert.equal(buildArtifacts(output(events), metadata, features), '/fresh/out');
+  assert.throws(() => buildArtifacts(output(events.slice(1)), metadata, features));
+  events[1].features = ['e2e']; assert.throws(() => buildArtifacts(output(events), metadata, features));
+});
+test('real normal/build graph excludes dev-only features and retains strict release feature checks', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-feature-graph-'));
+  try {
+    await writeFile(join(root, 'Cargo.toml'), '[workspace]\nmembers=["desktop","tauri"]\nresolver="2"\n');
+    for (const name of ['desktop', 'tauri']) {
+      await mkdir(join(root, name, 'src'), { recursive: true });
+      await writeFile(join(root, name, 'src/lib.rs'), '');
+    }
+    const manifest = '[package]\nname="ariadne-desktop"\nversion="0.1.0"\nedition="2021"\n[features]\ne2e=[]\n[dependencies]\ntauri={path="../tauri"}\n[dev-dependencies]\ntauri={path="../tauri",features=["test"]}\n';
+    await writeFile(join(root, 'desktop/Cargo.toml'), manifest);
+    await writeFile(join(root, 'tauri/Cargo.toml'), '[package]\nname="tauri"\nversion="0.1.0"\nedition="2021"\n[features]\ncustom-protocol=[]\ntest=[]\n');
+    const cwd = join(root, 'desktop'), flags = ['--no-default-features', '--features', 'tauri/custom-protocol'];
+    const metadata = JSON.parse((await command('cargo', ['metadata', '--offline', '--format-version', '1', '--filter-platform', 'aarch64-apple-darwin', ...flags], { cwd })).stdout);
+    const desktop = metadata.packages.find(pkg => pkg.name === 'ariadne-desktop'), tauri = metadata.packages.find(pkg => pkg.name === 'tauri');
+    assert.ok(metadata.resolve.nodes.find(node => node.id === tauri.id).features.includes('test'));
+    const tree = async extra => (await command('cargo', ['tree', '--locked', '--offline', '--package', 'ariadne-desktop', '--target', 'aarch64-apple-darwin', ...flags, ...extra, '--edges', 'normal,build', '--prefix', 'none', '--format', '{p}|{f}', '--no-dedupe'], { cwd })).stdout;
+    const graph = await tree([]), features = normalBuildFeatures(graph, metadata);
+    assert.deepEqual(features[tauri.id], ['custom-protocol']);
+    const events = [{ reason: 'build-script-executed', package_id: desktop.id, out_dir: '/fresh/out' }, ...[desktop, tauri].map(pkg => ({ reason: 'compiler-artifact', package_id: pkg.id, features: features[pkg.id], target: { kind: ['lib'] } }))];
+    const output = () => events.map(event => JSON.stringify(event)).join('\n');
+    assert.equal(buildArtifacts(output(), metadata, features), '/fresh/out');
+    events[2].features = ['custom-protocol', 'test'];
+    assert.throws(() => buildArtifacts(output(), metadata, features), /Compiler features differ/);
+    events[2].features = features[tauri.id];
+    await writeFile(join(root, 'desktop/Cargo.toml'), manifest.replace('tauri={path="../tauri"}\n', 'tauri={path="../tauri",features=["test"]}\n'));
+    const normalLeak = normalBuildFeatures(await tree([]), metadata);
+    assert.ok(normalLeak[tauri.id].includes('test'));
+    assert.throws(() => buildArtifacts(output(), metadata, normalLeak), /Compiler features differ/);
+    const e2e = normalBuildFeatures(await tree(['--features', 'e2e']), metadata);
+    events[1].features = e2e[desktop.id]; events[2].features = e2e[tauri.id];
+    assert.throws(() => buildArtifacts(output(), metadata, e2e));
+    assert.throws(() => normalBuildFeatures(graph, { ...metadata, packages: [...metadata.packages, { ...tauri, id: 'another-tauri' }] }), /Ambiguous/);
+    assert.throws(() => normalBuildFeatures(graph.replace('desktop)', 'desktop|ambiguous)'), metadata), /Malformed/);
+    assert.throws(() => normalBuildFeatures(graph.replace('tauri v0.1.0', 'tauri v0.1.01'), metadata), /Missing normal\/build/);
+    assert.throws(() => normalBuildFeatures(graph + graph.split('\n').find(line => line.startsWith('tauri v')) + ',unexpected\n', metadata), /Ambiguous normal\/build/);
+  } finally { await rm(root, { recursive: true }); }
 });
 test('frontend evidence must be fresh, match emitted chunk bytes and stay within production output', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-graph-')), started = Date.now() - 1000;
