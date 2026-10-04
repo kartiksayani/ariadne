@@ -518,10 +518,20 @@ fn connect_existing(
         binding_id
     } else {
         let binding_id = fresh(occupied, allocate)?;
-        session.bindings.0.insert(
-            binding_id.clone(),
-            new_binding(binding_id.clone(), generation.clone(), host, at),
-        );
+        let mut binding = new_binding(binding_id.clone(), generation.clone(), host, at);
+        // Explicit owner rebind issues only the locked structured-history snapshot.
+        // This is read context, never delivery or authority for an old attempt.
+        binding.issued_through_message_number = NonnegativeSafeInteger::new(
+            session
+                .messages
+                .iter()
+                .filter(|message| message.author == MessageAuthor::Owner)
+                .map(|message| message.number.value())
+                .max()
+                .unwrap_or(0),
+        )
+        .expect("validated persisted message numbers");
+        session.bindings.0.insert(binding_id.clone(), binding);
         session.active_binding_id = Some(binding_id.clone());
         binding_id
     };
