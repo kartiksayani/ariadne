@@ -43,6 +43,7 @@
     .dependency.critical { stroke: var(--critical); stroke-width: 2; }
     .task rect { fill: #2c5880; stroke: #80b8ff; rx: 4; }
     .task.critical rect { fill: #754b28; stroke: var(--critical); }
+    .task.in_progress rect { fill: #71601f; stroke: #f2d15f; }
     .task.merged rect { fill: #255343; stroke: var(--merged); }
     .task.selected rect { stroke: white; stroke-width: 3; }
     .task { cursor: pointer; }
@@ -59,6 +60,7 @@
       [aria-pressed="true"] { background: #dceaff; }
       .task rect { fill: #dceaff; stroke: #175b9e; }
       .task.critical rect { fill: #ffe7cd; }
+      .task.in_progress rect { fill: #fff2b8; stroke: #92720c; }
       .task.merged rect { fill: #d6f0e5; }
       .task.selected rect, .task:focus rect { stroke: #152238; }
       .error { color: #ad2424; }
@@ -88,7 +90,7 @@
           <button id="gantt-view" type="button" aria-pressed="true">Gantt estimate</button>
           <button id="graph-view" type="button" aria-pressed="false">Dependency graph</button>
         </div>
-        <div class="legend"><span>Orange + C: projected acceptance critical path</span><span>Green + M: maintainer-recorded merge</span><span>Solid: full acceptance joins</span><span>Dashed: implementation prerequisites</span><span>W: assigned worker lane</span></div>
+        <div class="legend"><span>Orange + C: projected acceptance critical path</span><span>Amber + I: implementation merged, acceptance in progress</span><span>Green + M: maintainer-recorded merge</span><span>Solid: full acceptance joins</span><span>Dashed: implementation prerequisites</span><span>W: assigned worker lane</span></div>
         <p class="muted" id="chart-note">Filters hide rows only; estimates use full acceptance joins. Implementation edges show earlier work eligibility after published contracts, not a validated completion forecast.</p>
         <div id="chart" class="scroll" aria-label="Interactive task chart"></div>
       </section>
@@ -2078,13 +2080,14 @@
     }
 
     function drawTask(svg, task, record, x, y, width, height, graph = false) {
-      const classes = ['task', record.critical ? 'critical' : '', completed.has(task.id) ? 'merged' : '', selected === task.id ? 'selected' : ''].join(' ');
+      const status = engine.taskStatus(task, completed);
+      const classes = ['task', record.critical ? 'critical' : '', status, selected === task.id ? 'selected' : ''].join(' ');
       const group = svgNode('g', {class: classes, role: 'button', tabindex: 0,
         'aria-label': task.id + ': ' + task.title + ', ' + task.estimate_days + ' estimated days, ' + engine.taskStatus(task, completed),
         'aria-pressed': String(selected === task.id), 'data-task-id': task.id}, svg);
       svgNode('title', {}, group, task.id + ' · ' + task.title);
       svgNode('rect', {x, y, width, height}, group);
-      const suffix = completed.has(task.id) ? ' M' : record.critical ? ' C' : '';
+      const suffix = completed.has(task.id) ? ' M' : (status === 'in_progress' ? ' I' : '') + (record.critical ? ' C' : '');
       const label = graph ? task.id + suffix + ' · ' + task.estimate_days + 'd' :
         task.id + suffix + ' · W' + (record.lane === null ? '–' : record.lane + 1);
       svgNode('text', {x: graph ? x + 6 : x + width + 6, y: y + 17, class: 'label'}, group, label);
