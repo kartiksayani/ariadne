@@ -68,10 +68,14 @@ describe('ordinary desktop composition', () => {
     expect([...transport.listeners.values()].every(callbacks => callbacks.size === 0)).toBe(true);
     expect(intervals.size).toBe(0);
   });
-  it('uses real registered controls, shares tree/graph selection and opens complete detail and the message rail', async () => {
+  it('shows seeded presence to a late reader, shares tree/graph selection and opens complete detail and the message rail', async () => {
     const { transport } = setup(); await openSession();
     expect(document.querySelector('.ref-header-context')?.textContent).toContain('Payments review');
-    expect(document.querySelector('.ref-header-context')?.textContent).toContain('Host state unknown');
+    // No presence hint is emitted: opening after the host event must seed its canonical observation.
+    await waitFor(() => expect(document.querySelector('.ref-header-context')?.textContent).toContain('Host running · fresh host event'));
+    expect(transport.queries).toContainEqual({ session: null, request: { command: 'session_list', params: {
+      project_id: route.project_id, state: null, cursor: null, limit: 100,
+    } } });
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
     await screen.findByRole('group', { name: 'Owner actions' });
     expect(screen.getAllByLabelText('Item detail')).not.toHaveLength(0);
