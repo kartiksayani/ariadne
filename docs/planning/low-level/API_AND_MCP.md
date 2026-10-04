@@ -412,6 +412,15 @@ items need no expected revision. New-parent ref handles topic/child creation
 without round trips. Every mutation produces activity provenance; replies produce
 separate full Message records with explicit item and round links.
 
+Core checks all supplied item/topic guards once against the locked original
+snapshot; ordered operations then use current staged revisions. Existing parents
+whose child counters change and items owning a closed round need their original
+item guard. Merely referencing an existing topic when adding an item needs no
+mandatory topic guard; any supplied guard is still checked. One batch Activity
+records mutation provenance and the union of touched items, preserving exact
+nonblank summary text or using a deterministic fallback for blank summaries.
+An empty no-result batch with a blank summary saves only its receipt/revision.
+
 `ResultDraft`: `{outcome:answered|deferred|unable,explanation,
 reply_refs:Ref[],followup_item_refs:Ref[],handled_through_message_number}`.
 Requires a valid open input/attempt in this binding; terminal-originated apply
@@ -424,6 +433,15 @@ The handled watermark must include this input's owner message and cannot
 acknowledge future unissued messages. Result commits once per attempt. Incremental
 applies before result are allowed; subsequent new operations after result returns
 `result_already_committed` (exact operation retries remain valid).
+
+The native `apply::ApplyService` uses the registered Store transaction and pure
+domain/history helpers. Fresh source writes require both the trusted current
+binding generation and the attempt's originating generation to be current;
+historical read permission grants no write authority. A result watermark obeys
+source owner message <= handled watermark <= trusted issued watermark <= latest
+persisted message. Narrower trusted grants never widen. Exact operation replay
+returns original IDs and receipt before mutable guards. Transport composition
+remains with the owning CLI/MCP/runtime tasks.
 
 ### Concrete reply + two children + result
 
