@@ -3,6 +3,7 @@ pub mod apply;
 pub mod bindings;
 #[path = "service/context.rs"]
 mod context;
+pub mod delivery;
 mod delivery_join;
 mod dto;
 #[path = "service/errors.rs"]

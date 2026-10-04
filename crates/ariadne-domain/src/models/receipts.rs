@@ -81,11 +81,24 @@ pub enum SavedReceiptData {
         input_result_state: Option<ResultState>,
         queue_join_state: Option<InputState>,
     },
+    Claim {
+        input_id: UuidV4,
+        attempt_id: UuidV4,
+    },
+    DeliveryExpiry {
+        input_id: UuidV4,
+        attempt_id: UuidV4,
+    },
     Event {
         event_id: String,
         input_id: Option<UuidV4>,
         attempt_id: Option<UuidV4>,
         durable_effect: bool,
+    },
+    EventConflict {
+        event_id: String,
+        input_id: Option<UuidV4>,
+        attempt_id: Option<UuidV4>,
     },
     Continuation {
         continuation: ContinuationReceipt,

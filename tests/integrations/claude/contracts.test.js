@@ -48,12 +48,15 @@ describe('published wire consumers', () => {
     expect(first.event_id).toBe(again.event_id);
     expect((await lifecycle({...binding,generation:binding.binding_id},value,'accepted',{receipt:null},'actual-turn')).event_id).not.toBe(first.event_id);
   });
-  it('keeps pending lifecycle until exact durable receipt, never trusting an ephemeral acknowledgment', async () => {
+  it('accepts matching changed or unchanged Core receipts and rejects malformed or mismatched acknowledgments', async () => {
     const event = await lifecycle(binding,await claim(),'accepted',{receipt:null});
     const session = {session_id:input};
     const receipt = {event_id:event.event_id,session_id:input,revision:1,durable_effect:true,replayed:false};
     expect(reportReceipt(receipt,event,session)).toBe(receipt);
-    for (const value of [{...receipt,event_id:'other'},{...receipt,session_id:attempt},{...receipt,revision:null},{...receipt,durable_effect:false},{...receipt,replayed:'yes'}]) {
+    for (const value of [{...receipt,durable_effect:false,revision:null},{...receipt,durable_effect:false}, {...receipt,replayed:true}]) {
+      expect(reportReceipt(value,event,session)).toBe(value);
+    }
+    for (const value of [{...receipt,event_id:'other'},{...receipt,session_id:attempt},{...receipt,revision:null},{...receipt,durable_effect:'false'},{...receipt,replayed:'yes'}, {...receipt,revision:0}, {...receipt,revision:1.5}, {...receipt,revision:Number.MAX_SAFE_INTEGER+1}, {...receipt,revision:'1'}]) {
       expect(() => reportReceipt(value,event,session)).toThrow();
     }
   });

@@ -1,8 +1,16 @@
-//! One pure delivery join, shared by apply and the future durable reporter.
+//! One pure delivery join, shared by apply and the durable reporter.
 use ariadne_domain::models::*;
 
 pub(crate) fn join(session: &mut Session, input_id: &UuidV4, attempt_id: &UuidV4, at: &UtcMillis) {
     // Callers have already validated the exact input/attempt/binding scope.
+    let binding_id = &session.inputs.0[input_id].binding_id;
+    let contradictory_receipt = session.operation_receipts.0.values().flatten().any(|entry| {
+        matches!(&entry.actor_scope, ReceiptActorScope::Adapter { binding_id: actor_binding }
+            if actor_binding == binding_id)
+            && matches!(&entry.result.data,
+                SavedReceiptData::EventConflict { input_id: Some(prior_input), attempt_id: Some(prior_attempt), .. }
+                if prior_input == input_id && prior_attempt == attempt_id)
+    });
     let input = session.inputs.0.get_mut(input_id).expect("validated input");
     let attempt = input
         .attempts
@@ -29,10 +37,12 @@ pub(crate) fn join(session: &mut Session, input_id: &UuidV4, attempt_id: &UuidV4
         .error
         .as_ref()
         .is_some_and(|e| e.code != "result_missing");
-    if failed || uncertain || blocking_error {
+    if failed || uncertain || blocking_error || contradictory_receipt {
         input.state = InputState::NeedsAttention;
         binding.dispatch_state = DispatchState::RecoveryRequired;
-        if binding.pause_reason.is_none() {
+        if binding.pause_reason.is_none()
+            || (contradictory_receipt && binding.pause_reason == Some(PauseReason::ResultMissing))
+        {
             binding.pause_reason = Some(if failed {
                 PauseReason::HostFailure
             } else {
@@ -130,6 +140,53 @@ mod tests {
         let sealed = session.clone();
         join(&mut session, &input_id, &attempt_id, &at);
         assert_eq!(session, sealed);
+    }
+
+    #[test]
+    fn resolved_prior_attempt_conflict_does_not_poison_a_distinct_attempt() {
+        let (mut session, input_id, attempt_id) = result_fixture();
+        let at = session.updated_at.clone();
+        let binding_id = session.inputs.0[&input_id].binding_id.clone();
+        let mut receipt = session
+            .operation_receipts
+            .0
+            .values()
+            .flatten()
+            .next()
+            .unwrap()
+            .clone();
+        receipt.actor_scope = ReceiptActorScope::Adapter { binding_id };
+        receipt.result.data = SavedReceiptData::EventConflict {
+            event_id: "retained prior contradiction".into(),
+            input_id: Some(input_id.clone()),
+            attempt_id: Some(attempt_id.clone()),
+        };
+        session
+            .operation_receipts
+            .0
+            .insert(receipt.operation_id.clone(), vec![receipt]);
+        let input = session.inputs.0.get_mut(&input_id).unwrap();
+        let prior = input
+            .attempts
+            .iter_mut()
+            .find(|a| a.id == attempt_id)
+            .unwrap();
+        prior.sealed_at = Some(at.clone());
+        let mut next = prior.clone();
+        next.id = UuidV4::new("00000000-0000-4000-8000-ffffffffffff").unwrap();
+        next.sealed_at = None;
+        next.turn_state = TurnState::Completed;
+        let next_id = next.id.clone();
+        input.active_attempt_id = Some(next_id.clone());
+        input.attempts.push(next);
+        join(&mut session, &input_id, &next_id, &at);
+        assert_eq!(session.inputs.0[&input_id].state, InputState::Handled);
+        assert!(session.inputs.0[&input_id]
+            .attempts
+            .last()
+            .unwrap()
+            .sealed_at
+            .is_some());
     }
 
     #[test]

@@ -191,8 +191,11 @@ Supervisors serialize one bounded provider response and its Core reports. They d
 not read another response while lifecycle receipts are outstanding. An 8 MiB
 provider response may include a full diagnostic ring plus durable facts; 256 is
 the lossy diagnostic record capacity, not a lifecycle event limit. Validate each
-fact, canonical error and correlated receipt before advancing. Lifecycle receipts
-must confirm durable effect. Text stays diagnostic, never a domain reply; the
+fact, canonical error and correlated receipt before advancing. A successful
+lifecycle receipt confirms either a durable effect or Core's validated unchanged
+observation; unchanged facts need no fabricated write or revision. Malformed,
+mismatched or failed receipts retain the pending fact and block progress.
+Text stays diagnostic, never a domain reply; the
 separate display copy is redacted and bounded to 256 records/2 MiB with explicit
 gap/truncation. It does not alter the event submitted to Core.
 
@@ -357,7 +360,8 @@ into shell commands. Helper resolves state via explicit binding handles.
    claim. Session switch pauses and invalidates the old connection.
 7. On matching main `turn.complete`, report turnId, reason, isAborted and bounded
    visible text diagnostic. Core records lifecycle only; agent CLI/MCP results
-   supply actual item messages. Locally clear active after durable report receipt;
+   supply actual item messages. Locally clear active after a matching validated
+   successful Core report receipt, including an unchanged observation;
    next claim still waits for core's domain-result/turn join.
 8. On `session.end`, stop polling and report disconnected best-effort. Missing
    end event is handled by stale heartbeat/reconciliation, never assumed clean.
@@ -399,7 +403,7 @@ or exact matching turn.start supports accepted with receipt:null.
 
 SDK answer&&!isAborted maps to completed; aborted/isAborted to interrupted;
 refusal/error to failed. Unknown evidence is uncertain. Keep final visible text
-as bounded diagnostic only. Retain exact report events until matching durable
+as bounded diagnostic only. Retain exact report events until matching validated
 receipts and prevent reconnect/new claims while a detached submission remains
 unsettled. Serialize owner connect/disconnect transitions: close prior-loop claim
 admission before mutation awaits, drain any admitted bounded poll and recheck

@@ -3,13 +3,17 @@
 //! Callbacks do only local domain work: no host, socket, inference or lease waits.
 //! Core owns authorization, expected revisions and command-specific semantics.
 mod catalogue;
+mod events;
 pub(crate) mod fs;
 pub(crate) mod lock;
 pub use catalogue::{ProjectCatalogue, SessionReadOutcome};
+pub use events::{EventIdentity, EventMutation, EventTransaction};
 
 use ariadne_domain::history::{validate_session_history, HistoryError};
 use ariadne_domain::models::*;
-use ariadne_domain::validation::{validate_session_items, ValidationError};
+use ariadne_domain::validation::{
+    validate_session_delivery, validate_session_items, ValidationError,
+};
 use fs::Directory;
 use serde_json::Value;
 use sha2::{Digest, Sha256 as Hasher};
@@ -262,43 +266,75 @@ impl Store {
             let digest = self.digest(session_id, actor, normalized_command)?;
             let mut candidate = live.clone();
             let data = apply(&mut candidate).map_err(TransactionError::Command)?;
-            // Callback owns business effects, not transaction bookkeeping.
-            if candidate.id != live.id
-                || candidate.project_id != live.project_id
-                || candidate.revision != live.revision
-                || candidate.operation_receipts != live.operation_receipts
-            {
-                return Err(StoreError::IdentityMismatch.into());
-            }
-            candidate.revision = PositiveSafeInteger::new(live.revision.value() + 1)
-                .map_err(|_| StoreError::CounterOverflow)?;
-            let saved = SavedReceipt {
-                operation_id: operation_id.clone(),
-                session_id: session_id.clone(),
-                revision: candidate.revision,
+            self.save_effect(
+                &live,
+                &previous,
+                candidate,
+                actor,
+                operation_id,
+                digest,
                 data,
-            };
-            candidate
-                .operation_receipts
-                .0
-                .entry(operation_id.clone())
-                .or_default()
-                .push(OperationReceipt {
-                    operation_id: operation_id.clone(),
-                    actor_scope: actor.clone(),
-                    command_digest: digest,
-                    result: saved.clone(),
-                });
-            self.validate(&candidate, session_id)?;
-            let bytes = encode(&candidate)?;
-            self.commit(
-                &format!("{}.json", session_id.as_str()),
-                Some(&previous),
-                &bytes,
-                Some(operation_id.clone()),
-            )?;
-            Ok(saved)
+            )
+            .map_err(TransactionError::Store)
         })
+    }
+
+    /// Shared transaction bookkeeping, called only while the session lock is held.
+    #[allow(clippy::too_many_arguments)]
+    fn save_effect(
+        &self,
+        live: &Session,
+        previous: &[u8],
+        mut candidate: Session,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        digest: Sha256,
+        data: SavedReceiptData,
+    ) -> Result<SavedReceipt, StoreError> {
+        // Callbacks own business effects, not transaction bookkeeping.
+        if candidate.id != live.id
+            || candidate.project_id != live.project_id
+            || candidate.revision != live.revision
+            || candidate.operation_receipts != live.operation_receipts
+        {
+            return Err(StoreError::IdentityMismatch);
+        }
+        if live
+            .operation_receipts
+            .0
+            .get(operation_id)
+            .is_some_and(|bucket| bucket.iter().any(|entry| &entry.actor_scope == actor))
+        {
+            return Err(StoreError::OperationReused);
+        }
+        candidate.revision = PositiveSafeInteger::new(live.revision.value() + 1)
+            .map_err(|_| StoreError::CounterOverflow)?;
+        let saved = SavedReceipt {
+            operation_id: operation_id.clone(),
+            session_id: live.id.clone(),
+            revision: candidate.revision,
+            data,
+        };
+        candidate
+            .operation_receipts
+            .0
+            .entry(operation_id.clone())
+            .or_default()
+            .push(OperationReceipt {
+                operation_id: operation_id.clone(),
+                actor_scope: actor.clone(),
+                command_digest: digest,
+                result: saved.clone(),
+            });
+        self.validate(&candidate, &live.id)?;
+        let bytes = encode(&candidate)?;
+        self.commit(
+            &format!("{}.json", live.id.as_str()),
+            Some(previous),
+            &bytes,
+            Some(operation_id.clone()),
+        )?;
+        Ok(saved)
     }
 
     fn with_lock<T, E: From<StoreError>>(
@@ -343,6 +379,7 @@ impl Store {
         }
         validate_session_items(session).map_err(StoreError::Validation)?;
         validate_session_history(session).map_err(StoreError::History)?;
+        validate_session_delivery(session).map_err(StoreError::Validation)?;
         for (operation_id, bucket) in &session.operation_receipts.0 {
             for (index, receipt) in bucket.iter().enumerate() {
                 if &receipt.operation_id != operation_id
