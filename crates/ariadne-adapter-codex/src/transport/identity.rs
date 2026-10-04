@@ -242,7 +242,16 @@ impl ExecutableIdentity {
     pub fn unchanged(&self) -> bool {
         Self::read(&self.path).is_ok_and(|identity| identity == *self)
     }
-    pub fn version(&self) -> Result<(), AdapterError> {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+    pub(crate) fn version_before(&self, deadline: Instant) -> Result<(), AdapterError> {
+        if Instant::now() >= deadline {
+            return Err(error(
+                Code::HostUnreachable,
+                "Codex version probe deadline expired.",
+            ));
+        }
         let mut child = Command::new(&self.path)
             .arg("--version")
             .stdin(Stdio::null())
@@ -274,7 +283,7 @@ impl ExecutableIdentity {
                     "Cannot bound Codex version probe.",
                 ));
             }
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = deadline.min(Instant::now() + Duration::from_secs(5));
             let mut bytes = Vec::new();
             let mut buffer = [0; 1024];
             let mut status = None;

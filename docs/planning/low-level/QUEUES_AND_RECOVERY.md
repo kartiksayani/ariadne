@@ -76,6 +76,11 @@ Ariadne guarantees one stored effect for the same validated operation ID/digest.
 It cannot guarantee exactly-once provider execution across a lost queue receipt.
 Persist before send, correlate actual host evidence and leave uncertainty visible.
 Internal event IDs and immutable payload digests deduplicate lifecycle replay.
+The semantic digest excludes envelope observation time and an accepted host
+receipt's observation time. Fresh scans of the same fact may report new times;
+identical remaining facts replay the original durable receipt without changing
+revision or stored timestamps. A changed scope, provider reference, status,
+reason or diagnostic remains a conflict; see PROCESS's normalized event contract.
 Native queue IDs are not assumed idempotency keys. Do not automatically drain,
 reorder or delete user/provider queue entries belonging to other clients.
 

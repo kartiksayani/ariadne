@@ -43,9 +43,11 @@ pub(super) fn match_turn(
                         && digest(text.as_bytes()) == attempt.payload_sha256.as_str()
                     {
                         bounded_identifier(id)?;
-                        if let Some(id) = client_id {
-                            bounded_identifier(id)?;
-                        }
+                        // An optional unusable provider receipt cannot defeat exact content proof.
+                        // Never normalize/truncate it into another identity.
+                        let client_id = client_id
+                            .as_ref()
+                            .filter(|id| !id.is_empty() && id.len() <= 4096);
                         matches.push((id, client_id));
                     }
                 }
@@ -88,7 +90,7 @@ pub(super) fn match_turn(
             UserMessageIdentity {
                 host_turn_id: turn.id.clone(),
                 host_message_id: matches[0].0.clone(),
-                client_id: matches[0].1.clone(),
+                client_id: matches[0].1.cloned(),
             },
         );
         let event = |event_id: String, event: EventPayload| NormalizedEvent {
