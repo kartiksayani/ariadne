@@ -101,7 +101,7 @@ describe('ordinary desktop composition', () => {
     await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(session.messages.length));
     await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
     const before = structuredClone(transport.preferences), writes = transport.mutations.length;
-    const tree = screen.getByRole('tree', { name: 'Sentences' }), detail = screen.getByLabelText('Item detail');
+    const tree = screen.getByRole('tree', { name: 'Sentences' }), detail = document.querySelector<HTMLElement>('.item-history')!;
     tree.scrollTop = 50; detail.scrollTop = 70; log.scrollTop = 123;
     const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
     const linked = session.messages.filter(message => message.item_id === '2' || message.items_touched.includes('2'));
