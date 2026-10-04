@@ -792,3 +792,95 @@ fn historical_attempt_reads_with_current_generation_do_not_gain_write_authority(
     assert_eq!(envelope(&output, 3)["error"]["code"], "stale_generation");
     assert_eq!(setup.bytes(), before);
 }
+
+#[test]
+fn real_process_bounds_long_native_errors_in_json_and_text_without_claiming_no_effects() {
+    let routing = [
+        "read",
+        "--binding",
+        "00000000-0000-4000-8000-000000000003",
+        "--generation",
+        "00000000-0000-4000-8000-000000000004",
+    ];
+    let path = format!("/{}/data", "a".repeat(10_000));
+    for json in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ariadne"));
+        command.args(routing).env("ARIADNE_HOME", &path);
+        if json {
+            command.arg("--json");
+        }
+        let output = invoke(command, None);
+        if json {
+            let value = envelope(&output, 3);
+            let error: CoreError = serde_json::from_value(value["error"].clone()).unwrap();
+            error.validate().unwrap();
+            assert_eq!(error.code, CoreErrorCode::ProtocolConflict);
+            assert!(!error.retryable);
+            assert!(error.hint.contains("effects may already exist"));
+            assert!(output.stdout.len() < 1024);
+        } else {
+            assert_eq!(output.status.code(), Some(3));
+            assert!(output.stdout.is_empty());
+            let text = String::from_utf8(output.stderr).unwrap();
+            assert!(text.contains("ProtocolConflict"));
+            assert!(text.contains("effects may already exist"));
+            assert!(text.len() < 1024);
+        }
+    }
+}
+
+#[test]
+fn output_preserves_valid_canonical_errors_and_uncertainty_exits() {
+    for (code, exit) in [
+        (CoreErrorCode::InvalidArgument, 2),
+        (CoreErrorCode::RevisionConflict, 3),
+        (CoreErrorCode::IoError, 4),
+        (CoreErrorCode::FutureSchema, 5),
+        (CoreErrorCode::CommitUncertain, 4),
+    ] {
+        let mut error = CoreError::new(
+            code,
+            "Exact original error",
+            "Retain the exact operation ID; inspect its saved receipt.",
+        );
+        error.current_revision = Some(PositiveSafeInteger::new(7).unwrap());
+        error.validate().unwrap();
+        for json in [false, true] {
+            let mut output = vec![];
+            let mut errors = vec![];
+            assert_eq!(
+                ariadne_cli::output::write(Err(error.clone()), json, &mut output, &mut errors),
+                exit
+            );
+            if json {
+                assert!(errors.is_empty());
+                let envelope: FailureEnvelope = serde_json::from_slice(&output).unwrap();
+                assert_eq!(envelope.error, error);
+            } else {
+                assert!(output.is_empty());
+                assert_eq!(
+                    String::from_utf8(errors).unwrap(),
+                    format!("{:?}: {}\n{}\n", error.code, error.message, error.hint)
+                );
+            }
+        }
+    }
+    let malformed = CoreError::new(
+        CoreErrorCode::CommitUncertain,
+        "x".repeat(4097),
+        "Do not resend uncertain delivery.",
+    );
+    let mut output = vec![];
+    let mut errors = vec![];
+    assert_eq!(
+        ariadne_cli::output::write(Err(malformed), true, &mut output, &mut errors),
+        3
+    );
+    let envelope: FailureEnvelope = serde_json::from_slice(&output).unwrap();
+    envelope.error.validate().unwrap();
+    assert!(!envelope.error.retryable);
+    assert!(envelope
+        .error
+        .hint
+        .contains("original request, event and operation IDs"));
+}

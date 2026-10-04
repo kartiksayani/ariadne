@@ -11,6 +11,7 @@ pub fn write(
     output: &mut dyn Write,
     errors: &mut dyn Write,
 ) -> i32 {
+    let result = result.map_err(ariadne_runtime::control::validated_error);
     let exit = result
         .as_ref()
         .err()
