@@ -1,7 +1,10 @@
 //! Private control framing DTOs, shared with the installed bridge client.
 use super::{error, validated_error};
-use ariadne_core::{ClaimRequest, CoreError, CoreErrorCode, PreparedAttempt};
-use ariadne_domain::models::{BindingSummary, UuidV4};
+use ariadne_core::{
+    ClaimRequest, CoreError, CoreErrorCode, MutationReceipt, OwnerCommand, OwnerMutationRequest,
+    PreparedAttempt,
+};
+use ariadne_domain::models::{BindingSummary, SavedReceiptData, UuidV4};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -31,6 +34,7 @@ pub enum ControlMethod {
     Ping(BindingScope),
     Claim(ClaimRequest),
     ConnectionStatus(BindingScope),
+    BindingConnect(Box<OwnerMutationRequest>),
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ControlRequest {
@@ -45,6 +49,7 @@ impl<'de> Deserialize<'de> for ControlRequest {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Params {
+            Owner(Box<OwnerMutationRequest>),
             Claim(ClaimRequest),
             Scope(BindingScope),
         }
@@ -62,6 +67,7 @@ impl<'de> Deserialize<'de> for ControlRequest {
             ("ping", Params::Scope(scope)) => ControlMethod::Ping(scope),
             ("claim", Params::Claim(request)) => ControlMethod::Claim(request),
             ("connection_status", Params::Scope(scope)) => ControlMethod::ConnectionStatus(scope),
+            ("binding_connect", Params::Owner(request)) => ControlMethod::BindingConnect(request),
             _ => {
                 return Err(serde::de::Error::custom(
                     "Unknown private control method or mismatched params",
@@ -102,15 +108,28 @@ impl ControlRequest {
                 ));
             }
         }
+        if let ControlMethod::BindingConnect(request) = &self.method {
+            request.validate_wire()?;
+            if request.session.is_some()
+                || !matches!(request.command, OwnerCommand::BindingConnect { .. })
+                || request.command.operation_id() != &self.id
+            {
+                return Err(error(CoreErrorCode::InvalidArgument,
+                    "Control binding_connect requires the canonical null-session BindingConnect request and id equal to op_id; retain the original operation."));
+            }
+        }
         Ok(())
     }
-    pub fn scope(&self) -> BindingScope {
+    pub fn scope(&self) -> Option<BindingScope> {
         match &self.method {
-            ControlMethod::Ping(scope) | ControlMethod::ConnectionStatus(scope) => scope.clone(),
-            ControlMethod::Claim(request) => BindingScope {
+            ControlMethod::Ping(scope) | ControlMethod::ConnectionStatus(scope) => {
+                Some(scope.clone())
+            }
+            ControlMethod::Claim(request) => Some(BindingScope {
                 binding_id: request.binding_id.clone(),
                 generation: request.generation.clone(),
-            },
+            }),
+            ControlMethod::BindingConnect(_) => None,
         }
     }
 }
@@ -120,6 +139,7 @@ pub enum ControlResult {
     Status(BindingSummary),
     Ping(BindingScope),
     Claim(Option<PreparedAttempt>),
+    BindingConnect(MutationReceipt),
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -184,6 +204,9 @@ impl ControlResponse {
                     result.validate_for(request)?;
                 }
             }
+            (ControlMethod::BindingConnect(request), ControlResult::BindingConnect(receipt)) => {
+                validate_connect_receipt(request, receipt)?;
+            }
             _ => {
                 return Err(error(
                     CoreErrorCode::ProtocolConflict,
@@ -193,4 +216,41 @@ impl ControlResponse {
         }
         Ok(response.result)
     }
+}
+
+// A saved bootstrap receipt is not evidence of a live supervisor, lease or provider.
+pub(crate) fn validate_connect_receipt(
+    request: &OwnerMutationRequest,
+    receipt: &MutationReceipt,
+) -> Result<(), CoreError> {
+    request.validate_wire()?;
+    let (OwnerCommand::BindingConnect { op_id, params, .. }, MutationReceipt::Session(saved)) =
+        (&request.command, receipt)
+    else {
+        return Err(connect_conflict());
+    };
+    let SavedReceiptData::BindingConnect {
+        setup_instruction, ..
+    } = &saved.data
+    else {
+        return Err(connect_conflict());
+    };
+    if request.session.is_some()
+        || &saved.operation_id != op_id
+        || params
+            .existing_session_id
+            .as_ref()
+            .is_some_and(|id| id != &saved.session_id)
+        || setup_instruction.trim().is_empty()
+        || setup_instruction.contains('\0')
+        || setup_instruction.len() > 64 * 1024
+    {
+        return Err(connect_conflict());
+    }
+    Ok(())
+}
+fn connect_conflict() -> CoreError {
+    CoreError::new(CoreErrorCode::ProtocolConflict,
+        "Binding connect returned a receipt with invalid kind, operation, selected session or setup instruction.",
+        "Retain the original operation ID and parameters; effects may already exist. Look up the exact saved connect receipt before repeating that operation.")
 }

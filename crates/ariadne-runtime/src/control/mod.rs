@@ -17,7 +17,7 @@ use std::{
     os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     net::{UnixListener, UnixStream},
@@ -88,6 +88,7 @@ pub struct ControlServer {
     listener: std::os::unix::net::UnixListener,
     core: Arc<dyn CoreService>,
     bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
+    binding_connect: bool,
 }
 impl ControlServer {
     /// Blocking native setup. Holding DesktopOwner proves stale removal is permitted.
@@ -138,7 +139,14 @@ impl ControlServer {
             listener,
             core,
             bindings: Arc::new(routes),
+            binding_connect: false,
         })
+    }
+    /// Native composition opts in only with its real configured CoreService.
+    /// This bootstrap route grants no dispatch lease or supervisor readiness.
+    pub fn with_binding_connect(mut self) -> Self {
+        self.binding_connect = true;
+        self
     }
     pub async fn serve(self, mut stop: oneshot::Receiver<()>) -> Result<(), CoreError> {
         let listener = UnixListener::from_std(self.listener)
@@ -164,9 +172,15 @@ impl ControlServer {
             }
             let core = self.core.clone();
             let bindings = self.bindings.clone();
+            let binding_connect = self.binding_connect;
+            let deadline = Instant::now() + CONTROL_TIMEOUT;
             connections.spawn(async move {
                 let slot = Arc::new(slot);
-                let _ = timeout(CONTROL_TIMEOUT, handle(stream, core, bindings, slot)).await;
+                let _ = tokio::time::timeout_at(
+                    tokio::time::Instant::from_std(deadline),
+                    handle(stream, core, bindings, binding_connect, slot, deadline),
+                )
+                .await;
             });
         }
     }
@@ -175,7 +189,9 @@ async fn handle(
     mut stream: UnixStream,
     core: Arc<dyn CoreService>,
     bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
+    binding_connect: bool,
     slot: Arc<tokio::sync::OwnedSemaphorePermit>,
+    deadline: Instant,
 ) -> Result<(), CoreError> {
     let bytes = codec::read_frame(&mut stream).await?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| {
@@ -203,56 +219,93 @@ async fn handle(
         Ok(request) => match request.validate() {
             Err(e) => Err(e),
             Ok(()) => {
-                let scope = request.scope();
-                match bindings.get(scope.binding_id.as_str()) {
-                    None => Err(error(
-                        CoreErrorCode::NotFound,
-                        "No current desktop supervisor holds this binding lease.",
-                    )),
-                    Some((lease, gate)) => match lease.context(
-                        &scope.binding_id,
-                        if matches!(request.method, ControlMethod::Claim(_)) {
-                            lease.generation()
-                        } else {
-                            &scope.generation
-                        },
-                    ) {
-                        Err(e) => Err(e),
-                        Ok(context) => match request.method {
-                            ControlMethod::Ping(scope) => Ok(ControlResult::Ping(scope)),
-                            ControlMethod::Claim(request) => {
-                                let lease = lease.clone();
-                                let slot = slot.clone();
-                                gate.admit(|| tokio::task::spawn_blocking(move || {
+                if let ControlMethod::BindingConnect(request) = request.method {
+                    if !binding_connect {
+                        Err(CoreError::new(CoreErrorCode::Unsupported,
+                            "Native binding connect is not configured on this desktop.",
+                            "Use matching installed app/helper versions with native provider verification; retain the original operation ID."))
+                    } else if Instant::now() >= deadline {
+                        Err(connect_unavailable())
+                    } else {
+                        tokio::task::spawn_blocking(move || {
+                            let _retained_slot = slot;
+                            if Instant::now() >= deadline {
+                                return Err(connect_unavailable());
+                            }
+                            let context = OwnerContext::from_trusted_entrypoint(OwnerScope::Registry);
+                            let receipt = core.execute_owner(context, request.command.clone())?;
+                            wire::validate_connect_receipt(&request, &receipt)?;
+                            Ok(ControlResult::BindingConnect(receipt))
+                        }).await.map_err(|_| CoreError::new(CoreErrorCode::HostUnreachable,
+                            "Blocking native binding connect did not return a receipt.",
+                            "Retain the original operation ID and parameters; effects may already exist. Look up its exact saved receipt before repeating that operation."))?
+                    }
+                } else {
+                    let scope = request.scope().ok_or_else(|| {
+                        error(
+                            CoreErrorCode::InvalidArgument,
+                            "Control method requires its declared binding scope.",
+                        )
+                    })?;
+                    match bindings.get(scope.binding_id.as_str()) {
+                        None => Err(error(
+                            CoreErrorCode::NotFound,
+                            "No current desktop supervisor holds this binding lease.",
+                        )),
+                        Some((lease, gate)) => match lease.context(
+                            &scope.binding_id,
+                            if matches!(request.method, ControlMethod::Claim(_)) {
+                                lease.generation()
+                            } else {
+                                &scope.generation
+                            },
+                        ) {
+                            Err(e) => Err(e),
+                            Ok(context) => match request.method {
+                                ControlMethod::Ping(scope) => Ok(ControlResult::Ping(scope)),
+                                ControlMethod::Claim(request) => {
+                                    let lease = lease.clone();
+                                    let slot = slot.clone();
+                                    gate.admit(|| tokio::task::spawn_blocking(move || {
                                     let _retained_lease = lease;
                                     let _retained_slot = slot;
                                     let result = core.claim(context, request.clone())?;
                                     if let Some(result) = &result { result.validate_for(&request)?; }
                                     Ok(ControlResult::Claim(result))
                                 }))?.await.map_err(|_| error(CoreErrorCode::HostUnreachable, "Blocking core claim failed; reuse the same claim request ID to recover its possibly saved receipt."))?
-                            }
-                            ControlMethod::ConnectionStatus(_) => {
-                                let lease = lease.clone();
-                                let slot = slot.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    let _retained_slot = slot;
-                                    status(core.as_ref(), &lease)
-                                })
-                                .await
-                                .map_err(|_| {
-                                    error(
-                                        CoreErrorCode::HostUnreachable,
-                                        "Blocking core status read failed.",
-                                    )
-                                })?
-                            }
+                                }
+                                ControlMethod::ConnectionStatus(_) => {
+                                    let lease = lease.clone();
+                                    let slot = slot.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        let _retained_slot = slot;
+                                        status(core.as_ref(), &lease)
+                                    })
+                                    .await
+                                    .map_err(|_| {
+                                        error(
+                                            CoreErrorCode::HostUnreachable,
+                                            "Blocking core status read failed.",
+                                        )
+                                    })?
+                                }
+                                ControlMethod::BindingConnect(_) => Err(error(
+                                    CoreErrorCode::InvalidArgument,
+                                    "Binding connect cannot use the lease-required route.",
+                                )),
+                            },
                         },
-                    },
+                    }
                 }
             }
         },
     };
     codec::write(&mut stream, &ControlResponse::from_result(id, result)).await
+}
+fn connect_unavailable() -> CoreError {
+    CoreError::new(CoreErrorCode::HostUnreachable,
+        "Native binding connect is unavailable or exceeded its control deadline.",
+        "Open the matching desktop for new provider verification. Retain the original operation ID and parameters; effects may already exist after response loss. Check its exact saved receipt before repeating that operation.")
 }
 fn status(core: &dyn CoreService, lease: &BindingLease) -> Result<ControlResult, CoreError> {
     let context = QueryContext::owner(OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
@@ -299,14 +352,22 @@ fn status(core: &dyn CoreService, lease: &BindingLease) -> Result<ControlResult,
 /// Native client. One absolute timeout includes validation, connect and complete frame IO.
 pub async fn call(home: PathBuf, request: ControlRequest) -> Result<ControlResult, CoreError> {
     request.validate()?;
+    let binding_connect = matches!(request.method, ControlMethod::BindingConnect(_));
     timeout(CONTROL_TIMEOUT, async move {
+        let response: ControlResponse = async {
         let path = tokio::task::spawn_blocking(move || control_path(&home)).await.map_err(|_| error(CoreErrorCode::HostUnreachable, "Private endpoint validation failed."))??;
         let mut stream = UnixStream::connect(path).await.map_err(|e| io_error("Connect desktop control socket", e))?;
         if stream.peer_cred().map_err(|e| io_error("Verify desktop peer UID", e))?.uid() != uid() { return Err(error(CoreErrorCode::PermissionDenied, "Desktop control peer UID differs.")); }
         codec::write(&mut stream, &request).await?;
-        let response: ControlResponse = codec::read(&mut stream).await?;
+        codec::read(&mut stream).await
+        }.await.map_err(|mut cause: CoreError| {
+            if binding_connect && cause.code == CoreErrorCode::HostUnreachable {
+                cause.hint = connect_unavailable().hint;
+            }
+            cause
+        })?;
         response.into_result(&request)
-    }).await.map_err(|_| error(CoreErrorCode::HostUnreachable, "Desktop control exceeded its 5-second frame IO bound; reuse the same claim request ID after a possibly saved claim."))?
+    }).await.map_err(|_| if binding_connect { connect_unavailable() } else { error(CoreErrorCode::HostUnreachable, "Desktop control exceeded its 5-second frame IO bound; reuse the same claim request ID after a possibly saved claim.") })?
 }
 /// CLI-only blocking entrypoint. Async/native UI callers use call instead.
 pub fn call_blocking(home: PathBuf, request: ControlRequest) -> Result<ControlResult, CoreError> {

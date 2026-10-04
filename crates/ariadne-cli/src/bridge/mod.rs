@@ -1,11 +1,29 @@
 use ariadne_agent_protocol::NormalizedEvent;
 use ariadne_core::{
     AdapterContext, ClaimRequest, CoreError, CoreErrorCode, CoreService, EventReceipt,
-    PreparedAttempt,
+    MutationReceipt, OwnerMutationRequest, PreparedAttempt,
 };
 use ariadne_domain::models::{BindingSummary, UuidV4};
 use ariadne_runtime::control::{self, ControlMethod, ControlRequest, ControlResult};
 use std::path::PathBuf;
+
+/// New binding verification contacts the desktop only AFTER the owner entrypoint
+/// has checked exact offline saved-connect replay. No automatic retry or new op ID.
+pub fn binding_connect(
+    home: PathBuf,
+    request: OwnerMutationRequest,
+) -> Result<MutationReceipt, CoreError> {
+    let control = ControlRequest::new(
+        request.command.operation_id().clone(),
+        ControlMethod::BindingConnect(Box::new(request)),
+    )?;
+    let ControlResult::BindingConnect(receipt) = control::call_blocking(home, control)? else {
+        return Err(CoreError::new(CoreErrorCode::ProtocolConflict,
+            "Desktop returned another result to binding connect.",
+            "Retain the original operation ID; effects may already exist. Check matching app/helper versions and its exact saved receipt."));
+    };
+    Ok(receipt)
+}
 
 /// Claim always contacts the desktop; there is no direct disk/core claim fallback.
 pub fn claim(home: PathBuf, request: ClaimRequest) -> Result<Option<PreparedAttempt>, CoreError> {

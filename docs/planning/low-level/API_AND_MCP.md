@@ -550,6 +550,16 @@ from the existing private control projection. `bridge report --binding B
 --generation G --json-stdin` receives one canonical NormalizedEvent and returns
 ApplicationEnvelope<EventReceipt>; exact pending event IDs/bytes survive failures.
 None of these helper consumers add a local DTO or authorize dispatch from status.
+The installed owner helper checks exact saved-connect replay through native Core
+before using the private `binding_connect` control method for a new operation.
+That method accepts only the unchanged null-session BindingConnect wrapper and
+returns canonical MutationReceipt, with envelope ID equal to op_id. It provides
+no general owner transport. A new connection requires the open desktop's native
+qualified provider composition; stored replay remains direct and usable when it
+is closed. Timeouts retain the original op_id/parameters and never authorize an
+automatic retry or imply an unsaved operation. This leaves direct domain CLI,
+apply and lifecycle report behavior when desktop is closed unchanged.
+
 Connect returns the stable binding handle and an instruction snippet:
 
 ```text
