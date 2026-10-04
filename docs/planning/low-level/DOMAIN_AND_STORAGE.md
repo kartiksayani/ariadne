@@ -632,6 +632,20 @@ See [ADR-0026](../../adr/ADR-0026-register-roots-and-verify-binding-setup.md).
 
 ## 5. Capacity, queries and errors
 
+Owner preferences use fixed global `ui.json` and stable sibling `ui.lock` in the
+verified owner data root. Core strictly validates its canonical snapshot plus
+retained owner operation/digest/typed preference receipts under that lock; Store
+provides only fixed-file anchored IO and atomic publication. Absent preferences
+return revision1 defaults without creating a data file. First patch saves
+revision2; exact replay precedes mutable revision guards and never writes. First
+publication is no-clobber; replacement fsyncs a validated `ui.previous.json`
+backup before publication and directory sync. Malformed/future records remain
+untouched. The canonical framed preference response stays within1MiB, while
+full receipt history has no invented aggregate file quota or pruning. Drafts
+and stale/unavailable view routes remain inert and preserved during unrelated
+writes. Explicit owner reset/recovery and consuming native wiring remain their
+own acceptance joins; see [ADR-0041](../../adr/ADR-0041-native-core-and-owner-preferences.md).
+
 Warn at 16 MiB per session to surface unexpectedly large personal history. There
 is no first-version snapshot hard cap, item/message quota or reserved-byte ledger.
 Keep bounded individual requests/messages below, and never silently truncate saved
