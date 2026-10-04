@@ -47,6 +47,7 @@ and no inference that effects were absent. Typed methods are:
 | `ping` | `{binding_id:UuidV4,generation:UuidV4}` | the same binding/generation; proves scoped control reachability only |
 | `claim` | canonical `ClaimRequest={binding_id,generation,request_id}`; envelope `id=request_id` | canonical `PreparedAttempt|null`, validated against that request |
 | `connection_status` | `{binding_id:UuidV4,generation:UuidV4}` | canonical `BindingSummary` from the current registered binding; presence is null unless actually qualified |
+| `binding_connect` | unchanged canonical `OwnerMutationRequest={session:null,command:BindingConnect}`; envelope `id=command.op_id` | canonical `MutationReceipt` with exact operation ID, `SavedReceiptData::BindingConnect` and the explicitly requested existing session when supplied |
 | `session_announcement` | strict private SDK identity described in section 5; no client timestamp or compatibility claim | `{adapter_id:"claude_code_mod",external_session_id:string}` matching the request exactly; candidate admission only |
 
 Announcement intake uses this same UID-checked socket and framing, separately
@@ -76,6 +77,28 @@ new-ID retry is authorized. Core calls run off the executor and socket waits
 never overlap a store transaction. Connection admission is bounded to 16,
 including blocking calls retained after socket timeout; shutdown stops accepts
 and pending IO while those calls retain their physical lease.
+
+Binding connect is a separate native bootstrap whitelist on this same socket,
+not a lease-required claim route or general owner RPC. It is disabled unless native
+composition opts in with its actual configured CoreService. The server supplies
+trusted Registry OwnerContext and forwards the original canonical command unchanged.
+The helper first uses the native saved-connect replay seam directly: an exact stored
+receipt or operation-reused conflict remains available while desktop is closed,
+without provider verification or new IDs. Only a new operation requires the matching
+open desktop and its fresh qualified selected candidate; missing/unconfigured
+composition returns actionable nonretryable host_unreachable/unsupported, with no
+launch or guessed provider identity.
+
+The existing 16 permits and absolute five-second deadline bound bootstrap admission
+and frame IO. Work not started before its deadline cannot call Core. Once the blocking
+Core call starts it retains its permit until completion even if the socket times out,
+the caller disappears or the listener stops. Response loss does not prove absence of
+commit; retain the exact original operation ID and parameters and check the saved
+receipt before repeating that operation. Validate the response's canonical saved
+variant, operation ID and explicit target session; preserve setup_instruction bytes.
+A saved connection receipt grants no dispatch lease or supervisor readiness. Actual
+provider verification, final adapter connect and dynamic supervisor/claim-route
+activation remain native composition work, not behavior supplied by this relay.
 
 Stable owned single-link regular lease files have mode 0600. Home, run and
 lease directories have mode 0700; opening these targets does not follow
@@ -112,11 +135,16 @@ failure reports generation-scoped disconnected and never dispatches. Unknown
 preflight connection remains Unknown with a disconnected dispatch barrier.
 Provider/runtime tasks own that final connection and report wiring. Codex's
 initialized reader now supplies an owned pre-ID qualification for the exact
-selected thread and canonical registered project root; its final bind rechecks
-that same thread/root and transport identity. Native composition still owns
-configuration validation, copying verified facts into Core and establishing the
-final runtime connection. No placeholder-ID connection or shared adapter method
-is added.
+selected thread and canonical registered project root. Native composition may
+consume that initialized reader with `CodexAdapter::from_qualified_thread`; final
+Adapter.connect supplies saved binding/generation IDs and rechecks the same
+thread/root and full-item/transport requirements under its original admission
+deadline. This qualified adapter retains the selected endpoint, fingerprint and
+existing executable identity across reconnect; a changed identity requires fresh
+qualification rather than retargeting the selection. Native composition still
+owns configuration validation, copying verified facts into Core, final runtime
+connection/reporting/reconciliation and lease activation. No placeholder-ID
+connection or shared adapter method is added.
 
 See [Agent adapters](../AGENT_ADAPTERS.md) for the shared interface and later
 executable-extension design. Public registration/negotiation is deferred. Rust trait
@@ -590,6 +618,20 @@ retain their permits after caller cancellation; busy admission returns actionabl
 `capacity_exceeded`. Missing/stale evidence remains Unknown;
 it never means Idle or authorizes reconnect, claims or resending. See
 [ADR-0042](../../adr/ADR-0042-native-discovery-and-announcement-intake.md).
+
+Native Claude pre-ID qualification returns owned provider facts from those same
+checks, with the original receipt age and endpoint fingerprint; it grants no
+future binding/generation connection or lease. The already-blocking owner
+verifier may use the existing bounded discovery qualifier with its original
+absolute deadline outside all Registry/Store locks. Bootstrap composition saves
+connection Unknown (therefore disconnected dispatch readiness) and returns the
+immutable receipt before awaiting a bound Mod announcement. The actual matching
+saved binding/generation announcement must be qualified before final
+Adapter.connect; persist canonical Connected and all reconciliation receipts
+before activating the physical-lease/ClaimGate route. Owner pause/recovery
+barriers remain. Exact bootstrap replay returns the original receipt even after
+state progresses. Native activation and Core fact mapping remain a consuming
+join; see [ADR-0051](../../adr/ADR-0051-claude-native-pre-id-qualification-facts.md).
 
 For Codex, enumerate the existing daemon's loaded-thread IDs and join read-only
 thread metadata to get cwd/title. Probe the pinned schema's thread/loaded/list

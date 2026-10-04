@@ -1,6 +1,6 @@
 //! Bounded read-only version and exact SDK-root resource inspection.
 use crate::{
-    evidence::{absolute, fresh, LoadedModIdentity, ModEvidence},
+    evidence::{absolute, fresh, LoadedModIdentity, ModEvidence, QualifiedClaudeHost},
     normalization::error,
 };
 use ariadne_agent_protocol::{AdapterError, AdapterErrorCode, EndpointFingerprint, UtcMillis};
@@ -13,6 +13,7 @@ use std::{
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -50,12 +51,38 @@ impl ClaudeOptions {
         received: Instant,
         deadline: Instant,
     ) -> Result<ModEvidence, AdapterError> {
+        self.qualify_parts(identity, observed_at, received, deadline)
+            .map(|(evidence, _)| evidence)
+    }
+    /// Blocking native pre-ID qualification. Reuses the installed version/resource
+    /// checks and retains the original receipt age under the caller's total deadline.
+    pub fn qualify_host_identity(
+        &self,
+        identity: LoadedModIdentity,
+        observed_at: UtcMillis,
+        received: Instant,
+        deadline: Instant,
+    ) -> Result<QualifiedClaudeHost, AdapterError> {
+        let (evidence, fingerprint) =
+            self.qualify_parts(identity, observed_at, received, deadline)?;
+        Ok(QualifiedClaudeHost {
+            evidence: Arc::new(evidence),
+            fingerprint,
+        })
+    }
+    fn qualify_parts(
+        &self,
+        identity: LoadedModIdentity,
+        observed_at: UtcMillis,
+        received: Instant,
+        deadline: Instant,
+    ) -> Result<(ModEvidence, EndpointFingerprint), AdapterError> {
         let deadline = deadline.min(Instant::now() + Duration::from_secs(5));
         check_deadline(deadline)?;
         self.validate()?;
         let evidence = ModEvidence::received_at(identity, observed_at, received)?;
-        qualify(self, &evidence, deadline)?;
-        Ok(evidence)
+        let fingerprint = qualify(self, &evidence, deadline)?;
+        Ok((evidence, fingerprint))
     }
     pub(crate) fn validate(&self) -> Result<(), AdapterError> {
         for path in [

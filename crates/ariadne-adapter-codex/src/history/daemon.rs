@@ -5,11 +5,14 @@ pub struct CodexDaemonReader {
     pub(super) rpc: RpcClient,
     pub(super) socket: SocketIdentity,
     pub(super) configured_socket: PathBuf,
-    executable: ExecutableIdentity,
-    configured_executable: PathBuf,
+    pub(super) executable: ExecutableIdentity,
+    pub(super) options: CodexOptions,
     usable: bool,
 }
 impl CodexDaemonReader {
+    pub(crate) fn has_executable_identity(&self, expected: &ExecutableIdentity) -> bool {
+        &self.executable == expected
+    }
     pub(crate) fn queue_executable(&self) -> &Path {
         self.executable.path()
     }
@@ -68,7 +71,7 @@ impl CodexDaemonReader {
             socket,
             configured_socket,
             executable,
-            configured_executable: options.executable,
+            options,
             usable: true,
         };
         reader.verify_identity()?;
@@ -97,7 +100,7 @@ impl CodexDaemonReader {
     ) -> Result<(CodexHistoryClient, ConnectResult), AdapterError> {
         self.bind_with_root(request, instance_id, observed_at, None, deadline)
     }
-    pub(super) fn bind_with_root(
+    pub(crate) fn bind_with_root(
         mut self,
         request: ConnectRequest,
         instance_id: UuidV4,
@@ -249,7 +252,7 @@ impl CodexDaemonReader {
                 "Codex reader requires a fresh initialize/connect before further reads.",
             ));
         }
-        if ExecutableIdentity::read(&self.configured_executable)? != self.executable {
+        if ExecutableIdentity::read(&self.options.executable)? != self.executable {
             return Err(error(
                 Code::UnsupportedHostVersion,
                 "Codex executable identity changed; re-probe before dispatch.",
