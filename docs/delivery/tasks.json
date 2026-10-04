@@ -795,6 +795,7 @@
     },
     {
       "id": "P3.1",
+      "active": true,
       "title": "Implement desktop leases and private bridge control IPC",
       "phase": "M3",
       "depends_on": [
@@ -831,6 +832,7 @@
     },
     {
       "id": "P3.2",
+      "active": true,
       "title": "Run independent supervisors and reconcile normal quit/reopen",
       "phase": "M3",
       "depends_on": [
@@ -994,6 +996,7 @@
     },
     {
       "id": "P3.7",
+      "active": true,
       "title": "Implement bounded host discovery and freshness observations",
       "phase": "M3",
       "depends_on": [
@@ -1068,6 +1071,7 @@
     },
     {
       "id": "P4.1",
+      "active": true,
       "title": "Complete the first real UI-to-Rust domain vertical slice",
       "phase": "M4",
       "depends_on": [
@@ -1515,6 +1519,7 @@
     },
     {
       "id": "P6.2",
+      "active": true,
       "title": "Implement native tray counts and one notification delegate",
       "phase": "M6",
       "depends_on": [
