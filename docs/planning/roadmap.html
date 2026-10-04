@@ -858,7 +858,10 @@
       "implementation_depends_on": [
         "P0.6",
         "P2.3"
-      ]
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/67"
+      }
     },
     {
       "id": "P2.6",
@@ -1111,7 +1114,8 @@
       "acceptance": [
         "Claude announces ID/cwd/version at startup and every 30s without inference or domain write; in-memory candidates expire after 90s.",
         "Codex paginates loaded-thread IDs and read-only thread metadata every 30s while connection UI is open; never use persisted thread/list as open-session discovery.",
-        "Manual binding remains available; stale/unknown/loaded/active are distinct and PID alone proves neither conversation identity nor liveness; refresh after wake."
+        "Manual binding remains available; stale/unknown/loaded/active are distinct and PID alone proves neither conversation identity nor liveness; refresh after wake.",
+        "Codex pre-binding qualification is merged in https://github.com/kartiksayani/ariadne/pull/63: verify the exact existing thread and project root before assigning binding identity. Final provider/runtime activation remains an integration task."
       ],
       "checks": [
         "rtk proxy cargo test -p ariadne-runtime --test discovery",
@@ -1253,7 +1257,7 @@
       "paths": [
         "apps/desktop/src/components/waiting/**",
         "apps/desktop/src/selectors/waiting/**",
-        "tests/ui/waiting/**",
+        "apps/desktop/tests/ui/waiting/**",
         "tests/e2e/waiting/**"
       ],
       "spec": [
@@ -1267,7 +1271,7 @@
         "Use backend SummaryCounts and delivery facts; old Sent plus new Waiting episode coexist; partial roots show incomplete counts; labels never rewrite item status."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project waiting",
+        "rtk proxy npm run test:ui -- --project desktop tests/ui/waiting",
         "rtk proxy npm run test:e2e -- --suite waiting"
       ],
       "estimate_days": 1,
@@ -1316,7 +1320,8 @@
       "implementation_depends_on": [
         "P4.1",
         "P4.2"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/58"
     },
     {
       "id": "P4.5",
@@ -1330,7 +1335,7 @@
       "paths": [
         "apps/desktop/src/components/history/**",
         "apps/desktop/src/components/rail/**",
-        "tests/ui/history/**",
+        "apps/desktop/tests/ui/history/**",
         "tests/e2e/history/**"
       ],
       "spec": [
@@ -1344,7 +1349,7 @@
         "Rail hover/pin and item cross-highlight share refs; upward scroll pauses follow, new messages increment Jump to latest without stealing focus/scroll (D08)."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project history",
+        "rtk proxy npm run test:ui -- --project desktop apps/desktop/tests/ui/history",
         "rtk proxy npm run test:e2e -- --suite history"
       ],
       "estimate_days": 1.5,
@@ -1485,7 +1490,7 @@
       "paths": [
         "apps/desktop/src/graph/layout/**",
         "apps/desktop/src/components/graph/**",
-        "tests/ui/graph-layout/**"
+        "apps/desktop/tests/ui/graph-layout/**"
       ],
       "spec": [
         "docs/planning/low-level/UI_AND_NATIVE.md#4-graph",
@@ -1497,7 +1502,7 @@
         "Shared filters/selection route to same detail; cursor-anchored zoom 0.25–2.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project graph-layout"
+        "rtk proxy npm run test:ui -- apps/desktop/tests/ui/graph-layout"
       ],
       "estimate_days": 1,
       "implementation_depends_on": [

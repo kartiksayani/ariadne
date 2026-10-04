@@ -200,6 +200,8 @@ All corrections, rounds, branches and superseded answers remain inspectable.
 
 ### Derived label precedence
 
+A persisted pre-delivery rejection displays Rejected before delivery with a warning; it never establishes a matching turn or authorizes automatic retry. A persisted protocol contradiction stays Uncertain ahead of ordinary progress. A saved adapter `EventConflict` receipt matching the input binding, input ID and current active attempt also displays Uncertain, even when the retained attempt error remains `result_missing`; unrelated or historical conflicts cannot label newly queued work.
+
 Read in this order: input cancelled→Cancelled; skipped→Skipped; handled→Handled;
 attempt uncertain→Uncertain; failed/interrupted turn→Failed; result missing→Missing
 result; result committed and turn not completed→Published; running→Received;
@@ -209,6 +211,17 @@ missing-result grace expires, retaining its unsealed attempt. If a late result
 joins successfully, clear only that automatic pause, never an explicit owner pause.
 Store independent owner_paused plus automatic pause_reason (`result_missing`, `uncertain`, `host_failure`,
 `store_error`, `incompatible`) beside dispatch_state so that distinction is durable.
+
+Current delivery labels use only `Input.active_attempt_id` after the terminal
+Input-state checks. Historical resolved attempts remain inspectable and do not
+label a newly queued input uncertain or failed. A queued input with no active
+attempt uses current qualified availability/busy evidence for Queued/Saved;
+missing or inconsistent active evidence for an in-flight/needs-attention input
+is shown as unavailable, never invented progress. A completed host turn with a
+pending result during the grace period displays Waiting for result (agent turn
+finished), before running/accepted labels. Missing result requires persisted
+`result_state=missing`. Completed+committed with nonterminal Input state is
+inconsistent evidence pending reload, not a renderer-authored Handled result.
 
 A queued answer retains the exact question/option snapshot it was saved against.
 If the agent later changes the item before dispatch, show the changed-question
