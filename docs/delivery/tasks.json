@@ -726,7 +726,8 @@
       "implementation_depends_on": [
         "P0.6",
         "P2.3"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/76"
     },
     {
       "id": "P2.5",
@@ -1521,7 +1522,8 @@
       "implementation_depends_on": [
         "P4.4",
         "P0.6"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/75"
     },
     {
       "id": "P6.2",

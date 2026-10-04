@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import presenceFixture from '../../../../../fixtures/domain/demo/presence.json';
 import summaries from '../../../../../fixtures/domain/projections/sessions.json';
@@ -16,6 +18,9 @@ import {
   RegisteredRoutes, revealAncestors, ServiceFailure, summaryCounts, useSession,
   type DesktopTransport, type HintPayloads, type SessionStore,
 } from '../../../src/data';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -72,6 +77,34 @@ function setup() {
 afterEach(() => { opened.splice(0).forEach((sessions) => sessions.closeAll()); cleanup(); vi.useRealTimers(); });
 
 describe('canonical desktop transport', () => {
+  it('installs the actual route listener before acknowledging native readiness', async () => {
+    const listener = deferred<() => void>();
+    const unsubscribe = vi.fn();
+    vi.mocked(listen).mockReset().mockReturnValue(listener.promise);
+    vi.mocked(invoke).mockReset().mockResolvedValue(undefined);
+    const service = createDesktopService();
+    const pending = service.subscribe('ariadne://route', vi.fn());
+    expect(listen).toHaveBeenCalledWith('ariadne://route', expect.any(Function));
+    expect(invoke).not.toHaveBeenCalled();
+    listener.resolve(unsubscribe);
+    const stop = await pending;
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('route_ready');
+    stop();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    vi.mocked(invoke).mockClear();
+    vi.mocked(listen).mockResolvedValue(unsubscribe);
+    const other = await service.subscribe('ariadne://session_changed', vi.fn());
+    expect(invoke).not.toHaveBeenCalled();
+    other();
+  });
+  it('removes the actual native listener when readiness acknowledgement fails', async () => {
+    const unsubscribe = vi.fn();
+    vi.mocked(listen).mockReset().mockResolvedValue(unsubscribe);
+    vi.mocked(invoke).mockReset().mockRejectedValue(new Error('private native failure'));
+    await expect(createDesktopService().subscribe('ariadne://route', vi.fn()))
+      .rejects.toEqual(new ServiceFailure('transport'));
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
   it('uses the exact command and one canonical argument envelope', async () => {
     const { transport, service } = setup();
     transport.script.push(loaded());

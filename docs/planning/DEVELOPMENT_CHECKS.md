@@ -74,6 +74,10 @@ declarations/re-exports: real LLVM measurement produces no executable lines for
 these wiring files. Domain `src/models/primitives.rs` is fully measured.
 The CLI `src/lib.rs` exclusion likewise covers only its bridge module export;
 the executable main, bridge command, codec and lease logic remain measured.
+The exact desktop Rust `src/native/mod.rs` and `src/native/window/mod.rs`
+exclusions cover only module declarations and the `NativeWindow` re-export;
+LLVM produces no executable lines for these files. Routes, geometry, lifecycle,
+preferences, desktop window operations and macOS wake logic remain measured.
 The exact desktop `src/data/index.ts` exclusion covers only re-exports. Vite
 consumes the same reviewed exclusion patterns in project-relative and absolute
 forms for external integration sources, so this zero-line barrel is omitted
