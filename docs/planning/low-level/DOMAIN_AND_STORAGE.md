@@ -155,6 +155,13 @@ conversation. System lifecycle records describe close/archive/recovery, not agen
 speech. Message bodies are append-only; corrections create new messages.
 `items_touched` and item backlinks are core-derived from operations, deduplicated.
 
+An atomic agent apply uses one batch Activity for mutation/status provenance,
+with exact nonblank summary text or a deterministic fallback for actual changes.
+Replies remain separate full Messages. A blank no-op batch adds no Activity.
+Supplied revision guards refer to the locked original snapshot; ordered operations
+use staged revisions thereafter. A newly created waiting item starts round 1 at
+question revision 1; a later Ask creates a distinct frozen history episode.
+
 Answer: `{id,seq,item_id,question_revision,question_snapshot,ask_snapshot,
 options_snapshot,selected_option_id,text,message_id,input_id,
 supersedes_answer_id,created_at}`. At least one valid option/nonempty text.

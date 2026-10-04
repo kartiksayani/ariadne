@@ -1,7 +1,9 @@
 //! Canonical synchronous service contract and native registered binding setup.
+pub mod apply;
 pub mod bindings;
 #[path = "service/context.rs"]
 mod context;
+mod delivery_join;
 mod dto;
 #[path = "service/errors.rs"]
 mod errors;
