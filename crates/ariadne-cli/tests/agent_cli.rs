@@ -811,20 +811,23 @@ fn real_process_bounds_long_native_errors_in_json_and_text_without_claiming_no_e
         }
         let output = invoke(command, None);
         if json {
-            let value = envelope(&output, 3);
+            let value = envelope(&output, 4);
             let error: CoreError = serde_json::from_value(value["error"].clone()).unwrap();
             error.validate().unwrap();
-            assert_eq!(error.code, CoreErrorCode::ProtocolConflict);
+            assert_eq!(error.code, CoreErrorCode::IoError);
             assert!(!error.retryable);
-            assert!(error.hint.contains("effects may already exist"));
-            assert!(output.stdout.len() < 1024);
+            assert!(error.message.len() <= 4096);
+            assert!(error.hint.contains("original operation/event IDs"));
+            assert!(error.hint.contains("no data was repaired"));
+            assert!(output.stdout.len() < 8192);
         } else {
-            assert_eq!(output.status.code(), Some(3));
+            assert_eq!(output.status.code(), Some(4));
             assert!(output.stdout.is_empty());
             let text = String::from_utf8(output.stderr).unwrap();
-            assert!(text.contains("ProtocolConflict"));
-            assert!(text.contains("effects may already exist"));
-            assert!(text.len() < 1024);
+            assert!(text.contains("IoError"));
+            assert!(text.contains("original operation/event IDs"));
+            assert!(text.contains("no data was repaired"));
+            assert!(text.len() < 8192);
         }
     }
 }
