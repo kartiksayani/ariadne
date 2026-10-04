@@ -1,7 +1,10 @@
 //! One UI-thread-owned workspace observer; no dispatch or durable state.
 use ariadne_core::{CoreError, CoreErrorCode};
 use block2::RcBlock;
-use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2::{
+    rc::Retained,
+    runtime::{AnyObject, ProtocolObject},
+};
 use objc2_app_kit::{NSWorkspace, NSWorkspaceDidWakeNotification};
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol};
 use std::{
@@ -53,7 +56,10 @@ impl Drop for WakeObserver {
         self.active.store(false, Ordering::Release);
         // This is exactly the opaque block-observer token returned by center.
         // Removal and token release occur on the same owning UI thread.
-        unsafe { self.center.removeObserver(self.token.as_ref().as_ref()) };
+        unsafe {
+            self.center
+                .removeObserver(AsRef::<AnyObject>::as_ref(&*self.token))
+        };
     }
 }
 
