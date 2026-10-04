@@ -1,4 +1,4 @@
-//! Structured executable bridge route; production report composition stays explicit.
+//! Structured executable bridge routes with explicit registered report scope.
 use super::{announce, claim, connection_status};
 use ariadne_core::{
     ApplicationEnvelope, ClaimRequest, CoreError, CoreErrorCode, FailureEnvelope, FailureFlag,
@@ -176,7 +176,13 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
                     "Report event and explicit binding/generation disagree.",
                 ));
             }
-            Err(CoreError::new(CoreErrorCode::Unsupported, "Production bridge report composition is not available yet; no lifecycle event was persisted.", "P2.2 core persistence and P1.4/P3.2 registered routing must be composed before this executable can report. Retain the same event ID for later reporting."))
+            serde_json::to_value(super::native::report(
+                home_from_environment()?,
+                binding_id,
+                generation,
+                event,
+            )?)
+            .map_err(|_| invalid("Cannot serialize the canonical event receipt."))
         }
         _ => Err(invalid("Unknown bridge method.")),
     }
