@@ -624,7 +624,14 @@
         "author": "agent",
         "binding_id": "00000000-0000-4000-8000-000000000920",
         "adapter_id": "demo.source",
-        "external_session_id": "source-thread"
+        "external_session_id": "source-thread",
+        "source_target": {
+          "project_id": "00000000-0000-4000-8000-000000000901",
+          "session_id": "00000000-0000-4000-8000-000000000902",
+          "topic_id": "00000000-0000-4000-8000-000000000910",
+          "item_id": "2",
+          "round_id": "00000000-0000-4000-8000-000000000940"
+        }
       }
     },
     {

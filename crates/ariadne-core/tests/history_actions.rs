@@ -1100,3 +1100,179 @@ fn continuation_crosses_registered_projects_without_copying_source_binding_autho
         assert_eq!(imported.binding_id, original.binding_id);
     }
 }
+
+#[test]
+fn cross_topic_reply_retains_full_body_and_qualified_target_without_aliasing_local_items() {
+    let mut source = rich_seed();
+    let reply = source
+        .messages
+        .iter_mut()
+        .find(|m| m.id == id(0x112))
+        .unwrap();
+    reply.items_touched.push(ItemRef::new("1").unwrap());
+    reply.body = "x".repeat(64 * 1024);
+    let original_reply = reply.clone();
+    let setup = Setup::new(&source);
+    let mut initial_target = target_seed();
+    let mut collision = initial_target.items.0[&ItemRef::new("2").unwrap()].clone();
+    collision.id = ItemRef::new("8").unwrap();
+    collision.ordinal = p(8);
+    initial_target
+        .items
+        .0
+        .insert(collision.id.clone(), collision);
+    initial_target.counters.next_root = p(9);
+    initial_target.messages[0]
+        .items_touched
+        .push(ItemRef::new("8").unwrap());
+    setup.store().create(&initial_target).unwrap();
+    let source_bytes = setup.bytes();
+    let service = HistoryActionService::new(&setup.registry);
+    let preview = service
+        .preview(&target_context(), &request(id(16)))
+        .unwrap();
+    let receipt = continuation(
+        service
+            .continue_topic(
+                &target_context(),
+                &continuing(&preview, 200),
+                allocator(10000),
+                at(),
+            )
+            .unwrap(),
+    );
+    let target = setup.store().read(&id(20)).unwrap();
+    assert_eq!(setup.bytes(), source_bytes);
+    let copied_id = &receipt.message_id_map.0[&original_reply.id];
+    let copied = target.messages.iter().find(|m| &m.id == copied_id).unwrap();
+    assert_eq!(copied.kind, MessageKind::Reply);
+    assert_eq!(copied.body, original_reply.body);
+    assert_eq!(copied.author, original_reply.author);
+    assert_eq!(copied.binding_id, original_reply.binding_id);
+    assert!(copied.item_id.is_none() && copied.topic_id.is_none() && copied.round_id.is_none());
+    assert_eq!(
+        copied.items_touched,
+        vec![receipt.item_id_map.0[&ItemRef::new("1").unwrap()].clone()]
+    );
+    let route = &copied.origin.as_ref().unwrap().source_target;
+    assert_eq!(route.project_id, source.project_id);
+    assert_eq!(route.session_id, source.id);
+    assert_eq!(route.topic_id, original_reply.topic_id);
+    assert_eq!(route.item_id, original_reply.item_id);
+    assert_eq!(route.round_id, original_reply.round_id);
+    assert!(target.items.0.contains_key(route.item_id.as_ref().unwrap()));
+    ariadne_domain::validation::validate_session_items(&target).unwrap();
+    ariadne_domain::history::validate_session_history(&target).unwrap();
+
+    // Copy the imported topic again: do not replace its direct historical route
+    // with a null route or interpret the colliding ItemRef in the next session.
+    let mut third = target_seed();
+    third.id = id(30);
+    setup.store().create(&third).unwrap();
+    let next_context = OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+        RegisteredSession::from_trusted_entrypoint(id(1), id(30)),
+    ));
+    let next_request = ContinuePreviewRequest {
+        source: SessionRef {
+            project_id: id(1),
+            session_id: id(20),
+        },
+        source_topic_id: receipt.target_topic_id.clone(),
+        target: SessionRef {
+            project_id: id(1),
+            session_id: id(30),
+        },
+    };
+    let next_preview = service.preview(&next_context, &next_request).unwrap();
+    let next_receipt = continuation(
+        service
+            .continue_topic(
+                &next_context,
+                &continuing(&next_preview, 201),
+                allocator(20000),
+                at(),
+            )
+            .unwrap(),
+    );
+    let next = setup.store().read(&id(30)).unwrap();
+    let repeated = next
+        .messages
+        .iter()
+        .find(|m| m.id == next_receipt.message_id_map.0[copied_id])
+        .unwrap();
+    assert_eq!(repeated.body, original_reply.body);
+    assert_eq!(repeated.origin.as_ref().unwrap().source_target, *route);
+    assert!(
+        repeated.item_id.is_none() && repeated.topic_id.is_none() && repeated.round_id.is_none()
+    );
+    assert_eq!(setup.store().read(&id(20)).unwrap(), target);
+
+    for variant in 0..4 {
+        let mut invalid = target.clone();
+        let message = invalid
+            .messages
+            .iter_mut()
+            .find(|m| &m.id == copied_id)
+            .unwrap();
+        match variant {
+            0 => message.origin = None,
+            1 => {
+                message.item_id = Some(ItemRef::new("8").unwrap());
+                message.topic_id = Some(id(5));
+            }
+            2 => message.origin.as_mut().unwrap().entity_id = id(999999),
+            _ => message.origin.as_mut().unwrap().source_target.item_id = None,
+        }
+        assert!(ariadne_domain::history::validate_session_history(&invalid).is_err());
+        if variant != 1 {
+            assert!(ariadne_domain::validation::validate_session_items(&invalid).is_err());
+        }
+    }
+}
+
+#[test]
+fn same_topic_reply_maps_direct_target_and_retains_source_route() {
+    let source = rich_seed();
+    let original = source.messages.iter().find(|m| m.id == id(0x112)).unwrap();
+    let setup = Setup::new(&source);
+    setup.store().create(&target_seed()).unwrap();
+    let service = HistoryActionService::new(&setup.registry);
+    let preview = service
+        .preview(&target_context(), &request(id(17)))
+        .unwrap();
+    let receipt = continuation(
+        service
+            .continue_topic(
+                &target_context(),
+                &continuing(&preview, 200),
+                allocator(10000),
+                at(),
+            )
+            .unwrap(),
+    );
+    let target = setup.store().read(&id(20)).unwrap();
+    let reply = target
+        .messages
+        .iter()
+        .find(|m| m.id == receipt.message_id_map.0[&original.id])
+        .unwrap();
+    assert_eq!(
+        reply.item_id,
+        Some(receipt.item_id_map.0[original.item_id.as_ref().unwrap()].clone())
+    );
+    assert_eq!(reply.topic_id, Some(receipt.target_topic_id));
+    assert_eq!(
+        reply.round_id,
+        Some(receipt.round_id_map.0[original.round_id.as_ref().unwrap()].clone())
+    );
+    assert_eq!(
+        reply.origin.as_ref().unwrap().source_target,
+        MessageSourceTarget {
+            project_id: source.project_id.clone(),
+            session_id: source.id.clone(),
+            topic_id: original.topic_id.clone(),
+            item_id: original.item_id.clone(),
+            round_id: original.round_id.clone()
+        }
+    );
+}

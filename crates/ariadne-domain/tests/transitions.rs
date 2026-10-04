@@ -961,6 +961,13 @@ fn terminal_guard_exempts_resolved_inputs_and_copied_history_without_changing_th
     let mut s = session();
     let mut copied = message(9, 2, MessageAuthor::Owner);
     copied.origin = Some(MessageOrigin {
+        source_target: MessageSourceTarget {
+            project_id: uuid(90),
+            session_id: uuid(91),
+            topic_id: Some(uuid(92)),
+            item_id: copied.item_id.clone(),
+            round_id: copied.round_id.clone(),
+        },
         project_id: uuid(90),
         session_id: uuid(91),
         topic_id: uuid(92),
@@ -1265,6 +1272,13 @@ fn copied_item_history_preserves_source_binding_but_new_transitions_require_targ
     let mut copied = message(30, 2, MessageAuthor::Agent);
     copied.binding_id = Some(uuid(99));
     copied.origin = Some(MessageOrigin {
+        source_target: MessageSourceTarget {
+            project_id: uuid(90),
+            session_id: uuid(91),
+            topic_id: Some(uuid(92)),
+            item_id: copied.item_id.clone(),
+            round_id: copied.round_id.clone(),
+        },
         project_id: uuid(90),
         session_id: uuid(91),
         topic_id: uuid(92),

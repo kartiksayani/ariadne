@@ -651,3 +651,12 @@ The staged handoff also must fit the actual 64KiB formatted delivery payload;
 capacity errors save no target effects. Full copied history is never truncated.
 The single queued input references its immutable continuation operation/map.
 CLI and NativeCoreService routing are later consumer joins.
+
+
+Copied message provenance retains a required fully qualified `source_target`
+(project/session plus nullable direct topic/item/round). A Reply directly aimed
+outside the continued topic remains complete Reply history with all local direct
+pointers null; exact continuation mapping/origin validation is required. Repeated
+continuation preserves that original historical target. Local item conversations
+use direct local item matches, so coincidentally equal foreign ItemRefs and
+`items_touched` backlinks cannot reanchor a Reply.
