@@ -19,6 +19,11 @@ selector. Changes confined to Rust sources or Cargo manifests in crates/desktop
 Rust, root Cargo/toolchain files, Markdown documentation and the static task/chart
 metadata skip that capture. Frontend, design, asset, browser-test, Node dependency/
 configuration and other paths retain it; missing bases and manual full runs capture.
+The current history/rail components, their local CSS and the existing desktop
+history test directory also skip capture: the reference gallery imports only its
+reference components/styles and does not load these modules. Remove this narrow
+exception when the gallery starts importing them. Other product modules retain
+capture; this is not a general frontend exemption.
 Application tests, frontend build/lint/types, weighted Rust+web coverage, Clippy,
 native WebView smoke and selected packaged release checks run independently.
 
@@ -39,6 +44,14 @@ crate source edits retain application/native checks. A PR adding another crate
 feature, feature-gated code or a desktop dependency on an internal crate must add
 the relevant paths to `RELEASE_FILES` or the release path checks in `scope_for`
 (`scripts/check-commit.py`) with a focused scope test.
+External Rust integration tests in `ariadne-core/tests/` and
+`ariadne-agent-protocol/tests/` do not enter production builds, so changes confined
+to those `.rs` files retain all application/coverage/native checks without packaged
+release isolation. Production crate sources, manifests/configuration, unknown paths,
+missing bases and full/manual runs keep their existing release selection.
+When frontend type/CSS checks run, `npm run check` owns the single repository-wide
+ESLint pass. JS-only changes retain standalone ESLint; maintained inline HTML
+scripts still receive their separate stdin lint.
 
 ```sh
 .venv-quality/bin/python scripts/check-commit.py --working-tree
