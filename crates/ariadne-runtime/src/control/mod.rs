@@ -1,6 +1,7 @@
 //! UID-checked Unix-only control; socket IO never spans a store transaction.
 mod codec;
 mod wire;
+use crate::discovery::Discovery;
 use crate::leases::{
     fs::{error, io_error, uid, Directory},
     BindingLease, DesktopOwner,
@@ -17,7 +18,7 @@ use std::{
     os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     net::{UnixListener, UnixStream},
@@ -88,6 +89,7 @@ pub struct ControlServer {
     listener: std::os::unix::net::UnixListener,
     core: Arc<dyn CoreService>,
     bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
+    discovery: Option<Discovery>,
 }
 impl ControlServer {
     /// Blocking native setup. Holding DesktopOwner proves stale removal is permitted.
@@ -138,7 +140,14 @@ impl ControlServer {
             listener,
             core,
             bindings: Arc::new(routes),
+            discovery: None,
         })
+    }
+    /// Native composition enables read-only announcements on this existing
+    /// UID-checked endpoint. It confers no dispatch lease or claim route.
+    pub fn with_discovery(mut self, discovery: Discovery) -> Self {
+        self.discovery = Some(discovery);
+        self
     }
     pub async fn serve(self, mut stop: oneshot::Receiver<()>) -> Result<(), CoreError> {
         let listener = UnixListener::from_std(self.listener)
@@ -164,9 +173,14 @@ impl ControlServer {
             }
             let core = self.core.clone();
             let bindings = self.bindings.clone();
+            let discovery = self.discovery.clone();
             connections.spawn(async move {
                 let slot = Arc::new(slot);
-                let _ = timeout(CONTROL_TIMEOUT, handle(stream, core, bindings, slot)).await;
+                let _ = timeout(
+                    CONTROL_TIMEOUT,
+                    handle(stream, core, bindings, discovery, slot),
+                )
+                .await;
             });
         }
     }
@@ -175,8 +189,10 @@ async fn handle(
     mut stream: UnixStream,
     core: Arc<dyn CoreService>,
     bindings: Arc<HashMap<String, (BindingLease, ClaimGate)>>,
+    discovery: Option<Discovery>,
     slot: Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<(), CoreError> {
+    let deadline = Instant::now() + CONTROL_TIMEOUT;
     let bytes = codec::read_frame(&mut stream).await?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| {
         error(
@@ -200,11 +216,33 @@ async fn handle(
             CoreErrorCode::InvalidArgument,
             "Control request has invalid method/params/envelope.",
         )),
-        Ok(request) => match request.validate() {
-            Err(e) => Err(e),
-            Ok(()) => {
-                let scope = request.scope();
-                match bindings.get(scope.binding_id.as_str()) {
+        Ok(request) => {
+            match request.validate() {
+                Err(e) => Err(e),
+                Ok(()) => {
+                    if let ControlMethod::SessionAnnouncement(announcement) = request.method {
+                        match discovery {
+                            None => Err(error(
+                                CoreErrorCode::Unsupported,
+                                "Read-only discovery intake is not enabled on this desktop.",
+                            )),
+                            Some(discovery) => {
+                                let received = Instant::now();
+                                let observed_at = (discovery.now)();
+                                tokio::task::spawn_blocking(move || {
+                            let _retained_slot = slot;
+                            discovery.announce(announcement, received, observed_at, deadline).map(ControlResult::Announcement)
+                        }).await.map_err(|_| error(CoreErrorCode::HostUnreachable, "Native announcement validation failed; refresh the original conversation."))?
+                            }
+                        }
+                    } else {
+                        let scope = request.scope().ok_or_else(|| {
+                            error(
+                                CoreErrorCode::InvalidArgument,
+                                "This control method requires binding scope.",
+                            )
+                        })?;
+                        match bindings.get(scope.binding_id.as_str()) {
                     None => Err(error(
                         CoreErrorCode::NotFound,
                         "No current desktop supervisor holds this binding lease.",
@@ -246,11 +284,14 @@ async fn handle(
                                     )
                                 })?
                             }
+                            ControlMethod::SessionAnnouncement(_) => Err(error(CoreErrorCode::ProtocolConflict, "Announcement must be handled before dispatch lease routing.")),
                         },
                     },
                 }
+                    }
+                }
             }
-        },
+        }
     };
     codec::write(&mut stream, &ControlResponse::from_result(id, result)).await
 }
