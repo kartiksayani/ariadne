@@ -87,6 +87,9 @@ pub struct ScrollAnchor {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct OwnerDraft {
+    // Persist before dispatch. Restored attempted drafts only replay their exact body.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub submission_attempted: bool,
     pub op_id: UuidV4,
     pub session: SessionRef,
     pub binding_id: UuidV4,

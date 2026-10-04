@@ -177,6 +177,24 @@ Per-session FIFO is maintained by the queue service. A definite pre-delivery rej
 
 Continue is a topic-level owner action, not a shared topic mutation: prepare a snapshot of source topic/items/history, preserve original references and origin metadata, preview the grouped summary, then explicitly `topic.continue` to send it in a selected target session. The target receives a new local topic copy; source IDs remain navigable and immutable. Failure to write target copy leaves source unchanged.
 
+The reusable P4.6 controls live in components/inputs with a composition-owned
+OwnerDraftStore under state/drafts. OwnerWaitingPanel consumes the actual Waiting
+module; OwnerItemDetail consumes the actual history module. Both share canonical
+SessionStore and RendererService. Later calls the existing navigation preference
+writer. This module does not change App startup or complete assembled/native acceptance.
+
+OwnerDraft.submission_attempted defaults to false when absent and false is omitted
+from serialization, preserving legacy preference replay digests. Persist true
+with the exact request-bearing fields and await a validated preference receipt
+before input_submit. Attempted records cannot change their marker or body under
+the same op_id; restart exposes explicit exact-operation retry and never dispatches.
+A validated input_submit receipt authorizes draft deletion; its queue sequence is
+save evidence, not delivery or completion evidence. After a definitive pre-commit
+question/revision/binding/active-state/queue guard rejection, explicit Prepare revised
+input retains the old attempted record, creates a new draft and requires current
+target review and separate submit. Unknown/transport/store/malformed responses
+and operation reuse remain retry-only. See ADR-0057.
+
 ## 6. Archive, sessions, and binding lifecycle
 
 Archive and close are guarded metadata operations. Render the returned blocking item/input IDs and dispatch state from guard errors, with actions to navigate to the blocker:
@@ -243,6 +261,23 @@ Roving tree focus uses visible row IDs and correct `aria-level`, `aria-expanded`
 
 `NativeService` owns window, tray, notifications, and open-route handling behind small interfaces. Native UI calls run on the app main thread. Register single-instance handling before other Tauri plugins and queue routes until the webview is ready. Window geometry, monitor identity, and pin are persisted and clamped to a reachable work area after display changes. Hide-on-close is distinct from Quit.
 
+The main webview acknowledges route readiness only after its registered route
+subscription is installed. Before that acknowledgement, retain the latest valid
+explicit `OpenRoute`; a later valid navigation intent supersedes it, while an
+invalid or unregistered request cannot erase it. This does not discard durable
+work. Trusted runtime callbacks own actual quit shutdown and wake reconciliation;
+an absent or unknown composition keeps explicit Quit unsupported. Trusted startup
+runs once after first-plugin interception and returns lifecycle callbacks only
+after existing native control ownership succeeds; startup failure aborts setup.
+Only an explicit trusted declaration that no runtime/watchers were started permits
+diagnostic-only exit, without claiming runtime shutdown. Quit joins the native
+preference writer and owning callbacks off the UI thread; an unconfirmed write or
+failed shutdown keeps the app running. Wake reconciliation cannot infer Idle,
+clear owner pauses or automatically resend uncertain delivery (ADR0053).
+macOS system wake uses one owned workspace did-wake observer, removed on exit;
+event-loop polling is not wake. Dock reopen shows, unminimizes and focuses the
+existing main window without changing its registered route or selection.
+
 The tray uses a template icon, numeric `waiting_unanswered` count (blank at zero), oldest 10 eligible waiting entries with project/session labels, separate binding/lifecycle diagnostics, Show Ariadne, Pin, and Quit. Sent generic requests do not increment the task-question count. Coalesce rebuilds at most every 250 ms. If registered roots are inaccessible, show an incomplete count and diagnostic row rather than a false total. No approval action exists in the tray.
 
 Use one native UserNotifications bridge in the macOS module with a single long-lived Rust `objc2` delegate. It owns permission request, schedule/remove, foreground policy, and click routing; do not initialize a second notification delegate. Notification identity is `ariadne:<session>:<item>:<waiting-episode>` and payload contains IDs resolved through the registry. Default body is generic; item text preview is opt-in. Deduplicate episodes in a bounded preference ledger. Establish a watermark on first launch rather than notifying the backlog. Group bursts over three arrivals within 500 ms; all entries remain in the queue. Denied notification permission leaves in-app queue working. Never put host permission approval controls in a notification.
@@ -250,6 +285,17 @@ Use one native UserNotifications bridge in the macOS module with a single long-l
 Click focuses/unhides, restores a minimized window, and calls the common reveal route. Cold launch stores the route until app readiness. If the item was answered, open its current detail; do not fail routing. A quit app cannot report new external changes until reopened, but already delivered notification routes must work. Packaged click and cold-launch routing have native proof acceptance coverage in `DESIGN_TRACEABILITY.md`.
 
 `ariadne open` resolves project/session and optional item route explicitly, locates the installed app from its package manifest, and passes structured launch arguments. Never place user-authored item text in a command line or shell string.
+
+The explicit syntax is `ariadne open --project UUID --session UUID [--item ItemRef]`.
+Read the single package-owned `~/.local/share/ariadne/current/install.json`,
+whose v1 required fields are `schema_version: 1`, `version` and absolute
+`app_path`. Validate its bounded input and helper/version agreement, and resolve
+`current` only within Ariadne's `versions/<version>` directory. Use
+`/usr/bin/open` argument arrays; never scan for an app or guess a fallback.
+Use `-n -a <app_path> --args --ariadne-route <OpenRoute JSON>` so a running
+instance receives explicit route arguments through single-instance handling.
+That plugin is not dispatch authority: existing control ownership and physical
+binding leases must succeed before primary setup starts owned workers.
 
 ## 9. Renderer boundary and diagnostics
 

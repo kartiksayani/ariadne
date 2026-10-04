@@ -2,8 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
+};
+use tauri::Manager;
 pub mod commands;
+pub mod native;
 
 #[derive(Deserialize)]
 pub struct PingRequest {
@@ -147,13 +152,17 @@ fn native_ping(
 }
 
 pub fn run() {
-    run_with_service(commands::DesktopService::default());
+    run_with_startup(commands::DesktopService::default(), |_| {
+        // This diagnostic entrypoint starts no owning runtime or watchers.
+        Ok(native::window::lifecycle::NativeLifecycle::diagnostic_only())
+    });
 }
 
 fn desktop_handler<R: tauri::Runtime>(
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         native_ping,
+        native::routes::route_ready,
         commands::project_list,
         commands::session_list,
         commands::session_get,
@@ -180,8 +189,62 @@ fn desktop_handler<R: tauri::Runtime>(
     ]
 }
 
+#[cfg(target_os = "macos")]
+fn reconcile_after_wake<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    quitting: Arc<AtomicBool>,
+    waking: Arc<AtomicBool>,
+) {
+    if quitting.load(Ordering::Acquire) || waking.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let lifecycle = app
+        .state::<native::window::lifecycle::NativeLifecycle>()
+        .inner()
+        .clone();
+    tauri::async_runtime::spawn(async move {
+        let result = tauri::async_runtime::spawn_blocking(move || lifecycle.reconcile()).await;
+        if !matches!(result, Ok(Ok(()))) {
+            eprintln!("Ariadne could not confirm owning-runtime wake reconciliation.");
+        }
+        // Display restoration is independent of dispatch readiness.
+        app.state::<native::window::NativeWindow>()
+            .reconcile(app.clone(), true);
+        waking.store(false, Ordering::Release);
+    });
+}
+
+fn establish_lifecycle<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    startup: impl FnOnce(
+        &tauri::AppHandle<R>,
+    )
+        -> Result<native::window::lifecycle::NativeLifecycle, ariadne_core::CoreError>,
+) -> Result<(), ariadne_core::CoreError> {
+    let lifecycle = startup(app)?;
+    app.manage(lifecycle);
+    Ok(())
+}
+
 /// Rust startup composition only; the renderer cannot install a service or resolver.
 pub fn run_with_service(service: commands::DesktopService) {
+    run_with_startup(service, |_| {
+        Ok(native::window::lifecycle::NativeLifecycle::default())
+    });
+}
+
+/// Trusted Rust composition only. Acquire existing native control ownership
+/// before starting owned workers, and return callbacks only after it succeeds.
+/// A failure aborts setup; the renderer cannot supply or replace this callback.
+pub fn run_with_startup(
+    service: commands::DesktopService,
+    startup: impl FnOnce(
+            &tauri::AppHandle,
+        )
+            -> Result<native::window::lifecycle::NativeLifecycle, ariadne_core::CoreError>
+        + Send
+        + 'static,
+) {
     #[cfg(feature = "e2e")]
     let state = PingState::environment().expect("Invalid E2E startup");
     #[cfg(feature = "e2e")]
@@ -190,7 +253,81 @@ pub fn run_with_service(service: commands::DesktopService) {
     let (state, owner) = PingState::ordinary().expect("Cannot create private diagnostic directory");
     #[cfg(not(feature = "e2e"))]
     let owner = Some(owner);
-    let builder = tauri::Builder::default().manage(state).manage(service);
+    let exit_allowed = Arc::new(AtomicBool::new(false));
+    let quitting = Arc::new(AtomicBool::new(false));
+    #[cfg(target_os = "macos")]
+    let waking = Arc::new(AtomicBool::new(false));
+    let window_quitting = quitting.clone();
+    #[cfg(target_os = "macos")]
+    let wake_quitting = quitting.clone();
+    #[cfg(target_os = "macos")]
+    let wake_active = waking.clone();
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            native::routes::receive_launch(app.clone(), args);
+        }))
+        .manage(state)
+        .manage(service)
+        .manage(native::routes::NativeRoutes::default())
+        .manage(native::window::NativeWindow::default())
+        .on_window_event(move |window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                    if !window_quitting.load(Ordering::Acquire) {
+                        window.state::<native::window::NativeWindow>().moved(window);
+                    }
+                }
+                tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                    window
+                        .state::<native::window::NativeWindow>()
+                        .reconcile(window.app_handle().clone(), true);
+                }
+                _ => {}
+            }
+        })
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+            {
+                webview
+                    .state::<native::routes::NativeRoutes>()
+                    .webview_loading();
+            }
+        })
+        .setup(move |app| {
+            // Plugin setup runs first: ordinary second launches are intercepted
+            // before this callback can acquire authority or start owned workers.
+            establish_lifecycle(app.handle(), startup).map_err(|_| {
+                std::io::Error::other("Native ownership/startup could not be established.")
+            })?;
+            #[cfg(target_os = "macos")]
+            {
+                let handle = app.handle().clone();
+                native::window::wake::install(move || {
+                    reconcile_after_wake(
+                        handle.clone(),
+                        wake_quitting.clone(),
+                        wake_active.clone(),
+                    );
+                })
+                .map_err(|_| {
+                    std::io::Error::other(
+                        "Native workspace wake observation could not be established.",
+                    )
+                })?;
+            }
+            native::routes::receive_launch(app.handle().clone(), std::env::args().collect());
+            app.state::<native::window::NativeWindow>()
+                .reconcile(app.handle().clone(), true);
+            Ok(())
+        });
     #[cfg(feature = "e2e")]
     let builder = builder
         .plugin(tauri_plugin_wdio::init())
@@ -199,7 +336,49 @@ pub fn run_with_service(service: commands::DesktopService) {
         .invoke_handler(desktop_handler())
         .build(tauri::generate_context!())
         .expect("Tauri startup failed")
-        .run_return(|_app, _event| {});
+        .run_return(move |app, event| {
+            match event {
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => native::routes::reopen(app),
+            tauri::RunEvent::ExitRequested { api, code, .. } => {
+                if exit_allowed.load(Ordering::Acquire) {
+                    return;
+                }
+                api.prevent_exit();
+                if quitting.swap(true, Ordering::AcqRel) {
+                    return;
+                }
+                let lifecycle = app
+                    .state::<native::window::lifecycle::NativeLifecycle>()
+                    .inner()
+                    .clone();
+                let window = app.state::<native::window::NativeWindow>().inner().clone();
+                let app = app.clone();
+                let exit_allowed = exit_allowed.clone();
+                let quitting = quitting.clone();
+                tauri::async_runtime::spawn(async move {
+                    let result = tauri::async_runtime::spawn_blocking(move || {
+                        window.join_writer()?;
+                        lifecycle.prepare_exit()
+                    }).await;
+                    if matches!(result, Ok(Ok(()))) {
+                        exit_allowed.store(true, Ordering::Release);
+                        app.exit(code.unwrap_or(0));
+                    } else {
+                        quitting.store(false, Ordering::Release);
+                        eprintln!("Ariadne could not confirm its owning-runtime shutdown; the app remains running.");
+                    }
+                });
+            }
+            tauri::RunEvent::Exit => {
+                #[cfg(target_os = "macos")]
+                native::window::wake::remove();
+            }
+            _ => {}
+            }
+        });
+    #[cfg(target_os = "macos")]
+    native::window::wake::remove();
     std::process::exit(complete_run(owner, exit_code));
 }
 
