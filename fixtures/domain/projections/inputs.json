@@ -42,8 +42,8 @@
           "claim_request_id": "00000000-0000-4000-8000-000000000365",
           "binding_generation": "00000000-0000-4000-8000-000000000022",
           "prepared_at": "2026-10-03T12:00:41.000Z",
-          "formatted_payload": "Bring request for item 2.\nPreserve this complete owner text.\nBinding context: delivery decisions.",
-          "payload_sha256": "aa77931c4e7ee4d0f5500c72e07e83c4c3cc28c19796e3e1e08f7b559f21cb42",
+          "formatted_payload": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000071:00000000-0000-4000-8000-000000000065]\nBring request for item 2.\nPreserve this complete owner text.\nBinding context: delivery decisions.",
+          "payload_sha256": "4024196a536104af0b10ff74e452f9c10bb442b9d82997900825b5c8599ba509",
           "wire_marker": "[ARIADNE_INPUT:00000000-0000-4000-8000-000000000071:00000000-0000-4000-8000-000000000065]",
           "acceptance": "accepted",
           "acceptance_receipt": {

@@ -58,6 +58,17 @@ reported event and persisted revision/effect, including a consistent replay;
 ephemeral presence need not produce a new durable session receipt.
 Its exact record is `{event_id,session_id,revision:positive_safe_integer|null,
 durable_effect,replayed}`; consistent replay preserves saved revision/effect.
+P2.2's native `DeliveryService` now persists Claim receipts containing only
+input/attempt IDs; replay derives immutable PreparedAttempt bytes from retained
+history. Native report uses full opaque event identity, omitting only the two
+observation timestamps prescribed by PROCESS. Unchanged observations allocate
+nothing and have no saved revision. Contradictory verified facts atomically retain
+an EventConflict receipt and binding barrier before returning `protocol_conflict`;
+exact conflict replay does not write again. A sealed attempt is never rewritten.
+`expire_missing_result` saves a typed DeliveryExpiry receipt after five seconds
+from persisted completion; its real native timer and CoreService/provider wiring
+remain explicit integration work, outside UI and Store locks.
+
 An invalid lease is `permission_denied`; disconnected dispatch is
 `host_unreachable`. Explicit owner pause and otherwise blocked recovery are
 `invalid_transition` with typed `details.reason=owner_paused|recovery_required`.
