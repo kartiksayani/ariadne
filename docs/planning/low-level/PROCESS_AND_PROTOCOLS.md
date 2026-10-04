@@ -381,6 +381,42 @@ hook to force another inference, permission changes, hidden transcript read or
 next-user-message dependency. Exact Mod APIs above were live-proven; transport
 POC did not exercise production domain tools or full recovery.
 
+The installed Mod imports an installer-local immutable JS descriptor carrying
+absolute helperPath, matching appVersion and apiVersion1; source checkouts have
+no descriptor and cannot fall back to PATH, plugin cache roots, environment or
+development helpers. Require exact Claude2.1.287 SDK engine version and matching
+helper/plugin version before connect/poll. A read-only2.1.289 CLI observation does
+not extend the preserved2.1.287 support baseline.
+
+Native qualified connection owns canonical `connected` evidence: only it supplies
+verified endpoint fingerprint/capabilities under §2. Mod connect validates the
+canonical saved receipt and scoped status/external session ID; reachability alone
+does not mean readiness. Installed Claude identity is adapter_id/config namespace
+`claude_code_mod`, local_bridge name `claude-mod`, values={}. The callbacks report
+actual captured lifecycle and best-effort session-end `disconnected`, without
+inventing connection facts or provider receipts. Unchanged SDK submit result.text
+or exact matching turn.start supports accepted with receipt:null.
+
+SDK answer&&!isAborted maps to completed; aborted/isAborted to interrupted;
+refusal/error to failed. Unknown evidence is uncertain. Keep final visible text
+as bounded diagnostic only. Retain exact report events until matching durable
+receipts and prevent reconnect/new claims while a detached submission remains
+unsettled. Serialize owner connect/disconnect transitions: close prior-loop claim
+admission before mutation awaits, drain any admitted bounded poll and recheck
+original claims/callbacks/pending reports before rotating. A late claimed attempt
+remains in its original scope without submission; failed/uncertain helper responses
+retain original request/event IDs and block rotation. Recheck after owner receipts
+as well, retaining any late original-scope evidence rather than replacing its loop.
+A committed owner receipt is exposed with recovery required; retained evidence
+does not restore old claim authority or imply a clean rollback.
+Identical terminal facts coalesce ignoring observation timestamps.
+Retain original and first contradictory terminal snapshot with the same terminal
+fallback identity, pause claims and require reconciliation. Further unsupported
+distinct terminal revisions retain one bounded explicit uncertainty/gap fact,
+stop intake for that claim and expose failure; additional raw callbacks are not
+claimed persisted. They never overwrite retained unsaved facts. P3.3 source
+consumers do not complete the actual P2.2/P2.4/P3.4/P3.7/P6 joins; see ADR0035.
+
 ## 4. Codex 0.160.0 adapter
 
 Use installed `codex`, existing shared daemon, and selected known thread. Resolve
