@@ -8,13 +8,13 @@ use tauri::Listener;
 
 fn inventory() -> Value {
     serde_json::from_str(include_str!(
-        "../../../../../fixtures/contracts/core/inventory.json"
+        "../../../../../../fixtures/contracts/core/inventory.json"
     ))
     .unwrap()
 }
 fn fixture_session() -> Session {
     serde_json::from_str(include_str!(
-        "../../../../../fixtures/domain/demo/session.json"
+        "../../../../../../fixtures/domain/demo/session.json"
     ))
     .unwrap()
 }
@@ -374,7 +374,7 @@ fn ordinary_startup_is_unsupported_and_canonical_success_is_returned_unchanged()
 #[test]
 fn mutation_receipts_keep_the_saved_shape_and_validate_operation_route_and_kind() {
     let corpus: Value = serde_json::from_str(include_str!(
-        "../../../../../fixtures/contracts/core/cases.json"
+        "../../../../../../fixtures/contracts/core/cases.json"
     ))
     .unwrap();
     let step = &corpus["cases"][0]["steps"][0];
