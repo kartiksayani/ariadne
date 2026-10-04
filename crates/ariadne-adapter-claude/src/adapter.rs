@@ -1,6 +1,6 @@
 //! First-party pull adapter: compatibility/presence only, never a second lifecycle transport.
 use crate::{
-    evidence::{ModEvidence, ModEvidenceSlot},
+    evidence::{fresh, ModEvidence, ModEvidenceSlot},
     normalization::error,
     probe::{self, ClaudeOptions, SUPPORTED_HOST_VERSION},
     worker::Worker,
@@ -143,18 +143,9 @@ impl State {
         evidence: &ModEvidence,
         deadline: Instant,
     ) -> Result<EndpointFingerprint, AdapterError> {
-        if !fresh(evidence) {
-            return Err(unavailable());
-        }
-        let version = probe::version(&self.options, deadline)?;
-        if version != SUPPORTED_HOST_VERSION
-            || evidence.identity.engine_version != SUPPORTED_HOST_VERSION
-        {
-            return Err(error(AdapterErrorCode::UnsupportedHostVersion, "Claude executable and loaded SDK must both match qualified 2.1.287; observed 2.1.289 is unqualified"));
-        }
-        let fingerprint = probe::resource_identity(&self.options, evidence, deadline)?;
+        let fingerprint = probe::qualify(&self.options, evidence, deadline)?;
         self.current_evidence(evidence, deadline)?;
-        Ok(EndpointFingerprint(fingerprint))
+        Ok(fingerprint)
     }
     fn current_evidence(
         &self,
@@ -379,9 +370,6 @@ fn reconcile_bounds(request: &ReconcileRequest) -> Result<(), AdapterError> {
         return Err(error(AdapterErrorCode::InvalidArgument, "Claude reconciliation accepts at most 100 attempts with nonempty markers up to 4KiB; request a narrower batch"));
     }
     Ok(())
-}
-fn fresh(evidence: &ModEvidence) -> bool {
-    evidence.received.elapsed() < Duration::from_secs(90)
 }
 fn unavailable() -> AdapterError {
     error(AdapterErrorCode::HostUnreachable, "No fresh scoped native Mod evidence; load/reload the original conversation and refresh its announcement")
