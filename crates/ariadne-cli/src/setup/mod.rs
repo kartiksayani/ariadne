@@ -190,3 +190,42 @@ pub fn run_in_installation(
         errors,
     )
 }
+
+pub(crate) fn package_root_from_environment() -> Result<PathBuf, CoreError> {
+    std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .map(|home| home.join(".local/share/ariadne"))
+        .ok_or_else(|| invalid("An absolute native HOME is required for the installed package."))
+}
+
+/// Native CLI composition uses the same package descriptor as explicit open routes.
+pub fn run(
+    args: &[&str],
+    uninstall: bool,
+    output: &mut dyn std::io::Write,
+    errors: &mut dyn std::io::Write,
+) -> i32 {
+    if args == ["--help"] || args == ["-h"] {
+        return if output.write_all(HELP.as_bytes()).is_ok() {
+            0
+        } else {
+            4
+        };
+    }
+    let result = (|| {
+        parse(args, uninstall)?;
+        let package_root = package_root_from_environment()?;
+        let package = crate::open::installed_package(&package_root, resources::VERSION)?;
+        let data = crate::bridge::command::home_from_environment()?;
+        execute_in_installation(
+            args,
+            uninstall,
+            &data,
+            &package.version_root,
+            &package_root.join("current/integrations"),
+        )
+    })();
+    write(result, args.contains(&"--json"), output, errors)
+}

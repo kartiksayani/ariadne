@@ -625,3 +625,130 @@ fn doctor_flags_output_and_error_exit_are_stable_without_root_creation() {
         .unwrap()
         .contains("session.future_schema"));
 }
+
+#[test]
+fn executable_doctor_qualifies_only_the_existing_codex_daemon_and_exact_thread() {
+    use std::os::unix::net::UnixListener;
+    let profile = Profile::new();
+    let executable_path = profile.home.path().join("codex");
+    executable(&executable_path, "codex-cli 0.160.0");
+    let codex_home = profile.home.path().join("codex-home");
+    let endpoint = codex_home.join("app-server-control/app-server-control.sock");
+    fs::create_dir_all(endpoint.parent().unwrap()).unwrap();
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    fs::set_permissions(&endpoint, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut session: Session = serde_json::from_slice(&fs::read(profile.live()).unwrap()).unwrap();
+    let binding = session.bindings.0.get_mut(&id(20)).unwrap();
+    binding.adapter_id = "codex".into();
+    binding.adapter_config.namespace = "codex".into();
+    binding.endpoint = EndpointRef::UnixSocket {
+        path: endpoint.to_str().unwrap().into(),
+    };
+    let thread = binding.external_session_id.clone();
+    let bytes = serde_json::to_vec(&session).unwrap();
+    ariadne_store::session::Store::decode_diagnostic_snapshot(
+        &bytes,
+        &session.id,
+        &session.project_id,
+    )
+    .unwrap();
+    fs::write(profile.live(), bytes).unwrap();
+    let project = profile.project.path().canonicalize().unwrap();
+    let before = snapshot(profile.project.path());
+    let home_before = snapshot(profile.home.path());
+    let server = std::thread::spawn(move || {
+        let fixture = |name: &str| -> Value {
+            serde_json::from_slice(
+                &fs::read(
+                    Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../contracts/providers/codex/0.160.0/fixtures")
+                        .join(name),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        let mut calls = Vec::new();
+        for _ in 0..2 {
+            let stream = accept_fixture(&listener);
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            while let Ok(tungstenite::Message::Text(text)) = socket.read() {
+                let request: Value = serde_json::from_str(text.as_str()).unwrap();
+                let method = request["method"].as_str().unwrap();
+                calls.push(method.to_owned());
+                let result = match method {
+                    "initialized" => continue,
+                    "initialize" => fixture("initialize-response.json"),
+                    "thread/read" => {
+                        assert_eq!(request["params"]["threadId"], thread);
+                        let mut result = fixture("read-response.json");
+                        result["thread"]["id"] = thread.clone().into();
+                        result["thread"]["cwd"] = serde_json::json!(project);
+                        result
+                    }
+                    "thread/queue/list" => fixture("queue-response.json"),
+                    "thread/turns/list" => fixture("turns-response.json"),
+                    forbidden => panic!("doctor called forbidden provider API: {forbidden}"),
+                };
+                socket
+                    .send(tungstenite::Message::Text(
+                        serde_json::json!({"id":request["id"],"result":result})
+                            .to_string()
+                            .into(),
+                    ))
+                    .unwrap();
+            }
+        }
+        calls
+    });
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_ariadne"))
+        .args([
+            "doctor",
+            "--project",
+            profile.project.path().to_str().unwrap(),
+            "--codex-bin",
+            executable_path.to_str().unwrap(),
+            "--json",
+        ])
+        .env("HOME", profile.home.path())
+        .env("ARIADNE_HOME", &profile.data)
+        .env("CODEX_HOME", &codex_home)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let report = &envelope["data"];
+    assert_eq!(checks(report, "codex.selected_thread")[0]["status"], "ok");
+    assert_eq!(checks(report, "codex.daemon")[0]["status"], "ok");
+    assert_eq!(
+        checks(report, "codex.selected_thread")[0]["facts"]["dispatch_ready"],
+        false
+    );
+    assert_eq!(
+        server.join().unwrap(),
+        [
+            "initialize",
+            "initialized",
+            "thread/read",
+            "thread/queue/list",
+            "thread/turns/list",
+            "initialize",
+            "initialized"
+        ]
+    );
+    assert_eq!(snapshot(profile.project.path()), before);
+    assert_eq!(snapshot(profile.home.path()), home_before);
+    assert!(!String::from_utf8(output.stdout)
+        .unwrap()
+        .contains("Codex queue communication test"));
+}

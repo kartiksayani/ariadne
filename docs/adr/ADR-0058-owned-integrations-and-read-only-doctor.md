@@ -11,6 +11,13 @@ Provider adapters already own bounded version and socket qualification.
 
 ## Decision
 
+Setup and doctor reuse the existing open-route install-manifest validator through
+`open::installed_package`, returning `InstalledPackage { version_root, application }`.
+`installed_application` preserves its application-only contract, including applications
+outside the versions directory and additive manifest inventory. Resources reopen the
+validated immutable version root through the existing anchored directory primitive;
+the mutable `current` path is used only in printed host commands.
+
 Setup consumes the validated installed version root, embeds the canonical generated
 rules and fixed Claude Mod inventory, and renders a static descriptor pointing to
 that immutable version's helper. It creates missing selected resources, preserves
@@ -37,6 +44,13 @@ budget. Codex retains its exact qualified version gate and existing read-only da
 and selected-thread APIs. Current native control status supplies timestamped binding
 presence without claiming input. Version strings and matching files alone never
 establish a loaded Mod, current host readiness or permission to dispatch.
+
+The additive public seams are `ariadne_store::OwnedDirectory`'s bounded reads,
+component-checked children, coordination and unchanged removal; Store's
+`diagnose_registered` and `decode_diagnostic_snapshot`; Registry's
+`inspect_data_directory` and `inspect_binding_index`; catalogue `diagnostic_routes`;
+and the existing Claude/Codex options' bounded `read_host_version`. Ordinary callers
+retain their existing semantics. No session contents are returned in diagnostic reports.
 
 ## Consequences
 

@@ -142,3 +142,41 @@ pub fn run_in_installation(
         errors,
     )
 }
+
+/// Native CLI diagnostics never create or repair an installation or data root.
+pub fn run(args: &[&str], output: &mut dyn Write, errors: &mut dyn Write) -> i32 {
+    if args == ["--help"] || args == ["-h"] {
+        return if output.write_all(HELP.as_bytes()).is_ok() {
+            0
+        } else {
+            4
+        };
+    }
+    let result = (|| {
+        let options = parse(args)?;
+        let data = crate::bridge::command::home_from_environment()?;
+        let root = crate::setup::package_root_from_environment()?;
+        let package = crate::open::installed_package(&root, crate::setup::resources::VERSION);
+        let mut report = inspect::collect(
+            &data,
+            package.as_ref().ok().map(|p| p.version_root.as_path()),
+            &options,
+        );
+        if let Err(error) = package {
+            // Missing personal installations remain unknown. Existing invalid layouts
+            // are explicit errors; their descriptors are never used for resource writes.
+            if std::fs::symlink_metadata(&root).is_ok() {
+                let checked_at = report["checked_at"].clone();
+                report["checks"].as_array_mut().expect("checks").push(json!({
+                    "status":"error", "code":"installation.invalid", "checked_at":checked_at,
+                    "message":"The existing personal package failed the shared install descriptor validation.",
+                    "hint":"Install the matching app/helper package; no resource path was guessed or repaired.",
+                    "facts":{"error_code":error.code}
+                }));
+                report["status"] = json!("error");
+            }
+        }
+        Ok(report)
+    })();
+    write(result, args.contains(&"--json"), output, errors)
+}
