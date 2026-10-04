@@ -61,20 +61,34 @@ export async function completeTurn(configuration, admission) {
   assert.ok(!completed.some(entry => entry.attemptId === admission.attemptId), 'Host completion is explicit and occurs once');
   await atomicJson(configuration.completePath, [...completed, admission]);
 }
-export async function publishResult(configuration, admission, reply, env = process.env) {
-  const session = await snapshot(configuration), input = session.inputs[admission.inputId];
+export function journeyResultRequest(configuration, admission, session, reply) {
+  const input = session.inputs[admission.inputId];
   assert.equal(input.binding_id, configuration.bindingId);
   assert.equal(admission.bindingId, configuration.bindingId); assert.equal(admission.generation, configuration.generation);
   const attempt = input.attempts.find(attempt => attempt.id === admission.attemptId);
   assert.ok(attempt); assert.equal(attempt.formatted_payload, admission.payload);
   const owner = session.messages.find(message => message.id === input.message_id);
-  const request = { ...applyRequest([{ op: 'reply', ref: 'native-reply', item: { id: configuration.itemId }, text: reply, round_id: null }]),
+  return { ...applyRequest([{ op: 'reply', ref: 'native_reply', item: { id: configuration.itemId }, text: reply, round_id: null }]),
     source_input_id: input.id, attempt_id: attempt.id,
     expected_item_revisions: { [configuration.itemId]: session.items[configuration.itemId].revision },
-    input_result: { outcome: 'answered', explanation: `Explicit scripted result ${admission.ordinal}`, reply_refs: [{ ref: 'native-reply' }], followup_item_refs: [], handled_through_message_number: owner.number } };
+    input_result: { outcome: 'answered', explanation: `Explicit scripted result ${admission.ordinal}`, reply_refs: [{ ref: 'native_reply' }], followup_item_refs: [], handled_through_message_number: owner.number } };
+}
+export async function publishResult(configuration, admission, reply, env = process.env) {
+  const request = journeyResultRequest(configuration, admission, await snapshot(configuration), reply);
   const applied = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request, env);
   assert.equal(applied.code, 0); assert.equal(applied.value.session_id, configuration.sessionId);
   return { request, receipt: applied.value };
+}
+
+export function journeySeedRequest(bindingId) {
+  const question = 'Which native delivery window should we use?', ask = 'Choose the saved option and explain it in your own words.';
+  const options = [{ id: 'native-window', label: 'Use the native window', consequence: 'Preserve this exact saved choice', recommended: true }];
+  const request = applyRequest([
+    { op: 'topic.add', ref: 'native_topic', name: 'Native provider journey' },
+    { op: 'item.add', ref: 'native_item', topic: { ref: 'native_topic' }, parent: null, question, type: 'task', status: 'open', owner: { kind: 'me' }, ask: null, options: null, note: null, links: null, outcome: null, why: null, replaced_by: null, source_round_id: null },
+    { op: 'item.ask', item: { ref: 'native_item' }, ask, options, recipient_binding_id: bindingId },
+  ]);
+  return { question, ask, options, request };
 }
 
 // This replaces only the pinned existing provider endpoint/executable. Every
@@ -179,13 +193,7 @@ export async function seedJourney(configuration, env = process.env) {
   assert.ok(read, 'Saved setup contains pasteable canonical read arguments');
   const readArgs = read.slice('Use ariadne '.length).replace(/\.$/, '').split(/\s+/);
   assert.equal((await cliRequest(configuration.cli, readArgs, undefined, env)).code, 0);
-  const question = 'Which native delivery window should we use?', ask = 'Choose the saved option and explain it in your own words.';
-  const options = [{ id: 'native-window', label: 'Use the native window', consequence: 'Preserve this exact saved choice', recommended: true }];
-  const seed = applyRequest([
-    { op: 'topic.add', ref: 'native-topic', name: 'Native provider journey' },
-    { op: 'item.add', ref: 'native-item', topic: { ref: 'native-topic' }, parent: null, question, type: 'task', status: 'open', owner: { kind: 'me' }, ask: null, options: null, note: null, links: null, outcome: null, why: null, replaced_by: null, source_round_id: null },
-    { op: 'item.ask', item: { ref: 'native-item' }, ask, options, recipient_binding_id: bindingId },
-  ]);
+  const { question, ask, options, request: seed } = journeySeedRequest(bindingId);
   const apply = receipt.data.setup_instruction.split('\n').find(line => line.startsWith('Publish full item replies with ariadne apply '));
   assert.ok(apply, 'Saved setup contains pasteable canonical apply arguments');
   const applyArgs = apply.slice('Publish full item replies with ariadne '.length).split('. Use explicit')[0].split(/\s+/);
