@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
-import { deferred, descriptor, failure, host, ids, prepared } from './fixtures.js';
+import { capabilities, deferred, descriptor, failure, host, ids, prepared, success } from './fixtures.js';
 function callbacks(descriptor) {
   const hooks = new Map();
   createRegister(descriptor)((name, pattern, handler) => {
@@ -26,10 +26,46 @@ describe('supported Mod entry convention', () => {
     expect(recorded[1].binding_scope).toEqual({binding_id:ids.binding,generation:ids.generation});
     await hooks.get('ariadne-disconnect')(h.$);
     await timer.callback();
-    expect(recorded[2].binding_scope).toBe(null);
+    expect(recorded[3].binding_scope).toBe(null);
     await hooks.get('session.end')(h.$,{},next);
     expect(timer.cancelled).toBe(true);await timer.callback();
-    expect(recorded).toHaveLength(3);expect(h.prompts).toEqual([]);
+    expect(recorded).toHaveLength(4);expect(h.prompts).toEqual([]);
+  });
+  it('announces exact saved IDs before status and retains the connect operation while route publication or its acknowledgement is pending', async () => {
+    for (const loseAnnouncementAck of [false,true]) {
+      let published = false, lost = false;
+      const bound = [];
+      const h = host({handler:(argv,options) => {
+        if (argv[2] === 'announce') {
+          const scope = JSON.parse(options.stdin).binding_scope;
+          if (scope) {
+            bound.push(scope);
+            if (loseAnnouncementAck && !lost) {lost=true;return failure('commit_uncertain');}
+          }
+        }
+        if (argv[2] === 'connection-status' && !published) return failure('not_found');
+      }});
+      const hooks = callbacks(descriptor);
+      await hooks.get('session.start')(h.$,{},next);
+      await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+      expect(h.logs.at(-1)).toContain('was saved; connection status remains pending');
+      expect(bound).toEqual([{binding_id:ids.binding,generation:ids.generation}]);
+      const connect = h.calls.find(call => call.argv[1] === 'binding');
+      const original = connect.options.stdin;
+      await h.timer().callback();
+      expect(h.calls.some(call => call.argv[2] === 'claim')).toBe(false);
+      expect(h.prompts).toEqual([]);
+      await hooks.get('ariadne-connect')(h.$,{args:ids.input});
+      expect(h.calls.filter(call => call.argv[1] === 'binding')).toHaveLength(1);
+      await h.timers().find(timer => timer.ms === 30000).callback();
+      expect(bound.at(-1)).toEqual(bound[0]);
+      published = true;
+      const retried = await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+      expect(JSON.parse(retried.text.split('\n')[0]).status).toMatchObject({connection_state:'connected'});
+      expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
+      expect(h.calls.filter(call => call.argv[2] === 'report')).toEqual([]);
+      expect(h.prompts).toEqual([]);
+    }
   });
   it('can announce an unqualified engine without admitting claims, and heartbeat failure cannot fabricate connection', async () => {
     const h = host({version:'2.1.289'}), hooks = callbacks(descriptor);
@@ -42,6 +78,85 @@ describe('supported Mod entry convention', () => {
     expect(unsupported.logs.some(log => log.includes('unsupported'))).toBe(true);
     expect(unsupported.calls.filter(call => call.argv[2] === 'claim')).toEqual([]);
     expect(unsupported.events).toEqual([]);
+  });
+  it('reports actual session end for saved scopes pending status or announcement acknowledgement, retaining failed report identity', async () => {
+    for (const loseAnnouncementAck of [false,true]) {
+      let failReport = true;
+      const h = host({handler:(argv,options) => {
+        if (argv[2] === 'connection-status') return failure('not_found');
+        if (argv[2] === 'announce' && loseAnnouncementAck && JSON.parse(options.stdin).binding_scope) return failure('commit_uncertain');
+        if (argv[2] === 'report' && failReport) return failure('commit_uncertain');
+      }});
+      const hooks = callbacks(descriptor);
+      await hooks.get('session.start')(h.$,{},next);
+      await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+      const original = h.calls.find(call => call.argv[1] === 'binding').options.stdin;
+      await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+      expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
+      h.timer().callback();
+      expect(h.calls.some(call => call.argv[2] === 'claim')).toBe(false);
+      await hooks.get('session.end')(h.$,{},next);
+      const failed = h.calls.find(call => call.argv[2] === 'report');
+      expect(JSON.parse(failed.options.stdin)).toMatchObject({kind:'disconnected',binding_id:ids.binding,generation:ids.generation,input_id:null,attempt_id:null});
+      expect(JSON.parse(failed.options.stdin).event_id).toBe(`claude:session-ended:${ids.binding}:${ids.generation}`);
+      failReport = false;
+      await hooks.get('session.end')(h.$,{},next);
+      const attempts = h.calls.filter(call => call.argv[2] === 'report');
+      expect(attempts).toHaveLength(2);
+      expect(attempts[1].options.stdin).toBe(failed.options.stdin);
+      expect(h.events.map(event => event.kind)).toEqual(['disconnected']);
+      expect(h.prompts).toEqual([]);
+      expect(h.timers().every(timer => timer.cancelled)).toBe(true);
+    }
+  });
+  it('reports the saved scope when session end overtakes its receipt or a pending status read', async () => {
+    for (const heldCommand of ['connect','connection-status']) {
+      const entered = deferred(), reply = deferred();
+      const h = host({handler:async argv => {
+        if (argv[2] === heldCommand) {entered.resolve();await reply.promise;}
+        if (argv[2] === 'connection-status') return failure('not_found');
+      }});
+      const hooks = callbacks(descriptor);
+      await hooks.get('session.start')(h.$,{},next);
+      const connecting = hooks.get('ariadne-connect')(h.$,{args:ids.session});
+      await entered.promise;
+      await hooks.get('session.end')(h.$,{},next);
+      reply.resolve();
+      await connecting;
+      expect(h.events).toHaveLength(1);
+      expect(h.events[0]).toMatchObject({kind:'disconnected',binding_id:ids.binding,generation:ids.generation,input_id:null,attempt_id:null});
+      expect(h.calls.some(call => call.argv[2] === 'claim')).toBe(false);
+      expect(h.prompts).toEqual([]);
+      expect(h.timers().every(timer => timer.cancelled)).toBe(true);
+    }
+  });
+  it('keeps distinct old and pending saved scopes through session end without replacing failed old evidence', async () => {
+    let connects = 0, holdStatus = false, failOldReport = true;
+    const h = host({handler:(argv,options) => {
+      if (argv[1] === 'binding' && ++connects === 2) {
+        holdStatus = true;
+        return success({operation_id:JSON.parse(options.stdin).command.op_id,session_id:ids.session,revision:2,
+          data:{kind:'binding_connect',binding_id:ids.input,generation:ids.attempt,
+            capabilities:capabilities(),setup_instruction:'Exact saved instruction.'}});
+      }
+      if (argv[2] === 'connection-status' && holdStatus) return failure('not_found');
+      if (argv[2] === 'report' && JSON.parse(options.stdin).binding_id === ids.binding && failOldReport) return failure('commit_uncertain');
+    }});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+    await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+    await hooks.get('session.end')(h.$,{},next);
+    const reports = h.calls.filter(call => call.argv[2] === 'report');
+    expect(reports.map(call => JSON.parse(call.options.stdin))).toMatchObject([
+      {binding_id:ids.binding,generation:ids.generation,kind:'disconnected'},
+      {binding_id:ids.input,generation:ids.attempt,kind:'disconnected'},
+    ]);
+    failOldReport = false;
+    await hooks.get('session.end')(h.$,{},next);
+    expect(h.calls.filter(call => call.argv[2] === 'report')).toHaveLength(3);
+    expect(h.calls.at(-1).options.stdin).toBe(reports[0].options.stdin);
+    expect(h.calls.some(call => call.argv[2] === 'claim')).toBe(false);
+    expect(h.prompts).toEqual([]);
   });
   it('does not create a poll timer after session end overtakes the bounded startup announcement', async () => {
     const entered = deferred(), reply = deferred();

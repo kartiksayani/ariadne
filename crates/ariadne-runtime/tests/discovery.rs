@@ -208,7 +208,8 @@ fn qualification_replaces_slots_but_heartbeats_do_not_refresh_prior_evidence() {
     assert_eq!(qualified_facts.identity().project_root, selected.cwd);
     assert_eq!(qualified_facts.observed_at(), &selected.observed_at);
     assert!(qualified_facts.is_fresh());
-    assert!(!qualified_facts.capabilities().domain_cli.supported);
+    assert!(qualified_facts.capabilities().domain_cli.supported);
+    assert!(!qualified_facts.capabilities().domain_mcp.supported);
     assert_eq!(
         files.availability(&rt, old.clone()),
         Availability::Available

@@ -306,5 +306,5 @@ fn expire(observation: &mut PresenceObservation, now: &UtcMillis) {
 }
 
 #[cfg(test)]
-#[path = "presence_tests.rs"]
+#[path = "tests/presence.rs"]
 mod tests;
