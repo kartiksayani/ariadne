@@ -832,7 +832,7 @@
         "P0.5",
         "P0.6"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/47"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/82"
     },
     {
       "id": "P3.2",
@@ -1308,7 +1308,7 @@
         "P4.1",
         "P4.4"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/60"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/80"
     },
     {
       "id": "P4.7",
@@ -1412,7 +1412,7 @@
       ],
       "acceptance": [
         "SVG uses fixed node/depth/leaf/root dimensions, stable ordered tree layout, cubic parent edges and distinct labelled dashed replacement edges (D07).",
-        "Shared filters/selection route to same detail; cursor-anchored zoom 0.25–2.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
+        "Shared filters/selection route to same detail; cursor-anchored zoom 0.25\u20132.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
       ],
       "checks": [
         "rtk proxy npm run test:ui -- apps/desktop/tests/ui/graph-layout"
@@ -1457,7 +1457,8 @@
       "estimate_days": 1,
       "implementation_depends_on": [
         "P5.1"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/80"
     },
     {
       "id": "P5.3",
@@ -1741,7 +1742,7 @@
       ],
       "acceptance": [
         "Clean checkout builds/installs recorded source revision; packaged offline demo/history/owner edits, both supported integrations, native routing and owned uninstall pass on recorded Mac.",
-        "Every non-deferred V01–V29 row links proved-on-version evidence or a concrete external blocker; distinguish mock/transport/production/live/native evidence and retain seeds/hashes/logs.",
+        "Every non-deferred V01\u2013V29 row links proved-on-version evidence or a concrete external blocker; distinguish mock/transport/production/live/native evidence and retain seeds/hashes/logs.",
         "README covers install/unsigned Open Anyway/setup/both hosts/60-second tour/rules/recovery/uninstall/limits; record no remote assets, telemetry, updater, host transcript/credential handling or release test service.",
         "Public plugin and exotic recovery remain deferred; reviewed repository changes are publishable under existing authorization, while signed public app distribution is a later decision."
       ],
