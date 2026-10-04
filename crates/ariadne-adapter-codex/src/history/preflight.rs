@@ -3,7 +3,7 @@ use super::*;
 use ariadne_agent_protocol::{Availability, Compatibility, EndpointFingerprint};
 
 /// Provider-owned facts, never deserialized authority or a durable binding.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CodexHostFacts {
     pub external_session_id: String,
     pub canonical_root: PathBuf,
@@ -33,6 +33,26 @@ impl QualifiedCodexThread {
         instance_id: UuidV4,
         observed_at: UtcMillis,
     ) -> Result<(CodexHistoryClient, ariadne_agent_protocol::ConnectResult), AdapterError> {
+        self.bind_before(
+            request,
+            instance_id,
+            observed_at,
+            Instant::now() + Duration::from_secs(10),
+        )
+    }
+    pub(crate) fn executable_identity(&self) -> ExecutableIdentity {
+        self.reader.executable.clone()
+    }
+    pub(crate) fn options(&self) -> CodexOptions {
+        self.reader.options.clone()
+    }
+    pub(crate) fn bind_before(
+        self,
+        request: ConnectRequest,
+        instance_id: UuidV4,
+        observed_at: UtcMillis,
+        deadline: Instant,
+    ) -> Result<(CodexHistoryClient, ariadne_agent_protocol::ConnectResult), AdapterError> {
         request.validate()?;
         if request.external_session_id != self.facts.external_session_id {
             return Err(error(
@@ -45,7 +65,7 @@ impl QualifiedCodexThread {
             instance_id,
             observed_at,
             Some(&self.facts.canonical_root),
-            Instant::now() + Duration::from_secs(10),
+            deadline,
         )
     }
 }
