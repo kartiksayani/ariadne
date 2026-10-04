@@ -134,6 +134,36 @@ not machine-proven absence. Show target identity and prior result/side effects.
   store owner attribution. This never fabricates an agent result or successful
   turn. Owner may then skip; automatic 'handled' still needs host/domain evidence.
 
+The native `recovery::RecoveryService` commits these decisions through the same
+replay-first session transaction. Its optional native-only `RecoveryObservation`
+binds qualified presence to the selected binding, adapter instance and current
+generation. Runtime owns freshness qualification; mismatched, stale or
+unqualified observations mean Unknown. Process hints cannot prove idle. Fresh
+qualified Running/WaitingForApproval blocks all resolutions; otherwise unknown
+liveness requires idle attestation supplied by this deliberate request. Ordinary
+Core composition defaults to Unknown and does not contact a host under lock.
+
+Prepare/retry/resend/repair and Skip seal only the replaced attempt, clear active
+IDs, preserve original input sequence/content/effects and persist owner pause.
+They never allocate or send an attempt. Separate Resume remains mandatory; a later
+legitimate claim allocates fresh delivery identity from the retained preparation
+resolution. Retry/Resend preserve the replaced purpose, so retrying a repair
+never delivers the original action prompt. Result repair uses a result-only prompt with original effect
+references, and repeated repairs point directly to original machine-observed
+Completed Work. Neither an owner assertion nor time expiry creates completion.
+
+ConfirmEvidence normally appends owner attribution without changing machine facts,
+result, queue state or barriers. A sealed input permits this append-only audit
+while its Attempt/result/payload/prior effects remain unchanged. A matching
+acknowledgement covers only scoped EventConflict receipts through the guarded
+snapshot revision. Binding Uncertain can clear only when every attributable
+conflict is acknowledged and no other unresolved attempt or recovery cause
+remains; unscoped/unmatched conflicts and StoreError/Incompatible/HostFailure
+remain blocked. Clearing still persists owner pause and requires separate Resume.
+Exact old operation replay never acknowledges later conflicts or widens effects.
+The installed recovery CLI delegates to this native Core service. Qualified runtime
+observations and full real composition acceptance remain consuming joins.
+
 Queue cancel is only before attempt preparation. Once delivered into the host's
 native queue, Pause means no additional sends and does not retract it. Release1
 has no 'Stop agent' button. UI tells the owner to interrupt in the terminal.
@@ -170,6 +200,8 @@ All corrections, rounds, branches and superseded answers remain inspectable.
 
 ### Derived label precedence
 
+A persisted pre-delivery rejection displays Rejected before delivery with a warning; it never establishes a matching turn or authorizes automatic retry. A persisted protocol contradiction stays Uncertain ahead of ordinary progress. A saved adapter `EventConflict` receipt matching the input binding, input ID and current active attempt also displays Uncertain, even when the retained attempt error remains `result_missing`; unrelated or historical conflicts cannot label newly queued work.
+
 Read in this order: input cancelled→Cancelled; skipped→Skipped; handled→Handled;
 attempt uncertain→Uncertain; failed/interrupted turn→Failed; result missing→Missing
 result; result committed and turn not completed→Published; running→Received;
@@ -179,6 +211,17 @@ missing-result grace expires, retaining its unsealed attempt. If a late result
 joins successfully, clear only that automatic pause, never an explicit owner pause.
 Store independent owner_paused plus automatic pause_reason (`result_missing`, `uncertain`, `host_failure`,
 `store_error`, `incompatible`) beside dispatch_state so that distinction is durable.
+
+Current delivery labels use only `Input.active_attempt_id` after the terminal
+Input-state checks. Historical resolved attempts remain inspectable and do not
+label a newly queued input uncertain or failed. A queued input with no active
+attempt uses current qualified availability/busy evidence for Queued/Saved;
+missing or inconsistent active evidence for an in-flight/needs-attention input
+is shown as unavailable, never invented progress. A completed host turn with a
+pending result during the grace period displays Waiting for result (agent turn
+finished), before running/accepted labels. Missing result requires persisted
+`result_state=missing`. Completed+committed with nonterminal Input state is
+inconsistent evidence pending reload, not a renderer-authored Handled result.
 
 A queued answer retains the exact question/option snapshot it was saved against.
 If the agent later changes the item before dispatch, show the changed-question

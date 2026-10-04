@@ -133,7 +133,11 @@ pub fn validate_session_items(session: &Session) -> Result<(), ValidationError> 
             )?;
         }
         require(
-            message.kind != MessageKind::Reply || message.item_id.is_some(),
+            message.kind != MessageKind::Reply
+                || message.item_id.is_some()
+                || message.origin.as_ref().is_some_and(|origin| {
+                    crate::history::copied_message(session, message, origin).is_ok()
+                }),
             "messages.reply.item_id",
             ValidationErrorKind::MissingReference,
         )?;

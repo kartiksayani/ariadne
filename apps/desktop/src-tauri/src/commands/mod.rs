@@ -1,6 +1,10 @@
 //! Owner desktop entrypoints. Only trusted Rust startup supplies composition.
+#[cfg(test)]
+use ariadne_core::validate_owner_receipt as validate_receipt;
 use ariadne_core::*;
-use ariadne_domain::models::{SavedReceiptData, SchemaVersion};
+#[cfg(test)]
+use ariadne_domain::models::SavedReceiptData;
+use ariadne_domain::models::SchemaVersion;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
@@ -140,7 +144,7 @@ impl DesktopService {
                 OwnerContext::from_trusted_entrypoint(scope),
                 request.command.clone(),
             )?;
-            validate_receipt(&request, &result)?;
+            validate_owner_receipt(&request, &result)?;
             Ok(result)
         })()))
     }
@@ -200,72 +204,6 @@ fn envelope<T>(result: Result<T, CoreError>) -> ApplicationEnvelope<T> {
         }
     }
 }
-fn validate_receipt(
-    request: &OwnerMutationRequest,
-    receipt: &MutationReceipt,
-) -> Result<(), CoreError> {
-    let matches = match receipt {
-        MutationReceipt::PreferencesPatched(receipt) => {
-            matches!(request.command, OwnerCommand::PreferencesPatch { .. })
-                && receipt.operation_id == *request.command.operation_id()
-        }
-        MutationReceipt::ProjectRegistered(receipt) => {
-            matches!(request.command, OwnerCommand::ProjectRegister { .. })
-                && receipt.operation_id == *request.command.operation_id()
-        }
-        MutationReceipt::Session(receipt) => {
-            receipt.operation_id == *request.command.operation_id()
-                && match (&request.session, &request.command) {
-                    (Some(route), _) => route.session_id == receipt.session_id,
-                    (None, OwnerCommand::BindingConnect { params, .. }) => params
-                        .existing_session_id
-                        .as_ref()
-                        .is_none_or(|id| id == &receipt.session_id),
-                    _ => false,
-                }
-                && matches!(
-                    (&request.command, &receipt.data),
-                    (
-                        OwnerCommand::BindingConnect { .. },
-                        SavedReceiptData::BindingConnect { .. }
-                    ) | (
-                        OwnerCommand::InputSubmit { .. },
-                        SavedReceiptData::InputSubmit { .. }
-                    ) | (
-                        OwnerCommand::InputCancel { .. },
-                        SavedReceiptData::InputCancel { .. }
-                    ) | (
-                        OwnerCommand::InputResolve { .. },
-                        SavedReceiptData::InputResolve { .. }
-                    ) | (
-                        OwnerCommand::TopicArchive { .. } | OwnerCommand::TopicRestore { .. },
-                        SavedReceiptData::TopicLifecycle { .. }
-                    ) | (
-                        OwnerCommand::SessionClose { .. } | OwnerCommand::SessionReopen { .. },
-                        SavedReceiptData::SessionLifecycle { .. }
-                    ) | (
-                        OwnerCommand::BindingPause { .. }
-                            | OwnerCommand::BindingResume { .. }
-                            | OwnerCommand::BindingDisconnect { .. },
-                        SavedReceiptData::BindingState { .. }
-                    ) | (
-                        OwnerCommand::TopicContinue { .. },
-                        SavedReceiptData::Continuation { .. }
-                    )
-                )
-        }
-    };
-    if matches {
-        Ok(())
-    } else {
-        Err(CoreError::new(
-            CoreErrorCode::ProtocolConflict,
-            "CoreService returned a receipt for a different operation or route.",
-            "Keep the original operation ID and reconcile the local service.",
-        ))
-    }
-}
-
 // Tauri schedules async commands on its executor. Move the entire synchronous
 // operation, including trusted registration lookup, off that executor as well.
 async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, ()> {
