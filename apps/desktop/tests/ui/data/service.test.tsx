@@ -11,7 +11,7 @@ import inventory from '../../../../../fixtures/contracts/core/inventory.json';
 import type { Session, SessionSummary } from '../../../src/generated/domain/models';
 import type {
   CoreError, ItemRoute, MutationEnvelope, OwnerMutationRequest, QueryEnvelope,
-  SessionRef, SessionSnapshot,
+  SessionListResult, SessionRef, SessionSnapshot,
 } from '../../../src/generated/core';
 import {
   CoreFailure, createDesktopService, immutable, indexSession, OpenSessions,
@@ -39,6 +39,8 @@ function success(data: Extract<QueryEnvelope, { ok: true }>['data']): QueryEnvel
   return { api_version: 1, ok: true, data };
 }
 const loaded = (revision = 21) => success({ kind: 'session_get', data: snapshot(revision) });
+const presenceList = () => ({ sessions: structuredClone(summaries) as SessionListResult['sessions'], active_total: 1, closed_total: 0,
+  counts: structuredClone(summaries.items[0].counts) as SessionListResult['counts'] });
 const coreError: CoreError = { code: 'io_error', message: 'Registered directory is inaccessible.', hint: 'Check local access.', retryable: false, field_errors: [] };
 const ownerStep = cases.cases[0].steps[0] as unknown as { request: OwnerMutationRequest['command']; response: Extract<MutationEnvelope, { ok: true }> };
 
@@ -49,12 +51,15 @@ class Transport implements DesktopTransport {
   readonly listeners = new Map<keyof HintPayloads, (hint: never) => void>();
   readonly unsubscribed: string[] = [];
   readonly script: (QueryEnvelope | MutationEnvelope | Error | Promise<QueryEnvelope>)[] = [];
+  readonly presenceScript: (QueryEnvelope | Error | Promise<QueryEnvelope>)[] = [];
   listenFailure = false;
   onInvoke: (() => void) | undefined;
   async invoke<T>(name: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
     this.calls.push({ name, request: structuredClone(args.request) });
     this.onInvoke?.();
-    const next = this.script.shift();
+    const next = name === 'session_list' ? this.presenceScript.shift() ?? success({ kind: 'session_list', data: {
+      ...presenceList(), sessions: { ...presenceList().sessions, items: [] }, active_total: 0,
+    } }) : this.script.shift();
     if (next instanceof Error) throw next;
     if (!next) throw new Error('Transport script exhausted');
     return await next as T;
@@ -156,6 +161,47 @@ describe('canonical desktop transport', () => {
 });
 
 describe('opened session synchronization', () => {
+  it('seeds late readers from the existing selected binding list without changing original observation age', async () => {
+    const { transport, sessions } = setup(); transport.script.push(loaded());
+    transport.presenceScript.push(success({ kind: 'session_list', data: presenceList() }));
+    const store = sessions.open(route); await store.refresh();
+    const expected = summaries.items[0].active_binding.presence;
+    expect(store.getSnapshot().presence[summaries.items[0].active_binding.id]).toEqual(expected);
+    expect(transport.calls.map(call => call.name)).toEqual(['session_get', 'session_list']);
+    expect(transport.calls[1].request).toMatchObject({ session: null, request: { params: { project_id: route.project_id, cursor: null, limit: 100 } } });
+  });
+  it('does not let a delayed seed or older duplicate overwrite a newer live instance or invalidation', async () => {
+    const { transport, sessions } = setup(); transport.script.push(loaded());
+    const seed = deferred<QueryEnvelope>(); transport.presenceScript.push(seed.promise);
+    const started = deferred<void>(); transport.onInvoke = () => { if (transport.calls.at(-1)?.name === 'session_list') started.resolve(); };
+    const store = sessions.open(route); const loading = store.refresh(); await started.promise;
+    const binding = demo.bindings[demo.active_binding_id as keyof typeof demo.bindings];
+    const fresh = { ...presenceFixture, instance_id: '00000000-0000-4000-8000-000000000099', generation: binding.generation,
+      last_seen_at: '2026-10-04T16:00:00.000Z' } as HintPayloads['ariadne://presence_changed']['observation'];
+    const hint = { binding_id: binding.id, generation: binding.generation, observation: fresh };
+    transport.emit('ariadne://presence_changed', hint);
+    seed.resolve(success({ kind: 'session_list', data: presenceList() }));
+    await loading;
+    expect(store.getSnapshot().presence[binding.id]).toEqual(fresh);
+    transport.emit('ariadne://presence_changed', { ...hint, observation: { ...fresh, last_seen_at: '2026-10-04T15:59:59.000Z' } });
+    expect(store.getSnapshot().presence[binding.id]).toEqual(fresh);
+    const stale = { ...fresh, freshness: 'stale', execution_state: 'unknown', connection_state: 'unknown' } as const;
+    transport.emit('ariadne://presence_changed', { ...hint, observation: stale });
+    transport.emit('ariadne://presence_changed', hint);
+    expect(store.getSnapshot().presence[binding.id]).toEqual(stale);
+    expect(store.getSnapshot().snapshot?.freshness).toBe('fresh');
+  });
+  it('abandons a late presence seed when the selected generation changes or the store closes', async () => {
+    const { transport, sessions } = setup(); transport.script.push(loaded());
+    const seed = deferred<QueryEnvelope>(); transport.presenceScript.push(seed.promise);
+    const started = deferred<void>(); transport.onInvoke = () => { if (transport.calls.at(-1)?.name === 'session_list') started.resolve(); };
+    const store = sessions.open(route); const pending = store.refresh(); await started.promise;
+    sessions.close(route);
+    seed.resolve(success({ kind: 'session_list', data: presenceList() }));
+    await pending;
+    expect(store.getSnapshot().presence).toEqual({});
+    expect(store.getSnapshot().status).toBe('closed');
+  });
   it('subscribes before loading, shares one store and exposes immutable state', async () => {
     const { transport, sessions } = setup();
     const response = deferred<QueryEnvelope>(); transport.script.push(response.promise);

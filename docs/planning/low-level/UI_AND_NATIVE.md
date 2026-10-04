@@ -70,6 +70,24 @@ or given invented ancestors. Inaccessible session reads preserve their error.
 Actual Registry wiring, registered-parent watch and original native
 on-disk acceptance remain required before P4.1 completion.
 
+The native composition installs one real CoreBridge/DesktopService after
+single-instance interception and DesktopOwner acquisition. BindingConnect carries
+its original native admission deadline through the qualified runtime callback;
+all blocking registration/Core/provider work stays off UI. Explicit Quit awaits
+owned workers and admitted blocking lease holders; wake requalifies persisted
+selected IDs without rebind, resume or resend (ADR0059).
+
+Presence is a volatile composition projection from accepted connection/report
+receipts, scoped to the selected binding, generation, endpoint and current
+instance. The opt-in supervisor observer is drained before replacement/shutdown.
+Expiry reuses the existing native discovery lifetime and original observation
+timestamp. Unknown/Stale do not imply Idle. SessionList carries current facts in
+its existing BindingSummary.presence; SessionSnapshot has no volatile extension.
+After subscriptions and SessionGet, opened readers seed from canonical
+project-scoped SessionList pages, stopping at their session. Live hints and
+generation changes supersede delayed seeds; failed presence reads preserve the
+valid durable snapshot. No volatile fact is persisted as domain status.
+
 Subscribe before loading. Keep one immutable validated snapshot store per opened session and expose it through `useSyncExternalStore`; keep drafts/view state in a separate local reducer. Coalesce invalidations and ignore revisions no newer than the displayed revision. Replace displayed data only after a complete valid snapshot is available. Preserve selected item, focus, scroll anchor, filters, and draft. A failed read marks the root/session stale or inaccessible; it never looks like an empty queue.
 
 Watch registered session-store parent directories, debounce changes, validate snapshots in the backend, and emit IDs/revisions rather than file contents. Reconcile on app focus, wake, watcher error, and a bounded fallback poll. Selected session gets priority. V1 session discovery reads only known-provider session metadata and Mod announcements; it never imports private terminal transcripts or chooses a binding automatically. Qualified host state and heartbeat freshness supply liveness. Explicit CLI/MCP messages and bridge lifecycle evidence are authoritative.

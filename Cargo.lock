@@ -150,6 +150,7 @@ version = "0.1.0"
 dependencies = [
  "ariadne-adapter-claude",
  "ariadne-adapter-codex",
+ "ariadne-agent-protocol",
  "ariadne-core",
  "ariadne-domain",
  "ariadne-runtime",

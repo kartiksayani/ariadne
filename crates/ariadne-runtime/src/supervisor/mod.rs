@@ -8,7 +8,10 @@ pub use gate::ClaimGate;
 use crate::{control::validated_error, leases::BindingLease};
 use ariadne_agent_protocol::*;
 use ariadne_core::*;
-use ariadne_domain::models::{Binding, ConnectionState, Freshness, InputState, PresenceSource};
+use ariadne_domain::models::{
+    Binding, ConnectionState, ExecutionState, Freshness, InputState, PresenceObservation,
+    PresenceSource,
+};
 use std::{
     collections::VecDeque,
     sync::Arc,
@@ -24,6 +27,25 @@ const POLL: Duration = Duration::from_millis(250);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 const FRAME_BYTES: usize = 8 * 1024 * 1024;
 const SCAN_BYTES: usize = 16 * 1024 * 1024;
+
+/// Opt-in native observation sink. These facts follow validated Core receipts;
+/// they never authorize a claim or change durable domain state.
+#[derive(Clone)]
+pub enum PresenceUpdate {
+    Connected {
+        hint: PresenceChangedHint,
+        endpoint: EndpointFingerprint,
+    },
+    Observed {
+        hint: PresenceChangedHint,
+        endpoint: EndpointFingerprint,
+    },
+    Stopped {
+        hint: PresenceChangedHint,
+        endpoint: EndpointFingerprint,
+    },
+}
+pub type PresenceObserver = dyn Fn(PresenceUpdate) + Send + Sync;
 
 /// Native factories supplied by composition, never renderer/model-controlled.
 /// Factories must be brief and nonblocking; IDs must be fresh UUIDv4 values.
@@ -87,6 +109,7 @@ pub struct ConnectedSupervisor {
     binding: Binding,
     connected: ConnectResult,
     facts: NativeFacts,
+    presence: Option<Arc<PresenceObserver>>,
 }
 impl ConnectedSupervisor {
     pub async fn connect(
@@ -217,7 +240,12 @@ impl ConnectedSupervisor {
             binding,
             connected,
             facts,
+            presence: None,
         })
+    }
+    pub fn with_presence_observer(mut self, observer: Arc<PresenceObserver>) -> Self {
+        self.presence = Some(observer);
+        self
     }
     pub fn start(self, lease: BindingLease) -> Result<SupervisorHandle, CoreError> {
         if lease.session() != &self.session
@@ -291,6 +319,8 @@ struct Worker {
     progress: watch::Sender<SupervisorProgress>,
     validated_reports: u64,
     validated_claims: u64,
+    last_presence: Option<PresenceObservation>,
+    presence_tasks: Vec<JoinHandle<Result<(), CoreError>>>,
 }
 impl Worker {
     fn new(
@@ -313,6 +343,8 @@ impl Worker {
             progress,
             validated_reports: 0,
             validated_claims: 0,
+            last_presence: None,
+            presence_tasks: Vec::new(),
         }
     }
     fn context(
@@ -383,6 +415,26 @@ impl Worker {
                 Ok(receipt)
             })
             .await?;
+            let observation = match &self
+                .pending
+                .front()
+                .expect("retained until receipt")
+                .event
+                .event
+            {
+                EventPayload::Connected { .. } => {
+                    Some((self.connected.connected.observation.clone(), true))
+                }
+                EventPayload::Presence { observation } => Some((observation.clone(), false)),
+                EventPayload::Disconnected { .. } => {
+                    self.invalidate_presence().await?;
+                    None
+                }
+                _ => None,
+            };
+            if let Some((observation, initial)) = observation {
+                self.observe_presence(observation, initial).await?;
+            }
             self.diagnostics
                 .record(&self.pending.front().expect("retained until receipt").event);
             self.pending.pop_front();
@@ -392,6 +444,65 @@ impl Worker {
             self.checkpoint = self.offered.take();
         }
         self.publish();
+        Ok(())
+    }
+    async fn observe_presence(
+        &mut self,
+        observation: PresenceObservation,
+        initial: bool,
+    ) -> Result<(), CoreError> {
+        if observation.instance_id != self.connected.connected.observation.instance_id
+            || observation.generation != self.connected.binding.generation
+        {
+            return Ok(());
+        }
+        self.last_presence = Some(observation.clone());
+        let hint = PresenceChangedHint {
+            binding_id: self.connected.binding.id.clone(),
+            generation: self.connected.binding.generation.clone(),
+            observation,
+        };
+        let endpoint = self.connected.connected.endpoint_fingerprint.clone();
+        self.publish_presence(if initial {
+            PresenceUpdate::Connected { hint, endpoint }
+        } else {
+            PresenceUpdate::Observed { hint, endpoint }
+        })
+        .await
+    }
+    async fn publish_presence(&mut self, update: PresenceUpdate) -> Result<(), CoreError> {
+        let Some(observer) = self.connected.presence.clone() else {
+            return Ok(());
+        };
+        // Retain the task if run's stop selection cancels this await. Shutdown
+        // drains it before any replacement instance can publish observations.
+        self.presence_tasks
+            .push(core_io::start(self.lease.clone(), move || {
+                observer(update);
+                Ok(())
+            }));
+        self.presence_tasks
+            .last_mut()
+            .expect("owned observation task")
+            .await
+            .map_err(|_| protocol_error("Native presence observer failed."))??;
+        self.presence_tasks.pop();
+        Ok(())
+    }
+    async fn invalidate_presence(&mut self) -> Result<(), CoreError> {
+        if let Some(mut observation) = self.last_presence.clone() {
+            observation.connection_state = ConnectionState::Disconnected;
+            observation.execution_state = ExecutionState::Unknown;
+            observation.freshness = Freshness::Unknown;
+            let hint = PresenceChangedHint {
+                binding_id: self.connected.binding.id.clone(),
+                generation: self.connected.binding.generation.clone(),
+                observation,
+            };
+            let endpoint = self.connected.connected.endpoint_fingerprint.clone();
+            self.publish_presence(PresenceUpdate::Stopped { hint, endpoint })
+                .await?;
+        }
         Ok(())
     }
     fn publish(&self) {
@@ -792,6 +903,16 @@ impl Worker {
         .map_err(|_| host_error("Observer shutdown exceeded its 5-second bound."))
         .and_then(|r| r.map_err(adapter_error))
         {
+            if error.is_none() {
+                error = Some(e);
+            }
+        }
+        for task in std::mem::take(&mut self.presence_tasks) {
+            if !matches!(task.await, Ok(Ok(()))) && error.is_none() {
+                error = Some(protocol_error("Native presence observer did not complete."));
+            }
+        }
+        if let Err(e) = self.invalidate_presence().await {
             if error.is_none() {
                 error = Some(e);
             }

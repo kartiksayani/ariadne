@@ -43,7 +43,7 @@ fn invoke(
     .deserialize()
     .unwrap()
 }
-struct Fixture {
+pub(super) struct Fixture {
     _home: tempfile::TempDir,
     home: PathBuf,
     root: PathBuf,
@@ -52,7 +52,7 @@ struct Fixture {
     executable: PathBuf,
 }
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let home = tempfile::Builder::new()
             .prefix("ariadne-composition-")
             .tempdir_in("/tmp")
@@ -98,7 +98,7 @@ impl Fixture {
             executable,
         }
     }
-    fn configuration(&self) -> NativeConfiguration {
+    pub(super) fn configuration(&self) -> NativeConfiguration {
         NativeConfiguration {
             home: self.home.clone(),
             codex: None,
@@ -136,7 +136,7 @@ impl Fixture {
             ControlRequest::new(id(n), method).unwrap(),
         )
     }
-    fn connected(
+    pub(super) fn connected(
         &self,
         runtime: &Arc<NativeRuntime>,
     ) -> (

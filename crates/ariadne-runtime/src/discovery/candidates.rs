@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 pub(crate) const CAP: usize = 256;
-pub(crate) const LIFETIME: Duration = Duration::from_secs(90);
+pub const LIFETIME: Duration = Duration::from_secs(90);
 
 /// Owned facts resolved by native registration. Never a deserialized authority.
 #[derive(Clone, Debug, PartialEq)]

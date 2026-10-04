@@ -17,6 +17,15 @@ proof. See [ROADMAP](ROADMAP.md) and [tasks.json](../delivery/tasks.json).
 | Adapter / B, P0.5 | [PROCESS section 2](low-level/PROCESS_AND_PROTOCOLS.md#2-shared-adapter-contract); six async methods, owned DTOs, pull/push capability, normalized events | Runtime plus Claude/Codex implementations; P3 and P7.1 join actual core/runtime/providers |
 | Renderer / C, P4.1 | [UI service and route seam](low-level/UI_AND_NATIVE.md#module-service-and-route-contract); generated DTOs, revision hints, registered reveal route | Screens, graph, native routes/counts; each retains real Tauri/core/store acceptance |
 
+Desktop composition joins P3.2/P4.1 through the actual NativeCoreService,
+ProviderFactory, shared DesktopOwner/control routes and registered-parent watcher.
+Its native-only qualified connect callback preserves the command admission
+Instant. The opt-in supervisor presence observer publishes only accepted scoped
+facts; the existing SessionList presence projection supplies late-reader seeds.
+Ordinary App/WebView receipt-and-disk acceptance remains required; these additive
+internal seams do not change public CoreService/DTOs or complete live-host and
+packaged-default milestones. See [ADR0059](../adr/ADR-0059-desktop-core-and-runtime-composition.md).
+
 P0.3b publishes exact stored entities, receipts and query projection shapes. P0.5
 publishes exact adapter method DTOs and normalized event payloads. P0.6 publishes
 the callable core trait, typed command/query unions and shared semantic fixtures.
