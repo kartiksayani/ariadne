@@ -1371,7 +1371,7 @@
       "paths": [
         "apps/desktop/src/graph/layout/**",
         "apps/desktop/src/components/graph/**",
-        "tests/ui/graph-layout/**"
+        "apps/desktop/tests/ui/graph-layout/**"
       ],
       "spec": [
         "docs/planning/low-level/UI_AND_NATIVE.md#4-graph",
@@ -1383,7 +1383,7 @@
         "Shared filters/selection route to same detail; cursor-anchored zoom 0.25–2.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project graph-layout"
+        "rtk proxy npm run test:ui -- apps/desktop/tests/ui/graph-layout"
       ],
       "estimate_days": 1,
       "implementation_depends_on": [
