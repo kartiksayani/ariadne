@@ -91,9 +91,22 @@ fn raw(home: &Path, bytes: &[u8], declared: usize) -> Option<serde_json::Value> 
     stream
         .set_write_timeout(Some(Duration::from_secs(2)))
         .unwrap();
-    stream.write_all(&(declared as u32).to_be_bytes()).unwrap();
-    if !bytes.is_empty() {
-        stream.write_all(bytes).unwrap();
+    let written = stream
+        .write_all(&(declared as u32).to_be_bytes())
+        .and_then(|()| stream.write_all(bytes));
+    if let Err(error) = written {
+        // Admission rejection can close the socket before either frame write.
+        // The peer's close is the same rejection observed by the read below.
+        assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+            ),
+            "request frame write failed without a peer close: {error}"
+        );
+        return None;
     }
     let mut length = [0; 4];
     if stream.read_exact(&mut length).is_err() {
