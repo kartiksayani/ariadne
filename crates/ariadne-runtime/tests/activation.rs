@@ -208,7 +208,7 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
     let server = ControlServer::bind_shared(owner.clone(), core.clone(), vec![])
         .unwrap()
         .with_routes(routes)
-        .with_discovery(discovery)
+        .with_discovery(discovery.clone())
         .with_native_connect(activation.connect_callback())
         .with_native_announcement(activation.announcement_callback());
     let (stop, stopped) = tokio::sync::oneshot::channel();
@@ -372,6 +372,34 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
         ids_before,
         "heartbeat must preserve the existing adapter instance/supervisor/lease"
     );
+    // Wake invalidation cannot renew the retained announcement's evidence. The
+    // next independently qualified heartbeat must reuse the same active slot.
+    discovery.refresh_after_wake().unwrap();
+    assert_eq!(
+        activation
+            .announce_before(scope.clone(), Instant::now() + Duration::from_secs(2))
+            .unwrap_err()
+            .code,
+        CoreErrorCode::InvalidArgument
+    );
+    let mut wrong_active = scope.clone();
+    wrong_active.generation = id(998);
+    assert_eq!(
+        activation
+            .announce_before(wrong_active, Instant::now() + Duration::from_secs(2))
+            .unwrap_err()
+            .code,
+        CoreErrorCode::StaleGeneration
+    );
+    rt.block_on(call(
+        home.path().into(),
+        wire_request(
+            id(10),
+            ControlMethod::SessionAnnouncement(files.announcement(Some(scope.clone()))),
+        ),
+    ))
+    .unwrap();
+    assert_eq!(facts_ids.load(Ordering::SeqCst), ids_before);
     assert!(rt.block_on(call(home.path().into(), claim)).is_err());
     assert_eq!(
         rt.block_on(call(home.path().into(), control)).unwrap(),
