@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionTopicGraph } from '../../../src/components/graph/SessionTopicGraph';
 import * as geometry from '../../../src/graph/layout/geometry';
-import { fitBounds } from '../../../src/graph/layout/viewport';
+import { fitBounds, zoomAt } from '../../../src/graph/layout/viewport';
 import { sentenceRows } from '../../../src/selectors/tree/rows';
 import { graphFixture } from './fixture';
 
@@ -16,7 +17,8 @@ function frames() {
   const pending = new Map<number, FrameRequestCallback>();
   vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { pending.set(++next, callback); return next; });
   vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { pending.delete(id); });
-  return () => act(() => { const callbacks = [...pending.values()]; pending.clear(); callbacks.forEach(callback => callback(0)); });
+  const flush = () => act(() => { const callbacks = [...pending.values()]; pending.clear(); callbacks.forEach(callback => callback(0)); });
+  return Object.assign(flush, { pending: () => pending.size });
 }
 const pointer = (target: Element, type: string, x: number, y: number) => {
   const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
@@ -27,6 +29,33 @@ async function setup() {
   return { ...fixture, later: new Set<string>(), onReveal: vi.fn(), saveSelection: vi.fn(async () => true), onSwitchToTree: vi.fn() };
 }
 describe('2,000-node rendered viewport', () => {
+  it('resumes scheduled initial Fit after StrictMode replay, updates pan/zoom and cancels pending work on unmount', async () => {
+    const flush = frames(), fixture = await setup();
+    const rendered = render(<StrictMode><SessionTopicGraph {...fixture} /></StrictMode>);
+    const transform = (view: { x: number; y: number; scale: number }) => `translate(${view.x} ${view.y}) scale(${view.scale})`;
+    const full = geometry.layoutGraph(Object.values(fixture.session.items).flatMap(item => item ? [item] : []));
+    const fit = fitBounds(full.bounds, 800, 420), cancel = vi.mocked(window.cancelAnimationFrame);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(flush.pending()).toBe(1); expect(world()).toBe('translate(32 32) scale(1)');
+    flush(); expect(world()).toBe(transform(fit));
+    const canvas = screen.getByLabelText('Topic sentences');
+    pointer(canvas, 'pointerdown', 0, 0); pointer(canvas, 'pointermove', 10, 20); pointer(canvas, 'pointermove', 30, 40);
+    expect(flush.pending()).toBe(1); expect(world()).toBe(transform(fit));
+    const panned = { ...fit, x: fit.x + 30, y: fit.y + 40 };
+    flush(); expect(world()).toBe(transform(panned));
+    let zoomed = panned;
+    for (let event = 0; event < 2; event++) {
+      fireEvent.wheel(canvas, { clientX: 100, clientY: 120, deltaY: -100 });
+      zoomed = zoomAt(zoomed, { x: 100, y: 120 }, zoomed.scale * Math.exp(0.1));
+    }
+    expect(flush.pending()).toBe(1); expect(world()).toBe(transform(panned));
+    flush(); expect(world()).toBe(transform(zoomed));
+    fireEvent.wheel(canvas, { clientX: 100, clientY: 120, deltaY: -100 });
+    expect(flush.pending()).toBe(1);
+    const scheduled = vi.mocked(window.requestAnimationFrame).mock.calls.length;
+    rendered.unmount(); expect(cancel).toHaveBeenCalledTimes(2); expect(flush.pending()).toBe(0);
+    flush(); expect(window.requestAnimationFrame).toHaveBeenCalledTimes(scheduled);
+  });
   it('culls nodes, retains crossing edges and commits burst input together without relayout', async () => {
     const flush = frames(), layout = vi.spyOn(geometry, 'layoutGraph'), fixture = await setup();
     render(<SessionTopicGraph {...fixture} />); flush();
