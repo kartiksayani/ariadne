@@ -53,7 +53,7 @@ impl Drop for WakeObserver {
         self.active.store(false, Ordering::Release);
         // This is exactly the opaque block-observer token returned by center.
         // Removal and token release occur on the same owning UI thread.
-        unsafe { self.center.removeObserver(&self.token) };
+        unsafe { self.center.removeObserver(self.token.as_ref().as_ref()) };
     }
 }
 
