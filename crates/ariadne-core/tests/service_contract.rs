@@ -1072,3 +1072,39 @@ fn consumer_never_advances_checkpoint_after_failed_report_persistence() {
     });
     cases::run(&service, &corpus.routing, &case);
 }
+
+#[test]
+fn tree_owner_filters_are_required_canonical_and_validate_other_names() {
+    let inventory: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root().join("fixtures/contracts/core/inventory.json")).unwrap(),
+    )
+    .unwrap();
+    let command = inventory["owner_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|value| value["command"] == "preferences_patch")
+        .unwrap()
+        .clone();
+    let mut wire = command.clone();
+    let owners = json!([{"kind":"me"}, {"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"}, {"kind":"other","name":"  Exact owner  "}]);
+    wire["params"]["entries"][1]["preferences"]["filters"]["owners"] = owners.clone();
+    let decoded: OwnerCommand = serde_json::from_value(wire.clone()).unwrap();
+    decoded.validate_wire().unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+    for name in ["", "  ", "bad\0name"] {
+        let mut bad = wire.clone();
+        bad["params"]["entries"][1]["preferences"]["filters"]["owners"][2]["name"] = json!(name);
+        assert!(serde_json::from_value::<OwnerCommand>(bad)
+            .unwrap()
+            .validate_wire()
+            .is_err());
+    }
+    let filters = &mut wire["params"]["entries"][1]["preferences"]["filters"];
+    filters.as_object_mut().unwrap().remove("owners");
+    assert!(serde_json::from_value::<OwnerCommand>(wire).is_err());
+    assert!(serde_json::from_value::<ItemOwner>(
+        json!({"kind":"other","name":"valid","extra":true})
+    )
+    .is_err());
+}
