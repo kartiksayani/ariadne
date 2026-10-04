@@ -1315,7 +1315,7 @@
       "paths": [
         "apps/desktop/src/components/history/**",
         "apps/desktop/src/components/rail/**",
-        "tests/ui/history/**",
+        "apps/desktop/tests/ui/history/**",
         "tests/e2e/history/**"
       ],
       "spec": [
@@ -1329,7 +1329,7 @@
         "Rail hover/pin and item cross-highlight share refs; upward scroll pauses follow, new messages increment Jump to latest without stealing focus/scroll (D08)."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project history",
+        "rtk proxy npm run test:ui -- --project desktop apps/desktop/tests/ui/history",
         "rtk proxy npm run test:e2e -- --suite history"
       ],
       "estimate_days": 1.5,
