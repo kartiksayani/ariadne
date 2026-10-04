@@ -164,7 +164,9 @@ export async function runTreeAcceptance(configuration) {
   }
   assert.equal((await preferences(tree)).view.selected_item_id, beforeKeys.selected_item_id, 'Focus movement alone must not select or mutate preferences');
   await browser.keys('Enter'); await wait(async () => (await preferences(tree)).view.selected_item_id === '1', 'Keyboard Enter did not select through the registered reveal route');
-  await (await row('1.1')).click(); await browser.keys('z');
+  await (await row('1.1')).click();
+  await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'The explicit selection must finish before the separate Later key');
+  await (await search()).waitForEnabled(); await browser.keys('z');
   await wait(async () => (await preferences(tree)).snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'), 'Later keyboard action did not persist canonical local preferences');
   await (await search()).setValue('No canonical native tree question matches this phrase');
   await wait(async () => await browser.$('button=Dismiss temporary reveal').isExisting(), 'A selected item outside new filters must offer explicit dismissal');
@@ -180,6 +182,8 @@ export async function runTreeAcceptance(configuration) {
   await (await row('2')).scrollIntoView(); await (await row('2')).$('button[aria-label="Expand or collapse"]').click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('2'), 'Second explicit collapse was not persisted');
   await (await row('10.50')).scrollIntoView({ block: 'start' }); await (await row('10.50')).click();
+  await wait(async () => (await preferences(tree)).view.selected_item_id === '10.50', 'The anchor selection must finish before the real CLI live edit');
+  await (await search()).waitForEnabled();
   const beforeEdit = await anchor(); assert.ok(beforeEdit.scrollTop > 0);
   const live = await snapshot(tree), longer = `${live.items['1'].question}\n${'A complete upstream sentence wraps across the native row. '.repeat(40)}`;
   const edit = await apply(tree, [{ op: 'item.edit', item: { id: '1' }, patch: { question: longer } }], { 1: live.items['1'].revision });
