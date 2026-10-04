@@ -135,7 +135,16 @@ BindingSummary.presence; SessionSnapshot stays unchanged. After subscription and
 SessionGet, SessionStore seeds from bounded project-scoped SessionList pages,
 terminating on the current session. A live hint supersedes any delayed seed;
 selection/generation changes or closure abort it. These facts remain separate
-from durable domain status and session snapshot freshness.
+from durable domain status and session snapshot freshness. InputResolve consumes
+that same native cache inside the existing owned bridge closure: registered-session
+reads establish the current selected binding/generation/endpoint, then a brief
+cache lock copies its current instance observation and freshness is checked.
+Core IO never holds the cache lock. Missing, stale or failed optional lookup leaves
+liveness unknown; fresh busy evidence remains blocking in Core. The additive
+native Core recovery entrypoint receives this trusted observation, while ordinary
+CoreService defaults to None. Core's transaction always owns receipt replay,
+selection, revision and recovery guards; optional lookup cannot reject a saved
+replay or introduce provider IO, renderer facts or another cache.
 
 The registered-parent watcher adapts unpublished task/desktop-watchers work from
 0e4a3da and b266e66 under new ownership and review. Its pinned notify 8.2.0 watches

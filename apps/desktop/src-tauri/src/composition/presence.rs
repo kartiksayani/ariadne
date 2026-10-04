@@ -1,5 +1,6 @@
 use ariadne_core::{
     native::{AgentResolver, NativeCoreService},
+    recovery::RecoveryObservation,
     *,
 };
 use ariadne_domain::models::*;
@@ -148,6 +149,58 @@ impl PresenceCache {
         if let Some(hint) = published {
             (self.emit)(hint);
         }
+    }
+    /// Optional native evidence only; failure must not preempt Core receipt
+    /// replay or its authoritative current-session/selection checks.
+    pub fn recovery_observation(
+        &self,
+        context: &OwnerContext,
+        command: &OwnerCommand,
+    ) -> Option<RecoveryObservation> {
+        let OwnerCommand::InputResolve { params, .. } = command else {
+            return None;
+        };
+        let OwnerScope::Session(_) = context.scope() else {
+            return None;
+        };
+        let query_context = QueryContext::owner(context.clone());
+        let request = QueryRequest::SessionGet {};
+        let result = self
+            .core
+            .query(query_context.clone(), request.clone())
+            .ok()?;
+        result.validate_for(&query_context, &request).ok()?;
+        let QueryResult::SessionGet(snapshot) = result else {
+            return None;
+        };
+        let input = snapshot.session.inputs.0.get(&params.input_id)?;
+        if snapshot.session.active_binding_id.as_ref() != Some(&input.binding_id) {
+            return None;
+        }
+        let binding = snapshot.session.bindings.0.get(&input.binding_id)?;
+        // All registered-session/Core IO is finished before this brief lock.
+        // Connected installs the current instance; only matching observations
+        // can replace it. Copy that exact current fact, never infer an idle one.
+        let mut observation = {
+            let entries = self.entries.lock().ok()?;
+            if self.stopped.load(Ordering::Acquire) || self.fenced.load(Ordering::Acquire) {
+                return None;
+            }
+            let entry = entries.get(&binding.id)?;
+            if entry.hint.generation != binding.generation
+                || entry.endpoint != binding.endpoint_fingerprint
+                || binding.dispatch_state == DispatchState::Disconnected
+            {
+                return None;
+            }
+            entry.hint.observation.clone()
+        };
+        expire(&mut observation, &super::runtime::now());
+        Some(RecoveryObservation {
+            binding_id: binding.id.clone(),
+            instance_id: observation.instance_id.clone(),
+            observation,
+        })
     }
     pub fn overlay(&self, result: &mut QueryResult) {
         let QueryResult::SessionList(list) = result else {
