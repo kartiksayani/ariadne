@@ -12,7 +12,7 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -59,6 +59,8 @@ struct Host {
     reconciliation_result: Mutex<Option<ReconcileResult>>,
     connects: AtomicU64,
     observations: AtomicU64,
+    hold_observation: AtomicBool,
+    observation_held: AtomicBool,
     disconnects: AtomicU64,
 }
 impl Host {
@@ -71,6 +73,8 @@ impl Host {
             reconciliation_result: Mutex::new(None),
             connects: AtomicU64::new(0),
             observations: AtomicU64::new(0),
+            hold_observation: AtomicBool::new(false),
+            observation_held: AtomicBool::new(false),
             disconnects: AtomicU64::new(0),
         })
     }
@@ -140,6 +144,11 @@ impl Adapter for Host {
             assert_eq!(request.binding_id, self.binding.id);
             assert_eq!(request.generation, self.binding.generation);
             self.observations.fetch_add(1, Ordering::SeqCst);
+            if self.hold_observation.load(Ordering::SeqCst) {
+                self.observation_held.store(true, Ordering::SeqCst);
+                // Cancellation detaches this observer, not the running host turn.
+                std::future::pending::<()>().await;
+            }
             Ok(ObserveResult {
                 events: self.events.lock().unwrap().drain(..).collect(),
                 next_checkpoint: None,
@@ -493,6 +502,8 @@ impl Setup {
     ) {
         let mut handles = vec![];
         for lane in &self.lanes {
+            lane.host.observation_held.store(false, Ordering::SeqCst);
+            lane.host.hold_observation.store(false, Ordering::SeqCst);
             let next = self.next.clone();
             let connected = ConnectedSupervisor::connect(
                 self.core.clone(),
@@ -679,13 +690,29 @@ impl Setup {
             )
             .unwrap();
     }
+    async fn quiesce_observers(&self) {
+        for lane in &self.lanes {
+            lane.host.hold_observation.store(true, Ordering::SeqCst);
+        }
+        until(|| {
+            self.lanes
+                .iter()
+                .all(|lane| lane.host.observation_held.load(Ordering::SeqCst))
+        })
+        .await;
+        // A worker reaches observe only after its prior Core call has returned.
+        // Holding it here prevents the next push claim while keeping saved host
+        // execution untouched. Counts alone cannot identify this safe boundary.
+    }
 }
 
 async fn stop_all(
+    setup: &Setup,
     handles: Vec<SupervisorHandle>,
     stop: oneshot::Sender<()>,
     server: tokio::task::JoinHandle<Result<(), CoreError>>,
 ) {
+    setup.quiesce_observers().await;
     for handle in handles {
         let exit = handle.stop().await.unwrap();
         assert!(exit.error.is_none(), "{exit:?}");
@@ -737,7 +764,7 @@ async fn three_bindings_run_five_fifo_turns_with_both_join_orders_and_independen
         setup.begin(a, number).await;
         setup.complete(a, number).await;
     }
-    stop_all(handles, stop, server).await;
+    stop_all(&setup, handles, stop, server).await;
     // Reopen the actual registry/Core instead of relying on a worker's memory.
     let reopened = NativeCoreService::new(
         AgentResolver::open_data_directory(setup.home.path()).unwrap(),
@@ -923,7 +950,7 @@ async fn actual_core_rejects_foreign_binding_and_generation_events_and_results_w
     for lane in &setup.lanes {
         setup.complete(lane, 0).await;
     }
-    stop_all(handles, stop, server).await;
+    stop_all(&setup, handles, stop, server).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
@@ -937,6 +964,7 @@ async fn quit_and_supervisor_restart_reconcile_saved_work_before_claiming_withou
     let (mut handles, stop, server) = setup.start().await;
     setup.begin(lane, 0).await;
     until(|| handles[0].progress().borrow().validated_claims >= 2).await;
+    setup.quiesce_observers().await;
     let saved = setup.read(lane);
     let input = saved.inputs.0[&lane.inputs[0]].clone();
     let attempt = &input.attempts[0];
@@ -958,7 +986,7 @@ async fn quit_and_supervisor_restart_reconcile_saved_work_before_claiming_withou
             .code,
         CoreErrorCode::HostUnreachable
     );
-    stop_all(handles, stop, server).await;
+    stop_all(&setup, handles, stop, server).await;
     assert_eq!(
         setup.read(lane),
         saved,
@@ -1087,7 +1115,7 @@ async fn quit_and_supervisor_restart_reconcile_saved_work_before_claiming_withou
     setup.complete(lane, 1).await;
     let observed = lane.host.observations.load(Ordering::SeqCst);
     until(|| lane.host.observations.load(Ordering::SeqCst) >= observed + 2).await;
-    stop_all(handles, stop, server).await;
+    stop_all(&setup, handles, stop, server).await;
     let final_state = setup.read(lane);
     assert_eq!(
         final_state.bindings.0[&lane.host.binding.id].generation,
