@@ -179,11 +179,13 @@ dependencies = [
  "ariadne-core",
  "ariadne-domain",
  "ariadne-store",
+ "chrono",
  "rmcp",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

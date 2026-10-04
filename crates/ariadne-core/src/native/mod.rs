@@ -1,5 +1,7 @@
 //! Concrete synchronous delegates. Entrypoints retain responsibility for trusted
 //! routes, provider qualification, actual leases, scheduler ticks and UI hints.
+mod agent;
+pub use agent::AgentResolver;
 mod errors;
 mod preferences;
 pub use preferences::PreferencesService;
@@ -47,6 +49,25 @@ impl NativeCoreService {
 
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Resolve only registered project/session membership. Mutation eligibility,
+    /// current binding selection and replay guards remain inside the core call.
+    pub fn resolve_session(&self, route: &SessionRef) -> Result<RegisteredSession, CoreError> {
+        let project = self
+            .registry
+            .resolve_project(&route.project_id)
+            .map_err(errors::registry)?;
+        let session = ariadne_store::session::Store::read_registered(
+            &project.root,
+            &route.project_id,
+            &route.session_id,
+        )
+        .map_err(errors::store)?;
+        Ok(RegisteredSession::from_trusted_entrypoint(
+            session.project_id,
+            session.id,
+        ))
     }
 
     /// Explicit native scheduler call, outside UI and all between-tick locks.

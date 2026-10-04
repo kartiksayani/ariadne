@@ -1,5 +1,6 @@
 //! Local stdio facade over the canonical service; no provider or owner tools.
 mod framing;
+pub mod native;
 mod tools;
 use rmcp::{transport::async_rw::AsyncRwTransport, ServiceExt};
 use tokio::io::{AsyncRead, AsyncWrite};
