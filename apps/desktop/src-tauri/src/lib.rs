@@ -308,15 +308,12 @@ fn run_native(
                         .state::<native::window::NativeWindow>()
                         .reconcile(window.app_handle().clone(), true);
                 }
-                tauri::WindowEvent::Focused(true) => {
-                    if !window_quitting.load(Ordering::Acquire) {
-                        if let Some(runtime) = window.try_state::<Arc<composition::NativeRuntime>>()
-                        {
-                            let _ = runtime.refresh_snapshots();
-                        }
-                        if let Some(tray) = window.try_state::<native::tray::NativeTray>() {
-                            tray.refresh();
-                        }
+                tauri::WindowEvent::Focused(true) if !window_quitting.load(Ordering::Acquire) => {
+                    if let Some(runtime) = window.try_state::<Arc<composition::NativeRuntime>>() {
+                        let _ = runtime.refresh_snapshots();
+                    }
+                    if let Some(tray) = window.try_state::<native::tray::NativeTray>() {
+                        tray.refresh();
                     }
                 }
                 _ => {}

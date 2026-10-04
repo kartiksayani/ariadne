@@ -126,7 +126,7 @@ mod tests {
     }
     #[test]
     fn native_configuration_is_pure_explicit_and_preserves_existing_data_root_defaults() {
-        let environment = |name| (name == "HOME").then(|| PathBuf::from("/absent/user"));
+        let environment = |name: &str| (name == "HOME").then(|| PathBuf::from("/absent/user"));
         let config = NativeConfiguration::parse(&[], environment).unwrap();
         assert_eq!(config.home, PathBuf::from("/absent/user/.ariadne"));
         assert!(config.claude.is_none() && config.codex.is_none());
