@@ -22,6 +22,8 @@
     "apps/desktop/src/data/index.ts",
     "apps/desktop/wdio.native.conf.mjs",
     "apps/desktop/src-tauri/build.rs",
+    "apps/desktop/src-tauri/src/native/mod.rs",
+    "apps/desktop/src-tauri/src/native/window/mod.rs",
     "integrations/claude/plugin/hooks/installed.js"
   ]
 }

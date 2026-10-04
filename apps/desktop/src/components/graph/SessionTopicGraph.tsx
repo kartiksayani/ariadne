@@ -6,6 +6,8 @@ import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
 import { sentenceRows } from '../../selectors/tree/rows';
 import { layoutGraph, selectedParentEdges } from '../../graph/layout/geometry';
 import { fitBounds, fitsAtMinimum, zoomAt, type Viewport } from '../../graph/layout/viewport';
+import { indexGraph, intersects, worldViewport } from '../../graph/culling/bounds-index';
+import { useViewport } from '../../graph/culling/use-viewport';
 import { StatusBadge, type Status } from '../reference/StatusBadge';
 import './graph.css';
 
@@ -33,7 +35,11 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
   const svg = useRef<SVGSVGElement>(null), marker = useId();
   const [size, setSize] = useState({ width: 800, height: 420 });
   const measuredSize = useRef(size);
-  const [viewport, setViewport] = useState<Viewport>({ x: 32, y: 32, scale: 1 });
+  const { viewport, current: requestedViewport, setViewport } = useViewport({ x: 32, y: 32, scale: 1 });
+  const [focused, setFocused] = useState<string | null>(null);
+  const nodeElements = useRef(new Map<string, SVGGElement>());
+  const pendingFocus = useRef<{ id: string; viewport: Viewport } | null>(null);
+  const lastSelection = useRef<{ store: SessionStore; topicId: string; id: string | null; reveal: RevealedItem | null; present: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
   const writing = useRef<number | null>(null);
@@ -46,10 +52,14 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
     ...view, filters: { ...view.filters, topic_id: topicId }, expanded_item_ids: Object.keys(session.items),
   }, later) : null, [session, topicMatches, view, topicId, later]);
   const layout = useMemo(() => layoutGraph(projection?.rows.map(row => row.item) ?? []), [projection]);
+  const queryGraph = useMemo(() => indexGraph(layout), [layout]);
   const currentReveal = localReveal ?? reveal;
+  const selectionReveal = currentReveal?.kind === 'item' ? currentReveal : null;
   const selected = currentReveal?.store === store && currentReveal.kind === 'item' ? currentReveal.route.item_id : view.selected_item_id;
-  const highlighted = selectedParentEdges(layout, selected), visible = new Set(layout.nodes.map(node => node.item.id));
-  const context = new Set(projection?.rows.filter(row => row.context).map(row => row.item.id));
+  const rendered = useMemo(() => queryGraph(worldViewport(viewport, size.width, size.height), [selected, focused]), [queryGraph, viewport, size, selected, focused]);
+  const highlighted = useMemo(() => selectedParentEdges(layout, selected), [layout, selected]);
+  const visible = useMemo(() => new Set(layout.nodes.map(node => node.item.id)), [layout]);
+  const context = useMemo(() => new Set(projection?.rows.filter(row => row.context).map(row => row.item.id)), [projection]);
   const initialFit = useRef<string | null>(null);
   useLayoutEffect(() => {
     const element = svg.current;
@@ -70,6 +80,27 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
       initialFit.current = key; setViewport(fitBounds(layout.bounds, measuredSize.current.width, measuredSize.current.height));
     }
   }, [layout, size, store, topicId]);
+  useLayoutEffect(() => {
+    const node = layout.nodes.find(node => node.item.id === selected);
+    const previousSelection = lastSelection.current;
+    if (previousSelection?.store === store && previousSelection.topicId === topicId && previousSelection.id === selected
+      && previousSelection.reveal === selectionReveal && previousSelection.present === !!node) return;
+    lastSelection.current = { store, topicId, id: selected, reveal: selectionReveal, present: !!node };
+    pendingFocus.current = null;
+    if (!node) return;
+    const previous = requestedViewport.current;
+    const next = intersects(node, worldViewport(previous, size.width, size.height, 0)) ? previous
+      : { ...previous, x: size.width / 2 - (node.x + node.width / 2) * previous.scale,
+        y: size.height / 2 - (node.y + node.height / 2) * previous.scale };
+    pendingFocus.current = { id: node.item.id, viewport: next };
+    if (next !== previous) setViewport(next);
+  }, [selected, selectionReveal, layout, store, topicId]);
+  useLayoutEffect(() => {
+    const pending = pendingFocus.current;
+    if (!pending || viewport.x !== pending.viewport.x || viewport.y !== pending.viewport.y || viewport.scale !== pending.viewport.scale) return;
+    const element = nodeElements.current.get(pending.id);
+    if (element) { pendingFocus.current = null; element.focus({ preventScroll: true }); }
+  }, [rendered, viewport]);
   useEffect(() => {
     const element = svg.current;
     if (!element) return;
@@ -82,7 +113,7 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
     return () => element.removeEventListener('wheel', wheel);
   }, []);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
-  useEffect(() => { ++request.current; writing.current = null; setLocalReveal(null); setError(null); pan.current = null; }, [store, topicId]);
+  useEffect(() => { ++request.current; writing.current = null; setLocalReveal(null); setError(null); setFocused(null); pan.current = null; }, [store, topicId]);
   useEffect(() => { setLocalReveal(null); }, [reveal]);
   const select = async (id: string) => {
     const call = ++request.current, current = latest.current, route = {...current.view.session,item_id:id};
@@ -122,7 +153,7 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
     <svg ref={svg} className="topic-graph-canvas" aria-label="Topic sentences" width="100%" height="420"
       onPointerDown={event => {
         if (event.button !== 0 || (event.target as Element).closest('[data-graph-node]')) return;
-        pan.current = {pointer:event.pointerId,x:event.clientX,y:event.clientY,start:viewport};
+        pan.current = {pointer:event.pointerId,x:event.clientX,y:event.clientY,start:requestedViewport.current};
         event.currentTarget.setPointerCapture?.(event.pointerId); event.preventDefault();
       }} onPointerMove={event => {
         const drag = pan.current;
@@ -131,14 +162,16 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
       onPointerCancel={() => { pan.current = null; }}>
       <defs><marker id={marker} viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--st-replaced)" /></marker></defs>
       <g data-graph-world="true" transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.scale})`}>
-        <g aria-hidden="true">{layout.edges.map(edge => <g key={edge.id} data-edge={edge.id}><path d={edge.path} fill="none"
+        <g aria-hidden="true">{rendered.edges.map(edge => <g key={edge.id} data-edge={edge.id}><path d={edge.path} fill="none"
           stroke={edge.kind === 'replacement' ? 'var(--st-replaced)' : highlighted.has(edge.id) ? 'var(--color-accent)' : 'var(--a-edge)'}
           strokeWidth={highlighted.has(edge.id) ? 1.75 : 1.25} strokeDasharray={edge.kind === 'replacement' ? '4 4' : undefined}
           markerEnd={edge.kind === 'replacement' ? `url(#${marker})` : undefined} />
           {edge.label && <text x={edge.label.x} y={edge.label.y} textAnchor="middle" className="topic-replacement-label">replaced by</text>}</g>)}</g>
-        {layout.nodes.map(node => <g key={node.item.id} data-graph-node={node.item.id} transform={`translate(${node.x} ${node.y})`}
+        {rendered.nodes.map(node => <g key={node.item.id} data-graph-node={node.item.id} transform={`translate(${node.x} ${node.y})`}
+          ref={element => { if (element) nodeElements.current.set(node.item.id, element); else nodeElements.current.delete(node.item.id); }}
           className={`topic-graph-node${context.has(node.item.id) ? ' topic-graph-context' : ''}`} role="button" tabIndex={0}
           aria-label={`Item ${node.item.id}: ${node.item.question}`} aria-pressed={selected === node.item.id}
+          onFocus={() => setFocused(node.item.id)} onBlur={() => setFocused(previous => previous === node.item.id ? null : previous)}
           onClick={() => { void select(node.item.id); }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void select(node.item.id); } }}>
           <title>{node.item.question}</title><rect width="190" height="66" rx="8" />
           <text x="12" y="20" className="topic-node-id">{node.item.id}</text>
