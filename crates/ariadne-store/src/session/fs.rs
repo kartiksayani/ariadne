@@ -66,6 +66,17 @@ fn checked_file(
     Ok(file)
 }
 
+fn open_created(create: bool, mut open: impl FnMut() -> libc::c_int) -> libc::c_int {
+    let fd = open();
+    // Concurrent first creation can return ENOENT on macOS even while the
+    // anchored directory is live. Retry that create once with identical flags.
+    if create && fd == -1 && io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT) {
+        open()
+    } else {
+        fd
+    }
+}
+
 impl Directory {
     pub fn root(path: &Path) -> Result<Self, StoreError> {
         let path = path
@@ -123,8 +134,10 @@ impl Directory {
             } else {
                 libc::O_RDONLY
             };
-        // SAFETY: parent descriptor is live; name is a generated single component.
-        let fd = unsafe { libc::openat(self.file.as_raw_fd(), name.as_ptr(), flags, 0o600) };
+        let fd = open_created(create, || {
+            // SAFETY: parent descriptor is live; name is a generated single component.
+            unsafe { libc::openat(self.file.as_raw_fd(), name.as_ptr(), flags, 0o600) }
+        });
         checked_file(fd, &path, false, true)
     }
 
@@ -364,6 +377,106 @@ unsafe fn errno() -> *mut libc::c_int {
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn only_create_enoent_retries_once_and_preserves_the_second_error() {
+        for create in [false, true] {
+            for code in [libc::ENOENT, libc::EACCES, libc::ELOOP, libc::EEXIST] {
+                let mut calls = 0;
+                let fd = open_created(create, || {
+                    calls += 1;
+                    if calls == 1 {
+                        // SAFETY: errno is the calling thread's writable OS error slot.
+                        unsafe { *errno() = code };
+                        -1
+                    } else {
+                        17
+                    }
+                });
+                let retry = create && code == libc::ENOENT;
+                assert_eq!(calls, if retry { 2 } else { 1 });
+                assert_eq!(fd, if retry { 17 } else { -1 });
+                if !retry {
+                    assert_eq!(io::Error::last_os_error().raw_os_error(), Some(code));
+                }
+            }
+        }
+        for second in [libc::ENOENT, libc::EACCES] {
+            let mut calls = 0;
+            let fd = open_created(true, || {
+                calls += 1;
+                // SAFETY: errno is the calling thread's writable OS error slot.
+                unsafe { *errno() = if calls == 1 { libc::ENOENT } else { second } };
+                -1
+            });
+            assert_eq!(fd, -1);
+            assert_eq!(calls, 2);
+            assert_eq!(io::Error::last_os_error().raw_os_error(), Some(second));
+        }
+    }
+
+    #[test]
+    fn concurrent_first_open_keeps_one_private_regular_file_identity() {
+        for _ in 0..32 {
+            let root = tempfile::tempdir().unwrap();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let writers: Vec<_> = (0..2)
+                .map(|_| {
+                    let path = root.path().to_owned();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        let directory = Directory::root(&path).unwrap();
+                        barrier.wait();
+                        directory.open("registry.lock", true).unwrap()
+                    })
+                })
+                .collect();
+            // Keep the directory and both successful descriptors alive together.
+            let files: Vec<_> = writers
+                .into_iter()
+                .map(|writer| writer.join().unwrap())
+                .collect();
+            let metadata: Vec<_> = files.iter().map(|file| file.metadata().unwrap()).collect();
+            assert_eq!(metadata[0].ino(), metadata[1].ino());
+            for file in metadata {
+                assert!(file.is_file());
+                assert_eq!(file.mode() & 0o777, 0o600);
+                assert_eq!(file.nlink(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn retry_never_follows_a_link_or_reopens_a_replaced_directory_path() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = Directory::root(root.path())
+            .unwrap()
+            .child("anchored", true)
+            .unwrap();
+        assert!(matches!(
+            directory.open("missing", false),
+            Err(StoreError::Io {
+                kind: io::ErrorKind::NotFound,
+                ..
+            })
+        ));
+        let target = root.path().join("target");
+        std::fs::write(&target, b"preserve").unwrap();
+        symlink(&target, directory.path.join("link")).unwrap();
+        assert!(directory.open("link", true).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"preserve");
+        std::fs::remove_file(directory.path.join("link")).unwrap();
+        std::fs::remove_dir(&directory.path).unwrap();
+        std::fs::create_dir(&directory.path).unwrap();
+        assert!(matches!(
+            directory.open("registry.lock", true),
+            Err(StoreError::Io {
+                kind: io::ErrorKind::NotFound,
+                ..
+            })
+        ));
+        assert!(!directory.path.join("registry.lock").exists());
+    }
 
     #[test]
     fn first_publication_preserves_a_restore_that_appeared_after_absence_check() {
