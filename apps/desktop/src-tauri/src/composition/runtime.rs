@@ -227,6 +227,13 @@ impl NativeRuntime {
     pub(super) fn overlay_presence(&self, result: &mut QueryResult) {
         self.presence.overlay(result);
     }
+    pub(super) fn recovery_observation(
+        &self,
+        context: &OwnerContext,
+        command: &OwnerCommand,
+    ) -> Option<ariadne_core::recovery::RecoveryObservation> {
+        self.presence.recovery_observation(context, command)
+    }
     pub(super) fn run_owned<T: Send + 'static>(
         &self,
         disconnected: CoreError,
@@ -723,3 +730,7 @@ pub(super) fn now() -> UtcMillis {
     )
     .expect("native UTC clock")
 }
+
+#[cfg(test)]
+#[path = "tests/recovery.rs"]
+mod recovery_tests;
