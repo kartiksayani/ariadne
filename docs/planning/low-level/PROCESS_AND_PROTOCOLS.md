@@ -401,7 +401,15 @@ SDK answer&&!isAborted maps to completed; aborted/isAborted to interrupted;
 refusal/error to failed. Unknown evidence is uncertain. Keep final visible text
 as bounded diagnostic only. Retain exact report events until matching durable
 receipts and prevent reconnect/new claims while a detached submission remains
-unsettled. Identical terminal facts coalesce ignoring observation timestamps.
+unsettled. Serialize owner connect/disconnect transitions: close prior-loop claim
+admission before mutation awaits, drain any admitted bounded poll and recheck
+original claims/callbacks/pending reports before rotating. A late claimed attempt
+remains in its original scope without submission; failed/uncertain helper responses
+retain original request/event IDs and block rotation. Recheck after owner receipts
+as well, retaining any late original-scope evidence rather than replacing its loop.
+A committed owner receipt is exposed with recovery required; retained evidence
+does not restore old claim authority or imply a clean rollback.
+Identical terminal facts coalesce ignoring observation timestamps.
 Retain original and first contradictory terminal snapshot with the same terminal
 fallback identity, pause claims and require reconciliation. Further unsupported
 distinct terminal revisions retain one bounded explicit uncertainty/gap fact,

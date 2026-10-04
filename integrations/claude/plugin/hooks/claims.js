@@ -3,8 +3,10 @@ import { bounded, clip, envelope, hash, lifecycle, prepared, reportReceipt } fro
 // One captured claim and one serialized reporter. Core remains the sole queue authority.
 export function claimLoop(helperPath, binding) {
   let active = null;
-  let polling = false;
+  let polling = null;
+  let admissionOpen = true;
   let reporting = null;
+  let observations = 0;
   let stopped = false;
   let paused = false;
   let claimId = null;
@@ -60,18 +62,26 @@ export function claimLoop(helperPath, binding) {
       await uncertain($,claim,'Prompt submission returned altered or unsupported evidence; do not resend automatically.');
     }
   }
-  async function poll($) {
-    if (polling || stopped) return;
-    polling = true;
+  function poll($) {
+    if (polling) return Promise.resolve();
+    if (stopped) return Promise.resolve();
+    polling = Promise.resolve().then(() => runPoll($)).finally(() => { polling = null; });
+    return polling;
+  }
+  async function quiesce() {
+    admissionOpen = false;
+    if (polling) await polling;
+  }
+  async function runPoll($) {
     try {
       await flush($);
-      if (stopped || paused || active || (capturedSubmission && !capturedSubmission.settled)) return;
+      if (!admissionOpen || stopped || paused || active || (capturedSubmission && !capturedSubmission.settled)) return;
       if (await $.session.id() !== binding.external_session_id) {
         paused = true;
         log($,'The original Claude session changed; reconnect explicitly after recovery.');
         return;
       }
-      if (stopped) return;
+      if (!admissionOpen || stopped) return;
       claimId ??= globalThis.crypto.randomUUID();
       const result = envelope(await $.process.run([helperPath,'bridge','claim',...route,'--request-id',claimId],{timeoutMs:5000}));
       if (result === null) { claimId = null; return; }
@@ -80,9 +90,10 @@ export function claimLoop(helperPath, binding) {
       active = captured;
       capturedSubmission = captured;
       claimId = null;
-      if (stopped || await $.session.id() !== binding.external_session_id) {
+      const currentSession = await $.session.id();
+      if (!admissionOpen || stopped || currentSession !== binding.external_session_id) {
         captured.settled = true;
-        await uncertain($,captured,'The original Claude session changed after a durable claim; no prompt was submitted.');
+        await uncertain($,captured,'Claim admission closed or the original Claude session changed after a durable claim; retain the original attempt for recovery.');
         return;
       }
       // Do not await: the SDK promise can settle before or after turn.start.
@@ -98,9 +109,15 @@ export function claimLoop(helperPath, binding) {
       }
     } catch {
       log($,'Claim/report helper failed. The same claim request/event IDs are retained; no prompt was resent.');
-    } finally { polling = false; }
+    }
   }
-  async function start($, event) {
+  function observe(action) {
+    observations += 1;
+    return action().finally(() => { observations -= 1; });
+  }
+  function start($, event) { return observe(() => observeStart($,event)); }
+  function complete($, event) { return observe(() => observeComplete($,event)); }
+  async function observeStart($, event) {
     const captured = active;
     if (!captured || captured.turnId !== null || !bounded(event.turnId)
       || typeof event.text !== 'string'
@@ -121,7 +138,7 @@ export function claimLoop(helperPath, binding) {
     })();
     await captured.startReporting;
   }
-  async function complete($, event) {
+  async function observeComplete($, event) {
     const captured = active ?? capturedSubmission;
     if (!captured || event.agentId !== undefined || !captured.turnId || captured.turnId !== event.turnId) return;
     await captured.startReporting;
@@ -152,6 +169,7 @@ export function claimLoop(helperPath, binding) {
   }
   async function stop($, sessionEnd = false) {
     stopped = true;
+    await quiesce();
     if (sessionEnd && !disconnected) {
       disconnected = true;
       pending.push({event:{event_id:globalThis.crypto.randomUUID(),binding_id:binding.binding_id,generation:binding.generation,
@@ -160,8 +178,8 @@ export function claimLoop(helperPath, binding) {
     try { await flush($); }
     catch { log($,'Lifecycle evidence remains unpersisted at session end; recover it in the app.'); }
   }
-  return {poll,start,complete,stop,
-    outstanding:() => active !== null || pending.length > 0 || claimId !== null || (capturedSubmission !== null && !capturedSubmission.settled),
+  return {poll,start,complete,stop,quiesce,
+    outstanding:() => polling !== null || observations > 0 || active !== null || pending.length > 0 || claimId !== null || (capturedSubmission !== null && !capturedSubmission.settled),
     status:() => ({active:active ? {input_id:active.input_id,attempt_id:active.attempt_id,host_turn_id:active.turnId} : null,
-      pending_reports:pending.length,paused,stopped,unsupported_terminal_revisions:capturedSubmission?.terminalGap ?? false})};
+      pending_reports:pending.length,pending_claim_request_id:claimId,admission_open:admissionOpen,paused,stopped,unsupported_terminal_revisions:capturedSubmission?.terminalGap ?? false})};
 }

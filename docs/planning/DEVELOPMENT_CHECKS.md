@@ -62,10 +62,16 @@ these wiring files. Domain `src/models/primitives.rs` is fully measured.
 The CLI `src/lib.rs` exclusion likewise covers only its bridge module export;
 the executable main, bridge command, codec and lease logic remain measured.
 The exact desktop `src/data/index.ts` exclusion covers only re-exports. Vite
-consumes the same reviewed exclusion patterns so this zero-line barrel is omitted
+consumes the same reviewed exclusion patterns in project-relative and absolute
+forms for external integration sources, so this zero-line barrel is omitted
 from measured LCOV. Remove any wiring exclusion in the same PR that adds its first
 executable logic; the independent reviewer checks the affected wiring files and
 the real report.
+The exact Claude `plugin/hooks/installed.js` exemption covers comments and the
+installer descriptor data export (`export default null` in source). Claims,
+contracts, registration and setup remain measured, including untested logic.
+Remove this exemption in the same PR that adds executable logic; a pure installer
+descriptor cannot contain hidden behavior.
 Generated/vendor/dependency/test sources are excluded by path. There is no blanket
 `crates/**/lib.rs` exemption, AST parser, source SHA or dependency-identity classifier.
 Remove a stub's exact exclusion when its first logic lands. Declaration paths must

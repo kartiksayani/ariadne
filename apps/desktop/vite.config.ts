@@ -8,7 +8,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const qualityGates = JSON.parse(readFileSync(resolve(root, '../../quality-gates.json'), 'utf8')) as { coverage_exclusions: string[] };
-const coverageExclusions = qualityGates.coverage_exclusions.map(pattern => relative(root, resolve(root, '../..', pattern)));
+const coverageExclusions = qualityGates.coverage_exclusions.flatMap(pattern => {
+  const absolute = resolve(root, '../..', pattern);
+  return [relative(root, absolute), absolute];
+});
 const e2e = process.env.VITE_ARIADNE_E2E === '1';
 const output = resolve(root, e2e ? '../../target/native-e2e/desktop-dist' : '../../target/desktop-dist');
 export default defineConfig({

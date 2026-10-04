@@ -57,6 +57,22 @@ kind. Observation timestamps are outside identity. Pending events retain their
 original timestamps/bytes until exact matching durable EventReceipt. Core durable
 replay follows the published semantic digest excluding observation timestamps.
 
+Owner connect/disconnect transitions have one synchronous admission guard. Before
+any owner mutation await, the prior loop closes claim admission and drains its
+already admitted bounded poll. An in-flight poll is outstanding work: a late
+prepared claim remains under its original binding/generation/attempt, is never
+submitted after closure, and blocks rotation until recovery. Pending reports and
+uncertain claim request IDs likewise block rotation; negative owner replies retain
+the old loop and exact operation body/ID with admission closed. Concurrent owner
+commands cannot replace an active loop. A final outstanding check after owner
+receipts retains late original-scope evidence instead of replacing/clearing its
+loop; the receipt is exposed with recovery required. An owner receipt may already
+have committed rotation: the retained old loop reports captured facts only,
+without restoring old claim authority, retargeting facts or claiming rollback.
+Callback hashing/enqueue
+work counts as outstanding. Session end closes admission even during
+an owner call; a late successful receipt cannot restart polling.
+
 One captured submission and serialized reporter bound retained facts; failed
 receipts stop new claims. An unsettled detached promise also prevents reconnect
 or another claim after terminal acknowledgment. Identical normalized terminal
@@ -82,7 +98,9 @@ evidence, requiring reconciliation, not an inference of non-delivery.
 Existing Vitest Node project tests inject only SDK/helper transport seams; no
 production fake, eligibility state machine or new dependency/runner is added.
 Default application coverage includes all handwritten integration JS, including
-untested files, using the existing external-file coverage option. The real CLI
+untested files, using the existing external-file coverage option. The exact
+installer descriptor data-only export is exempt because it has no executable
+lines; adding logic requires removing that exemption in the same PR. The real CLI
 status case uses a bounded private socket and subprocess.
 
 P3.3 implementation is reviewable before full acceptance: owner CLI/P2.4, durable
