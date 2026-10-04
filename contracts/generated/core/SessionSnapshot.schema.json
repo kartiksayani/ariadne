@@ -2183,6 +2183,48 @@
           "type": "object",
           "properties": {
             "attempt_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "claim"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "attempt_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "delivery_expiry"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id",
+            "attempt_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
               "anyOf": [
                 {
                   "$ref": "#/$defs/UuidV4"
@@ -2220,6 +2262,45 @@
             "input_id",
             "attempt_id",
             "durable_effect"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "event_id": {
+              "type": "string"
+            },
+            "input_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UuidV4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "event_conflict"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "input_id",
+            "attempt_id"
           ]
         },
         {

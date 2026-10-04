@@ -38,6 +38,9 @@
     "session": {
       "$ref": "#/$defs/SessionRef"
     },
+    "tab_open": {
+      "type": "boolean"
+    },
     "tab_order": {
       "$ref": "#/$defs/NonnegativeSafeInteger"
     }
@@ -45,6 +48,7 @@
   "additionalProperties": false,
   "required": [
     "session",
+    "tab_open",
     "selected_item_id",
     "tab_order",
     "expanded_item_ids",

@@ -19,9 +19,18 @@ pub struct PreferencesSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct GlobalPreferences {
     pub theme: Theme,
+    pub selected_navigation: NavigationSelection,
     pub window: Option<WindowGeometry>,
     pub pinned: bool,
     pub notification_watermark: Option<UtcMillis>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum NavigationSelection {
+    Projects {},
+    AllSessions {},
+    Project { project_id: UuidV4 },
+    Session { session: SessionRef },
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +52,7 @@ pub struct WindowGeometry {
 #[serde(deny_unknown_fields)]
 pub struct SessionPreferences {
     pub session: SessionRef,
+    pub tab_open: bool,
     pub selected_item_id: Option<ItemRef>,
     pub tab_order: NonnegativeSafeInteger,
     pub expanded_item_ids: Vec<ItemRef>,

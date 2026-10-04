@@ -110,6 +110,15 @@ The scaffold smoke proves UI/invoke/Rust/disk and actual PID cleanup; the first
 domain slice replaces it with persisted domain behavior. Tests fake only providers.
 Live final Claude/Codex acceptance remains M7 with owner approval.
 
+Project/session navigation includes an explicit new-versus-existing Ariadne
+session choice. A fresh Claude conversation may attach to registered Session X
+in its selected project while retaining topics, items and history, including
+unfinished work. P4.2 owns the visible selection and canonical binding request;
+the P3.3/backend follow-up must prove structured historical owner-context access
+through the locked connection snapshot, isolation of later unissued inputs and
+unchanged rebind guards. This does not transfer host transcript/memory or resume
+dispatch. Completion requires that handoff proof, beyond the early reusable UI.
+
 ## Milestones and acceptance evidence
 
 Milestones summarize acceptance; task prerequisites govern actual scheduling.
