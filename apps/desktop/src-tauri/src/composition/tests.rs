@@ -405,25 +405,45 @@ fn shutdown_awaits_actual_started_blocking_work_and_releases_owner_after_complet
     .unwrap();
     let (admitted, started) = std::sync::mpsc::channel();
     let (release, released) = std::sync::mpsc::channel();
-    {
-        runtime.executor_for_test().spawn_blocking(move || {
-            admitted.send(()).unwrap();
-            released.recv().unwrap();
-        });
-    }
+    let blocked = runtime.executor_for_test().spawn_blocking(move || {
+        admitted.send(()).unwrap();
+        released.recv_timeout(Duration::from_secs(3)).unwrap();
+    });
     started.recv_timeout(Duration::from_secs(1)).unwrap();
     let quitting = runtime.clone();
     let (completed, completion) = std::sync::mpsc::channel();
     let quit = std::thread::spawn(move || completed.send(quitting.shutdown()).unwrap());
-    assert!(completion.recv_timeout(Duration::from_millis(100)).is_err());
-    assert!(DesktopOwner::acquire(&fixture.home).is_err());
+    let before_release = completion.recv_timeout(Duration::from_millis(100));
+    let owner_held = DesktopOwner::acquire(&fixture.home).is_err();
+    // Release owned work before checking these observations so a failed
+    // assertion cannot strand shutdown or hide the original panic summary.
     release.send(()).unwrap();
-    completion
-        .recv_timeout(Duration::from_secs(3))
-        .unwrap()
-        .unwrap();
+    let after_release = if matches!(
+        before_release,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    ) {
+        completion.recv_timeout(Duration::from_secs(3))
+    } else {
+        before_release.clone()
+    };
     quit.join().unwrap();
-    DesktopOwner::acquire(&fixture.home).unwrap();
+    assert!(
+        matches!(before_release, Err(std::sync::mpsc::RecvTimeoutError::Timeout)),
+        "shutdown completed or disconnected while actual blocking work was held: {before_release:?}"
+    );
+    assert!(
+        owner_held,
+        "physical desktop ownership was released before actual blocking work completed"
+    );
+    after_release
+        .expect("shutdown did not return after the owned task was released")
+        .unwrap();
+    assert!(
+        blocked.is_finished(),
+        "shutdown returned before its blocking task finished"
+    );
+    DesktopOwner::acquire(&fixture.home)
+        .expect("physical desktop ownership remained after completed shutdown");
 }
 
 #[test]

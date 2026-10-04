@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, readFile, chmod } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, chmod, appendFile, rename } from 'node:fs/promises';
 import http from 'node:http';
 import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
@@ -32,51 +32,82 @@ async function optional(path) {
 const applyRequest = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
 
+export async function admissions(configuration) {
+  try { return (await readFile(configuration.queuedPath, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+async function atomicJson(path, value) {
+  await writeFile(`${path}.tmp`, JSON.stringify(value)); await rename(`${path}.tmp`, path);
+}
+export async function recordAdmission(configuration, args) {
+  assert.deepEqual(args.slice(0, 6), ['queue', '--remote', `unix://${configuration.socket}`, '--thread', thread, '--message']);
+  assert.equal(args.length, 7);
+  const marker = args[6].match(/^\[ARIADNE_INPUT:([0-9a-f-]{36}):([0-9a-f-]{36})\]\n/);
+  assert.ok(marker, 'Queue admission requires the saved input/attempt marker');
+  const body = JSON.parse(args[6].slice(marker[0].length));
+  assert.equal(body.source_input_id, marker[1]);
+  assert.match(body.binding_id, /^[0-9a-f-]{36}$/); assert.match(body.generation, /^[0-9a-f-]{36}$/);
+  const previous = await admissions(configuration);
+  assert.ok(!previous.some(entry => entry.attemptId === marker[2]), 'No blind resend of an admitted host turn');
+  const entry = { ordinal: previous.length + 1, inputId: marker[1], attemptId: marker[2], bindingId: body.binding_id,
+    generation: body.generation, turnId: `scripted-native-${marker[2]}`, admittedAt: Date.now(), payload: args[6], args: args.slice(0, 6) };
+  await appendFile(configuration.queuedPath, `${JSON.stringify(entry)}\n`);
+  return entry;
+}
+export async function completeTurn(configuration, admission) {
+  const saved = (await admissions(configuration)).find(entry => entry.attemptId === admission.attemptId);
+  assert.deepEqual(admission, saved, 'Completion must identify an exact existing B/G/input/attempt/turn admission');
+  const completed = await optional(configuration.completePath) ?? [];
+  assert.ok(!completed.some(entry => entry.attemptId === admission.attemptId), 'Host completion is explicit and occurs once');
+  await atomicJson(configuration.completePath, [...completed, admission]);
+}
+export async function publishResult(configuration, admission, reply, env = process.env) {
+  const session = await snapshot(configuration), input = session.inputs[admission.inputId];
+  assert.equal(input.binding_id, configuration.bindingId);
+  assert.equal(admission.bindingId, configuration.bindingId); assert.equal(admission.generation, configuration.generation);
+  const attempt = input.attempts.find(attempt => attempt.id === admission.attemptId);
+  assert.ok(attempt); assert.equal(attempt.formatted_payload, admission.payload);
+  const owner = session.messages.find(message => message.id === input.message_id);
+  const request = { ...applyRequest([{ op: 'reply', ref: 'native-reply', item: { id: configuration.itemId }, text: reply, round_id: null }]),
+    source_input_id: input.id, attempt_id: attempt.id,
+    expected_item_revisions: { [configuration.itemId]: session.items[configuration.itemId].revision },
+    input_result: { outcome: 'answered', explanation: `Explicit scripted result ${admission.ordinal}`, reply_refs: [{ ref: 'native-reply' }], followup_item_refs: [], handled_through_message_number: owner.number } };
+  const applied = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request, env);
+  assert.equal(applied.code, 0); assert.equal(applied.value.session_id, configuration.sessionId);
+  return { request, receipt: applied.value };
+}
+
 // This replaces only the pinned existing provider endpoint/executable. Every
 // domain read, connection, owner mutation and explicit reply/result is real CLI/Core/Store.
-export async function startScriptedProvider(root, cli, evidence, env) {
+export async function startScriptedProvider(root, cli, evidence) {
   const provider = join(root, 'provider'), project = join(root, 'project');
-  await mkdir(provider, { recursive: true }); await mkdir(project);
+  const discoveryProject = join(root, 'discovery-project'), discoveryThread = 'ariadne-scripted-discovery-thread';
+  await mkdir(provider, { recursive: true }); await mkdir(project); await mkdir(discoveryProject);
   const socket = join(provider, 'daemon.sock'), executable = join(provider, 'codex');
-  const queuedPath = join(provider, 'queued.json'), completePath = join(provider, 'complete.json');
+  const queuedPath = join(provider, 'admissions.jsonl'), completePath = join(provider, 'complete.json');
   const bindingPath = join(provider, 'binding.json'), calls = [];
-  const executableSource = `#!${process.execPath}\nimport{writeFileSync,appendFileSync,renameSync}from'node:fs';\nconst args=process.argv.slice(2);\nif(args.length===1&&args[0]==='--version'){appendFileSync(${JSON.stringify(join(provider, 'versions.jsonl'))},'version\\n');console.log('codex-cli 0.160.0');}\nelse if(args.length===7&&args[0]==='queue'&&args[1]==='--remote'&&args[2]===${JSON.stringify(`unix://${socket}`)}&&args[3]==='--thread'&&args[4]===${JSON.stringify(thread)}&&args[5]==='--message'&&/^\\[ARIADNE_INPUT:[0-9a-f-]{36}:[0-9a-f-]{36}\\]\\n/.test(args[6])){writeFileSync(${JSON.stringify(queuedPath + '.tmp')},JSON.stringify({payload:args[6],args:args.slice(0,6)}));renameSync(${JSON.stringify(queuedPath + '.tmp')},${JSON.stringify(queuedPath)});}\nelse{process.exitCode=3;}\n`;
+  const configuration = { cli, project, provider, socket, executable, queuedPath, completePath, bindingPath, thread,
+    discovery: { projectRoot: discoveryProject, externalSessionId: discoveryThread, socketPath: socket },
+    appArgs: ['--codex-executable', executable, '--codex-home', provider, '--codex-endpoint', socket] };
+  const executableSource = `#!${process.execPath}\nimport{appendFileSync}from'node:fs';\nimport{recordAdmission}from ${JSON.stringify(import.meta.url)};\nconst args=process.argv.slice(2);\nif(args.length===1&&args[0]==='--version'){appendFileSync(${JSON.stringify(join(provider, 'versions.jsonl'))},'version\\n');console.log('codex-cli 0.160.0');}\nelse{try{await recordAdmission(${JSON.stringify(configuration)},args);}catch{process.exitCode=3;}}\n`;
   // The fixture executable is a module even without a .mjs extension.
   await writeFile(join(provider, 'package.json'), '{"type":"module"}');
   await writeFile(executable, executableSource); await chmod(executable, 0o700);
   const fixtures = new URL('../../../../contracts/providers/codex/0.160.0/fixtures/', import.meta.url);
   const load = async name => JSON.parse(await readFile(new URL(name, fixtures), 'utf8'));
-  let finish, failure;
+  let failure;
   async function turns() {
-    const queued = await optional(queuedPath);
-    if (!queued) return { data: [], nextCursor: null, backwardsCursor: null };
-    const complete = await optional(completePath);
-    if (complete && !finish) {
-      finish = (async () => {
-        const configuration = await optional(bindingPath);
-        assert.ok(configuration, 'Only the saved canonical B/G may publish a result');
-        const session = await snapshot(configuration);
-        const input = Object.values(session.inputs).find(input => input.attempts.some(attempt => queued.payload === attempt.formatted_payload));
-        assert.ok(input, 'Queue payload must identify the actual persisted attempt');
-        const attempt = input.attempts.find(attempt => queued.payload === attempt.formatted_payload);
-        const owner = session.messages.find(message => message.id === input.message_id);
-        const request = { ...applyRequest([{ op: 'reply', ref: 'native-reply', item: { id: configuration.itemId }, text: complete.reply, round_id: null }]),
-          source_input_id: input.id, attempt_id: attempt.id,
-          expected_item_revisions: { [configuration.itemId]: session.items[configuration.itemId].revision },
-          input_result: { outcome: 'answered', explanation: 'Explicit scripted provider result', reply_refs: [{ ref: 'native-reply' }], followup_item_refs: [], handled_through_message_number: owner.number } };
-        const applied = await cliRequest(cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request, env);
-        assert.equal(applied.code, 0); assert.equal(applied.value.session_id, configuration.sessionId);
-        await writeFile(join(evidence, 'agent-apply.json'), JSON.stringify({ request, receipt: applied.value }, null, 2));
-        return applied;
-      })();
-    }
-    if (finish) await finish;
+    const queued = await admissions(configuration), completed = await optional(completePath) ?? [];
+    for (const control of completed) assert.deepEqual(queued.find(entry => entry.attemptId === control.attemptId), control, 'Foreign completion identity cannot affect another turn');
     const result = await load('turns-response.json');
-    const turn = result.data[0];
-    turn.id = 'scripted-native-turn'; turn.status = complete ? 'completed' : 'inProgress';
-    turn.completedAt = complete ? Math.floor(Date.now() / 1000) : null;
-    turn.items = [{ type: 'userMessage', id: 'scripted-native-owner', clientId: 'scripted-native-client', content: [{ type: 'text', text: queued.payload, text_elements: [] }] }];
-    return { ...result, data: [turn] };
+    return { ...result, data: queued.map(entry => {
+      const turn = globalThis.structuredClone(result.data[0]), complete = completed.some(control => control.attemptId === entry.attemptId);
+      turn.id = entry.turnId; turn.status = complete ? 'completed' : 'inProgress';
+      turn.startedAt = Math.floor(entry.admittedAt / 1000); turn.completedAt = complete ? turn.startedAt + 1 : null;
+      turn.durationMs = complete ? 1000 : null;
+      turn.items = [{ type: 'userMessage', id: `${entry.turnId}-owner`, clientId: `${entry.turnId}-client`, content: [{ type: 'text', text: entry.payload, text_elements: [] }] }];
+      return turn;
+    }) };
   }
   const server = http.createServer();
   const websocket = new WebSocketServer({ noServer: true });
@@ -89,10 +120,14 @@ export async function startScriptedProvider(root, cli, evidence, env) {
         case 'initialized': return;
         case 'initialize': result = await load('initialize-response.json'); result.codexHome = provider; break;
         case 'thread/read':
-          result = await load('read-response.json'); result.thread.id = thread; result.thread.sessionId = thread; result.thread.cwd = project; break;
-        case 'thread/loaded/list': result = { data: [thread], nextCursor: null }; break;
+          assert.ok([thread, discoveryThread].includes(request.params.threadId), 'Only the two explicit existing sessions are readable');
+          result = await load('read-response.json'); result.thread.id = request.params.threadId; result.thread.sessionId = request.params.threadId;
+          result.thread.cwd = request.params.threadId === thread ? project : discoveryProject; break;
+        case 'thread/loaded/list': result = { data: [thread, discoveryThread], nextCursor: null }; break;
         case 'thread/queue/list': result = { data: [], nextCursor: null }; break;
-        case 'thread/turns/list': result = await turns(); break;
+        case 'thread/turns/list':
+          assert.ok([thread, discoveryThread].includes(request.params.threadId));
+          result = request.params.threadId === thread ? await turns() : { data: [], nextCursor: null }; break;
         default: throw new Error(`Unexpected provider operation ${request.method}`);
       }
       client.send(JSON.stringify({ id: request.id, result }));
@@ -100,8 +135,6 @@ export async function startScriptedProvider(root, cli, evidence, env) {
   }));
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socket, resolve); });
   await chmod(socket, 0o600);
-  const configuration = { cli, project, provider, socket, executable, queuedPath, completePath, bindingPath, thread,
-    appArgs: ['--codex-executable', executable, '--codex-home', provider, '--codex-endpoint', socket] };
   await writeFile(join(root, 'journey.json'), JSON.stringify(configuration));
   return { configuration, async stop() {
     for (const client of websocket.clients) client.terminate();
@@ -146,19 +179,28 @@ export async function seedJourney(configuration, env = process.env) {
   assert.ok(read, 'Saved setup contains pasteable canonical read arguments');
   const readArgs = read.slice('Use ariadne '.length).replace(/\.$/, '').split(/\s+/);
   assert.equal((await cliRequest(configuration.cli, readArgs, undefined, env)).code, 0);
+  const question = 'Which native delivery window should we use?', ask = 'Choose the saved option and explain it in your own words.';
+  const options = [{ id: 'native-window', label: 'Use the native window', consequence: 'Preserve this exact saved choice', recommended: true }];
   const seed = applyRequest([
     { op: 'topic.add', ref: 'native-topic', name: 'Native provider journey' },
-    { op: 'item.add', ref: 'native-item', topic: { ref: 'native-topic' }, parent: null, question: 'Reply to this native owner message', type: 'task', status: 'open', owner: { kind: 'me' }, ask: null, options: null, note: null, links: null, outcome: null, why: null, replaced_by: null, source_round_id: null },
+    { op: 'item.add', ref: 'native-item', topic: { ref: 'native-topic' }, parent: null, question, type: 'task', status: 'open', owner: { kind: 'me' }, ask: null, options: null, note: null, links: null, outcome: null, why: null, replaced_by: null, source_round_id: null },
+    { op: 'item.ask', item: { ref: 'native-item' }, ask, options, recipient_binding_id: bindingId },
   ]);
   const apply = receipt.data.setup_instruction.split('\n').find(line => line.startsWith('Publish full item replies with ariadne apply '));
   assert.ok(apply, 'Saved setup contains pasteable canonical apply arguments');
   const applyArgs = apply.slice('Publish full item replies with ariadne '.length).split('. Use explicit')[0].split(/\s+/);
   const seeded = await cliRequest(configuration.cli, applyArgs, seed, env);
   assert.equal(seeded.code, 0);
-  Object.assign(configuration, { projectId, sessionId, bindingId, generation, sessionPath, itemId: '1' });
+  const demoProject = join(configuration.project, '..', 'canonical-demo'); await mkdir(demoProject);
+  const demo = await cliRequest(configuration.cli, ['demo', '--root', demoProject, '--json'], undefined, env);
+  assert.equal(demo.code, 0);
+  const demoPath = join(demoProject, '.ariadne/sessions', `${demo.value.data.session_id}.json`);
+  Object.assign(configuration, { projectId, sessionId, bindingId, generation, sessionPath, itemId: '1', question, ask, options,
+    demo: { ...demo.value.data, sessionPath: demoPath, before: JSON.parse(await readFile(demoPath, 'utf8')) } });
   const session = await snapshot(configuration);
   assert.equal(session.active_binding_id, bindingId); assert.equal(session.bindings[bindingId].generation, generation);
   assert.equal(session.bindings[bindingId].external_session_id, thread); assert.ok(session.items[configuration.itemId]);
   await writeFile(configuration.bindingPath, JSON.stringify(configuration));
+  await writeFile(join(configuration.project, '..', 'journey.json'), JSON.stringify(configuration));
   return { request, connected: connected.value, replay: replay.value, seed, seeded: seeded.value };
 }
