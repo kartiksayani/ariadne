@@ -995,6 +995,22 @@ fn result_repair_can_cite_verified_original_work_effects_and_rejects_uncompleted
         repair.sealed_at = None;
         repair.claim_request_id = id(803);
         i.attempts.push(repair);
+        for attempt in &mut i.attempts {
+            let body = attempt
+                .formatted_payload
+                .split_once('\n')
+                .unwrap()
+                .1
+                .to_owned();
+            attempt.wire_marker =
+                format!("[ARIADNE_INPUT:{}:{}]", input.as_str(), attempt.id.as_str());
+            attempt.formatted_payload = format!("{}\n{body}", attempt.wire_marker);
+            attempt.payload_sha256 = Sha256::new(format!(
+                "{:x}",
+                Hasher::digest(attempt.formatted_payload.as_bytes())
+            ))
+            .unwrap();
+        }
         for m in &mut s.messages {
             if m.attempt_id.as_ref() == Some(&id(800)) {
                 m.attempt_id = Some(id(799));

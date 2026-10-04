@@ -72,9 +72,11 @@ export async function prepared(value, binding) {
 export function reportReceipt(value, event, session) {
   if (!fields(value, ['event_id','session_id','revision','durable_effect','replayed'])
     || value.event_id !== event.event_id || value.session_id !== session.session_id
-    || value.durable_effect !== true || !Number.isSafeInteger(value.revision) || value.revision < 1
+    || typeof value.durable_effect !== 'boolean'
+    || (value.revision !== null && (!Number.isSafeInteger(value.revision) || value.revision < 1))
+    || (value.durable_effect && value.revision === null)
     || typeof value.replayed !== 'boolean') {
-    throw new ModError('Ariadne lifecycle report lacks a matching durable receipt; retain the exact event.');
+    throw new ModError('Ariadne lifecycle report lacks a matching validated receipt; retain the exact event.');
   }
   return value;
 }
