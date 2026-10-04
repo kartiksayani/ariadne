@@ -71,6 +71,20 @@ Global Waiting contains an item only when its status is `waiting_on_me` and it h
 
 Use the API's `SummaryCounts` projection consistently: `waiting_unanswered` drives global/project Waiting counts and the tray; `sent_inputs` counts inputs by `queued`, `in_flight`, and `needs_attention`; `items_by_status` is the separate raw seven-status count. Topic/session chips count nonarchived items before local search/filter. Footer shows visible and total scope. Archived topic counts stay in Archive. Inaccessible roots make counts partial and display an incomplete marker, never zero. These counts are not recomputed from whatever rows happen to be visible after filtering.
 
+The early P4.3 read module publishes `WaitingStore`, `waitingRows`, `sentRows`,
+`deliveryEvidence` and `WaitingPanel` over the merged renderer service. It pages
+the complete registered catalogue, matches every snapshot to its backend summary
+revision, preserves the last complete read on failure, and retains backend counts
+and partial metadata. Composition supplies the shared `OpenSessions` cache,
+registered reveal/session-open callbacks and optional real answer control;
+without that control the panel is read-only. Stopping the reader removes its
+subscriptions/poll and never closes another screen's session store. Current
+delivery labels use the active attempt and persisted facts, including Waiting
+for result during grace; no renderer timer creates Missing result or Handled.
+Actual owner/draft actions, core/store/runtime composition and native Waiting
+acceptance remain their original task joins, not completion through a scripted
+transport.
+
 ## 3. Tree, detail, message rail, search, and filters
 
 Build `childrenByParent`, `itemById`, `messagesByItem`, `roundsByItem`, and active-descendant counts once per changed snapshot. Sort siblings by stable numeric item reference while never reassigning references. Store topic order explicitly.

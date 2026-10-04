@@ -588,7 +588,10 @@
       "checks": [
         "rtk proxy cargo test -p ariadne-core --test projections"
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/49"
+      }
     },
     {
       "id": "P2.1",
@@ -616,7 +619,10 @@
       "checks": [
         "rtk proxy cargo test -p ariadne-core --test apply"
       ],
-      "estimate_days": 2
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/51"
+      }
     },
     {
       "id": "P2.2",
@@ -841,7 +847,8 @@
         "P3.1",
         "P0.5",
         "P0.6"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/50"
     },
     {
       "id": "P3.3",
@@ -874,7 +881,8 @@
         "P0.5",
         "P0.6",
         "P3.1"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/52"
     },
     {
       "id": "P3.4",
@@ -968,7 +976,8 @@
       "implementation_depends_on": [
         "P3.5",
         "P0.5"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/43"
     },
     {
       "id": "P3.7",
@@ -1076,7 +1085,8 @@
       "implementation_depends_on": [
         "P0.4",
         "P0.6"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/46"
     },
     {
       "id": "P4.2",
@@ -1122,7 +1132,7 @@
       "paths": [
         "apps/desktop/src/components/waiting/**",
         "apps/desktop/src/selectors/waiting/**",
-        "tests/ui/waiting/**",
+        "apps/desktop/tests/ui/waiting/**",
         "tests/e2e/waiting/**"
       ],
       "spec": [
@@ -1136,7 +1146,7 @@
         "Use backend SummaryCounts and delivery facts; old Sent plus new Waiting episode coexist; partial roots show incomplete counts; labels never rewrite item status."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project waiting",
+        "rtk proxy npm run test:ui -- --project desktop tests/ui/waiting",
         "rtk proxy npm run test:e2e -- --suite waiting"
       ],
       "estimate_days": 1,
