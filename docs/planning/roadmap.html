@@ -828,7 +828,8 @@
       "implementation_depends_on": [
         "P0.6",
         "P2.3"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/76"
     },
     {
       "id": "P2.5",
@@ -893,7 +894,10 @@
       "checks": [
         "rtk proxy cargo test -p ariadne-core --test history_actions"
       ],
-      "estimate_days": 1.5
+      "estimate_days": 1.5,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/76"
+      }
     },
     {
       "id": "P3.1",
@@ -963,7 +967,7 @@
         "P0.5",
         "P0.6"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/50"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/78"
     },
     {
       "id": "P3.3",
@@ -1134,7 +1138,7 @@
         "P3.3",
         "P3.5"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/62"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/74"
     },
     {
       "id": "P3.8",
@@ -1169,7 +1173,8 @@
         "rtk proxy cargo test -p ariadne-core --test recovery",
         "rtk proxy cargo test -p ariadne-cli --test owner_native"
       ],
-      "estimate_days": 1.5
+      "estimate_days": 1.5,
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/76"
     },
     {
       "id": "P4.1",
@@ -1285,7 +1290,8 @@
       "estimate_days": 1,
       "implementation_depends_on": [
         "P4.1"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73"
     },
     {
       "id": "P4.4",
@@ -1364,7 +1370,8 @@
       "implementation_depends_on": [
         "P4.1",
         "P4.4"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73"
     },
     {
       "id": "P4.6",
@@ -1399,8 +1406,8 @@
       ],
       "estimate_days": 1.5,
       "implementation_depends_on": [
+        "P0.6",
         "P4.1",
-        "P4.3",
         "P4.4"
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/60"
@@ -1516,7 +1523,8 @@
       "implementation_depends_on": [
         "P4.4",
         "P0.4"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73"
     },
     {
       "id": "P5.2",
@@ -1527,8 +1535,11 @@
       ],
       "paths": [
         "apps/desktop/src/graph/culling/**",
-        "tests/ui/graph-culling/**",
+        "apps/desktop/src/components/graph/SessionTopicGraph.tsx",
+        "apps/desktop/tests/ui/graph-culling/**",
+        "apps/desktop/tests/ui/graph-layout/component.test.tsx",
         "tests/e2e/graph/**",
+        "tests/ui/reference/playwright.config.ts",
         "docs/planning/evidence/graph-performance/**"
       ],
       "spec": [
@@ -1542,8 +1553,8 @@
         "Save deterministic 2,000-node correctness and measured render/performance evidence (V27)."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project graph-culling",
-        "rtk proxy npm run test:e2e -- --suite graph"
+        "rtk proxy npm run test:ui -- apps/desktop/tests/ui/graph-culling",
+        "rtk proxy npm run capture:reference -- --project graph-2000"
       ],
       "estimate_days": 1,
       "implementation_depends_on": [
@@ -1617,7 +1628,8 @@
       "implementation_depends_on": [
         "P4.4",
         "P0.6"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/75"
     },
     {
       "id": "P6.2",
