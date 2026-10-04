@@ -136,16 +136,43 @@ impl Store {
         normalized_command: &Value,
         data: SavedReceiptData,
     ) -> Result<SavedReceipt, StoreError> {
+        self.create_with_receipt_guarded(
+            session,
+            actor,
+            operation_id,
+            normalized_command,
+            data,
+            || Ok::<_, std::convert::Infallible>(()),
+        )
+        .map_err(|error| match error {
+            TransactionError::Store(error) => error,
+            TransactionError::Command(never) => match never {},
+        })
+    }
+
+    /// Native fresh-work admission after the final stable lock, exact replay and
+    /// candidate validation, immediately before the first transaction temp write.
+    /// Once writing starts, existing commit/uncertainty semantics remain intact.
+    pub fn create_with_receipt_guarded<E>(
+        &self,
+        session: &Session,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        normalized_command: &Value,
+        data: SavedReceiptData,
+        before_create: impl FnOnce() -> Result<(), E>,
+    ) -> Result<SavedReceipt, TransactionError<E>> {
         self.with_lock(&session.id, || {
             let name = format!("{}.json", session.id.as_str());
             if self.sessions.verify_target(&name)? {
                 let (live, _) = self.live(&session.id)?;
                 return self
                     .saved(&live, actor, operation_id, normalized_command)?
-                    .ok_or(StoreError::AlreadyExists);
+                    .ok_or(StoreError::AlreadyExists)
+                    .map_err(TransactionError::Store);
             }
             if session.revision.value() != 1 || !session.operation_receipts.0.is_empty() {
-                return Err(StoreError::InvalidSnapshot);
+                return Err(StoreError::InvalidSnapshot.into());
             }
             let mut candidate = session.clone();
             let receipt = SavedReceipt {
@@ -164,8 +191,10 @@ impl Store {
                 }],
             );
             self.validate(&candidate, &candidate.id)?;
+            let bytes = encode(&candidate)?;
+            before_create().map_err(TransactionError::Command)?;
             self.sessions
-                .temp(&name, &encode(&candidate)?)?
+                .temp(&name, &bytes)?
                 .create(&name)
                 .map_err(|error| uncertain_operation(error, operation_id))?;
             self.sessions

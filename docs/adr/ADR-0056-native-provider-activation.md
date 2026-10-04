@@ -31,6 +31,15 @@ provider-operation stash is introduced. Concrete adapters expose an inherent
 connect_before, carrying the original Instant through queue admission and IO;
 the shared Adapter trait and ordinary default method budgets remain unchanged.
 
+Fresh admission also follows all-project registration scans and final Store
+lock waits. Existing-session mutation checks inside Store.transact's callback,
+after its exact replay. New-session creation checks before speculative IDs, then
+uses an additive guarded-create method under the final stable session lock after
+exact replay and candidate validation, before the first transaction temp write.
+The original create_with_receipt remains a no-op wrapper with identical errors.
+Lock/read/validation entry is not persistence begun; once the first transaction
+write starts, no deadline check cancels or claims rollback of that transaction.
+
 Claude bootstrap saves Unknown/Disconnected and returns the canonical receipt
 before waiting for the Mod's actual saved binding/generation announcement. A
 matching bound announcement is a distinct operation with its own original
