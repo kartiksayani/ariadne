@@ -144,6 +144,77 @@ and view disposal; memoized rows must update when their highlight changes.
 The App owns this wiring, reusing existing TreeRow touched styling and rail
 callbacks. No CoreService, persisted DTO or second session reader is introduced.
 
+### Claude installed-helper acceptance join
+
+P3.3 joins the actual setup-rendered immutable Mod, executable CLI, native
+activation/private control and Core/Store in one deterministic fixture. Only the
+Claude SDK/host and its version response are scripted. Prove explicit attachment
+to a populated existing session, the saved historical snapshot ceiling, isolation
+of later unissued inputs, no implicit prompt, exact claim/payload/turn/result
+correlation in both completion orders, and captured late CLI reports after desktop
+closure. Reuse existing transport and normalization tests; do not add a parallel
+transport framework. This is installed-composition evidence, not live-host M7.
+
+After validating the exact saved connect receipt and explicit target, the Mod
+retains and announces its binding/generation before requesting route-dependent
+connection status. Native qualification/reconciliation still owns route publication.
+If announcement acknowledgement or status is unavailable, retain the original
+connect operation and saved scope, report activation as pending and retry that
+exact operation on the owner's next connect attempt. Do not invent Connected,
+enable claims early, or allocate new IDs to recover a lost response. Session-end
+and outstanding original-scope report guards remain in force.
+
+An actual Claude SDK `session.end` is terminal for that saved binding generation,
+including when its original native activation is still pending. Reserve the
+normalized event ID `claude:session-ended:<binding UUID>:<generation UUID>` for
+that non-attempt `Disconnected` fact on a Claude binding only. Validate its exact
+scope and kind; ordinary transport-disconnection events keep ordinary IDs and
+remain reconnectable. The Mod retains the original event and retries unchanged.
+
+Core records this terminal fact in the existing durable Event receipt even when
+the binding was already disconnected. Under the same Store transaction lock,
+a fresh Connected event cannot re-enable a generation with that terminal receipt.
+Preserve Store's existing exact-event replay before mutable guards: replaying an
+old Connected receipt does not change the now-disconnected state. Native
+activation checks the authoritative terminal receipt at its current-scope
+admission and publication checks; claims still require Core's current dispatch
+admission. Qualification, timeouts, lost acknowledgements, restarts, and replay
+must not remove this fence. A new explicit connect rotates generation and is not
+fenced by the previous generation's receipt. No new DTO or CoreService method is
+needed; shared receipt lookup/identity helpers must have one implementation.
+
+The protocol exports `claude_session_end_event_id(&UuidV4, &UuidV4) -> String`
+and `is_claude_session_end_event(&NormalizedEvent) -> bool`. Core exports
+`lifecycle::claude_generation_ended(&Session, &UuidV4, &UuidV4) -> bool` for its
+transaction and native activation. The lookup requires the actual Claude binding,
+matching Adapter receipt actor, exact event ID, non-attempt scope, and a durable
+Event receipt. Reject reserved-namespace misuse before receipt allocation. These
+are shared helpers; the existing service and serialized interfaces are unchanged.
+
+Prove the actual installed-Mod/native activation race, already-disconnected end,
+failed-report identity preservation, delayed/replayed Connected, restart, ordinary
+disconnect/reconnect and a new generation with real Core/Store. This is a durable
+ordering correction; do not interpret arbitrary diagnostic reason text as a fence.
+
+After that joined proof, `domain_cli` may report support for the current supported
+installed helper release only following existing native qualification: fresh SDK
+identity/project, qualified Claude version, exact selected helper path/version,
+and loaded/installed resource parity. Unsupported helper releases remain false;
+`domain_mcp` remains false. Pre-ID `QualifiedClaudeHost` and final Adapter.connect
+must use the same conditional capability constructor so saved and Connected facts
+agree. Support grants neither binding authority nor dispatch admission and does
+not promise host approval or success of an individual operation.
+
+This uses the existing immutable release/version identity assumption: version
+checks do not distinguish different helper builds sharing a version. A release
+changing the supported command contract must change its release identity; no
+cryptographic attestation is claimed. Keep the qualification limit in ADR-0051
+and PROCESS_AND_PROTOCOLS with the implementation. This amendment changes no
+CoreService signature or serialized provider DTO. The maintainer owns this
+contract; the assigned worker owns the adapter condition, joined fixture and
+affected conformance tests, and reports any insufficient qualification facts
+before changing the contract.
+
 ## Desktop discovery consumer
 
 DesktopService receives trusted composition callbacks for the existing native

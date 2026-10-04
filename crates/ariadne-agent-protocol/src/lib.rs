@@ -14,7 +14,9 @@ pub use ariadne_domain::models::{
     EndpointRef, HostReceipt, PresenceObservation, Sha256, UtcMillis, UuidV4,
 };
 pub use dto::*;
-pub use validation::{terminal_event_id, ObserveLimit};
+pub use validation::{
+    claude_session_end_event_id, is_claude_session_end_event, terminal_event_id, ObserveLimit,
+};
 
 pub type AdapterFuture<'a, T> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, AdapterError>> + Send + 'a>>;

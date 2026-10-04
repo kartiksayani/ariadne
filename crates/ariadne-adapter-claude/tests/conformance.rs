@@ -231,7 +231,7 @@ fn pre_id_facts_match_final_provider_connection_without_changing_original_age() 
     assert_eq!(qualified.observed_at(), &observed);
     assert_eq!(qualified.received_at(), received);
     assert!(qualified.is_fresh());
-    assert!(!qualified.capabilities().domain_cli.supported);
+    assert!(qualified.capabilities().domain_cli.supported);
     assert!(!qualified.capabilities().domain_mcp.supported);
     fixture.slot.publish_qualified(&qualified).unwrap();
     let connected = wait(fixture.adapter().connect(connect())).unwrap();
@@ -267,6 +267,46 @@ fn discovery_resource_is_required_and_compared_at_exact_loaded_root() {
             )
             .is_err());
     }
+}
+
+#[test]
+fn unknown_matching_installed_release_does_not_advertise_domain_command_support() {
+    let mut fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+    fixture.options.app_version = "0.2.0".into();
+    executable_file(
+        &fixture.options.helper,
+        "#!/bin/sh\nprintf 'ariadne 0.2.0\\n'\n",
+    );
+    let descriptor =
+        json!({"helperPath":fixture.options.helper,"appVersion":"0.2.0","apiVersion":1});
+    for root in [&fixture.options.installed_plugin, &fixture.loaded] {
+        fs::write(
+            root.join(".claude-plugin/plugin.json"),
+            r#"{"name":"ariadne","version":"0.2.0"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("hooks/installed.js"),
+            format!("export default Object.freeze({descriptor});\n"),
+        )
+        .unwrap();
+    }
+    let mut identity = fixture.identity();
+    identity.app_version = "0.2.0".into();
+    let qualified = fixture
+        .options
+        .qualify_host_identity(
+            identity,
+            UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap(),
+            Instant::now(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+    assert!(!qualified.capabilities().domain_cli.supported);
+    assert!(!qualified.capabilities().domain_mcp.supported);
+    fixture.slot.publish_qualified(&qualified).unwrap();
+    let connected = wait(fixture.adapter().connect(connect())).unwrap();
+    assert_eq!(connected.capabilities, qualified.capabilities());
 }
 
 #[test]
