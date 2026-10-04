@@ -98,6 +98,7 @@ describe('supported Mod entry convention', () => {
       await hooks.get('session.end')(h.$,{},next);
       const failed = h.calls.find(call => call.argv[2] === 'report');
       expect(JSON.parse(failed.options.stdin)).toMatchObject({kind:'disconnected',binding_id:ids.binding,generation:ids.generation,input_id:null,attempt_id:null});
+      expect(JSON.parse(failed.options.stdin).event_id).toBe(`claude:session-ended:${ids.binding}:${ids.generation}`);
       failReport = false;
       await hooks.get('session.end')(h.$,{},next);
       const attempts = h.calls.filter(call => call.argv[2] === 'report');

@@ -13,6 +13,7 @@ const replies = [];
 const submissions = [];
 let running = 0;
 let loseStatusAck = false;
+let detachedConnect = null;
 async function execute(argv, options) {
   running += 1;
   try {
@@ -66,6 +67,10 @@ for await (const line of createInterface({input:process.stdin})) {
     switch (request.action) {
       case 'start': value = await hooks.get('session.start:')(fixture.$,{},next); break;
       case 'connect': value = await hooks.get('command.run:ariadne-connect')(fixture.$,{args:request.session}); break;
+      case 'connect-detached':
+        detachedConnect = hooks.get('command.run:ariadne-connect')(fixture.$,{args:request.session});
+        break;
+      case 'connect-settled': value = await detachedConnect; break;
       case 'heartbeat': await fixture.timers().find(timer => timer.ms === 30000).callback(); break;
       case 'lose-status-ack': loseStatusAck = true; break;
       case 'poll': {
@@ -93,7 +98,8 @@ for await (const line of createInterface({input:process.stdin})) {
       case 'state': break;
       default: throw new Error('Unknown SDK fixture command');
     }
-    await drain();
+    // A detached connect lets the SDK session.end overtake a real pending helper.
+    if (request.action !== 'connect-detached' && !(request.action === 'event' && request.name === 'session.end' && detachedConnect)) await drain();
     process.stdout.write(`${JSON.stringify({value,prompts:fixture.prompts,reports,replies,logs:fixture.logs,commands:fixture.commands})}\n`);
   } catch (error) {
     process.stdout.write(`${JSON.stringify({error:error.message})}\n`);

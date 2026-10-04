@@ -80,6 +80,9 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_announcement_barrier(false)
+    }
+    fn with_announcement_barrier(hold: bool) -> Self {
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let install = tempfile::tempdir_in("/tmp").unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -171,12 +174,27 @@ impl Fixture {
             rt.handle().clone(),
             Arc::new(|_| {}),
         );
+        let callback = activation.announcement_callback();
+        let barrier = root.path().to_owned();
+        let callback: Arc<ariadne_runtime::control::NativeAnnouncement> =
+            Arc::new(move |scope, deadline| {
+                if hold {
+                    fs::write(barrier.join("announce-entered"), "").unwrap();
+                    // Hold the real callback after Discovery admitted the bound SDK
+                    // announcement; the actual native activation runs on release.
+                    while !barrier.join("announce-release").exists() {
+                        assert!(Instant::now() < deadline, "announcement barrier timed out");
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                }
+                callback(scope, deadline)
+            });
         let server = ControlServer::bind_shared(owner.clone(), core.clone(), vec![])
             .unwrap()
             .with_routes(routes)
             .with_discovery(discovery)
             .with_native_connect(activation.connect_callback())
-            .with_native_announcement(activation.announcement_callback());
+            .with_native_announcement(callback);
         let (stop, stopped) = tokio::sync::oneshot::channel();
         let server = rt.spawn(server.serve(stopped));
         let mut child = Command::new("node")
@@ -643,4 +661,75 @@ fn installed_session_end_reports_saved_scope_after_sdk_loses_actual_status_resul
         .unwrap()
         .iter()
         .all(|reply| reply["argv"][2] != "claim"));
+}
+
+#[test]
+fn installed_session_end_fences_the_original_delayed_native_announcement() {
+    let mut fixture = Fixture::with_announcement_barrier(true);
+    fixture.sdk.command(json!({"action":"start"}));
+    fixture
+        .sdk
+        .command(json!({"action":"connect-detached","session":id(2)}));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !fixture.root.path().join("announce-entered").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "real bound announcement never entered"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let saved = fixture.saved();
+    let binding = saved.active_binding_id.unwrap();
+    let generation = saved.bindings.0[&binding].generation.clone();
+    let ended = fixture
+        .sdk
+        .command(json!({"action":"event","name":"session.end","event":{}}));
+    let event = ended["reports"].as_array().unwrap().last().unwrap();
+    assert_eq!(
+        event["event_id"],
+        json!(format!(
+            "claude:session-ended:{}:{}",
+            binding.as_str(),
+            generation.as_str()
+        ))
+    );
+    assert_eq!(event["binding_id"], json!(binding));
+    assert_eq!(event["generation"], json!(generation));
+    assert_eq!(
+        fixture.saved().bindings.0[&binding].connection_state,
+        ConnectionState::Disconnected
+    );
+    fs::write(fixture.root.path().join("announce-release"), "").unwrap();
+    let settled = fixture.sdk.command(json!({"action":"connect-settled"}));
+    assert!(settled["prompts"].as_array().unwrap().is_empty());
+    assert!(settled["replies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|reply| reply["argv"][2] != "claim"));
+    let scope = ariadne_runtime::control::BindingScope {
+        binding_id: binding.clone(),
+        generation,
+    };
+    assert_eq!(
+        fixture
+            .activation
+            .as_ref()
+            .unwrap()
+            .activate_registered_before(scope, Instant::now() + Duration::from_secs(2))
+            .unwrap_err()
+            .code,
+        CoreErrorCode::HostUnreachable
+    );
+    // The real original callback has now completed, and replay/startup cannot
+    // resurrect the ended generation or publish dispatch authority.
+    let saved = fixture.saved();
+    assert_eq!(
+        saved.bindings.0[&binding].connection_state,
+        ConnectionState::Disconnected
+    );
+    assert_eq!(
+        saved.bindings.0[&binding].dispatch_state,
+        DispatchState::Disconnected
+    );
 }

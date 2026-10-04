@@ -81,6 +81,14 @@ must not remove this fence. A new explicit connect rotates generation and is not
 fenced by the previous generation's receipt. No new DTO or CoreService method is
 needed; shared receipt lookup/identity helpers must have one implementation.
 
+The protocol exports `claude_session_end_event_id(&UuidV4, &UuidV4) -> String`
+and `is_claude_session_end_event(&NormalizedEvent) -> bool`. Core exports
+`lifecycle::claude_generation_ended(&Session, &UuidV4, &UuidV4) -> bool` for its
+transaction and native activation. The lookup requires the actual Claude binding,
+matching Adapter receipt actor, exact event ID, non-attempt scope, and a durable
+Event receipt. Reject reserved-namespace misuse before receipt allocation. These
+are shared helpers; the existing service and serialized interfaces are unchanged.
+
 Prove the actual installed-Mod/native activation race, already-disconnected end,
 failed-report identity preservation, delayed/replayed Connected, restart, ordinary
 disconnect/reconnect and a new generation with real Core/Store. This is a durable
