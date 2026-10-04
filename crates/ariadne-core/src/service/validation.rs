@@ -296,6 +296,23 @@ impl OwnerCommand {
                 for entry in &params.entries {
                     match entry {
                         PreferencesPatchEntry::SetGlobal { preferences } => {
+                            if preferences.notification_ledger.len() > NOTIFICATION_LEDGER_CAPACITY
+                            {
+                                return Err(CoreError::new(CoreErrorCode::CapacityExceeded,
+                                    "Notification episode ledger exceeds its 256 entry bound",
+                                    "Wait for a complete registered queue capture before compacting notification history."));
+                            }
+                            let mut episodes = std::collections::BTreeSet::new();
+                            for episode in &preferences.notification_ledger {
+                                if !episodes.insert((
+                                    &episode.session.project_id,
+                                    &episode.session.session_id,
+                                    &episode.item_id,
+                                    episode.question_revision.value(),
+                                )) {
+                                    return Err(invalid("Duplicate notification episode identity"));
+                                }
+                            }
                             if let Some(window) = &preferences.window {
                                 if ![window.x, window.y, window.width, window.height]
                                     .into_iter()
