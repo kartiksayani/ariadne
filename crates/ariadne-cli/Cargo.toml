@@ -11,6 +11,8 @@ ariadne-domain = { path = "../ariadne-domain" }
 ariadne-store = { path = "../ariadne-store" }
 ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
 serde_json.workspace = true
+serde.workspace = true
+libc.workspace = true
 chrono.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
