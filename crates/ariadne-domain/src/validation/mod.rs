@@ -2,6 +2,8 @@
 //!
 //! Store/core compose these with history, delivery, actor and transaction checks;
 //! this module does not implement those state machines.
+mod delivery;
+pub use delivery::{validate_prepared_payload, validate_session_delivery};
 pub(crate) mod items;
 pub(crate) mod session;
 
