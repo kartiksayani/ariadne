@@ -5,6 +5,7 @@ import type { RevealedItem } from '../../data/routes';
 import { RegisteredRoutes } from '../../data/routes';
 import { immutable, OpenSessions, type Immutable, type SessionStore } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } from '../../data/service';
+import { initialExpansion } from '../../selectors/tree/rows';
 import * as catalogue from './catalogue';
 
 type Failure = CoreFailure | ServiceFailure;
@@ -203,7 +204,7 @@ export class NavigationStore {
         }
         const existing = preferences.sessions.find(view => sameRoute(view.session, selection.session));
         const view: SessionPreferences = existing ?? { session: selection.session, tab_open: true, selected_item_id: null,
-          tab_order: Math.max(-1, ...preferences.sessions.map(session => session.tab_order)) + 1, expanded_item_ids: [],
+          tab_order: Math.max(-1, ...preferences.sessions.map(session => session.tab_order)) + 1, expanded_item_ids: [...initialExpansion(snapshot.session)],
           filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
         entries.push({ kind: 'set_session_view', preferences: { ...view, tab_open: true,
           selected_item_id: reveal?.kind === 'item' ? reveal.route.item_id : view.selected_item_id } });

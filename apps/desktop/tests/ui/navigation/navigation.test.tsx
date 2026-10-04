@@ -435,3 +435,13 @@ describe('tree edits through canonical navigation preferences', () => {
     expect(store.getSnapshot().preferences?.drafts).toEqual(prefs.drafts);
   });
 });
+
+
+it('initializes active branch expansion only when a registered session view is first created', async () => {
+  const { transport, store } = setup(); const prefs = preferences(); prefs.sessions = [];
+  read(transport, prefs); await store.start(); transport.enqueue('session_get', loaded());
+  transport.enqueue('preferences_patch', patchReceipt()); transport.enqueue('preferences_get', new Error('Read unavailable'));
+  expect(await store.navigate({ kind: 'session', session: route })).toBe(true);
+  const view = store.getSnapshot().preferences!.sessions[0]; expect(view.expanded_item_ids).toContain('1');
+  expect(view.filters.owners).toEqual([]);
+});

@@ -167,3 +167,32 @@ describe('registered variable-height sentence tree', () => {
     expect(tree.scrollTop).toBe(70);
   });
 });
+
+
+it('persists exact canonical owner choices without changing another filter category', async () => {
+  const value = await setup(); render(<value.Composition />);
+  const owners = screen.getByRole('group', { name: 'Item owner' });
+  fireEvent.click(within(owners).getByRole('button', { name: 'Me' }));
+  await waitFor(() => expect(value.saved.at(-1)?.filters.owners).toEqual([{ kind: 'me' }]));
+  const agent = within(owners).getAllByRole('button').find(button => button.textContent?.startsWith('Agent ·'))!;
+  fireEvent.click(agent);
+  await waitFor(() => expect(value.saved.at(-1)?.filters.owners).toHaveLength(2));
+  expect(value.saved.at(-1)?.filters.statuses).toEqual([]);
+  expect(value.saved.at(-1)?.filters.search).toBe('');
+  fireEvent.click(within(owners).getByRole('button', { name: 'Me' }));
+  await waitFor(() => expect(value.saved.at(-1)?.filters.owners).toHaveLength(1));
+});
+
+it('measures a complete 2,000-row DOM and preserves numeric order and one roving focus target', async () => {
+  const session = structuredClone(demo) as Session, base = session.items['1']!;
+  session.items = {};
+  for (let n = 1; n <= 2000; n++) session.items[String(n)] = { ...base, id: String(n), ordinal: n, parent: null,
+    question: `Full sentence ${n} with a retained second line\nNo text truncation or ID reassignment.`, outcome: null };
+  const value = await setup(session), start = performance.now(); render(<value.Composition />);
+  const elapsed = performance.now() - start, rendered = rows();
+  expect(rendered).toHaveLength(2000); expect(rendered.filter(row => row.tabIndex === 0)).toHaveLength(1);
+  expect(rendered[1999].textContent).toContain('Full sentence 2000');
+  expect(Number.isFinite(elapsed)).toBe(true);
+  console.info(JSON.stringify({ measurement: 'sentence_tree_2000_initial_render', rows: rendered.length,
+    elapsed_ms: Math.round(elapsed), environment: 'Vitest jsdom; native layout and scroll performance remain unproved' }));
+}, 10000);
