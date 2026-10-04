@@ -80,6 +80,16 @@ A5s missing-result grace is UI policy, not proof a late result cannot arrive.
 Process deaths and expiry never authorize resending. Changing bindings or moving
 projects requires reconciliation of outstanding attempts first.
 
+Explicit owner connect to an existing session through a new binding grants read
+context only after its active-state, old paused/disconnected binding and all
+pending-input guards. The same locked transaction captures the maximum persisted
+owner-message number (including copied history), or0 if none, as that binding's
+issued watermark. This is a second explicit context issuer, not claim/delivery or
+handling. Exact connect replay does not recompute it; same-host reconnect does
+not advance it. Later owner messages stay hidden until issued by genuine claims.
+Old binding/attempt identities, read-scope ceilings and mutation guards remain
+unchanged. No input is queued, resent, retargeted or consumed by this handoff.
+
 ## 3. Idempotency and exactly-once limits
 
 Ariadne guarantees one stored effect for the same validated operation ID/digest.

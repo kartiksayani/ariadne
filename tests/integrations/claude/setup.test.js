@@ -1,8 +1,37 @@
 import { describe, it, expect } from 'vitest';
 import { bindingStatus, qualify, setup } from '../../../integrations/claude/plugin/hooks/setup.js';
-import { descriptor, failure, host, ids, status } from './fixtures.js';
+import { descriptor, failure, host, ids, status, success, capabilities } from './fixtures.js';
 
 describe('installed owner helper setup', () => {
+  it('explicitly targets an existing session and retains its exact operation through uncertainty', async () => {
+    let failing = true;
+    const h = host({handler:argv => argv[1] === 'binding' && failing ? failure('commit_uncertain') : undefined});
+    const owner = setup(descriptor.helperPath);
+    await expect(owner.connect(h.$,ids.session)).rejects.toThrow('commit_uncertain');
+    const original = h.calls.at(-1).options.stdin;
+    expect(JSON.parse(original)).toMatchObject({session:null,command:{params:{project_id:ids.project,existing_session_id:ids.session}}});
+    await expect(owner.connect(h.$,ids.input)).rejects.toThrow('different session');
+    await expect(owner.connect(h.$)).rejects.toThrow('different session');
+    expect(h.calls.at(-1).options.stdin).toBe(original);
+    failing = false;
+    const result = await owner.connect(h.$,ids.session);
+    expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
+    expect(result.binding.session).toEqual({project_id:ids.project,session_id:ids.session});
+    expect(result.instruction).toBe('Use published Ariadne domain commands.');
+    expect(h.prompts).toEqual([]);
+  });
+  it('rejects an explicit-target receipt mismatch before status, preserving the pending body', async () => {
+    const h = host({handler:(argv,options) => argv[1] === 'binding' ? success({operation_id:JSON.parse(options.stdin).command.op_id,
+      session_id:ids.input,revision:2,data:{kind:'binding_connect',binding_id:ids.binding,generation:ids.generation,
+        capabilities:capabilities(),setup_instruction:'Exact canonical instruction.'}}) : undefined});
+    const owner = setup(descriptor.helperPath);
+    await expect(owner.connect(h.$,ids.session)).rejects.toThrow('differs from the explicit');
+    await expect(owner.connect(h.$,ids.session)).rejects.toThrow('differs from the explicit');
+    expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([h.calls[1].options.stdin,h.calls[1].options.stdin]);
+    expect(h.calls.some(call => call.argv[2] === 'connection-status')).toBe(false);
+    await expect(owner.status(h.$)).rejects.toThrow('ariadne-connect');
+    await expect(owner.connect(h.$,'not-a-uuid')).rejects.toThrow('canonical Ariadne session UUID');
+  });
   it('qualifies exact supported host and helper version before owner mutation/polling', async () => {
     const h = host();await qualify(h.$,descriptor);
     expect(h.calls[0]).toEqual({argv:[descriptor.helperPath,'--version'],options:{timeoutMs:5000}});

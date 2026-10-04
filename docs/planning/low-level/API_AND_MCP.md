@@ -206,6 +206,15 @@ binding/history stays intact and its inactive former route is freed for a new
 default-connect session. A different enabled binding or route conflict returns
 `binding_conflict`; no queued message is silently retargeted.
 
+An explicit owner rebind to an existing session that creates a new binding also
+issues its structured history: under the same session transaction, after these
+guards, set the new binding's `issued_through_message_number` to the maximum
+persisted owner-message number (including copied history), or0 if none. This read
+ceiling neither delivers an input nor transfers old binding/attempt authority.
+Exact operation replay preserves the original ceiling; same-host reconnect and
+default new-session creation do not issue additional history. Later genuine
+claims may advance it normally.
+
 Trusted composition supplies read-only verified endpoint/config/version/thread
 facts through native `core::bindings::VerifiedHost`, outside all store locks.
 These facts are not a wire DTO or active provider handle. Unknown/incompatible
@@ -598,6 +607,18 @@ Unissued owner inputs are not fetched as
 an alternate delivery channel. This preserves one-at-a-time context. Shared
 rules instruct the agent to use these projections, not open raw session JSON.
 The restriction is application behavior, not a same-OS-user filesystem boundary.
+
+Explicit owner rebind is the second issuer of structured context: its new binding
+can read the locked history snapshot through the issued ceiling above. Owner
+messages appended afterward remain hidden until genuinely issued; old dispatched
+inputs retain their source-input ceiling and originating attempt generation.
+The Claude Mod's `/ariadne-connect [session-id]` accepts one explicit canonical
+UUID; no argument retains ordinary new-session/current-local-reconnect behavior.
+It validates the receipt session against the requested target and pairs it with
+the registered project used in the request. Saved setup instructions remain exact;
+only human command text appends guidance to read topics/items/questions/answers/
+results, summarize completed/remaining/missing context and reuse existing items.
+This does not transfer a host transcript, infer a session or dispatch work.
 
 
 ### Restore and continue guards
