@@ -1,4 +1,4 @@
-import { bounded, clip, envelope, hash, lifecycle, prepared, reportReceipt } from './contracts.js';
+import { bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, prepared, reportReceipt } from './contracts.js';
 
 // One captured claim and one serialized reporter. Core remains the sole queue authority.
 export function claimLoop(helperPath, binding) {
@@ -172,7 +172,7 @@ export function claimLoop(helperPath, binding) {
     await quiesce();
     if (sessionEnd && !disconnected) {
       disconnected = true;
-      pending.push({event:{event_id:globalThis.crypto.randomUUID(),binding_id:binding.binding_id,generation:binding.generation,
+      pending.push({event:{event_id:claudeSessionEndEventId(binding.binding_id,binding.generation),binding_id:binding.binding_id,generation:binding.generation,
         input_id:null,attempt_id:null,host_turn_id:null,observed_at:new Date().toISOString(),kind:'disconnected',payload:{reason:'Original Claude session ended.'}},terminal:false});
     }
     try { await flush($); }
