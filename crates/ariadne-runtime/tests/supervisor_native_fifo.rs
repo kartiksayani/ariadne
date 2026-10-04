@@ -55,6 +55,9 @@ struct Host {
     binding: Binding,
     submissions: Mutex<Vec<SubmitRequest>>,
     events: Mutex<VecDeque<NormalizedEvent>>,
+    reconciliations: Mutex<Vec<ReconcileRequest>>,
+    reconciliation_result: Mutex<Option<ReconcileResult>>,
+    connects: AtomicU64,
     observations: AtomicU64,
     disconnects: AtomicU64,
 }
@@ -64,6 +67,9 @@ impl Host {
             binding,
             submissions: Mutex::new(vec![]),
             events: Mutex::new(VecDeque::new()),
+            reconciliations: Mutex::new(vec![]),
+            reconciliation_result: Mutex::new(None),
+            connects: AtomicU64::new(0),
             observations: AtomicU64::new(0),
             disconnects: AtomicU64::new(0),
         })
@@ -102,6 +108,7 @@ impl Adapter for Host {
         Box::pin(async move {
             assert_eq!(request.binding_id, self.binding.id);
             assert_eq!(request.generation, self.binding.generation);
+            self.connects.fetch_add(1, Ordering::SeqCst);
             Ok(ConnectResult {
                 external_session_id: self.binding.external_session_id.clone(),
                 endpoint_fingerprint: self.binding.endpoint_fingerprint.clone(),
@@ -141,13 +148,17 @@ impl Adapter for Host {
     }
     fn reconcile(&self, request: ReconcileRequest) -> AdapterFuture<'_, ReconcileResult> {
         Box::pin(async move {
-            assert!(
-                request.attempts.is_empty(),
-                "fresh fixture has no historical turns"
-            );
+            self.reconciliations.lock().unwrap().push(request.clone());
+            if let Some(result) = self.reconciliation_result.lock().unwrap().take() {
+                return Ok(result);
+            }
             Ok(ReconcileResult {
                 attempt_evidence: vec![],
-                unresolved_attempt_ids: vec![],
+                unresolved_attempt_ids: request
+                    .attempts
+                    .iter()
+                    .map(|a| a.attempt_id.clone())
+                    .collect(),
                 next_checkpoint: None,
             })
         })
@@ -473,7 +484,7 @@ impl Setup {
         };
         attempt
     }
-    async fn start(
+    async fn launch(
         &self,
     ) -> (
         Vec<SupervisorHandle>,
@@ -520,8 +531,18 @@ impl Setup {
         .unwrap();
         let (stop, stopped) = oneshot::channel();
         let server = tokio::spawn(server.serve(stopped));
-        until(|| handles.iter().all(|h| h.progress().borrow().reconciled)).await;
         (handles, stop, server)
+    }
+    async fn start(
+        &self,
+    ) -> (
+        Vec<SupervisorHandle>,
+        oneshot::Sender<()>,
+        tokio::task::JoinHandle<Result<(), CoreError>>,
+    ) {
+        let started = self.launch().await;
+        until(|| started.0.iter().all(|h| h.progress().borrow().reconciled)).await;
+        started
     }
     async fn begin(&self, lane: &Lane, number: usize) {
         if lane.host.binding.capabilities.delivery_mode == DeliveryMode::Pull {
@@ -903,4 +924,189 @@ async fn actual_core_rejects_foreign_binding_and_generation_events_and_results_w
         setup.complete(lane, 0).await;
     }
     stop_all(handles, stop, server).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn quit_and_supervisor_restart_reconcile_saved_work_before_claiming_without_resend() {
+    let setup = Setup::new();
+    let lane = &setup.lanes[0];
+    // Other bindings retain queued work throughout this bounded restart journey.
+    for other in &setup.lanes[1..] {
+        setup.pause(other, true);
+    }
+    let (mut handles, stop, server) = setup.start().await;
+    setup.begin(lane, 0).await;
+    until(|| handles[0].progress().borrow().validated_claims >= 2).await;
+    let saved = setup.read(lane);
+    let input = saved.inputs.0[&lane.inputs[0]].clone();
+    let attempt = &input.attempts[0];
+    handles[0].request_stop();
+    let request_id = setup.uuid();
+    let claim = ControlRequest::new(
+        request_id.clone(),
+        ControlMethod::Claim(ClaimRequest {
+            binding_id: lane.host.binding.id.clone(),
+            generation: lane.host.binding.generation.clone(),
+            request_id,
+        }),
+    )
+    .unwrap();
+    assert_eq!(
+        call(setup.home.path().into(), claim)
+            .await
+            .unwrap_err()
+            .code,
+        CoreErrorCode::HostUnreachable
+    );
+    stop_all(handles, stop, server).await;
+    assert_eq!(
+        setup.read(lane),
+        saved,
+        "quit must not mutate the saved attempt, binding generation or user pause"
+    );
+    assert_eq!(lane.host.submissions.lock().unwrap().len(), 1);
+    assert_eq!(lane.host.disconnects.load(Ordering::SeqCst), 1);
+    // Shutdown releases the physical dispatch lease, while the same fake host
+    // still owns its running turn. It disconnects observation, not host execution.
+    drop(
+        setup
+            .owner
+            .binding_lease_shared(
+                lane.route.clone(),
+                lane.host.binding.id.clone(),
+                lane.host.binding.generation.clone(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(attempt.turn_state, TurnState::Running);
+    lane.host.reconciliations.lock().unwrap().clear();
+    let (handles, stop, server) = setup.launch().await;
+    until(|| lane.host.reconciliations.lock().unwrap().len() >= 2).await;
+    let expected = AttemptEvidenceRequest {
+        input_id: input.id.clone(),
+        attempt_id: attempt.id.clone(),
+        binding_generation: attempt.binding_generation.clone(),
+        payload_sha256: attempt.payload_sha256.clone(),
+        wire_marker: attempt.wire_marker.clone(),
+        host_turn_id: attempt.host_turn_id.clone(),
+    };
+    for request in lane.host.reconciliations.lock().unwrap().iter() {
+        assert_eq!(
+            request.attempts,
+            vec![expected.clone()],
+            "restart must inspect the exact persisted attempt"
+        );
+        assert!(
+            request.checkpoint.is_none(),
+            "new observer cannot inherit volatile progress"
+        );
+    }
+    assert_eq!(lane.host.connects.load(Ordering::SeqCst), 2);
+    assert!(!handles[0].progress().borrow().reconciled);
+    assert_eq!(handles[0].progress().borrow().validated_claims, 0);
+    assert_eq!(
+        lane.host.submissions.lock().unwrap().len(),
+        1,
+        "unresolved work must not be blindly resent"
+    );
+    assert_eq!(setup.read(lane), saved);
+    let request_id = setup.uuid();
+    let claim = ControlRequest::new(
+        request_id.clone(),
+        ControlMethod::Claim(ClaimRequest {
+            binding_id: lane.host.binding.id.clone(),
+            generation: lane.host.binding.generation.clone(),
+            request_id,
+        }),
+    )
+    .unwrap();
+    assert_eq!(
+        call(setup.home.path().into(), claim)
+            .await
+            .unwrap_err()
+            .code,
+        CoreErrorCode::HostUnreachable
+    );
+    // The original host finishes after desktop observation has stopped. On
+    // reconnection it supplies correlated evidence, without another submission.
+    let finished = lane.host.event(
+        &input,
+        EventPayload::TurnFinished {
+            status: TurnFinishedStatus::Completed,
+            reason: None,
+            diagnostic_text: Some("Original host completed while observer was detached.".into()),
+            truncated: false,
+        },
+    );
+    *lane.host.reconciliation_result.lock().unwrap() = Some(ReconcileResult {
+        attempt_evidence: vec![AttemptEvidence {
+            input_id: input.id.clone(),
+            attempt_id: attempt.id.clone(),
+            events: vec![finished],
+        }],
+        unresolved_attempt_ids: vec![],
+        next_checkpoint: None,
+    });
+    until(|| {
+        handles[0].progress().borrow().reconciled
+            && handles[0].progress().borrow().validated_claims >= 2
+    })
+    .await;
+    setup.assert_one_active(lane, 0);
+    assert_eq!(
+        lane.host.submissions.lock().unwrap().len(),
+        1,
+        "host completion without a result cannot admit queued input 2"
+    );
+    let reconciled = setup.read(lane);
+    assert_eq!(
+        reconciled.inputs.0[&input.id].attempts[0].turn_state,
+        TurnState::Completed
+    );
+    assert_eq!(
+        reconciled.inputs.0[&input.id].attempts[0].result_state,
+        ResultState::Pending
+    );
+    setup.publish_result(lane, 0);
+    setup.begin(lane, 1).await;
+    assert_eq!(
+        setup.read(lane).inputs.0[&input.id].state,
+        InputState::Handled
+    );
+    assert_eq!(
+        lane.host
+            .submissions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| &s.input_id)
+            .collect::<Vec<_>>(),
+        lane.inputs[..2].iter().collect::<Vec<_>>()
+    );
+    setup.pause(lane, true);
+    setup.complete(lane, 1).await;
+    let observed = lane.host.observations.load(Ordering::SeqCst);
+    until(|| lane.host.observations.load(Ordering::SeqCst) >= observed + 2).await;
+    stop_all(handles, stop, server).await;
+    let final_state = setup.read(lane);
+    assert_eq!(
+        final_state.bindings.0[&lane.host.binding.id].generation,
+        lane.host.binding.generation
+    );
+    assert_eq!(final_state.inputs.0[&input.id].attempts.len(), 1);
+    assert_eq!(final_state.inputs.0[&input.id].attempts[0].id, attempt.id);
+    for id in &lane.inputs[2..] {
+        assert_eq!(final_state.inputs.0[id].state, InputState::Queued);
+        assert!(final_state.inputs.0[id].attempts.is_empty());
+    }
+    for other in &setup.lanes[1..] {
+        assert!(other.host.submissions.lock().unwrap().is_empty());
+        assert!(setup
+            .read(other)
+            .inputs
+            .0
+            .values()
+            .all(|input| input.state == InputState::Queued && input.attempts.is_empty()));
+    }
+    assert_eq!(lane.host.disconnects.load(Ordering::SeqCst), 2);
 }
