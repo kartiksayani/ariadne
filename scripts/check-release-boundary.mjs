@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { readFile, readdir, mkdir, mkdtemp, rm, stat, cp, copyFile, chmod, symlink, realpath } from 'node:fs/promises';
+import { spawn, execFileSync } from 'node:child_process';
 import { join, resolve, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -21,6 +21,87 @@ export function mergedConfig(base, override) {
 export function verifyCleanup(record) {
   assert.equal(record.pidExited, true, 'Packaged PID did not exit');
   assert.equal(record.portFree, true, 'Packaged driver port is not free');
+  assert.deepEqual(record.remainingPids ?? [], [], 'Additional packaged process remains');
+}
+// The package layout and demo are created by ordinary release CLI commands. No
+// test command, renderer bridge or direct preference/session write is involved.
+export async function preparePackagedRoutes(cli, bundle, root, applicationData, env) {
+  const home = join(root, 'home with spaces');
+  const childEnv = { ...env, HOME: home, ARIADNE_HOME: applicationData };
+  const versionOutput = (await command(cli, ['--version'], { env: childEnv, timeout: 10000 })).stdout.trim();
+  const version = /^ariadne (\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)$/.exec(versionOutput)?.[1];
+  assert.ok(version, 'Release helper did not report its package version');
+  const packageRoot = join(home, '.local/share/ariadne'), versionRoot = join(packageRoot, 'versions', version);
+  const application = join(versionRoot, 'Ariadne with spaces.app'), installedCli = join(versionRoot, 'bin/ariadne');
+  await mkdir(dirname(installedCli), { recursive: true });
+  await cp(bundle, application, { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true });
+  await copyFile(cli, installedCli); await chmod(installedCli, 0o755);
+  await json(join(versionRoot, 'install.json'), { schema_version: 1, version, app_path: application });
+  await symlink(join('versions', version), join(packageRoot, 'current'));
+  const project = join(root, 'project with spaces'); await mkdir(project);
+  const demo = JSON.parse((await command(installedCli, ['demo', '--root', project, '--json'], { env: childEnv, timeout: 10000 })).stdout);
+  assert.equal(demo.ok, true, 'Actual installed CLI did not publish the canonical demo');
+  const sessionPath = join(project, '.ariadne/sessions', `${demo.data.session_id}.json`), before = await readFile(sessionPath);
+  const session = JSON.parse(before);
+  assert.equal(session.project_id, demo.data.project_id); assert.equal(session.id, demo.data.session_id);
+  for (const item of ['1.1', '3']) assert.ok(session.items[item], 'Canonical route item is absent');
+  const coldRoute = { ...demo.data, item_id: '1.1' }, secondRoute = { ...demo.data, item_id: '3' };
+  return { home, env: childEnv, application: await realpath(application), cli: installedCli,
+    binary: await realpath(join(application, 'Contents/MacOS/ariadne-desktop')), sessionPath, before,
+    preferencesPath: join(applicationData, 'ui.json'), coldRoute, secondRoute };
+}
+export function packagedRouteSelected(snapshot, route) {
+  const selection = snapshot?.global?.selected_navigation;
+  if (selection?.kind !== 'session' || selection.session?.project_id !== route.project_id || selection.session?.session_id !== route.session_id) return false;
+  const views = snapshot.sessions?.filter(view => view.session?.project_id === route.project_id && view.session?.session_id === route.session_id);
+  return views?.length === 1 && views[0].tab_open === true && views[0].selected_item_id === route.item_id;
+}
+function retainPackagedProcess(child, observed) {
+  assert.ok(alive(child.pid), 'Original packaged process exited during route delivery');
+  assert.deepEqual(identity(child.pid), observed, 'Original packaged process identity changed');
+}
+async function waitForPackagedRoute(fixture, route, child, observed) {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    retainPackagedProcess(child, observed);
+    let record;
+    try { record = JSON.parse(await readFile(fixture.preferencesPath, 'utf8')); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (packagedRouteSelected(record?.snapshot, route)) return record.snapshot;
+    await delay(50);
+  }
+  throw new Error('Packaged renderer did not persist the requested registered item route');
+}
+export async function packagedOwnership(applicationData, child, observed, previous) {
+  retainPackagedProcess(child, observed);
+  const socket = join(applicationData, 'run/control.sock'), lease = join(applicationData, 'run/runtime.lock');
+  const socketStat = await stat(socket), leaseStat = await stat(lease);
+  assert.ok(socketStat.isSocket(), 'Ordinary production control socket is absent');
+  const files = (await command('/usr/sbin/lsof', ['-nP', '-a', '-p', String(child.pid), '-Fpn', socket, lease], { timeout: 10000 })).stdout.split('\n');
+  assert.ok(files.includes(`p${child.pid}`) && files.some(line => line.startsWith(`n${socket}`)) && files.includes(`n${lease}`), 'Original packaged PID does not own its private control socket and instance lease');
+  const probe = 'import fcntl,sys\nwith open(sys.argv[1],"r+b") as lock:\n try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)\n except BlockingIOError: sys.exit(0)\n raise RuntimeError("Live packaged instance lease was available")\n';
+  await command('python3', ['-c', probe, lease], { timeout: 10000 });
+  const ownership = { pid: child.pid, socket: { path: socket, dev: socketStat.dev, ino: socketStat.ino }, lease: { path: lease, dev: leaseStat.dev, ino: leaseStat.ino }, leaseHeld: true };
+  if (previous) assert.deepEqual(ownership, previous, 'Second launch replaced the primary control ownership');
+  return ownership;
+}
+export function packagedPids(binary) {
+  // Scope the OS query to this private copied executable. Do not read global
+  // command lines or select another installation by process name.
+  try {
+    return execFileSync('/usr/sbin/lsof', ['-nP', '-Fp', binary], { encoding: 'utf8', timeout: 10000 })
+      .split('\n').filter(line => /^p\d+$/.test(line)).map(line => Number(line.slice(1)));
+  } catch (error) { if (error.status === 1) return []; throw error; }
+}
+async function convergePackagedInstance(binary, child, observed) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    retainPackagedProcess(child, observed);
+    const pids = packagedPids(binary);
+    if (pids.length === 1 && pids[0] === child.pid) return pids;
+    await delay(50);
+  }
+  throw new Error('Packaged second launch did not converge to the original process');
 }
 export function verifyProductionSecurity(config) {
   assert.deepEqual(config.app.security.csp, {
@@ -131,37 +212,65 @@ export async function checkRelease() {
   const modules = await frontendModules(inventory, join(repo, 'target/desktop-dist'), started);
   verifyReferenceIsolation(modules, await readdir(join(repo, 'target/desktop-dist'), { recursive: true }));
   const names = resolvedNames(metadata); verifyGraph(names, config, acl, capabilities, modules); verifyProductionSecurity(config);
-  const binary = join(target, 'release/bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop');
+  const bundle = join(target, 'release/bundle/macos/Ariadne.app'), builtBinary = join(bundle, 'Contents/MacOS/ariadne-desktop');
+  // Same normal release helper build used by personal package verification.
+  await command('cargo', ['build', '--release', '--locked', '--no-default-features', '-p', 'ariadne-cli', '-p', 'ariadne-mcp'], { env, log: join(evidence, 'helpers-build.log') });
+  await command(process.execPath, ['--test', 'tests/e2e/process-contract/packaged-route.test.mjs'], {
+    env: { ...env, ARIADNE_FIXTURE_TEST_CLI: join(target, 'release/ariadne') }, log: join(evidence, 'route-fixture.log'),
+  });
   await portFree(port);
-  const minimumSystemVersion = (await command('/usr/libexec/PlistBuddy', ['-c', 'Print :LSMinimumSystemVersion', join(dirname(dirname(binary)), 'Info.plist')])).stdout.trim();
+  const minimumSystemVersion = (await command('/usr/libexec/PlistBuddy', ['-c', 'Print :LSMinimumSystemVersion', join(bundle, 'Contents/Info.plist')])).stdout.trim();
   assert.equal(minimumSystemVersion, '13.0', 'Packaged minimum macOS differs from deployment target');
   const root = await mkdtemp('/private/tmp/ariadne-release-');
   const applicationData = await mkdtemp('/private/tmp/ariadne-release-data-');
-  const child = spawn(binary, [], { env: { ...env, ARIADNE_HOME: applicationData, WDIO_EMBEDDED_SERVER: 'true', TAURI_WEBDRIVER_PORT: String(port), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: '0'.repeat(64) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let logs = '', observed, spawnError, failure, cleanupError;
-  child.once('error', error => { spawnError = error; });
-  for (const stream of [child.stdout, child.stderr]) stream.on('data', value => { logs += value; });
+  const routeRoot = await mkdtemp('/private/tmp/ariadne-route-');
+  let logs = '', child, fixture, observed, spawnError, failure, cleanupError;
   try {
+    fixture = await preparePackagedRoutes(join(target, 'release/ariadne'), bundle, routeRoot, applicationData, env);
+    const { binary } = fixture, runtimeCommand = [binary, '--ariadne-route', JSON.stringify(fixture.coldRoute)];
+    await assert.rejects(stat(fixture.preferencesPath), { code: 'ENOENT' }, 'Fresh packaged preferences must not contain a preseeded selection');
+    assert.equal(await digest(binary), await digest(builtBinary), 'Private package differs from the ordinary compiled application');
+    assert.equal(await digest(fixture.cli), await digest(join(target, 'release/ariadne')), 'Installed helper differs from the ordinary release CLI');
+    child = spawn(runtimeCommand[0], runtimeCommand.slice(1), { env: { ...fixture.env, WDIO_EMBEDDED_SERVER: 'true', TAURI_WEBDRIVER_PORT: String(port), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: '0'.repeat(64) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.once('error', error => { spawnError = error; });
+    for (const stream of [child.stdout, child.stderr]) stream.on('data', value => { logs += value; });
     for (let count = 0; count < 20; count++) {
       await delay(500); if (spawnError) throw spawnError;
       assert.ok(alive(child.pid), 'Packaged application failed to remain alive');
       observed = identity(child.pid); assert.equal(observed.exe, binary);
       await portFree(port); assert.equal(listeners(port), ''); assert.deepEqual(await readdir(root), []);
     }
-    assert.ok((await stat(join(applicationData, 'run/control.sock'))).isSocket(), 'Ordinary production runtime did not own its private control socket');
-    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, applicationData, ordinaryRuntimeOwned: true, runtimeCommand: [binary], minimumSystemVersion, binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, normalFeatures, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
+    const cold = await waitForPackagedRoute(fixture, fixture.coldRoute, child, observed);
+    const ownership = await packagedOwnership(applicationData, child, observed);
+    assert.deepEqual(await readFile(fixture.sessionPath), fixture.before, 'Cold route mutated the canonical demo');
+    const cliArgs = ['open', '--project', fixture.secondRoute.project_id, '--session', fixture.secondRoute.session_id, '--item', fixture.secondRoute.item_id];
+    await command(fixture.cli, cliArgs, { env: fixture.env, timeout: 20000, log: join(evidence, 'open.log') });
+    const second = await waitForPackagedRoute(fixture, fixture.secondRoute, child, observed);
+    assert.ok(second.revision > cold.revision, 'Second instance did not publish a new registered selection');
+    const remainingPids = await convergePackagedInstance(binary, child, observed);
+    await packagedOwnership(applicationData, child, observed, ownership);
+    assert.deepEqual(await readFile(fixture.sessionPath), fixture.before, 'CLI second-instance route mutated the canonical demo');
+    await portFree(port); assert.equal(listeners(port), ''); assert.deepEqual(await readdir(root), []);
+    await json(join(evidence, 'routes.json'), { passed: true, coldRoute: fixture.coldRoute, coldPreferences: cold, secondRoute: fixture.secondRoute,
+      secondPreferences: second, cliCommand: [fixture.cli, ...cliArgs], helperSha256: await digest(fixture.cli), packagePath: fixture.application,
+      primary: observed, remainingPids, ownership, demoSessionPath: fixture.sessionPath, demoSha256: await digest(fixture.sessionPath), demoUnchanged: true,
+      scope: 'Ordinary packaged cold route and CLI second-instance registered reveal; OS hide/tray/Pin/Quit/wake are not exercised.' });
+    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, builtBinary, applicationData, ordinaryRuntimeOwned: true, runtimeCommand, minimumSystemVersion, binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, normalFeatures, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
   } catch (error) { failure = error; }
   finally {
-    let portReleased = false;
+    let portReleased = false, remainingPids = [];
     try {
       if (observed && alive(child.pid)) assert.deepEqual(identity(child.pid), observed, 'Packaged process identity changed');
-      await stop(child); await portFree(port); portReleased = true;
+      if (child) await stop(child);
+      if (fixture) remainingPids = packagedPids(fixture.binary);
+      assert.deepEqual(remainingPids, [], 'Additional packaged process remains; preserve its private roots and do not signal an unowned PID');
+      await portFree(port); portReleased = true;
     } catch (error) { cleanupError = error; }
-    const cleanup = { pid: child.pid, pidExited: !alive(child.pid), portFree: portReleased, exitCode: child.exitCode, signal: child.signalCode, logs, error: cleanupError?.message, failure: failure?.message };
+    const cleanup = { pid: child?.pid, pidExited: !child || !alive(child.pid), remainingPids, portFree: portReleased, exitCode: child?.exitCode, signal: child?.signalCode, logs, error: cleanupError?.message, failure: failure?.message };
     await json(join(evidence, 'cleanup.json'), cleanup);
     if (!cleanupError) {
       verifyCleanup(cleanup); assert.deepEqual(await readdir(root), []);
-      await rm(root, { recursive: true }); await rm(applicationData, { recursive: true });
+      await rm(root, { recursive: true }); await rm(applicationData, { recursive: true }); await rm(routeRoot, { recursive: true });
     }
   }
   if (cleanupError) throw cleanupError;
