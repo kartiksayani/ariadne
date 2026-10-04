@@ -31,8 +31,9 @@ generator registration remain with the maintainer until explicitly reassigned.
    Then keep this worker on P4.1 native five-input/relaunch and P4.4 tree acceptance.
    Start the second worker on the Claude join after83.
 3. Replace this handoff and update catalogue at checkpoints. Root `tasks.json` and
-   `roadmap.html` overlays are intentional: P3.2 active, 18 amber partial tasks.
-   Preserve them when main advances; amber does not mean complete.
+   `roadmap.html` overlays are intentional: no coding agent is currently active;
+   18 amber tasks are partial. Preserve cleared flags when main advances; PR83's
+   seven older active flags are stale. Set flags when implementation resumes.
 
 Missing proof includes discovery's UI consumer, five-input native relaunch, native
 tree performance, packaged permission/cold-click checks and live M7. Live/billable
