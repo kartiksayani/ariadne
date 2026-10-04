@@ -511,15 +511,24 @@ fn receipt_creation_is_first_commit_replayable_and_index_failure_is_uncertain_wi
     );
 }
 
-fn writer(home: &std::path::Path, root: &std::path::Path, number: u64, marker: &str) -> Child {
-    Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "registration_writer_subprocess", "--nocapture"])
-        .env("ARIADNE_REGISTRY_TEST_HOME", home)
-        .env("ARIADNE_REGISTRY_TEST_ROOT", root)
-        .env("ARIADNE_REGISTRY_TEST_NUMBER", number.to_string())
-        .env("ARIADNE_REGISTRY_TEST_MARKER", marker)
-        .spawn()
-        .unwrap()
+struct Writer(Child);
+impl Drop for Writer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+fn writer(home: &std::path::Path, root: &std::path::Path, number: u64, marker: &str) -> Writer {
+    Writer(
+        Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "registration_writer_subprocess", "--nocapture"])
+            .env("ARIADNE_REGISTRY_TEST_HOME", home)
+            .env("ARIADNE_REGISTRY_TEST_ROOT", root)
+            .env("ARIADNE_REGISTRY_TEST_NUMBER", number.to_string())
+            .env("ARIADNE_REGISTRY_TEST_MARKER", marker)
+            .spawn()
+            .unwrap(),
+    )
 }
 #[test]
 fn registration_writer_subprocess() {
@@ -550,12 +559,20 @@ fn separate_process_registration_reuses_project_identity_and_keeps_both_operatio
     let mut two = writer(home.path(), root.path(), 2, "two");
     let start = Instant::now();
     while !home.path().join("ready-one").exists() || !home.path().join("ready-two").exists() {
+        assert!(
+            one.0.try_wait().unwrap().is_none(),
+            "first registry writer exited before readiness"
+        );
+        assert!(
+            two.0.try_wait().unwrap().is_none(),
+            "second registry writer exited before readiness"
+        );
         assert!(start.elapsed() < Duration::from_secs(5));
         std::thread::sleep(Duration::from_millis(10));
     }
     fs::write(home.path().join("start"), b"start").unwrap();
-    assert!(one.wait().unwrap().success());
-    assert!(two.wait().unwrap().success());
+    assert!(one.0.wait().unwrap().success());
+    assert!(two.0.wait().unwrap().success());
     let registry = Registry::open(home.path()).unwrap();
     assert_eq!(registry.registered_projects().unwrap().len(), 1);
     for number in [1, 2] {
