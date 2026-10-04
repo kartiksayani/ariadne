@@ -141,12 +141,18 @@ describe('complete message rail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New parent callback' }));
     expect(calls).toBe(before);
     const message = value.transport.session.messages.find(message => message.item_id === '1')!;
-    fireEvent.mouseEnter(log.querySelector(`[data-message-id="${message.id}"]`)!);
+    const card = log.querySelector(`[data-message-id="${message.id}"]`)!;
+    fireEvent.mouseEnter(card);
     expect(screen.getByLabelText('Parent highlights').textContent).toBe(`2:1:${message.id}`);
     expect(calls).toBe(before + 1);
     expect(cleanupCalls.at(-1)).toEqual(new Set([message.id]));
+    fireEvent.click(card.querySelector('.history-body')!);
+    fireEvent.mouseLeave(card);
+    expect(card.classList.contains('history-pinned')).toBe(true);
+    expect(screen.getByLabelText('Parent highlights').textContent).toBe(`2:1:${message.id}`);
+    const beforeUnmount = calls;
     rendered.unmount();
-    expect(calls).toBe(before + 2);
+    expect(calls).toBe(beforeUnmount + 1);
     expect(cleanupCalls.at(-1)).toEqual(new Set());
   });
   it('cross-highlights canonical item links on hover/pin and selected item, preserving registered reveal', async () => {
