@@ -160,7 +160,7 @@ All corrections, rounds, branches and superseded answers remain inspectable.
 
 ### Derived label precedence
 
-A persisted pre-delivery rejection displays Rejected before delivery with a warning; it never establishes a matching turn or authorizes automatic retry. A persisted protocol contradiction stays Uncertain ahead of ordinary progress.
+A persisted pre-delivery rejection displays Rejected before delivery with a warning; it never establishes a matching turn or authorizes automatic retry. A persisted protocol contradiction stays Uncertain ahead of ordinary progress. A saved adapter `EventConflict` receipt matching the input binding, input ID and current active attempt also displays Uncertain, even when the retained attempt error remains `result_missing`; unrelated or historical conflicts cannot label newly queued work.
 
 Read in this order: input cancelled→Cancelled; skipped→Skipped; handled→Handled;
 attempt uncertain→Uncertain; failed/interrupted turn→Failed; result missing→Missing

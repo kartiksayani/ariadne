@@ -168,6 +168,31 @@ describe('delivery evidence', () => {
     expect(deliveryEvidence(value, binding).kind).toBe('uncertain');
     value.state = 'handled'; expect(deliveryEvidence(value, binding).kind).toBe('handled');
   });
+  it('uses a matching persisted adapter conflict ahead of retained missing-result facts', () => {
+    const value = input();
+    Object.assign(value.attempts[0], { turn_state: 'completed', result_state: 'missing', sealed_at: null,
+      error: { code: 'result_missing', reason: 'Missing explicit result.', retryable: false, observed_at: demo.updated_at } });
+    const receipts: Session['operation_receipts'] = { [inputId('99')]: [{ operation_id: inputId('99'),
+      actor_scope: { kind: 'adapter', binding_id: value.binding_id }, command_digest: 'a'.repeat(64),
+      result: { operation_id: inputId('99'), session_id: demo.id, revision: demo.revision,
+        data: { kind: 'event_conflict', event_id: 'conflicting-event', input_id: value.id, attempt_id: value.active_attempt_id } } }] };
+    expect(deliveryEvidence(value, binding, receipts).kind).toBe('uncertain');
+    expect(value.attempts[0].error?.code).toBe('result_missing');
+    for (const changed of [
+      { actor_scope: { kind: 'agent' as const, binding_id: value.binding_id } },
+      { actor_scope: { kind: 'adapter' as const, binding_id: inputId('98') } },
+      { result: { ...receipts[inputId('99')]![0].result, data: { kind: 'event_conflict' as const,
+        event_id: 'conflicting-event', input_id: inputId('98'), attempt_id: value.active_attempt_id } } },
+      { result: { ...receipts[inputId('99')]![0].result, data: { kind: 'event_conflict' as const,
+        event_id: 'conflicting-event', input_id: value.id, attempt_id: inputId('98') } } },
+    ]) expect(deliveryEvidence(value, binding, { [inputId('99')]: [{ ...receipts[inputId('99')]![0], ...changed }] }).kind).toBe('missing');
+    value.state = 'queued'; value.active_attempt_id = null;
+    expect(deliveryEvidence(value, { ...binding, presence: null }, receipts).kind).toBe('saved');
+    const newer = attempt(); newer.id = inputId('98'); newer.acceptance = 'accepted'; newer.turn_state = 'unknown';
+    value.state = 'in_flight'; value.active_attempt_id = newer.id; value.attempts.push(newer);
+    expect(deliveryEvidence(value, binding, receipts).kind).toBe('sent');
+    value.state = 'handled'; expect(deliveryEvidence(value, binding, receipts).kind).toBe('handled');
+  });
   it('does not use a different active binding to claim that queued work is available', () => {
     const value = input(); value.state = 'queued'; value.active_attempt_id = null;
     expect(deliveryEvidence(value, { ...binding, id: inputId('99') }).kind).toBe('unavailable');

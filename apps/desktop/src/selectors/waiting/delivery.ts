@@ -1,4 +1,4 @@
-import type { BindingSummary, Input } from '../../generated/domain/models';
+import type { BindingSummary, Input, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data';
 
 export type DeliveryKind = 'cancelled' | 'skipped' | 'handled' | 'uncertain' | 'rejected' | 'failed'
@@ -28,7 +28,8 @@ const labels: Record<DeliveryKind, readonly [string, string]> = {
 function evidence(kind: DeliveryKind): DeliveryEvidence {
   return Object.freeze({ kind, label: labels[kind][0], detail: labels[kind][1] });
 }
-export function deliveryEvidence(input: Immutable<Input>, binding: Immutable<BindingSummary> | null): DeliveryEvidence {
+export function deliveryEvidence(input: Immutable<Input>, binding: Immutable<BindingSummary> | null,
+  receipts: Immutable<Session>['operation_receipts'] = {}): DeliveryEvidence {
   if (input.state === 'cancelled' || input.state === 'skipped' || input.state === 'handled') return evidence(input.state);
   if (input.active_attempt_id === null) {
     if (input.state !== 'queued') return evidence('unavailable');
@@ -41,7 +42,11 @@ export function deliveryEvidence(input: Immutable<Input>, binding: Immutable<Bin
   }
   const attempt = input.attempts.find(attempt => attempt.id === input.active_attempt_id);
   if (!attempt || attempt.sealed_at !== null) return evidence('unavailable');
-  if (attempt.acceptance === 'uncertain' || attempt.error?.code === 'protocol_conflict'
+  const conflict = Object.values(receipts).some(entries => entries?.some(receipt =>
+    receipt.actor_scope.kind === 'adapter' && receipt.actor_scope.binding_id === input.binding_id
+    && receipt.result.data.kind === 'event_conflict' && receipt.result.data.input_id === input.id
+    && receipt.result.data.attempt_id === attempt.id));
+  if (conflict || attempt.acceptance === 'uncertain' || attempt.error?.code === 'protocol_conflict'
       || attempt.error?.code === 'delivery_uncertain') return evidence('uncertain');
   if (attempt.acceptance === 'rejected') return evidence('rejected');
   if (attempt.turn_state === 'failed' || attempt.turn_state === 'interrupted') return evidence('failed');
