@@ -4,6 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 pub mod commands;
+pub mod native;
 
 #[derive(Deserialize)]
 pub struct PingRequest {
@@ -154,6 +155,7 @@ fn desktop_handler<R: tauri::Runtime>(
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         native_ping,
+        native::routes::route_ready,
         commands::project_list,
         commands::session_list,
         commands::session_get,
@@ -190,7 +192,10 @@ pub fn run_with_service(service: commands::DesktopService) {
     let (state, owner) = PingState::ordinary().expect("Cannot create private diagnostic directory");
     #[cfg(not(feature = "e2e"))]
     let owner = Some(owner);
-    let builder = tauri::Builder::default().manage(state).manage(service);
+    let builder = tauri::Builder::default()
+        .manage(state)
+        .manage(service)
+        .manage(native::routes::NativeRoutes::default());
     #[cfg(feature = "e2e")]
     let builder = builder
         .plugin(tauri_plugin_wdio::init())

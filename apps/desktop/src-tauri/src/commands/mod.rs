@@ -16,6 +16,15 @@ struct Composition {
     resolve: Arc<ResolveSession>,
 }
 impl DesktopService {
+    pub(crate) fn resolve_open_route(&self, route: &OpenRoute) -> Result<(), CoreError> {
+        self.composition()?.session(&SessionRef {
+            project_id: route.project_id.clone(),
+            session_id: route.session_id.clone(),
+        })?;
+        // Item existence remains the shared renderer reveal's responsibility,
+        // including its validated session fallback for a concurrently deleted item.
+        Ok(())
+    }
     /// The Rust startup caller resolves IDs through actual registered project and
     /// session membership. This installer is never exposed as a Tauri command.
     pub fn from_trusted_startup(

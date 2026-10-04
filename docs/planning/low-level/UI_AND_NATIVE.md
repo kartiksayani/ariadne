@@ -218,6 +218,13 @@ Roving tree focus uses visible row IDs and correct `aria-level`, `aria-expanded`
 
 `NativeService` owns window, tray, notifications, and open-route handling behind small interfaces. Native UI calls run on the app main thread. Register single-instance handling before other Tauri plugins and queue routes until the webview is ready. Window geometry, monitor identity, and pin are persisted and clamped to a reachable work area after display changes. Hide-on-close is distinct from Quit.
 
+The main webview acknowledges route readiness only after its registered route
+subscription is installed. Before that acknowledgement, retain the latest valid
+explicit `OpenRoute`; a later valid navigation intent supersedes it, while an
+invalid or unregistered request cannot erase it. This does not discard durable
+work. Trusted runtime callbacks own actual quit shutdown and wake reconciliation;
+an absent composition cannot report that those operations succeeded (ADR0053).
+
 The tray uses a template icon, numeric `waiting_unanswered` count (blank at zero), oldest 10 eligible waiting entries with project/session labels, separate binding/lifecycle diagnostics, Show Ariadne, Pin, and Quit. Sent generic requests do not increment the task-question count. Coalesce rebuilds at most every 250 ms. If registered roots are inaccessible, show an incomplete count and diagnostic row rather than a false total. No approval action exists in the tray.
 
 Use one native UserNotifications bridge in the macOS module with a single long-lived Rust `objc2` delegate. It owns permission request, schedule/remove, foreground policy, and click routing; do not initialize a second notification delegate. Notification identity is `ariadne:<session>:<item>:<waiting-episode>` and payload contains IDs resolved through the registry. Default body is generic; item text preview is opt-in. Deduplicate episodes in a bounded preference ledger. Establish a watermark on first launch rather than notifying the backlog. Group bursts over three arrivals within 500 ms; all entries remain in the queue. Denied notification permission leaves in-app queue working. Never put host permission approval controls in a notification.
@@ -225,6 +232,13 @@ Use one native UserNotifications bridge in the macOS module with a single long-l
 Click focuses/unhides, restores a minimized window, and calls the common reveal route. Cold launch stores the route until app readiness. If the item was answered, open its current detail; do not fail routing. A quit app cannot report new external changes until reopened, but already delivered notification routes must work. Packaged click and cold-launch routing have native proof acceptance coverage in `DESIGN_TRACEABILITY.md`.
 
 `ariadne open` resolves project/session and optional item route explicitly, locates the installed app from its package manifest, and passes structured launch arguments. Never place user-authored item text in a command line or shell string.
+
+The explicit syntax is `ariadne open --project UUID --session UUID [--item ItemRef]`.
+Read the single package-owned `~/.local/share/ariadne/current/install.json`,
+whose v1 required fields are `schema_version: 1`, `version` and absolute
+`app_path`. Validate its bounded input and helper/version agreement, and resolve
+`current` only within Ariadne's `versions/<version>` directory. Use
+`/usr/bin/open` argument arrays; never scan for an app or guess a fallback.
 
 ## 9. Renderer boundary and diagnostics
 

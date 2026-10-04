@@ -287,8 +287,18 @@ otherwise print the PATH instruction. Do not edit shell startup files, use
 `sudo`, install toolchains, or download provider CLIs. Print the installed
 version and paths, then run `ariadne doctor`.
 
-Every commit runs the all-code linter and unit/integration suites. Keep overall
-test coverage at or above 80%. End-to-end tests for setup, both existing-session
+P6.4 writes the same package-owned `current/install.json` consumed by P6.1
+open routing. Its required v1 fields are `schema_version: 1`, `version` and
+absolute `app_path`; helper and manifest versions must agree. `current` must
+resolve inside the existing `versions/<version>` directory. A later owned-file
+inventory for uninstall extends this manifest rather than introducing another
+descriptor. P6.1 tests use temporary package fixtures and never alter an actual
+installation (ADR0053).
+
+The commit hook runs cheap changed-language format, lint and type checks. CI
+runs relevant tests, coverage and native gates for each pushed head, with full
+checks for unknown paths or missing bases. Keep weighted application coverage
+at or above 80%. End-to-end tests for setup, both existing-session
 adapters, explicit domain results, and recovery are required release gates.
 
 `make uninstall` removes the personal app, Ariadne-owned versioned helpers, and
