@@ -137,6 +137,11 @@ impl NativeTray {
             let _ = self.sender.try_send(Message::Refresh);
         }
     }
+    /// Pure producer/delegate fence at accepted Quit, before off-UI drains.
+    pub fn begin_stop(&self) {
+        self.stopped.store(true, Ordering::Release);
+        self.callbacks_active.store(false, Ordering::Release);
+    }
     pub fn diagnostics(&self, rows: Vec<String>) {
         if let Ok(mut snapshot) = self.diagnostics.lock() {
             snapshot.replace(rows, self.stopped.load(Ordering::Acquire));
@@ -161,8 +166,7 @@ impl NativeTray {
     /// Must run off the UI thread before the composition executor shuts down.
     /// Unconfirmed preference writes refuse Quit and retain the exact operation.
     pub fn stop(&self) -> Result<(), CoreError> {
-        self.stopped.store(true, Ordering::Release);
-        self.callbacks_active.store(false, Ordering::Release);
+        self.begin_stop();
         let mut worker = self.worker.lock().map_err(|_| unavailable())?;
         if worker.is_none() {
             return (self.teardown)();
@@ -220,8 +224,10 @@ fn run<R: tauri::Runtime>(
                         plans.push(plan);
                     }
                     let snapshot = service.native_preferences()?;
-                    if let Some(plan) = writer.observe(snapshot, &captured, now()?, op_id)? {
-                        plans.push(plan);
+                    if !stopped.load(Ordering::Acquire) {
+                        if let Some(plan) = writer.observe(snapshot, &captured, now()?, op_id)? {
+                            plans.push(plan);
+                        }
                     }
                     if let Some(plan) =
                         writer.confirm(|request| service.native_preferences_write(request))?
@@ -321,9 +327,8 @@ fn run<R: tauri::Runtime>(
                 }
             }
             Message::Pin => {
-                if stopped.load(Ordering::Acquire) {
-                    continue;
-                }
+                // These explicit intents were queued before the UI producer
+                // fence. No new Pin can enter afterward; finish their owned save.
                 let result = (|| {
                     if writer.pending() {
                         if let Some(plan) =
@@ -360,3 +365,7 @@ fn run<R: tauri::Runtime>(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/feed.rs"]
+mod tests;

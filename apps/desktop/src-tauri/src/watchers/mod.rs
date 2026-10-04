@@ -37,6 +37,23 @@ impl RegisteredWatcher {
         emit: impl Fn(SessionChangedHint) -> bool + Send + Sync + 'static,
         fallback: Duration,
     ) -> std::io::Result<Self> {
+        Self::start_observer(registry, data_directory, emit, fallback, Arc::new(|| {}))
+    }
+    pub(crate) fn start_with_reconciled(
+        registry: Registry,
+        data_directory: PathBuf,
+        emit: impl Fn(SessionChangedHint) -> bool + Send + Sync + 'static,
+        reconciled: Arc<dyn Fn() + Send + Sync>,
+    ) -> std::io::Result<Self> {
+        Self::start_observer(registry, data_directory, emit, FALLBACK, reconciled)
+    }
+    fn start_observer(
+        registry: Registry,
+        data_directory: PathBuf,
+        emit: impl Fn(SessionChangedHint) -> bool + Send + Sync + 'static,
+        fallback: Duration,
+        reconciled: Arc<dyn Fn() + Send + Sync>,
+    ) -> std::io::Result<Self> {
         // A one-slot wake channel coalesces storms without retaining file events.
         let (signal, wake) = mpsc::sync_channel(1);
         let (ready, installed) = mpsc::sync_channel(1);
@@ -58,6 +75,7 @@ impl RegisteredWatcher {
                     thread_selected,
                     fallback,
                     ready,
+                    reconciled,
                 );
             })?;
         // Startup runs before the Tauri event loop. Wait for the initial watch
@@ -154,6 +172,7 @@ fn work(
     selected: Arc<Mutex<Option<SessionRef>>>,
     fallback: Duration,
     ready: mpsc::SyncSender<()>,
+    reconciled: Arc<dyn Fn() + Send + Sync>,
 ) {
     let mut parents = Parents {
         watcher: None,
@@ -187,6 +206,9 @@ fn work(
                 let _ = ready.send(());
             }
         }
+        // Native consumers reuse this exact scan's fallback/focus completion;
+        // no extra scanner or timer is created for the tray.
+        reconciled();
         match wake.recv_timeout(fallback) {
             Ok(()) => {
                 // Fixed deadline prevents a continuous change stream from

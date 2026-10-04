@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 type Callback = dyn Fn() -> Result<(), CoreError> + Send + Sync;
 struct OwnedCallbacks {
     shutdown: Box<Callback>,
-    reconcile: Box<Callback>,
+    reconcile: Arc<Callback>,
     stopped: bool,
 }
 
@@ -43,7 +43,7 @@ impl NativeLifecycle {
             diagnostic_only: false,
             owned: Some(Arc::new(Mutex::new(OwnedCallbacks {
                 shutdown: Box::new(shutdown),
-                reconcile: Box::new(reconcile),
+                reconcile: Arc::new(reconcile),
                 stopped: false,
             }))),
         }
@@ -64,16 +64,21 @@ impl NativeLifecycle {
     }
     /// Call off the UI thread; this callback does not infer idle or resend work.
     pub fn reconcile(&self) -> Result<(), CoreError> {
-        let callbacks = self
-            .owned
-            .as_ref()
-            .ok_or_else(unavailable)?
-            .lock()
-            .map_err(|_| unavailable())?;
-        if callbacks.stopped {
-            return Err(unavailable());
-        }
-        (callbacks.reconcile)()
+        let reconcile = {
+            let callbacks = self
+                .owned
+                .as_ref()
+                .ok_or_else(unavailable)?
+                .lock()
+                .map_err(|_| unavailable())?;
+            if callbacks.stopped {
+                return Err(unavailable());
+            }
+            callbacks.reconcile.clone()
+        };
+        // Wake may wait for admitted Core/provider work. Release the callback
+        // lock so explicit Quit can reach the owner's admission fence first.
+        reconcile()
     }
 }
 

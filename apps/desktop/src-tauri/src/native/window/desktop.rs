@@ -17,6 +17,7 @@ pub struct NativeWindow {
     worker_failed: Arc<AtomicBool>,
     applied_revision: Arc<AtomicU64>,
     movement: Arc<AtomicU64>,
+    stopped: Arc<AtomicBool>,
 }
 fn unavailable() -> CoreError {
     CoreError::new(
@@ -133,28 +134,41 @@ impl NativeWindow {
     }
 
     pub(crate) fn moved<R: tauri::Runtime>(&self, window: &tauri::Window<R>) {
+        if self.stopped.load(Ordering::Acquire) {
+            return;
+        }
         self.movement.fetch_add(1, Ordering::AcqRel);
         let Ok(geometry) = geometry(window) else {
             return;
         };
+        let service = window.state::<DesktopService>().inner().clone();
+        self.queue_geometry(geometry, service);
+    }
+    pub(crate) fn queue_geometry(
+        &self,
+        geometry: ariadne_core::WindowGeometry,
+        service: DesktopService,
+    ) -> bool {
         let Ok(mut latest) = self.latest_geometry.lock() else {
-            return;
+            return false;
         };
+        if self.stopped.load(Ordering::Acquire) {
+            return false;
+        }
         *latest = Some(geometry);
         if self.writing.swap(true, Ordering::AcqRel) {
-            return;
+            return true;
         }
         // Hold the admission lock until the owned handle is installed. Quit
         // suppresses subsequent movement before joining this exact worker.
         let Ok(mut worker) = self.worker.lock() else {
             self.writing.store(false, Ordering::Release);
-            return;
+            return false;
         };
         if let Some(previous) = worker.take() {
             let _ = previous.join();
         }
         let manager = self.clone();
-        let service = window.state::<DesktopService>().inner().clone();
         match std::thread::Builder::new()
             .name("ariadne-window-preferences".into())
             .spawn(move || manager.save_latest(&service))
@@ -166,10 +180,12 @@ impl NativeWindow {
             }
         }
         drop(latest);
+        true
     }
     /// Movement admission has stopped on the UI thread. Join this native
     /// writer before exiting; uncertainty still retains its original request.
-    pub(crate) fn join_writer(&self) -> Result<(), CoreError> {
+    pub(crate) fn join_writer(&self, service: &DesktopService) -> Result<(), CoreError> {
+        self.begin_stop();
         let worker = self.worker.lock().map_err(|_| unavailable())?.take();
         if worker.is_some_and(|worker| worker.join().is_err()) {
             self.worker_failed.store(true, Ordering::Release);
@@ -179,10 +195,18 @@ impl NativeWindow {
                 "The native preference writer did not finish normally.",
                 "Keep the app running and reconcile the original preference operation; saved effects may already exist."));
         }
-        self.writer
+        let mut writer = self.writer.lock().map_err(|_| unavailable())?;
+        writer.confirm(|request| service.native_preferences_write(request))?;
+        writer.ready_to_exit()
+    }
+    /// Pure producer fence at accepted Quit, before any owned IO is joined.
+    pub(crate) fn begin_stop(&self) {
+        // Serialize with the owned geometry queue, without joining/doing IO.
+        let _latest = self
+            .latest_geometry
             .lock()
-            .map_err(|_| unavailable())?
-            .ready_to_exit()
+            .unwrap_or_else(|error| error.into_inner());
+        self.stopped.store(true, Ordering::Release);
     }
     fn save_latest(&self, service: &DesktopService) {
         loop {

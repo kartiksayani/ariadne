@@ -12,6 +12,9 @@ use tauri::{Emitter, Manager};
 type ResolveSession = dyn Fn(&SessionRef) -> Result<RegisteredSession, CoreError> + Send + Sync;
 type NativeConnect =
     dyn Fn(OwnerMutationRequest, Instant) -> Result<MutationReceipt, CoreError> + Send + Sync;
+type NativePreferencesWrite =
+    dyn Fn(&OwnerMutationRequest) -> Result<PreferencesPatchedReceipt, CoreError> + Send + Sync;
+type NativePreferencesRead = dyn Fn() -> Result<PreferencesSnapshot, CoreError> + Send + Sync;
 
 #[derive(Clone, Default)]
 pub struct DesktopService {
@@ -22,6 +25,8 @@ struct Composition {
     core: Arc<dyn CoreService>,
     resolve: Arc<ResolveSession>,
     connect: Option<Arc<NativeConnect>>,
+    native_preferences_write: Option<Arc<NativePreferencesWrite>>,
+    native_preferences_read: Option<Arc<NativePreferencesRead>>,
 }
 impl DesktopService {
     /// Trusted native consumers use the same validated owner envelope as IPC.
@@ -35,6 +40,16 @@ impl DesktopService {
         }
     }
     pub(crate) fn native_preferences(&self) -> Result<PreferencesSnapshot, CoreError> {
+        if let Some(read) = &self.composition()?.native_preferences_read {
+            let snapshot = read()?;
+            QueryResult::PreferencesGet(snapshot.clone()).validate_for(
+                &QueryContext::owner(OwnerContext::from_trusted_entrypoint(
+                    OwnerScope::Preferences,
+                )),
+                &QueryRequest::PreferencesGet {},
+            )?;
+            return Ok(snapshot);
+        }
         match self.native_query(OwnerQueryRequest {
             session: None,
             request: QueryRequest::PreferencesGet {},
@@ -47,6 +62,20 @@ impl DesktopService {
         &self,
         request: &OwnerMutationRequest,
     ) -> Result<PreferencesPatchedReceipt, CoreError> {
+        request.validate_wire()?;
+        if request.session.is_some()
+            || !matches!(request.command, OwnerCommand::PreferencesPatch { .. })
+        {
+            return Err(mismatched_command());
+        }
+        if let Some(write) = &self.composition()?.native_preferences_write {
+            let receipt = write(request)?;
+            validate_owner_receipt(
+                request,
+                &MutationReceipt::PreferencesPatched(receipt.clone()),
+            )?;
+            return Ok(receipt);
+        }
         match self
             .owner(
                 request.clone(),
@@ -82,6 +111,8 @@ impl DesktopService {
                 core,
                 resolve: Arc::new(resolve),
                 connect: None,
+                native_preferences_write: None,
+                native_preferences_read: None,
             }),
         }
     }
@@ -102,6 +133,21 @@ impl DesktopService {
             .expect("trusted composition")
             .connect = Some(Arc::new(connect));
         service
+    }
+    /// Private Rust-only confirmation seam for the two owned preference writers.
+    /// Renderer/control owner calls always retain normal runtime admission.
+    pub(crate) fn with_native_preferences(
+        mut self,
+        read: impl Fn() -> Result<PreferencesSnapshot, CoreError> + Send + Sync + 'static,
+        write: impl Fn(&OwnerMutationRequest) -> Result<PreferencesPatchedReceipt, CoreError>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        let composition = self.composition.as_mut().expect("trusted composition");
+        composition.native_preferences_write = Some(Arc::new(write));
+        composition.native_preferences_read = Some(Arc::new(read));
+        self
     }
     fn composition(&self) -> Result<&Composition, CoreError> {
         self.composition.as_ref().ok_or_else(|| {
@@ -301,11 +347,17 @@ macro_rules! mutations {
                 let _ = app.emit("ariadne://session_changed", SessionChangedHint {
                     session_id: receipt.session_id.clone(), revision: receipt.revision,
                 });
+                if let Some(tray) = app.try_state::<crate::native::tray::NativeTray>() {
+                    tray.refresh();
+                }
             }
             if matches!(&envelope.0, ApplicationEnvelope::Success(SuccessEnvelope {data:MutationReceipt::PreferencesPatched(_),..})) {
                 // OS reconciliation cannot change an already saved receipt.
                 if let Some(window) = app.try_state::<crate::native::window::NativeWindow>() {
                     window.reconcile(app.clone(), false);
+                }
+                if let Some(tray) = app.try_state::<crate::native::tray::NativeTray>() {
+                    tray.refresh();
                 }
             }
             envelope

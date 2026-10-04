@@ -78,15 +78,27 @@ impl NativeRuntime {
         emit: Arc<dyn Fn(SessionChangedHint) -> bool + Send + Sync>,
         presence: Arc<dyn Fn(PresenceChangedHint) -> bool + Send + Sync>,
     ) -> Result<Arc<Self>, CoreError> {
-        std::thread::spawn(move || Self::start_off_executor(config, outcomes, emit, presence))
-            .join()
-            .map_err(|_| unavailable())?
+        Self::start_with_presence_and_refresh(config, outcomes, emit, presence, Arc::new(|| {}))
+    }
+    pub(crate) fn start_with_presence_and_refresh(
+        config: NativeConfiguration,
+        outcomes: Arc<dyn Fn(ActivationOutcome) + Send + Sync>,
+        emit: Arc<dyn Fn(SessionChangedHint) -> bool + Send + Sync>,
+        presence: Arc<dyn Fn(PresenceChangedHint) -> bool + Send + Sync>,
+        reconciled: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<Arc<Self>, CoreError> {
+        std::thread::spawn(move || {
+            Self::start_off_executor(config, outcomes, emit, presence, reconciled)
+        })
+        .join()
+        .map_err(|_| unavailable())?
     }
     fn start_off_executor(
         config: NativeConfiguration,
         outcomes: Arc<dyn Fn(ActivationOutcome) + Send + Sync>,
         emit: Arc<dyn Fn(SessionChangedHint) -> bool + Send + Sync>,
         presence_emit: Arc<dyn Fn(PresenceChangedHint) -> bool + Send + Sync>,
+        reconciled: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Arc<Self>, CoreError> {
         let owner = Arc::new(DesktopOwner::acquire(&config.home)?);
         let core = Arc::new(NativeCoreService::new(
@@ -167,10 +179,11 @@ impl NativeRuntime {
             let _entered = executor.enter();
             DiscoveryPoller::start(discovery.clone(), config.discovery_endpoints)?
         };
-        let watcher = RegisteredWatcher::start(
+        let watcher = RegisteredWatcher::start_with_reconciled(
             Registry::open_data_directory(&config.home)?,
             config.home,
             move |hint| emit(hint),
+            reconciled,
         )
         .map_err(|_| unavailable())?;
         let (control_stop, stopped) = tokio::sync::oneshot::channel();
@@ -222,13 +235,29 @@ impl NativeRuntime {
         if OWNED_BRIDGE.with(Cell::get) {
             return work();
         }
+        self.run_owned_admitted(
+            disconnected,
+            |_| {
+                if self.stopping.load(Ordering::Acquire) || self.replacing.load(Ordering::Acquire) {
+                    Err(unavailable())
+                } else {
+                    Ok(())
+                }
+            },
+            work,
+        )
+    }
+    fn run_owned_admitted<T: Send + 'static>(
+        &self,
+        disconnected: CoreError,
+        admit: impl FnOnce(&mut Workers) -> Result<(), CoreError>,
+        work: impl FnOnce() -> Result<T, CoreError> + Send + 'static,
+    ) -> Result<T, CoreError> {
         let (sent, received) = std::sync::mpsc::sync_channel(1);
         {
             let mut workers = self.workers.lock().map_err(|_| unavailable())?;
-            if self.stopping.load(Ordering::Acquire) || self.replacing.load(Ordering::Acquire) {
-                return Err(unavailable());
-            }
             let workers = workers.as_mut().ok_or_else(unavailable)?;
+            admit(workers)?;
             // Scheduling under the admission lock makes executor shutdown wait
             // for this actual closure. The lock ends before Core/provider IO.
             workers.admitted.retain(|task| !task.is_finished());
@@ -244,6 +273,85 @@ impl NativeRuntime {
         // replay admitted after the provider deadline. Only provider IO uses
         // that original deadline; filesystem completion is not wall-clock bound.
         received.recv().map_err(|_| disconnected)?
+    }
+    pub(super) fn native_preferences_write(
+        &self,
+        request: &OwnerMutationRequest,
+    ) -> Result<PreferencesPatchedReceipt, CoreError> {
+        let core = self.core.clone();
+        let original = request.clone();
+        self.native_preferences_owned(request, move || {
+            match core.execute_owner(
+                OwnerContext::from_trusted_entrypoint(OwnerScope::Preferences),
+                original.command,
+            )? {
+                MutationReceipt::PreferencesPatched(receipt) => Ok(receipt),
+                _ => Err(uncertain()),
+            }
+        })
+    }
+    pub(super) fn native_preferences_read(&self) -> Result<PreferencesSnapshot, CoreError> {
+        let core = self.core.clone();
+        self.run_native_preferences(unavailable(), move || {
+            match core.query(
+                QueryContext::owner(OwnerContext::from_trusted_entrypoint(
+                    OwnerScope::Preferences,
+                )),
+                QueryRequest::PreferencesGet {},
+            )? {
+                QueryResult::PreferencesGet(snapshot) => Ok(snapshot),
+                _ => Err(unavailable()),
+            }
+        })
+    }
+    pub(super) fn native_preferences_owned(
+        &self,
+        request: &OwnerMutationRequest,
+        work: impl FnOnce() -> Result<PreferencesPatchedReceipt, CoreError> + Send + 'static,
+    ) -> Result<PreferencesPatchedReceipt, CoreError> {
+        request.validate_wire()?;
+        let OwnerCommand::PreferencesPatch { .. } = &request.command else {
+            return Err(unavailable());
+        };
+        if request.session.is_some() {
+            return Err(unavailable());
+        }
+        let original = request.clone();
+        self.run_native_preferences(uncertain(), move || {
+            let receipt = work()?;
+            validate_owner_receipt(
+                &original,
+                &MutationReceipt::PreferencesPatched(receipt.clone()),
+            )?;
+            Ok(receipt)
+        })
+    }
+    fn run_native_preferences<T: Send + 'static>(
+        &self,
+        disconnected: CoreError,
+        work: impl FnOnce() -> Result<T, CoreError> + Send + 'static,
+    ) -> Result<T, CoreError> {
+        // Only a Quit confirmation waits for the lifecycle gate. An ordinary
+        // admitted preference closure must not wait on a wake that drains it.
+        let _drain = if self.stopping.load(Ordering::Acquire) {
+            Some(self.shutdown_gate.lock().map_err(|_| unavailable())?)
+        } else {
+            None
+        };
+        self.run_owned_admitted(
+            disconnected,
+            |_| {
+                let stopped = self.stopping.load(Ordering::Acquire);
+                if self.replacing.load(Ordering::Acquire) && !stopped {
+                    return Err(unavailable());
+                }
+                // Only the fenced native preference producers possess this
+                // private callback. They own queued/frozen saves and exact
+                // retries; renderer/control/provider paths cannot call it.
+                Ok(())
+            },
+            work,
+        )
     }
     pub(super) fn spawn_reconciliation(&self, runtime: Arc<Self>) {
         let mut workers = self
@@ -274,6 +382,16 @@ impl NativeRuntime {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()),
         )
+    }
+    pub(super) fn reconciliation_diagnostics(&self) -> Vec<String> {
+        self.reconciliation_errors
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .rev()
+            .take(16)
+            .map(|error| error.message.clone())
+            .collect()
     }
     #[cfg(test)]
     pub(super) fn executor_for_test(&self) -> tokio::runtime::Handle {
@@ -500,12 +618,7 @@ impl NativeRuntime {
     /// by dropping this owned executor. Dropping only ControlServer's JoinSet
     /// would leave started blocking calls retaining the physical owner/leases.
     pub fn shutdown(&self) -> Result<(), CoreError> {
-        {
-            // Quit wins before waiting for wake's lifecycle gate. Its flag and
-            // wake publication are serialized by the short admission lock.
-            let _workers = self.workers.lock().map_err(|_| unavailable())?;
-            self.stopping.store(true, Ordering::Release);
-        }
+        self.begin_shutdown()?;
         let _shutdown = self.shutdown_gate.lock().map_err(|_| unavailable())?;
         self.presence.stop();
         let workers = self.workers.lock().map_err(|_| unavailable())?.take();
@@ -517,6 +630,14 @@ impl NativeRuntime {
         std::thread::spawn(move || workers.shutdown())
             .join()
             .map_err(|_| unavailable())?
+    }
+    /// Pure admission fence, before any window/tray drain or lifecycle wait.
+    pub(crate) fn begin_shutdown(&self) -> Result<(), CoreError> {
+        // Quit wins before waiting for wake's lifecycle gate. Its flag and
+        // wake publication are serialized by the short admission lock.
+        let _workers = self.workers.lock().map_err(|_| unavailable())?;
+        self.stopping.store(true, Ordering::Release);
+        Ok(())
     }
 }
 impl Drop for NativeRuntime {

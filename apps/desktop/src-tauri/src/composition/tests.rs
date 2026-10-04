@@ -495,13 +495,29 @@ fn admitted_connect_drains_before_wake_and_quit_wins_without_losing_the_receipt(
         admitted.connect_before(original, Instant::now() + CONTROL_TIMEOUT)
     });
     wait_file(&began);
+    let shutdown = runtime.clone();
     let waking = runtime.clone();
+    let (shutdown_began, shutdown_started) = std::sync::mpsc::channel();
+    let lifecycle = crate::native::window::lifecycle::NativeLifecycle::from_trusted_owner(
+        move || {
+            shutdown_began.send(()).unwrap();
+            shutdown.shutdown()
+        },
+        move || waking.reconcile_after_wake(),
+    );
+    let waking = lifecycle.clone();
     let (wake_sent, wake_result) = std::sync::mpsc::channel();
-    let wake = std::thread::spawn(move || wake_sent.send(waking.reconcile_after_wake()).unwrap());
+    let wake = std::thread::spawn(move || wake_sent.send(waking.reconcile()).unwrap());
     assert!(wake_result.recv_timeout(Duration::from_millis(50)).is_err());
-    let quitting = runtime.clone();
+    // The accepted native Quit event fences before window/tray drains. The
+    // actual lifecycle callback still must be reachable while wake waits.
+    runtime.begin_shutdown().unwrap();
+    let quitting = lifecycle.clone();
     let (quit_sent, quit_result) = std::sync::mpsc::channel();
-    let quit = std::thread::spawn(move || quit_sent.send(quitting.shutdown()).unwrap());
+    let quit = std::thread::spawn(move || quit_sent.send(quitting.prepare_exit()).unwrap());
+    shutdown_started
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
     assert!(quit_result.recv_timeout(Duration::from_millis(50)).is_err());
     assert!(DesktopOwner::acquire(&fixture.home).is_err());
     fs::write(&release, "release").unwrap();
@@ -550,6 +566,134 @@ fn admitted_connect_drains_before_wake_and_quit_wins_without_losing_the_receipt(
         receipt
     );
     DesktopOwner::acquire(&fixture.home).unwrap();
+}
+
+#[test]
+fn quit_confirms_frozen_native_writer_operations_on_the_real_core() {
+    use crate::native::{notifications::writer::PreferenceWriter, window::WindowPreferenceWrite};
+    let fixture = Fixture::new();
+    let runtime = NativeRuntime::start(
+        fixture.configuration(),
+        Arc::new(|_| {}),
+        Arc::new(|_| true),
+    )
+    .unwrap();
+    let service = runtime.bridge().desktop_service();
+    let mut window = WindowPreferenceWrite::default();
+    let mut tray = PreferenceWriter::default();
+    let mut frozen_window = None;
+    let mut frozen_tray = None;
+    let mut window_receipt = None;
+    let mut tray_receipt = None;
+    let commit_with_lost_delivery = |request: &OwnerMutationRequest, receipt: &mut Option<_>| {
+        let core = runtime.bridge().core().clone();
+        let original = request.clone();
+        let saved = Arc::new(Mutex::new(None));
+        let committed = saved.clone();
+        let result = runtime.native_preferences_owned(request, move || {
+            let MutationReceipt::PreferencesPatched(actual) = core.execute_owner(
+                OwnerContext::from_trusted_entrypoint(OwnerScope::Preferences),
+                original.command,
+            )?
+            else {
+                panic!("actual preference receipt")
+            };
+            *committed.lock().unwrap() = Some(actual);
+            Err(CoreError::new(
+                CoreErrorCode::IoError,
+                "Scripted delivery lost the already saved preference receipt.",
+                "Confirm the same frozen native operation.",
+            ))
+        });
+        *receipt = saved.lock().unwrap().clone();
+        result
+    };
+    assert!(window
+        .save(
+            WindowGeometry {
+                x: 10.0,
+                y: 20.0,
+                width: 1000.0,
+                height: 700.0,
+                monitor_id: None
+            },
+            || id(70),
+            || service.native_preferences(),
+            |request| {
+                frozen_window = Some(request.clone());
+                commit_with_lost_delivery(request, &mut window_receipt)
+            },
+        )
+        .is_err());
+    assert!(window.ready_to_exit().is_err());
+    tray.pin(service.native_preferences().unwrap(), || id(71))
+        .unwrap();
+    assert!(tray
+        .confirm(|request| {
+            frozen_tray = Some(request.clone());
+            commit_with_lost_delivery(request, &mut tray_receipt)
+        })
+        .is_err());
+    assert!(tray.pending());
+    let persisted = service.native_preferences().unwrap();
+    assert!(persisted.global.pinned);
+    assert!(persisted.global.window.is_some());
+    assert_eq!(persisted.revision.value(), 3);
+    runtime.begin_shutdown().unwrap();
+    let frozen = frozen_window.unwrap();
+    let mut changed = frozen.clone();
+    let OwnerCommand::PreferencesPatch { params, .. } = &mut changed.command else {
+        panic!("patch")
+    };
+    params.expected_preferences_revision = persisted.revision;
+    assert!(service.native_preferences_write(&changed).is_err());
+    assert!(runtime
+        .bridge()
+        .execute_owner(
+            OwnerContext::from_trusted_entrypoint(OwnerScope::Preferences),
+            frozen.command.clone(),
+        )
+        .is_err());
+    assert!(runtime
+        .run_owned::<()>(super::runtime::uncertain(), || panic!(
+            "no fresh claim/connect admission"
+        ))
+        .is_err());
+    window
+        .confirm(|request| {
+            assert_eq!(request, &frozen);
+            let actual = service.native_preferences_write(request)?;
+            assert_eq!(Some(actual.clone()), window_receipt);
+            Ok(actual)
+        })
+        .unwrap();
+    window.ready_to_exit().unwrap();
+    tray.confirm(|request| {
+        assert_eq!(Some(request), frozen_tray.as_ref());
+        let actual = service.native_preferences_write(request)?;
+        assert_eq!(Some(actual.clone()), tray_receipt);
+        Ok(actual)
+    })
+    .unwrap();
+    assert!(!tray.pending());
+    // Query actual canonical preferences without reopening runtime admission.
+    let QueryResult::PreferencesGet(after) = runtime
+        .bridge()
+        .core()
+        .query(
+            QueryContext::owner(OwnerContext::from_trusted_entrypoint(
+                OwnerScope::Preferences,
+            )),
+            QueryRequest::PreferencesGet {},
+        )
+        .unwrap()
+    else {
+        panic!("preferences")
+    };
+    assert_eq!(after, persisted);
+    assert!(DesktopOwner::acquire(&fixture.home).is_err());
+    runtime.shutdown().unwrap();
+    drop(DesktopOwner::acquire(&fixture.home).unwrap());
 }
 
 #[test]

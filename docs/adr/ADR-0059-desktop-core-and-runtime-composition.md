@@ -91,6 +91,23 @@ recovery guards stay authoritative; wake never rebinds, resumes or resends work.
 Native outcome callbacks retain and expose exact pending facts/errors for explicit
 inspection, rather than interpreting missing receipts as non-delivery.
 
+The native lifecycle wrapper clones its wake callback under a brief lock and
+invokes it outside that lock, so Quit can reach the runtime fence while wake is
+draining. Accepted Quit synchronously fences both native preference producers
+and ordinary runtime admission before joining anything. Window geometry and tray
+Pin intents already owned by those producers may finish their first read/save
+after that fence; their frozen pending requests alone own exact retry identity.
+`DesktopService::with_native_preferences` installs one private paired Rust-only
+callback: a fixed global PreferencesGet returning PreferencesSnapshot, and a
+validated global PreferencesPatch returning PreferencesPatchedReceipt. They use
+the same owning executor, waiting for in-flight wake off UI during Quit, and are
+unavailable after its removal. General renderer/control Core calls and provider
+work remain fenced. No second runtime operation tracker or dispatch authority is
+introduced. Generic errors retain native writer requests; only a verified
+replay-first RevisionConflict with a differing current_revision establishes the
+frozen edit unsaved. Window confirmation and the fenced tray feed drain before
+runtime shutdown; shutdown failure never reopens admission or callbacks.
+
 Presence adds an opt-in PresenceObserver Fn(PresenceUpdate) to the existing
 ConnectedSupervisor and a compatible NativeActivation::new_with_presence.
 Connected, Observed and Stopped updates carry the existing PresenceChangedHint
@@ -117,6 +134,11 @@ registered parents before initial snapshot reconciliation, emits only validated
 SessionChangedHint IDs/revisions, coalesces changes and preserves last valid
 revision through failed/deleted/unavailable reads. Selection changes priority,
 never membership. Focus/wake and fallback reconciliation reuse this same worker.
+Composition installs the tray after managing the real DesktopService and before
+launch callbacks. Existing validated revision hints, unchanged scan completion,
+focus and saved preference changes request its coalesced refresh; no separate
+tray scanner/timer is added. Native notification permission has its explicit
+main-window command and never runs automatically during startup.
 
 ## Acceptance boundary
 
