@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { Item, ItemStatus } from '../../generated/domain/models';
+import type { Item, ItemOwner, ItemStatus } from '../../generated/domain/models';
 import type { SessionPreferences } from '../../generated/core';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
-import { sentenceRows, type SentenceRow } from '../../selectors/tree/rows';
+import { sameOwner, sentenceRows, type SentenceRow } from '../../selectors/tree/rows';
 import { TreeRow } from '../reference/TreeRow';
 import { STATUS, type Status } from '../reference/StatusBadge';
 import '../../styles/tree.css';
@@ -176,7 +176,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   }, [projection, view.scroll, captureAnchor]);
   const clearFilters = () => {
     const next = structuredClone(view) as SessionPreferences;
-    next.filters = { ...next.filters, search: '', statuses: [], topic_id: null, hide_later: false };
+    next.filters = { ...next.filters, search: '', statuses: [], owners: [], topic_id: null, hide_later: false };
     void write(() => latest.current.saveView(next));
   };
   const filter = (change: (next: SessionPreferences['filters']) => void) => {
@@ -185,6 +185,8 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   };
   const disabled = state.status !== 'ready' || writing;
   const outside = rows.find(row => row.outsideFilters);
+  const owners: Immutable<ItemOwner>[] = [...view.filters.owners];
+  for (const item of Object.values(session?.items ?? {})) if (item && !owners.some(owner => sameOwner(owner, item.owner))) owners.push(item.owner);
   return <section className="ariadne-reference sentence-tree" aria-label="Session sentence tree" onKeyDown={event => {
     if (!editable(event.target) && (event.key === '/' || (event.metaKey && event.key.toLowerCase() === 'f'))) {
       event.preventDefault(); searchInput.current?.focus();
@@ -200,6 +202,11 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
         disabled={disabled} aria-pressed={view.filters.statuses.includes(status)} className="ref-button ref-ghost"
         onClick={() => filter(next => { next.statuses = next.statuses.includes(status) ? next.statuses.filter(value => value !== status) : [...next.statuses, status]; })}>
         {STATUS[visualStatus(status)].label}</button>)}</div>
+      <div role="group" aria-label="Item owner">{owners.map((owner, index) => <button type="button" key={index}
+        disabled={disabled} aria-pressed={view.filters.owners.some(value => sameOwner(value, owner))} className="ref-button ref-ghost"
+        onClick={() => filter(next => { next.owners = next.owners.some(value => sameOwner(value, owner))
+          ? next.owners.filter(value => !sameOwner(value, owner)) : [...next.owners, structuredClone(owner) as ItemOwner]; })}>
+        {owner.kind === 'me' ? 'Me' : owner.kind === 'other' ? owner.name : `Agent · ${owner.binding_id}`}</button>)}</div>
       <label><input type="checkbox" checked={view.filters.hide_later} disabled={disabled} onChange={event => filter(next => { next.hide_later = event.target.checked; })} />Hide Later</label>
       <label><input type="checkbox" checked={view.filters.archived} disabled={disabled} onChange={event => filter(next => { next.archived = event.target.checked; })} />Archive</label>
     </div>

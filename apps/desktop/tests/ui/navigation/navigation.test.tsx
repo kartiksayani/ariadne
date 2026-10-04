@@ -12,6 +12,7 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 import * as catalogue from '../../../src/state/navigation/catalogue';
 import { bindingLabel, NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
 import { BindSession, RegisterProject } from '../../../src/components/navigation/Registration';
+import { NavigationSentenceTree } from '../../../src/components/tree/NavigationSentenceTree';
 
 const projectId = demo.project_id;
 const route: SessionRef = { project_id: projectId, session_id: demo.id };
@@ -373,5 +374,64 @@ describe('source-backed navigation views and explicit registration', () => {
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull(); expect(document.activeElement).toBe(opener);
     expect(transport.calls.some(call => call.name === 'project_register')).toBe(false);
+  });
+});
+
+
+describe('tree edits through canonical navigation preferences', () => {
+  it('saves only the current session view while preserving tab state, other sessions, global state and drafts', async () => {
+    const { transport, store } = setup(); const prefs = preferences();
+    prefs.sessions.push({ ...structuredClone(prefs.sessions[0]), session: { ...route, session_id: projectId }, tab_order: 3 });
+    read(transport, prefs); await store.start();
+    const edit = structuredClone(prefs.sessions[0]); edit.tab_open = false; edit.tab_order = 99; edit.filters.search = 'new exact\nsearch';
+    transport.enqueue('preferences_patch', patchReceipt()); transport.enqueue('preferences_get', new Error('Follow-up read unavailable'));
+    expect(await store.saveSessionView(edit, 1)).toBe(true);
+    const saved = store.getSnapshot().preferences!;
+    expect(saved.sessions[0]).toEqual({ ...edit, tab_open: prefs.sessions[0].tab_open, tab_order: prefs.sessions[0].tab_order });
+    expect(saved.sessions[1]).toEqual(prefs.sessions[1]); expect(saved.global).toEqual(prefs.global); expect(saved.drafts).toEqual(prefs.drafts);
+    expect(transport.calls.find(call => call.name === 'preferences_patch')!.request).toMatchObject({ command: { params: { expected_preferences_revision: 1 } } });
+  });
+  it('rejects a captured local revision mismatch and refreshes without submitting stale changes', async () => {
+    const { transport, store } = setup(); const prefs = preferences(2); read(transport, prefs); await store.start();
+    const newer = preferences(3); newer.sessions[0].selected_item_id = '2'; read(transport, newer);
+    expect(await store.saveSessionView(preferences().sessions[0], 1)).toBe(false);
+    expect(transport.calls.some(call => call.name === 'preferences_patch')).toBe(false);
+    expect(store.getSnapshot().preferences).toEqual(newer);
+  });
+  it('refreshes a definitive backend revision conflict without automatically overwriting newer state', async () => {
+    const { transport, store } = setup(); read(transport); await store.start();
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'revision_conflict' } });
+    const newer = preferences(3); newer.sessions[0].filters.search = 'newer owner choice'; read(transport, newer);
+    expect(await store.setLater({ ...route, item_id: '1' }, true, 1)).toBe(false);
+    expect(store.getSnapshot().preferences).toEqual(newer);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    expect(store.getSnapshot().pendingOperationId).toBeNull();
+  });
+  it('retains uncertain tree operations with the original revision and exact body until explicit retry', async () => {
+    const { transport, store } = setup(); read(transport); await store.start();
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'commit_uncertain' } }, patchReceipt());
+    const edit = preferences().sessions[0]; edit.filters.search = 'immutable choice';
+    expect(await store.saveSessionView(edit, 1)).toBe(false); edit.filters.search = 'later mutation';
+    expect(await store.setLater({ ...route, item_id: '2' }, true, 1)).toBe(false);
+    const next = preferences(2); next.sessions[0].filters.search = 'immutable choice'; read(transport, next);
+    expect(await store.retryMutation()).toBe(true);
+    const calls = transport.calls.filter(call => call.name === 'preferences_patch');
+    expect(calls).toHaveLength(2); expect(calls[0]).toEqual(calls[1]);
+    expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe('immutable choice');
+  });
+  it('composes real tree Later callbacks into the same canonical mutation path and preserves unrelated preferences', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); prefs.sessions[0].filters.search = '';
+    read(transport, prefs); await store.start(); transport.enqueue('session_get', loaded());
+    const opened = store.opened.open(route); await opened.refresh();
+    render(<NavigationSentenceTree navigation={store} store={opened} onReveal={() => {}} />);
+    const next = structuredClone(prefs); next.revision = 2; next.later = [{ ...route, item_id: '1' }];
+    transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
+    await act(async () => { fireEvent.keyDown(screen.getAllByRole('treeitem')[0], { key: 'z' }); });
+    await waitFor(() => expect(store.getSnapshot().preferences?.later).toEqual(next.later));
+    expect(transport.calls.find(call => call.name === 'preferences_patch')!.request).toEqual({ session: null, command: {
+      api_version: 1, command: 'preferences_patch', op_id: operationId, params: { expected_preferences_revision: 1,
+        entries: [{ kind: 'set_later', item: { ...route, item_id: '1' }, later: true }] } } });
+    expect(store.getSnapshot().preferences?.global).toEqual(prefs.global);
+    expect(store.getSnapshot().preferences?.drafts).toEqual(prefs.drafts);
   });
 });

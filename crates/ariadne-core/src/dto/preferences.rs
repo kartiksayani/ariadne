@@ -65,6 +65,7 @@ pub struct SessionPreferences {
 pub struct ViewFilters {
     pub search: String,
     pub statuses: Vec<ItemStatus>,
+    pub owners: Vec<ItemOwner>,
     pub topic_id: Option<UuidV4>,
     pub archived: bool,
     pub hide_later: bool,

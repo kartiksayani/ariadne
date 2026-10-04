@@ -8,7 +8,7 @@ import { initialExpansion, normalizeSearch, sentenceRows } from '../../../src/se
 function seed() { return structuredClone(demo) as Session; }
 function view(session: Session): SessionPreferences {
   return { session: { project_id: session.project_id, session_id: session.id }, tab_open: true, selected_item_id: null,
-    tab_order: 0, expanded_item_ids: [], filters: { search: '', statuses: [], topic_id: null, archived: false, hide_later: false },
+    tab_order: 0, expanded_item_ids: [], filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false },
     rail: 'waiting', scroll: null };
 }
 
@@ -48,6 +48,23 @@ describe('canonical sentence tree projection', () => {
     expect(selected.rows.map(row => [row.item.id, row.context, row.expanded])).toEqual([['1', true, true], ['1.1', false, false]]);
     preferences.filters.statuses = ['done'];
     expect(sentenceRows(immutable(session), preferences, new Set()).rows).toHaveLength(0);
+  });
+  it('matches canonical owners exactly with OR within owners and AND across categories', () => {
+    const session = seed(), preferences = view(session);
+    for (const item of Object.values(session.items)) if (item) item.owner = { kind: 'me' };
+    session.items['1']!.owner = { kind: 'other', name: '  Exact person  ' };
+    session.items['2']!.owner = { kind: 'agent', binding_id: session.active_binding_id! };
+    session.items['3']!.owner = { kind: 'me' };
+    const frozen = immutable(session);
+    preferences.filters.owners = [{ kind: 'other', name: 'Exact person' }];
+    expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(0);
+    preferences.filters.owners = [session.items['1']!.owner, session.items['2']!.owner];
+    const result = sentenceRows(frozen, preferences, new Set());
+    expect(result.rows.filter(row => !row.context).map(row => row.item.id)).toEqual(['1', '2']);
+    preferences.filters.statuses = ['waiting_on_me'];
+    expect(sentenceRows(frozen, preferences, new Set()).rows.filter(row => !row.context).map(row => row.item.id)).toEqual(['2']);
+    preferences.filters.owners = [{ kind: 'agent', binding_id: session.id }];
+    expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(0);
   });
   it('temporarily reveals an excluded item without overwriting filters or saved expansion', () => {
     const session = seed(), preferences = view(session); preferences.filters.statuses = ['waiting_on_me'];

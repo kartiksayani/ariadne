@@ -1,4 +1,4 @@
-import type { Item, Session } from '../../generated/domain/models';
+import type { Item, ItemOwner, Session } from '../../generated/domain/models';
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 
@@ -16,6 +16,10 @@ export interface SentenceRows {
   readonly rows: readonly SentenceRow[];
   readonly matchingTotal: number;
   readonly scopeTotal: number;
+}
+export function sameOwner(left: Immutable<ItemOwner>, right: Immutable<ItemOwner>): boolean {
+  return left.kind === right.kind && (left.kind === 'me' || (left.kind === 'agent' && right.kind === 'agent'
+    && left.binding_id === right.binding_id) || (left.kind === 'other' && right.kind === 'other' && left.name === right.name));
 }
 export const normalizeSearch = (text: string): string => text.normalize('NFKC').toLowerCase();
 const selectedBySession = new WeakMap<Immutable<Session>, { key: string; value: SentenceRows }>();
@@ -38,7 +42,7 @@ export function sentenceRows(session: Immutable<Session>, view: Immutable<Sessio
   if (known?.key === key) return known.value;
   const indexes = indexSession(session), filters = view.filters;
   const tokens = normalizeSearch(filters.search).split(/\s+/u).filter(Boolean);
-  const filtering = tokens.length > 0 || filters.statuses.length > 0 || filters.hide_later;
+  const filtering = tokens.length > 0 || filters.statuses.length > 0 || filters.owners.length > 0 || filters.hide_later;
   const inScope = new Set(Object.values(session.items).filter((item): item is Immutable<Item> => !!item)
     .filter(item => {
       const topic = session.topics[item.topic_id];
@@ -49,6 +53,7 @@ export function sentenceRows(session: Immutable<Session>, view: Immutable<Sessio
   for (const id of inScope) {
     const item = session.items[id]!;
     if (filters.statuses.length && !filters.statuses.includes(item.status)) continue;
+    if (filters.owners.length && !filters.owners.some(owner => sameOwner(owner, item.owner))) continue;
     if (filters.hide_later && later.has(id)) continue;
     // The canonical conversation index excludes shared activity, raw provider
     // observations and unrelated operation backlinks.

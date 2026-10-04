@@ -14,7 +14,7 @@ const opened: OpenSessions[] = [];
 afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); vi.useRealTimers(); vi.restoreAllMocks(); });
 function preferences(): SessionPreferences {
   return { session: route, tab_open: true, selected_item_id: '1', tab_order: 0, expanded_item_ids: ['1'],
-    filters: { search: '', statuses: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
+    filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
 }
 async function setup(session: Session = structuredClone(demo) as Session, view = preferences()) {
   const calls: { command: string; request: Parameters<DesktopTransport['invoke']>[1]['request'] }[] = [];
@@ -127,7 +127,7 @@ describe('registered variable-height sentence tree', () => {
     const search = screen.getByRole('searchbox'); fireEvent.change(search, { target: { value: 'No canonical sentence has this phrase' } });
     await screen.findByText('No sentences match these filters.');
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
-    await waitFor(() => expect(value.saved.at(-1)?.filters).toEqual({ search: '', statuses: [], topic_id: null, archived: true, hide_later: false }));
+    await waitFor(() => expect(value.saved.at(-1)?.filters).toEqual({ search: '', statuses: [], owners: [], topic_id: null, archived: true, hide_later: false }));
   });
   it('focuses search from tree shortcuts without invoking browser search or changing item selection', async () => {
     const value = await setup(); render(<value.Composition />); rows()[0].focus();

@@ -195,6 +195,7 @@
               "filters": {
                 "search": "",
                 "statuses": [],
+                "owners": [],
                 "topic_id": null,
                 "archived": false,
                 "hide_later": false
