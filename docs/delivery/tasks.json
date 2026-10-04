@@ -1072,7 +1072,8 @@
         "rtk proxy cargo test -p ariadne-cli --test owner_native"
       ],
       "estimate_days": 1.5,
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/76"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/76",
+      "active": true
     },
     {
       "id": "P4.1",
@@ -1346,7 +1347,8 @@
         "P4.3",
         "P4.6",
         "P0.6"
-      ]
+      ],
+      "active": true
     },
     {
       "id": "P4.8",
