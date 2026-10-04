@@ -192,6 +192,42 @@ fn native_qualifier_preserves_original_receipt_time_and_rejects_expired_evidence
 }
 
 #[test]
+fn pre_id_facts_match_final_provider_connection_without_changing_original_age() {
+    let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+    let observed = UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap();
+    let received = Instant::now() - Duration::from_secs(1);
+    let mut identity = fixture.identity();
+    identity.binding_scope = None; // No durable binding/generation exists at qualification.
+    let qualified = fixture
+        .options
+        .qualify_host_identity(
+            identity.clone(),
+            observed.clone(),
+            received,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+    assert_eq!(qualified.identity(), &identity);
+    assert_eq!(qualified.observed_at(), &observed);
+    assert_eq!(qualified.received_at(), received);
+    assert!(qualified.is_fresh());
+    assert!(!qualified.capabilities().domain_cli.supported);
+    assert!(!qualified.capabilities().domain_mcp.supported);
+    fixture.slot.publish_qualified(&qualified).unwrap();
+    let connected = wait(fixture.adapter().connect(connect())).unwrap();
+    assert_eq!(
+        &connected.endpoint_fingerprint,
+        qualified.endpoint_fingerprint()
+    );
+    assert_eq!(connected.capabilities, qualified.capabilities());
+    assert_eq!(connected.observation.last_seen_at, Some(observed));
+    assert_eq!(qualified.received_at(), received);
+    fixture.slot.clear().unwrap();
+    // Retained facts cannot recreate current availability by themselves.
+    assert!(wait(fixture.adapter().connect(connect())).is_err());
+}
+
+#[test]
 fn discovery_resource_is_required_and_compared_at_exact_loaded_root() {
     for missing in [true, false] {
         let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
