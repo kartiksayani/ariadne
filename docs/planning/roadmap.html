@@ -970,7 +970,7 @@
         "Installed version-matched Mod registers connect/status/disconnect and guarded 1-second claim poll; helper receives argv and stdin JSON, never shell interpolation.",
         "Capture binding/generation/attempt before detached prompt.submit; match exact envelope marker/digest to main turn and ignore unrelated/subagent turns.",
         "Persist accepted/start/end/reject/uncertain callbacks through CLI, including late acceptance/rejection and desktop closure; terminal text stays diagnostic.",
-        "Explicit connect may select a canonical existing Ariadne session UUID in the registered project; target identity is never inferred from cwd/name. Saved setup/rules resume from structured Ariadne context, with an atomic historical owner-context ceiling, future-input isolation, stable replay and all existing-session rebind guards."
+        "Explicit connect may select a canonical existing Ariadne session UUID in the registered project; target identity is never inferred from cwd/name. Saved setup/rules resume from structured Ariadne context, with an atomic historical owner-context ceiling, future-input isolation, stable replay and all existing-session rebind guards (implementation: https://github.com/kartiksayani/ariadne/pull/54)."
       ],
       "checks": [
         "rtk proxy npm run test:integration -- --project claude-mod"
@@ -1003,7 +1003,7 @@
       "acceptance": [
         "Claude first-party trait implementation translates Mod lifecycle with stable event identities and exact host/binding scope, preserving diagnostics bounds.",
         "Probe pinned CLI/Mod versions and reload/cache parity; unsupported versions disable dispatch while saved inputs/history remain usable.",
-        "Test malformed/oversize Unicode frames, old-generation callbacks, conflicting turn facts and result/turn ordering against production core/runtime."
+        "Test malformed/oversize Unicode frames, old-generation callbacks, conflicting turn facts and result/turn ordering against production core/runtime. Full acceptance still requires actual native P3.7 Mod intake, immutable P6 installation and qualified owner/domain CLI plus production Core/runtime composition; pure conformance does not qualify an installed conversation."
       ],
       "checks": [
         "rtk proxy cargo test -p ariadne-adapter-claude --test conformance"

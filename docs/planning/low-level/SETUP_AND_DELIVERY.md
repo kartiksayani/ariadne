@@ -160,13 +160,24 @@ The source artifact exports null. The Mod uses supported plugin-local static
 imports and SDK argv/stdin calls, with no Node/filesystem/environment/PATH/cache
 fallback. Missing or mismatched resources give actionable local status and no
 connect/poll. Exact supported SDK engine2.1.287 remains required; observed CLI
-2.1.289 is unqualified until P3.4 verifies compatibility.
+2.1.289 remains unqualified until new-version conformance and live existing-session proof.
 
 Connect uses canonical owner receipts plus scoped BindingSummary to show the
 actual connection state. It does not invent canonical Connected from receipts
 that lack a verified endpoint fingerprint; native qualified connection owns
 that evidence under PROCESS §2. Current owner/durable report composition and
 installer generation remain explicit P2.4/P2.2/P3.4/P6 acceptance work.
+
+The SDK supplies loaded plugin name/root, not `plugin.version`. Native parity checks
+use only that exact reported root's manifest/resources plus imported descriptor,
+engine/session/project identity and fresh native-validated announcement. Files and
+version strings alone do not prove a Mod is loaded. Immutable version installs must
+never replace same-version resources with different bytes; otherwise show actionable
+reload/unsupported status. Missing or unverifiable evidence stays Unknown. This is
+version/cache parity, not an in-memory attestation protocol (ADR0037). P3.7 owns the
+actual announcement intake/association/freshness; P6 owns production rendering and
+immutable installation. PR54/ADR0038 adds explicit structured existing-session handoff,
+while owner CLI/native qualification and durable report composition remain required.
 
 The Mod announces its session ID, working directory, and Claude version to the
 private app control socket at startup and every 30 seconds, whether bound or not.

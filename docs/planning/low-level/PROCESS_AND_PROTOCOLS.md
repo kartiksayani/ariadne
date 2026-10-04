@@ -400,6 +400,29 @@ development helpers. Require exact Claude2.1.287 SDK engine version and matching
 helper/plugin version before connect/poll. A read-only2.1.289 CLI observation does
 not extend the preserved2.1.287 support baseline.
 
+The actual2.1.287 SDK plugin identity is `{name,root}`, without a version property.
+Use its explicit loaded root and imported immutable descriptor; native qualification
+compares that exact root's manifest/fixed resource checksums against the installed
+bundle and verifies canonical executable/helper/project identities and both version
+commands. It never crawls cache roots or interprets installed files alone as a loaded
+Mod. P3.7 supplies fresh UID-checked scoped announcements; P6 preserves immutable
+version directories and rejects different bytes at the same version. This is reload
+version/cache compatibility, not in-memory code attestation. Missing/unverifiable
+runtime evidence is Unknown; concrete mismatch requires reload/update. See ADR0037.
+
+Native first-party pull submit is Unsupported. Lifecycle remains bridge report→Core;
+normalization retains original captured scope and canonical ISO millisecond timestamps.
+No independent host history is available: reconciliation returns all requested attempts
+unresolved and never treats an old token/absence as no delivery. It is bounded to100
+attempts per request and nonempty markers≤4KiB, with actionable invalid_argument for a
+narrower batch. Presence-only observation has no lifecycle checkpoint. Fresh/stale
+snapshots keep original last-seen times and Unknown execution; a known cleared native
+evidence slot emits Unknown connection/execution/freshness with no last-seen/source
+and native observation time, never Disconnected/Idle or resend permission. Private
+observation identity includes the complete presence snapshot, including freshness.
+Actual composition must re-evaluate persisted unsealed attempts after later Mod report
+commits before admitting claims; P2.2/P3.2/P3.7 still own that durable runtime join.
+
 Native qualified connection owns canonical `connected` evidence: only it supplies
 verified endpoint fingerprint/capabilities under §2. Mod connect validates the
 canonical saved receipt and scoped status/external session ID; reachability alone
