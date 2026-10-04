@@ -132,7 +132,46 @@ impl DeliveryService<'_> {
                     )
                     .into());
                 }
-                let body = super::format::body(session, &input)?;
+                let repair = input
+                    .resolution_history
+                    .iter()
+                    .rev()
+                    .find(|entry| {
+                        input
+                            .attempts
+                            .last()
+                            .is_some_and(|a| entry.attempt_id == a.id)
+                            && matches!(
+                                entry.kind,
+                                ResolutionKind::RetryUnexecuted
+                                    | ResolutionKind::Resend
+                                    | ResolutionKind::RequestResultRepair
+                            )
+                    })
+                    .map(|entry| {
+                        let selected = input.attempts.last().expect("matched retained attempt");
+                        if entry.kind == ResolutionKind::RequestResultRepair {
+                            crate::recovery::original_work(&input, &entry.attempt_id).map(Some)
+                        } else if selected.purpose == AttemptPurpose::ResultRepair {
+                            let original =
+                                selected.repair_for_attempt_id.as_ref().ok_or_else(|| {
+                                    core(
+                                        CoreErrorCode::InvalidRef,
+                                        "Repair preparation lost original work",
+                                    )
+                                })?;
+                            crate::recovery::original_work(&input, original).map(Some)
+                        } else {
+                            Ok(None)
+                        }
+                    })
+                    .transpose()?
+                    .flatten();
+                let body = if let Some(original) = repair {
+                    super::format::repair_body(session, &input, original)?
+                } else {
+                    super::format::body(session, &input)?
+                };
                 let attempt_id = allocate();
                 if occupied(session, &attempt_id) {
                     return Err(core(
@@ -160,8 +199,12 @@ impl DeliveryService<'_> {
                     .number;
                 let attempt = Attempt {
                     id: attempt_id.clone(),
-                    purpose: AttemptPurpose::Work,
-                    repair_for_attempt_id: None,
+                    purpose: if repair.is_some() {
+                        AttemptPurpose::ResultRepair
+                    } else {
+                        AttemptPurpose::Work
+                    },
+                    repair_for_attempt_id: repair.map(|a| a.id.clone()),
                     claim_request_id: request.request_id.clone(),
                     binding_generation: request.generation.clone(),
                     prepared_at: at.clone(),

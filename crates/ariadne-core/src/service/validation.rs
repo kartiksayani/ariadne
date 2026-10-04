@@ -286,7 +286,12 @@ impl OwnerCommand {
                 text(&params.text, 16 * 1024, !option_only)?;
             }
             Self::InputResolve { params, .. } => text(&params.reason, 4096, true)?,
-            Self::TopicContinue { params, .. } => text(&params.summary, 512 * 1024, true)?,
+            Self::TopicContinue { params, .. } => {
+                if params.summary.len() > 16 * 1024 {
+                    return Err(CoreError::new(CoreErrorCode::CapacityExceeded, "The complete continuation summary exceeds the saved 16 KiB owner-input bound", "Use a concise complete summary; full history is copied separately."));
+                }
+                text(&params.summary, 16 * 1024, true)?;
+            }
             Self::PreferencesPatch { params, .. } => {
                 for entry in &params.entries {
                     match entry {
@@ -892,5 +897,72 @@ impl QueryResult {
             size(self, 1024 * 1024)?;
         }
         Ok(())
+    }
+}
+
+/// Validate the original owner request against its canonical saved receipt.
+pub fn validate_owner_receipt(
+    request: &OwnerMutationRequest,
+    receipt: &MutationReceipt,
+) -> Result<(), CoreError> {
+    let matches = match receipt {
+        MutationReceipt::PreferencesPatched(receipt) => {
+            matches!(request.command, OwnerCommand::PreferencesPatch { .. })
+                && receipt.operation_id == *request.command.operation_id()
+        }
+        MutationReceipt::ProjectRegistered(receipt) => {
+            matches!(request.command, OwnerCommand::ProjectRegister { .. })
+                && receipt.operation_id == *request.command.operation_id()
+        }
+        MutationReceipt::Session(receipt) => {
+            receipt.operation_id == *request.command.operation_id()
+                && match (&request.session, &request.command) {
+                    (Some(route), _) => route.session_id == receipt.session_id,
+                    (None, OwnerCommand::BindingConnect { params, .. }) => params
+                        .existing_session_id
+                        .as_ref()
+                        .is_none_or(|id| id == &receipt.session_id),
+                    _ => false,
+                }
+                && matches!(
+                    (&request.command, &receipt.data),
+                    (
+                        OwnerCommand::BindingConnect { .. },
+                        SavedReceiptData::BindingConnect { .. }
+                    ) | (
+                        OwnerCommand::InputSubmit { .. },
+                        SavedReceiptData::InputSubmit { .. }
+                    ) | (
+                        OwnerCommand::InputCancel { .. },
+                        SavedReceiptData::InputCancel { .. }
+                    ) | (
+                        OwnerCommand::InputResolve { .. },
+                        SavedReceiptData::InputResolve { .. }
+                    ) | (
+                        OwnerCommand::TopicArchive { .. } | OwnerCommand::TopicRestore { .. },
+                        SavedReceiptData::TopicLifecycle { .. }
+                    ) | (
+                        OwnerCommand::SessionClose { .. } | OwnerCommand::SessionReopen { .. },
+                        SavedReceiptData::SessionLifecycle { .. }
+                    ) | (
+                        OwnerCommand::BindingPause { .. }
+                            | OwnerCommand::BindingResume { .. }
+                            | OwnerCommand::BindingDisconnect { .. },
+                        SavedReceiptData::BindingState { .. }
+                    ) | (
+                        OwnerCommand::TopicContinue { .. },
+                        SavedReceiptData::Continuation { .. }
+                    )
+                )
+        }
+    };
+    if matches {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorCode::ProtocolConflict,
+            "CoreService returned a receipt for a different operation or route.",
+            "Keep the original operation ID and reconcile the local service.",
+        ))
     }
 }

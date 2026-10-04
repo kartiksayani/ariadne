@@ -11,8 +11,10 @@ use crate::{
     apply::ApplyService,
     bindings::{BindingService, VerifiedHost},
     delivery::DeliveryService,
+    history_actions::HistoryActionService,
     inputs::InputService,
     queries::QueryService,
+    recovery::RecoveryService,
     *,
 };
 use ariadne_domain::models::*;
@@ -104,6 +106,27 @@ impl CoreService for NativeCoreService {
                 .get(owner)
                 .map(QueryResult::PreferencesGet);
         }
+        if let QueryRequest::TopicContinuePreview(request) = &request {
+            let QueryVisibility::Owner(owner) = context.visibility() else {
+                return Err(errors::local(
+                    CoreErrorCode::PermissionDenied,
+                    "Continuation preview is owner-only",
+                ));
+            };
+            let target_owner;
+            let owner = if matches!(owner.scope(), OwnerScope::Registry) {
+                target_owner = OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+                    self.resolve_session(&request.target)?,
+                ));
+                &target_owner
+            } else {
+                owner
+            };
+            return HistoryActionService::new(&self.registry)
+                .preview(owner, request)
+                .map(QueryResult::TopicContinuePreview)
+                .map_err(errors::history);
+        }
         QueryService::new(&self.registry)
             .query(&context, &request)
             .map_err(errors::query)
@@ -138,13 +161,21 @@ impl CoreService for NativeCoreService {
                     .execute(&context, &command, || (self.allocate)(), (self.now)())
                     .map_err(errors::input)
             }
+            OwnerCommand::InputResolve { .. } => RecoveryService::new(&self.registry)
+                .execute(&context, &command, None, (self.now)())
+                .map_err(errors::recovery),
+            OwnerCommand::TopicArchive { .. }
+            | OwnerCommand::TopicRestore { .. }
+            | OwnerCommand::SessionClose { .. }
+            | OwnerCommand::SessionReopen { .. } => HistoryActionService::new(&self.registry)
+                .execute(&context, &command, (self.now)())
+                .map_err(errors::history),
+            OwnerCommand::TopicContinue { .. } => HistoryActionService::new(&self.registry)
+                .continue_topic(&context, &command, || (self.allocate)(), (self.now)())
+                .map_err(errors::history),
             OwnerCommand::PreferencesPatch { .. } => PreferencesService::new(&self.registry)
                 .patch(&context, &command)
                 .map(MutationReceipt::PreferencesPatched),
-            _ => Err(errors::local(
-                CoreErrorCode::Unsupported,
-                "History/recovery owner command is owned by a later product task",
-            )),
         }
     }
 

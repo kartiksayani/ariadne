@@ -39,7 +39,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
     register!(
         Project, Session, SessionState, SessionCounters, Topic, Item, ItemType, ItemStatus,
         ItemOwner, ItemOption, ItemLinkTarget, LinkKind, StatusHistoryEntry, Message,
-        MessageAuthor, MessageKind, Answer, Round, TopicOrigin, ItemOrigin, MessageOrigin,
+        MessageAuthor, MessageKind, Answer, Round, TopicOrigin, ItemOrigin, MessageOrigin, MessageSourceTarget,
         RoundOrigin, EndpointFingerprint, EndpointRef, AdapterConfig, Capability,
         Capabilities, DeliveryMode, Binding, DispatchState, PauseReason, ConnectionState,
         PresenceObservation, ExecutionState, PresenceSource, Freshness, ProcessIdentity,

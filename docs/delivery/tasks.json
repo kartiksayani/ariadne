@@ -703,7 +703,9 @@
         "crates/ariadne-cli/src/demo.rs",
         "crates/ariadne-cli/tests/owner_cli.rs",
         "integrations/rules/**",
-        "tools/xtask/src/rules.rs"
+        "tools/xtask/src/rules.rs",
+        "crates/ariadne-cli/tests/owner_native.rs",
+        "crates/ariadne-cli/tests/demo.rs"
       ],
       "spec": [
         "docs/planning/low-level/API_AND_MCP.md#4-bootstrap-and-tool-instructions",
@@ -945,7 +947,7 @@
       ],
       "acceptance": [
         "Respect CODEX_HOME; resolve permitted socket symlink deliberately, verify final UID/socket and initialize over Unix WebSocket without launching daemon/thread.",
-        "Decode full item history/null/optional fields using private generated types; poll exact thread, preserve correlation and stop on unknown required variants.",
+        "Decode full item history/null/optional fields using private generated types; poll exact thread, preserve correlation and stop on unknown required variants. Native pre-ID selected-thread/root qualification with one initialization-plus-read deadline is implemented in https://github.com/kartiksayani/ariadne/pull/63; consuming composition remains separate.",
         "CLI/daemon mismatch, changed executable identity or unsupported version disables dispatch and retains durable saved inputs."
       ],
       "checks": [
@@ -1033,6 +1035,11 @@
       "id": "P3.8",
       "title": "Implement explicit day-to-day recovery and audited CLI actions",
       "phase": "M3",
+      "implementation_depends_on": [
+        "P2.2",
+        "P2.3",
+        "P0.6"
+      ],
       "depends_on": [
         "P2.2",
         "P3.2",
@@ -1041,8 +1048,8 @@
       "paths": [
         "crates/ariadne-core/src/recovery/**",
         "crates/ariadne-core/tests/recovery.rs",
-        "crates/ariadne-cli/src/recovery.rs",
-        "crates/ariadne-cli/tests/recovery_cli.rs"
+        "crates/ariadne-cli/src/owner/**",
+        "crates/ariadne-cli/tests/owner_native.rs"
       ],
       "spec": [
         "docs/planning/low-level/QUEUES_AND_RECOVERY.md#4-owner-recovery-commands",
@@ -1055,7 +1062,7 @@
       ],
       "checks": [
         "rtk proxy cargo test -p ariadne-core --test recovery",
-        "rtk proxy cargo test -p ariadne-cli --test recovery_cli"
+        "rtk proxy cargo test -p ariadne-cli --test owner_native"
       ],
       "estimate_days": 1.5
     },

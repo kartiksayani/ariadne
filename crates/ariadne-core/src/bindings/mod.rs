@@ -46,6 +46,28 @@ impl<'a> BindingService<'a> {
         ))
     }
 
+    /// Recover an exact saved connect without host verification or ID allocation.
+    /// Refresh the rebuildable index through the same authoritative replay path.
+    pub fn replay_connect(
+        &self,
+        context: &OwnerContext,
+        command: &OwnerCommand,
+    ) -> Result<Option<MutationReceipt>, BindingError> {
+        require_registry(context)?;
+        command.validate_wire()?;
+        let OwnerCommand::BindingConnect { op_id, params, .. } = command else {
+            return Err(invalid("Expected binding connect"));
+        };
+        let normalized = normalized("binding_connect", params)?;
+        self.registry.with_binding_setup(|setup| {
+            let saved = replay(setup, params, op_id, &normalized)?;
+            if saved.is_some() {
+                setup.synchronize(op_id)?;
+            }
+            Ok(saved.map(|saved| MutationReceipt::Session(Box::new(saved))))
+        })
+    }
+
     /// Exact saved replay precedes the read-only verifier and is checked again
     /// after reacquiring locks. IDs are allocated only inside locked persistence.
     pub fn connect(
@@ -74,14 +96,8 @@ impl<'a> BindingService<'a> {
             return Err(invalid("Expected binding connect"));
         };
         let normalized = normalized("binding_connect", params)?;
-        if let Some(saved) = self.registry.with_binding_setup(|setup| {
-            let saved = replay(setup, params, op_id, &normalized)?;
-            if saved.is_some() {
-                setup.synchronize(op_id)?;
-            }
-            Ok::<_, BindingError>(saved)
-        })? {
-            return Ok(MutationReceipt::Session(Box::new(saved)));
+        if let Some(saved) = self.replay_connect(context, command)? {
+            return Ok(saved);
         }
         // No registry, metadata or session lock survives this provider callback.
         let verified = verify(params);
@@ -161,6 +177,7 @@ impl<'a> BindingService<'a> {
                                     &mut occupied,
                                     &mut allocate,
                                     &at,
+                                    op_id,
                                 )
                             },
                         )
@@ -178,7 +195,14 @@ impl<'a> BindingService<'a> {
                             &ReceiptActorScope::Owner {},
                             op_id,
                             &normalized,
-                            connect_receipt(&verified, binding_id, generation),
+                            connect_receipt(
+                                &verified,
+                                binding_id,
+                                generation,
+                                &session.id,
+                                op_id,
+                                session.revision,
+                            )?,
                         )
                         .map_err(BindingError::from)
                 }
@@ -366,13 +390,47 @@ fn connect_receipt(
     host: &VerifiedHost,
     binding_id: UuidV4,
     generation: UuidV4,
-) -> SavedReceiptData {
-    SavedReceiptData::BindingConnect {
+    session_id: &UuidV4,
+    operation_id: &UuidV4,
+    revision: PositiveSafeInteger,
+) -> Result<SavedReceiptData, BindingError> {
+    let setup_instruction = format!("{}\n\nUse these routing IDs for Ariadne commands: binding {}, generation {}.\nUse ariadne read --binding {} --generation {} --view items --json.\nPublish full item replies with ariadne apply --binding {} --generation {} --json-stdin. Use explicit item references; ordinary terminal prose does not update Ariadne.", host.setup_instruction, binding_id.as_str(), generation.as_str(), binding_id.as_str(), generation.as_str(), binding_id.as_str(), generation.as_str());
+    if setup_instruction.trim().is_empty()
+        || setup_instruction.contains('\0')
+        || setup_instruction.len() > 64 * 1024
+    {
+        return Err(core(
+            CoreErrorCode::CapacityExceeded,
+            "Saved setup instructions exceed the canonical 64KiB bound",
+            "Shorten verified instruction content before retrying the same operation.",
+        ));
+    }
+    let data = SavedReceiptData::BindingConnect {
         binding_id,
         generation,
         capabilities: host.capabilities.clone(),
-        setup_instruction: host.setup_instruction.clone(),
+        setup_instruction,
+    };
+    let response = SuccessEnvelope {
+        api_version: SchemaVersion::new(1).expect("literal"),
+        ok: SuccessFlag,
+        data: MutationReceipt::Session(Box::new(SavedReceipt {
+            operation_id: operation_id.clone(),
+            session_id: session_id.clone(),
+            revision,
+            data: data.clone(),
+        })),
+    };
+    let bytes = serde_json::to_vec(&response)
+        .map_err(|_| invalid("Cannot serialize saved binding receipt"))?;
+    if bytes.len() > 1024 * 1024 {
+        return Err(core(
+            CoreErrorCode::CapacityExceeded,
+            "Binding receipt exceeds the canonical 1MiB response bound",
+            "Shorten verified provider facts before retrying the same operation.",
+        ));
     }
+    Ok(data)
 }
 fn unresolved(session: &Session) -> bool {
     session.inputs.0.values().any(|input| {
@@ -458,6 +516,7 @@ fn connect_existing(
     occupied: &mut BTreeSet<UuidV4>,
     allocate: &mut impl FnMut() -> UuidV4,
     at: &UtcMillis,
+    operation_id: &UuidV4,
 ) -> Result<SavedReceiptData, BindingError> {
     if session.state != SessionState::Active {
         return Err(core(
@@ -546,10 +605,47 @@ fn connect_existing(
         .expect("validated persisted message numbers");
         session.bindings.0.insert(binding_id.clone(), binding);
         session.active_binding_id = Some(binding_id.clone());
+        if let Some(retired) = &selected {
+            for item in session.items.0.values_mut() {
+                let owner_matches = matches!(&item.owner,
+                    ItemOwner::Agent { binding_id } if binding_id == retired);
+                let recipient_matches = item.recipient_binding_id.as_ref() == Some(retired);
+                if owner_matches || recipient_matches {
+                    if owner_matches {
+                        item.owner = ItemOwner::Agent {
+                            binding_id: binding_id.clone(),
+                        };
+                    }
+                    if recipient_matches {
+                        item.recipient_binding_id = Some(binding_id.clone());
+                    }
+                    item.revision = item
+                        .revision
+                        .value()
+                        .checked_add(1)
+                        .and_then(|n| PositiveSafeInteger::new(n).ok())
+                        .ok_or(ariadne_store::session::StoreError::CounterOverflow)?;
+                    item.updated_at = at.clone();
+                }
+            }
+        }
         binding_id
     };
     session.updated_at = at.clone();
-    Ok(connect_receipt(host, binding_id, generation))
+    let revision = session
+        .revision
+        .value()
+        .checked_add(1)
+        .and_then(|n| PositiveSafeInteger::new(n).ok())
+        .ok_or(ariadne_store::session::StoreError::CounterOverflow)?;
+    connect_receipt(
+        host,
+        binding_id,
+        generation,
+        &session.id,
+        operation_id,
+        revision,
+    )
 }
 fn core(code: CoreErrorCode, message: &str, hint: &str) -> BindingError {
     CoreError::new(code, message, hint).into()

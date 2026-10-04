@@ -34,9 +34,21 @@ pub struct RoundOrigin {
     pub source_revision: PositiveSafeInteger,
 }
 
+/// Historical direct route; these qualified IDs never provide local routing or authority.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct MessageSourceTarget {
+    pub project_id: UuidV4,
+    pub session_id: UuidV4,
+    pub topic_id: Option<UuidV4>,
+    pub item_id: Option<ItemRef>,
+    pub round_id: Option<UuidV4>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct MessageOrigin {
+    pub source_target: MessageSourceTarget,
     pub project_id: UuidV4,
     pub session_id: UuidV4,
     pub topic_id: UuidV4,

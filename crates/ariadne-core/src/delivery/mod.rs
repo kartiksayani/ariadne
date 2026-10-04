@@ -2,7 +2,7 @@
 mod claim;
 mod error;
 mod expiry;
-mod format;
+pub(crate) mod format;
 mod report;
 use crate::*;
 use ariadne_store::{registry::Registry, session::Store};
