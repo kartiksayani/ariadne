@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ariadne-adapter-claude = { path = "../ariadne-adapter-claude" }
+ariadne-adapter-codex = { path = "../ariadne-adapter-codex" }
 ariadne-runtime = { path = "../ariadne-runtime" }
 ariadne-core = { path = "../ariadne-core" }
 ariadne-domain = { path = "../ariadne-domain" }
@@ -16,6 +18,7 @@ chrono.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+tungstenite = { version = "=0.29.0", default-features = false, features = ["handshake"] }
 serde.workspace = true
 ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
 tempfile.workspace = true

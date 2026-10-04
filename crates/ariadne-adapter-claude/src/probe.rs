@@ -41,6 +41,11 @@ pub struct ClaudeOptions {
     pub app_version: String,
 }
 impl ClaudeOptions {
+    /// Read only the selected CLI version; this does not qualify a loaded Mod.
+    pub fn read_host_version(&self, deadline: Instant) -> Result<String, AdapterError> {
+        absolute(&self.executable)?;
+        version(self, deadline.min(Instant::now() + Duration::from_secs(5)))
+    }
     /// Blocking trusted native qualification of a UID-checked SDK announcement.
     /// Offload outside Registry/Store locks, then recheck candidate/association before
     /// publishing. The original receipt time is retained; this creates no heartbeat.
