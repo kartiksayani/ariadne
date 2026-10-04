@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { BindingConnectParams, ItemRoute, MutationReceipt, NavigationSelection, OwnerMutationRequest,
-  PreferencesPatchEntry, PreferencesSnapshot, ProjectListResult, SessionListResult, SessionPreferences, SessionRef } from '../../generated/core';
+  PreferencesPatchEntry, PreferencesSnapshot, ProjectListResult, SessionListResult, SessionPreferences, SessionRef, Theme } from '../../generated/core';
 import type { RevealedItem } from '../../data/routes';
 import { RegisteredRoutes } from '../../data/routes';
 import { immutable, OpenSessions, type Immutable, type SessionStore } from '../../data/session-store';
@@ -169,6 +169,13 @@ export class NavigationStore {
       hint: 'Reload the view before choosing this edit again.', retryable: false, field_errors: [], current_revision: preferences.revision }) });
     await this.refresh();
     return null;
+  }
+  async saveTheme(theme: Theme, expectedPreferencesRevision: number): Promise<boolean> {
+    try {
+      const preferences = await this.editingPreferences(expectedPreferencesRevision);
+      if (!preferences || this.stopped || this.pending) return false;
+      return await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, theme } }]);
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   async saveSessionView(view: SessionPreferences, expectedPreferencesRevision: number): Promise<boolean> {
     try {
