@@ -449,20 +449,25 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
         .unwrap();
 }
 
+type DaemonBarrier = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+struct ReleaseObservation(std::sync::mpsc::Sender<()>);
+impl Drop for ReleaseObservation {
+    fn drop(&mut self) {
+        // Unblock provider IO even if an assertion unwinds before normal drain.
+        let _ = self.0.send(());
+    }
+}
 struct CodexDaemon {
     _home: tempfile::TempDir,
     options: ariadne_adapter_codex::CodexOptions,
     endpoint: EndpointRef,
     calls: Arc<Mutex<Vec<String>>>,
+    observation_pause: Arc<Mutex<Option<DaemonBarrier>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 impl CodexDaemon {
-    fn new(
-        root: PathBuf,
-        wrong_final_root: bool,
-        final_read: Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>,
-    ) -> Self {
+    fn new(root: PathBuf, wrong_final_root: bool, final_read: Option<DaemonBarrier>) -> Self {
         use std::os::unix::net::UnixListener;
         let home = home();
         let executable = home.path().join("codex");
@@ -473,6 +478,8 @@ impl CodexDaemon {
         listener.set_nonblocking(true).unwrap();
         let calls = Arc::new(Mutex::new(Vec::new()));
         let observed = calls.clone();
+        let observation_pause = Arc::new(Mutex::new(None::<DaemonBarrier>));
+        let pause = observation_pause.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopped = stop.clone();
         let worker = std::thread::spawn(move || {
@@ -503,6 +510,13 @@ impl CodexDaemon {
                 observed.lock().unwrap().push(method.to_owned());
                 if method == "initialized" {
                     continue;
+                }
+                if method == "thread/read" {
+                    let barrier = pause.lock().unwrap().take();
+                    if let Some((entered, release)) = barrier {
+                        entered.send(()).unwrap();
+                        release.recv_timeout(Duration::from_secs(3)).unwrap();
+                    }
                 }
                 let fixture = match method {
                     "initialize" => "initialize-response.json",
@@ -551,9 +565,21 @@ impl CodexDaemon {
                 path: socket.to_str().unwrap().into(),
             },
             calls,
+            observation_pause,
             stop,
             worker: Some(worker),
         }
+    }
+    fn pause_observation(&self) -> (std::sync::mpsc::Receiver<()>, ReleaseObservation) {
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        assert!(self
+            .observation_pause
+            .lock()
+            .unwrap()
+            .replace((entered, released))
+            .is_none());
+        (waiting, ReleaseObservation(release))
     }
 }
 impl Drop for CodexDaemon {
@@ -630,13 +656,19 @@ fn codex_activation(case: CodexCase) {
     let routes = ControlRoutes::new();
     let outcomes = Arc::new(Mutex::new(Vec::new()));
     let reported = outcomes.clone();
+    let (worker_stopped, stopped_worker) = std::sync::mpsc::channel();
     let activation = NativeActivation::new(
         core.clone(),
         factory,
         owner.clone(),
         routes.clone(),
         rt.handle().clone(),
-        Arc::new(move |outcome| reported.lock().unwrap().push(outcome)),
+        Arc::new(move |outcome| {
+            if matches!(&outcome, ActivationOutcome::Stopped { .. }) {
+                worker_stopped.send(()).unwrap();
+            }
+            reported.lock().unwrap().push(outcome);
+        }),
     );
     let server = ControlServer::bind_shared(owner.clone(), core.clone(), vec![])
         .unwrap()
@@ -748,6 +780,11 @@ fn codex_activation(case: CodexCase) {
             ControlResult::Claim(None)
         );
         if case == CodexCase::StopActive {
+            let (observing, release_observation) = daemon.pause_observation();
+            observing.recv_timeout(Duration::from_secs(3)).unwrap();
+            // The serial supervisor observes only after its previous claim has
+            // finished. Pause here so the fence has no pre-admitted Core claim
+            // that could legitimately prepare the subsequently created input.
             activation.stop_admission().unwrap();
             assert_eq!(
                 rt.block_on(call(home.path().into(), claim))
@@ -822,20 +859,29 @@ fn codex_activation(case: CodexCase) {
             let SavedReceiptData::InputSubmit { input_id, .. } = submitted.data else {
                 panic!("input")
             };
-            std::thread::sleep(Duration::from_millis(600));
-            let persisted = read(&core, project.project_id.clone(), saved.session_id.clone());
-            assert!(persisted.inputs.0[&input_id].attempts.is_empty());
-            assert_eq!(persisted.bindings.0[binding_id].generation, *generation);
-            assert!(!daemon
-                .calls
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|method| method == "thread/queue/add"));
+            let assert_fenced = || {
+                let persisted = read(&core, project.project_id.clone(), saved.session_id.clone());
+                assert!(persisted.inputs.0[&input_id].attempts.is_empty());
+                assert_eq!(persisted.bindings.0[binding_id].generation, *generation);
+                assert!(!daemon
+                    .calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|method| method == "thread/queue/add"));
+            };
+            assert_fenced();
             assert!(
                 DesktopOwner::acquire(home.path()).is_err(),
                 "fencing cannot release the owner lease"
             );
+            drop(release_observation);
+            // The synchronous fence itself must stop the worker. Waiting for
+            // its outcome before shutdown avoids letting shutdown hide a fence
+            // that left the active supervisor admitting new claims.
+            stopped_worker.recv_timeout(Duration::from_secs(3)).unwrap();
+            rt.block_on(activation.shutdown()).unwrap();
+            assert_fenced();
         }
     }
     assert_eq!(
