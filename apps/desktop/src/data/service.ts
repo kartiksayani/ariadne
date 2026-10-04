@@ -44,7 +44,18 @@ export interface DesktopTransport {
 }
 const tauriTransport: DesktopTransport = {
   invoke: (command, args) => invoke(command, args),
-  listen: (event, receive) => listen<HintPayloads[typeof event]>(event, (message) => receive(message.payload)),
+  async listen(event, receive) {
+    const unsubscribe = await listen<HintPayloads[typeof event]>(event, (message) => receive(message.payload));
+    if (event === 'ariadne://route') {
+      try {
+        await invoke('route_ready');
+      } catch (error: unknown) {
+        unsubscribe();
+        throw error;
+      }
+    }
+    return unsubscribe;
+  },
 };
 
 function validEnvelope(envelope: QueryEnvelope | MutationEnvelope): void {
