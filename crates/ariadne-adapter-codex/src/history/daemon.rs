@@ -156,19 +156,29 @@ impl CodexDaemonReader {
     /// One loaded page plus at most twenty metadata joins, under one ten-second deadline.
     /// Caller retains the cursor and schedules more pages while the connection UI is open.
     pub fn discover(&mut self, cursor: Option<String>) -> Result<DiscoveryPage, AdapterError> {
-        let result = self.discover_inner(cursor);
+        self.discover_before(cursor, Instant::now() + Duration::from_secs(10))
+    }
+    pub(crate) fn discover_before(
+        &mut self,
+        cursor: Option<String>,
+        deadline: Instant,
+    ) -> Result<DiscoveryPage, AdapterError> {
+        let result = self.discover_inner(cursor, deadline);
         // Unsupported discovery leaves manual exact-thread reading available.
         if result.as_ref().is_err_and(|e| e.code == Code::Unsupported) {
             return result;
         }
         self.fence(result)
     }
-    fn discover_inner(&mut self, cursor: Option<String>) -> Result<DiscoveryPage, AdapterError> {
+    fn discover_inner(
+        &mut self,
+        cursor: Option<String>,
+        deadline: Instant,
+    ) -> Result<DiscoveryPage, AdapterError> {
         self.verify_identity()?;
         if let Some(cursor) = &cursor {
             bounded_identifier(cursor)?;
         }
-        let deadline = Instant::now() + Duration::from_secs(10);
         let page: wire::thread_loaded_list_response::ThreadLoadedListResponse = self.rpc.request(
             "thread/loaded/list",
             &wire::thread_loaded_list_params::ThreadLoadedListParams {

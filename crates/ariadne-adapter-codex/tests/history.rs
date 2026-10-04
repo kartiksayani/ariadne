@@ -1,5 +1,5 @@
 //! Fixture transport tests: only a local Unix socket server and a --version stub run.
-use ariadne_adapter_codex::{CodexDaemonReader, CodexHistoryClient, CodexOptions};
+use ariadne_adapter_codex::{CodexDaemonReader, CodexDiscovery, CodexHistoryClient, CodexOptions};
 use ariadne_agent_protocol::{
     AdapterErrorCode as Code, AttemptEvidenceRequest, ConnectRequest, EventPayload,
     ReconcileRequest, Sha256, UtcMillis, UuidV4,
@@ -20,7 +20,7 @@ use std::{
         Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tungstenite::{
     protocol::frame::{
@@ -1092,6 +1092,42 @@ fn unbound_discovery_precedes_explicit_binding_and_reuses_initialization() {
         1
     );
     assert!(client.presence(at()).is_ok());
+}
+#[test]
+fn scheduled_discovery_uses_admission_deadline_and_reuses_only_verified_reader() {
+    let harness = Harness::standard();
+    let mut discovery = CodexDiscovery::new(harness.options(), harness.request().endpoint).unwrap();
+    let error = discovery.page(None, Instant::now()).unwrap_err();
+    assert_eq!(error.code, Code::HostUnreachable);
+    assert!(harness.methods().is_empty());
+    for _ in 0..2 {
+        let page = discovery
+            .page(None, Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(page.candidates[0].external_session_id, THREAD);
+    }
+    assert_eq!(
+        harness.methods(),
+        [
+            "initialize",
+            "initialized",
+            "thread/loaded/list",
+            "thread/read",
+            "thread/loaded/list",
+            "thread/read",
+        ]
+    );
+    // Reuse still checks the exact executable identity before reading metadata.
+    fs::write(
+        &harness.executable,
+        "#!/bin/sh\nprintf 'codex-cli 0.160.0\\n' # changed\n",
+    )
+    .unwrap();
+    let error = discovery
+        .page(None, Instant::now() + Duration::from_secs(2))
+        .unwrap_err();
+    assert_eq!(error.code, Code::UnsupportedHostVersion);
+    assert_eq!(harness.methods().len(), 6);
 }
 #[test]
 fn unbound_reader_rechecks_identity_and_explicit_endpoint_when_binding() {
