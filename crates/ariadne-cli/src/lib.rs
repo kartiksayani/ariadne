@@ -3,5 +3,6 @@ pub mod agent;
 pub mod bridge;
 pub mod demo;
 pub mod mcp;
+pub mod open;
 pub mod output;
 pub mod owner;
