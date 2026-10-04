@@ -1,6 +1,6 @@
 # Ariadne handoff
 
-Updated 2026-10-04, 21:32 UTC. Owner requests autonomous delivery; delegates use
+Updated 2026-10-04, 21:41 UTC. Owner requests autonomous delivery; delegates use
 only Sol 6.1 High. Ten subagent slots are available; four concurrent agents were
 verified. Current focus is two product workers, not filling every slot.
 
@@ -16,13 +16,15 @@ verified. Current focus is two product workers, not filling every slot.
 | Maintainer | `.worktrees/resume-integration` / `maintenance/resume-integration` | Local `6fbbe2d` replaces a helper in an excluded DTO with the existing standard predicate; 36 focused tests and generated contracts pass. One unpushed commit awaits current CI evidence to batch any further fixes |
 | `prove_three_binding_fifo` | `.worktrees/three-binding-fifo` / `task/three-binding-fifo` | FIFO and real supervisor stop/restart proof pushed; no unpushed commits; awaiting83, then continues P3.2 → P4.1 → P4.4 |
 | Maintainer | `.worktrees/delivery-focus` / `maintenance/delivery-focus` | ADR0060, ORCHESTRATOR rules and this handoff; published checkpoint queued for84, no separate process PR |
-| Maintainer | `.worktrees/claude-installed-join` / `task/claude-installed-join` | Local `7c86b86` settles the canonical installed-helper join contract; one unpushed documentation commit, implementation waits for83 |
+| `claude_installed_join` | `.worktrees/claude-installed-join` / `task/claude-installed-join` | Implementing actual installed Mod/CLI/Core join; root contract `7c86b86` is one unpushed documentation commit. Existing merged implementation prerequisites permit this work while83 validates |
 
 Primary worker owns `crates/ariadne-runtime/tests/supervisor_native_fifo.rs` and
 exclusively uses `.worktrees/native-provider-activation/target` for focused checks.
-Second worker will own P3.3 after83. Claude qualification scoping is finished; no
-other module is staffed. `audit_pr83_evidence` independently checks CI artifacts
-and merge readiness; no coding worker is currently active. Shared native files, manifests, Tauri configuration and
+Second worker owns P3.3 Claude adapter capability condition and consuming fixtures,
+with exclusive `.worktrees/binding-connect-relay/target` cache. No other module is
+staffed. `audit_pr83_evidence` checks CI artifacts; `review_pr83_fix_delta` cleared
+the local repair with 36 independent tests, awaiting pushed-head verification.
+Shared native files, manifests, Tauri configuration and
 generator registration remain with the maintainer until explicitly reassigned.
 
 **Next three steps**
@@ -31,10 +33,11 @@ generator registration remain with the maintainer until explicitly reassigned.
    other actual failures, then exact-head delta review and full CI. Squash merge
    and check main. Close only P2.4 and P3.1 with actual evidence.
 2. Finish P3.2 real Core/Store stop/restart proof in84; integrate actual83 main.
-   Then keep this worker on P4.1 native five-input/relaunch and P4.4 tree acceptance.
-   Start the second worker on the Claude join after83.
+   P3.2 acceptance audit confirms no remaining behavior gap after83/84 merge.
+   Then keep this worker on P4.1 native five-input/relaunch and P4.4 tree acceptance;
+   continue the independent Claude join stream. Full P3.3 acceptance still waits83.
 3. Replace this handoff and update catalogue at checkpoints. Root `tasks.json` and
-   `roadmap.html` overlays are intentional: no coding agent is currently active;
+   `roadmap.html` overlays are intentional: only P3.3 is currently active;
    18 amber tasks are partial. Preserve cleared flags when main advances; PR83's
    seven older active flags are stale. Set flags when implementation resumes.
 

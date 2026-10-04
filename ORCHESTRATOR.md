@@ -17,8 +17,10 @@ worktrees/branches/unpushed work, and next three steps. Link CI evidence rather 
 copying logs. Historical records stay intact. Check actual GitHub state for every
 open PR before scheduling.
 
-After the first composition merge, prioritize P3.2 → P4.1 → P4.4 with one continuing
-implementer and P3.3 with a second. Follow [ADR-0060](docs/adr/ADR-0060-own-desktop-integration-seams.md)
+Prioritize P3.2 → P4.1 → P4.4 with one continuing implementer and P3.3 with a
+second. A stream whose declared implementation prerequisites are already merged
+may progress while composition CI runs; full acceptance retains its original
+dependencies. Follow [ADR-0060](docs/adr/ADR-0060-own-desktop-integration-seams.md)
 for shared ownership. Remaining changes land vertically on merged main, including
 real Core/native acceptance where appropriate. Do not defer wiring to another
 combining PR. Prefer units one PR can finish.
