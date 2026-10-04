@@ -1,34 +1,52 @@
-:root {
-  font-family: system-ui, sans-serif;
-  color: #e8e5dc;
-  background: #191b1d;
-}
+@import url("/fonts/inter.css");
+@import url("/icons/phosphor.css");
+@import url("/styles/design-tokens.css");
 
-main {
-  max-width: 42rem;
-  margin: 3rem auto;
-  padding: 1rem;
-}
-
-label {
-  display: block;
-  margin: 1rem 0;
-}
-
-input {
-  display: block;
+html, body, #root {
   width: 100%;
-  box-sizing: border-box;
-  padding: 0.5rem;
+  height: 100%;
+  margin: 0;
 }
 
-button {
-  padding: 0.75rem;
-  cursor: pointer;
+body {
+  color: var(--color-text);
+  background: var(--a-bg);
+  font-family: var(--font-body);
 }
 
-pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+.product-app .app-waiting {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
 }
-[role="alert"] { color: #ffb3a7; }
+
+.product-app .app-waiting > .ref-waiting {
+  flex: 1;
+  min-height: 0;
+}
+
+.product-app .app-session > .lifecycle-binding,
+.product-app .app-session > .lifecycle-recovery {
+  margin-bottom: 16px;
+}
+
+.product-app .ref-detail-scroll {
+  padding: 0;
+}
+
+.product-app .item-history {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  border: 0;
+  overflow: visible;
+}
+
+.product-app .ref-detail-scroll .owner-input {
+  padding: 16px;
+}
+
+.product-app .message-history-rail {
+  border-left: 1px solid var(--color-divider);
+}
