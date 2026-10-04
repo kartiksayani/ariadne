@@ -127,6 +127,15 @@ fn read(core: &NativeCoreService, project: UuidV4, session: UuidV4) -> Session {
 
 #[test]
 fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
+    claude_activation(false);
+}
+
+#[test]
+fn claude_session_end_rejects_active_shortcuts_and_activation_after_restart() {
+    claude_activation(true);
+}
+
+fn claude_activation(terminal: bool) {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(3)
         .enable_all()
@@ -412,6 +421,36 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
             .generation,
         *generation
     );
+    if terminal {
+        let ended = ariadne_agent_protocol::NormalizedEvent {
+            event_id: ariadne_agent_protocol::claude_session_end_event_id(binding_id, generation),
+            binding_id: binding_id.clone(),
+            generation: generation.clone(),
+            input_id: None,
+            attempt_id: None,
+            host_turn_id: None,
+            observed_at: at(),
+            event: ariadne_agent_protocol::EventPayload::Disconnected { reason: None },
+        };
+        let context = AdapterContext::from_trusted_entrypoint(
+            RegisteredSession::from_trusted_entrypoint(
+                project.project_id.clone(),
+                session_id.clone(),
+            ),
+            binding_id.clone(),
+            generation.clone(),
+            None,
+        );
+        core.report(context, ended).unwrap();
+        for result in [
+            activation
+                .activate_registered_before(scope.clone(), Instant::now() + Duration::from_secs(2)),
+            activation.announce_before(scope.clone(), Instant::now() + Duration::from_secs(2)),
+            activation.resolve_announcement(&scope).map(|_| ()),
+        ] {
+            assert_eq!(result.unwrap_err().code, CoreErrorCode::HostUnreachable);
+        }
+    }
     rt.block_on(activation.shutdown()).unwrap();
     stop.send(()).unwrap();
     rt.block_on(task).unwrap().unwrap();
@@ -419,7 +458,11 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
     assert_eq!(after.bindings.0[binding_id].generation, *generation);
     assert_eq!(
         after.bindings.0[binding_id].connection_state,
-        ConnectionState::Connected
+        if terminal {
+            ConnectionState::Disconnected
+        } else {
+            ConnectionState::Connected
+        }
     );
     assert!(outcomes.lock().unwrap().iter().all(|outcome| matches!(outcome, ActivationOutcome::Stopped { exit: Ok(exit), .. } if exit.error.is_none() && exit.pending.is_none())));
     drop(activation);
@@ -447,6 +490,66 @@ fn claude_receipt_precedes_bound_activation_and_real_dispatch_authority() {
         .unwrap()
         .validate_for(&context, &event)
         .unwrap();
+    if terminal {
+        // Reopen real persisted Core/Store and construct a fresh activation. The
+        // end receipt is authoritative before any host qualification or route.
+        let allocated = facts_ids.clone();
+        let reopened = Arc::new(NativeCoreService::new(
+            AgentResolver::open_data_directory(home.path()).unwrap(),
+            move || id(allocated.fetch_add(1, Ordering::SeqCst)),
+            at,
+            |_| panic!("restart cannot qualify terminal generation"),
+        ));
+        let native = reopened.clone();
+        let roots: Arc<ProjectRootResolver> =
+            Arc::new(move |project| Ok(native.registry().resolve_project(project)?.root));
+        let discovery = Discovery::new(
+            Arc::new(at),
+            Some(registered_announcement_resolver(
+                reopened.clone(),
+                roots.clone(),
+            )),
+        );
+        let allocated = facts_ids.clone();
+        let factory = ProviderFactory::new(
+            roots,
+            discovery,
+            Some(files.options.clone()),
+            None,
+            NativeFacts {
+                next_id: Arc::new(move || id(allocated.fetch_add(1, Ordering::SeqCst))),
+                now: Arc::new(at),
+            },
+            ProviderInstructions {
+                claude: "Retain terminal scope.".into(),
+                codex: "Unused".into(),
+            },
+        );
+        let routes = ControlRoutes::new();
+        let restarted = NativeActivation::new(
+            reopened,
+            factory,
+            Arc::new(DesktopOwner::acquire(home.path()).unwrap()),
+            routes,
+            rt.handle().clone(),
+            Arc::new(|_| {}),
+        );
+        assert_eq!(
+            restarted
+                .activate_registered_before(scope.clone(), Instant::now() + Duration::from_secs(2))
+                .unwrap_err()
+                .code,
+            CoreErrorCode::HostUnreachable
+        );
+        assert_eq!(
+            restarted
+                .announce_before(scope, Instant::now() + Duration::from_secs(2))
+                .unwrap_err()
+                .code,
+            CoreErrorCode::HostUnreachable
+        );
+        rt.block_on(restarted.shutdown()).unwrap();
+    }
 }
 
 type DaemonBarrier = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
