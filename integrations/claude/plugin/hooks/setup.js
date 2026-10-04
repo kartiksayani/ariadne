@@ -52,8 +52,15 @@ export function setup(helperPath) {
       '--request-id',globalThis.crypto.randomUUID()],{timeoutMs:5000}));
     return bindingStatus(value,selected);
   }
-  async function connect($) {
+  async function connect($, requestedSessionId = null) {
+    if (requestedSessionId !== null && !uuid(requestedSessionId)) {
+      throw new ModError('Choose an explicit canonical Ariadne session UUID, or omit it to connect normally.');
+    }
     if (disconnectRequest) throw new ModError('An original disconnect operation is pending; retry disconnect with its retained operation ID before reconnecting.');
+    const targetSessionId = requestedSessionId ?? binding?.session.session_id ?? null;
+    if (connectRequest && connectRequest.command.params.existing_session_id !== targetSessionId) {
+      throw new ModError('The original connect operation targets a different session; retain its operation ID and retry that exact target.');
+    }
     const externalSession = await $.session.id();
     const cwd = await $.session.cwd();
     if (!bounded(externalSession) || !bounded(cwd) || !cwd.startsWith('/')) {
@@ -76,7 +83,7 @@ export function setup(helperPath) {
     connectRequest ??= {session:null,command:command('binding_connect',{
       project_id:projectId,adapter_id:'claude_code_mod',external_session_id:externalSession,
       endpoint:{kind:'local_bridge',name:'claude-mod'},configuration:{namespace:'claude_code_mod',values:{}},
-      existing_session_id:binding?.session.session_id ?? null,
+      existing_session_id:targetSessionId,
     })};
     const receipt = await owner($,'binding','connect',connectRequest);
     const data = receipt?.data;
@@ -86,6 +93,9 @@ export function setup(helperPath) {
       || data.kind !== 'binding_connect' || !uuid(data.binding_id) || !uuid(data.generation)
       || !capabilities(data.capabilities) || !bounded(data.setup_instruction)) {
       throw new ModError('Binding connect did not return its exact canonical saved receipt; retain the original operation ID.');
+    }
+    if (targetSessionId !== null && receipt.session_id !== targetSessionId) {
+      throw new ModError('Binding receipt differs from the explicit Ariadne session; retain the original operation ID and recover that target in the app.');
     }
     const selected = {binding_id:data.binding_id,generation:data.generation,external_session_id:externalSession,
       session:{project_id:projectId,session_id:receipt.session_id}};

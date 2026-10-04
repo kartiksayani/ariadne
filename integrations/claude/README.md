@@ -23,6 +23,18 @@ then validates the saved receipt and scoped `bridge connection-status` projectio
 Native qualification owns canonical `Connected` evidence. The Mod never invents
 endpoint fingerprints or treats control reachability as provider readiness.
 
+Use `/ariadne-connect <session-id>` in a fresh conversation to explicitly attach
+an existing active Ariadne session in the registered project. Its previous binding
+must be paused/disconnected with no queued, in-flight or needs-attention input.
+No argument retains normal new-session/current-local-reconnect behavior. An
+uncertain operation retains its exact target/body/ID; do not switch targets while
+it is pending. Matching receipts and scoped status precede a new local claim loop.
+The command appends human guidance to read and summarize the issued structured
+history, reuse existing items and respect cancelled work, preserving the canonical
+setup instruction. This transfers neither old host memory nor a transcript, and
+does not automatically submit a prompt. Native binding history issuance and query
+tests cover the captured ceiling; actual helper/Core composition remains required.
+
 Claims use the original exact persisted prompt; the marker is its first line and
 SHA-256 covers all UTF8 bytes. Submission is detached and callbacks capture the
 original attempt and binding generation. The Mod retains exact pending lifecycle
