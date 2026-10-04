@@ -842,7 +842,8 @@
       ],
       "paths": [
         "crates/ariadne-runtime/src/supervisor/**",
-        "crates/ariadne-runtime/tests/supervisor.rs"
+        "crates/ariadne-runtime/tests/supervisor.rs",
+        "crates/ariadne-runtime/tests/supervisor_native_fifo.rs"
       ],
       "spec": [
         "docs/planning/low-level/QUEUES_AND_RECOVERY.md#5-desktop-shutdown-and-worker-recovery",
@@ -855,7 +856,7 @@
         "Quit stops own dispatch/helpers and releases leases without changing generation or killing hosts; independent CLI/MCP remains usable and startup reconciles before dispatch."
       ],
       "checks": [
-        "rtk proxy cargo test -p ariadne-runtime --test supervisor"
+        "rtk proxy cargo test -p ariadne-runtime --test supervisor --test supervisor_native_fifo"
       ],
       "estimate_days": 1.5,
       "implementation_depends_on": [

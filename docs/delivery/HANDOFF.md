@@ -1,6 +1,6 @@
 # Ariadne handoff
 
-Updated 2026-10-04, 20:52 UTC. Owner requests autonomous delivery; delegates use
+Updated 2026-10-04, 20:58 UTC. Owner requests autonomous delivery; delegates use
 only Sol 6.1 High. Ten subagent slots are available; four concurrent agents were
 verified. Current focus is two product workers, not filling every slot.
 
@@ -9,12 +9,12 @@ verified. Current focus is two product workers, not filling every slot.
 | Open PR | Head / base | CI and review |
 | --- | --- | --- |
 | [83](https://github.com/kartiksayani/ariadne/pull/83) | `6c48b93` / `b41829c` | [CI running](https://github.com/kartiksayani/ariadne/actions/runs/37233593098); [independent delta clear](https://github.com/kartiksayani/ariadne/pull/83#pullrequestreview-5408162868); prior build passed, test-closure lifetime and focus-guard Clippy failures now fixed |
-| [84, draft](https://github.com/kartiksayani/ariadne/pull/84) | `be4ac3c` / `b41829c` | [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37233024665); [independent review clear](https://github.com/kartiksayani/ariadne/pull/84#pullrequestreview-5408134002); independently repeated 22 tests and Clippy; acceptance awaits83 |
+| [84, draft](https://github.com/kartiksayani/ariadne/pull/84) | `3f0d813` / `b41829c` | [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37233989440); [independent delta clear](https://github.com/kartiksayani/ariadne/pull/84#pullrequestreview-5408186250); independently repeated 23 tests and Clippy; acceptance awaits83 |
 
 | Owner | Worktree / branch | Current work |
 | --- | --- | --- |
 | Maintainer | `.worktrees/resume-integration` / `maintenance/resume-integration` | PR83 fully pushed; awaiting CI and evidence audit |
-| `prove_three_binding_fifo` | `.worktrees/three-binding-fifo` / `task/three-binding-fifo` | FIFO checkpoint pushed; now adding real supervisor stop/restart proof in the same test file; continues P3.2 → P4.1 → P4.4 |
+| `prove_three_binding_fifo` | `.worktrees/three-binding-fifo` / `task/three-binding-fifo` | FIFO and real supervisor stop/restart proof pushed; no unpushed commits; awaiting83, then continues P3.2 → P4.1 → P4.4 |
 | Maintainer | `.worktrees/delivery-focus` / `maintenance/delivery-focus` | ADR0060, ORCHESTRATOR rules and this handoff; published checkpoint queued for84, no separate process PR |
 
 Primary worker owns `crates/ariadne-runtime/tests/supervisor_native_fifo.rs` and
