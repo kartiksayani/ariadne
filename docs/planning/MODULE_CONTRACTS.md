@@ -113,6 +113,17 @@ transaction: it supplies an optional fact, while Core owns replay and current
 binding guards. No renderer-supplied presence is trusted and no new wire DTO,
 second presence cache, provider call or automatic resend is introduced.
 
+Instance and binding leases retain physical locks until their final owning
+reference is dropped, including references held by already admitted work. The
+acquiring process explicitly unlocks at that final drop before closing its file:
+a concurrent fork may temporarily retain an inherited descriptor despite
+close-on-exec. An inherited descriptor does not give the child ownership. A child
+dropping an inherited Rust object must only close its copy, never unlock the
+parent's still-live lease; compare the acquiring process ID before explicit
+unlock. A shared binding lease continues to retain the instance owner until its
+own final drop. This preserves drain order and introduces no early release or
+new dispatch authority.
+
 Ordinary App assembly reuses NavigationWorkspace and ReferenceWorkspace with
 optional Waiting and rail content, the existing detail slot, and explicit
 query/view/rail/theme callbacks. Default reference-gallery output remains stable.
