@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { FocusEventHandler, KeyboardEventHandler, ReactNode, Ref } from 'react';
 import { StatusBadge, type Status } from './StatusBadge';
 import '../../styles/reference.css';
 
@@ -24,15 +24,19 @@ export type TreeRowProps = {
   onToggle?: () => void;
   onEnter?: () => void;
   onLeave?: () => void;
+  rowRef?: Ref<HTMLDivElement>;
+  tabIndex?: number;
+  onFocus?: FocusEventHandler<HTMLDivElement>;
+  onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
 };
 
-export function TreeRow({ item, depth = 1, selected = false, hovered = false, focused = false, context = false, touched, segments, guides = [], hasChildren = false, expanded = false, collapsedSummary, roundTag, delivery, replacement, actions = [], answer, onSelect, onToggle, onEnter, onLeave }: TreeRowProps) {
+export function TreeRow({ item, depth = 1, selected = false, hovered = false, focused = false, context = false, touched, segments, guides = [], hasChildren = false, expanded = false, collapsedSummary, roundTag, delivery, replacement, actions = [], answer, onSelect, onToggle, onEnter, onLeave, rowRef, tabIndex, onFocus, onKeyDown }: TreeRowProps) {
   const closed = ['decided', 'done', 'dropped', 'replaced'].includes(item.status);
   const muted = closed || context || (item.status === 'open' && item.later);
   const supporting = delivery ? 'delivery' : item.status === 'open' && item.later ? 'later' : item.status === 'waiting' && item.ask ? 'ask' : item.status === 'progress' && item.note ? 'note' : item.status === 'replaced' && replacement ? 'replacement' : closed && item.outcome ? 'outcome' : null;
   const label = item.status === 'open' && item.later ? 'Later' : item.status === 'done' && item.explanation ? 'Explained' : undefined;
   const toggle = () => onToggle?.();
-  return <div className="ariadne-reference ref-tree-row" role="treeitem" aria-selected={selected} aria-level={depth + 1} aria-expanded={hasChildren ? expanded : undefined} tabIndex={selected ? 0 : -1} onClick={onSelect} onMouseEnter={onEnter} onMouseLeave={onLeave} onKeyDown={event => { if (event.target === event.currentTarget && event.key === 'Enter') { event.preventDefault(); onSelect?.(); } }} style={{ paddingLeft: 12 + depth * 24, background: selected ? 'color-mix(in srgb, var(--color-text) 7%, transparent)' : touched === 'strong' ? 'color-mix(in srgb, var(--color-accent) 9%, transparent)' : hovered ? 'color-mix(in srgb, var(--color-text) 4%, transparent)' : 'transparent', boxShadow: selected && focused ? 'inset 0 0 0 1.5px color-mix(in srgb, var(--color-accent) 80%, transparent)' : 'none' }}>
+  return <div ref={rowRef} className="ariadne-reference ref-tree-row" role="treeitem" aria-selected={selected} aria-level={depth + 1} aria-expanded={hasChildren ? expanded : undefined} tabIndex={tabIndex ?? (selected ? 0 : -1)} onFocus={onFocus} onClick={onSelect} onMouseEnter={onEnter} onMouseLeave={onLeave} onKeyDown={event => { onKeyDown?.(event); if (!event.defaultPrevented && event.target === event.currentTarget && event.key === 'Enter') { event.preventDefault(); onSelect?.(); } }} style={{ paddingLeft: 12 + depth * 24, background: selected ? 'color-mix(in srgb, var(--color-text) 7%, transparent)' : touched === 'strong' ? 'color-mix(in srgb, var(--color-accent) 9%, transparent)' : hovered ? 'color-mix(in srgb, var(--color-text) 4%, transparent)' : 'transparent', boxShadow: selected && focused ? 'inset 0 0 0 1.5px color-mix(in srgb, var(--color-accent) 80%, transparent)' : 'none' }}>
     <div className="ref-tree-mark" style={{ background: touched ? `color-mix(in srgb, var(--color-accent) ${touched === 'strong' ? 75 : 40}%, transparent)` : 'transparent' }} />
     {guides.map((guide, index) => guide.elbowWidth !== undefined ? <div key={index} className="ref-tree-elbow" style={{ left: guide.x, width: guide.elbowWidth }} /> : <div key={index} className="ref-tree-guide" style={{ left: guide.x, width: guide.accent ? 1.5 : 1, background: guide.accent ? 'var(--color-accent)' : 'var(--a-guide)' }} />)}
     {hasChildren ? <button type="button" className="ref-toggle" aria-label="Expand or collapse" onClick={event => { event.stopPropagation(); toggle(); }}><i className={`ph ph-caret-${expanded ? 'down' : 'right'}`} aria-hidden="true" style={{ fontSize: 12 }} /></button> : <span className="ref-tree-spacer" />}
