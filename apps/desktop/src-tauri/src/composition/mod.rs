@@ -2,9 +2,13 @@
 //! Configuration and lifecycle installers are Rust-only, never renderer DTOs.
 mod bridge;
 mod configuration;
+mod entrypoint;
+mod presence;
 mod runtime;
+pub(crate) use entrypoint::establish;
 
 pub use bridge::CoreBridge;
+pub use entrypoint::ActivationHandoffs;
 pub use runtime::{NativeConfiguration, NativeRuntime};
 
 use ariadne_runtime::providers::ProviderInstructions;

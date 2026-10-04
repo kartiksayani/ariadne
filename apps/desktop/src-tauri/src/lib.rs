@@ -154,10 +154,12 @@ fn native_ping(
 }
 
 pub fn run() {
-    run_with_startup(commands::DesktopService::default(), |_| {
-        // This diagnostic entrypoint starts no owning runtime or watchers.
-        Ok(native::window::lifecycle::NativeLifecycle::diagnostic_only())
-    });
+    // Parsing is pure. Single-instance ownership is established by the plugin
+    // before trusted startup can create directories, probes, leases or workers.
+    let configuration =
+        composition::NativeConfiguration::from_startup_args(&std::env::args().collect::<Vec<_>>())
+            .expect("Invalid native startup configuration");
+    run_native(None, move |app| composition::establish(app, configuration));
 }
 
 fn desktop_handler<R: tauri::Runtime>(
@@ -247,6 +249,18 @@ pub fn run_with_startup(
         + Send
         + 'static,
 ) {
+    run_native(Some(service), startup);
+}
+
+fn run_native(
+    service: Option<commands::DesktopService>,
+    startup: impl FnOnce(
+            &tauri::AppHandle,
+        )
+            -> Result<native::window::lifecycle::NativeLifecycle, ariadne_core::CoreError>
+        + Send
+        + 'static,
+) {
     #[cfg(feature = "e2e")]
     let state = PingState::environment().expect("Invalid E2E startup");
     #[cfg(feature = "e2e")]
@@ -269,11 +283,13 @@ pub fn run_with_startup(
             native::routes::receive_launch(app.clone(), args);
         }))
         .manage(state)
-        .manage(service)
         .manage(native::routes::NativeRoutes::default())
         .manage(native::window::NativeWindow::default())
         .on_window_event(move |window, event| {
             if window.label() != "main" {
+                return;
+            }
+            if window.try_state::<commands::DesktopService>().is_none() {
                 return;
             }
             match event {
@@ -306,9 +322,18 @@ pub fn run_with_startup(
         .setup(move |app| {
             // Plugin setup runs first: ordinary second launches are intercepted
             // before this callback can acquire authority or start owned workers.
+            if let Some(service) = service {
+                app.manage(service);
+            }
             establish_lifecycle(app.handle(), startup).map_err(|_| {
                 std::io::Error::other("Native ownership/startup could not be established.")
             })?;
+            if app.try_state::<commands::DesktopService>().is_none() {
+                return Err(std::io::Error::other(
+                    "Trusted startup did not install the desktop service.",
+                )
+                .into());
+            }
             #[cfg(target_os = "macos")]
             {
                 let handle = app.handle().clone();

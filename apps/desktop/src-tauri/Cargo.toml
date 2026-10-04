@@ -13,6 +13,7 @@ tauri-build.workspace = true
 
 [dependencies]
 ariadne-core = { path = "../../../crates/ariadne-core" }
+ariadne-agent-protocol = { path = "../../../crates/ariadne-agent-protocol" }
 ariadne-domain = { path = "../../../crates/ariadne-domain" }
 ariadne-store = { path = "../../../crates/ariadne-store" }
 ariadne-runtime = { path = "../../../crates/ariadne-runtime" }

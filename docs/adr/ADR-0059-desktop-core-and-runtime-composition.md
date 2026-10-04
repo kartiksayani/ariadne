@@ -18,6 +18,13 @@ after shutdown. An unavailable/stopped runtime returns a canonical typed error.
 Other commands continue delegating domain effects to the real Core. DTOs,
 CoreService and renderer command names remain unchanged.
 
+Ordinary run uses a private runner without an initial service. Its trusted
+startup installs the actual managed DesktopService exactly once after ownership.
+The existing public run_with_startup supplies its service before the callback,
+preserving callbacks that read managed state. Early geometry events wait for
+service installation. Initial persisted-selection reconciliation runs on the
+owned blocking executor after publication; offline domain reads remain usable.
+
 DesktopService adds a native-only from_trusted_startup_with_connect constructor:
 CoreService, a registered SessionRef resolver, and an
 Fn(OwnerMutationRequest, Instant) -> Result<MutationReceipt, CoreError> callback.
@@ -28,6 +35,15 @@ No worker, bridge, Core callback or provider resets it. Canonical wire validatio
 registered membership and saved-receipt validation remain at the command boundary.
 Exact replay remains the Core transaction's responsibility and precedes provider
 work/deadline rejection.
+
+The Tauri command offload belongs to Tauri's global pool, so it alone cannot
+prove owning-runtime shutdown. CoreBridge delegates its admitted work to the
+composition runtime's blocking pool and waits on a bounded result channel;
+BindingConnect carries the original admission Instant. Scheduling is atomic with
+shutdown under the existing workers mutex, which ends before work or waiting.
+An owned-call marker prevents recursive rescheduling. Late mutating completion
+returns uncertainty while its real worker remains covered by executor drain.
+No extra waiter thread, duplicate Core authority or public signature is needed.
 
 Provider instructions include the existing generated integrations/rules/claude.md
 and codex.md at compile time. The single authored source and xtask generator stay
@@ -63,6 +79,26 @@ recovery guards stay authoritative; wake never rebinds, resumes or resends work.
 Native outcome callbacks retain and expose exact pending facts/errors for explicit
 inspection, rather than interpreting missing receipts as non-delivery.
 
+Presence adds an opt-in PresenceObserver Fn(PresenceUpdate) to the existing
+ConnectedSupervisor and a compatible NativeActivation::new_with_presence.
+Connected, Observed and Stopped updates carry the existing PresenceChangedHint
+plus the qualified endpoint fingerprint. Accepted connected/report receipts
+precede publication. Connected establishes a current instance; observations and
+stops must match it. The supervisor retains and drains observation offloads on
+stop, including when cancellation interrupted the await. No store IO happens
+under the observer cache mutex, and an old instance cannot erase a replacement.
+
+The composition-owned volatile cache validates actual selected binding identity,
+generation and endpoint, uses the existing Discovery PRESENCE_LIFETIME, preserves
+the original last_seen_at and ignores duplicate/out-of-order observations. An
+owned timer emits expiry; wake/disconnect/shutdown invalidate it. Unknown/Stale
+never infer Idle or dispatch readiness. SessionList overlays the existing
+BindingSummary.presence; SessionSnapshot stays unchanged. After subscription and
+SessionGet, SessionStore seeds from bounded project-scoped SessionList pages,
+terminating on the current session. A live hint supersedes any delayed seed;
+selection/generation changes or closure abort it. These facts remain separate
+from durable domain status and session snapshot freshness.
+
 The registered-parent watcher adapts unpublished task/desktop-watchers work from
 0e4a3da and b266e66 under new ownership and review. Its pinned notify 8.2.0 watches
 registered parents before initial snapshot reconciliation, emits only validated
@@ -77,6 +113,12 @@ physical leases, watcher hints and explicit lifecycle. Actual ordinary App nativ
 WebView/invoke/receipt/disk acceptance remains separate from mocked Tauri runtime
 tests. Live/billable host acceptance and complete packaged default setup remain
 their original milestones. No skipped native check or component test proves them.
+
+This checkpoint has not run desktop/native compilation or the ordinary App
+WebView journey. The final integration still requires actual UI Send, canonical
+saved receipt/on-disk correlation, scripted real-provider queue/completion and
+explicit agent CLI Apply, plus native quit/inflight-connect/wake race tests and
+packaged isolation in CI. No task-completion status changes accompany this draft.
 
 MCP/the review tool remain disabled under the owner's current-session waiver. Organization
 security guidance was not checked; no organizational approval is claimed.

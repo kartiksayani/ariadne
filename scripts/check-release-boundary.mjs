@@ -136,7 +136,8 @@ export async function checkRelease() {
   const minimumSystemVersion = (await command('/usr/libexec/PlistBuddy', ['-c', 'Print :LSMinimumSystemVersion', join(dirname(dirname(binary)), 'Info.plist')])).stdout.trim();
   assert.equal(minimumSystemVersion, '13.0', 'Packaged minimum macOS differs from deployment target');
   const root = await mkdtemp('/private/tmp/ariadne-release-');
-  const child = spawn(binary, [], { env: { ...env, WDIO_EMBEDDED_SERVER: 'true', TAURI_WEBDRIVER_PORT: String(port), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: '0'.repeat(64) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const applicationData = await mkdtemp('/private/tmp/ariadne-release-data-');
+  const child = spawn(binary, [], { env: { ...env, ARIADNE_HOME: applicationData, WDIO_EMBEDDED_SERVER: 'true', TAURI_WEBDRIVER_PORT: String(port), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: '0'.repeat(64) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '', observed, spawnError, failure, cleanupError;
   child.once('error', error => { spawnError = error; });
   for (const stream of [child.stdout, child.stderr]) stream.on('data', value => { logs += value; });
@@ -147,7 +148,8 @@ export async function checkRelease() {
       observed = identity(child.pid); assert.equal(observed.exe, binary);
       await portFree(port); assert.equal(listeners(port), ''); assert.deepEqual(await readdir(root), []);
     }
-    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, runtimeCommand: [binary], minimumSystemVersion, binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, normalFeatures, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
+    assert.ok((await stat(join(applicationData, 'run/control.sock'))).isSocket(), 'Ordinary production runtime did not own its private control socket');
+    await json(join(evidence, 'assertions.json'), { passed: true, observed, binary, applicationData, ordinaryRuntimeOwned: true, runtimeCommand: [binary], minimumSystemVersion, binarySha256: await digest(binary), port, listenerAbsent: true, e2eWritesAbsent: true, observedMilliseconds: 10000, metadata, normalFeatures, compilerOutput: out, fingerprint, acl, capabilities, inventory, config });
   } catch (error) { failure = error; }
   finally {
     let portReleased = false;
@@ -157,7 +159,10 @@ export async function checkRelease() {
     } catch (error) { cleanupError = error; }
     const cleanup = { pid: child.pid, pidExited: !alive(child.pid), portFree: portReleased, exitCode: child.exitCode, signal: child.signalCode, logs, error: cleanupError?.message, failure: failure?.message };
     await json(join(evidence, 'cleanup.json'), cleanup);
-    if (!cleanupError) { verifyCleanup(cleanup); await rm(root, { recursive: true }); }
+    if (!cleanupError) {
+      verifyCleanup(cleanup); assert.deepEqual(await readdir(root), []);
+      await rm(root, { recursive: true }); await rm(applicationData, { recursive: true });
+    }
   }
   if (cleanupError) throw cleanupError;
   if (failure) throw failure;
