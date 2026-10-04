@@ -133,6 +133,10 @@ impl SubmitOutcome {
 impl NormalizedEvent {
     pub fn validate(&self) -> Result<(), AdapterError> {
         identifier(&self.event_id)?;
+        if self.event_id.starts_with("claude:session-ended:") && !is_claude_session_end_event(self)
+        {
+            return Err(invalid("Reserved Claude session-end identity requires its exact non-attempt Disconnected scope"));
+        }
         optional_identifier(&self.host_turn_id)?;
         let matched = !matches!(
             self.event,
@@ -208,6 +212,23 @@ impl NormalizedEvent {
         }
         Ok(())
     }
+}
+
+/// Reserved identity for an actual Claude SDK session.end, never transport loss.
+pub fn claude_session_end_event_id(binding_id: &UuidV4, generation: &UuidV4) -> String {
+    format!(
+        "claude:session-ended:{}:{}",
+        binding_id.as_str(),
+        generation.as_str()
+    )
+}
+
+pub fn is_claude_session_end_event(event: &NormalizedEvent) -> bool {
+    event.event_id == claude_session_end_event_id(&event.binding_id, &event.generation)
+        && matches!(event.event, EventPayload::Disconnected { .. })
+        && event.input_id.is_none()
+        && event.attempt_id.is_none()
+        && event.host_turn_id.is_none()
 }
 
 impl ObserveResult {

@@ -1,56 +1,83 @@
 # Ariadne handoff
 
-Checked 2026-10-04 23:20 UTC. Verify GitHub before acting. Owner requests
-autonomous delivery, Sol 6.1 High delegates only. Ten slots work; coding and
-independent review overlap. Reviewed-parent stacks are authorized while CI runs.
+Checked 2026-10-04 23:49 UTC. Verify GitHub before acting. Continue autonomously;
+Sol 6.1 High delegates only. Ten delegate slots are supported. Reviewed-parent
+stacks are authorized. Publishing this checkpoint with the composed app repairs; check the current
+GitHub head and checks rather than treating this snapshot as live status.
 
-**Main:** `79c0d86705d688f5504672e4d79d4d76cbd5ec3c`, PR89 squash;
-[postmerge CI green](https://github.com/kartiksayani/ariadne/actions/runs/37240630623).
-PR89 repaired FIFO test shutdown coordination, preserving production uncertainty.
-Its audited proof had 89.77% coverage, all 175 required sources and actual native
-receipt/clean exit. PRs80–82 and84 are also merged.
+**Main:** `20eb77d715c0aa58664dddea0232465598cf8cb1` (PR85);
+[postmerge CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37244941515).
+PR85 merged after exact-head independent review and coverage/native/release audit.
+PRs80–82 and84 also merged. Preserve intentional root tasks.json/roadmap overlays.
 
-| PR | Code checkpoint / base | Current evidence |
+| PR | Head / base | Review and CI |
 | --- | --- | --- |
-| [83](https://github.com/kartiksayani/ariadne/pull/83) | Local `3b710cc` plus this checkpoint / main | Publishing lease, control/activation and recovery-fixture repairs; independent delta review running. Old [CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37241027659) physical owner reacquisition after shutdown. Check latest head/run |
-| [85](https://github.com/kartiksayani/ariadne/pull/85) | `224e737` / main | Clear5408629599; independent 83 Rust + 53 Mod passed; [CI running](https://github.com/kartiksayani/ariadne/actions/runs/37241561932) |
-| [86](https://github.com/kartiksayani/ariadne/pull/86) | `3759819` /83 | Clear5408605936; [failed CI](https://github.com/kartiksayani/ariadne/actions/runs/37241062792) inherited activation-test race; await composed83 repair |
-| [88](https://github.com/kartiksayani/ariadne/pull/88) | `48960cb` /86 | Clear5408612150; [failed CI](https://github.com/kartiksayani/ariadne/actions/runs/37241260290) 14 recovery fake-transport tests; fix composed into83 |
-| [90](https://github.com/kartiksayani/ariadne/pull/90) | `9628e68` / main | Control socket-write fix; clear5408675830; [new CI running](https://github.com/kartiksayani/ariadne/actions/runs/37242652964) |
-| [91](https://github.com/kartiksayani/ariadne/pull/91) | Remote `7ad7a23`, local `34bc65f` /88 | Local targeted review clear: unclipped native row growth and full2k/5k corpus. [Old CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37241410266) inherited lease reacquisition; publish with parent repair |
-| [92](https://github.com/kartiksayani/ariadne/pull/92) | Remote `b81bdee`, local `f694e56` /88 | Both installer findings locally cleared; independent31 tests/97% coverage. [CI](https://github.com/kartiksayani/ariadne/actions/runs/37241451121); publish fix with parent repair |
+| [83](https://github.com/kartiksayani/ariadne/pull/83) | Local `2d57711` plus checkpoint / main | Publishing repairs; independent delta review underway; [old CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37243524591) |
+| [85](https://github.com/kartiksayani/ariadne/pull/85) | Merged as20eb77d | Clear5408629599; [CI green](https://github.com/kartiksayani/ariadne/actions/runs/37241561932), artifacts audited |
+| [86](https://github.com/kartiksayani/ariadne/pull/86) | `b8b1bb3` /83 | Clear5408722087; [CI running](https://github.com/kartiksayani/ariadne/actions/runs/37243590020) |
+| [88](https://github.com/kartiksayani/ariadne/pull/88) | `59eac83` /86 | Clear5408722152; [CI running](https://github.com/kartiksayani/ariadne/actions/runs/37243661426) |
+| [90](https://github.com/kartiksayani/ariadne/pull/90) | `9628e68` / main | Clear5408675830; [CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37242652964), wake-test diagnosis assigned |
+| [91](https://github.com/kartiksayani/ariadne/pull/91) | `37b650a` /88 | Clear5408725188; [CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37243736889) |
+| [92](https://github.com/kartiksayani/ariadne/pull/92) | `1572661` /88 | Clear5408725538; [CI running](https://github.com/kartiksayani/ariadne/actions/runs/37243771774) |
+| [93](https://github.com/kartiksayani/ariadne/pull/93) | `281baf4` /88 | Clear5408797489; retained-blocker fix verified; CI pending |
+| [94](https://github.com/kartiksayani/ariadne/pull/94) | `cfaeb59` /91 | Clear5408753598; CI pending |
+| [95](https://github.com/kartiksayani/ariadne/pull/95) | `e40f4fb` /91 | Clear5408787995; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37244480495) |
 
-| Owner | Worktree / branch | Local work and ownership |
+GitHub stack87 is83 →86 →88 →91 →94. Atomic squash only a qualified prefix.
+Prioritize this critical stack over an unrelated main update that restarts its
+checks; independent siblings stay independent. Every merged state must satisfy
+current-base validation. No new full task closure is claimed.
+
+| Responsibility | Worktree / branch | Local state |
 | --- | --- | --- |
-| Maintainer | `.worktrees/resume-integration` / `maintenance/resume-integration` |83 repairs composed; publishing current docs. Root tasks.json/roadmap overlays intentional; owns shared contracts/manifests/catalogue |
-| `prove_three_binding_fifo` | `.worktrees/native-history-acceptance` / `task/native-history-acceptance` | P4.5 App/tree highlights + real five-round/two-fork/paging/history native helper; local91 repair integrated. Owns provider/native-smoke/post-CLI fixture callsites |
-| `guarded_history_actions` | `.worktrees/guarded-history-actions` / `task/guarded-history-actions` | Product checkpoint `fc978df` unpushed; Core23/UI35 pass. Temporary App ownership handed over by primary; guarded native helper uses paused discovery target and unchanged demo source |
-| `review_runtime_race_repairs` | Separate review worktrees |83 control/activation, lease final-drop and recovery fixture delta; exclusive `owner-answer-ui/target` cache |
-| `personal_package_install` | `.worktrees/personal-package-install` / `task/personal-package-install` | Clean `f694e56`, held only for parent update; targeted reviewer ready for final published-head review |
+| Maintainer | .worktrees/resume-integration / maintenance/resume-integration | Publishing source2d57711 plus workflow/checkpoint; shared contracts/catalogue |
+| prove_three_binding_fifo | .worktrees/packaged-route-acceptance / task/packaged-route-acceptance | P6.1 cold launch, second-instance route and path spaces using real packaged release/CLI; no OS driver |
+| guarded_history_actions | .worktrees/guarded-history-actions / task/guarded-history-actions |93 fix published/clean; review-local errors preserve controller pending identity |
+| native_graph_acceptance | .worktrees/native-graph-acceptance / task/native-graph-acceptance |95 published/clean and source-cleared |
+| repair_runtime_ci_races | .worktrees/runtime-wake-reuse / fix/runtime-wake-reuse |5bbd5ac committed/clean, cherry-picked into83 as2d57711; no other unpushed work |
+| review_guarded_actions | Separate review context |93 targeted review clear5408797489; prior thread resolved |
+| audit_claude85_green | Separate review context;85 evidence in /tmp/ariadne-pr85-ci37241561932-audit.XEXXMN |83 integration, coverage, wake and CI-setup delta review; exclusive owner-answer-ui/target |
+| review_native_history | Separate review context |94 cleared;90 first-failure source diagnosis complete |
+| review_personal_package92 | Separate review context |92 and95 source-cleared |
 
-Root integrated control9986701, activationa5ff0d9, recovery fixtured176ddc and
-leasecb74cf8. Lease author proved inherited-fd failure with zero parent Arcs on
-macOS; acquiring-PID guarded final unlock fixes instance and binding leases.
-Native composition assertion remains strict; its exact CI interleaving is inferred.
-ADR0064 records the decision. Other warm caches: primary native-provider-activation,
-guarded binding-connect-relay; domain-transitions idle. Always set explicit
-CARGO_TARGET_DIR; no cold native builds.
+85 audit: 21,090/23,466 =89.87% weighted coverage, all176 required sources;
+exact head/tree with no tracked changes, native PID54199/nonce/receipt/clean exit,
+packaged PID64494 no test service/writes and clean exit. Native evidence is the
+scaffold journey; actual Claude behavior is proved by its real Core/installed tests.
+
+83 contains control-write, activation-fixture, recovery-transport and physical
+lease repairs, propagated through descendants. Final lease drop unlocks only in
+its acquiring process (ADR0064); exact old CI interleaving remains inferred.
+90 has the control repair but not83 lease repair. Its new first failure is the
+unchanged Claude wake/heartbeat counter107 versus106 at activation.rs402. Source
+trace was proved deterministically: clearing evidence during helper inspection
+stopped the worker.5bbd5ac now yields Unknown without losing the worker; preserves
+actual identity/resource errors. Six activation and21 conformance tests passed.
+83 also relocated two byte-identical test files under tests/ and excluded only
+the declaration-only tray/mod.rs from source inventory. Original80% floor stays.
 
 **Next three steps**
 
-1. Publish composed83 repairs, independently clear its exact head, propagate once
-   through86→88→91 and sibling92, then publish held fixes with targeted review.
-   GitHub stack87 is83→86→88→91. No global stack sync/rebase over active edits.
-2. Finish history and guarded actions vertically while CI runs. Guarded Continue
-   moves stale-preview rejection under target receipt replay; ADR0065 reserved.
-   Native pin/ref/scroll proof joins component hover tests: pinned driver emits
-   mousemove without hover transitions, so do not claim native hover automation.
-3. Audit83 actual coverage/native/release artifacts before squash merge. Close
-   P2.4/P3.1/P3.2 only with required proof and merges, then dependent acceptance.
-   Preserve root overlays; purple+A means coding, amber means partial, not CI waiting.
+1. Finish83 independent review, push its composed repairs once, then propagate
+   through the reviewed stack and siblings. Integrate90 with main and shared fixes.
+   Continue isolated P6.1 product acceptance while CI runs.
+2. Audit critical stack coverage/native/release artifacts before squash merge.
+   Close P2.4/P3.1 and P3.2 only with required merges/proof, then original dependent
+   tasks.85 is now merged; main failure pauses further merges, pending does not.
+3. Publish this single handoff with the next substantive checkpoint. Purple+A
+   means actual coding; amber includes partial work waiting for review or CI.
+   Preserve root overlays, historical evidence and all worktrees.
 
-Live/billable hosts, M7 and real owner installation/configuration need approval;
-temporary-home fixtures are authorized. Packaged permissions/cold-click manual
-proof remains. Heavy native/browser/package checks stay in CI. No warm native
-cache existed for pre-push timing; no cold build was started. MCP/the review tool disabled
-by owner waiver, no org approval claimed. Historical .delivery remains evidence.
+Use pinned Node22 with NPM_CONFIG_USERCONFIG=/dev/null; old global npm may print
+failure but exit0. Explicit warm caches only: primary native-provider-activation,
+guarded author binding-connect-relay, guarded reviewer domain-transitions,
+83 reviewer owner-answer-ui (all /target). No cold native builds. Heavy native,
+browser and package checks stay in CI. Real owner install, paid hosts and M7 need
+approval; temporary private-home fixtures are authorized. MCP/the review tool disabled by
+owner waiver; no organization security approval claimed.
+
+Bounded CI setup repair: run37238789118 lost10m22s to a partial Rust install;
+run37243736889 failed on conflicting cargo-clippy after8.1m of reference captures.
+No earlier Rust invocation or cache restore was found; runner cause remains
+unproven. A fresh mktemp RUSTUP_HOME isolates inherited state, and setup now runs
+before captures to avoid wasting those8m on setup failure. Existing gates remain.

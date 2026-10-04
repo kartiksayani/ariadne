@@ -1,4 +1,6 @@
-use ariadne_agent_protocol::{EventPayload, NormalizedEvent, TurnFinishedStatus};
+use ariadne_agent_protocol::{
+    claude_session_end_event_id, EventPayload, NormalizedEvent, TurnFinishedStatus,
+};
 use ariadne_core::{
     apply::ApplyService,
     delivery::{DeliveryError, DeliveryService},
@@ -1143,6 +1145,218 @@ fn connection_reports_preserve_owner_pause_recovery_and_verified_identity() {
         CoreErrorCode::BindingMismatch
     );
     assert_eq!(bytes, t.bytes());
+}
+
+fn connection_event(t: &Setup, name: &str, connected: bool) -> NormalizedEvent {
+    let binding = t.saved().bindings.0[&id(3)].clone();
+    NormalizedEvent {
+        event_id: name.into(),
+        binding_id: binding.id,
+        generation: binding.generation,
+        input_id: None,
+        attempt_id: None,
+        host_turn_id: None,
+        observed_at: at("01"),
+        event: if connected {
+            EventPayload::Connected {
+                external_session_id: binding.external_session_id,
+                endpoint_fingerprint: binding.endpoint_fingerprint,
+                capabilities: Box::new(binding.capabilities),
+            }
+        } else {
+            EventPayload::Disconnected {
+                reason: Some("Original Claude session ended.".into()),
+            }
+        },
+    }
+}
+
+#[test]
+fn claude_end_receipt_fences_fresh_connected_but_preserves_exact_connected_replay() {
+    let t = Setup::new();
+    t.write(|s| s.bindings.0.get_mut(&id(3)).unwrap().adapter_id = "claude_code_mod".into());
+    let ordinary = connection_event(&t, "ordinary-loss", false);
+    t.report(&ordinary).unwrap();
+    let connected = connection_event(&t, "original-connected", true);
+    let original = t.report(&connected).unwrap();
+    // Diagnostic reason alone has no authority to fence reconnection.
+    assert_eq!(
+        t.saved().bindings.0[&id(3)].dispatch_state,
+        DispatchState::Enabled
+    );
+    let mut ended = connection_event(&t, "", false);
+    ended.event_id = claude_session_end_event_id(&ended.binding_id, &ended.generation);
+    let receipt = t.report(&ended).unwrap();
+    assert!(receipt.durable_effect);
+    assert!(ariadne_core::lifecycle::claude_generation_ended(
+        &t.saved(),
+        &id(3),
+        &ended.generation
+    ));
+    let bytes = t.bytes();
+    let replay = DeliveryService::new(&t.registry)
+        .report(&t.context(), &connected, || panic!("replay allocation"))
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.revision, original.revision);
+    assert!(
+        DeliveryService::new(&t.registry)
+            .report(&t.context(), &ended, || panic!("end replay allocation"))
+            .unwrap()
+            .replayed
+    );
+    let mut late = connected;
+    late.event_id = "fresh-delayed-connected".into();
+    assert_eq!(
+        code(
+            DeliveryService::new(&t.registry)
+                .report(&t.context(), &late, || panic!("rejected allocation"))
+                .unwrap_err()
+        ),
+        CoreErrorCode::HostUnreachable
+    );
+    assert_eq!(bytes, t.bytes());
+    assert_eq!(
+        t.saved().bindings.0[&id(3)].connection_state,
+        ConnectionState::Disconnected
+    );
+    assert_eq!(
+        code(
+            DeliveryService::new(&t.registry)
+                .claim(&t.lease(), &t.request(200), || panic!(), at("02"))
+                .unwrap_err()
+        ),
+        CoreErrorCode::HostUnreachable
+    );
+}
+
+#[test]
+fn already_disconnected_claude_end_commits_one_durable_fence() {
+    let t = Setup::new();
+    t.write(|s| s.bindings.0.get_mut(&id(3)).unwrap().adapter_id = "claude_code_mod".into());
+    t.report(&connection_event(&t, "ordinary-disconnect", false))
+        .unwrap();
+    let mut ended = connection_event(&t, "", false);
+    ended.event_id = claude_session_end_event_id(&ended.binding_id, &ended.generation);
+    let before = t.saved();
+    let receipt = t.report(&ended).unwrap();
+    assert!(receipt.durable_effect && !receipt.replayed);
+    assert_eq!(t.saved().revision.value(), before.revision.value() + 1);
+    assert!(ariadne_core::lifecycle::claude_generation_ended(
+        &t.saved(),
+        &id(3),
+        &ended.generation
+    ));
+    let bytes = t.bytes();
+    let mut retry = ended.clone();
+    retry.observed_at = at("03");
+    assert!(t.report(&retry).unwrap().replayed);
+    assert_eq!(bytes, t.bytes());
+    assert_eq!(
+        code(t.report(&connection_event(&t, "late", true)).unwrap_err()),
+        CoreErrorCode::HostUnreachable
+    );
+}
+
+#[test]
+fn reserved_session_end_identity_rejects_wrong_scope_kind_and_provider_without_writes() {
+    let t = Setup::new();
+    let mut ended = connection_event(&t, "", false);
+    ended.event_id = claude_session_end_event_id(&ended.binding_id, &ended.generation);
+    let bytes = t.bytes();
+    assert_eq!(
+        code(
+            DeliveryService::new(&t.registry)
+                .report(&t.context(), &ended, || panic!())
+                .unwrap_err()
+        ),
+        CoreErrorCode::BindingMismatch
+    );
+    for mutation in 0..4 {
+        let mut invalid = ended.clone();
+        match mutation {
+            0 => invalid.event_id = claude_session_end_event_id(&id(999), &invalid.generation),
+            1 => invalid.event_id = claude_session_end_event_id(&invalid.binding_id, &id(999)),
+            2 => invalid.event = connection_event(&t, "", true).event,
+            _ => invalid.event_id = "claude:session-ended:malformed".into(),
+        }
+        assert_eq!(
+            code(
+                DeliveryService::new(&t.registry)
+                    .report(&t.context(), &invalid, || panic!())
+                    .unwrap_err()
+            ),
+            CoreErrorCode::InvalidArgument
+        );
+    }
+    assert_eq!(bytes, t.bytes());
+}
+
+#[test]
+fn explicit_claude_reconnect_rotates_generation_past_the_prior_terminal_receipt() {
+    use ariadne_agent_protocol::{Availability, Compatibility};
+    use ariadne_core::bindings::{BindingService, VerifiedHost};
+    let t = Setup::new();
+    t.write(|s| s.bindings.0.get_mut(&id(3)).unwrap().adapter_id = "claude_code_mod".into());
+    let original = t.saved().bindings.0[&id(3)].clone();
+    let mut ended = connection_event(&t, "", false);
+    ended.event_id = claude_session_end_event_id(&ended.binding_id, &ended.generation);
+    t.report(&ended).unwrap();
+    let command = OwnerCommand::BindingConnect {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(900),
+        params: BindingConnectParams {
+            project_id: id(1),
+            adapter_id: original.adapter_id.clone(),
+            external_session_id: original.external_session_id.clone(),
+            endpoint: original.endpoint.clone(),
+            configuration: original.adapter_config.clone(),
+            existing_session_id: Some(id(2)),
+        },
+    };
+    BindingService::new(&t.registry)
+        .connect(
+            &OwnerContext::from_trusted_entrypoint(OwnerScope::Registry),
+            &command,
+            |_| {
+                Ok(VerifiedHost {
+                    adapter_id: original.adapter_id.clone(),
+                    adapter_version: original.adapter_version,
+                    protocol_major: original.protocol_major,
+                    config_version: original.config_version,
+                    external_session_id: original.external_session_id,
+                    endpoint: original.endpoint,
+                    endpoint_fingerprint: original.endpoint_fingerprint,
+                    configuration: original.adapter_config,
+                    capabilities: original.capabilities,
+                    compatibility: Compatibility::Compatible,
+                    availability: Availability::Available,
+                    connection_state: ConnectionState::Unknown,
+                    setup_instruction: "Retain saved IDs.".into(),
+                })
+            },
+            || t.uuid(),
+            at("04"),
+        )
+        .unwrap();
+    let saved = t.saved();
+    assert_ne!(saved.bindings.0[&id(3)].generation, original.generation);
+    assert!(!ariadne_core::lifecycle::claude_generation_ended(
+        &saved,
+        &id(3),
+        &saved.bindings.0[&id(3)].generation
+    ));
+    assert!(ariadne_core::lifecycle::claude_generation_ended(
+        &saved,
+        &id(3),
+        &original.generation
+    ));
+    t.report(&connection_event(&t, "new-generation-connected", true))
+        .unwrap();
+    assert_eq!(
+        t.saved().bindings.0[&id(3)].dispatch_state,
+        DispatchState::Enabled
+    );
 }
 #[test]
 fn claim_reads_current_target_but_keeps_frozen_input_and_rejects_capacity_before_allocation() {
