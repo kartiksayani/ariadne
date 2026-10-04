@@ -14,7 +14,7 @@ use std::{
         fs::{symlink, PermissionsExt},
         net::UnixListener,
     },
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Condvar, Mutex,
@@ -222,6 +222,283 @@ impl Drop for Harness {
         self.worker.take().unwrap().join().unwrap();
     }
 }
+fn project_harness(root: &Path) -> Harness {
+    let root = root.to_owned();
+    Harness::new(move |request, _| {
+        if request["method"] != "thread/read" {
+            return None;
+        }
+        let mut value = default_result(request);
+        value["thread"]["cwd"] = json!(root);
+        Some(Action::Result(value))
+    })
+}
+
+#[test]
+fn initialization_and_qualification_share_one_short_native_admission_budget() {
+    let project = tempfile::tempdir().unwrap();
+    for held_method in ["initialize", "thread/read"] {
+        let (release, hold) = std::sync::mpsc::channel::<()>();
+        let root = project.path().to_owned();
+        let h = Harness::new(move |request, _| {
+            let method = request["method"].as_str().unwrap();
+            if method == held_method {
+                // Retain the real response until the client has exhausted its
+                // admission budget. Bounded fallback also allows a failing test
+                // to finish and reap its fixture server.
+                let _ = hold.recv_timeout(Duration::from_secs(2));
+            } else if method == "initialize" {
+                // A successful initialization consumes part of the SAME budget.
+                assert_eq!(
+                    hold.recv_timeout(Duration::from_millis(250)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                );
+            }
+            let mut value = default_result(request);
+            if method == "thread/read" {
+                value["thread"]["cwd"] = json!(root);
+            }
+            Some(Action::Result(value))
+        });
+        let started = Instant::now();
+        let deadline = started + Duration::from_secs(1);
+        let result = CodexDaemonReader::open_before(h.options(), h.request().endpoint, deadline)
+            .and_then(|reader| reader.qualify_selected_thread(THREAD, project.path(), deadline));
+        let elapsed = started.elapsed();
+        let _ = release.send(());
+        assert_eq!(result.err().unwrap().code, Code::HostUnreachable);
+        assert!(elapsed < Duration::from_secs(2));
+        assert_eq!(
+            h.methods(),
+            if held_method == "initialize" {
+                vec!["initialize"]
+            } else {
+                vec!["initialize", "initialized", "thread/read"]
+            }
+        );
+    }
+}
+
+#[test]
+fn pre_id_qualification_uses_exact_reader_thread_and_root_before_final_binding_ids() {
+    let project = tempfile::tempdir().unwrap();
+    let alias = project.path().join("alias");
+    symlink(project.path(), &alias).unwrap();
+    let h = project_harness(&alias);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let reader = CodexDaemonReader::open(h.options(), h.request().endpoint).unwrap();
+    let selected = reader
+        .qualify_selected_thread(THREAD, project.path(), deadline)
+        .unwrap();
+    let facts = selected.facts();
+    assert_eq!(facts.external_session_id, THREAD);
+    assert_eq!(
+        facts.canonical_root,
+        fs::canonicalize(project.path()).unwrap()
+    );
+    assert_eq!(facts.endpoint, h.request().endpoint);
+    assert_eq!(facts.host_version, "0.160.0");
+    assert_eq!(
+        facts.availability,
+        ariadne_agent_protocol::Availability::Available
+    );
+    assert_eq!(
+        facts.compatibility,
+        ariadne_agent_protocol::Compatibility::Compatible
+    );
+    assert!(facts.capabilities.existing_session.supported);
+    assert!(facts.capabilities.deferred_delivery.supported);
+    assert!(facts.capabilities.deferred_delivery.conditions[0]
+        .contains("runtime owns durable claim and lease"));
+    let fingerprint = facts.endpoint_fingerprint.clone();
+    let calls = h.calls.lock().unwrap().clone();
+    assert_eq!(
+        h.methods(),
+        [
+            "initialize",
+            "initialized",
+            "thread/read",
+            "thread/queue/list",
+            "thread/turns/list"
+        ]
+    );
+    assert!(calls
+        .iter()
+        .all(|request| !request.to_string().contains(BINDING)
+            && !request.to_string().contains(GENERATION)));
+    for request in &calls[2..] {
+        assert_eq!(request["params"]["threadId"], THREAD);
+    }
+    assert_eq!(calls[3]["params"]["limit"], 20);
+    assert_eq!(calls[4]["params"]["limit"], 20);
+    assert_eq!(calls[4]["params"]["itemsView"], "full");
+    let (client, result) = selected.bind(h.request(), id(BINDING), at()).unwrap();
+    assert_eq!(result.endpoint_fingerprint, fingerprint);
+    assert_eq!(result.observation.generation, id(GENERATION));
+    assert!(client.latest_anchor().is_some());
+    // No second initialization or host mutation; final bind rechecks all reads.
+    assert_eq!(
+        h.methods(),
+        [
+            "initialize",
+            "initialized",
+            "thread/read",
+            "thread/queue/list",
+            "thread/turns/list",
+            "thread/read",
+            "thread/queue/list",
+            "thread/turns/list"
+        ]
+    );
+}
+
+#[test]
+fn project_qualification_rejects_other_or_missing_root_before_queue_and_history_reads() {
+    let project = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    for (root, expected) in [
+        (other.path().to_owned(), Code::BindingMismatch),
+        (project.path().join("missing"), Code::HostUnreachable),
+    ] {
+        let h = project_harness(project.path());
+        let reader = CodexDaemonReader::open(h.options(), h.request().endpoint).unwrap();
+        let error = reader
+            .qualify_selected_thread(THREAD, &root, Instant::now() + Duration::from_secs(10))
+            .err()
+            .unwrap();
+        assert_eq!(error.code, expected);
+        assert_eq!(h.methods(), ["initialize", "initialized", "thread/read"]);
+    }
+}
+
+#[test]
+fn qualified_thread_cannot_be_retargeted_and_final_bind_rechecks_current_project() {
+    let project = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let root = project.path().to_owned();
+    let changed = other.path().to_owned();
+    let h = Harness::new(move |request, count| {
+        if request["method"] != "thread/read" {
+            return None;
+        }
+        let mut value = default_result(request);
+        value["thread"]["cwd"] = json!(if count == 1 { &root } else { &changed });
+        Some(Action::Result(value))
+    });
+    let selected = CodexDaemonReader::open(h.options(), h.request().endpoint)
+        .unwrap()
+        .qualify_selected_thread(
+            THREAD,
+            project.path(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+    assert_eq!(
+        selected
+            .bind(h.request(), id(BINDING), at())
+            .err()
+            .unwrap()
+            .code,
+        Code::BindingMismatch
+    );
+    assert_eq!(
+        h.methods(),
+        [
+            "initialize",
+            "initialized",
+            "thread/read",
+            "thread/queue/list",
+            "thread/turns/list",
+            "thread/read"
+        ]
+    );
+    let h = project_harness(project.path());
+    let selected = CodexDaemonReader::open(h.options(), h.request().endpoint)
+        .unwrap()
+        .qualify_selected_thread(
+            THREAD,
+            project.path(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+    let mut request = h.request();
+    request.external_session_id = "another-thread".into();
+    assert_eq!(
+        selected
+            .bind(request, id(BINDING), at())
+            .err()
+            .unwrap()
+            .code,
+        Code::BindingMismatch
+    );
+    assert_eq!(h.methods().len(), 5);
+}
+
+#[test]
+fn pre_id_verification_preserves_required_wire_checks_and_original_deadline() {
+    let project = tempfile::tempdir().unwrap();
+    for mode in 0..4 {
+        let root = project.path().to_owned();
+        let h = Harness::new(move |request, _| {
+            let mut value = default_result(request);
+            match request["method"].as_str().unwrap() {
+                "thread/read" => {
+                    value["thread"]["cwd"] = json!(root);
+                    if mode == 0 {
+                        value["thread"]["id"] = json!("different-thread");
+                    }
+                    if mode == 1 {
+                        value["thread"]["status"] = json!({"type":"notLoaded"});
+                    }
+                }
+                "thread/queue/list" if mode == 2 => {
+                    let entry = value["data"][0].clone();
+                    value["data"] = json!(vec![entry; 21]);
+                }
+                "thread/turns/list" if mode == 3 => {
+                    value["data"][0]["itemsView"] = json!("summary");
+                }
+                _ => {}
+            }
+            Some(Action::Result(value))
+        });
+        let reader = CodexDaemonReader::open(h.options(), h.request().endpoint).unwrap();
+        let error = reader
+            .qualify_selected_thread(
+                THREAD,
+                project.path(),
+                Instant::now() + Duration::from_secs(10),
+            )
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.code,
+            [
+                Code::BindingMismatch,
+                Code::HostUnreachable,
+                Code::IncompatibleAdapter,
+                Code::UnsupportedHostVersion
+            ][mode]
+        );
+        assert!(!h.methods().iter().any(|method| method.contains("start")
+            || method.contains("resume")
+            || method.contains("add")));
+    }
+    let h = project_harness(project.path());
+    let reader = CodexDaemonReader::open(h.options(), h.request().endpoint).unwrap();
+    h.wait_for_method("initialized");
+    let error = reader
+        .qualify_selected_thread(
+            THREAD,
+            project.path(),
+            Instant::now() - Duration::from_secs(1),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.code, Code::HostUnreachable);
+    assert_eq!(h.methods(), ["initialize", "initialized"]);
+}
+
 fn attempt(index: usize) -> AttemptEvidenceRequest {
     let exercise = fixture("poc-live-exercise.json");
     let input = &exercise["inputs"][index];
