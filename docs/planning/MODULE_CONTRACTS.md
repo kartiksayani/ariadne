@@ -122,6 +122,26 @@ session preference. Application-lifetime routing and recovery controllers share
 one desktop service. Nonvisual session/item data attributes on the real controls
 support native acceptance without adding a separate test flow.
 
+Guarded history actions reuse the application-lifetime `SessionActionControllers`
+registry and existing `SessionActions.execute(command, reviewedRevision)` /
+`retry()` methods. Topic archive/restore and session close/reopen share the same
+write barrier as binding/recovery actions. Continue previews use explicit source
+and target refs and the target owner context; Send uses the target session's
+controller. An uncertain request retains its exact operation ID and body across
+view changes, and cannot be replaced by a newly edited preview.
+
+Receipt admission verifies the registered target session, operation ID and
+positive revision, plus the command-specific result: topic ID, next topic revision
+and archive state; next session revision, requested state and close timestamp;
+or continuation operation/source IDs, source revision/hash and approved summary.
+The existing renderer response validation still checks canonical result shapes.
+Only errors proven to arise after atomic receipt replay may clear pending work:
+lifecycle revision/transition/blocker guards, and Continue queue/target-state/
+adapter guards inside its target transaction. Generic routing, source IO and
+validation errors retain pending work. `preview_stale` must also retain it while
+its check remains outside that final transaction; an earlier timed-out request
+can still be completing. No new DTO or alternate mutation path is introduced.
+
 ## Desktop discovery consumer
 
 DesktopService receives trusted composition callbacks for the existing native
