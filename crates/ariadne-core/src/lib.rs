@@ -9,6 +9,7 @@ mod errors;
 #[path = "service/fake.rs"]
 pub mod fake;
 pub mod inputs;
+pub mod queries;
 mod receipts;
 #[path = "service/validation.rs"]
 mod validation;

@@ -2,8 +2,10 @@
 //!
 //! Callbacks do only local domain work: no host, socket, inference or lease waits.
 //! Core owns authorization, expected revisions and command-specific semantics.
+mod catalogue;
 pub(crate) mod fs;
 pub(crate) mod lock;
+pub use catalogue::{ProjectCatalogue, SessionReadOutcome};
 
 use ariadne_domain::history::{validate_session_history, HistoryError};
 use ariadne_domain::models::*;
@@ -314,14 +316,29 @@ impl Store {
     }
 
     fn live(&self, id: &UuidV4) -> Result<(Session, Vec<u8>), StoreError> {
-        let bytes = self.sessions.read(&format!("{}.json", id.as_str()))?;
+        Self::read_validated(&self.sessions, id, &self.project_id)
+    }
+
+    fn read_validated(
+        sessions: &Directory,
+        id: &UuidV4,
+        project_id: &UuidV4,
+    ) -> Result<(Session, Vec<u8>), StoreError> {
+        let bytes = sessions.read(&format!("{}.json", id.as_str()))?;
         let session = decode(&bytes)?;
-        self.validate(&session, id)?;
+        Self::validate_in_project(&session, id, project_id)?;
         Ok((session, bytes))
     }
 
     fn validate(&self, session: &Session, id: &UuidV4) -> Result<(), StoreError> {
-        if &session.id != id || session.project_id != self.project_id {
+        Self::validate_in_project(session, id, &self.project_id)
+    }
+    fn validate_in_project(
+        session: &Session,
+        id: &UuidV4,
+        project_id: &UuidV4,
+    ) -> Result<(), StoreError> {
+        if &session.id != id || &session.project_id != project_id {
             return Err(StoreError::IdentityMismatch);
         }
         validate_session_items(session).map_err(StoreError::Validation)?;

@@ -3251,11 +3251,22 @@
           "$ref": "#/$defs/SummaryCounts"
         },
         "project": {
-          "$ref": "#/$defs/Project"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Project"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
         }
       },
       "additionalProperties": false,
       "required": [
+        "project_id",
         "project",
         "canonical_root",
         "availability",
