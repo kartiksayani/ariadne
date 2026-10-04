@@ -786,6 +786,70 @@ fn adapter_errors_map_exhaustively_without_authorizing_uncertain_resend() {
 }
 
 #[test]
+fn local_io_errors_are_explicit_and_do_not_authorize_provider_resends() {
+    let mut error = CoreError::new(
+        CoreErrorCode::IoError,
+        "Cannot read the registered session directory.",
+        "Check local filesystem access before retrying the same operation.",
+    );
+    assert!(!error.retryable);
+    assert_eq!(error.code.cli_exit(), 4);
+    let value = serde_json::to_value(&error).unwrap();
+    assert_eq!(value["code"], "io_error");
+    assert_eq!(serde_json::from_value::<CoreError>(value).unwrap(), error);
+    error.validate().unwrap();
+    // Only a classified transient local failure may explicitly override this.
+    error.retryable = true;
+    error.validate().unwrap();
+    error.code = CoreErrorCode::DeliveryUncertain;
+    assert!(error.validate().is_err());
+}
+
+#[test]
+fn desktop_hints_preserve_nullable_routes_and_qualify_presence_generation() {
+    let routing = cases::load(root()).routing;
+    let hint = SessionChangedHint {
+        session_id: routing.session_id.clone(),
+        revision: PositiveSafeInteger::new(2).unwrap(),
+    };
+    assert_eq!(serde_json::to_value(hint).unwrap()["revision"], 2);
+    let mut route = OpenRoute {
+        project_id: routing.project_id,
+        session_id: routing.session_id,
+        item_id: None,
+    };
+    assert!(route.item_route().is_none());
+    let value = serde_json::to_value(&route).unwrap();
+    assert!(value["item_id"].is_null());
+    assert_eq!(serde_json::from_value::<OpenRoute>(value).unwrap(), route);
+    route.item_id = Some(ItemRef::new("1.1").unwrap());
+    assert_eq!(route.item_route().unwrap().item_id, route.item_id.unwrap());
+    let mut presence = PresenceChangedHint {
+        binding_id: routing.binding_id,
+        generation: routing.generation.clone(),
+        observation: PresenceObservation {
+            instance_id: routing.generation.clone(),
+            generation: routing.generation,
+            connection_state: ConnectionState::Disconnected,
+            execution_state: ExecutionState::Unknown,
+            last_seen_at: None,
+            source: None,
+            process_identity: None,
+            freshness: Freshness::Unknown,
+        },
+    };
+    presence.validate_wire().unwrap();
+    presence.observation.generation = routing.attempt_id;
+    assert_eq!(
+        presence.validate_wire().unwrap_err().code,
+        CoreErrorCode::BindingMismatch
+    );
+    let mut extra = serde_json::to_value(presence).unwrap();
+    extra["path"] = json!("/unregistered/root");
+    assert!(serde_json::from_value::<PresenceChangedHint>(extra).is_err());
+}
+
+#[test]
 fn owner_transport_routes_are_required_once_and_never_silently_overridden() {
     let routing = cases::load(root()).routing;
     let session = SessionRef {
