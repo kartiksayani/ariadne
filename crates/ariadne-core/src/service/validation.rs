@@ -674,6 +674,21 @@ impl QueryResult {
             (Self::ProjectList(result), QueryRequest::ProjectList(request)) => {
                 page(&result.projects, request.limit.value())?;
                 continued_page(&result.projects, &request.cursor, QueryView::Projects)?;
+                for summary in &result.projects.items {
+                    if summary
+                        .project
+                        .as_ref()
+                        .is_some_and(|project| project.id != summary.project_id)
+                        || (summary.availability == ProjectAvailability::Available
+                            && summary.project.is_none())
+                        || (summary.availability == ProjectAvailability::Unavailable
+                            && summary.counts.completeness != Completeness::Partial)
+                    {
+                        return Err(invalid(
+                            "Project summary contradicts registered identity or availability",
+                        ));
+                    }
+                }
             }
             (Self::SessionList(result), QueryRequest::SessionList(request)) => {
                 page(&result.sessions, request.limit.value())?;

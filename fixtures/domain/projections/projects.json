@@ -27,7 +27,34 @@
         "archived_topics": 0,
         "completeness": "complete",
         "unavailable_session_ids": []
-      }
+      },
+      "project_id": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "project": null,
+      "canonical_root": "/fixtures/unavailable-demo",
+      "availability": "unavailable",
+      "counts": {
+        "items_by_status": {
+          "open": 0,
+          "waiting_on_me": 0,
+          "in_progress": 0,
+          "decided": 0,
+          "done": 0,
+          "dropped": 0,
+          "replaced": 0
+        },
+        "waiting_unanswered": 0,
+        "sent_inputs": {
+          "queued": 0,
+          "in_flight": 0,
+          "needs_attention": 0
+        },
+        "archived_topics": 0,
+        "completeness": "partial",
+        "unavailable_session_ids": []
+      },
+      "project_id": "00000000-0000-4000-8000-000000000009"
     }
   ],
   "next_cursor": null,

@@ -258,12 +258,24 @@ Canonical P0.3b records make those projections explicit:
   keeps nullable parent/creation/fork context apart from the deduplicated timeline.
   `ItemRoundsProjection={item_id,rounds:Page<RoundProjection>}` retains independent
   cursors inside each round; advancing outer pages never advances nested pages.
-- `ProjectSummary={project:Project,canonical_root,availability:available|unavailable,
+- `ProjectSummary={project_id,project:Project|null,canonical_root,availability:available|unavailable,
   counts:SummaryCounts}`. `SessionSummary={project_id,session_id,title,state,
   revision,created_at,updated_at,closed_at,active_binding:BindingSummary|null,
   counts:SummaryCounts}`. `BindingSummary={id,adapter_id,external_session_id,
   generation,dispatch_state,owner_paused,pause_reason,connection_state,
   presence:PresenceObservation|null}`. Closed time and pause reason are nullable.
+
+Available project summaries require verified metadata matching project_id.
+Unavailable registered roots retain their trusted ID/path; metadata may be null
+when unreadable. Counts are partial, with actual known unreadable session IDs or
+an empty list when those IDs are unknown. No cached or fabricated Project is used.
+Aggregate cursors bind the full captured inventory digest as well as actor,
+route and filters; a mismatch, including a changed aggregate filter, returns
+snapshot_changed. Single-session filter mismatches remain invalid_argument.
+Counts use the captured scope before pagination and session-state filtering.
+Requested nested history families get byte-budget priority; defaults may return
+empty pages with truthful after:null continuations, then progress when explicitly
+requested. Complete bodies are never truncated.
 
 These are owned domain records, not renderer copies or executable transforms.
 Full bodies and source author/identity remain in canonical Message/Answer/origin
@@ -479,7 +491,11 @@ source_input_id/attempt_id and its `issued_through_message_number`; agent query
 projections hide later queued owner-message bodies/options until those inputs
 are issued, while still showing current items/revisions and intervening agent
 updates. Queue summaries may show counts/IDs only. Terminal-originated reads use
-the binding's latest issued watermark; unissued owner inputs are not fetched as
+at most the binding's latest issued watermark, permitting a narrower grant;
+dispatched reads also stay within source-input issuance. Historical attempts can
+be read under a newly trusted current generation after reconciliation while
+retaining their original attempt generation, without lease or write authority.
+Unissued owner inputs are not fetched as
 an alternate delivery channel. This preserves one-at-a-time context. Shared
 rules instruct the agent to use these projections, not open raw session JSON.
 The restriction is application behavior, not a same-OS-user filesystem boundary.

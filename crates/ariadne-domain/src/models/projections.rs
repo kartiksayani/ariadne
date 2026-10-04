@@ -232,7 +232,9 @@ pub struct ItemRoundsProjection {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectSummary {
-    pub project: Project,
+    pub project_id: UuidV4,
+    #[serde(deserialize_with = "Option::<Project>::deserialize")]
+    pub project: Option<Project>,
     pub canonical_root: String,
     pub availability: ProjectAvailability,
     pub counts: SummaryCounts,
