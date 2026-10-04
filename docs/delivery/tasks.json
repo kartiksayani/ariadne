@@ -1032,7 +1032,7 @@
         "P3.3",
         "P3.5"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/62"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/74"
     },
     {
       "id": "P3.8",
@@ -1183,7 +1183,8 @@
       "estimate_days": 1,
       "implementation_depends_on": [
         "P4.1"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73"
     },
     {
       "id": "P4.4",
@@ -1262,7 +1263,8 @@
       "implementation_depends_on": [
         "P4.1",
         "P4.4"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73"
     },
     {
       "id": "P4.6",
@@ -1297,8 +1299,8 @@
       ],
       "estimate_days": 1.5,
       "implementation_depends_on": [
+        "P0.6",
         "P4.1",
-        "P4.3",
         "P4.4"
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/60"
@@ -1414,7 +1416,8 @@
       "implementation_depends_on": [
         "P4.4",
         "P0.4"
-      ]
+      ],
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73"
     },
     {
       "id": "P5.2",

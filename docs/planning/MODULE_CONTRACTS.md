@@ -79,6 +79,13 @@ supervisor composition is an acceptance join, not a prerequisite for pure Core/
 Store recovery decisions. Full P3.8 retains its original P3.2 dependency, audited
 CLI and actual runtime composition acceptance.
 
+P4.6's independent form/draft module starts after the actual merged P0.6 Core
+commands, P4.1 renderer service and P4.4 navigation/tree components. Waiting
+(P4.3) remains an original full acceptance dependency; it is not required to
+implement the independent controls. The reusable controls join actual merged
+Waiting/history modules when available and retain assembled/native acceptance.
+See [ADR-0057](../adr/ADR-0057-contract-first-owner-inputs-and-restored-operation-identity.md).
+
 P7.1 joins every product module and unresolved task integration acceptance.
 P7.2/P7.3 retain live five-input existing-host acceptance with owner approval;
 P8.1 retains the clean-install release handoff. There is no fixed integration
