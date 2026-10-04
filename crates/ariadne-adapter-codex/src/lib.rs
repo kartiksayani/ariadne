@@ -1,4 +1,4 @@
-//! Read-only Codex existing-daemon boundary. Queue submission is a separate task.
+//! Existing Codex daemon reads and bounded native queue submission.
 
 // Keep typify's output unchanged. Its keyword spelling, conversion helpers,
 // enum names/layout and explicit defaults trigger these specific lints.
@@ -17,8 +17,11 @@ mod generated;
 #[path = "tests/wire.rs"]
 mod wire_tests;
 
+mod adapter;
 mod history;
+mod queue;
 mod transport;
+pub use adapter::CodexAdapter;
 pub use history::{
     CodexDaemonReader, CodexHistoryClient, CodexOptions, DiscoveryPage, HistoryScan, ScanProgress,
     ThreadCandidate, UserMessageIdentity,
