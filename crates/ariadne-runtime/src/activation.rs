@@ -4,7 +4,9 @@ use crate::{
     discovery::AnnouncementBinding,
     leases::DesktopOwner,
     providers::{within, ProviderFactory, QualifiedProvider},
-    supervisor::{ConnectFailure, ConnectedSupervisor, SupervisorExit, SupervisorHandle},
+    supervisor::{
+        ConnectFailure, ConnectedSupervisor, PresenceObserver, SupervisorExit, SupervisorHandle,
+    },
 };
 use ariadne_core::{
     native::{AgentResolver, NativeCoreService},
@@ -54,6 +56,7 @@ pub struct NativeActivation {
     routes: ControlRoutes,
     runtime: tokio::runtime::Handle,
     outcomes: Arc<OutcomeHandler>,
+    presence: Option<Arc<PresenceObserver>>,
     state: Mutex<State>,
     stopping: AtomicBool,
 }
@@ -66,6 +69,17 @@ impl NativeActivation {
         runtime: tokio::runtime::Handle,
         outcomes: Arc<OutcomeHandler>,
     ) -> Arc<Self> {
+        Self::new_with_presence(core, providers, owner, routes, runtime, outcomes, None)
+    }
+    pub fn new_with_presence(
+        core: Arc<NativeCoreService>,
+        providers: ProviderFactory,
+        owner: Arc<DesktopOwner>,
+        routes: ControlRoutes,
+        runtime: tokio::runtime::Handle,
+        outcomes: Arc<OutcomeHandler>,
+        presence: Option<Arc<PresenceObserver>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             core,
             providers,
@@ -73,6 +87,7 @@ impl NativeActivation {
             routes,
             runtime,
             outcomes,
+            presence,
             state: Mutex::new(State {
                 active: BTreeMap::new(),
                 admitting: BTreeSet::new(),
@@ -331,6 +346,10 @@ impl NativeActivation {
         if self.stopping.load(Ordering::Acquire) {
             return Err(unavailable());
         }
+        let connected = match &self.presence {
+            Some(observer) => connected.with_presence_observer(observer.clone()),
+            None => connected,
+        };
         let mut handle = connected.start(lease)?;
         let observed = handle.progress();
         let route = handle.control_binding();

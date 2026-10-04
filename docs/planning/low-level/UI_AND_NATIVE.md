@@ -70,6 +70,24 @@ or given invented ancestors. Inaccessible session reads preserve their error.
 Actual Registry wiring, registered-parent watch and original native
 on-disk acceptance remain required before P4.1 completion.
 
+The native composition installs one real CoreBridge/DesktopService after
+single-instance interception and DesktopOwner acquisition. BindingConnect carries
+its original native admission deadline through the qualified runtime callback;
+all blocking registration/Core/provider work stays off UI. Explicit Quit awaits
+owned workers and admitted blocking lease holders; wake requalifies persisted
+selected IDs without rebind, resume or resend (ADR0059).
+
+Presence is a volatile composition projection from accepted connection/report
+receipts, scoped to the selected binding, generation, endpoint and current
+instance. The opt-in supervisor observer is drained before replacement/shutdown.
+Expiry reuses the existing native discovery lifetime and original observation
+timestamp. Unknown/Stale do not imply Idle. SessionList carries current facts in
+its existing BindingSummary.presence; SessionSnapshot has no volatile extension.
+After subscriptions and SessionGet, opened readers seed from canonical
+project-scoped SessionList pages, stopping at their session. Live hints and
+generation changes supersede delayed seeds; failed presence reads preserve the
+valid durable snapshot. No volatile fact is persisted as domain status.
+
 Subscribe before loading. Keep one immutable validated snapshot store per opened session and expose it through `useSyncExternalStore`; keep drafts/view state in a separate local reducer. Coalesce invalidations and ignore revisions no newer than the displayed revision. Replace displayed data only after a complete valid snapshot is available. Preserve selected item, focus, scroll anchor, filters, and draft. A failed read marks the root/session stale or inaccessible; it never looks like an empty queue.
 
 Watch registered session-store parent directories, debounce changes, validate snapshots in the backend, and emit IDs/revisions rather than file contents. Reconcile on app focus, wake, watcher error, and a bounded fallback poll. Selected session gets priority. V1 session discovery reads only known-provider session metadata and Mod announcements; it never imports private terminal transcripts or chooses a binding automatically. Qualified host state and heartbeat freshness supply liveness. Explicit CLI/MCP messages and bridge lifecycle evidence are authoritative.
@@ -263,6 +281,15 @@ existing main window without changing its registered route or selection.
 The tray uses a template icon, numeric `waiting_unanswered` count (blank at zero), oldest 10 eligible waiting entries with project/session labels, separate binding/lifecycle diagnostics, Show Ariadne, Pin, and Quit. Sent generic requests do not increment the task-question count. Coalesce rebuilds at most every 250 ms. If registered roots are inaccessible, show an incomplete count and diagnostic row rather than a false total. No approval action exists in the tray.
 
 Use one native UserNotifications bridge in the macOS module with a single long-lived Rust `objc2` delegate. It owns permission request, schedule/remove, foreground policy, and click routing; do not initialize a second notification delegate. Notification identity is `ariadne:<session>:<item>:<waiting-episode>` and payload contains IDs resolved through the registry. Default body is generic; item text preview is opt-in. Deduplicate episodes in a bounded preference ledger. Establish a watermark on first launch rather than notifying the backlog. Group bursts over three arrivals within 500 ms; all entries remain in the queue. Denied notification permission leaves in-app queue working. Never put host permission approval controls in a notification.
+
+The canonical preferences ledger retains at most 256 typed session/item/question-revision
+episode identities. Empty ledger and disabled preview preserve existing normalized
+preference bytes. Establish the first watermark only from a complete consistent
+registered capture; an initial partial catalogue keeps notifications unavailable.
+Subsequent partial captures may notify within ledger capacity. Pause on capacity
+pressure; advance/compact only after a complete capture and retain identities at
+the watermark boundary. Confirm the preferences patch before scheduling observed
+arrivals, without introducing a durable notification delivery journal (ADR0061).
 
 Click focuses/unhides, restores a minimized window, and calls the common reveal route. Cold launch stores the route until app readiness. If the item was answered, open its current detail; do not fail routing. A quit app cannot report new external changes until reopened, but already delivered notification routes must work. Packaged click and cold-launch routing have native proof acceptance coverage in `DESIGN_TRACEABILITY.md`.
 

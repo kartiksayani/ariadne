@@ -2,6 +2,7 @@
 mod candidates;
 mod codex;
 mod wire;
+pub use candidates::LIFETIME as PRESENCE_LIFETIME;
 pub use candidates::{
     AnnouncementBinding, BindingResolver, Candidate, Discovery, DiscoverySnapshot,
 };
