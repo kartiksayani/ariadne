@@ -410,6 +410,30 @@ The MCP server may serve several sessions, so **every call** has explicit routin
 no cwd/latest-session default, global mutable 'current agent', or inferred PID.
 Binding maps to a registered session; callers cannot provide an alternate path.
 
+The optional rmcp stdio transport advertises exactly these four generated tools
+and canonical schemas. Native lookup and synchronous Core calls run off the async
+executor through the existing blocking pool. Both installed entrypoints share
+`serve_stdio`; agent CLI and MCP reuse one authoritative native context resolver,
+including historical Apply replay and persisted issuance ceilings. Tool callers
+cannot install a service or choose trusted actor/path context. No external host
+MCP configuration or connector is enabled by installing the binary.
+
+Raw request lines are bounded to 1MiB before SDK JSON decode; typed canonical tool
+arguments retain the 512KiB request bound. Overflow or nonempty incomplete EOF
+closes the transport without dispatching partial input or salvaging a suffix.
+SDK JSON-RPC failures handle invalid protocol/unknown methods; canonical domain
+failures preserve CoreError and set `isError=true`. Malformed Core errors become
+a bounded nonretryable protocol_conflict with same-operation reconciliation
+guidance and no assertion that effects are absent.
+
+The complete application envelope retains its 1MiB bound before MCP wrapping.
+Structured content and required text content contain that same full envelope;
+bodies/provenance and page limits are unchanged. JSON-RPC wrapping adds bounded
+protocol overhead: the structured copy, at most twice the envelope for its JSON
+text encoding, the request ID from the bounded input frame, and fixed metadata.
+Stdout contains only JSON-RPC. See
+[ADR-0045](../../adr/ADR-0045-bounded-mcp-stdio-and-shared-agent-routing.md).
+
 `ApplyRequest`:
 
 ```text
