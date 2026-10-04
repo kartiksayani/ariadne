@@ -92,7 +92,7 @@
           <button id="gantt-view" type="button" aria-pressed="true">Gantt estimate</button>
           <button id="graph-view" type="button" aria-pressed="false">Dependency graph</button>
         </div>
-        <div class="legend"><span>Orange + C: projected acceptance critical path</span><span>Amber + I: implementation merged, acceptance in progress</span><span>Purple dashed outline + A: active subagent assignment</span><span>Green + M: maintainer-recorded merge</span><span>Solid: full acceptance joins</span><span>Dashed: implementation prerequisites</span><span>W: assigned worker lane</span></div>
+        <div class="legend"><span>Orange + C: projected acceptance critical path</span><span>Amber + I: implementation merged, acceptance in progress</span><span>Purple dashed outline + A: active product implementation</span><span>Green + M: maintainer-recorded merge</span><span>Solid: full acceptance joins</span><span>Dashed: implementation prerequisites</span><span>W: assigned worker lane</span></div>
         <p class="muted" id="chart-note">Filters hide rows only; estimates use full acceptance joins. Implementation edges show earlier work eligibility after published contracts, not a validated completion forecast.</p>
         <div id="chart" class="scroll" aria-label="Interactive task chart"></div>
       </section>
@@ -901,7 +901,6 @@
     },
     {
       "id": "P3.1",
-      "active": true,
       "title": "Implement desktop leases and private bridge control IPC",
       "phase": "M3",
       "depends_on": [
@@ -938,7 +937,6 @@
     },
     {
       "id": "P3.2",
-      "active": true,
       "title": "Run independent supervisors and reconcile normal quit/reopen",
       "phase": "M3",
       "depends_on": [
@@ -946,7 +944,8 @@
       ],
       "paths": [
         "crates/ariadne-runtime/src/supervisor/**",
-        "crates/ariadne-runtime/tests/supervisor.rs"
+        "crates/ariadne-runtime/tests/supervisor.rs",
+        "crates/ariadne-runtime/tests/supervisor_native_fifo.rs"
       ],
       "spec": [
         "docs/planning/low-level/QUEUES_AND_RECOVERY.md#5-desktop-shutdown-and-worker-recovery",
@@ -959,7 +958,7 @@
         "Quit stops own dispatch/helpers and releases leases without changing generation or killing hosts; independent CLI/MCP remains usable and startup reconciles before dispatch."
       ],
       "checks": [
-        "rtk proxy cargo test -p ariadne-runtime --test supervisor"
+        "rtk proxy cargo test -p ariadne-runtime --test supervisor --test supervisor_native_fifo"
       ],
       "estimate_days": 1.5,
       "implementation_depends_on": [
@@ -967,10 +966,11 @@
         "P0.5",
         "P0.6"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/78"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/84"
     },
     {
       "id": "P3.3",
+      "active": true,
       "title": "Ship Claude Mod claims and captured turn callbacks",
       "phase": "M3",
       "depends_on": [
@@ -1174,8 +1174,7 @@
         "rtk proxy cargo test -p ariadne-cli --test owner_native"
       ],
       "estimate_days": 1.5,
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/76",
-      "active": true
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/76"
     },
     {
       "id": "P4.1",
@@ -1449,8 +1448,7 @@
         "P4.3",
         "P4.6",
         "P0.6"
-      ],
-      "active": true
+      ]
     },
     {
       "id": "P4.8",
@@ -1636,7 +1634,6 @@
     },
     {
       "id": "P6.2",
-      "active": true,
       "title": "Implement native tray counts and one notification delegate",
       "phase": "M6",
       "depends_on": [
@@ -2106,7 +2103,7 @@
       const status = engine.taskStatus(task, completed);
       const classes = ['task', record.critical ? 'critical' : '', status, task.active ? 'active' : '', selected === task.id ? 'selected' : ''].join(' ');
       const group = svgNode('g', {class: classes, role: 'button', tabindex: 0,
-        'aria-label': task.id + ': ' + task.title + ', ' + task.estimate_days + ' estimated days, ' + engine.taskStatus(task, completed) + (task.active ? ', active subagent assignment' : ''),
+        'aria-label': task.id + ': ' + task.title + ', ' + task.estimate_days + ' estimated days, ' + engine.taskStatus(task, completed) + (task.active ? ', active product implementation' : ''),
         'aria-pressed': String(selected === task.id), 'data-task-id': task.id}, svg);
       svgNode('title', {}, group, task.id + ' · ' + task.title);
       svgNode('rect', {x, y, width, height}, group);
