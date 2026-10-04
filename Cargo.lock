@@ -107,9 +107,12 @@ dependencies = [
  "ariadne-core",
  "ariadne-domain",
  "ariadne-runtime",
+ "ariadne-store",
+ "chrono",
  "serde",
  "serde_json",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]

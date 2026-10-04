@@ -8,8 +8,11 @@ license.workspace = true
 ariadne-runtime = { path = "../ariadne-runtime" }
 ariadne-core = { path = "../ariadne-core" }
 ariadne-domain = { path = "../ariadne-domain" }
+ariadne-store = { path = "../ariadne-store" }
 ariadne-agent-protocol = { path = "../ariadne-agent-protocol" }
 serde_json.workspace = true
+chrono.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 serde.workspace = true

@@ -175,6 +175,30 @@ impl Registry {
     /// Trusted native entry-point chooses the user home; tests inject owned homes.
     pub fn open(home: &Path) -> Result<Self, RegistryError> {
         let data = Directory::root(home)?.child(".ariadne", true)?;
+        Self::from_directory(data)
+    }
+    /// Open the existing private application data root used by native entrypoints.
+    /// Its final component is opened relative to its canonical parent without
+    /// following links; no additional `.ariadne` directory or root is created.
+    pub fn open_data_directory(path: &Path) -> Result<Self, RegistryError> {
+        if !path.is_absolute()
+            || path
+                .components()
+                .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+        {
+            return Err(StoreError::UnsafePath { path: path.into() }.into());
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| StoreError::UnsafePath { path: path.into() })?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| StoreError::UnsafePath { path: path.into() })?;
+        let data = Directory::root(parent)?.child(name, false)?;
+        Self::from_directory(data)
+    }
+    fn from_directory(data: Directory) -> Result<Self, RegistryError> {
         let registry = Self { data };
         lock::with_lock(&registry.data, "registry.lock", || {
             registry.projects().map(|_| ())
