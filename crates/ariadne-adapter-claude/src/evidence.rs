@@ -99,7 +99,7 @@ impl QualifiedClaudeHost {
         fresh(&self.evidence)
     }
     pub fn capabilities(&self) -> Capabilities {
-        crate::capabilities::capabilities()
+        crate::capabilities::capabilities(&self.evidence.identity.app_version)
     }
 }
 

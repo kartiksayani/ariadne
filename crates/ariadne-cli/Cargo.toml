@@ -20,6 +20,7 @@ chrono.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+tokio = { version = "=1.53.1", default-features = false, features = ["rt-multi-thread", "time", "sync"] }
 tungstenite = { version = "=0.29.0", default-features = false, features = ["handshake"] }
 serde.workspace = true
 ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
