@@ -166,7 +166,7 @@ pub fn run() {
 
 fn desktop_handler<R: tauri::Runtime>(
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
-    let handler = tauri::generate_handler![
+    let handler: fn(tauri::ipc::Invoke<R>) -> bool = tauri::generate_handler![
         native_ping,
         native::routes::route_ready,
         native::notifications::notification_permission,
@@ -196,7 +196,8 @@ fn desktop_handler<R: tauri::Runtime>(
     ];
     #[cfg(feature = "e2e")]
     {
-        let quit = tauri::generate_handler![e2e_quit::native_e2e_quit];
+        let quit: fn(tauri::ipc::Invoke<R>) -> bool =
+            tauri::generate_handler![e2e_quit::native_e2e_quit];
         move |invoke: tauri::ipc::Invoke<R>| {
             if invoke.message.command() == "native_e2e_quit" {
                 quit(invoke)
