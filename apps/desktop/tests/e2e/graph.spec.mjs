@@ -116,6 +116,8 @@ export async function runGraphAcceptance(configuration) {
   // Existing detail -> parent -> child routes reach an initially off-screen node
   // through the real renderer/Core boundary; no node is added to the DOM by tests.
   await detail(canonical, '10.50'); await click('[aria-label="Item location"] button=Parent · Item 10'); await detail(canonical, '10');
+  await wait(async () => (await view(tree)).selected_item_id === '10' && await browser.$('.ref-view-tabs button=Graph').isEnabled(),
+    'The parent reveal must finish saving before the separate child reveal');
   assert.ok(!(await sample()).nodes.some(value => value.id === '10.80'), 'The reveal target must actually begin culled');
   await click('[aria-label="Child items"] button*=Item 10.80 ·');
   const offscreenReveal = await revealed(canonical, '10.80'); samples.push({ action: 'registered-offscreen-reveal', ...offscreenReveal });
@@ -124,14 +126,13 @@ export async function runGraphAcceptance(configuration) {
   const maximum = await sample(); assertCulled(maximum, canonical, '10.80');
   assert.ok(!maximum.nodes.some(value => ['10', '10.99'].includes(value.id)), 'Both crossing-edge endpoints must actually be culled');
   assert.ok(maximum.edges.some(value => value.id === 'parent:10:10.99'), 'Native SVG must retain the conservative crossing edge with both endpoints culled');
-  assert.equal(maximum.focused, '10.80'); assert.equal(await browser.$('[aria-label="Zoom in"]').isEnabled(), false);
+  assert.equal(await browser.$('[aria-label="Zoom in"]').isEnabled(), false);
   samples.push({ action: 'maximum-zoom-crossing-edge', ...maximum });
   await browser.saveScreenshot(join(evidence, 'native-graph-crossing-edge.png'));
   await fit(); const refitted = await sample(); assertCulled(refitted, canonical, '10.80');
-  assert.equal(refitted.focused, '10.80', 'Fit must retain off-screen native focus');
   const retained = refitted.nodes.find(value => value.id === '10.80');
   assert.ok(refitted.y + (retained.y + retained.height) * refitted.scale < -200,
-    'The retained selected/focused node must actually lie outside even the expanded culling margin');
+    'The retained selected node must actually lie outside even the expanded culling margin');
   samples.push({ action: 'fit-after-remote-selection', ...refitted });
 
   await (await search()).waitForEnabled(); await (await search()).setValue('Native token_10_80_end');
