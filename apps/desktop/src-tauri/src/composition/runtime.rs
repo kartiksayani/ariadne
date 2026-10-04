@@ -50,6 +50,7 @@ struct Workers {
     watcher: RegisteredWatcher,
     presence_stop: tokio::sync::oneshot::Sender<()>,
     presence_task: tokio::task::JoinHandle<()>,
+    admitted: Vec<tokio::task::JoinHandle<()>>,
 }
 pub struct NativeRuntime {
     core: Arc<NativeCoreService>,
@@ -147,7 +148,7 @@ impl NativeRuntime {
         });
         let connect_runtime = Arc::downgrade(&runtime);
         let announcement_runtime = Arc::downgrade(&runtime);
-        let server = ControlServer::bind_shared(owner.clone(), core.clone(), vec![])?
+        let server = ControlServer::bind_shared(owner.clone(), Arc::new(runtime.bridge()), vec![])?
             .with_routes(routes.clone())
             .with_discovery(discovery.clone())
             .with_native_connect(Arc::new(move |request, deadline| {
@@ -160,7 +161,6 @@ impl NativeRuntime {
                 announcement_runtime
                     .upgrade()
                     .ok_or_else(unavailable)?
-                    .activation()?
                     .announce_before(scope, deadline)
             }));
         let poller = {
@@ -204,6 +204,7 @@ impl NativeRuntime {
             watcher,
             presence_stop,
             presence_task,
+            admitted: Vec::new(),
         });
         Ok(runtime)
     }
@@ -215,8 +216,7 @@ impl NativeRuntime {
     }
     pub(super) fn run_owned<T: Send + 'static>(
         &self,
-        deadline: Instant,
-        timeout: CoreError,
+        disconnected: CoreError,
         work: impl FnOnce() -> Result<T, CoreError> + Send + 'static,
     ) -> Result<T, CoreError> {
         if OWNED_BRIDGE.with(Cell::get) {
@@ -224,30 +224,39 @@ impl NativeRuntime {
         }
         let (sent, received) = std::sync::mpsc::sync_channel(1);
         {
-            let workers = self.workers.lock().map_err(|_| unavailable())?;
+            let mut workers = self.workers.lock().map_err(|_| unavailable())?;
             if self.stopping.load(Ordering::Acquire) || self.replacing.load(Ordering::Acquire) {
                 return Err(unavailable());
             }
-            let workers = workers.as_ref().ok_or_else(unavailable)?;
+            let workers = workers.as_mut().ok_or_else(unavailable)?;
             // Scheduling under the admission lock makes executor shutdown wait
             // for this actual closure. The lock ends before Core/provider IO.
-            workers.executor.spawn_blocking(move || {
+            workers.admitted.retain(|task| !task.is_finished());
+            let task = workers.executor.spawn_blocking(move || {
                 let _owned = OwnedBridgeGuard(OWNED_BRIDGE.with(|owned| owned.replace(true)));
                 let result = work();
                 let _ = sent.send(result);
             });
+            workers.admitted.push(task);
         }
-        received
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .map_err(|_| timeout)?
+        // Core owns replay/persistence authority. An outer deadline could hide
+        // a receipt already committed by this admitted worker, including exact
+        // replay admitted after the provider deadline. Only provider IO uses
+        // that original deadline; filesystem completion is not wall-clock bound.
+        received.recv().map_err(|_| disconnected)?
     }
     pub(super) fn spawn_reconciliation(&self, runtime: Arc<Self>) {
-        let workers = self
+        let mut workers = self
             .workers
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if let Some(workers) = workers.as_ref() {
-            workers.executor.spawn_blocking(move || {
+        if self.stopping.load(Ordering::Acquire) || self.replacing.load(Ordering::Acquire) {
+            return;
+        }
+        if let Some(workers) = workers.as_mut() {
+            workers.admitted.retain(|task| !task.is_finished());
+            let task = workers.executor.spawn_blocking(move || {
+                let _owned = OwnedBridgeGuard(OWNED_BRIDGE.with(|owned| owned.replace(true)));
                 if let Err(error) = runtime.reconcile() {
                     eprintln!(
                         "Ariadne persisted binding reconciliation remains unavailable: {:?}.",
@@ -255,6 +264,7 @@ impl NativeRuntime {
                     );
                 }
             });
+            workers.admitted.push(task);
         }
     }
     pub fn take_reconciliation_errors(&self) -> Vec<CoreError> {
@@ -275,6 +285,21 @@ impl NativeRuntime {
             .executor
             .handle()
             .clone()
+    }
+    #[cfg(test)]
+    pub(super) fn lease_for_test(
+        &self,
+        route: &SessionRef,
+        scope: BindingScope,
+    ) -> ariadne_runtime::leases::BindingLease {
+        let owner = self.workers.lock().unwrap().as_ref().unwrap().owner.clone();
+        owner
+            .binding_lease_shared(
+                self.core.resolve_session(route).unwrap(),
+                scope.binding_id,
+                scope.generation,
+            )
+            .unwrap()
     }
     pub fn discovery(&self) -> Result<DiscoverySnapshot, CoreError> {
         self.discovery.snapshot()
@@ -315,8 +340,14 @@ impl NativeRuntime {
         deadline: Instant,
     ) -> Result<MutationReceipt, CoreError> {
         let activation = self.activation()?;
-        self.run_owned(deadline, uncertain(), move || {
+        self.run_owned(uncertain(), move || {
             activation.bootstrap_before(request, deadline)
+        })
+    }
+    fn announce_before(&self, scope: BindingScope, deadline: Instant) -> Result<(), CoreError> {
+        let activation = self.activation()?;
+        self.run_owned(unavailable(), move || {
+            activation.announce_before(scope, deadline)
         })
     }
     fn activation(&self) -> Result<Arc<NativeActivation>, CoreError> {
@@ -401,32 +432,61 @@ impl NativeRuntime {
         }
     }
     pub fn reconcile_after_wake(&self) -> Result<(), CoreError> {
-        if self.stopping.load(Ordering::Acquire) || self.replacing.swap(true, Ordering::AcqRel) {
-            return Err(unavailable());
+        {
+            let _workers = self.workers.lock().map_err(|_| unavailable())?;
+            if self.stopping.load(Ordering::Acquire) || self.replacing.swap(true, Ordering::AcqRel)
+            {
+                return Err(unavailable());
+            }
         }
+        let _lifecycle = self.shutdown_gate.lock().map_err(|_| unavailable())?;
         let result = std::thread::scope(|scope| {
             scope
                 .spawn(|| {
-                    let mut workers = self.workers.lock().map_err(|_| unavailable())?;
-                    let workers = workers.as_mut().ok_or_else(unavailable)?;
+                    let mut workers = self
+                        .workers
+                        .lock()
+                        .map_err(|_| unavailable())?
+                        .take()
+                        .ok_or_else(unavailable)?;
                     self.presence.fence();
-                    workers.poller.refresh_after_wake()?;
-                    workers.watcher.reconcile();
-                    workers.executor.block_on(workers.activation.shutdown())?;
-                    if self.stopping.load(Ordering::Acquire) {
-                        return Err(unavailable());
+                    // No admission can join this set after the fence. Actual
+                    // started work must return before its activation is replaced.
+                    // Neither the workers mutex nor any cache lock spans IO/wait.
+                    let result = (|| {
+                        workers.executor.block_on(async {
+                            let mut result = Ok(());
+                            for task in std::mem::take(&mut workers.admitted) {
+                                result = result.and(task.await.map_err(|_| unavailable()));
+                            }
+                            result.and(workers.activation.shutdown().await)
+                        })?;
+                        workers.poller.refresh_after_wake()?;
+                        workers.watcher.reconcile();
+                        Ok(())
+                    })();
+                    let mut published = self.workers.lock().map_err(|_| unavailable())?;
+                    let result = if self.stopping.load(Ordering::Acquire) {
+                        Err(unavailable())
+                    } else {
+                        result
+                    };
+                    if result.is_ok() {
+                        workers.activation = NativeActivation::new_with_presence(
+                            self.core.clone(),
+                            workers.providers.clone(),
+                            workers.owner.clone(),
+                            workers.routes.clone(),
+                            workers.executor.handle().clone(),
+                            workers.outcomes.clone(),
+                            Some(self.presence.observer()),
+                        );
+                        self.presence.reopen();
                     }
-                    workers.activation = NativeActivation::new_with_presence(
-                        self.core.clone(),
-                        workers.providers.clone(),
-                        workers.owner.clone(),
-                        workers.routes.clone(),
-                        workers.executor.handle().clone(),
-                        workers.outcomes.clone(),
-                        Some(self.presence.observer()),
-                    );
-                    self.presence.reopen();
-                    Ok(())
+                    // Even a failed refresh retains the owner and stopped
+                    // activation for a subsequent explicit lifecycle action.
+                    *published = Some(workers);
+                    result
                 })
                 .join()
                 .map_err(|_| unavailable())?
@@ -440,8 +500,13 @@ impl NativeRuntime {
     /// by dropping this owned executor. Dropping only ControlServer's JoinSet
     /// would leave started blocking calls retaining the physical owner/leases.
     pub fn shutdown(&self) -> Result<(), CoreError> {
+        {
+            // Quit wins before waiting for wake's lifecycle gate. Its flag and
+            // wake publication are serialized by the short admission lock.
+            let _workers = self.workers.lock().map_err(|_| unavailable())?;
+            self.stopping.store(true, Ordering::Release);
+        }
         let _shutdown = self.shutdown_gate.lock().map_err(|_| unavailable())?;
-        self.stopping.store(true, Ordering::Release);
         self.presence.stop();
         let workers = self.workers.lock().map_err(|_| unavailable())?.take();
         let Some(workers) = workers else {
@@ -518,7 +583,7 @@ pub(super) fn unavailable() -> CoreError {
 }
 pub(super) fn uncertain() -> CoreError {
     CoreError::new(CoreErrorCode::CommitUncertain,
-        "The admitted desktop operation has not returned a saved receipt within its original deadline.",
+        "The admitted desktop worker stopped before returning its authoritative receipt.",
         "Retain the original operation ID and contents; reconcile its saved receipt before any new operation.")
 }
 fn next_id() -> UuidV4 {
