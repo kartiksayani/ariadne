@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ariadne-adapter-claude = { path = "../ariadne-adapter-claude" }
 ariadne-adapter-codex = { path = "../ariadne-adapter-codex" }
 ariadne-core = { path = "../ariadne-core" }
 ariadne-domain = { path = "../ariadne-domain" }
