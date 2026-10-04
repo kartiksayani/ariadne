@@ -1,5 +1,9 @@
 # Delivery catalogue
 
+[HANDOFF](HANDOFF.md) is the sole current resumption page. It records active owners,
+unpushed work, current GitHub state and the next three steps; historical records
+remain evidence rather than additional current handoffs.
+
 [tasks.json](tasks.json) is the single source for task definitions and maintainer-updated
 completion metadata. [ORCHESTRATOR](../../ORCHESTRATOR.md) describes implementation,
 independent exact-head review and squash merge. [CONTRIBUTING](../../CONTRIBUTING.md)
