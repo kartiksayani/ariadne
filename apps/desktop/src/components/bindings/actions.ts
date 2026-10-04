@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { MutationReceipt, OwnerCommand, OwnerMutationRequest } from '../../generated/core';
+import type { MutationReceipt, OwnerCommand, OwnerMutationRequest, SessionRef } from '../../generated/core';
 import { CoreFailure, immutable, ServiceFailure, type Immutable, type RendererService, type SessionStore } from '../../data';
 
 interface ActionState {
@@ -8,12 +8,39 @@ interface ActionState {
   readonly error: CoreFailure | ServiceFailure | null;
   readonly receipt: Immutable<MutationReceipt> | null;
 }
+function definitiveRejection(failure: CoreFailure | ServiceFailure, command: OwnerCommand): boolean {
+  if (!(failure instanceof CoreFailure)) return false;
+  // Verified replay-first transaction guards in recovery/mod.rs and
+  // bindings/mod.rs reject before publication. Recovery's delivery_uncertain
+  // denotes missing idle attestation or ineligible retry before mutation.
+  // Generic routing/store/host failures can precede replay of an earlier save;
+  // their error codes cannot establish that the original operation was unsaved.
+  const lifecycle = command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect';
+  return (lifecycle || command.command === 'input_resolve')
+      && ['revision_conflict', 'binding_mismatch', 'invalid_transition'].includes(failure.error.code)
+    || command.command === 'input_resolve' && failure.error.code === 'delivery_uncertain'
+    || lifecycle && failure.error.code === 'stale_generation';
+}
 /** One controller per opened session; lifecycle and recovery share its write barrier. */
 export class SessionActions {
   private state: ActionState = Object.freeze({ writing: false, pending: null, error: null, receipt: null });
   private readonly listeners = new Set<() => void>();
-  constructor(readonly service: RendererService, readonly session: SessionStore,
-    private readonly operationId: () => string = () => crypto.randomUUID()) {}
+  private currentSession: SessionStore;
+  private readonly route: Immutable<SessionRef>;
+  constructor(readonly service: RendererService, session: SessionStore,
+    private readonly operationId: () => string = () => crypto.randomUUID()) {
+    this.currentSession = session;
+    this.route = immutable(session.getSnapshot().route);
+  }
+  get session(): SessionStore { return this.currentSession; }
+  /** Reopening a tab replaces its reader, never its pending operation. */
+  attachSession(session: SessionStore): void {
+    const route = session.getSnapshot().route;
+    if (route.project_id !== this.route.project_id || route.session_id !== this.route.session_id) {
+      throw new Error('A session action controller cannot change its registered route.');
+    }
+    this.currentSession = session;
+  }
   readonly getSnapshot = () => this.state;
   readonly subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(update: Partial<ActionState>) {
@@ -24,7 +51,7 @@ export class SessionActions {
     const current = this.session.getSnapshot();
     if (this.state.writing || this.state.pending || current.status !== 'ready' || current.error
         || current.snapshot?.session.revision !== reviewedRevision) return false;
-    this.publish({ pending: immutable({ session: current.route, command: { ...command, op_id: this.operationId() } }), receipt: null, error: null });
+    this.publish({ pending: immutable({ session: this.route, command: { ...command, op_id: this.operationId() } }), receipt: null, error: null });
     return this.retry();
   }
   async retry(): Promise<boolean> {
@@ -52,11 +79,26 @@ export class SessionActions {
       const failure = error instanceof CoreFailure || error instanceof ServiceFailure ? error : new ServiceFailure('transport');
       // A transport failure or ambiguous commit can have persisted. Keep every
       // byte, including attestation time and revision, for exact receipt replay.
-      const rejected = failure instanceof CoreFailure && failure.error.code !== 'commit_uncertain';
+      const rejected = definitiveRejection(failure, request.command);
       this.publish({ error: failure, ...(rejected ? { pending: null } : {}) });
       if (rejected) await this.session.refresh();
       return false;
     } finally { this.publish({ writing: false }); }
+  }
+}
+/** Owned by the application, independently of mounted views or open tabs. */
+export class SessionActionControllers {
+  private readonly controllers = new Map<string, SessionActions>();
+  constructor(private readonly service: RendererService, private readonly operationId: () => string = () => crypto.randomUUID()) {}
+  forSession(session: SessionStore): SessionActions {
+    const route = session.getSnapshot().route;
+    const key = JSON.stringify([route.project_id, route.session_id]);
+    let actions = this.controllers.get(key);
+    if (!actions) {
+      actions = new SessionActions(this.service, session, this.operationId);
+      this.controllers.set(key, actions);
+    } else actions.attachSession(session);
+    return actions;
   }
 }
 export function useSessionActions(actions: SessionActions) {
