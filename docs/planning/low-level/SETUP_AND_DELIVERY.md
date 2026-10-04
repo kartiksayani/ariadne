@@ -263,6 +263,14 @@ repositories, launches a host, or changes permissions. Setup prints the files it
 creates and the host commands the owner needs to run. Running setup again is
 safe and reports resources that are already present.
 
+Use `--project /absolute/project` for explicit registration; omission performs
+global integration setup without selecting a repository. The matching personal
+app/helpers must already be installed. Resources reference the validated immutable
+version root; P6.4 owns binary/app installation and the `current` pointer. Setup's
+ownership receipt records only newly created files. Matching pre-existing files
+remain unowned, and different same-version bytes are never replaced. Permanent
+coordination files and empty owned directories may remain after resource removal.
+
 Keep integration resources under Ariadne-owned paths. For a required host
 registration, edit only the named Ariadne entry and preserve surrounding
 settings. If the host format cannot be updated without rewriting foreign
@@ -315,8 +323,18 @@ public distribution.
 
 `ariadne doctor [--project PATH] [--json]` is read-only. Each check returns
 `status: ok|warning|error`, stable `code`, concise `message`, and actionable
-`hint`; JSON output also includes app/helper versions and check timestamps. It
-reports:
+`hint`; JSON output also includes app/helper versions and check timestamps.
+
+Select trusted provider executables with additive `--claude-bin /absolute/claude`
+and `--codex-bin /absolute/codex` options; without them, provider version/capability
+checks report unknown and the required option. Existing `CODEX_HOME`/default
+semantics select the endpoint without provider configuration or credential reads.
+Doctor opens only existing coordination files, using bounded lock admission;
+missing/busy coordination stays unknown. Index comparison needs complete validated
+authoritative observations and never rebuilds it. These timestamped diagnostics
+are not an atomic dispatch-readiness guarantee. See [ADR-0058](../../adr/ADR-0058-owned-integrations-and-read-only-doctor.md).
+
+It reports:
 
 - App/CLI/helper/plugin version parity and supported Claude/Codex baselines.
 - Project canonical path/identity, data permissions, symlink/path validation,

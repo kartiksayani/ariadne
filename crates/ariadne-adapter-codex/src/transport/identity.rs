@@ -246,6 +246,15 @@ impl ExecutableIdentity {
         &self.path
     }
     pub(crate) fn version_before(&self, deadline: Instant) -> Result<(), AdapterError> {
+        if self.read_version_before(deadline)? != "0.160.0" {
+            return Err(error(
+                Code::UnsupportedHostVersion,
+                "Codex CLI must match the supported 0.160.0 daemon pair.",
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn read_version_before(&self, deadline: Instant) -> Result<String, AdapterError> {
         if Instant::now() >= deadline {
             return Err(error(
                 Code::HostUnreachable,
@@ -327,16 +336,33 @@ impl ExecutableIdentity {
                 }
                 std::thread::sleep(Duration::from_millis(5));
             }
-            if !status.is_some_and(|s| s.success())
-                || bytes != b"codex-cli 0.160.0\n"
-                || !self.unchanged()
-            {
+            if !status.is_some_and(|s| s.success()) || !self.unchanged() {
                 return Err(error(
                     Code::UnsupportedHostVersion,
                     "Codex CLI must match the supported 0.160.0 daemon pair.",
                 ));
             }
-            Ok(())
+            let output = std::str::from_utf8(&bytes).map_err(|_| {
+                error(
+                    Code::UnsupportedHostVersion,
+                    "Codex version output is not canonical.",
+                )
+            })?;
+            let version = output
+                .strip_prefix("codex-cli ")
+                .and_then(|s| s.strip_suffix('\n'))
+                .filter(|s| {
+                    !s.is_empty()
+                        && s.len() <= 64
+                        && s.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+                })
+                .ok_or_else(|| {
+                    error(
+                        Code::UnsupportedHostVersion,
+                        "Codex version output is not canonical.",
+                    )
+                })?;
+            Ok(version.to_owned())
         })();
         if result.is_err() {
             let _ = child.kill();

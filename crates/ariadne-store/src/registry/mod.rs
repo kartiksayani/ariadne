@@ -62,6 +62,30 @@ pub struct RegistryCatalogue {
     pub revision: NonnegativeSafeInteger,
     pub projects: Vec<RegisteredProjectRead>,
 }
+impl RegistryCatalogue {
+    /// Complete timestamped diagnostic observations, never dispatch authority.
+    pub fn diagnostic_routes(&self) -> Result<Option<Vec<BindingRoute>>, RegistryError> {
+        let mut located = Vec::new();
+        for project in &self.projects {
+            let Ok(catalogue) = &project.result else {
+                return Ok(None);
+            };
+            let Ok(sessions) = &catalogue.sessions else {
+                return Ok(None);
+            };
+            for read in sessions {
+                let Ok(session) = &read.result else {
+                    return Ok(None);
+                };
+                located.push(LocatedSession {
+                    project: project.registered.clone(),
+                    session: session.clone(),
+                });
+            }
+        }
+        selected_routes(&located).map(Some)
+    }
+}
 /// Native local-setup result; transport uses its canonical core DTO.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -390,6 +414,53 @@ impl Registry {
         Ok(RegistryCatalogue {
             revision: projects.revision,
             projects: outcomes,
+        })
+    }
+
+    /// Read existing coordination state only, without index reconciliation or repair.
+    pub fn inspect_data_directory(path: &Path) -> Result<RegistryCatalogue, RegistryError> {
+        let registry = Self::diagnostic_root(path)?;
+        let projects = lock::with_lock_mode(&registry.data, "registry.lock", false, || {
+            registry.projects()
+        })?;
+        Ok(RegistryCatalogue {
+            revision: projects.revision,
+            projects: projects
+                .projects
+                .into_iter()
+                .map(|registered| {
+                    let result =
+                        Store::diagnose_registered(&registered.root, &registered.project_id);
+                    RegisteredProjectRead { registered, result }
+                })
+                .collect(),
+        })
+    }
+    pub fn inspect_binding_index(path: &Path) -> Result<Option<Vec<BindingRoute>>, RegistryError> {
+        let registry = Self::diagnostic_root(path)?;
+        lock::with_lock_mode(&registry.data, "registry.lock", false, || {
+            if !registry.data.verify_target("bindings.json")? {
+                return Ok(None);
+            }
+            let index: BindingIndex = read_data(&registry.data, "bindings.json")?;
+            Ok(Some(index.bindings))
+        })
+    }
+    fn diagnostic_root(path: &Path) -> Result<Self, RegistryError> {
+        if !path.is_absolute()
+            || path
+                .components()
+                .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+        {
+            return Err(StoreError::UnsafePath { path: path.into() }.into());
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or(RegistryError::InvalidArgument)?;
+        let parent = path.parent().ok_or(RegistryError::InvalidArgument)?;
+        Ok(Self {
+            data: Directory::root(parent)?.child(name, false)?,
         })
     }
     pub fn resolve_project(&self, project_id: &UuidV4) -> Result<RegisteredProject, RegistryError> {

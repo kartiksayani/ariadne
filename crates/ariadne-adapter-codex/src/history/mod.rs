@@ -28,6 +28,11 @@ pub struct CodexOptions {
     pub codex_home: PathBuf,
 }
 impl CodexOptions {
+    /// A detected version is diagnostic only and never qualifies a daemon/thread.
+    pub fn read_host_version(&self, deadline: Instant) -> Result<String, AdapterError> {
+        ExecutableIdentity::read(&self.executable)?
+            .read_version_before(deadline.min(Instant::now() + Duration::from_secs(5)))
+    }
     /// Reads only CODEX_HOME/HOME, never provider credentials or configuration files.
     pub fn from_environment(executable: PathBuf) -> Result<Self, AdapterError> {
         let codex_home = env::var_os("CODEX_HOME")
