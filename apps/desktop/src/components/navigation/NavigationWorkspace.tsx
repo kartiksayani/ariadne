@@ -19,7 +19,16 @@ export interface OpenedSessionView {
 }
 export interface NavigationWorkspaceProps {
   readonly store: NavigationStore;
-  readonly waiting: GlobalWaitingPanelProps;
+  readonly waiting?: GlobalWaitingPanelProps;
+  readonly waitingContent?: ReactNode;
+  readonly detail?: ReactNode;
+  readonly railContent?: ReactNode;
+  readonly chrome?: Pick<ReferenceWorkspaceProps['header'], 'query' | 'views' | 'railColor' | 'themeIcon' | 'themeTitle'>;
+  readonly context?: { readonly session: string; readonly binding: string };
+  readonly onQueryChange?: (query: string) => void;
+  readonly onToggleRail?: () => void;
+  readonly onThemeChange?: () => void;
+  readonly onCloseDetail?: () => void;
   readonly adapterChoices: readonly AdapterChoice[];
   readonly renderSession: (view: OpenedSessionView) => ReactNode;
 }
@@ -72,7 +81,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, waiting, adapterChoices, renderSession }: NavigationWorkspaceProps) {
+export function NavigationWorkspace({ store, waiting, waitingContent, detail, railContent, chrome, context, onQueryChange, onToggleRail, onThemeChange, onCloseDetail, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const [registering, setRegistering] = useState(false);
   const [binding, setBinding] = useState<Immutable<ProjectSummary> | null>(null);
@@ -108,7 +117,7 @@ export function NavigationWorkspace({ store, waiting, adapterChoices, renderSess
     meta={`${session.active_binding?.adapter_id ?? 'No binding'} · updated ${session.updated_at} · ${countsText(session.counts)}`}
     titleColor={text} background="var(--color-surface)" run={bindingLabel(session)} runColor={muted} runDot="currentColor" runRing="none"
     topics={[]} actions={[{ label: 'Open', icon: 'ph ph-arrow-square-out', kind: 'secondary',
-      disabled, onClick: () => select({ kind: 'session', session: { project_id: session.project_id, session_id: session.session_id } }) }]} />;
+      disabled, sessionId: session.session_id, onClick: () => select({ kind: 'session', session: { project_id: session.project_id, session_id: session.session_id } }) }]} />;
   const counts = selection.kind === 'projects' ? state.projects?.counts : matchingSessions?.counts;
   const center = <div className="nav-content">
     {state.error && <div className="nav-banner" role="alert"><p>{state.error.message}</p>
@@ -148,9 +157,10 @@ export function NavigationWorkspace({ store, waiting, adapterChoices, renderSess
         typeof value === 'object' && <li key={name}>{name.replace(/_/g, ' ')}: {value.supported ? 'supported' : 'unavailable'}{value.conditions.length > 0 && ` · ${value.conditions.join('; ')}`}</li>)}</ul>
     </section>}
   </div>;
-  return <ReferenceWorkspace header={{ session: selectedSession?.title ?? (selection.kind === 'session' ? `Session ${selection.session.session_id}` : selectedProject ? projectName(selectedProject) : 'Projects'),
-    binding: selectedSession ? bindingLabel(selectedSession) : 'Registered navigation', bindingColor: muted, bindingGlow: 'none',
-    query: '', views: [], railColor: muted, themeIcon: 'ph ph-moon', themeTitle: 'Theme' }} tabs={tabs} waiting={waiting}
+  return <ReferenceWorkspace header={{ session: context?.session ?? selectedSession?.title ?? (selection.kind === 'session' ? `Session ${selection.session.session_id}` : selectedProject ? projectName(selectedProject) : 'Projects'),
+    binding: context?.binding ?? (selectedSession ? bindingLabel(selectedSession) : 'Registered navigation'), bindingColor: muted, bindingGlow: 'none',
+    query: '', views: [], railColor: muted, themeIcon: 'ph ph-moon', themeTitle: 'Theme', ...chrome }} tabs={tabs} waiting={waiting ?? { count: '—', emptyText: 'Reading registered sessions…', waiting: [], sent: [] }} waitingContent={waitingContent} detail={detail} railContent={railContent}
+    onQueryChange={onQueryChange} onToggleRail={onToggleRail} onThemeChange={onThemeChange} onCloseDetail={onCloseDetail} chromeDisabled={disabled}
     center={center} summary={counts ? countsText(counts) : 'Catalogue unavailable'} overlay={registering
       ? <RegisterProject store={store} disabled={state.writing || state.pendingOperationId !== null} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}
