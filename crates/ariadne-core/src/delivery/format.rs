@@ -3,7 +3,7 @@ use crate::*;
 use ariadne_domain::models::*;
 use serde_json::{json, Value};
 
-pub(super) fn body(session: &Session, input: &Input) -> Result<String, CoreError> {
+pub(crate) fn body(session: &Session, input: &Input) -> Result<String, CoreError> {
     let owner = session
         .messages
         .iter()

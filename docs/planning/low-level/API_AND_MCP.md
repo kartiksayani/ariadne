@@ -627,3 +627,23 @@ source/target sessions and an active target with a valid binding. An unavailable
 host can receive a durable queued continuation, labelled queued, but an unknown
 or ambiguous binding cannot. Source may be closed or topic archived because
 copying is read-only there. No provider is launched by either action.
+
+Native `HistoryActionService` returns canonical lifecycle blockers and saved
+receipts. Exact operation replay precedes mutable guards. Continue preview binds
+the deterministic full source Session/topic hash and source revision; commit
+checks target replay before source IO and captures a validated immutable source
+Session under its read lock, the freshness observation/linearization point. It
+releases that lock, compares the owned snapshot revision/hash and uses one
+replay-first target transaction. The source is
+never written and no simultaneous session locks are held. A source change after
+validation leaves the recorded snapshot provenance unchanged. Reject same-session
+copies. Live Agent owner/recipient fields move to the explicit target binding;
+source message authorship/binding history and Me/Other ownership remain. Preview
+states this assignment and the explicit Dropped transformation for replacement
+edges outside the copied topic.
+
+Confirmed `topic_continue.summary` uses the existing 16KiB UTF-8 OwnerInput bound.
+The staged handoff also must fit the actual 64KiB formatted delivery payload;
+capacity errors save no target effects. Full copied history is never truncated.
+The single queued input references its immutable continuation operation/map.
+CLI and NativeCoreService routing are later consumer joins.
