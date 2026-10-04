@@ -60,7 +60,8 @@ def scope_for(paths):
     scope, release = "docs", False
     for name in paths:
         if (name in RELEASE_FILES or name.startswith((".github/", ".githooks/", "apps/desktop/src-tauri/"))
-                or (name.startswith(("crates/ariadne-agent-protocol/", "crates/ariadne-core/")) and name.endswith(".rs"))
+                or (name.startswith(("crates/ariadne-agent-protocol/", "crates/ariadne-core/")) and name.endswith(".rs")
+                    and not name.startswith(("crates/ariadne-agent-protocol/tests/", "crates/ariadne-core/tests/")))
                 or (name.startswith(("apps/", "crates/", "integrations/")) and
                     (Path(name).name in {"Cargo.toml", "build.rs", "package.json", "package-lock.json"} or
                      "/capabilities/" in name or "config" in Path(name).name or
@@ -80,7 +81,7 @@ def scope_for(paths):
 
 
 def reference_capture_for(paths, full=False):
-    """Skip only known backend/docs changes; every other path can affect visuals."""
+    """Skip known backend/docs and modules outside the current reference gallery."""
     if full or paths is None:
         return True
     for name in paths:
@@ -93,6 +94,12 @@ def reference_capture_for(paths, full=False):
             continue
         if name.startswith(("crates/", "apps/desktop/src-tauri/")) and (
                 path.suffix == ".rs" or path.name == "Cargo.toml"):
+            continue
+        # The gallery imports components/reference and its own styles, never
+        # history/rail. Remove this exception if that import closure changes.
+        if name.startswith(("apps/desktop/src/components/history/", "apps/desktop/src/components/rail/")) and path.suffix in {".ts", ".tsx", ".css"} and "config" not in path.name:
+            continue
+        if name.startswith("apps/desktop/tests/ui/history/") and path.suffix in {".ts", ".tsx"} and "config" not in path.name:
             continue
         return True
     return False
@@ -190,13 +197,16 @@ class InlineScripts(HTMLParser):
 
 def lint(paths, full=False):
     existing = [ROOT / name for name in paths if (ROOT / name).is_file()]
+    check_frontend = full or any(path.suffix in {".ts", ".tsx", ".mts", ".cts", ".css"}
+                                or path.name.startswith("tsconfig") for path in existing)
     run("git", "diff", "--check")
     run("git", "diff", "--cached", "--check")
     if full or any(path.suffix == ".py" or path.name in {"pyproject.toml", "requirements-dev.txt"} for path in existing):
         ruff = ROOT / ".venv-quality/bin/ruff"
         run(str(ruff) if ruff.exists() else "ruff", "check", ".")
     js = {".js", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}
-    if full or any(path.suffix in js for path in existing):
+    # npm check already runs the same repository-wide ESLint before types/CSS.
+    if not check_frontend and any(path.suffix in js for path in existing):
         run("node", ROOT / "node_modules/eslint/bin/eslint.js", ".", "--max-warnings=0")
     html = sorted((ROOT / "docs").rglob("*.html")) if full else [p for p in existing if p.suffix == ".html"]
     for path in html:
@@ -207,7 +217,7 @@ def lint(paths, full=False):
                 "--stdin-filename", "planning-inline.mjs", "--max-warnings=0", input="\n".join(parser.scripts))
     if full or any(path.suffix == ".rs" for path in existing):
         run("cargo", "fmt", "--all", "--", "--check")
-    if full or any(path.suffix in {".ts", ".tsx", ".mts", ".cts", ".css"} or path.name.startswith("tsconfig") for path in existing):
+    if check_frontend:
         run("npm", "run", "check")
 
 
