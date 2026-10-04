@@ -371,6 +371,26 @@ means all owners; selected exact owner values combine with OR, and with search,
 status, topic, Archive and Later filters through AND. Other-owner names preserve
 their exact bytes and follow the existing nonblank/NUL-free owner constraint.
 
+The native preferences backend stores one strict private `ui.json` record with
+the canonical snapshot and retained owner operation/digest/exact preference
+receipts. Absence returns revision1 defaults (System, Projects, empty views/Later/
+drafts) without writing data; the first patch expects1 and saves revision2. Exact
+operation replay precedes revision guards and performs no write; changed same-op
+parameters conflict. Each new valid patch saves effects plus receipt atomically
+and increments once. The complete canonical response envelope must fit1MiB;
+receipt history has no separate hard file quota or pruning. Unrelated patches
+preserve stale/unavailable view routes and exact inert drafts. Malformed/future
+records remain untouched; explicit owner reset/backup recovery remains native
+Settings acceptance. See [ADR-0041](../../adr/ADR-0041-native-core-and-owner-preferences.md).
+
+`NativeCoreService` now composes the real Query/Binding/Input/Apply/Delivery and
+preferences delegates behind the existing trait. Trusted native routes, UUIDs,
+time and read-only host qualification are injected; the verifier runs outside
+locks and no provider facts or dispatch lease are invented. Runtime/bridge and
+desktop consuming wiring, expiry scheduling, hints/watchers and native vertical
+acceptance remain their owning joins; later history/recovery routes are explicit
+Unsupported.
+
 Explicit owner attachment of a fresh host conversation uses `binding_connect`
 with its actual external session ID and a project-scoped `existing_session_id`;
 the Registry wrapper route is null. Names and cwd never select the target.
