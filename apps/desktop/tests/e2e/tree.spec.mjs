@@ -130,7 +130,9 @@ export async function runTreeAcceptance(configuration) {
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-2000.png'));
 
   const searchMs = [];
-  for (const id of ['1.1', '20.99', '10.50', '2.10', '15.25', '5.60']) {
+  const measuredIds = ['1.1', '20.99', '10.50', '2.10', '15.25', '5.60',
+    ...Array.from({ length: 14 }, (_, index) => `${index + 3}.${1 + (index * 17) % 99}`)];
+  for (const id of measuredIds) {
     searchMs.push(await measureAction('input', '.sentence-search input', [id.split('.')[0], id], async () => { const input = await search(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }));
   }
   await (await search()).setValue('ＮＡＴＩＶＥ café needle');
