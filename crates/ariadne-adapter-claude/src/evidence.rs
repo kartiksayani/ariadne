@@ -1,6 +1,8 @@
 //! Native-only facts supplied by the future UID-checked Mod announcement intake.
 use crate::normalization::error;
-use ariadne_agent_protocol::{AdapterError, AdapterErrorCode, UtcMillis, UuidV4};
+use ariadne_agent_protocol::{
+    AdapterError, AdapterErrorCode, Capabilities, EndpointFingerprint, UtcMillis, UuidV4,
+};
 use std::{
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
@@ -72,6 +74,35 @@ impl ModEvidence {
     }
 }
 
+/// Owned result of the exact native resource/version qualifier. No wire decoder or
+/// public constructor can create these facts. They are a read-only observation,
+/// not a binding, connection handle, lease or durable authority.
+#[derive(Debug, Clone)]
+pub struct QualifiedClaudeHost {
+    pub(crate) evidence: Arc<ModEvidence>,
+    pub(crate) fingerprint: EndpointFingerprint,
+}
+impl QualifiedClaudeHost {
+    pub fn identity(&self) -> &LoadedModIdentity {
+        &self.evidence.identity
+    }
+    pub fn endpoint_fingerprint(&self) -> &EndpointFingerprint {
+        &self.fingerprint
+    }
+    pub fn observed_at(&self) -> &UtcMillis {
+        &self.evidence.observed_at
+    }
+    pub fn received_at(&self) -> Instant {
+        self.evidence.received
+    }
+    pub fn is_fresh(&self) -> bool {
+        fresh(&self.evidence)
+    }
+    pub fn capabilities(&self) -> Capabilities {
+        crate::capabilities::capabilities()
+    }
+}
+
 pub(crate) fn fresh(evidence: &ModEvidence) -> bool {
     evidence.received.elapsed() < Duration::from_secs(90)
 }
@@ -81,7 +112,14 @@ pub(crate) fn fresh(evidence: &ModEvidence) -> bool {
 pub struct ModEvidenceSlot(Arc<Mutex<Option<Arc<ModEvidence>>>>);
 impl ModEvidenceSlot {
     pub fn publish(&self, evidence: ModEvidence) -> Result<(), AdapterError> {
-        *self.0.lock().map_err(|_| poisoned())? = Some(Arc::new(evidence));
+        self.publish_arc(Arc::new(evidence))
+    }
+    /// Reuse the original qualified snapshot without refreshing its receipt age.
+    pub fn publish_qualified(&self, host: &QualifiedClaudeHost) -> Result<(), AdapterError> {
+        self.publish_arc(host.evidence.clone())
+    }
+    fn publish_arc(&self, evidence: Arc<ModEvidence>) -> Result<(), AdapterError> {
+        *self.0.lock().map_err(|_| poisoned())? = Some(evidence);
         Ok(())
     }
     pub fn clear(&self) -> Result<(), AdapterError> {

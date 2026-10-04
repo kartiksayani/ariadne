@@ -1,6 +1,8 @@
 use super::{bounded, capacity, invalid, AnnouncementAck, SessionAnnouncement};
 use crate::control::BindingScope;
-use ariadne_adapter_claude::{ClaudeOptions, LoadedModIdentity, ModEvidenceSlot};
+use ariadne_adapter_claude::{
+    ClaudeOptions, LoadedModIdentity, ModEvidenceSlot, QualifiedClaudeHost,
+};
 use ariadne_agent_protocol::{Availability, Compatibility, EndpointRef};
 use ariadne_core::{CoreError, CoreErrorCode, SessionRef};
 use ariadne_domain::models::{Freshness, UtcMillis};
@@ -223,32 +225,62 @@ impl Discovery {
             .spawn_blocking(move || {
                 // Dropping the caller future cannot admit unbounded blocking probes.
                 let _permit = permit;
-                let result =
-                    discovery.qualify_claude_blocking(&candidate, &options, slot, deadline);
-                if result.is_err() {
-                    // An older failed probe cannot clear a newer heartbeat's qualification.
-                    let mut state = discovery.lock()?;
-                    let key = claude_key(&candidate);
-                    if state
-                        .candidates
-                        .get(&key)
-                        .is_some_and(|current| same_snapshot(current, &candidate))
-                    {
-                        if let Some(slot) = state.slots.remove(&key) {
-                            slot.clear().map_err(CoreError::from)?;
-                        }
-                        if let Some(current) = state.candidates.get_mut(&key) {
-                            current.compatibility = Compatibility::Unknown;
-                            current.availability = Availability::Unknown;
-                        }
-                    }
-                }
-                result
+                discovery
+                    .qualify_claude_checked(&candidate, &options, slot, deadline)
+                    .map(|_| ())
             })
             .await
             .map_err(|_| {
                 invalid("Native qualification did not complete; refresh the original candidate.")
             })?
+    }
+    /// Blocking native composition entrypoint for an already-blocking owner verifier.
+    /// Call outside all Registry/Store locks; no worker or runtime is created here.
+    /// The caller's original deadline bounds the complete operation (maximum 5s).
+    pub fn qualify_claude_host_before(
+        &self,
+        candidate: Candidate,
+        options: ClaudeOptions,
+        slot: ModEvidenceSlot,
+        deadline: Instant,
+    ) -> Result<QualifiedClaudeHost, CoreError> {
+        let _permit = self.qualification_slots.clone().try_acquire_owned().map_err(|_| {
+            CoreError::new(CoreErrorCode::CapacityExceeded, "Native discovery qualification is busy.", "Wait for the bounded read-only probes; no binding or delivery has been granted.")
+        })?;
+        self.qualify_claude_checked(
+            &candidate,
+            &options,
+            slot,
+            deadline.min(Instant::now() + Duration::from_secs(5)),
+        )
+    }
+    fn qualify_claude_checked(
+        &self,
+        candidate: &Candidate,
+        options: &ClaudeOptions,
+        slot: ModEvidenceSlot,
+        deadline: Instant,
+    ) -> Result<QualifiedClaudeHost, CoreError> {
+        let result = self.qualify_claude_blocking(candidate, options, slot, deadline);
+        if result.is_err() {
+            // An older failed probe cannot clear a newer heartbeat's qualification.
+            let mut state = self.lock()?;
+            let key = claude_key(candidate);
+            if state
+                .candidates
+                .get(&key)
+                .is_some_and(|current| same_snapshot(current, candidate))
+            {
+                if let Some(slot) = state.slots.remove(&key) {
+                    slot.clear().map_err(CoreError::from)?;
+                }
+                if let Some(current) = state.candidates.get_mut(&key) {
+                    current.compatibility = Compatibility::Unknown;
+                    current.availability = Availability::Unknown;
+                }
+            }
+        }
+        result
     }
     fn qualify_claude_blocking(
         &self,
@@ -256,7 +288,7 @@ impl Discovery {
         options: &ClaudeOptions,
         slot: ModEvidenceSlot,
         deadline: Instant,
-    ) -> Result<(), CoreError> {
+    ) -> Result<QualifiedClaudeHost, CoreError> {
         within(deadline)?;
         if candidate.adapter_id != "claude_code_mod"
             || candidate.endpoint
@@ -278,8 +310,8 @@ impl Discovery {
                 "Registered association changed; refresh the original candidate.",
             ));
         }
-        let evidence = options
-            .qualify_identity(
+        let qualified = options
+            .qualify_host_identity(
                 LoadedModIdentity {
                     plugin_name: announcement.plugin.name.clone(),
                     plugin_root: PathBuf::from(&announcement.plugin.root),
@@ -321,7 +353,8 @@ impl Discovery {
         if let Some(previous) = state.slots.remove(&key) {
             previous.clear().map_err(CoreError::from)?;
         }
-        slot.publish(evidence).map_err(CoreError::from)?;
+        slot.publish_qualified(&qualified)
+            .map_err(CoreError::from)?;
         state.slots.insert(key.clone(), slot);
         let current = state
             .candidates
@@ -329,7 +362,7 @@ impl Discovery {
             .expect("checked candidate under the same lock");
         current.compatibility = Compatibility::Compatible;
         current.availability = Availability::Available;
-        Ok(())
+        Ok(qualified)
     }
     fn current_candidate(&self, candidate: &Candidate) -> Result<(), CoreError> {
         let mut state = self.lock()?;
