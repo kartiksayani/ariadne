@@ -20,6 +20,8 @@ use tokio::{
 #[allow(dead_code)]
 #[path = "../../../tests/support/core_service/mod.rs"]
 mod cases;
+#[path = "fixtures/paged_attempt_digests.rs"]
+mod paged_attempt_digests;
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1453,8 +1455,10 @@ fn more_than_one_hundred_persisted_attempts_are_scanned_and_reconciled_before_an
     let owner = DesktopOwner::acquire(home.path()).unwrap();
     let scope = Scope::new(1, 2, 0x20, DeliveryMode::Push);
     let base = prepared();
-    let digests: Vec<Sha256> =
-        serde_json::from_str(include_str!("fixtures/paged-attempt-digests.json")).unwrap();
+    let digests: Vec<Sha256> = paged_attempt_digests::DIGESTS
+        .into_iter()
+        .map(|value| Sha256::new(value).unwrap())
+        .collect();
     assert_eq!(digests.len(), 101);
     let attempts: Vec<_> = digests
         .into_iter()
