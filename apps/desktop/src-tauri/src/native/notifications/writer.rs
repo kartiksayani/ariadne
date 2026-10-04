@@ -95,10 +95,20 @@ impl PreferenceWriter {
                 "Reconcile the original operation before observing more notifications.",
             )),
             Err(error) => {
-                if !matches!(
-                    error.code,
-                    CoreErrorCode::CommitUncertain | CoreErrorCode::ProtocolConflict
-                ) {
+                // NativeCore's PreferencesService checks retained exact replay
+                // under the preferences lock before reporting this revision
+                // rejection. Generic admission/transport/store errors cannot
+                // prove that an earlier uncertain save did not commit.
+                let rejected = match &request.command {
+                    OwnerCommand::PreferencesPatch { params, .. } => {
+                        error.code == CoreErrorCode::RevisionConflict
+                            && error.current_revision.is_some_and(|revision| {
+                                revision != params.expected_preferences_revision
+                            })
+                    }
+                    _ => false,
+                };
+                if rejected {
                     self.pending = None;
                 }
                 Err(error)

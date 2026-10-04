@@ -91,6 +91,183 @@ fn receipt(request: &OwnerMutationRequest) -> PreferencesPatchedReceipt {
     }
 }
 
+fn native_preferences() -> (tempfile::TempDir, native::NativeCoreService) {
+    let home = tempfile::tempdir().unwrap();
+    let core = native::NativeCoreService::new(
+        ariadne_store::registry::Registry::open(home.path()).unwrap(),
+        || panic!("preferences allocate their operation ID at the writer"),
+        || at(1),
+        |_| panic!("preferences never qualify a host"),
+    );
+    (home, core)
+}
+fn preference_owner() -> OwnerContext {
+    OwnerContext::from_trusted_entrypoint(OwnerScope::Preferences)
+}
+fn native_receipt(
+    core: &native::NativeCoreService,
+    request: &OwnerMutationRequest,
+) -> Result<PreferencesPatchedReceipt, CoreError> {
+    let result = core.execute_owner(preference_owner(), request.command.clone())?;
+    validate_owner_receipt(request, &result)?;
+    let MutationReceipt::PreferencesPatched(receipt) = result else {
+        panic!("preferences receipt");
+    };
+    Ok(receipt)
+}
+
+#[test]
+fn saved_uncertain_preferences_survive_transport_store_and_unknown_errors_then_replay_exactly() {
+    let (_home, core) = native_preferences();
+    let service = native::PreferencesService::new(core.registry());
+    let snapshot = service.get(&preference_owner()).unwrap();
+    let baseline = policy::evaluate(&snapshot.global, &queue(vec![row(1, 1)], true), at(1));
+    let baseline_request = OwnerMutationRequest {
+        session: None,
+        command: OwnerCommand::PreferencesPatch {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: UuidV4::new("00000000-0000-4000-8000-000000000004").unwrap(),
+            params: PreferencesPatch {
+                expected_preferences_revision: snapshot.revision,
+                entries: vec![PreferencesPatchEntry::SetGlobal {
+                    preferences: baseline.preferences,
+                }],
+            },
+        },
+    };
+    native_receipt(&core, &baseline_request).unwrap();
+    let captured = queue(vec![row(2, 2)], true);
+    let mut writer = writer::PreferenceWriter::default();
+    writer
+        .observe(
+            service.get(&preference_owner()).unwrap(),
+            &captured,
+            at(3),
+            operation_id,
+        )
+        .unwrap();
+    let mut frozen = None;
+    let error = writer
+        .confirm(|request| {
+            frozen = Some(request.clone());
+            native_receipt(&core, request)?;
+            Err(CoreError::new(
+                CoreErrorCode::CommitUncertain,
+                "Saved receipt was lost.",
+                "Replay the exact operation.",
+            ))
+        })
+        .err()
+        .unwrap();
+    assert_eq!(error.code, CoreErrorCode::CommitUncertain);
+    let saved = service.get(&preference_owner()).unwrap();
+    assert_eq!(saved.revision.value(), 3);
+    for code in [
+        CoreErrorCode::HostUnreachable,
+        CoreErrorCode::IoError,
+        CoreErrorCode::StoreBusy,
+        CoreErrorCode::Unsupported,
+        CoreErrorCode::OperationReused,
+        CoreErrorCode::CorruptSession,
+        CoreErrorCode::FutureSchema,
+        CoreErrorCode::PermissionDenied,
+        CoreErrorCode::CapacityExceeded,
+        CoreErrorCode::InvalidArgument,
+        CoreErrorCode::ProtocolConflict,
+        CoreErrorCode::RevisionConflict,
+    ] {
+        let error = writer
+            .confirm(|request| {
+                assert_eq!(Some(request), frozen.as_ref());
+                Err(CoreError::new(
+                    code,
+                    "Reconciliation did not establish an outcome.",
+                    "Keep the exact operation.",
+                ))
+            })
+            .err()
+            .unwrap();
+        assert_eq!(error.code, code);
+        assert!(
+            writer.pending(),
+            "{code:?} must not discard an uncertain saved operation"
+        );
+        assert!(writer
+            .observe(saved.clone(), &captured, at(4), || panic!(
+                "must not rebuild the pending operation"
+            ))
+            .unwrap()
+            .is_none());
+    }
+    let plan = writer
+        .confirm(|request| {
+            assert_eq!(Some(request), frozen.as_ref());
+            native_receipt(&core, request)
+        })
+        .unwrap()
+        .unwrap();
+    assert!(!writer.pending());
+    assert_eq!(plan.arrivals[0].identifier(), row(2, 2).identifier());
+    assert_eq!(service.get(&preference_owner()).unwrap(), saved);
+}
+
+#[test]
+fn transactional_preferences_revision_rejection_allows_fresh_snapshot_rebuild() {
+    let (_home, core) = native_preferences();
+    let service = native::PreferencesService::new(core.registry());
+    let snapshot = service.get(&preference_owner()).unwrap();
+    let mut writer = writer::PreferenceWriter::default();
+    let captured = queue(vec![row(1, 1)], true);
+    writer
+        .observe(snapshot.clone(), &captured, at(1), operation_id)
+        .unwrap();
+    let mut updated = snapshot.global.clone();
+    updated.pinned = true;
+    let competing = OwnerMutationRequest {
+        session: None,
+        command: OwnerCommand::PreferencesPatch {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: UuidV4::new("00000000-0000-4000-8000-000000000004").unwrap(),
+            params: PreferencesPatch {
+                expected_preferences_revision: snapshot.revision,
+                entries: vec![PreferencesPatchEntry::SetGlobal {
+                    preferences: updated,
+                }],
+            },
+        },
+    };
+    native_receipt(&core, &competing).unwrap();
+    let error = writer
+        .confirm(|request| native_receipt(&core, request))
+        .err()
+        .unwrap();
+    assert_eq!(error.code, CoreErrorCode::RevisionConflict);
+    assert_eq!(error.current_revision.unwrap().value(), 2);
+    assert!(!writer.pending());
+    let fresh_id = UuidV4::new("00000000-0000-4000-8000-000000000005").unwrap();
+    writer
+        .observe(
+            service.get(&preference_owner()).unwrap(),
+            &captured,
+            at(2),
+            || fresh_id.clone(),
+        )
+        .unwrap();
+    let plan = writer
+        .confirm(|request| {
+            assert_eq!(request.command.operation_id(), &fresh_id);
+            native_receipt(&core, request)
+        })
+        .unwrap()
+        .unwrap();
+    assert!(plan.preferences.pinned);
+    assert!(plan.arrivals.is_empty());
+    assert_eq!(
+        service.get(&preference_owner()).unwrap().revision.value(),
+        3
+    );
+}
+
 #[test]
 fn bursts_dedupe_with_a_fixed_deadline_and_group_only_more_than_three() {
     let now = std::time::Instant::now();
@@ -223,11 +400,13 @@ fn preference_writer_rejects_mismatched_receipt_and_refreshes_after_definite_con
         .unwrap();
     let error = writer
         .confirm(|_| {
-            Err(CoreError::new(
+            let mut error = CoreError::new(
                 CoreErrorCode::RevisionConflict,
                 "Preferences changed.",
                 "Read a fresh snapshot.",
-            ))
+            );
+            error.current_revision = Some(PositiveSafeInteger::new(2).unwrap());
+            Err(error)
         })
         .err()
         .unwrap();
