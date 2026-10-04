@@ -177,6 +177,24 @@ Per-session FIFO is maintained by the queue service. A definite pre-delivery rej
 
 Continue is a topic-level owner action, not a shared topic mutation: prepare a snapshot of source topic/items/history, preserve original references and origin metadata, preview the grouped summary, then explicitly `topic.continue` to send it in a selected target session. The target receives a new local topic copy; source IDs remain navigable and immutable. Failure to write target copy leaves source unchanged.
 
+The reusable P4.6 controls live in components/inputs with a composition-owned
+OwnerDraftStore under state/drafts. OwnerWaitingPanel consumes the actual Waiting
+module; OwnerItemDetail consumes the actual history module. Both share canonical
+SessionStore and RendererService. Later calls the existing navigation preference
+writer. This module does not change App startup or complete assembled/native acceptance.
+
+OwnerDraft.submission_attempted defaults to false when absent and false is omitted
+from serialization, preserving legacy preference replay digests. Persist true
+with the exact request-bearing fields and await a validated preference receipt
+before input_submit. Attempted records cannot change their marker or body under
+the same op_id; restart exposes explicit exact-operation retry and never dispatches.
+A validated input_submit receipt authorizes draft deletion; its queue sequence is
+save evidence, not delivery or completion evidence. After a definitive pre-commit
+question/revision/binding/active-state/queue guard rejection, explicit Prepare revised
+input retains the old attempted record, creates a new draft and requires current
+target review and separate submit. Unknown/transport/store/malformed responses
+and operation reuse remain retry-only. See ADR-0057.
+
 ## 6. Archive, sessions, and binding lifecycle
 
 Archive and close are guarded metadata operations. Render the returned blocking item/input IDs and dispatch state from guard errors, with actions to navigate to the blocker:

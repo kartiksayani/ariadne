@@ -1,0 +1,78 @@
+import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useSession, type SessionStore } from '../../data/session-store';
+import { OwnerDraftStore, blockedDraft, ownerActions, useOwnerDrafts, type OwnerIntent } from '../../state/drafts/store';
+import '../../styles/reference.css';
+import './inputs.css';
+
+const labels: Record<OwnerIntent, string> = { answer: 'Answer', bring: 'Bring up', reply: 'Reply', note: 'Note', followup: 'Follow up', drop: 'Drop', reopen: 'Reopen' };
+
+// This module consumes the composition-owned current session and draft store;
+// Waiting/detail can share it without creating another persistence boundary.
+export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'answer', later = false, onLater, onEscape }: {
+  drafts: OwnerDraftStore; session: SessionStore; itemId: string; initialIntent?: OwnerIntent;
+  later?: boolean; onLater?: (value: boolean) => Promise<boolean>; onEscape?: () => void;
+}) {
+  const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
+  const item = session?.items[itemId];
+  const [intent, setIntent] = useState<OwnerIntent>(initialIntent), [laterError, setLaterError] = useState(false);
+  const actions = item ? ownerActions(item) : [];
+  const activeIntent = actions.includes(intent) ? intent : item && ['done', 'decided', 'dropped', 'replaced'].includes(item.status) ? 'followup' : 'reply';
+  const entry = session ? drafts.find({ project_id: session.project_id, session_id: session.id }, itemId, activeIntent) : undefined;
+  useEffect(() => { void drafts.load(); }, [drafts]);
+  useEffect(() => {
+    if (session && item && state.ready && !entry) drafts.begin(session, itemId, activeIntent);
+  }, [drafts, session, item, itemId, activeIntent, state.ready, entry]);
+  if (!session || !item) return <p role="status">The current item is unavailable. Refresh its registered session.</p>;
+  if (!state.ready || !entry) return <div role="status">Loading saved drafts…{state.error && <p role="alert">{state.error.message}</p>}</div>;
+  if (entry.receipt?.data.kind === 'input_submit') return <div className="ariadne-reference owner-input"><p role="status">Saved · Queue position #{entry.receipt.data.input_seq}</p>
+    <button type="button" className="ref-button ref-secondary" disabled={state.preferenceUncertain || entry.saving || current.status !== 'ready'} onClick={() => drafts.another(entry.draft.op_id, session)}>Write another input</button>
+    {state.error && <p role="alert">{state.error.message}</p>}
+    {state.preferenceUncertain && <button type="button" onClick={() => { void drafts.retryPreferences(); }}>Retry saving draft preferences</button>}</div>;
+  const draft = entry.draft, option = item.options.find(option => option.id === draft.selected_option_id);
+  const changed = item.revision !== draft.target_revision || item.question_revision !== draft.question_revision || session.active_binding_id !== draft.binding_id;
+  const blocked = current.status !== 'ready' ? 'The session is unavailable or stale. Refresh before sending.' : blockedDraft(draft, session);
+  const locked = entry.saving || entry.uncertain || state.preferenceUncertain;
+  const submit = () => { if (!entry.saving && !state.preferenceUncertain && (!blocked || entry.uncertain)) void drafts.submit(draft.op_id); };
+  const key = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') { event.stopPropagation(); onEscape?.(); }
+    if (event.key === 'Enter' && event.metaKey && event.currentTarget.contains(document.activeElement)) {
+      event.preventDefault(); event.stopPropagation(); submit(); return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey || locked || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) return;
+    const index = Number(event.key) - 1;
+    if (activeIntent === 'answer' && /^[1-9]$/.test(event.key) && item.options[index]) {
+      event.preventDefault(); event.stopPropagation(); drafts.edit(draft.op_id, { selected_option_id: item.options[index].id });
+    }
+  };
+  const changeLater = async () => { try { setLaterError(!await onLater?.(!later)); } catch { setLaterError(true); } };
+  return <div className="ariadne-reference owner-input ref-answer" onKeyDown={key} aria-label={`Owner input for #${item.id}`}>
+    <div className="owner-actions" role="group" aria-label="Owner actions">
+      {actions.map(action => <button type="button" key={action} className="ref-button ref-secondary" aria-pressed={activeIntent === action}
+        disabled={locked} onClick={() => setIntent(action)}>{labels[action]}</button>)}
+      {onLater && <button type="button" className="ref-button ref-secondary" aria-pressed={later} disabled={locked || current.status !== 'ready'} onClick={() => { void changeLater(); }}>Later</button>}
+    </div>
+    {changed && <div className="ref-warning" role="alert"><span>This item changed. Review the current question and options; your text is retained.</span>
+      <button type="button" className="ref-button ref-secondary" disabled={locked} onClick={() => drafts.review(draft.op_id, session)}>Review current target</button></div>}
+    {activeIntent === 'answer' && <div className="ref-options owner-options">
+      {item.options.map((choice, index) => <button type="button" className={`ref-button ref-option ${choice.recommended ? 'ref-primary' : 'ref-secondary'}`}
+        key={choice.id} aria-pressed={draft.selected_option_id === choice.id} disabled={locked || changed}
+        onClick={() => drafts.edit(draft.op_id, { selected_option_id: choice.id })}>
+        <span className="ref-option-title"><span className="ref-keycap">{index + 1}</span>{choice.label}{draft.selected_option_id === choice.id && <span aria-label="Selected">✓</span>}</span>
+        <span className="ref-consequence">{choice.recommended && <span className="ref-recommended">★ Recommended</span>}{choice.consequence}</span>
+      </button>)}
+    </div>}
+    <label className="owner-editor-label">{activeIntent === 'answer' ? 'Reply in your own words' : `${labels[activeIntent]} message`}
+      <textarea className="ref-input" rows={3} value={draft.text} disabled={locked} onChange={event => drafts.edit(draft.op_id, { text: event.target.value })} />
+    </label>
+    <div className="ref-send-row"><button type="button" className="ref-button ref-primary" disabled={entry.saving || state.preferenceUncertain || (!!blocked && !entry.uncertain)} onClick={submit}>
+      {entry.saving ? 'Saving…' : entry.uncertain ? 'Retry saved input' : option ? `Send “${option.label}”` : `Send ${labels[activeIntent].toLowerCase()}`}
+    </button><span className="ref-hint">⌘↵ sends · Esc keeps your draft</span></div>
+    {blocked && <p className="ref-blocked">{blocked}</p>}
+    {entry.uncertain && <p role="status">{entry.rejected ? 'This input was rejected before save.' : 'Save completion is unknown.'} Retry the same saved input to confirm it; its operation and contents are retained.</p>}
+    {entry.rejected && <button type="button" className="ref-button ref-secondary" disabled={entry.saving || state.preferenceUncertain}
+      onClick={() => drafts.prepareRevised(draft.op_id, session)}>Prepare revised input</button>}
+    {(entry.error || state.error) && <p className="ref-warning" role="alert">{entry.error?.message ?? state.error?.message}</p>}
+    {state.preferenceUncertain && <button type="button" className="ref-button ref-secondary" onClick={() => { void drafts.retryPreferences(); }}>Retry saving draft preferences</button>}
+    {laterError && <p role="alert">Later was not saved. Keep the current view and try again.</p>}
+  </div>;
+}

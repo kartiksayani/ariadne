@@ -2691,6 +2691,9 @@
         "session": {
           "$ref": "#/$defs/SessionRef"
         },
+        "submission_attempted": {
+          "type": "boolean"
+        },
         "supersedes_answer_id": {
           "anyOf": [
             {
