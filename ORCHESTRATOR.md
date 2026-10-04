@@ -25,6 +25,13 @@ for shared ownership. Remaining changes land vertically on merged main, includin
 real Core/native acceptance where appropriate. Do not defer wiring to another
 combining PR. Prefer units one PR can finish.
 
+The owner authorizes stacked implementation on reviewed parent code while CI runs.
+Use settled contracts and disjoint ownership; keep each child diff bounded and
+its merge behind its prerequisites. Independent discovery UI work may run as a
+third stream. Use the existing GitHub stack support for linear dependent PRs;
+do not create artificial dependencies between independent siblings. Coordinate
+parent updates before workers publish, with current-head CI and delta reviews.
+
 ## Delivery feedback rules
 
 - **Pre-push timing:** Measure `cargo check --workspace --all-features --locked`
