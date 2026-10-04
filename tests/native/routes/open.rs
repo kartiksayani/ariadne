@@ -1,5 +1,7 @@
 #[path = "../../../apps/desktop/src-tauri/src/native/routes/launch.rs"]
 mod launch;
+#[path = "../../../apps/desktop/src-tauri/src/native/window/lifecycle.rs"]
+mod lifecycle;
 #[path = "../../../crates/ariadne-cli/src/open.rs"]
 mod open;
 #[path = "../../../apps/desktop/src-tauri/src/native/window/preferences.rs"]
