@@ -2,7 +2,9 @@
 mod observe;
 mod process;
 use crate::{
-    history::HistoryScan, transport::error, CodexDaemonReader, CodexHistoryClient, CodexOptions,
+    history::HistoryScan,
+    transport::{error, ExecutableIdentity},
+    CodexDaemonReader, CodexHistoryClient, CodexHostFacts, CodexOptions, QualifiedCodexThread,
 };
 use ariadne_agent_protocol::*;
 use futures_channel::oneshot;
@@ -42,6 +44,9 @@ pub(crate) struct Worker {
 }
 pub(crate) struct State {
     options: CodexOptions,
+    qualified_reader: Option<QualifiedCodexThread>,
+    qualified_selection: Option<CodexHostFacts>,
+    qualified_executable: Option<ExecutableIdentity>,
     instance_id: UuidV4,
     client: Option<CodexHistoryClient>,
     shared: Arc<Mutex<Shared>>,
@@ -52,10 +57,32 @@ pub(crate) struct State {
 }
 impl Worker {
     pub(crate) fn new(options: CodexOptions, instance_id: UuidV4) -> Result<Self, AdapterError> {
+        Self::start(options, instance_id, None)
+    }
+    pub(crate) fn from_qualified_thread(
+        qualified: QualifiedCodexThread,
+        instance_id: UuidV4,
+    ) -> Result<Self, AdapterError> {
+        Self::start(qualified.options(), instance_id, Some(qualified))
+    }
+    fn start(
+        options: CodexOptions,
+        instance_id: UuidV4,
+        qualified_reader: Option<QualifiedCodexThread>,
+    ) -> Result<Self, AdapterError> {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (sender, receiver) = sync_channel::<Job>(1);
+        let qualified_selection = qualified_reader
+            .as_ref()
+            .map(|reader| reader.facts().clone());
+        let qualified_executable = qualified_reader
+            .as_ref()
+            .map(|reader| reader.executable_identity());
         let mut state = State {
             options,
+            qualified_reader,
+            qualified_selection,
+            qualified_executable,
             instance_id: instance_id.clone(),
             client: None,
             shared: shared.clone(),
@@ -225,13 +252,50 @@ impl State {
                 "Persist and acknowledge the retained Codex observation batch before reconnecting.",
             ));
         }
-        let daemon = CodexDaemonReader::open_before(
-            self.options.clone(),
-            request.endpoint.clone(),
-            deadline,
-        )?;
-        let (client, mut result) =
-            daemon.bind_before(request.clone(), self.instance_id.clone(), now()?, deadline)?;
+        if let Some(selected) = &self.qualified_selection {
+            if selected.external_session_id != request.external_session_id
+                || selected.endpoint != request.endpoint
+            {
+                return Err(error(AdapterErrorCode::BindingMismatch,
+                    "Qualified Codex adapter cannot retarget its exact selected thread or endpoint."));
+            }
+        }
+        let (client, mut result) = if let Some(qualified) = self.qualified_reader.take() {
+            qualified.bind_before(request.clone(), self.instance_id.clone(), now()?, deadline)?
+        } else {
+            let daemon = CodexDaemonReader::open_before(
+                self.options.clone(),
+                request.endpoint.clone(),
+                deadline,
+            )?;
+            if self
+                .qualified_executable
+                .as_ref()
+                .is_some_and(|identity| !daemon.has_executable_identity(identity))
+            {
+                return Err(error(
+                    AdapterErrorCode::BindingMismatch,
+                    "Qualified Codex executable identity changed; qualify the selected host again.",
+                ));
+            }
+            daemon.bind_with_root(
+                request.clone(),
+                self.instance_id.clone(),
+                now()?,
+                self.qualified_selection
+                    .as_ref()
+                    .map(|selected| selected.canonical_root.as_path()),
+                deadline,
+            )?
+        };
+        if self
+            .qualified_selection
+            .as_ref()
+            .is_some_and(|selected| selected.endpoint_fingerprint != result.endpoint_fingerprint)
+        {
+            return Err(error(AdapterErrorCode::BindingMismatch,
+                "Qualified Codex endpoint identity changed; qualify the selected host again before native bootstrap."));
+        }
         let mut shared = self.shared.lock().map_err(|_| poisoned())?;
         if let Some(prior) = &shared.last_connection {
             if prior.binding_id == request.binding_id

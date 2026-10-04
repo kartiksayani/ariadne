@@ -112,11 +112,16 @@ failure reports generation-scoped disconnected and never dispatches. Unknown
 preflight connection remains Unknown with a disconnected dispatch barrier.
 Provider/runtime tasks own that final connection and report wiring. Codex's
 initialized reader now supplies an owned pre-ID qualification for the exact
-selected thread and canonical registered project root; its final bind rechecks
-that same thread/root and transport identity. Native composition still owns
-configuration validation, copying verified facts into Core and establishing the
-final runtime connection. No placeholder-ID connection or shared adapter method
-is added.
+selected thread and canonical registered project root. Native composition may
+consume that initialized reader with `CodexAdapter::from_qualified_thread`; final
+Adapter.connect supplies saved binding/generation IDs and rechecks the same
+thread/root and full-item/transport requirements under its original admission
+deadline. This qualified adapter retains the selected endpoint, fingerprint and
+existing executable identity across reconnect; a changed identity requires fresh
+qualification rather than retargeting the selection. Native composition still
+owns configuration validation, copying verified facts into Core, final runtime
+connection/reporting/reconciliation and lease activation. No placeholder-ID
+connection or shared adapter method is added.
 
 See [Agent adapters](../AGENT_ADAPTERS.md) for the shared interface and later
 executable-extension design. Public registration/negotiation is deferred. Rust trait

@@ -1,5 +1,5 @@
 //! No live hosts: a local wire-fixture daemon and argv-recording executable exercise the seam.
-use ariadne_adapter_codex::{CodexAdapter, CodexOptions};
+use ariadne_adapter_codex::{CodexAdapter, CodexDaemonReader, CodexOptions, QualifiedCodexThread};
 use ariadne_agent_protocol::*;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256 as Hasher};
@@ -63,6 +63,9 @@ struct Harness {
     stop: Arc<AtomicBool>,
     calls: Arc<Mutex<Vec<Value>>>,
     turns: Arc<Mutex<Value>>,
+    read: Arc<Mutex<Value>>,
+    initialize_delay: Arc<Mutex<Duration>>,
+    read_delay: Arc<Mutex<Duration>>,
     worker: Option<JoinHandle<()>>,
 }
 impl Harness {
@@ -99,6 +102,12 @@ impl Harness {
         anchor["data"][0]["id"] = json!("pre-submit-anchor");
         let turns = Arc::new(Mutex::new(anchor));
         let history = turns.clone();
+        let read = Arc::new(Mutex::new(fixture("read-response.json")));
+        let metadata = read.clone();
+        let initialize_delay = Arc::new(Mutex::new(Duration::ZERO));
+        let init_delay = initialize_delay.clone();
+        let read_delay = Arc::new(Mutex::new(Duration::ZERO));
+        let thread_delay = read_delay.clone();
         let worker = thread::spawn(move || {
             let mut connections = Vec::new();
             while !stopped.load(Ordering::SeqCst) {
@@ -122,6 +131,9 @@ impl Harness {
                 let stopped = stopped.clone();
                 let called = called.clone();
                 let history = history.clone();
+                let metadata = metadata.clone();
+                let init_delay = init_delay.clone();
+                let thread_delay = thread_delay.clone();
                 connections.push(thread::spawn(move || {
                     let Ok(mut ws) = tungstenite::accept(stream) else {
                         return;
@@ -152,9 +164,15 @@ impl Harness {
                         called.lock().unwrap().push(request.clone());
                         let result = match request["method"].as_str().unwrap() {
                             "initialized" => continue,
-                            "initialize" => fixture("initialize-response.json"),
+                            "initialize" => {
+                                let delay = *init_delay.lock().unwrap();
+                                thread::sleep(delay);
+                                fixture("initialize-response.json")
+                            }
                             "thread/read" => {
-                                let mut value = fixture("read-response.json");
+                                let delay = *thread_delay.lock().unwrap();
+                                thread::sleep(delay);
+                                let mut value = metadata.lock().unwrap().clone();
                                 value["thread"]["id"] = request["params"]["threadId"].clone();
                                 value
                             }
@@ -196,8 +214,31 @@ impl Harness {
             stop,
             calls,
             turns,
+            read,
+            initialize_delay,
+            read_delay,
             worker: Some(worker),
         }
+    }
+    fn qualified(&self) -> QualifiedCodexThread {
+        self.read.lock().unwrap()["thread"]["cwd"] = json!(self.directory.path());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        CodexDaemonReader::open_before(
+            CodexOptions::new(self.executable.clone(), self.directory.path().to_owned()).unwrap(),
+            self.connect().endpoint,
+            deadline,
+        )
+        .unwrap()
+        .qualify_selected_thread(THREAD, self.directory.path(), deadline)
+        .unwrap()
+    }
+    fn method_count(&self, method: &str) -> usize {
+        self.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call["method"] == method)
+            .count()
     }
     fn adapter(&self) -> CodexAdapter {
         CodexAdapter::new(
@@ -1050,4 +1091,170 @@ fn verified_original_message_recovers_acceptance_and_preserves_only_valid_provid
         assert_eq!(*recovered, rescanned);
         assert_eq!(h.count(), 1);
     }
+}
+
+#[test]
+fn qualified_adapter_reuses_initialization_and_final_checks_before_native_queue() {
+    let h = Harness::new("success");
+    let qualified = h.qualified();
+    let fingerprint = qualified.facts().endpoint_fingerprint.clone();
+    let capabilities = qualified.facts().capabilities.clone();
+    let adapter = CodexAdapter::from_qualified_thread(qualified, id(9)).unwrap();
+    assert!(block_on(adapter.submit(h.submit(700))).is_err());
+    assert_eq!(h.count(), 0);
+    let ready = block_on(adapter.connect(h.connect())).unwrap();
+    ready.validate_for(&h.connect()).unwrap();
+    assert_eq!(ready.endpoint_fingerprint, fingerprint);
+    assert_eq!(ready.capabilities, capabilities);
+    assert_eq!(h.method_count("initialize"), 1);
+    assert_eq!(h.method_count("thread/read"), 2);
+    assert_eq!(h.method_count("thread/queue/list"), 2);
+    assert_eq!(h.method_count("thread/turns/list"), 2);
+    assert_eq!(h.count(), 0);
+    assert!(matches!(
+        block_on(adapter.submit(h.submit(700))).unwrap(),
+        SubmitOutcome::Accepted { .. }
+    ));
+    assert_eq!(h.count(), 1);
+}
+
+#[test]
+fn qualified_adapter_rejects_retargeting_without_consuming_selected_reader() {
+    let h = Harness::new("success");
+    let adapter = CodexAdapter::from_qualified_thread(h.qualified(), id(9)).unwrap();
+    for endpoint in [false, true] {
+        let mut request = h.connect();
+        if endpoint {
+            request.endpoint = EndpointRef::UnixSocket {
+                path: "/tmp/another-daemon.sock".into(),
+            };
+        } else {
+            request.external_session_id = "another-thread".into();
+        }
+        assert_eq!(
+            block_on(adapter.connect(request)).unwrap_err().code,
+            AdapterErrorCode::BindingMismatch
+        );
+    }
+    assert_eq!(h.method_count("thread/read"), 1);
+    block_on(adapter.connect(h.connect())).unwrap();
+    assert_eq!(h.method_count("initialize"), 1);
+    assert_eq!(h.method_count("thread/read"), 2);
+}
+
+#[test]
+fn qualified_adapter_rechecks_final_root_and_full_items() {
+    for root in [false, true] {
+        let h = Harness::new("success");
+        let adapter = CodexAdapter::from_qualified_thread(h.qualified(), id(9)).unwrap();
+        let other = tempfile::tempdir().unwrap();
+        if root {
+            h.read.lock().unwrap()["thread"]["cwd"] = json!(other.path());
+        } else {
+            h.turns.lock().unwrap()["data"][0]["itemsView"] = json!("summary");
+        }
+        let error = block_on(adapter.connect(h.connect())).unwrap_err();
+        assert_eq!(
+            error.code,
+            if root {
+                AdapterErrorCode::BindingMismatch
+            } else {
+                AdapterErrorCode::UnsupportedHostVersion
+            }
+        );
+        assert_eq!(h.method_count("initialize"), 1);
+        assert!(block_on(adapter.submit(h.submit(701))).is_err());
+        assert_eq!(h.count(), 0);
+    }
+}
+
+#[test]
+fn qualified_adapter_reconnect_keeps_root_socket_and_executable_identity() {
+    let h = Harness::new("success");
+    let adapter = CodexAdapter::from_qualified_thread(h.qualified(), id(9)).unwrap();
+    let ready = block_on(adapter.connect(h.connect())).unwrap();
+    let disconnect = || DisconnectRequest {
+        binding_id: h.connect().binding_id,
+        generation: h.connect().generation,
+    };
+    block_on(adapter.disconnect(disconnect())).unwrap();
+    let again = block_on(adapter.connect(h.connect())).unwrap();
+    assert_eq!(ready.endpoint_fingerprint, again.endpoint_fingerprint);
+    assert_eq!(h.method_count("initialize"), 2);
+    assert_eq!(h.method_count("thread/read"), 3);
+    block_on(adapter.disconnect(disconnect())).unwrap();
+    let other = tempfile::tempdir().unwrap();
+    h.read.lock().unwrap()["thread"]["cwd"] = json!(other.path());
+    assert_eq!(
+        block_on(adapter.connect(h.connect())).unwrap_err().code,
+        AdapterErrorCode::BindingMismatch
+    );
+    h.read.lock().unwrap()["thread"]["cwd"] = json!(h.directory.path());
+    block_on(adapter.connect(h.connect())).unwrap();
+    block_on(adapter.disconnect(disconnect())).unwrap();
+    let replacement = h.directory.path().join("replacement-executable");
+    fs::copy(&h.executable, &replacement).unwrap();
+    fs::rename(&replacement, &h.executable).unwrap();
+    let reads = h.method_count("thread/read");
+    assert_eq!(
+        block_on(adapter.connect(h.connect())).unwrap_err().code,
+        AdapterErrorCode::BindingMismatch
+    );
+    assert_eq!(h.method_count("thread/read"), reads);
+    assert_eq!(h.count(), 0);
+}
+
+#[test]
+fn qualified_adapter_reconnect_rejects_replaced_same_version_socket() {
+    let h = Harness::new("success");
+    let adapter = CodexAdapter::from_qualified_thread(h.qualified(), id(9)).unwrap();
+    block_on(adapter.connect(h.connect())).unwrap();
+    block_on(adapter.disconnect(DisconnectRequest {
+        binding_id: h.connect().binding_id,
+        generation: h.connect().generation,
+    }))
+    .unwrap();
+    let replacement = Harness::new("success");
+    replacement.read.lock().unwrap()["thread"]["cwd"] = json!(h.directory.path());
+    fs::rename(&h.socket, h.directory.path().join("original.sock")).unwrap();
+    fs::rename(&replacement.socket, &h.socket).unwrap();
+    assert_eq!(
+        block_on(adapter.connect(h.connect())).unwrap_err().code,
+        AdapterErrorCode::BindingMismatch
+    );
+    assert!(block_on(adapter.submit(h.submit(702))).is_err());
+    assert_eq!(h.count(), 0);
+    assert_eq!(replacement.count(), 0);
+}
+
+#[test]
+fn qualified_adapter_final_bind_keeps_original_queued_connect_deadline() {
+    let h = Harness::new("success");
+    let adapter = CodexAdapter::from_qualified_thread(h.qualified(), id(9)).unwrap();
+    // A preceding read-only probe occupies this same bounded IO worker. The final
+    // thread read would fit a reset ten-second budget, but not the original one.
+    *h.initialize_delay.lock().unwrap() = Duration::from_secs(3);
+    *h.read_delay.lock().unwrap() = Duration::from_secs(8);
+    let probe = adapter.probe(ProbeRequest {
+        endpoint: h.connect().endpoint,
+        configuration: h.connect().configuration,
+    });
+    let observed_by = Instant::now() + Duration::from_secs(2);
+    while h.method_count("initialize") < 2 {
+        assert!(Instant::now() < observed_by);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let started = Instant::now();
+    assert_eq!(
+        block_on(adapter.connect(h.connect())).unwrap_err().code,
+        AdapterErrorCode::HostUnreachable
+    );
+    assert!(started.elapsed() < Duration::from_millis(10_800));
+    assert_eq!(
+        block_on(probe).unwrap().compatibility,
+        Compatibility::Compatible
+    );
+    assert_eq!(h.method_count("initialize"), 2);
+    assert_eq!(h.method_count("thread/queue/list"), 1);
+    assert_eq!(h.count(), 0);
 }
