@@ -1,5 +1,6 @@
 use ariadne_core::{fake::*, *};
 use ariadne_domain::models::*;
+use ariadne_runtime::supervisor::ClaimGate;
 use ariadne_runtime::{control::*, leases::DesktopOwner};
 use std::{
     fs,
@@ -42,6 +43,11 @@ fn runtime() -> Runtime {
 fn corpus() -> cases::Corpus {
     cases::load(root())
 }
+fn ready_gate() -> ClaimGate {
+    let gate = ClaimGate::new();
+    gate.reconciled_from_trusted_native().unwrap();
+    gate
+}
 fn scope(r: &cases::Routing) -> BindingScope {
     BindingScope {
         binding_id: r.binding_id.clone(),
@@ -61,7 +67,7 @@ impl Running {
         let lease = owner
             .binding_lease(r.session(), r.binding_id.clone(), r.generation.clone())
             .unwrap();
-        let server = ControlServer::bind(owner, core, vec![lease]).unwrap();
+        let server = ControlServer::bind(owner, core, vec![(lease, ready_gate())]).unwrap();
         let (stop, stopped) = oneshot::channel();
         Self {
             stop,
@@ -388,8 +394,12 @@ fn lease_child_process() {
     let lease = owner
         .binding_lease(r.session(), r.binding_id.clone(), r.generation.clone())
         .unwrap();
-    let _server =
-        ControlServer::bind(owner, Arc::new(ScriptedCoreService::new([])), vec![lease]).unwrap();
+    let _server = ControlServer::bind(
+        owner,
+        Arc::new(ScriptedCoreService::new([])),
+        vec![(lease, ready_gate())],
+    )
+    .unwrap();
     println!("LEASE_READY");
     std::io::stdout().flush().unwrap();
     std::io::stdin().read_exact(&mut [0]).unwrap();
