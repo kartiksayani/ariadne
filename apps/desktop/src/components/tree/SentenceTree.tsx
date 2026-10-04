@@ -54,6 +54,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   const [error, setError] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [search, setSearch] = useState(view.filters.search);
+  const [pendingSearch, setPendingSearch] = useState<{ store: SessionStore; text: string } | null>(null);
   const elements = useRef(new Map<string, HTMLDivElement>()), container = useRef<HTMLDivElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const request = useRef(0), mounted = useRef(true);
@@ -76,9 +77,17 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     if (!mounted.current || latest.current.writing || latest.current.state.status !== 'ready') return;
     // A ref closes the gap before React paints the pending state.
     latest.current.writing = true; setWriting(true); setError(null);
-    try { if (!await operation() && mounted.current) setError('The view change was not confirmed. Keep the current view and reconcile its preferences.'); }
-    catch (failure: unknown) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'The view change could not be saved.'); }
-    finally { if (mounted.current) { latest.current.writing = false; setWriting(false); } }
+    let confirmed = false;
+    try {
+      confirmed = await operation();
+      if (!confirmed && mounted.current) setError('The view change was not confirmed. Keep the current view and reconcile its preferences.');
+    } catch (failure: unknown) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'The view change could not be saved.'); }
+    finally { if (mounted.current) {
+      // Only an unsubmitted search may follow a confirmed write. Failed or
+      // uncertain operations keep their original explicit reconciliation path.
+      if (!confirmed) setPendingSearch(null);
+      latest.current.writing = false; setWriting(false);
+    } }
   }, []);
   const select = useCallback((id: string) => {
     const call = ++request.current, value = latest.current;
@@ -123,13 +132,21 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     event.preventDefault();
     if (destination) { setFocusId(destination); elements.current.get(destination)?.focus({ preventScroll: true }); }
   }, [select, toggle, write]);
-  useEffect(() => { setSearch(view.filters.search); }, [view.filters.search]);
+  useEffect(() => { setSearch(view.filters.search); setPendingSearch(null); }, [store, view.filters.search]);
   useEffect(() => {
     if (search === view.filters.search) return;
-    const timer = setTimeout(() => { void write(() => latest.current.saveView({ ...structuredClone(latest.current.view),
-      filters: { ...structuredClone(latest.current.view.filters), search } } as SessionPreferences)); }, 100);
+    const timer = setTimeout(() => setPendingSearch({ store, text: search }), 100);
     return () => clearTimeout(timer);
-  }, [search, view.filters.search, write]);
+  }, [search, view.filters.search, store]);
+  useEffect(() => {
+    if (!pendingSearch || writing || state.status !== 'ready') return;
+    setPendingSearch(null);
+    if (pendingSearch.store !== store || pendingSearch.text !== search || pendingSearch.text === view.filters.search) return;
+    // Merge only the latest unsubmitted text into the newly rendered view and
+    // its composition-owned revision; never retry a previously attempted edit.
+    void write(() => latest.current.saveView({ ...structuredClone(latest.current.view),
+      filters: { ...structuredClone(latest.current.view.filters), search: pendingSearch.text } } as SessionPreferences));
+  }, [pendingSearch, writing, state.status, store, search, view, write]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
   useEffect(() => {
     ++request.current; setLocalReveal(null);
@@ -147,13 +164,6 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     setFocusId(next);
     if (previousFocus.current) elements.current.get(next)?.focus({ preventScroll: true });
   }, [rows, focusId, session]);
-  useLayoutEffect(() => {
-    if (!belongs || currentReveal.kind !== 'item') return;
-    setFocusId(currentReveal.route.item_id);
-    const element = elements.current.get(currentReveal.route.item_id);
-    element?.focus({ preventScroll: true });
-    element?.scrollIntoView?.({ block: 'nearest', behavior: 'auto' });
-  }, [currentReveal, belongs]);
   const anchor = useRef<{ id: string; offset: number } | null>(null);
   const captureAnchor = useCallback(() => {
     const scroller = container.current;
@@ -174,6 +184,14 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     }
     captureAnchor();
   }, [projection, view.scroll, captureAnchor]);
+  useLayoutEffect(() => {
+    if (!belongs || currentReveal.kind !== 'item') return;
+    setFocusId(currentReveal.route.item_id);
+    const element = elements.current.get(currentReveal.route.item_id);
+    element?.focus({ preventScroll: true });
+    element?.scrollIntoView?.({ block: 'nearest', behavior: 'auto' });
+    captureAnchor();
+  }, [currentReveal, belongs, captureAnchor]);
   const clearFilters = () => {
     const next = structuredClone(view) as SessionPreferences;
     next.filters = { ...next.filters, search: '', statuses: [], owners: [], topic_id: null, hide_later: false };
@@ -192,7 +210,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
       event.preventDefault(); searchInput.current?.focus();
     }
   }}>
-    <label className="sentence-search">Search sentences<input ref={searchInput} type="search" value={search} onChange={event => setSearch(event.target.value)} disabled={disabled} /></label>
+    <label className="sentence-search">Search sentences<input ref={searchInput} type="search" value={search} onChange={event => { setPendingSearch(null); setSearch(event.target.value); }} disabled={disabled} /></label>
     <div className="sentence-filters" aria-label="Sentence filters">
       <label>Topic<select value={view.filters.topic_id ?? ''} disabled={disabled} onChange={event => filter(next => { next.topic_id = event.target.value || null; })}>
         <option value="">All topics</option>{session && Object.values(session.topics).filter(topic => !!topic)

@@ -17,6 +17,7 @@ function preferences(): SessionPreferences {
     filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
 }
 async function setup(session: Session = structuredClone(demo) as Session, view = preferences()) {
+  const route = { project_id: session.project_id, session_id: session.id };
   const calls: { command: string; request: Parameters<DesktopTransport['invoke']>[1]['request'] }[] = [];
   let readError = false, missing = false;
   const transport: DesktopTransport = {
@@ -93,6 +94,70 @@ describe('registered variable-height sentence tree', () => {
     expect(value.saved[0].filters.search).toBe('ＮＡＴＩＶＥ queue'); expect(value.saved[0].expanded_item_ids).toEqual(['1']);
     expect(value.saved[0].tab_open).toBe(true);
   });
+  it('saves only the latest unsubmitted search after a confirmed write using the new view', async () => {
+    const value = await setup(), saved: SessionPreferences[] = [];
+    let finish!: (confirmed: boolean) => void;
+    function Composition() {
+      const [view, setView] = useState(preferences());
+      return <SentenceTree store={value.store} routes={value.routes} view={view} later={new Set()}
+        saveView={async next => { saved.push(next); setView(next); return true; }}
+        saveLater={async () => {
+          const confirmed = await new Promise<boolean>(resolve => { finish = resolve; });
+          if (confirmed) setView(previous => ({ ...previous, selected_item_id: '1.1',
+            filters: { ...previous.filters, statuses: ['open'] } }));
+          return confirmed;
+        }} onReveal={() => {}} />;
+    }
+    render(<Composition />); vi.useFakeTimers();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'superseded text' } });
+    await act(async () => { vi.advanceTimersByTime(99); });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'latest exact text' } });
+    fireEvent.keyDown(rows()[0], { key: 'z' });
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(saved).toHaveLength(0);
+    await act(async () => { finish(true); });
+    expect(saved).toHaveLength(1);
+    expect(saved[0].filters.search).toBe('latest exact text');
+    expect(saved[0].filters.statuses).toEqual(['open']);
+    expect(saved[0].selected_item_id).toBe('1.1');
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(saved).toHaveLength(1);
+  });
+  it.each(['rejected', 'uncertain'] as const)('does not submit queued search after a %s preference operation', async failure => {
+    const value = await setup(), saved: SessionPreferences[] = [];
+    let finish!: () => void;
+    render(<SentenceTree store={value.store} routes={value.routes} view={preferences()} later={new Set()}
+      saveView={async next => { saved.push(next); return true; }}
+      saveLater={async () => { await new Promise<void>(resolve => { finish = resolve; });
+        if (failure === 'uncertain') throw new Error('Reconcile the original operation.');
+        return false;
+      }} onReveal={() => {}} />);
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'unsubmitted search' } });
+    fireEvent.keyDown(rows()[0], { key: 'z' });
+    await act(async () => { vi.advanceTimersByTime(100); });
+    await act(async () => { finish(); });
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(saved).toHaveLength(0); expect(screen.getByRole('alert')).toBeTruthy();
+  });
+  it('discards a pending search when the opened session changes', async () => {
+    const first = await setup(), session = structuredClone(demo) as Session;
+    session.id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const nextView = preferences(); nextView.session = { ...route, session_id: session.id };
+    const second = await setup(session, nextView), saved: SessionPreferences[] = [];
+    expect(second.store.getSnapshot().status).toBe('ready');
+    let finish!: (confirmed: boolean) => void;
+    const props = { routes: first.routes, later: new Set<string>(), onReveal: () => {},
+      saveView: async (next: SessionPreferences) => { saved.push(next); return true; },
+      saveLater: async () => new Promise<boolean>(resolve => { finish = resolve; }) };
+    const rendered = render(<SentenceTree {...props} store={first.store} view={preferences()} />);
+    vi.useFakeTimers(); fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'old session text' } });
+    fireEvent.keyDown(rows()[0], { key: 'z' });
+    await act(async () => { vi.advanceTimersByTime(100); });
+    rendered.rerender(<SentenceTree {...props} store={second.store} view={nextView} />);
+    await act(async () => { finish(true); vi.advanceTimersByTime(500); });
+    expect(saved).toHaveLength(0); expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  });
   it('retains last valid rows and disables preferences changes after failed read', async () => {
     const value = await setup(); render(<value.Composition />); const before = rows().length;
     value.unavailable(); await act(async () => { await value.store.refresh(); });
@@ -152,6 +217,29 @@ describe('registered variable-height sentence tree', () => {
     value.session.revision++; value.session.items['1']!.revision++; value.session.items['1']!.question = 'A new canonical question';
     await act(async () => { await value.store.refresh(); });
     expect(document.activeElement).toBe(input); expect(screen.getByText('A new canonical question')).toBeTruthy();
+  });
+  it('lets explicit registered reveal win over anchor restoration and anchors subsequent live updates there', async () => {
+    const session = structuredClone(demo) as Session, base = session.items['1']!;
+    session.items = {};
+    for (let n = 1; n <= 20; n++) session.items[String(n)] = { ...base, id: String(n), ordinal: n, parent: null };
+    const value = await setup(session), rendered = render(<value.Composition />);
+    const tree = screen.getByRole('tree', { name: 'Sentences' });
+    let growth = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const index = rows().indexOf(this), top = index < 0 ? 0 : index * 20 + (index > 0 ? growth : 0) - tree.scrollTop;
+      return { top, bottom: top + (index < 0 ? 100 : 20), height: 20, left: 0, right: 500, width: 500, x: 0, y: top, toJSON: () => ({}) };
+    });
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function () { tree.scrollTop = rows().indexOf(this) * 20; };
+    try {
+      fireEvent.scroll(tree);
+      const reveal = await value.routes.revealItem({ ...route, item_id: '20' });
+      rendered.rerender(<value.Composition externalReveal={reveal} />);
+      expect(tree.scrollTop).toBe(380); expect(document.activeElement).toBe(rows()[19]);
+      growth = 30; value.session.revision++; value.session.items['1']!.revision++;
+      await act(async () => { await value.store.refresh(); });
+      expect(tree.scrollTop).toBe(410);
+    } finally { HTMLElement.prototype.scrollIntoView = original; }
   });
   it('preserves a visible row scroll anchor when upstream wrapped sentences grow', async () => {
     const value = await setup(); render(<value.Composition />); const tree = screen.getByRole('tree', { name: 'Sentences' });
