@@ -343,22 +343,21 @@ impl NativeActivation {
         })
         .await
         .map_err(|_| unavailable())??;
-        if self.stopping.load(Ordering::Acquire) {
-            return Err(unavailable());
-        }
         let connected = match &self.presence {
             Some(observer) => connected.with_presence_observer(observer.clone()),
             None => connected,
         };
-        let mut handle = connected.start(lease)?;
-        let observed = handle.progress();
-        let route = handle.control_binding();
         {
             let mut state = self.state.lock().map_err(|_| unavailable())?;
             if self.stopping.load(Ordering::Acquire) {
-                handle.request_stop();
                 return Err(unavailable());
             }
+            // Starting schedules the worker. Serialize that scheduling and its
+            // handle installation with the synchronous stop-admission fence,
+            // so no live worker can exist outside the fence's active set.
+            let handle = connected.start(lease)?;
+            let observed = handle.progress();
+            let route = handle.control_binding();
             state.active.insert(
                 scope.binding_id.clone(),
                 Active {
@@ -439,8 +438,7 @@ impl NativeActivation {
     /// Explicit Quit fences admission, removes routes and awaits actual workers.
     /// It does not persist a domain disconnect, rotate generations or stop hosts.
     pub async fn shutdown(&self) -> Result<(), CoreError> {
-        self.stopping.store(true, Ordering::Release);
-        self.routes.close()?;
+        self.stop_admission()?;
         let (active, monitors) = {
             let mut state = self.state.lock().map_err(|_| unavailable())?;
             (
@@ -463,6 +461,21 @@ impl NativeActivation {
             monitor.await.map_err(|_| unavailable())?;
         }
         Ok(())
+    }
+    /// Synchronous wake/Quit fence only: no Core/provider IO or worker waits.
+    /// Already admitted calls retain their leases for the later owned drain.
+    pub fn stop_admission(&self) -> Result<(), CoreError> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.stopping.store(true, Ordering::Release);
+        for active in state.active.values_mut() {
+            active.handle.request_stop();
+        }
+        // Publication takes state before routes too, so it cannot reopen a
+        // route after this fence. Existing route copies share the stopped gates.
+        self.routes.close()
     }
     fn current(&self, scope: &BindingScope) -> Result<(RegisteredSession, Binding), CoreError> {
         current_binding(&self.core, scope)
