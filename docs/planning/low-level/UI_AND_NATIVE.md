@@ -114,6 +114,16 @@ Render SVG for the selected topic. Use deterministic ordered tree layout: 190x66
 
 Keep viewport transform `{x,y,scale}` local to the view; clamp scale to 0.25–2.0. Wheel zoom anchors cursor, dragging blank canvas pans, Fit adds 32 px bounds padding. Tree/graph share item selection and filters. Graph selection opens the same detail. A two-line node preview is allowed; detail always shows the complete sentence. Accessible Fit/Zoom/Switch to tree controls mean graph is never the only route to an action.
 
+The explicit selected topic must exist and agree with a nonnull saved topic
+filter. Keep exact filtered membership and ordinary ancestor context. Draw a
+replacement edge only when both endpoints are in that layout; a hidden or
+cross-topic replacement stays accessible through the registered reveal route,
+without adding context nodes or rewriting filters. Fit centers the complete
+uncropped bounds with 32px padding, then clamps to the universal zoom range. When
+minimum zoom cannot fit those bounds, show the actual zoom and a concise overflow
+status with pan/tree access rather than implying all geometry fits. See
+[ADR-0050](../../adr/ADR-0050-graph-filter-membership-and-bounded-fit.md).
+
 Lay out the complete filtered topic when its structure or filter changes; pan/zoom
 does not recompute geometry. Above 300 layout nodes, cull SVG elements to the
 visible world rectangle expanded by 200 screen pixels divided by scale. Bucket
