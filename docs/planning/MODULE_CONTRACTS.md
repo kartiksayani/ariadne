@@ -99,6 +99,20 @@ unsaved. Only verified replay-first transactional rejections permit a corrected
 new deliberate action. Actual restart reloads canonical state without automatic
 resend or a new persisted client journal.
 
+Native recovery consumes qualified presence through the additive
+`NativeCoreService::execute_recovery_with_observation(context, command, observation)`
+entry point, accepting only InputResolve and an optional native-only
+RecoveryObservation. Ordinary CoreService calls retain Unknown by default.
+Desktop composition selects the existing presence-cache fact for the registered
+session's current binding/generation/instance, rechecks freshness at execution,
+and passes it off the UI thread without a cache lock across Core IO. Missing,
+stale or unqualified facts remain Unknown; fresh Running/WaitingForApproval
+blocks recovery, and Idle permits the existing explicit recovery command.
+Observation lookup must not reject an exact saved replay before Core's
+transaction: it supplies an optional fact, while Core owns replay and current
+binding guards. No renderer-supplied presence is trusted and no new wire DTO,
+second presence cache, provider call or automatic resend is introduced.
+
 Ordinary App assembly reuses NavigationWorkspace and ReferenceWorkspace with
 optional Waiting and rail content, the existing detail slot, and explicit
 query/view/rail/theme callbacks. Default reference-gallery output remains stable.
