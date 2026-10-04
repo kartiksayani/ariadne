@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
 import { useSession, type SessionState, type SessionStore } from './data/session-store';
@@ -53,8 +53,9 @@ function ThemeAppearance({ theme }: { theme: Theme }) {
   }, [theme]);
   return null;
 }
-function SessionCenter({ application, view, graph, onReveal, switchToTree }: {
+function SessionCenter({ application, view, graph, onReveal, switchToTree, highlightedItemIds, onHoverItem }: {
   application: Application; view: OpenedSessionView; graph: boolean; onReveal: (result: RevealedItem) => void; switchToTree: () => void;
+  highlightedItemIds: ReadonlySet<string>; onHoverItem: (itemId: string | null) => void;
 }) {
   const state = useSession(view.store), session = state.snapshot?.session;
   const actions = application.actions.forSession(view.store);
@@ -67,7 +68,7 @@ function SessionCenter({ application, view, graph, onReveal, switchToTree }: {
     {session && Object.keys(session.items).length === 0 && <EdgeState kind="empty" />}
     {graph ? topics.map(topic => <NavigationTopicGraph key={topic.id} navigation={application.navigation} store={view.store}
       topicId={topic.id} onReveal={onReveal} onSwitchToTree={switchToTree} />)
-      : <NavigationSentenceTree navigation={application.navigation} store={view.store} onReveal={onReveal} />}
+      : <NavigationSentenceTree navigation={application.navigation} store={view.store} onReveal={onReveal} highlightedItemIds={highlightedItemIds} onHoverItem={onHoverItem} />}
   </section>;
 }
 function Workspace({ application }: { application: Application }) {
@@ -79,6 +80,9 @@ function Workspace({ application }: { application: Application }) {
   const [graphModes, setGraphModes] = useState<Readonly<Record<string, boolean>>>({});
   const [detailOpen, setDetailOpen] = useState(true);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
+  const [highlightedItems, setHighlightedItems] = useState<ReadonlySet<string>>(new Set());
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const hoverItem = useCallback((itemId: string | null) => setHoveredItem(itemId), []);
   const [highlightedMessages, setHighlightedMessages] = useState<ReadonlySet<string>>(new Set());
   const [searchEdit, setSearchEdit] = useState<{ route: string; text: string; attempted: boolean } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
@@ -87,7 +91,8 @@ function Workspace({ application }: { application: Application }) {
   const selectedId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
   const theme = preferences?.global.theme ?? 'system';
   const query = searchEdit?.route === key ? searchEdit.text : view?.filters.search ?? '';
-  useEffect(() => { setDetailOpen(true); setLocalReveal(null); setHighlightedMessages(new Set()); }, [key]);
+  useEffect(() => { setDetailOpen(true); setLocalReveal(null); }, [key]);
+  useEffect(() => { setHighlightedItems(new Set()); setHighlightedMessages(new Set()); setHoveredItem(null); }, [key, graph, view?.rail]);
   useEffect(() => { setDetailOpen(true); }, [view?.selected_item_id, state.reveal]);
   useEffect(() => { setLocalReveal(null); }, [state.reveal]);
   // The header uses navigation's existing serialized preference writer. Keep
@@ -148,8 +153,8 @@ function Workspace({ application }: { application: Application }) {
         onLater={value => route && preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}
       onCloseDetail={closeDetail}
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} routes={navigation.routes}
-        selectedItemId={selectedId} onHighlight={(_items, messages) => setHighlightedMessages(messages)} onReveal={reveal} onClose={toggleRail} /> : undefined}
-      renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} onReveal={selected} switchToTree={switchToTree} />} />
+        selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onReveal={reveal} onClose={toggleRail} /> : undefined}
+      renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} onReveal={selected} switchToTree={switchToTree} highlightedItemIds={highlightedItems} onHoverItem={hoverItem} />} />
   </div>;
 }
 
