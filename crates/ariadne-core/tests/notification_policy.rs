@@ -440,6 +440,17 @@ fn old_preferences_round_trip_without_changing_normalized_command_bytes() {
     assert!(!decoded.notification_preview);
     assert!(decoded.notification_ledger.is_empty());
     assert_eq!(serde_json::to_value(decoded).unwrap(), old);
+
+    let mut disabled = old.clone();
+    disabled["notification_preview"] = json!(false);
+    let decoded: GlobalPreferences = serde_json::from_value(disabled).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), old);
+
+    let mut enabled = old;
+    enabled["notification_preview"] = json!(true);
+    let decoded: GlobalPreferences = serde_json::from_value(enabled.clone()).unwrap();
+    assert!(decoded.notification_preview);
+    assert_eq!(serde_json::to_value(decoded).unwrap(), enabled);
 }
 
 #[test]
