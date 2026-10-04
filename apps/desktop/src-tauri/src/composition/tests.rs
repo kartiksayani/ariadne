@@ -1,3 +1,5 @@
+mod window;
+
 use super::*;
 use ariadne_adapter_claude::ClaudeOptions;
 use ariadne_core::*;
