@@ -39,6 +39,7 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
   const [focused, setFocused] = useState<string | null>(null);
   const nodeElements = useRef(new Map<string, SVGGElement>());
   const pendingFocus = useRef<{ id: string; viewport: Viewport } | null>(null);
+  const lastSelection = useRef<{ store: SessionStore; topicId: string; id: string | null; reveal: RevealedItem | null; present: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
   const writing = useRef<number | null>(null);
@@ -53,6 +54,7 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
   const layout = useMemo(() => layoutGraph(projection?.rows.map(row => row.item) ?? []), [projection]);
   const queryGraph = useMemo(() => indexGraph(layout), [layout]);
   const currentReveal = localReveal ?? reveal;
+  const selectionReveal = currentReveal?.kind === 'item' ? currentReveal : null;
   const selected = currentReveal?.store === store && currentReveal.kind === 'item' ? currentReveal.route.item_id : view.selected_item_id;
   const rendered = useMemo(() => queryGraph(worldViewport(viewport, size.width, size.height), [selected, focused]), [queryGraph, viewport, size, selected, focused]);
   const highlighted = useMemo(() => selectedParentEdges(layout, selected), [layout, selected]);
@@ -80,6 +82,10 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
   }, [layout, size, store, topicId]);
   useLayoutEffect(() => {
     const node = layout.nodes.find(node => node.item.id === selected);
+    const previousSelection = lastSelection.current;
+    if (previousSelection?.store === store && previousSelection.topicId === topicId && previousSelection.id === selected
+      && previousSelection.reveal === selectionReveal && previousSelection.present === !!node) return;
+    lastSelection.current = { store, topicId, id: selected, reveal: selectionReveal, present: !!node };
     pendingFocus.current = null;
     if (!node) return;
     const previous = requestedViewport.current;
@@ -88,7 +94,7 @@ export function SessionTopicGraph(props: SessionTopicGraphProps) {
         y: size.height / 2 - (node.y + node.height / 2) * previous.scale };
     pendingFocus.current = { id: node.item.id, viewport: next };
     if (next !== previous) setViewport(next);
-  }, [selected, layout, store, topicId]);
+  }, [selected, selectionReveal, layout, store, topicId]);
   useLayoutEffect(() => {
     const pending = pendingFocus.current;
     if (!pending || viewport.x !== pending.viewport.x || viewport.y !== pending.viewport.y || viewport.scale !== pending.viewport.scale) return;
