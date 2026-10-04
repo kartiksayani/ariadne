@@ -130,6 +130,15 @@ pub fn capture(
                 .into(),
         );
     }
+    let expected: BTreeMap<_, _> = summaries
+        .iter()
+        .map(|summary| {
+            (
+                (summary.project_id.clone(), summary.session_id.clone()),
+                summary.revision,
+            )
+        })
+        .collect();
     for summary in summaries {
         let project = projects.get(&summary.project_id).ok_or_else(inconsistent)?;
         let route = SessionRef {
@@ -156,8 +165,13 @@ pub fn capture(
                 || binding.connection_state != ConnectionState::Connected
             {
                 diagnostics.push(format!(
-                    "{}: binding {:?}",
-                    summary.title, binding.connection_state
+                    "{}: {}",
+                    summary.title,
+                    if binding.owner_paused || binding.pause_reason.is_some() {
+                        "binding paused".into()
+                    } else {
+                        format!("binding {:?}", binding.connection_state)
+                    }
                 ));
             }
         }
@@ -207,6 +221,46 @@ pub fn capture(
             .then_with(|| item_order(&a.episode.item_id, &b.episode.item_id))
     });
     if rows.len() as u64 != counts.waiting_unanswered.value() {
+        return Err(inconsistent());
+    }
+    // The aggregate page revision is the registry revision. A session can
+    // change without changing that revision or the total count, so validate the
+    // complete session inventory again before committing a notification baseline.
+    let mut final_inventory = BTreeMap::new();
+    let mut cursor = None;
+    let mut final_revision = None;
+    let mut seen = BTreeSet::new();
+    loop {
+        let QueryResult::SessionList(result) = query(OwnerQueryRequest {
+            session: None,
+            request: QueryRequest::SessionList(SessionListRequest {
+                project_id: None,
+                state: None,
+                cursor,
+                limit: PageLimit::new(100).expect("literal"),
+            }),
+        })?
+        else {
+            return Err(inconsistent());
+        };
+        check_page(&result.sessions, &mut final_revision, &mut seen)?;
+        if counts != result.counts {
+            return Err(inconsistent());
+        }
+        for summary in result.sessions.items {
+            if final_inventory
+                .insert((summary.project_id, summary.session_id), summary.revision)
+                .is_some()
+            {
+                return Err(inconsistent());
+            }
+        }
+        cursor = result.sessions.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    if expected != final_inventory || final_revision != session_revision {
         return Err(inconsistent());
     }
     Ok(WaitingCapture {
