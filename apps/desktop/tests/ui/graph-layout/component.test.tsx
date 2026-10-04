@@ -54,6 +54,7 @@ async function setup(view = preferences(), session = structuredClone(demo) as Se
 const nodes = () => Array.from(document.querySelectorAll<SVGGElement>('[data-graph-node]'));
 const ids = () => nodes().map(node => node.dataset.graphNode);
 const node = (id: string) => nodes().find(value => value.dataset.graphNode === id)!;
+const frame = () => act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
 describe('registered selected-topic graph', () => {
   it('renders the complete topic independently of tree expansion, with complete accessible text and fixed nodes', async () => {
     const value = await setup(); value.session.items['1']!.question = 'A complete sentence far longer than the two-line graph preview, with retained detail text.';
@@ -119,19 +120,21 @@ describe('registered selected-topic graph', () => {
     expect(ids()).toEqual(['8']); expect(value.reveals).toEqual([]); expect(value.saved).toEqual([]);
   });
   it('anchors wheel zoom, clamps controls and offers the accessible tree route', async () => {
-    const value = await setup(); render(<value.Composition />);
+    const value = await setup(); render(<value.Composition />); await frame();
     const canvas = screen.getByLabelText('Topic sentences'), world = document.querySelector('[data-graph-world]')!;
     fireEvent.wheel(canvas, { clientX: 100, clientY: 120, deltaY: -100000 });
+    await frame();
     expect(screen.getByRole('status').textContent).toBe('200%');
     expect((screen.getByRole('button', { name: 'Zoom in' }) as HTMLButtonElement).disabled).toBe(true);
     const before = world.getAttribute('transform'); fireEvent.wheel(canvas, { clientX: 100, clientY: 120, deltaY: 100000 });
+    await frame();
     expect(screen.getByRole('status').textContent).toBe('25%'); expect(world.getAttribute('transform')).not.toBe(before);
-    fireEvent.click(screen.getByRole('button', { name: 'Fit' })); expect(world.getAttribute('transform')).not.toContain('scale(0.25)');
+    fireEvent.click(screen.getByRole('button', { name: 'Fit' })); await frame(); expect(world.getAttribute('transform')).not.toContain('scale(0.25)');
     fireEvent.click(screen.getByRole('button', { name: 'Switch to tree' })); expect(value.switchTree).toHaveBeenCalledOnce();
     expect(value.saved).toEqual([]);
   });
   it('pans only the primary pointer on blank canvas and stops after cancellation', async () => {
-    const value = await setup(); render(<value.Composition />);
+    const value = await setup(); render(<value.Composition />); await frame();
     const canvas = screen.getByLabelText('Topic sentences'), world = document.querySelector('[data-graph-world]')!;
     const pointer = (target: Element, type: string, x: number, y: number, id = 1, button = 0) => {
       const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button });
@@ -142,18 +145,19 @@ describe('registered selected-topic graph', () => {
     pointer(node('1'), 'pointerdown', 10, 10); pointer(canvas, 'pointermove', 30, 40); expect(transform()).toBe(original);
     pointer(canvas, 'pointerdown', 10, 10, 1, 2); pointer(canvas, 'pointermove', 30, 40); expect(transform()).toBe(original);
     pointer(canvas, 'pointerdown', 10, 10); pointer(canvas, 'pointermove', 30, 40, 2); expect(transform()).toBe(original);
-    pointer(canvas, 'pointermove', 30, 40); const moved = transform(); expect(moved).not.toBe(original);
+    pointer(canvas, 'pointermove', 30, 40); await frame(); const moved = transform(); expect(moved).not.toBe(original);
     pointer(canvas, 'pointercancel', 30, 40); pointer(canvas, 'pointermove', 60, 70); expect(transform()).toBe(moved);
-    fireEvent.click(screen.getByRole('button', { name: 'Fit' })); expect(transform()).toBe(original);
+    fireEvent.click(screen.getByRole('button', { name: 'Fit' })); await frame(); expect(transform()).toBe(original);
     expect(value.saved).toEqual([]);
   });
   it('fits the actual initial canvas size rather than the fallback dimensions', async () => {
     vi.spyOn(SVGElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0,
       right: 200, bottom: 420, width: 200, height: 420, toJSON: () => ({}) });
-    const value = await setup(); render(<value.Composition />);
+    const value = await setup(); render(<value.Composition />); await frame();
     expect(screen.getByRole('status').textContent).toBe('31%');
     const before = document.querySelector('[data-graph-world]')!.getAttribute('transform');
     fireEvent.click(screen.getByRole('button', { name: 'Fit' }));
+    await frame();
     expect(document.querySelector('[data-graph-world]')!.getAttribute('transform')).toBe(before);
   });
   it('keeps a pending preference operation scoped and does not enqueue automatic selection retries', async () => {

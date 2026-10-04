@@ -887,7 +887,10 @@
       "checks": [
         "rtk proxy cargo test -p ariadne-core --test history_actions"
       ],
-      "estimate_days": 1.5
+      "estimate_days": 1.5,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/76"
+      }
     },
     {
       "id": "P3.1",
@@ -1155,7 +1158,8 @@
         "rtk proxy cargo test -p ariadne-core --test recovery",
         "rtk proxy cargo test -p ariadne-cli --test recovery_cli"
       ],
-      "estimate_days": 1.5
+      "estimate_days": 1.5,
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/76"
     },
     {
       "id": "P4.1",
@@ -1512,8 +1516,11 @@
       ],
       "paths": [
         "apps/desktop/src/graph/culling/**",
-        "tests/ui/graph-culling/**",
+        "apps/desktop/src/components/graph/SessionTopicGraph.tsx",
+        "apps/desktop/tests/ui/graph-culling/**",
+        "apps/desktop/tests/ui/graph-layout/component.test.tsx",
         "tests/e2e/graph/**",
+        "tests/ui/reference/playwright.config.ts",
         "docs/planning/evidence/graph-performance/**"
       ],
       "spec": [
@@ -1527,8 +1534,8 @@
         "Save deterministic 2,000-node correctness and measured render/performance evidence (V27)."
       ],
       "checks": [
-        "rtk proxy npm run test:ui -- --project graph-culling",
-        "rtk proxy npm run test:e2e -- --suite graph"
+        "rtk proxy npm run test:ui -- apps/desktop/tests/ui/graph-culling",
+        "rtk proxy npm run capture:reference -- --project graph-2000"
       ],
       "estimate_days": 1,
       "implementation_depends_on": [
