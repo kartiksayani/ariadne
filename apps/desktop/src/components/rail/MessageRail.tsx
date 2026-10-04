@@ -24,6 +24,8 @@ export function MessageRail({ service, store, routes, selectedItemId = null, hov
   const [routeError, setRouteError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null), lastScroll = useRef(0), seenThrough = useRef(0);
   const initialized = useRef(false), request = useRef(0);
+  const highlight = useRef(onHighlight);
+  highlight.current = onHighlight;
   useEffect(() => {
     setHovered(null); setPinned(null); setFollowing(true); setUnseen(0); setRouteError(null);
     lastScroll.current = 0; seenThrough.current = 0; initialized.current = false; ++request.current;
@@ -31,9 +33,9 @@ export function MessageRail({ service, store, routes, selectedItemId = null, hov
   }, [store]);
   useEffect(() => {
     const message = messages?.find(value => value.id === (hovered ?? pinned));
-    onHighlight(new Set(message ? messageItems(message) : []), new Set(message ? [message.id] : []));
-  }, [messages, hovered, pinned, onHighlight]);
-  useEffect(() => () => onHighlight(new Set(), new Set()), [onHighlight, store]);
+    highlight.current(new Set(message ? messageItems(message) : []), new Set(message ? [message.id] : []));
+  }, [messages, hovered, pinned]);
+  useEffect(() => () => highlight.current(new Set(), new Set()), [store]);
   useLayoutEffect(() => {
     if (!messages || !scroller.current) return;
     const latest = messages.at(-1)?.number ?? 0;
