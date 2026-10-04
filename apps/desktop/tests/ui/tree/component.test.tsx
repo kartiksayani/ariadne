@@ -16,7 +16,7 @@ function preferences(): SessionPreferences {
   return { session: route, tab_open: true, selected_item_id: '1', tab_order: 0, expanded_item_ids: ['1'],
     filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
 }
-async function setup(session: Session = structuredClone(demo) as Session, view = preferences()) {
+async function setup(session: Session = structuredClone(demo) as Session, view = preferences(), saveCompletion?: Promise<void>) {
   const route = { project_id: session.project_id, session_id: session.id };
   const calls: { command: string; request: Parameters<DesktopTransport['invoke']>[1]['request'] }[] = [];
   let readError = false, missing = false;
@@ -39,7 +39,7 @@ async function setup(session: Session = structuredClone(demo) as Session, view =
   function Composition({ externalReveal = null }: { externalReveal?: RevealedItem | null }) {
     const [current, setCurrent] = useState(view), [later, setLater] = useState(new Set<string>());
     return <SentenceTree store={store} routes={routes} view={immutable(current)} later={later} reveal={externalReveal}
-      saveView={async next => { saved.push(structuredClone(next)); if (rejectWrite) return false; setCurrent(next); return true; }}
+      saveView={async next => { saved.push(structuredClone(next)); if (saveCompletion) await saveCompletion; if (rejectWrite) return false; setCurrent(next); return true; }}
       saveLater={async (id, value) => { laterWrites.push([id, value]); setLater(previous => { const next = new Set(previous); if (value) next.add(id); else next.delete(id); return next; }); return true; }}
       onReveal={result => { reveals.push(result); }} />;
   }
@@ -258,17 +258,35 @@ describe('registered variable-height sentence tree', () => {
 
 
 it('persists exact canonical owner choices without changing another filter category', async () => {
-  const value = await setup(); render(<value.Composition />);
+  let confirm!: () => void;
+  const completion = new Promise<void>(resolve => { confirm = resolve; });
+  const view = preferences(); view.filters.statuses = ['open']; view.filters.search = 'queue';
+  const value = await setup(undefined, view, completion); render(<value.Composition />);
   const owners = screen.getByRole('group', { name: 'Item owner' });
-  fireEvent.click(within(owners).getByRole('button', { name: 'Me' }));
+  const agentOwner = Object.values(value.session.items).find(item => item?.owner.kind === 'agent')!.owner;
+  expect(agentOwner.kind).toBe('agent');
+  const agentName = `Agent · ${agentOwner.kind === 'agent' ? agentOwner.binding_id : ''}`;
+  const ownerButton = (name: string) => within(owners).getByRole<HTMLButtonElement>('button', { name });
+  const confirmedOwner = async (name: string, pressed: boolean) => waitFor(() => {
+    expect(ownerButton(name).disabled).toBe(false);
+    expect(ownerButton(name).getAttribute('aria-pressed')).toBe(String(pressed));
+  });
+  fireEvent.click(ownerButton('Me'));
+  // A recorded request is not confirmation. While its completion is pending,
+  // the next owner choice must stay disabled rather than submit a stale view.
   await waitFor(() => expect(value.saved.at(-1)?.filters.owners).toEqual([{ kind: 'me' }]));
-  const agent = within(owners).getAllByRole('button').find(button => button.textContent?.startsWith('Agent ·'))!;
-  fireEvent.click(agent);
-  await waitFor(() => expect(value.saved.at(-1)?.filters.owners).toHaveLength(2));
-  expect(value.saved.at(-1)?.filters.statuses).toEqual([]);
-  expect(value.saved.at(-1)?.filters.search).toBe('');
-  fireEvent.click(within(owners).getByRole('button', { name: 'Me' }));
-  await waitFor(() => expect(value.saved.at(-1)?.filters.owners).toHaveLength(1));
+  expect(ownerButton('Me').getAttribute('aria-pressed')).toBe('false');
+  expect(ownerButton(agentName).disabled).toBe(true);
+  fireEvent.click(ownerButton(agentName)); expect(value.saved).toHaveLength(1);
+  await act(async () => { confirm(); });
+  await confirmedOwner('Me', true);
+  fireEvent.click(ownerButton(agentName));
+  await confirmedOwner(agentName, true);
+  expect(value.saved.at(-1)?.filters).toEqual({ ...view.filters, owners: [{ kind: 'me' }, agentOwner] });
+  fireEvent.click(ownerButton('Me'));
+  await confirmedOwner('Me', false);
+  expect(value.saved.at(-1)?.filters).toEqual({ ...view.filters, owners: [agentOwner] });
+  expect(value.saved).toHaveLength(3);
 });
 
 it('measures a complete 2,000-row DOM and preserves numeric order and one roving focus target', async () => {

@@ -59,6 +59,7 @@ fn patch(op: u64, expected: u64, entries: Vec<PreferencesPatchEntry>) -> OwnerCo
 }
 fn draft(n: u64, text: &str) -> OwnerDraft {
     OwnerDraft {
+        submission_attempted: false,
         op_id: id(n),
         session: reference(700),
         binding_id: id(702),
@@ -119,6 +120,140 @@ impl Setup {
 fn write_private(path: &std::path::Path, bytes: &[u8]) {
     fs::write(path, bytes).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+}
+
+#[test]
+fn attempted_drafts_survive_restart_and_cannot_change_payload_or_marker() {
+    let s = Setup::new();
+    let mut saved = draft(80, " Exact attempted bytes ");
+    saved.submission_attempted = true;
+    s.preferences()
+        .patch(
+            &owner(),
+            &patch(
+                90,
+                1,
+                vec![PreferencesPatchEntry::UpsertDraft {
+                    draft: saved.clone(),
+                }],
+            ),
+        )
+        .unwrap();
+    let reopened = Registry::open(s.home.path()).unwrap();
+    assert_eq!(
+        PreferencesService::new(&reopened)
+            .get(&owner())
+            .unwrap()
+            .drafts,
+        vec![saved.clone()]
+    );
+    for changed in [
+        OwnerDraft {
+            text: "Different body".into(),
+            ..saved.clone()
+        },
+        OwnerDraft {
+            submission_attempted: false,
+            ..saved.clone()
+        },
+    ] {
+        assert_eq!(
+            s.preferences()
+                .patch(
+                    &owner(),
+                    &patch(
+                        91,
+                        2,
+                        vec![PreferencesPatchEntry::UpsertDraft { draft: changed }]
+                    )
+                )
+                .unwrap_err()
+                .code,
+            CoreErrorCode::OperationReused
+        );
+    }
+    assert_eq!(s.preferences().get(&owner()).unwrap().revision, revision(2));
+    s.preferences()
+        .patch(
+            &owner(),
+            &patch(
+                92,
+                2,
+                vec![PreferencesPatchEntry::UpsertDraft {
+                    draft: saved.clone(),
+                }],
+            ),
+        )
+        .unwrap();
+    s.preferences()
+        .patch(
+            &owner(),
+            &patch(
+                93,
+                3,
+                vec![PreferencesPatchEntry::DeleteDraft {
+                    operation_id: saved.op_id,
+                }],
+            ),
+        )
+        .unwrap();
+    assert!(s.preferences().get(&owner()).unwrap().drafts.is_empty());
+}
+
+#[test]
+fn older_unsent_draft_defaults_marker_and_attempted_empty_body_is_rejected() {
+    let mut value = serde_json::to_value(draft(80, "Unsent bytes")).unwrap();
+    value
+        .as_object_mut()
+        .unwrap()
+        .remove("submission_attempted");
+    let restored: OwnerDraft = serde_json::from_value(value).unwrap();
+    assert!(!restored.submission_attempted);
+    let mut invalid = draft(80, " ");
+    invalid.selected_option_id = None;
+    invalid.submission_attempted = true;
+    assert_eq!(
+        patch(
+            90,
+            1,
+            vec![PreferencesPatchEntry::UpsertDraft { draft: invalid }]
+        )
+        .validate_wire()
+        .unwrap_err()
+        .code,
+        CoreErrorCode::InvalidArgument
+    );
+}
+
+#[test]
+fn legacy_draft_patch_replays_with_unchanged_normalized_command_bytes() {
+    let s = Setup::new();
+    let command = patch(
+        90,
+        1,
+        vec![PreferencesPatchEntry::UpsertDraft {
+            draft: draft(80, "Legacy exact bytes"),
+        }],
+    );
+    let legacy = serde_json::to_value(&command).unwrap();
+    assert!(legacy["params"]["entries"][0]["draft"]
+        .get("submission_attempted")
+        .is_none());
+    let decoded: OwnerCommand = serde_json::from_value(legacy.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), legacy);
+    let saved = s.preferences().patch(&owner(), &decoded).unwrap();
+    let before = fs::read(s.live()).unwrap();
+    assert!(!String::from_utf8(before.clone())
+        .unwrap()
+        .contains("submission_attempted"));
+    let reopened = Registry::open(s.home.path()).unwrap();
+    assert_eq!(
+        PreferencesService::new(&reopened)
+            .patch(&owner(), &command)
+            .unwrap(),
+        saved
+    );
+    assert_eq!(fs::read(s.live()).unwrap(), before);
 }
 
 #[test]
