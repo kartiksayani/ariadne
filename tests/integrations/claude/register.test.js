@@ -26,10 +26,46 @@ describe('supported Mod entry convention', () => {
     expect(recorded[1].binding_scope).toEqual({binding_id:ids.binding,generation:ids.generation});
     await hooks.get('ariadne-disconnect')(h.$);
     await timer.callback();
-    expect(recorded[2].binding_scope).toBe(null);
+    expect(recorded[3].binding_scope).toBe(null);
     await hooks.get('session.end')(h.$,{},next);
     expect(timer.cancelled).toBe(true);await timer.callback();
-    expect(recorded).toHaveLength(3);expect(h.prompts).toEqual([]);
+    expect(recorded).toHaveLength(4);expect(h.prompts).toEqual([]);
+  });
+  it('announces exact saved IDs before status and retains the connect operation while route publication or its acknowledgement is pending', async () => {
+    for (const loseAnnouncementAck of [false,true]) {
+      let published = false, lost = false;
+      const bound = [];
+      const h = host({handler:(argv,options) => {
+        if (argv[2] === 'announce') {
+          const scope = JSON.parse(options.stdin).binding_scope;
+          if (scope) {
+            bound.push(scope);
+            if (loseAnnouncementAck && !lost) {lost=true;return failure('commit_uncertain');}
+          }
+        }
+        if (argv[2] === 'connection-status' && !published) return failure('not_found');
+      }});
+      const hooks = callbacks(descriptor);
+      await hooks.get('session.start')(h.$,{},next);
+      await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+      expect(h.logs.at(-1)).toContain('was saved; connection status remains pending');
+      expect(bound).toEqual([{binding_id:ids.binding,generation:ids.generation}]);
+      const connect = h.calls.find(call => call.argv[1] === 'binding');
+      const original = connect.options.stdin;
+      await h.timer().callback();
+      expect(h.calls.some(call => call.argv[2] === 'claim')).toBe(false);
+      expect(h.prompts).toEqual([]);
+      await hooks.get('ariadne-connect')(h.$,{args:ids.input});
+      expect(h.calls.filter(call => call.argv[1] === 'binding')).toHaveLength(1);
+      await h.timers().find(timer => timer.ms === 30000).callback();
+      expect(bound.at(-1)).toEqual(bound[0]);
+      published = true;
+      const retried = await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+      expect(JSON.parse(retried.text.split('\n')[0]).status).toMatchObject({connection_state:'connected'});
+      expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
+      expect(h.calls.filter(call => call.argv[2] === 'report')).toEqual([]);
+      expect(h.prompts).toEqual([]);
+    }
   });
   it('can announce an unqualified engine without admitting claims, and heartbeat failure cannot fabricate connection', async () => {
     const h = host({version:'2.1.289'}), hooks = callbacks(descriptor);

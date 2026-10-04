@@ -53,6 +53,15 @@ correlation in both completion orders, and captured late CLI reports after deskt
 closure. Reuse existing transport and normalization tests; do not add a parallel
 transport framework. This is installed-composition evidence, not live-host M7.
 
+After validating the exact saved connect receipt and explicit target, the Mod
+retains and announces its binding/generation before requesting route-dependent
+connection status. Native qualification/reconciliation still owns route publication.
+If announcement acknowledgement or status is unavailable, retain the original
+connect operation and saved scope, report activation as pending and retry that
+exact operation on the owner's next connect attempt. Do not invent Connected,
+enable claims early, or allocate new IDs to recover a lost response. Session-end
+and outstanding original-scope report guards remain in force.
+
 After that joined proof, `domain_cli` may report support for the current supported
 installed helper release only following existing native qualification: fresh SDK
 identity/project, qualified Claude version, exact selected helper path/version,

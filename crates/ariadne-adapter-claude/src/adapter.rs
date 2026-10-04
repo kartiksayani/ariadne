@@ -142,7 +142,7 @@ impl State {
         let result = ConnectResult {
             external_session_id: request.external_session_id.clone(),
             endpoint_fingerprint: fingerprint.clone(),
-            capabilities: capabilities(),
+            capabilities: capabilities(&evidence.identity.app_version),
             observation: self.presence(request.generation.clone(), Some(&evidence)),
         };
         result.validate_for(&request)?;

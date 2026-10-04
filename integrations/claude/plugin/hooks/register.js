@@ -21,8 +21,14 @@ export function createRegister(descriptor) {
     let qualified = false;
     let ownerTransition = false;
     let sessionEnded = false;
-    const owner = descriptor ? setup(descriptor.helperPath) : null;
     const discovery = announcements(descriptor);
+    const owner = descriptor ? setup(descriptor.helperPath,async ($,binding) => {
+      announcementScope = {binding_id:binding.binding_id,generation:binding.generation};
+      if (sessionEnded) return;
+      if (!await discovery.announce($,announcementScope)) {
+        throw new ModError('Bound announcement is pending or the original session ended; no claims were admitted.');
+      }
+    }) : null;
     function failure($, error) {
       // Only our bounded actionable messages are displayed; raw rejected host
       // promises, helper stderr and owner payloads are never reflected.

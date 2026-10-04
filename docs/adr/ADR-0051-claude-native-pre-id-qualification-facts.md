@@ -18,9 +18,13 @@ Expose provider-owned `QualifiedClaudeHost`, with private fields and no
 Deserialize implementation or public constructor. The existing version/exact-root
 resource qualifier constructs it; it retains the verified fingerprint, original
 SDK identity and native receipt Instant/UTC observation time. Its capability
-getter uses the same constructor as the full adapter. Domain CLI/MCP capabilities
-remain unsupported until their installed composition is qualified. These facts
-are an owned read-only observation, not a Core authority, connection handle,
+getter uses the same conditional constructor as the full adapter. The installed
+Mod/helper/native/Core/Store acceptance join qualifies domain CLI command support
+for release `0.1.0` after the existing exact helper path/version, original SDK
+identity/project, Claude `2.1.287` and nine-resource loaded/installed parity checks.
+Unknown helper releases and domain MCP remain unsupported. Command support grants
+no Core authority, dispatch admission, host approval or per-operation success.
+These facts are an owned read-only observation, not a Core authority, connection handle,
 binding, lease or promise of continued availability.
 
 The existing `qualify_identity` API delegates to the same qualifier. A qualified
@@ -48,14 +52,32 @@ validated reconciliation receipts, and only then physical-lease/ClaimGate route
 activation. Owner pause and recovery barriers remain. Exact bootstrap replay
 returns the original immutable receipt even after current state progresses.
 
+The installed Mod validates the entire saved receipt and explicit target before
+publishing that exact bound scope through its existing announcement path, then
+asks for route-dependent connection status. It retains that announcement scope
+and the original connect request/operation ID when the announcement acknowledgement
+or status is unavailable. The owner explicitly retries the same selector once
+native reconciliation publishes the route. Pending status creates no claim loop,
+Connected fact or new binding. Session-end and retained original-scope report
+guards still fence admission and rotation.
+
 ## Consequences
 
-This PR provides only the qualification facts seam. Real native composition must
-activate/retry qualification after a matching bound announcement without waiting
-for that announcement before returning bootstrap IDs, synthesizing Connected,
-resending delivery or implying a lease. Dynamic supervisor/control route
-activation remains a consuming integration, as do Core VerifiedHost mapping and
-the Codex qualified-reader factory. A test-only fake-provider closed loop must
-prove the ordering before bootstrap is claimed complete. Current tests verify
+Native composition activates after the matching bound announcement without
+waiting for it before returning bootstrap IDs. The original qualification seam
+and consuming activation remain distinct from dispatch authority. Tests verify
 provider facts agree with final connection fingerprint/capabilities, preserve
 receipt age, and retain the caller's shorter budget through native discovery.
+
+The consuming CLI test imports the setup-rendered installed Mod and forwards its
+helper argv/stdin to the production executable. Native activation, private control,
+Core and Store stay real; only the Claude SDK/host and host version response are
+scripted. It proves explicit existing-session attachment, the saved owner-context
+ceiling and later unissued-input isolation, no implicit prompt, both domain-result
+and completion orders, and captured original-scope reports after desktop closure.
+This is deterministic installed composition evidence; live-host M7 remains separate.
+
+Release identity retains the existing immutable-version assumption: version
+checks cannot distinguish different helper builds both reporting `0.1.0`.
+A release changing supported command semantics must change its release identity.
+No cryptographic helper attestation or organizational security approval is claimed.

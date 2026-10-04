@@ -35,7 +35,7 @@ export function bindingStatus(value, binding) {
   }
   return value;
 }
-export function setup(helperPath) {
+export function setup(helperPath, savedBinding = async () => {}) {
   let projectRequest = null;
   let projectId = null;
   let connectRequest = null;
@@ -99,7 +99,15 @@ export function setup(helperPath) {
     }
     const selected = {binding_id:data.binding_id,generation:data.generation,external_session_id:externalSession,
       session:{project_id:projectId,session_id:receipt.session_id}};
-    const projection = await status($,selected);
+    let projection;
+    try {
+      // Publish only the exact validated saved IDs. Native qualification and
+      // reconciliation must finish before route-dependent status can succeed.
+      await savedBinding($,selected);
+      projection = await status($,selected);
+    } catch (error) {
+      throw new ModError(`Ariadne binding ${selected.binding_id} was saved; connection status remains pending. Retry /ariadne-connect with the same session selector when the app is ready; the original operation ID is retained.${error instanceof ModError ? ` ${error.message}` : ''}`);
+    }
     binding = selected;
     connectRequest = null;
     disconnectRequest = null;
