@@ -1,6 +1,10 @@
 // Consumers of canonical core/agent-protocol wire records, not another queue model.
 export const API_VERSION = 1;
 export const HOST_VERSION = '2.1.287';
+export function claudeSessionEndEventId(bindingId, generation) {
+  if (!uuid(bindingId) || !uuid(generation)) throw new ModError('Invalid saved Claude session-end scope.');
+  return `claude:session-ended:${bindingId}:${generation}`;
+}
 export class ModError extends Error {}
 const encoder = new globalThis.TextEncoder();
 export function bytes(text) { return encoder.encode(text).byteLength; }

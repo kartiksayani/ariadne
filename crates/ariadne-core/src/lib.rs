@@ -13,6 +13,7 @@ mod errors;
 pub mod fake;
 pub mod history_actions;
 pub mod inputs;
+pub mod lifecycle;
 pub mod native;
 pub mod queries;
 mod receipts;
