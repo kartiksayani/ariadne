@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay } from '../../../scripts/run-native-e2e.mjs';
+import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import WebSocket from 'ws';
@@ -46,6 +46,44 @@ test('selectors are explicit and default runs the complete gate', () => {
   assert.equal(selector([]), 'all');
   for (const name of ['all', 'native', 'process-contract']) assert.equal(selector(['--suite', name]), name);
   for (const args of [['--suite'], ['--suite', 'skip'], ['--skip'], ['--suite', 'native', '--suite', 'all']]) assert.throws(() => selector(args));
+});
+test('source evidence distinguishes generated untracked files from tracked changes against HEAD', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-source-'));
+  const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  try {
+    git(['init', '--quiet']);
+    await writeFile(join(root, 'source.txt'), 'committed source\n');
+    git(['add', 'source.txt']);
+    git(['-c', 'user.name=Source Fixture', '-c', 'user.email=source@example.test', 'commit', '--quiet', '-m', 'Source fixture']);
+    const clean = sourceState(root);
+    assert.equal(clean.head, git(['rev-parse', 'HEAD']));
+    assert.equal(clean.indexTree, git(['rev-parse', 'HEAD^{tree}']));
+    assert.equal(clean.dirty, false);
+    assert.equal(clean.statusPorcelain, '');
+    assert.equal(clean.trackedDiffNameStatus, '');
+
+    await writeFile(join(root, 'generated.txt'), 'generated output\n');
+    const untracked = sourceState(root);
+    assert.equal(untracked.dirty, true);
+    assert.equal(untracked.statusPorcelain, '?? generated.txt');
+    assert.equal(untracked.trackedDiffNameStatus, '');
+
+    await writeFile(join(root, 'source.txt'), 'unstaged source overlay\n');
+    const unstaged = sourceState(root);
+    assert.equal(unstaged.head, clean.head);
+    assert.equal(unstaged.indexTree, clean.indexTree);
+    assert.equal(unstaged.dirty, true);
+    assert.equal(unstaged.statusPorcelain, ' M source.txt\n?? generated.txt');
+    assert.equal(unstaged.trackedDiffNameStatus, 'M\tsource.txt');
+
+    git(['add', 'source.txt']);
+    const staged = sourceState(root);
+    assert.equal(staged.head, clean.head);
+    assert.notEqual(staged.indexTree, clean.indexTree);
+    assert.equal(staged.dirty, true);
+    assert.equal(staged.statusPorcelain, 'M  source.txt\n?? generated.txt');
+    assert.equal(staged.trackedDiffNameStatus, 'M\tsource.txt');
+  } finally { await rm(root, { recursive: true }); }
 });
 test('private command cwd, exact arguments, logs and native identity are real', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-process-'));

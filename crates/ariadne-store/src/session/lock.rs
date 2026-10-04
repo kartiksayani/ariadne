@@ -94,10 +94,19 @@ pub(crate) fn with_lock<T, E: From<StoreError>>(
     name: &str,
     work: impl FnOnce() -> Result<T, E>,
 ) -> Result<T, E> {
+    with_lock_mode(directory, name, true, work)
+}
+
+pub(crate) fn with_lock_mode<T, E: From<StoreError>>(
+    directory: &super::fs::Directory,
+    name: &str,
+    create: bool,
+    work: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
     let path = directory.path.join(name);
     let keyed = keyed(&path)?;
     let mut wait = Wait::new();
     let _mutex = wait.mutex(&keyed)?;
-    let _flock = wait.flock(directory.open(name, true)?, &path)?;
+    let _flock = wait.flock(directory.open(name, create)?, &path)?;
     work()
 }
