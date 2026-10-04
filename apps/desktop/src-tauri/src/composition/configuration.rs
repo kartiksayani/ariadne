@@ -14,7 +14,9 @@ impl NativeConfiguration {
     /// second-instance arguments stay navigation data in the existing plugin.
     /// These reads select existing documented data-root names, never credentials.
     pub fn from_startup_args(args: &[String]) -> Result<Self, CoreError> {
-        Self::parse(args, |name| std::env::var_os(name).map(PathBuf::from))
+        Self::parse(args.get(1..).ok_or_else(invalid)?, |name| {
+            std::env::var_os(name).map(PathBuf::from)
+        })
     }
     fn parse(
         args: &[String],
@@ -159,5 +161,14 @@ mod tests {
         )
         .is_err());
         assert!(NativeConfiguration::parse(&args(&["--codex-home"]), environment).is_err());
+    }
+    #[test]
+    fn ordinary_startup_consumes_argv_after_the_executable() {
+        let configuration = NativeConfiguration::from_startup_args(&args(&[
+            "/Applications/Ariadne.app/Contents/MacOS/ariadne-desktop",
+        ]))
+        .unwrap();
+        assert!(configuration.claude.is_none() && configuration.codex.is_none());
+        assert!(NativeConfiguration::from_startup_args(&[]).is_err());
     }
 }

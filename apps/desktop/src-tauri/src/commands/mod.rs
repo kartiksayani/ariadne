@@ -24,22 +24,22 @@ struct Composition {
     connect: Option<Arc<NativeConnect>>,
 }
 impl DesktopService {
-    pub(crate) fn native_preferences(&self) -> Result<PreferencesSnapshot, CoreError> {
-        match self
-            .query(
-                OwnerQueryRequest {
-                    session: None,
-                    request: QueryRequest::PreferencesGet {},
-                },
-                true,
-            )
-            .0
-        {
-            ApplicationEnvelope::Success(SuccessEnvelope {
-                data: QueryResult::PreferencesGet(snapshot),
-                ..
-            }) => Ok(snapshot),
+    /// Trusted native consumers use the same validated owner envelope as IPC.
+    pub(crate) fn native_query(
+        &self,
+        request: OwnerQueryRequest,
+    ) -> Result<QueryResult, CoreError> {
+        match self.query(request, true).0 {
+            ApplicationEnvelope::Success(SuccessEnvelope { data, .. }) => Ok(data),
             ApplicationEnvelope::Failure(FailureEnvelope { error, .. }) => Err(error),
+        }
+    }
+    pub(crate) fn native_preferences(&self) -> Result<PreferencesSnapshot, CoreError> {
+        match self.native_query(OwnerQueryRequest {
+            session: None,
+            request: QueryRequest::PreferencesGet {},
+        })? {
+            QueryResult::PreferencesGet(snapshot) => Ok(snapshot),
             _ => Err(mismatched_command()),
         }
     }

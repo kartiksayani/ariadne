@@ -145,47 +145,8 @@ impl Fixture {
         OwnerMutationRequest,
         MutationReceipt,
     ) {
+        let request = self.connect_request(runtime);
         let core = runtime.bridge().core().clone();
-        let MutationReceipt::ProjectRegistered(project) = core
-            .execute_owner(
-                OwnerContext::from_trusted_entrypoint(OwnerScope::Registry),
-                OwnerCommand::ProjectRegister {
-                    api_version: SchemaVersion::new(1).unwrap(),
-                    op_id: id(1),
-                    params: ProjectRegisterParams {
-                        canonical_root: self.root.to_str().unwrap().into(),
-                    },
-                },
-            )
-            .unwrap()
-        else {
-            panic!("registration")
-        };
-        self.call(
-            2,
-            ControlMethod::SessionAnnouncement(self.announcement(None)),
-        )
-        .unwrap();
-        let request = OwnerMutationRequest {
-            session: None,
-            command: OwnerCommand::BindingConnect {
-                api_version: SchemaVersion::new(1).unwrap(),
-                op_id: id(3),
-                params: BindingConnectParams {
-                    project_id: project.project_id.clone(),
-                    adapter_id: "claude_code_mod".into(),
-                    external_session_id: "fixture-original".into(),
-                    endpoint: EndpointRef::LocalBridge {
-                        name: "claude-mod".into(),
-                    },
-                    configuration: AdapterConfig {
-                        namespace: "claude_code_mod".into(),
-                        values: UniqueMap(Default::default()),
-                    },
-                    existing_session_id: None,
-                },
-            },
-        };
         let response = invoke(
             runtime,
             "binding_connect",
@@ -212,8 +173,11 @@ impl Fixture {
             binding_id: binding_id.clone(),
             generation: generation.clone(),
         };
+        let OwnerCommand::BindingConnect { params, .. } = &request.command else {
+            panic!("connect request")
+        };
         let session = SessionRef {
-            project_id: project.project_id,
+            project_id: params.project_id.clone(),
             session_id: saved.session_id.clone(),
         };
         assert_eq!(
@@ -243,6 +207,49 @@ impl Fixture {
         .unwrap();
         self.wait_route(&scope);
         (session, scope, request, receipt)
+    }
+    fn connect_request(&self, runtime: &Arc<NativeRuntime>) -> OwnerMutationRequest {
+        let core = runtime.bridge().core().clone();
+        let MutationReceipt::ProjectRegistered(project) = core
+            .execute_owner(
+                OwnerContext::from_trusted_entrypoint(OwnerScope::Registry),
+                OwnerCommand::ProjectRegister {
+                    api_version: SchemaVersion::new(1).unwrap(),
+                    op_id: id(1),
+                    params: ProjectRegisterParams {
+                        canonical_root: self.root.to_str().unwrap().into(),
+                    },
+                },
+            )
+            .unwrap()
+        else {
+            panic!("registration")
+        };
+        self.call(
+            2,
+            ControlMethod::SessionAnnouncement(self.announcement(None)),
+        )
+        .unwrap();
+        OwnerMutationRequest {
+            session: None,
+            command: OwnerCommand::BindingConnect {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(3),
+                params: BindingConnectParams {
+                    project_id: project.project_id.clone(),
+                    adapter_id: "claude_code_mod".into(),
+                    external_session_id: "fixture-original".into(),
+                    endpoint: EndpointRef::LocalBridge {
+                        name: "claude-mod".into(),
+                    },
+                    configuration: AdapterConfig {
+                        namespace: "claude_code_mod".into(),
+                        values: UniqueMap(Default::default()),
+                    },
+                    existing_session_id: None,
+                },
+            },
+        }
     }
     fn wait_route(&self, scope: &BindingScope) {
         let until = Instant::now() + Duration::from_secs(3);
@@ -395,5 +402,237 @@ fn shutdown_awaits_actual_started_blocking_work_and_releases_owner_after_complet
         .unwrap()
         .unwrap();
     quit.join().unwrap();
+    DesktopOwner::acquire(&fixture.home).unwrap();
+}
+
+#[test]
+fn admitted_post_deadline_core_commit_returns_the_actual_saved_receipt() {
+    let fixture = Fixture::new();
+    let runtime = NativeRuntime::start(
+        fixture.configuration(),
+        Arc::new(|_| {}),
+        Arc::new(|_| true),
+    )
+    .unwrap();
+    let core = runtime.bridge().core().clone();
+    let command = OwnerCommand::ProjectRegister {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(20),
+        params: ProjectRegisterParams {
+            canonical_root: fixture.root.to_str().unwrap().into(),
+        },
+    };
+    let original = Instant::now() + Duration::from_millis(30);
+    let (began, started) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let admitted = runtime.clone();
+    let original_command = command.clone();
+    let caller = std::thread::spawn(move || {
+        admitted.run_owned(super::runtime::uncertain(), move || {
+            began.send(()).unwrap();
+            released.recv().unwrap();
+            assert!(Instant::now() >= original);
+            core.execute_owner(
+                OwnerContext::from_trusted_entrypoint(OwnerScope::Registry),
+                original_command,
+            )
+        })
+    });
+    started.recv_timeout(Duration::from_secs(1)).unwrap();
+    std::thread::sleep(original.saturating_duration_since(Instant::now()));
+    release.send(()).unwrap();
+    let receipt = caller.join().unwrap().unwrap();
+    assert_eq!(
+        runtime
+            .bridge()
+            .core()
+            .execute_owner(
+                OwnerContext::from_trusted_entrypoint(OwnerScope::Registry),
+                command,
+            )
+            .unwrap(),
+        receipt
+    );
+    runtime.shutdown().unwrap();
+}
+
+fn wait_file(path: &std::path::Path) {
+    let end = Instant::now() + Duration::from_secs(2);
+    while !path.exists() {
+        assert!(
+            Instant::now() < end,
+            "scripted provider did not enter qualification"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn admitted_connect_drains_before_wake_and_quit_wins_without_losing_the_receipt() {
+    let fixture = Fixture::new();
+    let runtime = NativeRuntime::start(
+        fixture.configuration(),
+        Arc::new(|_| {}),
+        Arc::new(|_| true),
+    )
+    .unwrap();
+    let request = fixture.connect_request(&runtime);
+    let began = fixture.root.join("qualification-started");
+    let release = fixture.root.join("qualification-release");
+    // Only the scripted provider is delayed; actual Core/Store and native
+    // bootstrap receive the one original admission Instant.
+    fs::write(
+        &fixture.executable,
+        format!(
+            "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nprintf '2.1.287 (Claude Code)\\n'\n",
+            began.display(), release.display()
+        ),
+    )
+    .unwrap();
+    let admitted = runtime.clone();
+    let original = request.clone();
+    let connect = std::thread::spawn(move || {
+        admitted.connect_before(original, Instant::now() + CONTROL_TIMEOUT)
+    });
+    wait_file(&began);
+    let waking = runtime.clone();
+    let (wake_sent, wake_result) = std::sync::mpsc::channel();
+    let wake = std::thread::spawn(move || wake_sent.send(waking.reconcile_after_wake()).unwrap());
+    assert!(wake_result.recv_timeout(Duration::from_millis(50)).is_err());
+    let quitting = runtime.clone();
+    let (quit_sent, quit_result) = std::sync::mpsc::channel();
+    let quit = std::thread::spawn(move || quit_sent.send(quitting.shutdown()).unwrap());
+    assert!(quit_result.recv_timeout(Duration::from_millis(50)).is_err());
+    assert!(DesktopOwner::acquire(&fixture.home).is_err());
+    fs::write(&release, "release").unwrap();
+    let receipt = connect.join().unwrap().unwrap();
+    assert!(wake_result
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap()
+        .is_err());
+    quit_result
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap()
+        .unwrap();
+    wake.join().unwrap();
+    quit.join().unwrap();
+    assert!(runtime.reconcile_after_wake().is_err());
+    let MutationReceipt::Session(saved) = &receipt else {
+        panic!("connect receipt")
+    };
+    let SavedReceiptData::BindingConnect {
+        binding_id,
+        generation,
+        ..
+    } = &saved.data
+    else {
+        panic!("connect IDs")
+    };
+    let OwnerCommand::BindingConnect { params, .. } = &request.command else {
+        panic!("connect request")
+    };
+    let core = runtime.bridge().core().clone();
+    let route = SessionRef {
+        project_id: params.project_id.clone(),
+        session_id: saved.session_id.clone(),
+    };
+    let persisted = read(&core, &route);
+    assert_eq!(persisted.active_binding_id.as_ref(), Some(binding_id));
+    assert_eq!(&persisted.bindings.0[binding_id].generation, generation);
+    assert_eq!(
+        core.connect_before(
+            OwnerContext::from_trusted_entrypoint(OwnerScope::Registry),
+            request.command,
+            Instant::now() - Duration::from_secs(1),
+            |_, _| panic!("exact replay must not qualify or reactivate a provider"),
+        )
+        .unwrap(),
+        receipt
+    );
+    DesktopOwner::acquire(&fixture.home).unwrap();
+}
+
+#[test]
+fn admitted_real_core_claim_retains_its_physical_lease_until_quit_drains_it() {
+    let fixture = Fixture::new();
+    let runtime = NativeRuntime::start(
+        fixture.configuration(),
+        Arc::new(|_| {}),
+        Arc::new(|_| true),
+    )
+    .unwrap();
+    let request = fixture.connect_request(&runtime);
+    let MutationReceipt::Session(saved) = runtime
+        .connect_before(request.clone(), Instant::now() + CONTROL_TIMEOUT)
+        .unwrap()
+    else {
+        panic!("session")
+    };
+    let SavedReceiptData::BindingConnect {
+        binding_id,
+        generation,
+        ..
+    } = saved.data
+    else {
+        panic!("binding")
+    };
+    let OwnerCommand::BindingConnect { params, .. } = request.command else {
+        panic!("request")
+    };
+    let route = SessionRef {
+        project_id: params.project_id,
+        session_id: saved.session_id,
+    };
+    let scope = BindingScope {
+        binding_id: binding_id.clone(),
+        generation: generation.clone(),
+    };
+    let lease = runtime.lease_for_test(&route, scope);
+    let context = ValidatedDispatchContext::from_trusted_current_lease(
+        lease.session().clone(),
+        binding_id.clone(),
+        generation.clone(),
+    );
+    let core = runtime.bridge().core().clone();
+    let before = read(&core, &route);
+    let (began, started) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let admitted = runtime.clone();
+    let claim = std::thread::spawn(move || {
+        admitted.run_owned(super::runtime::uncertain(), move || {
+            began.send(()).unwrap();
+            released.recv().unwrap();
+            let result = core.claim(
+                context,
+                ClaimRequest {
+                    binding_id,
+                    generation,
+                    request_id: id(30),
+                },
+            );
+            drop(lease);
+            result
+        })
+    });
+    started.recv_timeout(Duration::from_secs(1)).unwrap();
+    let quitting = runtime.clone();
+    let (sent, completion) = std::sync::mpsc::channel();
+    let quit = std::thread::spawn(move || sent.send(quitting.shutdown()).unwrap());
+    assert!(completion.recv_timeout(Duration::from_millis(50)).is_err());
+    assert!(DesktopOwner::acquire(&fixture.home).is_err());
+    release.send(()).unwrap();
+    assert_eq!(
+        claim.join().unwrap().unwrap_err().code,
+        CoreErrorCode::HostUnreachable
+    );
+    completion
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap()
+        .unwrap();
+    quit.join().unwrap();
+    let after = read(runtime.bridge().core(), &route);
+    assert_eq!(before.active_binding_id, after.active_binding_id);
+    assert_eq!(before.bindings, after.bindings);
+    assert_eq!(before.inputs, after.inputs);
     DesktopOwner::acquire(&fixture.home).unwrap();
 }

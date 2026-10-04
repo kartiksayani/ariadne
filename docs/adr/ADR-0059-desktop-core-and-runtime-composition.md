@@ -38,11 +38,17 @@ work/deadline rejection.
 
 The Tauri command offload belongs to Tauri's global pool, so it alone cannot
 prove owning-runtime shutdown. CoreBridge delegates its admitted work to the
-composition runtime's blocking pool and waits on a bounded result channel;
+composition runtime's blocking pool and waits on a capacity-one result channel;
 BindingConnect carries the original admission Instant. Scheduling is atomic with
 shutdown under the existing workers mutex, which ends before work or waiting.
-An owned-call marker prevents recursive rescheduling. Late mutating completion
-returns uncertainty while its real worker remains covered by executor drain.
+An owned-call marker prevents recursive rescheduling. The caller is already off
+the UI thread and waits for the actual authoritative result, including an expired
+exact replay or a commit completed after the provider admission deadline. An outer
+wait deadline must never mask that receipt. Channel capacity is bounded; result
+waiting duration and filesystem persistence are not claimed wall-clock bounded.
+The original Instant still bounds provider admission/IO. A disconnected worker
+returns typed uncertainty for mutations or unavailability for reads, and its real
+worker remains covered by executor drain.
 No extra waiter thread, duplicate Core authority or public signature is needed.
 
 Provider instructions include the existing generated integrations/rules/claude.md
@@ -69,8 +75,14 @@ thread to avoid waiting for itself; ordinary explicit Quit always joins cleanup.
 
 Wake invalidates discovery freshness and replaces only the volatile activation,
 using the same DesktopOwner, ProviderFactory, ControlRoutes, Core and runtime.
-New admissions are fenced while the old activation and all route monitors stop,
-before the replacement is published. This avoids an old same-generation monitor
+New admissions are fenced and the actual admitted bridge/startup-reconciliation
+closures are awaited before the old activation and all route monitors stop and
+before replacement is published. Private control Core calls share that same
+bridge and drain. The workers mutex ends before every IO/wait; the distinct
+lifecycle gate serializes only wake/Quit. Quit marks stopping before waiting for
+that gate, and its flag is checked atomically with final wake publication under
+the short admission lock. It cannot publish a replacement after Quit has won.
+This avoids an old same-generation monitor
 removing a new route. It then qualifies only the current persisted selected
 bindings; Claude requires a genuinely fresh matching bound announcement. Started
 blocking calls retain old leases until actual completion. Busy or missing evidence
