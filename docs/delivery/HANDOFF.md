@@ -15,7 +15,7 @@ verified. Current focus is two product workers, not filling every slot.
 | --- | --- | --- |
 | Maintainer | `.worktrees/resume-integration` / `maintenance/resume-integration` | PR83 fully pushed; awaiting CI and evidence audit |
 | `prove_three_binding_fifo` | `.worktrees/three-binding-fifo` / `task/three-binding-fifo` | PR84 fully pushed, no unpushed commits; continues P3.2 → P4.1 → P4.4 after83 |
-| Maintainer | `.worktrees/delivery-focus` / `maintenance/delivery-focus` | Uncommitted ADR0060, ORCHESTRATOR rules and delivery notes; include in next product PR |
+| Maintainer | `.worktrees/delivery-focus` / `maintenance/delivery-focus` | ADR0060, ORCHESTRATOR rules and this handoff; published checkpoint queued for84, no separate process PR |
 
 Primary worker owns `crates/ariadne-runtime/tests/supervisor_native_fifo.rs` and
 exclusively uses `.worktrees/native-provider-activation/target` for focused checks.
