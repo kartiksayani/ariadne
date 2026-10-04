@@ -16,7 +16,10 @@ export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'an
   const item = session?.items[itemId];
   const [intent, setIntent] = useState<OwnerIntent>(initialIntent), [laterError, setLaterError] = useState(false);
   const actions = item ? ownerActions(item) : [];
-  const activeIntent = actions.includes(intent) ? intent : item && ['done', 'decided', 'dropped', 'replaced'].includes(item.status) ? 'followup' : 'reply';
+  const preferred = session ? drafts.find({ project_id: session.project_id, session_id: session.id }, itemId, intent) : undefined;
+  // Mutable item eligibility controls new input forms. It must not hide an
+  // attempted operation whose frozen request still needs explicit replay.
+  const activeIntent = preferred?.saving || preferred?.uncertain || actions.includes(intent) ? intent : item && ['done', 'decided', 'dropped', 'replaced'].includes(item.status) ? 'followup' : 'reply';
   const entry = session ? drafts.find({ project_id: session.project_id, session_id: session.id }, itemId, activeIntent) : undefined;
   useEffect(() => { void drafts.load(); }, [drafts]);
   useEffect(() => {
@@ -24,7 +27,11 @@ export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'an
   }, [drafts, session, item, itemId, activeIntent, state.ready, entry]);
   if (!session || !item) return <p role="status">The current item is unavailable. Refresh its registered session.</p>;
   if (!state.ready || !entry) return <div role="status">Loading saved drafts…{state.error && <p role="alert">{state.error.message}</p>}</div>;
-  if (entry.receipt?.data.kind === 'input_submit') return <div className="ariadne-reference owner-input"><p role="status">Saved · Queue position #{entry.receipt.data.input_seq}</p>
+  const retained = Object.values(state.entries).filter(value => value.uncertain && !value.receipt && value.draft.intent !== activeIntent
+    && value.draft.session.project_id === session.project_id && value.draft.session.session_id === session.id && value.draft.target.item_id === itemId);
+  const retainedControls = retained.map(value => <button type="button" className="ref-button ref-secondary" key={value.draft.op_id}
+    onClick={() => setIntent(value.draft.intent as OwnerIntent)}>Review saved {labels[value.draft.intent as OwnerIntent].toLowerCase()} input</button>);
+  if (entry.receipt?.data.kind === 'input_submit') return <div className="ariadne-reference owner-input">{retainedControls}<p role="status">Saved · Queue position #{entry.receipt.data.input_seq}</p>
     <button type="button" className="ref-button ref-secondary" disabled={state.preferenceUncertain || entry.saving || current.status !== 'ready'} onClick={() => drafts.another(entry.draft.op_id, session)}>Write another input</button>
     {state.error && <p role="alert">{state.error.message}</p>}
     {state.preferenceUncertain && <button type="button" onClick={() => { void drafts.retryPreferences(); }}>Retry saving draft preferences</button>}</div>;
@@ -46,6 +53,7 @@ export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'an
   };
   const changeLater = async () => { try { setLaterError(!await onLater?.(!later)); } catch { setLaterError(true); } };
   return <div className="ariadne-reference owner-input ref-answer" onKeyDown={key} aria-label={`Owner input for #${item.id}`}>
+    {retainedControls}
     <div className="owner-actions" role="group" aria-label="Owner actions">
       {actions.map(action => <button type="button" key={action} className="ref-button ref-secondary" aria-pressed={activeIntent === action}
         disabled={locked} onClick={() => setIntent(action)}>{labels[action]}</button>)}

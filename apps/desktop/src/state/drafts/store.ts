@@ -60,6 +60,7 @@ export class OwnerDraftStore {
   private saves: Promise<boolean> = Promise.resolve(true);
   private pendingPreference: OwnerMutationRequest | null = null;
   private pendingPreferenceEntries: PreferencesPatchEntry[] = [];
+  private readonly deferredPreferences: PreferencesPatchEntry[][] = [];
   private readonly pendingInputs = new Map<string, OwnerMutationRequest>();
   private readonly flights = new Map<string, Promise<boolean>>();
   private loadFlight: Promise<void> | null = null;
@@ -131,11 +132,28 @@ export class OwnerDraftStore {
     this.entry(nextId, { draft: immutable(draft) }); void this.save([{ kind: 'upsert_draft', draft }]);
   }
   private save(entries: PreferencesPatchEntry[]): Promise<boolean> {
-    const next = this.saves.then(() => this.writePreferences(entries));
+    const next = this.saves.then(() => {
+      // Later logical edits remain ordered separately from the exact in-flight
+      // request. They cannot be discarded or overwrite its operation body.
+      this.deferredPreferences.push(structuredClone(entries)); return this.flushPreferences();
+    });
     this.saves = next; return next;
   }
-  private async writePreferences(entries: PreferencesPatchEntry[]): Promise<boolean> {
+  private async flushPreferences(): Promise<boolean> {
     if (this.pendingPreference) return false;
+    let saved = true;
+    while (this.deferredPreferences.length) {
+      const entries = this.deferredPreferences.shift()!;
+      if (!await this.writePreferences(entries)) {
+        // An uncertain write is now held by pendingPreference. Definite
+        // rejections retain local content/error while later edits can correct it.
+        if (this.pendingPreference) return false;
+        saved = false;
+      }
+    }
+    return saved;
+  }
+  private async writePreferences(entries: PreferencesPatchEntry[]): Promise<boolean> {
     try {
       const preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
       this.pendingPreference = { session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(), params: { expected_preferences_revision: preferences.revision, entries: structuredClone(entries) } } };
@@ -161,7 +179,14 @@ export class OwnerDraftStore {
     }
   }
   retryPreferences(): Promise<boolean> {
-    const next = this.saves.then(() => this.commitPreferences()); this.saves = next; return next;
+    const next = this.saves.then(async () => {
+      const reconciled = await this.commitPreferences();
+      if (!reconciled && this.pendingPreference) return false;
+      // Resolve the old operation first, then use fresh IDs/revisions for the
+      // queued logical edits. Reconciliation never invokes input_submit.
+      return await this.flushPreferences() && reconciled;
+    });
+    this.saves = next; return next;
   }
   private inputRequest(draft: Immutable<OwnerDraft>): OwnerMutationRequest {
     return immutable({ session: draft.session, command: { api_version: 1, command: 'input_submit', op_id: draft.op_id, params: {
