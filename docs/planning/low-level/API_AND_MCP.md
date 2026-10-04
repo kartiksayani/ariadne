@@ -362,7 +362,13 @@ contains schema/revision, global theme (system/light/dark), required
 `selected_navigation:NavigationSelection`, optional window geometry/monitor,
 pin and notification watermark; per-session required `tab_open`, selection, tab
 order, expansion, filters, rail and scroll; qualified Later routes; and unsent
-`OwnerDraft` records. Drafts retain a stable operation ID, registered session,
+`OwnerDraft` records. The optional submission_attempted marker defaults to false
+and false is omitted from serialization to preserve legacy preference-command
+replay digests. True is saved with the exact request-bearing draft before submit;
+native preference patches reject any later body/marker changes under that op_id.
+Restart exposes explicit same-operation reconciliation and never auto-submits.
+See [ADR-0057](../../adr/ADR-0057-contract-first-owner-inputs-and-restored-operation-identity.md).
+Drafts retain a stable operation ID, registered session,
 binding, canonical target, intent, exact text/option and target/question revisions.
 They are never submitted inputs or agent query data. A revision-checked
 `PreferencesPatch` uses typed entries to set global/session view, set/clear Later,

@@ -83,6 +83,16 @@ impl<'a> PreferencesService<'a> {
                     return Err(Failure::Core(error));
                 }
                 for entry in &params.entries {
+                    if let PreferencesPatchEntry::UpsertDraft { draft } = entry {
+                        if record.snapshot.drafts.iter().any(|saved| {
+                            saved.op_id == draft.op_id && saved.submission_attempted && saved != draft
+                        }) {
+                            return Err(Failure::Core(errors::local(
+                                CoreErrorCode::OperationReused,
+                                "An attempted draft must retain its exact operation and payload until reconciled",
+                            )));
+                        }
+                    }
                     apply(&mut record.snapshot, entry);
                 }
                 record.snapshot.revision = PositiveSafeInteger::new(

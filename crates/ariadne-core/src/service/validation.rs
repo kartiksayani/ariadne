@@ -341,7 +341,23 @@ impl OwnerCommand {
                             }
                         }
                         PreferencesPatchEntry::UpsertDraft { draft } => {
-                            text(&draft.text, 16 * 1024, false)?
+                            text(&draft.text, 16 * 1024, false)?;
+                            if draft.submission_attempted {
+                                OwnerCommand::InputSubmit {
+                                    api_version: SchemaVersion::new(1).expect("schema version"),
+                                    op_id: draft.op_id.clone(),
+                                    params: InputSubmitParams {
+                                        binding_id: draft.binding_id.clone(),
+                                        target: draft.target.clone(),
+                                        kind: draft.intent.clone(),
+                                        text: draft.text.clone(),
+                                        selected_option_id: draft.selected_option_id.clone(),
+                                        expected_question_revision: draft.question_revision,
+                                        supersedes_answer_id: draft.supersedes_answer_id.clone(),
+                                    },
+                                }
+                                .validate_wire()?;
+                            }
                         }
                         PreferencesPatchEntry::SetLater { .. }
                         | PreferencesPatchEntry::DeleteDraft { .. } => {}
