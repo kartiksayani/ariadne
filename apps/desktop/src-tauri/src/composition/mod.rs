@@ -3,6 +3,7 @@
 mod bridge;
 mod configuration;
 mod entrypoint;
+mod expiry;
 mod presence;
 mod runtime;
 pub(crate) use entrypoint::establish;

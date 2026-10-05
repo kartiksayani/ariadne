@@ -3,8 +3,10 @@
 This ledger distinguishes transport evidence from product behavior. The
 existing-session transports have passed bounded live proofs: Claude Mods on
 Claude Code **2.1.287** and the native queue/history adapter on Codex **0.160.0**.
-Neither proof implements Ariadne's store, CLI/MCP, result join, UI, recovery, or
-release packaging. No application implementation has started.
+Neither transport proof establishes Ariadne's store, CLI/MCP, result join, UI,
+recovery, or release packaging acceptance. Production implementation and qualified
+merge evidence are recorded in the [task catalogue](../../delivery/tasks.json);
+current delivery state is in the [handoff](../../delivery/HANDOFF.md).
 
 Organization security guidance was not checked under the owner's explicit
 waiver. This ledger records project evidence only.
@@ -42,7 +44,9 @@ change is explicitly recorded in `DECISIONS.md` and retested.
 
 ## Required acceptance matrix
 
-Rows below remain `specified` until implementation evidence is linked here.
+Rows below define the required acceptance; source implementation alone does not
+prove them. Consult the task catalogue's completion evidence and exact qualifying
+CI/native/live records before marking a row proved.
 Rows marked **deferred** are explicitly outside this personal release and do
 not block acceptance. Row owners and implementation stages are in the
 [roadmap](../ROADMAP.md).

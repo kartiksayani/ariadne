@@ -24,15 +24,54 @@ impl DeliveryService<'_> {
         operation_id: &UuidV4,
         now: UtcMillis,
     ) -> Result<Option<SavedReceipt>, DeliveryError> {
+        self.expire(context, input_id, attempt_id, operation_id, now, false)
+    }
+
+    /// Internal persisted-clock policy, including a retained completed attempt
+    /// from an older generation. This grants no authority to report host facts.
+    pub fn expire_missing_result_native(
+        &self,
+        context: &AdapterContext,
+        input_id: &UuidV4,
+        attempt_id: &UuidV4,
+        operation_id: &UuidV4,
+        now: UtcMillis,
+    ) -> Result<Option<SavedReceipt>, DeliveryError> {
+        self.expire(context, input_id, attempt_id, operation_id, now, true)
+    }
+
+    fn expire(
+        &self,
+        context: &AdapterContext,
+        input_id: &UuidV4,
+        attempt_id: &UuidV4,
+        operation_id: &UuidV4,
+        now: UtcMillis,
+        native_clock: bool,
+    ) -> Result<Option<SavedReceipt>, DeliveryError> {
         let store = self.store(context.session())?;
         let normalized = crate::receipts::normalized(
-            "expire_missing_result",
+            if native_clock {
+                "expire_missing_result_native"
+            } else {
+                "expire_missing_result"
+            },
             &serde_json::json!({"binding_id":context.binding_id(),"generation":context.current_generation(),"input_id":input_id,"attempt_id":attempt_id}),
         )?;
         let saved=store.transact(context.session().session_id(),&ReceiptActorScope::Adapter {binding_id:context.binding_id().clone()},operation_id,&normalized,|session| {
             let input=session.inputs.0.get(input_id).ok_or_else(||core(CoreErrorCode::InvalidRef,"Expiry input is missing"))?;
             let attempt=input.attempts.iter().find(|a| &a.id==attempt_id).ok_or_else(||core(CoreErrorCode::InvalidRef,"Expiry attempt is missing"))?;
-            super::report::authorize(session,context,&attempt.binding_generation,Some(input_id),Some(attempt_id))?;
+            if native_clock {
+                // Validate selection/current generation without claiming any
+                // historical adapter evidence. The saved turn is the only
+                // completion authority for this internal clock transition.
+                super::report::authorize(session,context,context.current_generation(),None,None)?;
+                if &input.binding_id != context.binding_id() {
+                    return Err(ExpiryFailure::Core(core(CoreErrorCode::BindingMismatch,"Expiry input belongs to another binding")));
+                }
+            } else {
+                super::report::authorize(session,context,&attempt.binding_generation,Some(input_id),Some(attempt_id))?;
+            }
             if attempt.sealed_at.is_some() || matches!(input.state,InputState::Handled|InputState::Cancelled|InputState::Skipped) || attempt.turn_state!=TurnState::Completed || attempt.result_state!=ResultState::Pending || attempt.domain_result.is_some() || matches!(attempt.acceptance,AcceptanceState::Rejected|AcceptanceState::Uncertain) || attempt.error.as_ref().is_some_and(|e|e.code!="result_missing") {return Err(ExpiryFailure::Unchanged);}
             let Some(completed)=&attempt.turn_observed_at else {return Err(ExpiryFailure::Unchanged);};
             let elapsed=DateTime::parse_from_rfc3339(now.as_str()).expect("canonical time").signed_duration_since(DateTime::parse_from_rfc3339(completed.as_str()).expect("canonical time"));

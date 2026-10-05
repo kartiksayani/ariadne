@@ -107,6 +107,21 @@ impl NativeCoreService {
             .expire_missing_result(context, input_id, attempt_id, operation_id, (self.now)())
             .map_err(errors::delivery)
     }
+
+    /// Native clock transition based only on already-authorized saved completion.
+    /// The ordinary context captures current registered binding selection and
+    /// generation; no historical host/report authority is asserted or granted.
+    pub fn expire_missing_result_native(
+        &self,
+        context: &AdapterContext,
+        input_id: &UuidV4,
+        attempt_id: &UuidV4,
+        operation_id: &UuidV4,
+    ) -> Result<Option<SavedReceipt>, CoreError> {
+        DeliveryService::new(&self.registry)
+            .expire_missing_result_native(context, input_id, attempt_id, operation_id, (self.now)())
+            .map_err(errors::delivery)
+    }
 }
 
 impl CoreService for NativeCoreService {
