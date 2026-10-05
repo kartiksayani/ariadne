@@ -62,9 +62,9 @@ async function sample() {
       }), edges: [...section.querySelectorAll('[data-edge]')].map(element => ({ id: element.dataset.edge, path: element.querySelector('path').getAttribute('d') })) };
   });
 }
-async function click(selector) { const button = await browser.$(selector); await button.waitForEnabled(); await button.click(); }
+async function click(selector, parent = browser) { const button = await parent.$(selector); await button.waitForEnabled(); await button.click(); }
 async function fit() {
-  await click('.topic-graph-controls button=Fit');
+  await click('button=Fit', browser.$('.topic-graph-controls'));
   await wait(async () => {
     const current = await sample();
     return Math.abs(current.scale - 0.25) < 0.01 && Math.abs(current.y - (current.height - corpusBounds.height * 0.25) / 2) < 0.01;
@@ -102,7 +102,7 @@ export async function runGraphAcceptance(configuration) {
   assert.equal(canonical.messages.length, prior.performance.messages + 1, 'The subsequent real CLI item edit adds one activity message');
   assert.equal(Object.keys(canonical.inputs).length, 0); assert.equal(beforeView.selected_item_id, '10.50');
   const samples = [], started = Date.now();
-  await click('.ref-view-tabs button=Graph'); await (await graph()).waitForDisplayed();
+  await click('button=Graph', browser.$('.ref-view-tabs')); await (await graph()).waitForDisplayed();
   await wait(async () => (await sample()).nodes.some(value => value.id === '10.50'), 'The real registered topic did not open in native Graph');
   const driverOpenToReadyMs = Date.now() - started;
   const initialFit = await fit(); assertCulled(initialFit, canonical, '10.50'); samples.push({ action: 'full-fit', ...initialFit });
@@ -115,11 +115,11 @@ export async function runGraphAcceptance(configuration) {
 
   // Existing detail -> parent -> child routes reach an initially off-screen node
   // through the real renderer/Core boundary; no node is added to the DOM by tests.
-  await detail(canonical, '10.50'); await click('[aria-label="Item location"] button=Parent · Item 10'); await detail(canonical, '10');
-  await wait(async () => (await view(tree)).selected_item_id === '10' && await browser.$('.ref-view-tabs button=Graph').isEnabled(),
+  await detail(canonical, '10.50'); await click('button=Parent · Item 10', browser.$('[aria-label="Item location"]')); await detail(canonical, '10');
+  await wait(async () => (await view(tree)).selected_item_id === '10' && await browser.$('.ref-view-tabs').$('button=Graph').isEnabled(),
     'The parent reveal must finish saving before the separate child reveal');
   assert.ok(!(await sample()).nodes.some(value => value.id === '10.80'), 'The reveal target must actually begin culled');
-  await click('[aria-label="Child items"] button*=Item 10.80 ·');
+  await click('button*=Item 10.80 ·', browser.$('[aria-label="Child items"]'));
   const offscreenReveal = await revealed(canonical, '10.80'); samples.push({ action: 'registered-offscreen-reveal', ...offscreenReveal });
   await wait(async () => (await view(tree)).selected_item_id === '10.80', 'Registered reveal selection was not persisted');
   while ((await sample()).scale < 2) await zoom('in');
@@ -139,7 +139,7 @@ export async function runGraphAcceptance(configuration) {
   await wait(async () => (await sample()).footer.includes('1 matching · 2000 in this topic'), 'Graph search must preserve canonical scope counts');
   const filtered = await sample(); assert.deepEqual(filtered.nodes.map(value => value.id), ['10', '10.80']);
   await detail(canonical, '10.80');
-  await click('.topic-graph-controls button=Switch to tree');
+  await click('button=Switch to tree', browser.$('.topic-graph-controls'));
   await wait(async () => JSON.stringify(await browser.execute(() => [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].map(element => element.dataset.itemId))) === JSON.stringify(['10', '10.80']), 'Native tree fallback must preserve Graph filters and ordinary ancestry');
   await detail(canonical, '10.80');
   const filteredView = await view(tree); assert.equal(filteredView.filters.search, 'Native token_10_80_end'); assert.equal(filteredView.selected_item_id, '10.80');
