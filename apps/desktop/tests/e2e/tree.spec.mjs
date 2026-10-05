@@ -359,7 +359,7 @@ async function treeAcceptance(configuration) {
     await browser.keys(key); assert.equal(await focusedId(), id); await roving();
   }
   assert.equal((await preferences(tree)).view.selected_item_id, beforeKeys.selected_item_id, 'Focus movement alone must not select or mutate preferences');
-  await browser.keys('Enter'); await wait(async () => (await preferences(tree)).view.selected_item_id === '1', 'Keyboard Enter did not select through the registered reveal route');
+  await (await search()).waitForEnabled(); await browser.keys('Enter'); await wait(async () => (await preferences(tree)).view.selected_item_id === '1', 'Keyboard Enter did not select through the registered reveal route');
   await (await search()).waitForEnabled(); await (await row('1.1')).click();
   await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'The explicit selection must finish before the separate Later key');
   await (await search()).waitForEnabled(); await browser.keys('z');
@@ -393,7 +393,7 @@ async function treeAcceptance(configuration) {
     'The real upstream edit must materially grow its native row before it can prove scroll anchoring');
   const afterEdit = await anchor(); assert.equal(afterEdit.id, beforeEdit.id); assert.ok(Math.abs(afterEdit.offset - beforeEdit.offset) <= 2, 'Live wrapped-row growth must preserve the actual visible scroll anchor');
   assert.equal(await focusedId(), '10.50', 'Live update must not steal native keyboard focus');
-  await (await search()).click();
+  await (await search()).waitForEnabled(); await (await search()).click();
   await wait(async () => (await preferences(tree)).view.scroll?.item_id === afterEdit.id, 'Native blur did not persist the scroll anchor');
   await (await search()).waitForEnabled();
   const saved = await preferences(tree), finalSession = await snapshot(tree);
