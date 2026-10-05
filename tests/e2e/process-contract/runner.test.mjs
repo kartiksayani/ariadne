@@ -197,20 +197,95 @@ test('embedded launcher retains backend stderr when the app exits before readine
     await portFree(port);
   } finally { await rm(root, { recursive: true }); }
 });
-test('SIGINT and deadline clean owned descendants while preserving the test parent', async () => {
+test('SIGINT and deadline clean owned descendants after delayed witness readiness', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-signal-'));
   const runner = new URL('../../../scripts/run-native-e2e.mjs', import.meta.url).href;
   try {
-    for (const interrupt of [false, true]) {
-      const pidFile = join(root, String(interrupt));
-      const source = `const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); require('node:fs').writeFileSync(process.argv[1],String(child.pid)); setInterval(()=>{},1000)`;
-      const fixture = `import {command} from ${JSON.stringify(runner)}; ${interrupt ? 'setTimeout(()=>process.kill(process.pid,"SIGINT"),200);' : ''} try { await command(process.execPath,['-e',${JSON.stringify(source)},${JSON.stringify(pidFile)}],{timeout:300}); } catch(error) { console.log(error.message); }`;
+    for (const mode of ['deadline', 'SIGINT', 'early-failure']) {
+      const interrupt = mode === 'SIGINT', earlyFailure = mode === 'early-failure';
+      const pidFile = join(root, mode);
+      // Force witness startup beyond both original timers. This is a regression
+      // input, not a readiness wait: the parent must observe the actual witness.
+      // The failure fixture cannot publish a witness even if its parent is
+      // delayed. It stays alive until the owned-group cleanup interrupts it.
+      const witness = earlyFailure ? '' : `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,500); require('node:fs').writeFileSync(process.argv[1],String(child.pid)); console.log('ready:'+child.pid);`;
+      const source = `const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log('spawned:'+child.pid); ${witness} setInterval(()=>{},1000)`;
+      const fixture = `
+        import assert from 'node:assert/strict';
+        import {readFile} from 'node:fs/promises';
+        import {command,stop,alive} from ${JSON.stringify(runner)};
+        const realSetTimeout=globalThis.setTimeout;
+        let registration, registrations=0, armed=0, witness=false, child, descendant;
+        let deadlineTimer, signalTimer, readinessTimer, execution;
+        const fired=[];
+        // This subprocess alone holds command's one deadline registration.
+        // After onStart all timers, including stop's cleanup timers, are real.
+        globalThis.setTimeout=(callback,ms,...args)=>{
+          assert.equal(ms,300); assert.equal(++registrations,1);
+          registration=()=>callback(...args); return {};
+        };
+        try {
+          const ready=new Promise((resolve,reject)=>{
+            readinessTimer=realSetTimeout(()=>reject(new Error('Descendant witness readiness deadline')),5000);
+            execution=command(process.execPath,['-e',${JSON.stringify(source)},${JSON.stringify(pidFile)}],{
+              timeout:300,
+              onStart:owned=>{
+                child=owned; globalThis.setTimeout=realSetTimeout;
+                let output='';
+                child.stdout.on('data',bytes=>{
+                  output+=bytes;
+                  descendant=Number(output.match(/spawned:(\\d+)/)?.[1]);
+                  ${earlyFailure ? "if(descendant) reject(new Error('Injected pre-witness failure'));" : ''}
+                  if(output.includes('ready:'+descendant)) resolve();
+                });
+              }
+            }).then(value=>({value}),error=>({error}));
+            execution.then(outcome=>reject(outcome.error||new Error('Command exited before readiness')));
+          });
+          await ready; clearTimeout(readinessTimer);
+          assert.equal(Number(await readFile(${JSON.stringify(pidFile)},'utf8')),descendant);
+          assert.ok(Number.isInteger(descendant) && descendant>1);
+          assert.ok(alive(descendant)); witness=true;
+          assert.equal(registrations,1); assert.equal(armed,0);
+          assert.equal(globalThis.setTimeout,realSetTimeout);
+          deadlineTimer=realSetTimeout(()=>{fired.push('deadline');registration();},300); armed++;
+          ${interrupt ? "signalTimer=realSetTimeout(()=>{clearTimeout(deadlineTimer);fired.push('SIGINT');process.kill(process.pid,'SIGINT');},200);" : ''}
+          const outcome=await execution;
+          assert.match(outcome.error?.message||'',/deadline\\/interruption/);
+          assert.deepEqual(fired,${interrupt ? "['SIGINT']" : "['deadline']"});
+          console.log(JSON.stringify({witness,registrations,armed,fired,descendant}));
+        } catch(error) {
+          if(!${earlyFailure}) throw error;
+          assert.equal(error.message,'Injected pre-witness failure');
+          assert.equal(armed,0); assert.equal(witness,false);
+          console.log(JSON.stringify({witness,registrations,armed,fired,descendant}));
+        } finally {
+          globalThis.setTimeout=realSetTimeout;
+          clearTimeout(readinessTimer);clearTimeout(deadlineTimer);clearTimeout(signalTimer);
+          if(child) await stop(child);
+          await execution;
+          if(descendant) assert.equal(alive(descendant),false,'Early failure must also clean the owned descendant');
+        }
+      `;
       const result = await command(process.execPath, ['--input-type=module', '-e', fixture]);
-      assert.match(result.stdout, /deadline\/interruption/);
-      await assertExited(Number(await readFile(pidFile, 'utf8')));
+      const proof = JSON.parse(result.stdout.trim());
+      assert.equal(proof.witness, !earlyFailure); assert.equal(proof.registrations, 1); assert.equal(proof.armed, earlyFailure ? 0 : 1);
+      assert.deepEqual(proof.fired, earlyFailure ? [] : [interrupt ? 'SIGINT' : 'deadline']);
+      if (earlyFailure) await assert.rejects(readFile(pidFile, 'utf8'), { code: 'ENOENT' });
+      else assert.equal(proof.descendant, Number(await readFile(pidFile, 'utf8')));
+      await assertExited(proof.descendant);
     }
     assert.ok(alive(process.pid));
-  } finally { await rm(root, { recursive: true }); }
+  } finally {
+    // Verify cleanup even when an assertion above fails after a witness exists.
+    for (const name of ['deadline', 'SIGINT', 'early-failure']) {
+      const pid = await readFile(join(root, name), 'utf8').catch(error => {
+        assert.equal(error.code, 'ENOENT'); return undefined;
+      });
+      if (pid !== undefined) await assertExited(Number(pid));
+    }
+    await rm(root, { recursive: true });
+  }
 });
 test('runner observes startup ancestry before any UI bridge assertion', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-observe-'));
