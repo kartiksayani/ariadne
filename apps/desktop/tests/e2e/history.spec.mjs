@@ -212,6 +212,23 @@ async function railState() {
       focused: document.activeElement === editor, draft: editor?.value };
   });
 }
+export async function unpinHistoryMessage(card, message) {
+  await card.scrollIntoView(); await card.$(`button[aria-label="Unpin message ${message.number}"]`).click();
+  await wait(async () => !(await card.getAttribute('class')).includes('history-pinned')
+    && await card.$(`button[aria-label="Pin message ${message.number}"]`).getAttribute('aria-pressed') === 'false',
+  'Native unpin did not remove the actual message pin');
+  // Unpin leaves the pointer on the card, whose hover highlight must remain.
+  // A genuine WebDriver pointer move clears that separate transient source.
+  const outside = await browser.$('.message-history-rail > .history-header > strong');
+  await outside.waitForDisplayed(); await outside.moveTo();
+  await wait(async () => browser.execute(id => {
+    const card = document.querySelector(`.rail-messages [data-message-id="${id}"]`);
+    const mark = document.querySelector('[role="treeitem"][data-item-id="1"] .ref-tree-mark');
+    const message = document.querySelector(`.history-timeline [data-message-id="${id}"]`);
+    return card && !card.matches(':hover') && !card.classList.contains('history-pinned')
+      && mark?.style.background === 'transparent' && message && !message.classList.contains('history-highlight');
+  }, message.id), 'Native unpin and pointer leave did not clear transient tree and detail references');
+}
 async function rail(history, saved, paged) {
   const toggle = await browser.$('button=Messages (m)');
   if (!(await browser.$('.rail-messages').isExisting())) { await toggle.waitForEnabled(); await toggle.scrollIntoView(); await toggle.click(); }
@@ -248,12 +265,7 @@ async function rail(history, saved, paged) {
   };
   await wait(async () => (await preferences()).sessions.find(view => view.session.session_id === history.sessionId)?.selected_item_id === '1', 'Registered parent selection did not finish its deliberate preference write');
   const beforeUnpin = await preferences();
-  await card.scrollIntoView(); await card.$(`button[aria-label="Unpin message ${parentMessage.number}"]`).click();
-  await wait(async () => browser.execute(id => {
-    const mark = document.querySelector('[role="treeitem"][data-item-id="1"] .ref-tree-mark');
-    const message = document.querySelector(`.history-timeline [data-message-id="${id}"]`);
-    return mark.style.background === 'transparent' && !message?.classList.contains('history-highlight');
-  }, parentMessage.id), 'Native unpin did not clear transient tree and detail references');
+  await unpinHistoryMessage(card, parentMessage);
   assert.deepEqual(await preferences(), beforeUnpin, 'Unpin must not write saved navigation or selection');
   // WebDriver scrollIntoView performs an actual nested WebView scroll. This is
   // programmatic DOM scrolling, not an injected physical wheel gesture.
