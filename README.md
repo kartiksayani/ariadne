@@ -283,6 +283,12 @@ Source inputs: [build prompt](BUILD_PROMPT.md), [design brief](DESIGN_PROMPT.md)
 [UI mockups](<designs/Ariadne UI mockups.zip>). Historical planning and POCs are in
 the [immutable archive](https://github.com/kartiksayani/ariadne/tree/a5e306f).
 
+## License
+
+Copyright © Kartik Sayani. All rights reserved. Ariadne is not open source: no
+license is granted to copy, modify or redistribute it. Bundled third-party
+components keep their own licenses.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks and review rules.
