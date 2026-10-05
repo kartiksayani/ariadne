@@ -1,4 +1,28 @@
 use super::*;
+use std::collections::BTreeMap;
+
+pub(super) struct ItemValidationIndex<'a> {
+    max_child_ordinal: BTreeMap<&'a ItemRef, PositiveSafeInteger>,
+    message_ids: BTreeSet<&'a UuidV4>,
+}
+
+impl<'a> ItemValidationIndex<'a> {
+    pub(super) fn new(session: &'a Session) -> Self {
+        let mut max_child_ordinal = BTreeMap::new();
+        // Index every stored value, including malformed identities. Validation
+        // still reports errors in its existing order, using actual parent links.
+        for child in session.items.0.values() {
+            if let Some(parent) = &child.parent {
+                let maximum = max_child_ordinal.entry(parent).or_insert(child.ordinal);
+                *maximum = (*maximum).max(child.ordinal);
+            }
+        }
+        Self {
+            max_child_ordinal,
+            message_ids: session.messages.iter().map(|message| &message.id).collect(),
+        }
+    }
+}
 
 /// Validate a stored or assembled candidate item against its session.
 /// All referenced messages/rounds/bindings must already be present. Item identity,
@@ -11,6 +35,20 @@ pub(crate) fn validate_candidate(
     session: &Session,
     item: &Item,
     assembled_round: bool,
+) -> Result<(), ValidationError> {
+    validate_candidate_indexed(
+        session,
+        item,
+        assembled_round,
+        &ItemValidationIndex::new(session),
+    )
+}
+
+pub(super) fn validate_candidate_indexed(
+    session: &Session,
+    item: &Item,
+    assembled_round: bool,
+    validation_index: &ItemValidationIndex<'_>,
 ) -> Result<(), ValidationError> {
     let path = format!("items.{}", item.id.as_str());
     require(
@@ -54,12 +92,11 @@ pub(crate) fn validate_candidate(
     )?;
     ahead(
         item.next_child,
-        session
-            .items
-            .0
-            .values()
-            .filter(|child| child.parent.as_ref() == Some(&item.id))
-            .map(|child| child.ordinal),
+        validation_index
+            .max_child_ordinal
+            .get(&item.id)
+            .copied()
+            .into_iter(),
         &format!("{path}.next_child"),
     )?;
 
@@ -153,10 +190,9 @@ pub(crate) fn validate_candidate(
         )?;
     }
     require(
-        session
-            .messages
-            .iter()
-            .any(|message| message.id == item.created_message_id),
+        validation_index
+            .message_ids
+            .contains(&item.created_message_id),
         format!("{path}.created_message_id"),
         ValidationErrorKind::MissingReference,
     )?;
@@ -166,7 +202,7 @@ pub(crate) fn validate_candidate(
     )?;
     for id in &item.updated_message_ids {
         require(
-            session.messages.iter().any(|message| &message.id == id),
+            validation_index.message_ids.contains(id),
             format!("{path}.updated_message_ids"),
             ValidationErrorKind::MissingReference,
         )?;
@@ -211,10 +247,9 @@ pub(crate) fn validate_candidate(
         )?;
         optional_text(&history.reason, &format!("{path}.reason"), true, None)?;
         require(
-            session
-                .messages
-                .iter()
-                .any(|message| message.id == history.cause_message_id),
+            validation_index
+                .message_ids
+                .contains(&history.cause_message_id),
             format!("{path}.cause_message_id"),
             ValidationErrorKind::MissingReference,
         )?;

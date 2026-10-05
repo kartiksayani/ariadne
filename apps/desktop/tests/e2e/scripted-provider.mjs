@@ -96,12 +96,14 @@ export function journeySeedRequest(bindingId) {
 export async function startScriptedProvider(root, cli, evidence) {
   const provider = join(root, 'provider'), project = join(root, 'project');
   const discoveryProject = join(root, 'discovery-project'), discoveryThread = 'ariadne-scripted-discovery-thread';
-  await mkdir(provider, { recursive: true }); await mkdir(project); await mkdir(discoveryProject);
+  const treeProject = join(root, 'tree-project'), treeThread = 'ariadne-scripted-tree-thread';
+  await mkdir(provider, { recursive: true }); await mkdir(project); await mkdir(discoveryProject); await mkdir(treeProject);
   const socket = join(provider, 'daemon.sock'), executable = join(provider, 'codex');
   const queuedPath = join(provider, 'admissions.jsonl'), completePath = join(provider, 'complete.json');
   const bindingPath = join(provider, 'binding.json'), calls = [];
   const configuration = { cli, project, provider, socket, executable, queuedPath, completePath, bindingPath, thread,
     discovery: { projectRoot: discoveryProject, externalSessionId: discoveryThread, socketPath: socket },
+    tree: { projectRoot: treeProject, externalSessionId: treeThread, socketPath: socket },
     appArgs: ['--codex-executable', executable, '--codex-home', provider, '--codex-endpoint', socket] };
   const executableSource = `#!${process.execPath}\nimport{appendFileSync}from'node:fs';\nimport{recordAdmission}from ${JSON.stringify(import.meta.url)};\nconst args=process.argv.slice(2);\nif(args.length===1&&args[0]==='--version'){appendFileSync(${JSON.stringify(join(provider, 'versions.jsonl'))},'version\\n');console.log('codex-cli 0.160.0');}\nelse{try{await recordAdmission(${JSON.stringify(configuration)},args);}catch{process.exitCode=3;}}\n`;
   // The fixture executable is a module even without a .mjs extension.
@@ -137,18 +139,18 @@ export async function startScriptedProvider(root, cli, evidence) {
         case 'initialize': result = await load('initialize-response.json'); result.codexHome = provider; break;
         case 'thread/read': {
           const requested = request.params.threadId;
-          assert.ok([thread, discoveryThread, 'another-explicit-thread'].includes(requested), 'Only explicit candidates and the deliberate identity-mismatch probe are readable');
+          assert.ok([thread, discoveryThread, treeThread, 'another-explicit-thread'].includes(requested), 'Only explicit candidates and the deliberate identity-mismatch probe are readable');
           // A reachable host reports its actual existing session for the known
           // negative probe. Real qualification must reject that different ID;
           // closing the transport would test HostUnreachable instead.
           const actual = requested === 'another-explicit-thread' ? thread : requested;
           result = await load('read-response.json'); result.thread.id = actual; result.thread.sessionId = actual;
-          result.thread.cwd = actual === thread ? project : discoveryProject; break;
+          result.thread.cwd = actual === thread ? project : actual === discoveryThread ? discoveryProject : treeProject; break;
         }
-        case 'thread/loaded/list': result = { data: [thread, discoveryThread], nextCursor: null }; break;
+        case 'thread/loaded/list': result = { data: [thread, discoveryThread, treeThread], nextCursor: null }; break;
         case 'thread/queue/list': result = { data: [], nextCursor: null }; break;
         case 'thread/turns/list':
-          assert.ok([thread, discoveryThread].includes(request.params.threadId));
+          assert.ok([thread, discoveryThread, treeThread].includes(request.params.threadId));
           result = request.params.threadId === thread ? await turns() : { data: [], nextCursor: null }; break;
         default: throw new Error(`Unexpected provider operation ${request.method}`);
       }
