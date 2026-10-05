@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
+import { command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import WebSocket from 'ws';
@@ -291,6 +291,22 @@ test('production environment removes test switches without mutating owner enviro
     const env = buildEnv('/private/tmp/target'); assert.equal(env.ARIADNE_E2E_NONCE, undefined); assert.equal(env.TAURI_WEBDRIVER_PORT, undefined); assert.equal(env.VITE_ARIADNE_E2E, undefined); assert.equal(env.TAURI_CONFIG, undefined);
     assert.equal(env.MACOSX_DEPLOYMENT_TARGET, '13.0'); assert.equal(buildEnv('/private/tmp/target', true).VITE_ARIADNE_E2E, '1'); assert.equal(process.env.ARIADNE_E2E_NONCE, 'fixture');
   } finally { delete process.env.ARIADNE_E2E_NONCE; delete process.env.TAURI_WEBDRIVER_PORT; delete process.env.VITE_ARIADNE_E2E; delete process.env.TAURI_CONFIG; }
+});
+test('native App and CLI build commands receive shipped optimization with dev assertions and isolated features', async () => {
+  const keys = ['CARGO_PROFILE_DEV_OPT_LEVEL', 'CARGO_PROFILE_DEV_DEBUG_ASSERTIONS', 'VITE_ARIADNE_E2E', 'ARIADNE_E2E_NONCE'];
+  const previous = new Map(keys.map(key => [key, process.env[key]]));
+  Object.assign(process.env, { CARGO_PROFILE_DEV_OPT_LEVEL: '0', CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: 'false', VITE_ARIADNE_E2E: 'unexpected', ARIADNE_E2E_NONCE: 'parent-only' });
+  try {
+    for (const e2e of [true, false]) {
+      const env = nativeBuildEnv('/private/tmp/native-profile-target', e2e);
+      const source = `console.log(JSON.stringify({target:process.env.CARGO_TARGET_DIR,opt:process.env.CARGO_PROFILE_DEV_OPT_LEVEL,assertions:process.env.CARGO_PROFILE_DEV_DEBUG_ASSERTIONS,e2e:process.env.VITE_ARIADNE_E2E,nonce:process.env.ARIADNE_E2E_NONCE}))`;
+      const observed = JSON.parse((await command(process.execPath, ['-e', source], { env })).stdout);
+      assert.deepEqual(observed, { target: '/private/tmp/native-profile-target', opt: '1', assertions: 'true', ...(e2e ? { e2e: '1' } : {}) });
+    }
+    assert.equal(buildEnv('/private/tmp/ordinary-target').CARGO_PROFILE_DEV_OPT_LEVEL, '0');
+    assert.equal(buildEnv('/private/tmp/ordinary-target').CARGO_PROFILE_DEV_DEBUG_ASSERTIONS, 'false');
+    for (const [key, value] of Object.entries({ CARGO_PROFILE_DEV_OPT_LEVEL: '0', CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: 'false', VITE_ARIADNE_E2E: 'unexpected', ARIADNE_E2E_NONCE: 'parent-only' })) assert.equal(process.env[key], value);
+  } finally { for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
 test('compiler config and artifact evidence rejects unexpected inherited inputs and feature mismatch', () => {
   const base = { bundle: { active: true, icon: ['icons/icon.icns'] } };
