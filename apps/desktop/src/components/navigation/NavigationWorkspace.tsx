@@ -166,7 +166,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
     </>}
     {state.setup?.data.kind === 'binding_connect' && <section className="nav-banner" aria-label="Session setup"><h2>Session connected</h2>
       <p>Connecting sent nothing to the model. {state.setupAdapterId === 'codex'
-        ? 'Paste this setup instruction into the selected Codex thread once per binding so the agent has the Ariadne rules.'
+        ? 'Paste this setup instruction into the selected Codex thread once per binding so the agent has the Ariadne rules. Installation also adds an Ariadne skill for Codex unless its link was skipped.'
         : state.setupAdapterId === 'claude_code_mod'
           ? 'Run /ariadne-connect in the selected Claude conversation, then paste this setup instruction into it once per binding so the agent has the Ariadne rules.'
           : 'Paste this setup instruction into the selected host conversation once per binding so the agent has the Ariadne rules.'}</p>

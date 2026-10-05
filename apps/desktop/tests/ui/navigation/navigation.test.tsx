@@ -645,7 +645,7 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(close).toHaveBeenCalledOnce();
   });
   it.each([
-    ['codex', /Paste this setup instruction into the selected Codex thread/],
+    ['codex', /Paste this setup instruction into the selected Codex thread.*Ariadne skill for Codex unless its link was skipped/],
     ['claude_code_mod', /Run \/ariadne-connect in the selected Claude conversation/],
     ['demo.local', /Paste this setup instruction into the selected host conversation/],
   ])('tells the owner how to give the saved setup instruction to a %s host once per binding', async (adapterId, wording) => {

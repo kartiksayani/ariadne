@@ -18,6 +18,7 @@ for the end-to-end user flow and [POC results](../INTEGRATIONS.md#live-evidence-
 ~/.local/bin/ariadne -> ../share/ariadne/current/bin/ariadne
 ~/.local/bin/ariadne-mcp -> ../share/ariadne/current/bin/ariadne-mcp
 ~/Applications/Ariadne.app              # personal app install
+~/.agents/skills/ariadne -> ../../.local/share/ariadne/current/integrations/codex-skills/ariadne
 ~/.ariadne/
   projects.json                        # explicit canonical roots + setup receipts
   bindings.json                        # rebuildable selected binding route index
@@ -291,7 +292,13 @@ this checkout, then installs them for the current user. Keep versioned helper
 files under `~/.local/share/ariadne/versions/<version>/`, update the `current`
 symlink, and install the app at `~/Applications/Ariadne.app`. Create
 `~/.local/bin/ariadne` and `ariadne-mcp` symlinks when that directory exists;
-otherwise print the PATH instruction. Do not edit shell startup files, use
+otherwise print the PATH instruction. Also create the one package-owned link
+`~/.agents/skills/ariadne` to the versioned Codex skill directory
+(ADR-0070) only when that path is absent or already Ariadne's; a foreign file,
+directory or redirected `~/.agents` is skipped with a printed instruction.
+Uninstall removes it only when it is still that exact link and leaves
+`~/.agents/skills` in place. The allowed link locations are therefore
+`~/Applications`, `~/.local/bin` and `~/.agents/skills/ariadne`. Do not edit shell startup files, use
 `sudo`, install toolchains, or download provider CLIs. Print the installed
 version and paths, then run `ariadne doctor`.
 

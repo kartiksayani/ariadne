@@ -9,6 +9,7 @@ fn one_source_generates_identical_adapter_guidance_and_detects_stale_outputs() {
         "Full exact reply.\nRetain original operation IDs.\n",
     )
     .unwrap();
+    fs::write(rules.join("skill.md"), SKILL).unwrap();
     ariadne_xtask::rules::generate(root.path(), false).unwrap();
     assert_eq!(
         fs::read(rules.join("claude.md")).unwrap(),
@@ -22,12 +23,50 @@ fn one_source_generates_identical_adapter_guidance_and_detects_stale_outputs() {
     ariadne_xtask::rules::generate(root.path(), false).unwrap();
     ariadne_xtask::rules::generate(root.path(), true).unwrap();
 }
+
+const SKILL: &str = "Shared body.\n<!-- only:claude -->\nClaude only.\n<!-- /only -->\n<!-- only:codex -->\nCodex only.\n<!-- /only -->\nSee {{RULES}}.\n";
+
+#[test]
+fn one_skill_source_generates_agent_specific_skills_and_detects_stale_outputs() {
+    let root = tempfile::tempdir().unwrap();
+    let rules = root.path().join("integrations/rules");
+    fs::create_dir_all(&rules).unwrap();
+    fs::write(rules.join("source.md"), "Full exact reply.\n").unwrap();
+    fs::write(rules.join("skill.md"), SKILL).unwrap();
+    ariadne_xtask::rules::generate(root.path(), false).unwrap();
+    let claude = fs::read_to_string(
+        root.path()
+            .join("integrations/claude/plugin/skills/ariadne/SKILL.md"),
+    )
+    .unwrap();
+    let codex_path = root
+        .path()
+        .join("integrations/codex/skills/ariadne/SKILL.md");
+    let codex = fs::read_to_string(&codex_path).unwrap();
+    assert!(claude.starts_with("---\nname: ariadne\ndescription: "));
+    assert!(codex.starts_with("---\nname: ariadne\ndescription: "));
+    assert!(codex.lines().nth(2).unwrap().contains("[ARIADNE_INPUT:"));
+    assert!(claude.contains("Claude only.") && !claude.contains("Codex only."));
+    assert!(codex.contains("Codex only.") && !codex.contains("Claude only."));
+    assert!(codex.ends_with("Full exact reply.\n"));
+    assert!(!claude.contains("{{") && !codex.contains("{{"));
+    ariadne_xtask::rules::generate(root.path(), true).unwrap();
+    fs::write(&codex_path, "edited").unwrap();
+    assert!(ariadne_xtask::rules::generate(root.path(), true)
+        .unwrap_err()
+        .contains("Stale"));
+    fs::write(rules.join("skill.md"), "<!-- only:codex -->\nopen\n").unwrap();
+    assert!(ariadne_xtask::rules::generate(root.path(), false)
+        .unwrap_err()
+        .contains("Unterminated"));
+}
 #[test]
 fn symlinked_rule_target_is_rejected_without_overwriting_unrelated_content() {
     let root = tempfile::tempdir().unwrap();
     let rules = root.path().join("integrations/rules");
     fs::create_dir_all(&rules).unwrap();
     fs::write(rules.join("source.md"), "Valid full reply guidance.\n").unwrap();
+    fs::write(rules.join("skill.md"), SKILL).unwrap();
     let other = root.path().join("unrelated.md");
     fs::write(&other, "Keep this owner's file.").unwrap();
     symlink(&other, rules.join("claude.md")).unwrap();

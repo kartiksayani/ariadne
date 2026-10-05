@@ -52,6 +52,7 @@ class InstallationTests(unittest.TestCase):
                       "elif sys.argv[1]=='package-resources':\n"
                       f" print(json.dumps({{'schema_version':1,'version':'{version}','files':{{"
                       "'rules/claude.md':'fixture claude rules','rules/codex.md':'fixture codex rules',"
+                      "'codex-skills/ariadne/SKILL.md':'fixture codex skill',"
                       "'claude-mod/plugin/hooks/installed.js':sys.argv[3]}}))\n"
                       "else: sys.exit(2)\n")
             (self.artifacts / name).write_text(script)
@@ -96,7 +97,77 @@ class InstallationTests(unittest.TestCase):
         final = self.install()
         self.assertFalse((self.home / ".local/bin").exists())
         self.assertIn("PATH directory is absent", self.output.getvalue())
-        self.assertEqual(set(installer.json_read(final / "install.json")["owned_links"]), {"Applications/Ariadne.app"})
+        self.assertEqual(set(installer.json_read(final / "install.json")["owned_links"]),
+                         {"Applications/Ariadne.app", installer.SKILL_LINK})
+
+    @property
+    def skill(self):
+        return self.home / installer.SKILL_LINK
+
+    def test_codex_skill_link_is_created_recorded_idempotent_and_removed_leaving_parent(self):
+        final = self.install()
+        self.assertTrue(self.skill.is_symlink())
+        self.assertEqual(self.skill.resolve(), final / "integrations/codex-skills/ariadne")
+        self.assertEqual((self.skill / "SKILL.md").read_text(), "fixture codex skill")
+        self.assertIn(installer.SKILL_LINK, installer.json_read(final / "install.json")["owned_links"])
+        before = (final / "install.json").stat().st_mtime_ns
+        self.assertEqual(self.install(), final)
+        self.assertEqual((final / "install.json").stat().st_mtime_ns, before)
+        self.assertTrue(self.skill.is_symlink())
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(installer.exists(self.skill))
+        self.assertTrue((self.home / ".agents/skills").is_dir())
+
+    def test_codex_skill_upgrade_keeps_owned_link_pointing_at_current(self):
+        self.install()
+        self.make_artifacts("0.2.0")
+        second = self.install()
+        self.assertEqual(self.skill.resolve(), second / "integrations/codex-skills/ariadne")
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(installer.exists(self.skill))
+
+    def test_foreign_codex_skill_is_skipped_with_instruction_and_never_removed(self):
+        for kind in ("directory", "file", "symlink"):
+            self.skill.parent.mkdir(parents=True, exist_ok=True)
+            if kind == "directory":
+                self.skill.mkdir()
+                (self.skill / "SKILL.md").write_bytes(b"owner skill")
+            elif kind == "file":
+                self.skill.write_bytes(b"owner file")
+            else:
+                self.skill.symlink_to(installer.links(self.home)[installer.SKILL_LINK])
+            self.output.truncate(0)
+            self.output.seek(0)
+            final = self.install()
+            self.assertIn("Skipped the Codex skill link", self.output.getvalue())
+            self.assertNotIn(installer.SKILL_LINK, installer.json_read(final / "install.json")["owned_links"])
+            self.assertEqual(installer.uninstall(self.home), [])
+            self.assertTrue(installer.exists(self.skill), kind)
+            if kind == "directory":
+                self.assertEqual((self.skill / "SKILL.md").read_bytes(), b"owner skill")
+                shutil.rmtree(self.skill)
+            elif kind == "file":
+                self.assertEqual(self.skill.read_bytes(), b"owner file")
+                self.skill.unlink()
+            else:
+                self.skill.unlink()
+
+    def test_redirected_agents_directory_is_skipped_without_writing_through_it(self):
+        outside = self.base / "outside-agents"
+        (outside / "skills").mkdir(parents=True)
+        (self.home / ".agents").symlink_to(outside)
+        self.install()
+        self.assertIn("Skipped the Codex skill link", self.output.getvalue())
+        self.assertEqual(list((outside / "skills").iterdir()), [])
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertTrue((self.home / ".agents").is_symlink())
+
+    def test_replaced_owned_codex_skill_link_survives_uninstall(self):
+        self.install()
+        self.skill.unlink()
+        self.skill.write_bytes(b"owner replacement")
+        self.assertIn(str(self.skill), installer.uninstall(self.home))
+        self.assertEqual(self.skill.read_bytes(), b"owner replacement")
 
     def test_upgrade_retains_previous_immutable_version_then_uninstalls_both(self):
         first = self.install()
