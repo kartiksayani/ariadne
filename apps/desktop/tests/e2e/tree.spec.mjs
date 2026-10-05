@@ -294,7 +294,12 @@ async function readySessionButton(tree) {
   if (failure) throw failure;
   return button;
 }
-async function choose(group, name, pressed) {
+export async function choose(group, name, pressed) {
+  const focused = () => browser.execute(() => document.visibilityState === 'visible' && !document.hidden && document.hasFocus());
+  if (!await focused()) {
+    await activateOwned(process.env.ARIADNE_E2E_ROOT, process.env.ARIADNE_E2E_BINARY, process.env.ARIADNE_E2E_NONCE);
+    await wait(focused, 'Owned native App did not become visible and focused before filtering');
+  }
   const button = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`);
   await button.waitForClickable();
   await browser.execute(observeTreeClickReadiness, button, group, name, pressed);
