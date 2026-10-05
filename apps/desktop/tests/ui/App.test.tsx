@@ -349,6 +349,41 @@ describe('ordinary desktop composition', () => {
     await waitFor(() => expect(mutations(transport, 'input_submit')).toHaveLength(1));
     expect(mutations(transport, 'input_submit')[0].command).toMatchObject({ params: { text } });
   });
+  it('retains the newer parent selection when child navigation finishes its late catalogue read', async () => {
+    const { transport } = setup(); await openSession();
+    fireEvent.click(document.querySelector('[data-item-id="1"]')!);
+    await screen.findByLabelText('Owner input for #1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    let release!: () => void, entered = false, completed = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const hold = !('command' in args.request) && args.request.request.command === 'project_list'
+        && transport.preferences.sessions[0].selected_item_id === '1.1' && !entered;
+      if (hold) { entered = true; await gate; }
+      const response = await invoke(name, args);
+      if (hold) completed = true;
+      return response;
+    });
+    fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Item 1\.1/ }));
+    await waitFor(() => expect(entered).toBe(true));
+    await screen.findByLabelText('Owner input for #1.1');
+    const search = screen.getByLabelText('Search sentences');
+    await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
+    expect(completed).toBe(false);
+    const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
+    fireEvent.click(parent);
+    await screen.findByLabelText('Owner input for #1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
+    expect(completed).toBe(false);
+    await act(async () => { release(); await gate; });
+    await waitFor(() => expect(completed).toBe(true));
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+    expect(document.querySelector('.item-history > .history-header > strong')?.textContent).toBe('Item 1');
+    expect(screen.getByLabelText('Owner input for #1')).toBeTruthy();
+    expect(parent.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('region', { name: 'Child items' })).toBeTruthy();
+  });
   it.each(['confirmed', 'reconciled'])('admits parent selection only after child navigation is %s', async completion => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
