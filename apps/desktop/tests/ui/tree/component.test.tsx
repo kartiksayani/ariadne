@@ -48,6 +48,17 @@ async function setup(session: Session = structuredClone(demo) as Session, view =
 }
 const rows = () => screen.getAllByRole('treeitem');
 describe('registered variable-height sentence tree', () => {
+  it('offers one keyboard entry row in a newly opened session without a saved selection', async () => {
+    const view = preferences(); view.selected_item_id = null;
+    const value = await setup(structuredClone(demo) as Session, view);
+    const rendered = render(<><button>Current control</button></>);
+    const control = screen.getByRole('button', { name: 'Current control' }); control.focus();
+    rendered.rerender(<><button>Current control</button><value.Composition /></>);
+    expect(rows().filter(row => row.tabIndex === 0)).toHaveLength(1);
+    expect(rows()[0].tabIndex).toBe(0);
+    expect(document.activeElement).toBe(control);
+    expect(value.saved).toHaveLength(0);
+  });
   it('renders full stored sentences and outcomes with one roving focus target', async () => {
     const session = structuredClone(demo) as Session;
     session.items['1']!.question = 'A full question\nwith a second line and no summary substitution.';
