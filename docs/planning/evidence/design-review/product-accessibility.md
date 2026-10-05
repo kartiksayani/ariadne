@@ -22,6 +22,8 @@ and isolated, pinned source-runtime dependencies.
   navigation, and failed/superseded navigation cannot authorize focus or Bring.
   The optional caller guard is rechecked after asynchronous session validation
   before dispatching preferences; an already dispatched durable write is unchanged.
+  Its valid receipt still confirms the saved preferences, but an invalidated guard
+  suppresses local reveal so a newer Escape cannot be undone by completion.
   Consumed focus tokens are acknowledged to App and cleared only when matching;
   an old editor callback cannot erase a newer request.
 - Numeric selection previously bypassed disabled changed-target choices and
@@ -104,12 +106,19 @@ size, real keyboard behavior and light/System contrast; CI must still confirm al
 four combinations at the final head.
 
 Review repair validation: the final focused desktop/reference selection passed
-226 tests across 12 files, including navigation validation cancellation, failed
-navigation, stale/frozen number requests, remount and old/new token acknowledgment.
+228 tests across 12 files, including navigation validation cancellation, dismissed
+Reply/Bring after dispatched preference saves, failed navigation, stale/frozen
+number requests, remount and old/new token acknowledgment.
 Normal type/lint/CSS checks passed. Local real-browser keyboard checks passed at
 dark 1000×700, light 1600×960 and light 1000×700. Light/System samples have a
 measured minimum 4.949:1. Existing warm Chrome was used; final CI still uses the
 package-pinned Chromium. Exact pushed-head evidence will be appended.
+
+The reviewed native-parent repair `cc11095` is merged with the composed journey
+and accessibility helper preserved. Its launcher-fixture integration requires the
+existing delivery phase explicitly; 23 process-contract tests passed using the
+warm CLI without a native build. Parent native startup proof does not establish
+the full composed P4.8 native acceptance.
 
 Required pushed-head checks: `npm run capture:reference` (both themes/sizes,
 immutable source gallery + ordinary captures), application tests/weighted coverage,

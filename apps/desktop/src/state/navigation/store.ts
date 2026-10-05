@@ -224,10 +224,12 @@ export class NavigationStore {
         throw new ServiceFailure('invalid_response');
       }
       if (!isCurrent() || request !== this.navigationRequest) return false;
-      return await this.patch(preferences, entries, () => {
+      const saved = await this.patch(preferences, entries, () => {
+        if (!isCurrent() || request !== this.navigationRequest) return;
         this.publish({ reveal });
         if (selection.kind === 'session') this.opened.open(selection.session);
       });
+      return saved && isCurrent() && request === this.navigationRequest;
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   async closeTab(route: SessionRef): Promise<boolean> {
