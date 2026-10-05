@@ -1,9 +1,11 @@
 use super::{bounded, capacity, invalid, AnnouncementAck, SessionAnnouncement};
 use crate::control::BindingScope;
 use ariadne_adapter_claude::{
-    ClaudeOptions, LoadedModIdentity, ModEvidenceSlot, QualifiedClaudeHost,
+    ClaudeOptions, LoadedModIdentity, ModEvidenceSlot, QualifiedClaudeHost, SUPPORTED_HOST_VERSION,
 };
-use ariadne_agent_protocol::{Availability, Compatibility, EndpointRef};
+use ariadne_agent_protocol::{
+    host_version::classify_host_version, Availability, Compatibility, EndpointRef,
+};
 use ariadne_core::{CoreError, CoreErrorCode, SessionRef};
 use ariadne_domain::models::{Freshness, UtcMillis};
 use std::{
@@ -380,7 +382,9 @@ impl Discovery {
             .candidates
             .get_mut(&key)
             .expect("checked candidate under the same lock");
-        current.compatibility = Compatibility::Compatible;
+        current.compatibility =
+            classify_host_version(SUPPORTED_HOST_VERSION, &current.host_version)
+                .map_or(Compatibility::Incompatible, |status| status.compatibility());
         current.availability = Availability::Available;
         Ok(qualified)
     }

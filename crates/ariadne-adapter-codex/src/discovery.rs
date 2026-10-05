@@ -17,6 +17,12 @@ impl CodexDiscovery {
             reader: None,
         })
     }
+    /// Observed CLI version of the initialized reader; `None` before the first page.
+    pub fn host_version(&self) -> Option<String> {
+        self.reader
+            .as_ref()
+            .map(|reader| reader.host_version().0.to_owned())
+    }
     /// Blocking IO; the native runtime offloads this call. Admission supplies one
     /// absolute deadline covering initialization and this page's metadata reads.
     pub fn page(

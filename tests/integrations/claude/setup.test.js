@@ -35,7 +35,10 @@ describe('installed owner helper setup', () => {
   it('qualifies exact supported host and helper version before owner mutation/polling', async () => {
     const h = host();await qualify(h.$,descriptor);
     expect(h.calls[0]).toEqual({argv:[descriptor.helperPath,'--version'],options:{timeoutMs:5000}});
-    await expect(qualify(host({version:'2.1.289'}).$,descriptor)).rejects.toThrow('2.1.287');
+    for (const version of ['2.1.288','2.1.289','2.1.1000']) await qualify(host({version}).$,descriptor);
+    for (const version of ['2.1.286','2.2.287','2.0.999','3.1.287','2.1','2.1.287.1','2.1.x','','garbage',null,2.1]) {
+      await expect(qualify(host({version}).$,descriptor)).rejects.toThrow('2.1.287');
+    }
     await expect(qualify(h.$,null)).rejects.toThrow('descriptor');
     const mismatch = host({handler:() => ({exitCode:0,stdout:'ariadne 0.2.0\n'})});
     await expect(qualify(mismatch.$,descriptor)).rejects.toThrow('versions disagree');

@@ -79,6 +79,14 @@ describe('explicit discovery registration and binding', () => {
     expect(context.mutations.some(request => request.command.command === 'binding_connect')).toBe(false);
     await waitFor(() => expect(context.opens.mock.calls.at(-1)).toEqual([false]));
   });
+  it('shows an untested host version notice and accepts the untested compatibility value', async () => {
+    const context = setup(); await context.store.start();
+    context.reads.mockResolvedValue({ candidates: [{ ...candidate(), host_version: '0.160.1', compatibility: 'untested' }], error: null });
+    bind(context);
+    await screen.findByText('Discovered conversation');
+    expect(screen.getByRole('note')).toHaveTextContent('Codex 0.160.1 is newer than the tested version; it should work, but has not been verified.');
+    expect(screen.getByText(/untested/)).toBeInTheDocument();
+  });
   it('selection preserves the explicit existing Ariadne UUID and Connect retry retains its immutable request', async () => {
     const context = setup(); await context.store.start(); context.loseNextConnect(); bind(context);
     await screen.findByText('Discovered conversation');

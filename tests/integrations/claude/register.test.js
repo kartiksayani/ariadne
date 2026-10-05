@@ -68,7 +68,7 @@ describe('supported Mod entry convention', () => {
     }
   });
   it('can announce an unqualified engine without admitting claims, and heartbeat failure cannot fabricate connection', async () => {
-    const h = host({version:'2.1.289'}), hooks = callbacks(descriptor);
+    const h = host({version:'2.2.0'}), hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);
     expect(h.calls.map(call => call.argv[2])).toEqual(['announce']);
     expect(h.timer()).toBe(null);expect(h.events).toEqual([]);expect(h.prompts).toEqual([]);
@@ -206,7 +206,7 @@ describe('supported Mod entry convention', () => {
     expect(h.timer().cancelled).toBe(true);
   });
   it('keeps commands actionable with missing/mismatched descriptor/host and never connects or polls', async () => {
-    for (const [config,version] of [[null,'2.1.287'],[descriptor,'2.1.289'],[{...descriptor,helperPath:'ariadne'},'2.1.287']]) {
+    for (const [config,version] of [[null,'2.1.287'],[descriptor,'2.1.286'],[{...descriptor,helperPath:'ariadne'},'2.1.287']]) {
       const h = host({version});const hooks = callbacks(config);
       await hooks.get('session.start')(h.$,{},next);
       expect(h.timer()).toBe(null);expect(h.calls.filter(call => call.argv[2] !== 'announce')).toEqual([]);

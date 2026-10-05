@@ -452,9 +452,10 @@ POC did not exercise production domain tools or full recovery.
 The installed Mod imports an installer-local immutable JS descriptor carrying
 absolute helperPath, matching appVersion and apiVersion1; source checkouts have
 no descriptor and cannot fall back to PATH, plugin cache roots, environment or
-development helpers. Require exact Claude2.1.287 SDK engine version and matching
-helper/plugin version before connect/poll. A read-only2.1.289 CLI observation does
-not extend the preserved2.1.287 support baseline.
+development helpers. Require a Claude SDK engine version equal to the CLI version,
+both 2.1.287 or a newer 2.1.x patch, and matching helper/plugin version before
+connect/poll. A newer patch is accepted and marked `untested`; other minors/majors
+and older patches stay rejected ([ADR-0071](../../adr/ADR-0071-accept-newer-host-patch-versions-as-untested.md)).
 
 The actual2.1.287 SDK plugin identity is `{name,root}`, without a version property.
 Use its explicit loaded root and imported immutable descriptor; native qualification

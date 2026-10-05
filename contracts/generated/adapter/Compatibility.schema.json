@@ -1,10 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Compatibility",
-  "type": "string",
-  "enum": [
-    "compatible",
-    "incompatible",
-    "unknown"
+  "oneOf": [
+    {
+      "type": "string",
+      "enum": [
+        "compatible",
+        "incompatible",
+        "unknown"
+      ]
+    },
+    {
+      "description": "Same major.minor as the qualified baseline with a newer patch: accepted, not verified.",
+      "type": "string",
+      "const": "untested"
+    }
   ]
 }

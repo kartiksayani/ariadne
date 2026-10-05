@@ -112,10 +112,10 @@ impl CodexDaemonReader {
                     .expect("selected endpoint originated as UTF-8")
                     .to_owned(),
             },
-            host_version: "0.160.0".into(),
+            host_version: self.host_version.clone(),
             endpoint_fingerprint: self.socket.fingerprint(),
             capabilities: crate::queue::queue_capabilities(read_capabilities()),
-            compatibility: Compatibility::Compatible,
+            compatibility: self.host_status.compatibility(),
             availability: Availability::Available,
         };
         Ok(QualifiedCodexThread {

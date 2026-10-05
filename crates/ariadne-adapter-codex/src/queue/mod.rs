@@ -5,8 +5,12 @@ use crate::{
     history::HistoryScan,
     transport::{error, ExecutableIdentity},
     CodexDaemonReader, CodexHistoryClient, CodexHostFacts, CodexOptions, QualifiedCodexThread,
+    SUPPORTED_CODEX_VERSION,
 };
-use ariadne_agent_protocol::*;
+use ariadne_agent_protocol::{
+    host_version::{untested_notice, HostVersionStatus},
+    *,
+};
 use futures_channel::oneshot;
 use sha2::{Digest, Sha256 as Hasher};
 use std::{
@@ -238,13 +242,17 @@ impl State {
         request: ProbeRequest,
         deadline: Instant,
     ) -> Result<ProbeResult, AdapterError> {
-        let _reader =
+        let reader =
             CodexDaemonReader::open_before(self.options.clone(), request.endpoint, deadline)?;
+        let (version, status) = reader.host_version();
         Ok(ProbeResult {
-            host_version: Some("0.160.0".to_owned()),
-            compatibility: Compatibility::Compatible,
+            host_version: Some(version.to_owned()),
+            compatibility: status.compatibility(),
             availability: Availability::Available,
-            setup_steps: Vec::new(),
+            setup_steps: (status == HostVersionStatus::Untested)
+                .then(|| untested_notice("Codex", version, SUPPORTED_CODEX_VERSION))
+                .into_iter()
+                .collect(),
         })
     }
     pub(crate) fn connect(

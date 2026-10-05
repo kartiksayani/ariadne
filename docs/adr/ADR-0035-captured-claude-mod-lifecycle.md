@@ -19,8 +19,10 @@ The maintainer approved a static plugin-local ESM Mod using supported SDK
 process/crypto/timer calls. An installer-rendered immutable JS descriptor supplies
 the absolute installed helper path, matching app/plugin version and API version1.
 The source descriptor is absent; there is no PATH, environment, filesystem, Node,
-cache-root or checkout fallback. Exact host2.1.287 and helper/Mod version equality
-are required before polling or connection. P6 owns rendering/version substitution;
+cache-root or checkout fallback. Exact host2.1.287 equality is superseded by
+[ADR-0071](ADR-0071-accept-newer-host-patch-versions-as-untested.md) (2.1.287 or a
+newer 2.1.x patch, marked untested); helper/Mod version equality remains required
+before polling or connection. P6 owns rendering/version substitution;
 P3.4 owns any new host compatibility proof.
 
 Setup uses canonical `OwnerMutationRequest {session,command}` bodies through

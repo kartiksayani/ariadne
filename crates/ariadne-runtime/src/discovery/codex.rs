@@ -142,6 +142,7 @@ async fn run(
                         }
                         Ok(page)
                     });
+                    let result = result.map(|page| (page, source.host_version()));
                     (source, result)
                 }).await;
                 let Ok((returned, page)) = page else {
@@ -165,7 +166,7 @@ async fn run(
                         error = Some(cause);
                         break;
                     }
-                    Ok(page) => {
+                    Ok((page, observed_version)) => {
                         for candidate in page.candidates {
                             if !ids.insert(candidate.external_session_id.clone()) {
                                 error = Some(invalid("Loaded discovery repeated a host session identity across pages."));
@@ -181,7 +182,7 @@ async fn run(
                                 external_session_id: candidate.external_session_id,
                                 cwd: candidate.cwd,
                                 title: candidate.title,
-                                host_version: "0.160.0".into(),
+                                host_version: observed_version.clone().unwrap_or_default(),
                                 observed_at: (discovery.now)(),
                                 freshness: Freshness::Fresh,
                                 compatibility: Compatibility::Unknown,

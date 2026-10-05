@@ -1,6 +1,9 @@
 use super::Report;
 use ariadne_adapter_claude::{ClaudeOptions, SUPPORTED_HOST_VERSION};
-use ariadne_adapter_codex::{CodexDaemonReader, CodexOptions};
+use ariadne_adapter_codex::{CodexDaemonReader, CodexOptions, SUPPORTED_CODEX_VERSION};
+use ariadne_agent_protocol::host_version::{
+    accepted_range, classify_host_version, untested_notice, HostVersionStatus,
+};
 use ariadne_domain::models::*;
 use ariadne_store::{
     registry::{Registry, RegistryError},
@@ -12,6 +15,14 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
+
+fn host_version_state(status: Option<HostVersionStatus>) -> &'static str {
+    match status {
+        Some(HostVersionStatus::Qualified) => "qualified",
+        Some(HostVersionStatus::Untested) => "untested",
+        None => "unsupported",
+    }
+}
 
 #[derive(Default)]
 pub struct Options {
@@ -264,7 +275,18 @@ fn providers(report: &mut Report, data: &Path, version_root: Option<&Path>, opti
             app_version: crate::setup::resources::VERSION.into(),
         };
         match options.read_host_version(Instant::now()+Duration::from_secs(5)) {
-            Ok(version)=>report.add(if version==SUPPORTED_HOST_VERSION {"ok"} else {"warning"},"claude.version","Read the explicit Claude CLI version; version alone does not qualify its SDK/Mod.","Only Claude Code 2.1.287 is qualified; unknown versions require conformance and live existing-session acceptance.",json!({"detected_version":version,"supported_baseline":SUPPORTED_HOST_VERSION,"adapter_gate":"unknown","dispatch_ready":false})),
+            Ok(version)=>{
+                let status=classify_host_version(SUPPORTED_HOST_VERSION,&version);
+                let message=match status {
+                    Some(HostVersionStatus::Untested)=>untested_notice("Claude Code",&version,SUPPORTED_HOST_VERSION),
+                    _=>"Read the explicit Claude CLI version; version alone does not qualify its SDK/Mod.".to_owned(),
+                };
+                let next=match status {
+                    Some(_)=>"Claude Code 2.1.287 is the qualified baseline; a newer 2.1.x patch is accepted but untested.".to_owned(),
+                    None=>format!("Only Claude Code {} is accepted; other versions require conformance and live existing-session acceptance.",accepted_range(SUPPORTED_HOST_VERSION)),
+                };
+                report.add(if status==Some(HostVersionStatus::Qualified) {"ok"} else {"warning"},"claude.version",&message,&next,json!({"detected_version":version,"supported_baseline":SUPPORTED_HOST_VERSION,"host_version_status":host_version_state(status),"adapter_gate":"unknown","dispatch_ready":false}));
+            }
             Err(error)=>report.add("warning","claude.version_unknown","The explicit Claude version command could not be verified.","Check the selected absolute executable; doctor runs only --version with a bounded deadline.",json!({"error_code":error.code})),
         }
     } else {
@@ -282,8 +304,17 @@ fn providers(report: &mut Report, data: &Path, version_root: Option<&Path>, opti
                 let deadline=Instant::now()+Duration::from_secs(5);
                 match options.read_host_version(deadline) {
                     Ok(version)=>{
-                        let supported=version=="0.160.0";
-                        report.add(if supported {"ok"} else {"warning"},"codex.version","Read the explicit Codex CLI version; version alone does not qualify its daemon/thread.","Only Codex 0.160.0 is qualified; keep unsupported versions unavailable until conformance/live acceptance.",json!({"detected_version":version,"supported_baseline":"0.160.0","dispatch_ready":false}));
+                        let status=classify_host_version(SUPPORTED_CODEX_VERSION,&version);
+                        let supported=status.is_some();
+                        let message=match status {
+                            Some(HostVersionStatus::Untested)=>untested_notice("Codex",&version,SUPPORTED_CODEX_VERSION),
+                            _=>"Read the explicit Codex CLI version; version alone does not qualify its daemon/thread.".to_owned(),
+                        };
+                        let next=match status {
+                            Some(_)=>"Codex 0.160.0 is the qualified baseline; a newer 0.160.x patch is accepted but untested.".to_owned(),
+                            None=>format!("Only Codex {} is accepted; keep other versions unavailable until conformance/live acceptance.",accepted_range(SUPPORTED_CODEX_VERSION)),
+                        };
+                        report.add(if status==Some(HostVersionStatus::Qualified) {"ok"} else {"warning"},"codex.version",&message,&next,json!({"detected_version":version,"supported_baseline":SUPPORTED_CODEX_VERSION,"host_version_status":host_version_state(status),"dispatch_ready":false}));
                         if supported {
                             let handshake=options.default_endpoint().and_then(|endpoint|CodexDaemonReader::open_before(options,endpoint,deadline));
                             match handshake {
@@ -303,7 +334,7 @@ fn providers(report: &mut Report, data: &Path, version_root: Option<&Path>, opti
             "codex.version_unknown",
             "No trusted Codex executable was selected.",
             "Pass --codex-bin /absolute/codex to inspect its existing daemon/version.",
-            json!({"supported_baseline":"0.160.0"}),
+            json!({"supported_baseline":SUPPORTED_CODEX_VERSION}),
         );
     }
 }

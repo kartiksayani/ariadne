@@ -3,7 +3,10 @@ use crate::{
     evidence::{absolute, fresh, LoadedModIdentity, ModEvidence, QualifiedClaudeHost},
     normalization::error,
 };
-use ariadne_agent_protocol::{AdapterError, AdapterErrorCode, EndpointFingerprint, UtcMillis};
+use ariadne_agent_protocol::{
+    host_version::{accepted_range, classify_host_version},
+    AdapterError, AdapterErrorCode, EndpointFingerprint, UtcMillis,
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
@@ -119,10 +122,18 @@ pub(crate) fn qualify(
             "The original native Mod announcement is stale; qualification cannot refresh its age",
         ));
     }
-    if version(options, deadline)? != SUPPORTED_HOST_VERSION
-        || evidence.identity.engine_version != SUPPORTED_HOST_VERSION
+    let cli = version(options, deadline)?;
+    if classify_host_version(SUPPORTED_HOST_VERSION, &cli).is_none()
+        || evidence.identity.engine_version != cli
     {
-        return Err(error(AdapterErrorCode::UnsupportedHostVersion, "Claude executable and loaded SDK must both match qualified 2.1.287; observed 2.1.289 is unqualified"));
+        return Err(error(
+            AdapterErrorCode::UnsupportedHostVersion,
+            &format!(
+                "Claude executable and loaded SDK must be the same version, {}; observed CLI {cli} and SDK {}",
+                accepted_range(SUPPORTED_HOST_VERSION),
+                evidence.identity.engine_version
+            ),
+        ));
     }
     let fingerprint = resource_identity(options, evidence, deadline)?;
     check_deadline(deadline)?;
