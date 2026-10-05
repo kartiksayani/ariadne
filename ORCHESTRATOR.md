@@ -34,12 +34,20 @@ parent updates before workers publish, with current-head CI and delta reviews.
 
 ## Delivery feedback rules
 
+The owner authorizes local builds, native runs, browser tests and other focused
+checks whenever they are necessary and likely to save time overall. No further
+confirmation is needed to make an exception to the earlier CI-only default.
+Prefer existing caches, isolated fixture data and the smallest useful reproduction;
+reuse the build to verify the fix. Required CI and merge acceptance still apply.
+This standing authorization was confirmed on 2026-10-05.
+
 - **Pre-push timing:** Measure `cargo check --workspace --all-features --locked`
   and `tsc --noEmit` on an existing warm cache, recording each duration and the
   combined time. Include a representative incremental source change so a no-op
   check does not mislead. If the combined check takes **under 90 seconds**, propose
   it to the owner as a pre-push step. Until explicitly approved, the existing rule
-  remains. If no warm cache exists, report that rather than starting a cold build.
+  remains. If no warm cache exists, report that rather than starting a cold build solely
+  for this timing measurement.
   Keep one build directory per worker.
 - **Process budget:** No new process or tooling PR until the same concrete
   delivery problem has occurred twice. Record both occurrences, their observed
