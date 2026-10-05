@@ -601,6 +601,67 @@ fn capture_uses_global_counts_labels_and_registered_snapshots() {
 }
 
 #[test]
+fn capture_skips_empty_sessions_but_keeps_diagnostics_and_rechecks_their_revision() {
+    for partial in [false, true] {
+        let mut projects: Page<ProjectSummary> = fixture("domain/projections/projects.json");
+        let mut sessions: Page<SessionSummary> = fixture("domain/projections/sessions.json");
+        let mut counts = projects.items[0].counts.clone();
+        counts.waiting_unanswered = NonnegativeSafeInteger::new(0).unwrap();
+        if partial {
+            counts.completeness = Completeness::Partial;
+        }
+        projects.items[0].counts = counts.clone();
+        sessions.items[0].counts = counts.clone();
+        sessions.items[0]
+            .active_binding
+            .as_mut()
+            .unwrap()
+            .owner_paused = true;
+        for changed in [false, true] {
+            let lists = std::cell::Cell::new(0);
+            let result = capture(|request| {
+                Ok(match request.request {
+                    QueryRequest::ProjectList(_) => QueryResult::ProjectList(ProjectListResult {
+                        projects: projects.clone(),
+                        counts: counts.clone(),
+                    }),
+                    QueryRequest::SessionList(_) => {
+                        lists.set(lists.get() + 1);
+                        let mut sessions = sessions.clone();
+                        if changed && lists.get() == 2 {
+                            sessions.items[0].revision =
+                                PositiveSafeInteger::new(sessions.items[0].revision.value() + 1)
+                                    .unwrap();
+                        }
+                        QueryResult::SessionList(SessionListResult {
+                            sessions,
+                            active_total: NonnegativeSafeInteger::new(1).unwrap(),
+                            closed_total: NonnegativeSafeInteger::new(0).unwrap(),
+                            counts: counts.clone(),
+                        })
+                    }
+                    QueryRequest::SessionGet {} => panic!("zero Waiting rows need no snapshot"),
+                    _ => panic!("unexpected query"),
+                })
+            });
+            assert_eq!(lists.get(), 2);
+            if changed {
+                assert_eq!(result.unwrap_err().code, CoreErrorCode::RevisionConflict);
+            } else {
+                let captured = result.unwrap();
+                assert!(captured.rows.is_empty());
+                assert_eq!(captured.counts, counts);
+                assert!(captured
+                    .diagnostics
+                    .iter()
+                    .any(|row| row.ends_with("binding paused")));
+                assert_eq!(captured.diagnostics.len(), if partial { 2 } else { 1 });
+            }
+        }
+    }
+}
+
+#[test]
 fn tray_keeps_authoritative_count_oldest_ten_and_separate_diagnostics() {
     let mut capture = queue(
         (1..=11).map(|revision| row(revision, revision)).collect(),
