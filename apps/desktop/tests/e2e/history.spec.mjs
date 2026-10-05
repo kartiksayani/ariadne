@@ -52,14 +52,24 @@ async function open(history, itemId = '1') {
   const catalogue = await browser.$('button=All sessions'); await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
   const selectedCatalogue = async () => (await preferencesSnapshot()).global.selected_navigation.kind === 'all_sessions'
     && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
-  await wait(async () => await selectedCatalogue() || await navigationRejection(), 'History catalogue navigation neither completed nor showed a definitive revision conflict');
-  if (await navigationRejection()) {
+  let rejectedNavigation = false;
+  await wait(async () => {
+    rejectedNavigation ||= await navigationRejection();
+    return rejectedNavigation || await selectedCatalogue();
+  }, 'History catalogue navigation neither completed nor showed a definitive revision conflict');
+  if (rejectedNavigation) {
     assert.equal(navigationRecovered, false, 'Only one explicit history navigation recovery is allowed per native launch');
     navigationRecovered = true;
     const rejected = { sessionId: history.sessionId, message: revisionConflict,
       preferences: await preferencesSnapshot(), body: await browser.$('body').getText() };
     const refresh = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
     await refresh.waitForDisplayed(); await refresh.waitForEnabled(); await refresh.scrollIntoView(); await refresh.click();
+    // The actual Refresh control returns after its awaited read completes;
+    // the definitive mutation error remains visible until a fresh choice.
+    await wait(async () => {
+      const refreshed = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
+      return await refreshed.isExisting() && await refreshed.isDisplayed() && await refreshed.isEnabled() && await catalogue.isEnabled();
+    }, 'Explicit history Refresh did not finish before the fresh navigation choice');
     // A visible definitive rejection permits one fresh owner navigation choice.
     await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
     await wait(selectedCatalogue, 'Fresh history catalogue navigation did not persist after Refresh');
