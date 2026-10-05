@@ -429,6 +429,137 @@ fn mutation_receipts_keep_the_saved_shape_and_validate_operation_route_and_kind(
     assert!(validate_receipt(&wrapper, &MutationReceipt::Session(wrong)).is_err());
 }
 
+fn preference_request(entries: Vec<PreferencesPatchEntry>) -> OwnerMutationRequest {
+    let mut command: OwnerCommand = serde_json::from_value(
+        inventory()["owner_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["command"] == "preferences_patch")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    let OwnerCommand::PreferencesPatch { params, .. } = &mut command else {
+        unreachable!()
+    };
+    params.entries = entries;
+    OwnerMutationRequest {
+        session: None,
+        command,
+    }
+}
+
+fn notification_counts(command: &OwnerCommand, response: &MutationEnvelope) -> (usize, usize) {
+    let window = std::cell::Cell::new(0);
+    let tray = std::cell::Cell::new(0);
+    notify_native_preferences(
+        command,
+        response,
+        || window.set(window.get() + 1),
+        || tray.set(tray.get() + 1),
+    );
+    (window.get(), tray.get())
+}
+
+#[test]
+fn preference_notifications_follow_consumers_and_preserve_exact_replay_receipts() {
+    // Start with the canonical entries, including global, view, Later and drafts.
+    let command: OwnerCommand = serde_json::from_value(
+        inventory()["owner_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["command"] == "preferences_patch")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    let OwnerCommand::PreferencesPatch {
+        params: canonical, ..
+    } = command
+    else {
+        unreachable!()
+    };
+    let entries = canonical.entries;
+    for (selected, expected) in [
+        (vec![entries[1].clone()], (0, 0)), // Search/selection/expansion view.
+        (vec![entries[2].clone()], (0, 0)), // Later does not hide native Waiting.
+        (vec![entries[3].clone(), entries[4].clone()], (0, 0)),
+        (vec![entries[1].clone(), entries[2].clone()], (0, 0)),
+        (vec![entries[0].clone()], (1, 1)),
+        (entries.clone(), (1, 1)), // Mixed patch still affects both consumers once.
+    ] {
+        let request = preference_request(selected);
+        let receipt = MutationReceipt::PreferencesPatched(PreferencesPatchedReceipt {
+            operation_id: request.command.operation_id().clone(),
+            preferences_revision: PositiveSafeInteger::new(2).unwrap(),
+        });
+        let step = ScriptStep {
+            request: RecordedRequest::Owner(
+                OwnerContext::from_trusted_entrypoint(OwnerScope::Preferences),
+                Box::new(request.command.clone()),
+            ),
+            response: ScriptedResponse::Owner(Box::new(Ok(receipt.clone()))),
+        };
+        let core = Arc::new(ScriptedCoreService::new([step.clone(), step]));
+        let service = DesktopService::from_trusted_startup(core.clone(), resolve);
+        for _ in 0..2 {
+            let response = service.owner(request.clone(), true);
+            let before = serde_json::to_value(&response).unwrap();
+            assert_eq!(notification_counts(&request.command, &response), expected);
+            assert_eq!(serde_json::to_value(&response).unwrap(), before);
+            assert_eq!(before["data"], serde_json::to_value(&receipt).unwrap());
+        }
+        assert_eq!(core.remaining().unwrap(), 0);
+    }
+}
+
+#[test]
+fn rejected_or_invalid_preference_receipts_never_notify_native_consumers() {
+    let entry: PreferencesPatchEntry = serde_json::from_value(
+        inventory()["owner_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["command"] == "preferences_patch")
+            .unwrap()["params"]["entries"][0]
+            .clone(),
+    )
+    .unwrap();
+    let request = preference_request(vec![entry]);
+    for result in [
+        Err(CoreError::new(
+            CoreErrorCode::RevisionConflict,
+            "Preferences changed.",
+            "Reload preferences.",
+        )),
+        Err(CoreError::new(
+            CoreErrorCode::CommitUncertain,
+            "Receipt was not confirmed.",
+            "Reconcile the original operation.",
+        )),
+        Ok(MutationReceipt::PreferencesPatched(
+            PreferencesPatchedReceipt {
+                operation_id: UuidV4::new("00000000-0000-4000-8000-000000000099").unwrap(),
+                preferences_revision: PositiveSafeInteger::new(2).unwrap(),
+            },
+        )),
+    ] {
+        let core = Arc::new(ScriptedCoreService::new([ScriptStep {
+            request: RecordedRequest::Owner(
+                OwnerContext::from_trusted_entrypoint(OwnerScope::Preferences),
+                Box::new(request.command.clone()),
+            ),
+            response: ScriptedResponse::Owner(Box::new(result)),
+        }]));
+        let service = DesktopService::from_trusted_startup(core, resolve);
+        let response = service.owner(request.clone(), true);
+        assert!(matches!(&response.0, ApplicationEnvelope::Failure(_)));
+        assert_eq!(notification_counts(&request.command, &response), (0, 0));
+    }
+}
+
 #[test]
 fn qualified_connect_keeps_admission_deadline_and_validation_before_native_handoff() {
     let core = Arc::new(ScriptedCoreService::new([]));
@@ -465,18 +596,18 @@ fn qualified_connect_keeps_admission_deadline_and_validation_before_native_hando
         command,
     };
     assert_eq!(
-        failure(&service.owner_before(wrapper.clone(), true, expected)).code,
+        failure(&service.owner_before(&wrapper, true, expected)).code,
         CoreErrorCode::HostUnreachable
     );
     assert_eq!(observed.lock().unwrap()[0].0, expected);
     assert_eq!(
-        failure(&service.owner_before(wrapper.clone(), false, expected)).code,
+        failure(&service.owner_before(&wrapper, false, expected)).code,
         CoreErrorCode::InvalidArgument
     );
     let mut wrong_scope = wrapper.clone();
     wrong_scope.session = Some(route());
     assert_eq!(
-        failure(&service.owner_before(wrong_scope, true, expected)).code,
+        failure(&service.owner_before(&wrong_scope, true, expected)).code,
         CoreErrorCode::InvalidArgument
     );
     assert_eq!(observed.lock().unwrap().len(), 1);
