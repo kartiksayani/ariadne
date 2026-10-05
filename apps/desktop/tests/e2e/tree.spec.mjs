@@ -117,7 +117,7 @@ async function measureAction(eventName, selector, expectedIds, action) {
   return browser.execute(() => { const result = window.__ariadneTreeMeasurement.elapsed; delete window.__ariadneTreeMeasurement; return result; });
 }
 async function choose(group, name, pressed) {
-  const button = await browser.$(`[aria-label="${group}"] button=${name}`); await button.waitForEnabled(); await button.click();
+  const button = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`); await button.waitForEnabled(); await button.click();
   await wait(async () => await button.getAttribute('aria-pressed') === String(pressed) && await button.isEnabled(), 'Native filter write was not confirmed');
 }
 async function anchor() {
@@ -209,7 +209,7 @@ export async function runTreeAcceptance(configuration) {
   await (await search()).setValue('ＮＡＴＩＶＥ café needle');
   await wait(async () => (await visibleIds()).includes('1.1'), 'Filtered context must temporarily expose its ancestry');
   const beforeReveal = (await preferences(tree)).view;
-  const child = await browser.$('[aria-label="Child items"] button*=Item 1.2 ·'); await child.waitForDisplayed(); await child.click();
+  const child = await browser.$('[aria-label="Child items"]').$('button*=Item 1.2 ·'); await child.waitForDisplayed(); await child.click();
   await wait(async () => (await browser.$('.sentence-tree').getText()).includes('Item 1.2 is outside the current filters.'), 'Detail child reveal did not preserve the filter and expose an outside-filter row');
   assert.equal(await focusedId(), '1.2');
   const revealed = (await preferences(tree)).view;
