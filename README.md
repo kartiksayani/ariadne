@@ -1,32 +1,96 @@
 # Ariadne
 
-## What Ariadne is
+**One window for every question your Claude Code and Codex sessions ask you.**
 
-Ariadne is a Mac app for one person. It collects the questions that Claude Code
-and Codex sessions ask you. You answer them in one window instead of hunting
-through terminals.
+Run a few coding-agent sessions and their questions end up scattered across
+terminal scrollback. After an hour you cannot say what is waiting on you, what
+you already decided, or why. Ariadne is a local Mac app that gathers those
+questions in one place. You answer there, and each answer goes back into the
+right running session. The questions, replies and decisions stay as a history you
+can browse and trace back (like a thread through a labyrinth).
 
-Each question becomes an item. Items sit in a tree, and the agents add replies
-and statuses to them. Your answers are sent back into the same session that
-asked. The app, a command-line tool (`ariadne`) and an MCP server
-(`ariadne-mcp`, a helper agents use to talk to Ariadne) share the same saved
-data.
+![Design mockup of the Ariadne window: the Waiting list on the left, the tree of
+topics and items in the middle, an item's detail and the message rail on the
+right](docs/planning/assets/mockup-dark-tree.png)
 
-Ariadne works with sessions that are already running. It does not start them.
+*Design mockup, not a screenshot of the running app.*
 
-## Install
+## How it works
+
+1. **Connect a session.** Ariadne attaches to a Claude Code or Codex session you
+   already have open. It does not start sessions.
+2. **The agent asks.** Connected agents record their questions, findings and
+   decisions in Ariadne as structured items, instead of leaving them in the
+   terminal.
+3. **You answer in Ariadne.** Pick an option or write your own words. Ariadne
+   saves your answer at once.
+4. **The answer lands in the session.** Ariadne delivers it into the session that
+   asked, one input per turn, in the order you sent them. The agent replies on
+   the item and the history is kept.
+
+## What you get
+
+- **One list of what is waiting on you**, across all your sessions, oldest
+  first. A count in the menu bar shows it without opening the window.
+- **Answers go to the right session.** Each answer is queued for the session
+  that asked and delivered in order. Five messages are five inputs, not a batch.
+- **A tree of topics and items.** Each question is an item with its options, the
+  agent's replies and its status, so you see what was asked, decided and dropped.
+- **A graph view** of the same items, to see how far one question branched.
+- **Full history per item**, in rounds, plus a message rail to see which messages
+  touched which item.
+- **No guessing after a failed delivery.** If Ariadne cannot confirm a message
+  arrived, it stops and asks you what to do. It never resends on its own.
+- **Local only.** Your data is plain files on your Mac. No account, no cloud, no
+  telemetry.
+
+## Status
+
+Ariadne is early and built first for one person's own use.
+
+- **macOS only:** macOS 13 or newer, Apple Silicon or Intel.
+- **Build from source.** There is no downloadable release. The app is not signed
+  or notarized, so macOS asks you to approve it once (see
+  [First launch](#first-launch-unsigned-app)).
+- **Host versions:** built and tested against Claude Code 2.1.287 or newer and
+  Codex CLI 0.160.0 or newer. Other versions may be refused or show as unknown.
+- **Testing:** the automated test suite runs in CI without the real tools. Live
+  end-to-end runs against real Claude Code and Codex sessions are still in
+  progress.
+- **Moving targets:** Ariadne relies on integration surfaces of Claude Code and
+  Codex. If they change, parts of Ariadne may break.
+
+## Quick start
 
 You need macOS 13 or newer, Python 3.11 or newer, Xcode command line tools, and
 these exact tools already installed: Node v22.23.2, npm 10.9.8 and Rust 1.98.1
 (through `rustup`, the Rust installer). Ariadne does not install any of them.
 
-From the repository folder:
-
 ```sh
+git clone https://github.com/kartiksayani/ariadne.git
+cd ariadne
+mkdir -p ~/.local/bin
 make install
 ```
 
-If your `python3` is too old, pick another one:
+Open `~/Applications/Ariadne.app` (see [First launch](#first-launch-unsigned-app)
+if macOS refuses). Then prepare an integration and connect one session:
+
+```sh
+~/.local/bin/ariadne setup --agent claude    # or codex, or both
+```
+
+Follow [Connect Claude Code](#connect-claude-code) or
+[Connect Codex](#connect-codex). To look around first without any agent:
+
+```sh
+~/.local/bin/ariadne demo --root /absolute/path/to/an/empty/folder
+```
+
+## Install in detail
+
+From the repository folder, run `make install`. If your `python3` is too old,
+pick another one:
 
 ```sh
 make PYTHON=/absolute/path/to/python3 install
@@ -34,18 +98,19 @@ make PYTHON=/absolute/path/to/python3 install
 
 First, a preflight check prints your macOS version, chip and tool versions. It
 stops with a clear message if something is missing. Then it builds the app, the
-`ariadne` command and `ariadne-mcp`.
+`ariadne` command and `ariadne-mcp` (an MCP server: a helper agents use to talk
+to Ariadne).
 
 It puts everything under `~/.local/share/ariadne/versions/<version>` and points
 `current` at it. It adds links at `~/Applications/Ariadne.app`,
 `~/.local/bin/ariadne` and `~/.local/bin/ariadne-mcp`. It does not edit your
 shell startup files. The two `~/.local/bin` links are made only if that folder
-already exists. So run `mkdir -p ~/.local/bin` before `make install`. Running it
+already exists, so run `mkdir -p ~/.local/bin` before `make install`. Running it
 again with the same version changes nothing.
 
-## First launch (unsigned app)
+### First launch (unsigned app)
 
-The app is not signed or notarized. If macOS refuses to open it:
+If macOS refuses to open the app:
 
 1. Try to open `~/Applications/Ariadne.app` once.
 2. Open System Settings, then Privacy & Security.
@@ -80,12 +145,6 @@ Check the result at any time:
 Doctor only reads. It repairs nothing, resends nothing and starts no session.
 You can point it at specific programs with `--claude-bin` and `--codex-bin`
 (absolute paths). Add `--json` for machine-readable output.
-
-To try the app without any agent, create an offline demo project:
-
-```sh
-~/.local/bin/ariadne demo --root /absolute/path/to/an/empty/folder
-```
 
 ## Connect Claude Code
 
@@ -184,15 +243,10 @@ A small lock file under `~/.local/share/ariadne` can remain.
 
 ## Known limits
 
-- macOS only. macOS 13 or newer, Apple Silicon or Intel.
-- Built from source. No signed, notarized or downloadable release.
-- Built and tested against Claude Code 2.1.287 and Codex 0.160.0. Other versions
-  may be refused or show as unknown in `ariadne doctor`.
 - Claude Code and Codex only. There is no plugin system for further agents yet.
-- Live checks against real Claude Code and Codex sessions are still pending the
-  owner's approval.
 - No automatic repair for corrupted data, full disks or power loss.
 - Speed targets are recorded, not guaranteed.
+- Everything under [Status](#status) also applies.
 
 ## What Ariadne does not do
 
@@ -204,11 +258,17 @@ Checked in the app configuration and source:
   credentials.
 - It does not listen on the network. Parts of Ariadne talk to each other through
   a private local socket.
-- There is no release test service.
 
-## Planning documents
+## How it's built
+
+A Rust core, the `ariadne` command-line tool and the `ariadne-mcp` server share
+one saved store of plain JSON files on disk. The window is a Tauri 2 app (a
+desktop shell around a web view) with a React interface. Design and planning
+documents:
 
 - [Build handoff](docs/planning/BUILD_HANDOFF.md)
+- [Architecture](docs/planning/ARCHITECTURE.md) and
+  [product contract](docs/planning/PRODUCT.md)
 - [Personal release scope](docs/planning/PERSONAL_RELEASE.md)
 - [Roadmap](docs/planning/ROADMAP.md) and [interactive Gantt](docs/planning/roadmap.html)
 - [Planning index](docs/planning/README.md), including all 30 design frames
@@ -222,3 +282,7 @@ Checked in the app configuration and source:
 Source inputs: [build prompt](BUILD_PROMPT.md), [design brief](DESIGN_PROMPT.md),
 [UI mockups](<designs/Ariadne UI mockups.zip>). Historical planning and POCs are in
 the [immutable archive](https://github.com/kartiksayani/ariadne/tree/a5e306f).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks and review rules.
