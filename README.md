@@ -48,8 +48,8 @@ Early preview. macOS 13 or newer, built from source.
 - **Build from source.** There is no downloadable release. The app is not signed
   or notarized, so macOS asks you to approve it once (see
   [First launch](#first-launch-unsigned-app)).
-- **Host versions:** built and tested against Claude Code 2.1.287 or newer and
-  Codex CLI 0.160.0 or newer. Other versions may be refused or show as unknown.
+- **Host versions:** needs Claude Code 2.1.287 or newer and Codex CLI 0.160.0
+  or newer. Newer versions work and show a "newer than tested" note.
 - **Testing:** the automated test suite runs in CI without the real tools. Live
   end-to-end runs against real Claude Code and Codex sessions are still in
   progress.
@@ -59,8 +59,10 @@ Early preview. macOS 13 or newer, built from source.
 ## Quick start
 
 You need macOS 13 or newer, Python 3.11 or newer, Xcode command line tools, and
-these exact tools already installed: Node v22.23.2, npm 10.9.8 and Rust 1.98.1
-(through `rustup`, the Rust installer). Ariadne does not install any of them.
+these tools already installed: Node 22.23.2 or newer on the 22 line, 24.15.0 or
+newer on the 24 line, or 26 and later; npm 10.9.8 or newer; and Rust 1.98.1 or
+newer (through `rustup`, the Rust installer). Ariadne does not install any of
+them.
 
 ```sh
 git clone https://github.com/kartiksayani/ariadne.git
