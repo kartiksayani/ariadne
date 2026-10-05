@@ -160,6 +160,11 @@ export function buildEnv(target, e2e = false) {
   if (e2e) env.VITE_ARIADNE_E2E = '1';
   return env;
 }
+export function nativeBuildEnv(target, e2e = false) {
+  // Match shipped Rust optimization without disabling dev assertions or E2E
+  // isolation. This override belongs only to the two native acceptance builds.
+  return { ...buildEnv(target, e2e), CARGO_PROFILE_DEV_OPT_LEVEL: '1', CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: 'true' };
+}
 export async function runNative() {
   if (process.platform !== 'darwin') throw new Error('Native E2E requires a logged-in macOS GUI session');
   const port = Number(process.env.ARIADNE_E2E_PORT || '4445'); await portFree(port);
@@ -172,10 +177,14 @@ export async function runNative() {
   try {
     const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--bundles', 'app', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
     const runtimeCommand = [process.execPath, join(repo, 'node_modules/@wdio/cli/bin/wdio.js'), 'run', 'wdio.native.conf.mjs'];
-    const details = { root, port, nonce, binary, toolchain: toolchain(), buildCommand, runtimeCommand, cwd: desktop };
+    const nativeEnv = nativeBuildEnv(join(repo, 'target/native-e2e'), true), cliEnv = nativeBuildEnv(join(repo, 'target/native-e2e'));
+    const cliBuildCommand = ['cargo', 'build', '-p', 'ariadne-cli', '--locked'];
+    const nativeProfile = { profile: 'dev', optLevel: Number(nativeEnv.CARGO_PROFILE_DEV_OPT_LEVEL),
+      debugAssertions: nativeEnv.CARGO_PROFILE_DEV_DEBUG_ASSERTIONS === 'true', artifactDirectory: 'debug' };
+    const details = { root, port, nonce, binary, toolchain: toolchain(), buildCommand, cliBuildCommand, nativeProfile, runtimeCommand, cwd: desktop };
     await json(join(evidence, 'run.json'), details);
-    await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: buildEnv(join(repo, 'target/native-e2e'), true), log: join(evidence, 'build.log') });
-    await command('cargo', ['build', '-p', 'ariadne-cli', '--locked'], { env: buildEnv(join(repo, 'target/native-e2e')), log: join(evidence, 'cli-build.log') });
+    await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: nativeEnv, log: join(evidence, 'build.log') });
+    await command(cliBuildCommand[0], cliBuildCommand.slice(1), { env: cliEnv, log: join(evidence, 'cli-build.log') });
     await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs', 'tests/e2e/history/fixture.test.mjs'], {
       env: { ...process.env, ARIADNE_FIXTURE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'fixture-cli.log'),
     });
