@@ -12,10 +12,27 @@ const applyRequest = operations => ({ op_id: randomUUID(), source_input_id: null
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
 async function apply(configuration, operations, expectedItemRevisions = {}, summary = '') {
   const request = { ...applyRequest(operations), expected_item_revisions: expectedItemRevisions, summary };
+  return publishTreeRequest(configuration, request);
+}
+export async function publishTreeRequest(configuration, request) {
   assert.ok(Buffer.byteLength(JSON.stringify(request)) < 512 * 1024, 'Every real CLI request remains within its protocol limit');
-  const result = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request);
-  assert.equal(result.code, 0); assert.equal(result.value.session_id, configuration.sessionId);
-  return { request, receipt: result.value };
+  const args = ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--json'];
+  const before = await snapshot(configuration), rejections = [];
+  for (let retry = 0; retry <= 2; retry++) {
+    const result = await cliRequest(configuration.cli, args, request);
+    if (result.value.ok === true) {
+      assert.equal(result.code, 0); assert.equal(result.value.data.session_id, configuration.sessionId);
+      return { request, receipt: result.value.data };
+    }
+    const after = await snapshot(configuration); rejections.push({ retry, result, after });
+    await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, `tree-apply-${request.op_id}-failure.json`), JSON.stringify({ args, request, before, rejections }, null, 2));
+    // StoreBusy is a definitive lock-acquisition rejection before the batch
+    // callback. Only setup may repeat this exact frozen operation; uncertain
+    // writes, revision conflicts and every other error remain failures.
+    assert.ok(!after.operation_receipts[request.op_id], 'Rejected tree setup must have no saved receipt for this operation');
+    if (result.value.error.code !== 'store_busy' || retry === 2) assert.fail(result.output);
+  }
+  assert.fail('Bounded tree setup publication did not complete');
 }
 function item(reference, topicId, parent, question, status, owner, outcome = null) {
   return { op: 'item.add', ref: reference, topic: { id: topicId }, parent, question, type: 'task', status, owner,
