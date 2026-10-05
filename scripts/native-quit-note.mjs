@@ -12,7 +12,7 @@ export function selectQuitNote(observation, pid) {
   const dialog = observation.dialogs[0];
   const message = 'Host work already sent can continue after Ariadne quits.';
   const informative = 'Queued, unsent inputs wait until you reopen Ariadne.';
-  if (!dialog.texts.includes(message) || !dialog.texts.includes(informative)) throw new Error('Unexpected native Quit note text');
+  if (dialog.texts.length !== 2 || !dialog.texts.includes(message) || !dialog.texts.includes(informative)) throw new Error('Unexpected native Quit note text');
   if (dialog.buttons.length !== 1) throw new Error('Quit note must have exactly one button');
   const button = dialog.buttons[0];
   if (button.name !== 'OK' || button.enabled !== true || !button.actions.includes('AXPress')) throw new Error('Quit note OK is unavailable');

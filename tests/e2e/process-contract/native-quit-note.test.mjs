@@ -60,15 +60,17 @@ test('owned actual dialog text and sole enabled OK produce a native AXPress rece
   assert.equal(native.effects().pressed, 1);
 });
 
-test('wrong PID, note wording, multiple dialogs, extra buttons and unavailable OK never press', () => {
+test('wrong PID, extra or duplicate note text, multiple dialogs, extra buttons and unavailable OK never press', () => {
   assert.throws(() => selectQuitNote({ pid: pid + 1, dialogs: [dialog()] }, pid), /another PID/);
   const wrongText = dialog(); wrongText.texts[1] = 'An unrelated dialog';
+  const extraText = dialog(); extraText.texts.push('Another notification');
+  const duplicateText = dialog(); duplicateText.texts.push(message);
   const extraButtons = dialog(); extraButtons.buttons.push({ name: 'Cancel', enabled: true, actions: ['AXPress'] });
   const disabled = dialog(); disabled.buttons[0].enabled = false;
   const wrongButton = dialog(); wrongButton.buttons[0].name = 'Allow';
   const missingAction = dialog(); missingAction.buttons[0].actions = [];
   for (const configuration of [
-    { actualPid: pid + 1 }, { dialogs: [wrongText] }, { dialogs: [dialog(), dialog()] },
+    { actualPid: pid + 1 }, { dialogs: [wrongText] }, { dialogs: [extraText] }, { dialogs: [duplicateText] }, { dialogs: [dialog(), dialog()] },
     { dialogs: [extraButtons] }, { dialogs: [disabled] }, { dialogs: [wrongButton] }, { dialogs: [missingAction] },
   ]) {
     const native = nativeFixture(configuration);
@@ -77,6 +79,8 @@ test('wrong PID, note wording, multiple dialogs, extra buttons and unavailable O
   }
   const absent = nativeFixture({ dialogs: [] });
   assert.equal(absent.run('press'), null); assert.equal(absent.effects().pressed, 0);
+  const reversed = dialog(); reversed.texts.reverse();
+  assert.equal(nativeFixture({ dialogs: [reversed] }).run('press').pressed, true);
 });
 
 test('missing Accessibility or Automation fails before UI observation without requesting consent', () => {
