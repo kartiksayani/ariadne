@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { observeTreeClickReadiness, publishTreeRequest, treeBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { choose, observeTreeClickReadiness, publishTreeRequest, treeBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
 
 for (const target of ['filter', 'session']) test(`${target} click readiness requires the same enabled hit target and stable nested geometry without clicking`, () => {
   const frames = new Map(), listeners = new Map(), scrolls = [];
@@ -69,7 +69,10 @@ for (const target of ['filter', 'session']) test(`${target} click readiness requ
   assert.equal(status().ready, false, 'Live hidden state prevents admission without waiting for another animation frame');
   document.visibilityState = 'visible'; document.hidden = false; document.hasFocus = () => false;
   assert.equal(status().ready, false, 'Live focus loss prevents admission even if the last frame was ready');
+  frame(); assert.equal(state.readiness.frames, 0); assert.equal(state.readiness.ready, false);
+  assert.equal(state.readiness.connectedNamedTarget, true); assert.equal(state.readiness.enabled, true); assert.equal(state.readiness.centreHit, true);
   document.hasFocus = () => true;
+  frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
   assert.equal(state.click, null, 'Readiness must not generate an input');
   listeners.get('click')({ target: parent, isTrusted: false }); assert.equal(state.click, null);
   listeners.get('click')({ target: button, isTrusted: true }); assert.equal(state.click.trusted, true);
@@ -84,6 +87,47 @@ for (const target of ['filter', 'session']) test(`${target} click readiness requ
   assert.equal(status().ready, false); assert.equal(status().callbackError.message, 'native hit-test diagnostic failure');
   window.__ariadneTreeFilterCleanup(); assert.equal(frames.size, 0); assert.equal(listeners.size, 0);
 });
+
+for (const scenario of ['focused', 'unfocused', 'hidden', 'activation_error', 'focus_timeout', 'readiness_error']) {
+  test(`untimed filter choice prepares owned focus once and preserves one click: ${scenario}`, async () => {
+    const calls = [], environment = { ARIADNE_E2E_ROOT: '/private/fixture', ARIADNE_E2E_BINARY: '/private/fixture/App', ARIADNE_E2E_NONCE: 'owned' };
+    const document = { visibilityState: scenario === 'hidden' ? 'hidden' : 'visible', hidden: scenario === 'hidden', hasFocus: () => scenario === 'focused' || scenario === 'readiness_error' };
+    const window = { __ariadneTreeFilterCleanup: () => calls.push('cleanup') };
+    const button = { waitForClickable: async () => { calls.push('clickable'); }, click: async () => { calls.push('click'); },
+      getAttribute: async () => 'true', isEnabled: async () => true };
+    // Run the actual orchestration with observed browser/OS boundaries; this
+    // checks input ordering and rejection, not real macOS activation or rendering.
+    const context = {
+      process: { env: environment },
+      browser: {
+        $: () => ({ $: async () => button }),
+        execute: async callback => {
+          if (callback === observeTreeClickReadiness) { calls.push('observe'); return; }
+          return runInNewContext(`(${callback.toString()})()`, { document, window });
+        },
+      },
+      observeTreeClickReadiness,
+      activateOwned: async (...args) => {
+        assert.deepEqual(args, Object.values(environment)); calls.push('activate');
+        if (scenario === 'activation_error') throw new Error('Owned activation rejected');
+        if (scenario !== 'focus_timeout') { document.visibilityState = 'visible'; document.hidden = false; document.hasFocus = () => true; }
+      },
+      wait: async (condition, message) => { calls.push('wait'); if (!await condition()) throw new Error(message); },
+      waitClickReadiness: async (_message, admit) => {
+        assert.equal(admit, true); calls.push('ready');
+        if (scenario === 'readiness_error') throw new Error('Native readiness callback failed');
+      },
+    };
+    const action = runInNewContext(`(${choose.toString()})('Item status', 'Open', true)`, context);
+    if (scenario === 'activation_error') { await assert.rejects(action, /Owned activation rejected/); assert.deepEqual(calls, ['activate']); }
+    else if (scenario === 'focus_timeout') { await assert.rejects(action, /did not become visible and focused before filtering/); assert.deepEqual(calls, ['activate', 'wait']); }
+    else if (scenario === 'readiness_error') { await assert.rejects(action, /Native readiness callback failed/); assert.deepEqual(calls, ['clickable', 'observe', 'ready', 'cleanup']); }
+    else {
+      await action;
+      assert.deepEqual(calls, [...(scenario === 'focused' ? [] : ['activate', 'wait']), 'clickable', 'observe', 'ready', 'click', 'wait', 'cleanup']);
+    }
+  });
+}
 
 test('tree setup repeats only definitive Busy with the identical frozen request and stops on other failures', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-tree-retry-')), priorEvidence = process.env.ARIADNE_E2E_EVIDENCE;
