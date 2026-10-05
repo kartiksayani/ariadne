@@ -56,10 +56,12 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     const secondPayload = `[ARIADNE_INPUT:${secondInput}:${secondAttempt}]\n${JSON.stringify({ ...body, source_input_id: secondInput })}`;
     await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', secondPayload]);
     const journal = await admissions(config); assert.equal(journal.length, 2); assert.notEqual(journal[0].turnId, journal[1].turnId);
-    const after = (await rpc(5, 'thread/turns/list', { threadId: thread })).result.data;
-    assert.deepEqual(after.map(turn => turn.status), ['completed', 'inProgress']);
-    assert.deepEqual(after.map(turn => turn.items[0].content[0].text), [payload, secondPayload]);
-    assert.equal(after[1].id, journal[1].turnId, 'Completing the first admission cannot complete the successor');
+    const after = (await rpc(5, 'thread/turns/list', { threadId: thread, sortDirection: 'desc' })).result.data;
+    assert.deepEqual(after.map(turn => turn.id), [journal[1].turnId, journal[0].turnId], 'The newest exact original must precede the prior queue anchor');
+    assert.deepEqual(after.map(turn => turn.status), ['inProgress', 'completed']);
+    assert.deepEqual(after.map(turn => turn.items[0].content[0].text), [secondPayload, payload]);
+    assert.equal(after[0].id, journal[1].turnId, 'Completing the first admission cannot complete the successor');
+    assert.deepEqual((await admissions(config)).map(entry => entry.turnId), journal.map(entry => entry.turnId), 'History order cannot rewrite FIFO admissions');
     await assert.rejects(completeTurn(config, admitted), /occurs once/);
   } finally { client?.terminate(); await provider?.stop(); await rm(root, { recursive: true }); }
 });

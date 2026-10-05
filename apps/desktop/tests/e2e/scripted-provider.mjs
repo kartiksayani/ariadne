@@ -114,7 +114,9 @@ export async function startScriptedProvider(root, cli, evidence) {
     const queued = await admissions(configuration), completed = await optional(completePath) ?? [];
     for (const control of completed) assert.deepEqual(queued.find(entry => entry.attemptId === control.attemptId), control, 'Foreign completion identity cannot affect another turn');
     const result = await load('turns-response.json');
-    return { ...result, data: queued.map(entry => {
+    // Existing Codex history reads are descending: the newest turn precedes
+    // the prior queue anchor while the admission journal retains FIFO order.
+    return { ...result, data: [...queued].reverse().map(entry => {
       const turn = globalThis.structuredClone(result.data[0]), complete = completed.some(control => control.attemptId === entry.attemptId);
       turn.id = entry.turnId; turn.status = complete ? 'completed' : 'inProgress';
       turn.startedAt = Math.floor(entry.admittedAt / 1000); turn.completedAt = complete ? turn.startedAt + 1 : null;
