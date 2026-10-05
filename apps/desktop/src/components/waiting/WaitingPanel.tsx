@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { QueueAnnouncements } from '../accessibility/QueueAnnouncements';
 import type { ItemRoute, SessionRef } from '../../generated/core';
 import { CoreFailure } from '../../data';
 import { GlobalWaitingPanel, type DeliveryLabel } from '../reference/GlobalWaitingPanel';
@@ -27,6 +28,7 @@ export function WaitingPanel({ store, revealItem, openSession, answerControl }: 
   const current = state.status === 'ready';
   const sentCounts = state.counts?.sent_inputs;
   const notice = <>
+    <QueueAnnouncements state={state} />
     {state.status === 'stale' && <p className="ref-warning" role="status">Showing the last complete queue read. Refresh is pending.</p>}
     {state.error && <div className="ref-warning" role="alert"><p>{state.error.message}</p>
       {state.error instanceof CoreFailure && <p>{state.error.error.hint}</p>}
