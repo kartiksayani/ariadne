@@ -19,11 +19,16 @@ const invoke = (command, request) => browser.execute(async (command, request) =>
 
 async function openSession(sessionId, itemId) {
   const catalogue = await browser.$('button[title="All sessions"]');
-  await catalogue.waitForDisplayed(); await catalogue.click();
+  await catalogue.waitForDisplayed(); await catalogue.waitForEnabled(); await catalogue.click();
   const session = await browser.$(`[data-session-id="${sessionId}"]`);
-  await session.waitForDisplayed(); await session.click();
+  try { await session.waitForDisplayed(); }
+  catch (error) {
+    await json(join(evidence, 'session-open-failure.json'), { sessionId, body: await browser.$('body').getText() });
+    await browser.saveScreenshot(join(evidence, 'session-open-failure.png')); throw error;
+  }
+  await session.waitForEnabled(); await session.click();
   const item = await browser.$(`.ref-tree-row[data-item-id="${itemId}"]`);
-  await item.waitForDisplayed(); await item.click();
+  await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
   await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(`Item ${itemId}`), 'Selected item detail did not load');
 }
 async function showHistory(texts) {
