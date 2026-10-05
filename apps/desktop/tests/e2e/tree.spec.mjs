@@ -4,12 +4,14 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
+import { installSearchTimingObservation, takeSearchTimingObservation } from './search-timing-observation.mjs';
 import { identity } from '../../../../scripts/run-native-e2e.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
 const search = () => browser.$('.sentence-search input');
+async function setSearch(value) { const input = await search(); await input.waitForEnabled(); await input.setValue(value); }
 const applyRequest = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
 async function apply(configuration, operations, expectedItemRevisions = {}, summary = '', setup = false) {
@@ -140,7 +142,7 @@ async function catalogue() {
   await wait(async () => await button.getAttribute('aria-current') === 'page' && await button.isEnabled(), 'Tree catalogue navigation did not finish its actual preference write');
 }
 async function open(tree) {
-  await catalogue(); const button = await browser.$(`[data-session-id="${tree.sessionId}"]`); await button.waitForDisplayed(); await button.click();
+  await catalogue(); const button = await readySessionButton(tree); await button.click();
   await wait(async () => (await visibleIds()).includes('20.99'), 'The real native 2,000-item tree did not open');
 }
 // Passive WebView measurement starts at the real driver-generated click/input,
@@ -153,13 +155,20 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       centreTarget: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.outerHTML.slice(0, 1000) } : null };
     window.__ariadneTreeMeasurement = sample;
-    const start = event => { if (event.target.closest(selector)) { sample.started = window.performance.now(); sample.trusted = event.isTrusted; } };
+    const start = event => { if (event.target.closest(selector)) {
+      sample.started = window.performance.now(); sample.trusted = event.isTrusted;
+      window.__ariadneSearchTimingObservation?.mark('input');
+    } };
     document.addEventListener(eventName, start, true);
     const observer = new window.MutationObserver(() => {
       const ids = [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].map(element => element.dataset.itemId);
       if (sample.started === null || ids.length !== expectedIds.length || ids.some((id, index) => id !== expectedIds[index])) return;
       observer.disconnect(); document.removeEventListener(eventName, start, true);
-      requestAnimationFrame(() => { document.querySelector('.sentence-rows')?.getBoundingClientRect(); sample.elapsed = window.performance.now() - sample.started; });
+      window.__ariadneSearchTimingObservation?.mark('result');
+      requestAnimationFrame(() => {
+        document.querySelector('.sentence-rows')?.getBoundingClientRect(); sample.elapsed = window.performance.now() - sample.started;
+        window.__ariadneSearchTimingObservation?.mark('frame');
+      });
     });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true });
   }, { eventName, selector, expectedIds });
@@ -182,29 +191,90 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
   }
   return browser.execute(() => { const result = window.__ariadneTreeMeasurement.elapsed; delete window.__ariadneTreeMeasurement; return result; });
 }
+export function observeTreeClickReadiness(button, group, name, expectedPressed, selector = null) {
+  window.__ariadneTreeFilterCleanup?.();
+  // Match the driver's own centering before observing readiness. WDIO's wheel
+  // scroll returns before nested layout settles; a subsequent driver centering
+  // can otherwise change the target after waitForClickable has passed.
+  button.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+  const bounds = button.getBoundingClientRect();
+  const sample = { text: button.textContent, expectedPressed, priorPressed: button.getAttribute('aria-pressed'), disabled: button.disabled,
+    bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
+    centreTarget: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.outerHTML.slice(0, 1000),
+    click: null, readiness: { frames: 0, ready: false } };
+  window.__ariadneTreeFilterAction = sample;
+  let previous, frame;
+  const observe = event => {
+    if (!button.contains(event.target)) return;
+    sample.click = { trusted: event.isTrusted, target: event.target.outerHTML.slice(0, 1000) };
+  };
+  document.addEventListener('click', observe, true);
+  window.__ariadneTreeFilterCleanup = () => {
+    window.cancelAnimationFrame(frame);
+    document.removeEventListener('click', observe, true);
+    delete window.__ariadneTreeFilterCleanup;
+  };
+  const inspect = () => {
+    const current = selector ? document.querySelector(selector) : [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
+      .find(value => value.textContent.trim() === name);
+    const rect = button.getBoundingClientRect(), hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const scroll = [];
+    for (let parent = button.parentElement; parent; parent = parent.parentElement) scroll.push([parent.scrollLeft, parent.scrollTop]);
+    const geometry = { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, scroll };
+    const valid = button.isConnected && current === button && !button.disabled && hit !== null && button.contains(hit);
+    const signature = JSON.stringify(geometry);
+    sample.readiness.frames = valid ? (signature === previous ? sample.readiness.frames + 1 : 1) : 0;
+    sample.readiness.ready = sample.readiness.frames >= 2;
+    sample.readiness.geometry = geometry;
+    sample.readiness.connectedNamedTarget = button.isConnected && current === button;
+    sample.readiness.enabled = !button.disabled;
+    sample.readiness.centreHit = hit !== null && button.contains(hit);
+    previous = valid ? signature : undefined;
+    frame = window.requestAnimationFrame(inspect);
+  };
+  frame = window.requestAnimationFrame(inspect);
+}
+async function readySessionButton(tree) {
+  const selector = `[data-session-id="${tree.sessionId}"]`, button = await browser.$(selector);
+  await button.waitForDisplayed(); await button.waitForEnabled();
+  await browser.execute(observeTreeClickReadiness, button, null, null, null, selector);
+  let failure;
+  try {
+    await wait(() => browser.execute(() => window.__ariadneTreeFilterAction.readiness.ready),
+      'Native session target did not become stable and enabled');
+  } catch (error) { failure = error;
+  } finally {
+    try { await browser.execute(() => window.__ariadneTreeFilterCleanup?.()); }
+    catch (error) { failure ??= error; }
+  }
+  if (failure) throw failure;
+  return button;
+}
 async function choose(group, name, pressed) {
   const button = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`);
-  await button.scrollIntoView({ block: 'center' }); await button.waitForClickable();
-  await browser.execute((button, expectedPressed) => {
-    const bounds = button.getBoundingClientRect();
-    const sample = { text: button.textContent, expectedPressed, priorPressed: button.getAttribute('aria-pressed'), disabled: button.disabled,
-      bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
-      centreTarget: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.outerHTML.slice(0, 1000), click: null };
-    window.__ariadneTreeFilterAction = sample;
-    const observe = event => {
-      if (!button.contains(event.target)) return;
-      sample.click = { trusted: event.isTrusted, target: event.target.outerHTML.slice(0, 1000) };
-      document.removeEventListener('click', observe, true);
-    };
-    document.addEventListener('click', observe, true);
-  }, button, pressed);
-  await button.click();
-  await wait(async () => {
-    // Selected owners move first after the saved preference renders. Reacquire
-    // the named control instead of observing its former index's DOM element.
-    const current = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`);
-    return await current.getAttribute('aria-pressed') === String(pressed) && await current.isEnabled();
-  }, 'Native filter write was not confirmed');
+  await button.waitForClickable();
+  await browser.execute(observeTreeClickReadiness, button, group, name, pressed);
+  let failure;
+  try {
+    await wait(() => browser.execute(() => {
+      const sample = window.__ariadneTreeFilterAction;
+      if (!sample.readiness.ready) return false;
+      sample.admittedReadiness = { ...sample.readiness };
+      return true;
+    }), 'Native filter target did not become stable and enabled');
+    await button.click();
+    await wait(async () => {
+      // Selected owners move first after the saved preference renders. Reacquire
+      // the named control instead of observing its former index's DOM element.
+      const current = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`);
+      return await current.getAttribute('aria-pressed') === String(pressed) && await current.isEnabled();
+    }, 'Native filter write was not confirmed');
+  } catch (error) { failure = error;
+  } finally {
+    try { await browser.execute(() => window.__ariadneTreeFilterCleanup?.()); }
+    catch (error) { failure ??= error; }
+  }
+  if (failure) throw failure;
 }
 async function anchor() {
   return browser.execute(() => {
@@ -311,7 +381,7 @@ async function treeAcceptance(configuration) {
   // refresh. A document reload is unnecessary and races the native driver.
   await catalogue();
   const expectedIds = Array.from({ length: 20 }, (_, index) => [String(index + 1), ...Array.from({ length: 99 }, (_, child) => `${index + 1}.${child + 1}`)]).flat();
-  const sessionButton = await browser.$(`[data-session-id="${tree.sessionId}"]`); await sessionButton.waitForDisplayed();
+  const sessionButton = await readySessionButton(tree);
   const usableMs = await measureAction('click', `[data-session-id="${tree.sessionId}"]`, expectedIds, () => sessionButton.click(), tree);
   assert.deepEqual(await visibleIds(), expectedIds); await roving();
   assert.equal(await (await row('1')).getAttribute('aria-level'), '1'); assert.equal(await (await row('1.1')).getAttribute('aria-level'), '2');
@@ -321,15 +391,26 @@ async function treeAcceptance(configuration) {
   const searchMs = [];
   const measuredIds = ['1.1', '20.99', '10.50', '2.10', '15.25', '5.60',
     ...Array.from({ length: 14 }, (_, index) => `${index + 3}.${1 + (index * 17) % 99}`)];
-  for (const id of measuredIds) {
-    searchMs.push(await measureAction('input', '.sentence-search input', [id.split('.')[0], id], async () => { const input = await search(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree));
+  const timingInstallation = await browser.execute(installSearchTimingObservation);
+  let searchFailure;
+  try {
+    for (const id of measuredIds) {
+      searchMs.push(await measureAction('input', '.sentence-search input', [id.split('.')[0], id], async () => { const input = await search(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree));
+    }
+  } catch (error) { searchFailure = error;
+  } finally {
+    try {
+      const observation = await browser.execute(takeSearchTimingObservation);
+      await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-search-timing-observation.json'), JSON.stringify({ installation: timingInstallation, ...observation }, null, 2));
+    } catch (error) { searchFailure ??= error; }
   }
+  if (searchFailure) throw searchFailure;
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-performance-samples.json'), JSON.stringify({ rows: 2000,
     messages: initialSession.messages.length, viewport, firstUsableMs: usableMs, localSearchSamplesMs: searchMs }, null, 2));
-  await (await search()).setValue('ＮＡＴＩＶＥ café needle');
+  await setSearch('ＮＡＴＩＶＥ café needle');
   await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'NFKC/lowercase AND-token search did not retain the contextual ancestor');
   assert.equal((await snapshot(tree)).items['1.1'].question, initialSession.items['1.1'].question, 'Search normalization must not rewrite stored text');
-  await (await search()).setValue(''); await wait(async () => (await visibleIds()).length === 2000, 'Clear search did not restore the complete tree');
+  await setSearch(''); await wait(async () => (await visibleIds()).length === 2000, 'Clear search did not restore the complete tree');
   await choose('Item status', 'Open', true); await wait(async () => (await browser.$('.sentence-tree footer').getText()).includes('1320 matching'), 'Open status count differs from the canonical fixture');
   await choose('Item status', 'Done', true); await wait(async () => (await browser.$('.sentence-tree footer').getText()).includes('2000 matching'), 'Within-category status OR did not restore all items');
   await choose('Item owner', 'Me', true); await wait(async () => (await browser.$('.sentence-tree footer').getText()).includes('1000 matching'), 'Owner AND filtering did not retain exactly the Me items');
@@ -338,10 +419,12 @@ async function treeAcceptance(configuration) {
   await choose('Item status', 'Open', false); await choose('Item status', 'Done', false);
 
   await (await row('1')).click(); await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(initialSession.items['1'].question), 'Native tree selection did not use full registered item detail');
-  await (await row('1')).$('button[aria-label="Expand or collapse"]').click();
+  const firstToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
+  await firstToggle.waitForEnabled(); await firstToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('1'), 'Explicit collapse was not persisted');
-  await (await search()).setValue('ＮＡＴＩＶＥ café needle');
+  await setSearch('ＮＡＴＩＶＥ café needle');
   await wait(async () => (await visibleIds()).includes('1.1'), 'Filtered context must temporarily expose its ancestry');
+  await (await search()).waitForEnabled();
   const beforeReveal = (await preferences(tree)).view;
   const child = await browser.$('[aria-label="Child items"]').$('button*=Item 1.2 ·'); await child.waitForDisplayed(); await child.click();
   await wait(async () => (await browser.$('.sentence-tree').getText()).includes('Item 1.2 is outside the current filters.'), 'Detail child reveal did not preserve the filter and expose an outside-filter row');
@@ -350,30 +433,33 @@ async function treeAcceptance(configuration) {
   assert.deepEqual(revealed.filters, beforeReveal.filters); assert.deepEqual(revealed.expanded_item_ids, beforeReveal.expanded_item_ids);
   await browser.$('button=Dismiss temporary reveal').click();
   await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'Dismiss must remove only temporary outside-filter reveal');
-  await (await row('1.1')).click(); await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'Selected item preference did not persist');
+  await (await search()).waitForEnabled(); await (await row('1.1')).click(); await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'Selected item preference did not persist');
   const beforeKeys = (await preferences(tree)).view;
   for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '1.1'], ['Home', '1'], ['l', '1.1'], ['h', '1']]) {
     await browser.keys(key); assert.equal(await focusedId(), id); await roving();
   }
   assert.equal((await preferences(tree)).view.selected_item_id, beforeKeys.selected_item_id, 'Focus movement alone must not select or mutate preferences');
-  await browser.keys('Enter'); await wait(async () => (await preferences(tree)).view.selected_item_id === '1', 'Keyboard Enter did not select through the registered reveal route');
-  await (await row('1.1')).click();
+  await (await search()).waitForEnabled(); await browser.keys('Enter'); await wait(async () => (await preferences(tree)).view.selected_item_id === '1', 'Keyboard Enter did not select through the registered reveal route');
+  await (await search()).waitForEnabled(); await (await row('1.1')).click();
   await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'The explicit selection must finish before the separate Later key');
   await (await search()).waitForEnabled(); await browser.keys('z');
   await wait(async () => (await preferences(tree)).snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'), 'Later keyboard action did not persist canonical local preferences');
-  await (await search()).setValue('No canonical native tree question matches this phrase');
+  await setSearch('No canonical native tree question matches this phrase');
   await wait(async () => await browser.$('button=Dismiss temporary reveal').isExisting(), 'A selected item outside new filters must offer explicit dismissal');
   await browser.$('button=Dismiss temporary reveal').click();
   await wait(async () => (await browser.$('.sentence-tree').getText()).includes('No sentences match these filters.'), 'No-result state did not provide explicit clear');
-  await browser.$('button=Clear filters').click();
+  const clear = await browser.$('button=Clear filters'); await clear.waitForEnabled(); await clear.click();
   await wait(async () => (await visibleIds()).length === 1901, 'Clear filters must preserve the saved collapsed branch');
 
   // Reopen the explicitly collapsed branch through its visible toggle, then
   // collapse a different branch so restart can prove this exact saved choice.
-  await (await row('1')).$('button[aria-label="Expand or collapse"]').click();
+  const reopenToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
+  await reopenToggle.waitForEnabled(); await reopenToggle.click();
   await wait(async () => (await visibleIds()).length === 2000, 'Explicit re-expansion did not restore children');
-  await (await row('2')).scrollIntoView(); await (await row('2')).$('button[aria-label="Expand or collapse"]').click();
+  await (await row('2')).scrollIntoView(); const secondToggle = await (await row('2')).$('button[aria-label="Expand or collapse"]');
+  await secondToggle.waitForEnabled(); await secondToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('2'), 'Second explicit collapse was not persisted');
+  await (await search()).waitForEnabled();
   await (await row('10.50')).scrollIntoView({ block: 'start' }); await (await row('10.50')).click();
   await wait(async () => (await preferences(tree)).view.selected_item_id === '10.50', 'The anchor selection must finish before the real CLI live edit');
   await (await search()).waitForEnabled();
@@ -387,8 +473,9 @@ async function treeAcceptance(configuration) {
     'The real upstream edit must materially grow its native row before it can prove scroll anchoring');
   const afterEdit = await anchor(); assert.equal(afterEdit.id, beforeEdit.id); assert.ok(Math.abs(afterEdit.offset - beforeEdit.offset) <= 2, 'Live wrapped-row growth must preserve the actual visible scroll anchor');
   assert.equal(await focusedId(), '10.50', 'Live update must not steal native keyboard focus');
-  await (await search()).click();
+  await (await search()).waitForEnabled(); await (await search()).click();
   await wait(async () => (await preferences(tree)).view.scroll?.item_id === afterEdit.id, 'Native blur did not persist the scroll anchor');
+  await (await search()).waitForEnabled();
   const saved = await preferences(tree), finalSession = await snapshot(tree);
   assert.equal(Object.keys(finalSession.items).length, 2000); assert.equal(Object.keys(finalSession.inputs).length, 0);
   assert.ok(saved.snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'));

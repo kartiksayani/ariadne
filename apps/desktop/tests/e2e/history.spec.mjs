@@ -85,8 +85,10 @@ async function open(history, itemId = '1') {
   await wait(async () => (await detail().getText()).includes(`Item ${itemId}`), 'Registered native history detail did not open');
 }
 async function selectParent() {
+  await (await browser.$('.sentence-search input')).waitForEnabled();
   const parent = await row('1'); await parent.waitForDisplayed(); await parent.scrollIntoView(); await parent.click();
   await wait(async () => (await detail().getText()).includes('Retain five complete native rounds'), 'Fork did not return to its registered parent');
+  await (await browser.$('.sentence-search input')).waitForEnabled();
 }
 async function seed(configuration) {
   const selected = configuration.history;
@@ -207,7 +209,11 @@ async function rail(history, saved, paged) {
   }, parentMessage.id), 'Native rail pin did not cross-highlight its real tree item and detail message');
   const childMessage = saved.messages.find(message => message.item_id === '1.1' && message.kind === 'reply'); assert.ok(childMessage);
   const parent = await row('1');
-  if (await parent.getAttribute('aria-expanded') !== 'true') { await parent.scrollIntoView(); await parent.$('button[aria-label="Expand or collapse"]').click(); }
+  if (await parent.getAttribute('aria-expanded') !== 'true') {
+    await parent.scrollIntoView();
+    const fold = await parent.$('button[aria-label="Expand or collapse"]'); await fold.waitForEnabled(); await fold.click();
+  }
+  await (await browser.$('.sentence-search input')).waitForEnabled();
   const child = await row('1.1'); await child.waitForDisplayed(); await child.scrollIntoView(); await child.click();
   await wait(async () => (await detail().getText()).includes('Native history fork 1.1'), 'Registered tree selection did not reveal the genuine child');
   await wait(async () => browser.execute(id => document.querySelector(`.rail-messages [data-message-id="${id}"]`)?.classList.contains('history-highlight'), childMessage.id), 'Native tree selection did not highlight its canonical rail backlink');
