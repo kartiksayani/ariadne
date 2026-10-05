@@ -2,7 +2,8 @@
 
 Status: accepted
 Supersedes: ADR-0022 imported-message interpretation, only for provenance-only copied Replies
-Superseded by: none
+Superseded by: [ADR-0065](ADR-0065-validate-captured-reads-outside-storage-locks.md),
+only for read-side validation lock scope; replay, provenance and target commits remain unchanged
 
 ## Context
 

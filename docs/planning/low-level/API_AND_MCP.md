@@ -721,9 +721,9 @@ copying is read-only there. No provider is launched by either action.
 Native `HistoryActionService` returns canonical lifecycle blockers and saved
 receipts. Exact operation replay precedes mutable guards. Continue preview binds
 the deterministic full source Session/topic hash and source revision; commit
-checks target replay before source IO and captures a validated immutable source
-Session under its read lock, the freshness observation/linearization point. It
-releases that lock, compares the owned snapshot revision/hash and uses one
+checks target replay before source IO and captures immutable source bytes under
+the read lock, the freshness observation/linearization point. It releases that
+lock, decodes and fully validates the capture, compares its revision/hash and uses one
 replay-first target transaction. The source is
 never written and no simultaneous session locks are held. A source change after
 validation leaves the recorded snapshot provenance unchanged. Reject same-session
