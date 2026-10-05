@@ -461,7 +461,11 @@ impl Discovery {
         state.slots.clear();
         for candidate in state.candidates.values_mut() {
             candidate.freshness = Freshness::Unknown;
-            candidate.compatibility = Compatibility::Unknown;
+            candidate.compatibility = if candidate.adapter_id == "codex" {
+                Compatibility::Unknown
+            } else {
+                unbound_compatibility(&candidate.host_version)
+            };
             candidate.availability = Availability::Unknown;
         }
         Ok(())
@@ -773,6 +777,30 @@ mod tests {
         let snap = d.snapshot().unwrap();
         assert_eq!(snap.candidates[0].freshness, Freshness::Unknown);
         assert_eq!(snap.candidates[0].observed_at, time());
+    }
+    #[test]
+    fn wake_rederives_claude_compatibility_from_the_host_version() {
+        let root = tempfile::tempdir().unwrap();
+        let d = discovery();
+        for (id, version, expected) in [
+            ("newer", "2.1.290", Compatibility::Untested),
+            ("older", "2.1.286", Compatibility::Incompatible),
+            ("garbled", "dev-build", Compatibility::Incompatible),
+        ] {
+            let mut a = announcement(root.path());
+            a.external_session_id = id.into();
+            a.host_version = version.into();
+            let _ = admit(&d, a);
+            d.refresh_after_wake().unwrap();
+            let snap = d.snapshot().unwrap();
+            let row = snap
+                .candidates
+                .iter()
+                .find(|c| c.external_session_id == id)
+                .unwrap();
+            assert_eq!(row.compatibility, expected, "{version}");
+            assert_eq!(row.availability, Availability::Unknown);
+        }
     }
     #[test]
     fn expired_candidates_release_only_the_tracked_slot_reference() {

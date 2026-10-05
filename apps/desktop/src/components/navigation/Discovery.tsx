@@ -23,7 +23,9 @@ export function CandidateList({ controller, root, select, selected }: { controll
       <strong>{candidate.title ?? candidate.external_session_id}</strong>
       <p>{candidate.cwd}</p><p>{candidate.adapter_id} · {candidate.host_version} · {candidate.freshness} · {candidate.compatibility} · {candidate.availability} · {candidate.loaded ? 'daemon loaded' : 'daemon not loaded'} · observed {candidate.observed_at}</p>
       {candidate.compatibility === 'untested' && <p role="note">{untestedNotice(candidate)}</p>}
-      {root && candidate.compatibility === 'incompatible' && <p role="note">This Claude Code version is older than Ariadne requires.</p>}
+      {root && candidate.compatibility === 'incompatible' && <p role="note">{/^\d+\.\d+\.\d+$/.test(candidate.host_version)
+        ? 'This Claude Code version is older than Ariadne requires.'
+        : 'This Claude Code version could not be read; Ariadne requires a minimum version or newer.'}</p>}
       <button type="button" className="ref-button ref-secondary" disabled={candidate.freshness !== 'fresh' || state.error !== null || (!!root && candidate.compatibility === 'incompatible')} aria-pressed={selected === candidateIdentity(candidate)} onClick={() => select(candidate)}>{root ? 'Use host session' : 'Register this project'}</button>
     </article>)}</section>)}
   </div>;
