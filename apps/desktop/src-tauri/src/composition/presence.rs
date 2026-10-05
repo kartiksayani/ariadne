@@ -51,15 +51,25 @@ impl PresenceCache {
         })
     }
     fn selected(&self, hint: &PresenceChangedHint, endpoint: &EndpointFingerprint) -> bool {
-        let read = || -> Result<bool, CoreError> {
-            hint.validate_wire()?;
-            let resolved = AgentResolver::resolve(
+        self.selected_with(hint, endpoint, || {
+            AgentResolver::resolve(
                 self.core.registry(),
                 hint.binding_id.clone(),
                 hint.generation.clone(),
                 None,
                 None,
-            )?;
+            )
+        })
+    }
+    fn selected_with(
+        &self,
+        hint: &PresenceChangedHint,
+        endpoint: &EndpointFingerprint,
+        resolve: impl FnOnce() -> Result<AgentContext, CoreError>,
+    ) -> bool {
+        let read = || -> Result<bool, CoreError> {
+            hint.validate_wire()?;
+            let resolved = resolve()?;
             let context = QueryContext::owner(OwnerContext::from_trusted_entrypoint(
                 OwnerScope::Session(resolved.session().clone()),
             ));
@@ -232,8 +242,24 @@ impl PresenceCache {
             .values()
             .map(|entry| (entry.hint.clone(), entry.endpoint.clone()))
             .collect();
+        if candidates.is_empty() {
+            return;
+        }
+        // One complete catalogue preserves ambiguity/unreadable checks for the
+        // whole sweep. Each resolved candidate still gets a fresh SessionGet.
+        let catalogue = self.core.registry().catalogue();
         for (hint, endpoint) in candidates {
-            let selected = self.selected(&hint, &endpoint);
+            let selected = catalogue.as_ref().is_ok_and(|catalogue| {
+                self.selected_with(&hint, &endpoint, || {
+                    AgentResolver::resolve_from_catalogue(
+                        catalogue,
+                        hint.binding_id.clone(),
+                        hint.generation.clone(),
+                        None,
+                        None,
+                    )
+                })
+            });
             let changed = {
                 let mut entries = self
                     .entries

@@ -160,13 +160,14 @@ pub fn validate_session_items(session: &Session) -> Result<(), ValidationError> 
             "rounds",
         )?;
     }
+    let item_index = items::ItemValidationIndex::new(session);
     for (id, item) in &session.items.0 {
         require(
             id == &item.id,
             "items.id",
             ValidationErrorKind::IdentityMismatch,
         )?;
-        validate_item(session, item)?;
+        items::validate_candidate_indexed(session, item, true, &item_index)?;
     }
     // These frozen bodies obey the same content bounds as live item/owner text.
     // Queue state, attempt linkage and accepted-answer semantics are not checked.

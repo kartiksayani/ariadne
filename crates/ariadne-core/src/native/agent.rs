@@ -1,10 +1,10 @@
 //! One native registered-binding resolver shared by installed agent transports.
 use crate::{AgentContext, AgentReadScope, CoreError, CoreErrorCode, RegisteredSession};
 use ariadne_domain::models::*;
-use ariadne_store::registry::Registry;
+use ariadne_store::registry::{Registry, RegistryCatalogue};
 use std::path::Path;
 
-/// Routing is reconstructed from authoritative retained snapshots on every call.
+/// Routing is reconstructed from authoritative retained snapshots.
 /// This helper carries no provider lease, cached generation or mutable eligibility.
 pub struct AgentResolver;
 impl AgentResolver {
@@ -24,11 +24,32 @@ impl AgentResolver {
             ));
         }
         let catalogue = registry.catalogue().map_err(super::errors::registry)?;
+        Self::resolve_from_catalogue(&catalogue, binding_id, generation, source, attempt_id)
+    }
+    /// Resolve a binding from one complete, freshly captured native catalogue.
+    /// This does not prove current dispatch eligibility; callers must retain
+    /// their authoritative session/transaction checks after resolving the route.
+    pub fn resolve_from_catalogue(
+        catalogue: &RegistryCatalogue,
+        binding_id: UuidV4,
+        generation: UuidV4,
+        source: Option<UuidV4>,
+        attempt_id: Option<UuidV4>,
+    ) -> Result<AgentContext, CoreError> {
+        if source.is_some() != attempt_id.is_some() {
+            return Err(invalid(
+                "Source input and attempt must both be supplied or both absent.",
+            ));
+        }
         let mut found = None;
-        for project in catalogue.projects {
-            let project = project.result.map_err(super::errors::store)?;
-            for outcome in project.sessions.map_err(super::errors::store)? {
-                let session = outcome.result.map_err(super::errors::store)?;
+        for project in &catalogue.projects {
+            let project = project.result.as_ref().map_err(super::errors::store_ref)?;
+            for outcome in project
+                .sessions
+                .as_ref()
+                .map_err(super::errors::store_ref)?
+            {
+                let session = outcome.result.as_ref().map_err(super::errors::store_ref)?;
                 if session.bindings.0.contains_key(&binding_id) && found.replace(session).is_some()
                 {
                     return Err(CoreError::new(
@@ -90,7 +111,10 @@ impl AgentResolver {
         // Do not precheck selected route, generation, active attempt or seal: Apply's
         // locked exact receipt replay must remain available after rebind/reconciliation.
         Ok(AgentContext::from_trusted_entrypoint(
-            RegisteredSession::from_trusted_entrypoint(session.project_id, session.id),
+            RegisteredSession::from_trusted_entrypoint(
+                session.project_id.clone(),
+                session.id.clone(),
+            ),
             binding_id,
             generation,
             scope,

@@ -574,6 +574,16 @@ routing and canonical actor scope, then hashes the recursively sorted tuple.
 The operation UUID selects the actor-scoped receipt; it is not part of that
 command digest. Durable results remain the canonical typed receipt union.
 
+Read-only snapshots capture owned bytes under the same stable session mutex/file
+lock and directory-relative safety checks. They release those guards and any
+enclosing project lock before decoding and fully validating the capture. Project
+metadata identity is still checked before coordination files can be created.
+No unvalidated snapshot reaches a caller. Locked byte capture is the read's
+freshness observation point; a subsequent writer does not change its owned bytes.
+Catalogue captures preserve per-session errors and diagnostic no-write behavior.
+This does not change the mutation algorithm below; see
+[ADR-0065](../../adr/ADR-0065-validate-captured-reads-outside-storage-locks.md).
+
 The transaction follows this algorithm:
 
 1. Resolve project/session from registered IDs, not arbitrary renderer paths. Open canonical root and `.ariadne` descendants with no-follow checks. Reject symlinked store/lock targets and unsafe filesystem types; account for path-to-use races using directory-relative opens in the OS module.
@@ -775,9 +785,9 @@ validated snapshot revision even if source changes just after that check.
 The canonical hash covers deterministic full Session serialization plus selected
 topic ID; unrelated source revision changes conservatively stale the preview.
 Target receipt replay occurs before source IO and again under the target lock.
-The stable locked read captures the validated immutable source snapshot and is
-the freshness observation/linearization point. Hash/revision checks use that owned
-snapshot after releasing its lock, before the sole target transaction. There are
+The stable locked read captures immutable source bytes and is the freshness
+observation/linearization point. After releasing the lock, decode and fully validate
+those bytes, then check the owned snapshot's hash/revision before the sole target transaction. There are
 no simultaneous session locks, source publication or cross-file journal. Reject source == target.
 Two-pass maps include answers as well as topics/items/messages/rounds. Only live
 Agent owner/recipient routing moves to the explicitly selected target binding;

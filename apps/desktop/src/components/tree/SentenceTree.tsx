@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { Item, ItemOwner, ItemStatus } from '../../generated/domain/models';
 import type { SessionPreferences } from '../../generated/core';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
@@ -23,11 +23,11 @@ const visualStatus = (status: Item['status']): Status => status === 'waiting_on_
 const statuses: readonly ItemStatus[] = ['open', 'waiting_on_me', 'in_progress', 'decided', 'done', 'dropped', 'replaced'];
 const editable = (target: EventTarget | null) => target instanceof HTMLElement
   && !!target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"]');
-type RowProps = { row: SentenceRow; selected: boolean; focused: boolean; later: boolean;
+type RowProps = { row: SentenceRow; selected: boolean; focused: boolean; later: boolean; toggleDisabled: boolean;
   remember: (id: string, element: HTMLDivElement | null) => void; focus: (id: string) => void;
   select: (id: string) => void; toggle: (id: string) => void; keyboard: (event: KeyboardEvent<HTMLDivElement>, id: string) => void };
 
-const SentenceItem = memo(function SentenceItem({ row, selected, focused, later, remember, focus, select, toggle, keyboard }: RowProps) {
+const SentenceItem = memo(function SentenceItem({ row, selected, focused, later, toggleDisabled, remember, focus, select, toggle, keyboard }: RowProps) {
   const item = row.item;
   return <TreeRow item={{ id: item.id, question: item.question, status: visualStatus(item.status),
     explanation: item.type === 'explanation', ask: item.ask ?? undefined, note: item.note ?? undefined,
@@ -35,7 +35,7 @@ const SentenceItem = memo(function SentenceItem({ row, selected, focused, later,
   depth={row.depth} selected={selected} focused={focused} context={row.context}
   tabIndex={focused ? 0 : -1} rowRef={element => remember(item.id, element)} onFocus={() => focus(item.id)}
   onKeyDown={event => keyboard(event, item.id)} onSelect={() => select(item.id)} onToggle={() => toggle(item.id)}
-  hasChildren={row.childCount > 0} expanded={row.expanded}
+  hasChildren={row.childCount > 0} expanded={row.expanded} toggleDisabled={toggleDisabled}
   collapsedSummary={!row.expanded && row.activeDescendants > 0 ? `${row.activeDescendants} active descendants` : undefined}
   replacement={row.replacement ? { question: row.replacement.question, status: visualStatus(row.replacement.status),
     onReveal: () => select(row.replacement!.id) } : undefined} />;
@@ -43,7 +43,7 @@ const SentenceItem = memo(function SentenceItem({ row, selected, focused, later,
   && a.row.depth === b.row.depth && a.row.context === b.row.context && a.row.expanded === b.row.expanded
   && a.row.childCount === b.row.childCount && a.row.activeDescendants === b.row.activeDescendants
   && a.row.replacement?.id === b.row.replacement?.id && a.row.replacement?.revision === b.row.replacement?.revision
-  && a.selected === b.selected && a.focused === b.focused && a.later === b.later
+  && a.selected === b.selected && a.focused === b.focused && a.later === b.later && a.toggleDisabled === b.toggleDisabled
   && a.remember === b.remember && a.focus === b.focus && a.select === b.select && a.toggle === b.toggle && a.keyboard === b.keyboard);
 
 export function SentenceTree({ store, routes, view, later, reveal, saveView, saveLater, onReveal }: SentenceTreeProps) {
@@ -55,16 +55,21 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   const [writing, setWriting] = useState(false);
   const [search, setSearch] = useState(view.filters.search);
   const [pendingSearch, setPendingSearch] = useState<{ store: SessionStore; text: string } | null>(null);
+  // Row projection survives submission; pendingSearch only queues unsubmitted text.
+  const [searchPreview, setSearchPreview] = useState<{ store: SessionStore; text: string } | null>(null);
+  const searchEdited = useRef(false), searchBlocked = useRef(false);
   const elements = useRef(new Map<string, HTMLDivElement>()), container = useRef<HTMLDivElement>(null);
-  const searchInput = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null), ownerFocus = useRef<HTMLButtonElement | null>(null);
   const request = useRef(0), mounted = useRef(true);
-  const latest = useRef({ view, saveView, saveLater, onReveal, routes, later, state, writing });
-  latest.current = { view, saveView, saveLater, onReveal, routes, later, state, writing };
-  const offeredReveal = reveal ?? localReveal;
+  const latest = useRef({ view, saveView, saveLater, onReveal, routes, later, state, writing, search });
+  latest.current = { view, saveView, saveLater, onReveal, routes, later, state, writing, search };
+  const offeredReveal = localReveal ?? reveal ?? null;
   const currentReveal = offeredReveal === dismissedReveal ? null : offeredReveal;
   const belongs = currentReveal?.store === store;
   const revealedId = belongs && currentReveal.kind === 'item' ? currentReveal.route.item_id : null;
-  const projection = session ? sentenceRows(session, view, later,
+  const preview = searchPreview?.store === store ? searchPreview : null;
+  const projectedView = useMemo(() => preview ? { ...view, filters: { ...view.filters, search: preview.text } } : view, [view, preview]);
+  const projection = session ? sentenceRows(session, projectedView, later,
     belongs && currentReveal.kind === 'item' ? currentReveal.temporaryExpandedItemIds : [], revealedId) : null;
   const rows = projection?.rows ?? [];
   const currentRows = useRef(rows); currentRows.current = rows;
@@ -80,12 +85,12 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     let confirmed = false;
     try {
       confirmed = await operation();
-      if (!confirmed && mounted.current) setError('The view change was not confirmed. Keep the current view and reconcile its preferences.');
+      if (!confirmed && mounted.current) setError('The view change was not confirmed. Reconcile its preferences.');
     } catch (failure: unknown) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'The view change could not be saved.'); }
     finally { if (mounted.current) {
       // Only an unsubmitted search may follow a confirmed write. Failed or
       // uncertain operations keep their original explicit reconciliation path.
-      if (!confirmed) setPendingSearch(null);
+      if (!confirmed) { searchBlocked.current = true; setPendingSearch(null); }
       latest.current.writing = false; setWriting(false);
     } }
   }, []);
@@ -132,12 +137,27 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     event.preventDefault();
     if (destination) { setFocusId(destination); elements.current.get(destination)?.focus({ preventScroll: true }); }
   }, [select, toggle, write]);
-  useEffect(() => { setSearch(view.filters.search); setPendingSearch(null); }, [store, view.filters.search]);
+  useLayoutEffect(() => {
+    searchEdited.current = false; searchBlocked.current = false;
+    setSearch(latest.current.view.filters.search); setPendingSearch(null); setSearchPreview(null);
+  }, [store]);
   useEffect(() => {
-    if (search === view.filters.search) return;
-    const timer = setTimeout(() => setPendingSearch({ store, text: search }), 100);
+    if (searchEdited.current && view.filters.search !== latest.current.search) return;
+    searchEdited.current = false;
+    setSearch(view.filters.search); setPendingSearch(null); setSearchPreview(null);
+  }, [view.filters.search]);
+  useEffect(() => {
+    if (!searchEdited.current) return;
+    const timer = setTimeout(() => {
+      if (!searchEdited.current) return;
+      if (search === latest.current.view.filters.search) {
+        searchEdited.current = false; setSearchPreview(null); setPendingSearch(null); return;
+      }
+      setSearchPreview({ store, text: search });
+      if (!searchBlocked.current) setPendingSearch({ store, text: search });
+    }, 100);
     return () => clearTimeout(timer);
-  }, [search, view.filters.search, store]);
+  }, [search, store]);
   useEffect(() => {
     if (!pendingSearch || writing || state.status !== 'ready') return;
     setPendingSearch(null);
@@ -148,12 +168,28 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
       filters: { ...structuredClone(latest.current.view.filters), search: pendingSearch.text } } as SessionPreferences));
   }, [pendingSearch, writing, state.status, store, search, view, write]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
-  useEffect(() => {
-    ++request.current; setLocalReveal(null);
+  // A later tree selection supersedes the last external route. A new external
+  // route supersedes that local selection before rows and focus are painted.
+  useLayoutEffect(() => { setLocalReveal(null); }, [reveal]);
+  useLayoutEffect(() => {
+    ++request.current; setLocalReveal(null); ownerFocus.current = null;
     setFocusId(reveal?.store === store && reveal.kind === 'item' ? reveal.route.item_id : latest.current.view.selected_item_id);
-    // External reveal changes are handled by the layout effect; this reset is
-    // only for replacing the opened session store.
+    // Reset before the row-focus layout effect chooses a visible keyboard entry.
+    // A passive reset would overwrite that fallback when saved selection is null.
+    // External reveals are handled below; this reset only replaces the store.
   }, [store]);
+  useLayoutEffect(() => {
+    if (writing) {
+      const moved = (event: FocusEvent) => { if (event.target !== ownerFocus.current && event.target !== document.body) ownerFocus.current = null; };
+      document.addEventListener('focusin', moved);
+      return () => document.removeEventListener('focusin', moved);
+    }
+    const button = ownerFocus.current; ownerFocus.current = null;
+    // Saving disables controls before click-first activation can focus them;
+    // reordering can also move an already focused owner and blur it.
+    // Restore only that pending control, never a deliberate new focus target.
+    if (button?.isConnected && document.activeElement === document.body) button.focus({ preventScroll: true });
+  }, [store, writing, view.filters.owners]);
   const previousFocus = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (!rows.length) return;
@@ -169,8 +205,13 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     const scroller = container.current;
     if (!scroller) return;
     const top = scroller.getBoundingClientRect().top;
-    const first = [...elements.current].find(([, element]) => element.getBoundingClientRect().bottom > top);
-    anchor.current = first ? { id: first[0], offset: first[1].getBoundingClientRect().top - top } : null;
+    // Ref callbacks may reinsert a rerendered row after its DOM successors.
+    const first = currentRows.current.find(row => {
+      const element = elements.current.get(row.item.id);
+      return element && element.getBoundingClientRect().bottom > top;
+    });
+    const element = first && elements.current.get(first.item.id);
+    anchor.current = first && element ? { id: first.item.id, offset: element.getBoundingClientRect().top - top } : null;
   }, []);
   useLayoutEffect(() => {
     const scroller = container.current;
@@ -193,6 +234,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     captureAnchor();
   }, [currentReveal, belongs, captureAnchor]);
   const clearFilters = () => {
+    searchEdited.current = false; setSearch(view.filters.search); setPendingSearch(null); setSearchPreview(null);
     const next = structuredClone(view) as SessionPreferences;
     next.filters = { ...next.filters, search: '', statuses: [], owners: [], topic_id: null, hide_later: false };
     void write(() => latest.current.saveView(next));
@@ -210,7 +252,10 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
       event.preventDefault(); searchInput.current?.focus();
     }
   }}>
-    <label className="sentence-search">Search sentences<input ref={searchInput} type="search" value={search} onChange={event => { setPendingSearch(null); setSearch(event.target.value); }} disabled={disabled} /></label>
+    <label className="sentence-search">Search sentences<input ref={searchInput} type="search" value={search} onChange={event => {
+      searchEdited.current = true; searchBlocked.current = false;
+      setPendingSearch(null); setSearch(event.target.value);
+    }} disabled={disabled} /></label>
     <div className="sentence-filters" aria-label="Sentence filters">
       <label>Topic<select value={view.filters.topic_id ?? ''} disabled={disabled} onChange={event => filter(next => { next.topic_id = event.target.value || null; })}>
         <option value="">All topics</option>{session && Object.values(session.topics).filter(topic => !!topic)
@@ -220,16 +265,21 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
         disabled={disabled} aria-pressed={view.filters.statuses.includes(status)} className="ref-button ref-ghost"
         onClick={() => filter(next => { next.statuses = next.statuses.includes(status) ? next.statuses.filter(value => value !== status) : [...next.statuses, status]; })}>
         {STATUS[visualStatus(status)].label}</button>)}</div>
-      <div role="group" aria-label="Item owner">{owners.map((owner, index) => <button type="button" key={index}
+      <div role="group" aria-label="Item owner">{owners.map(owner => <button type="button"
+        key={owner.kind === 'me' ? 'me' : owner.kind === 'other' ? `other:${owner.name}` : `agent:${owner.binding_id}`}
         disabled={disabled} aria-pressed={view.filters.owners.some(value => sameOwner(value, owner))} className="ref-button ref-ghost"
-        onClick={() => filter(next => { next.owners = next.owners.some(value => sameOwner(value, owner))
-          ? next.owners.filter(value => !sameOwner(value, owner)) : [...next.owners, structuredClone(owner) as ItemOwner]; })}>
+        onClick={event => {
+          ownerFocus.current = event.currentTarget;
+          filter(next => { next.owners = next.owners.some(value => sameOwner(value, owner))
+            ? next.owners.filter(value => !sameOwner(value, owner)) : [...next.owners, structuredClone(owner) as ItemOwner]; });
+        }}>
         {owner.kind === 'me' ? 'Me' : owner.kind === 'other' ? owner.name : `Agent · ${owner.binding_id}`}</button>)}</div>
       <label><input type="checkbox" checked={view.filters.hide_later} disabled={disabled} onChange={event => filter(next => { next.hide_later = event.target.checked; })} />Hide Later</label>
       <label><input type="checkbox" checked={view.filters.archived} disabled={disabled} onChange={event => filter(next => { next.archived = event.target.checked; })} />Archive</label>
     </div>
     {state.status !== 'ready' && <p role="status">{state.error?.message ?? (session ? 'This session is stale. Showing the last valid snapshot.' : 'Loading the registered session…')}</p>}
     {error && <p role="alert">{error}</p>}
+    {preview && preview.text !== view.filters.search && <p role="status">Search preview · {writing || pendingSearch ? 'save pending' : 'save not confirmed'}</p>}
     {belongs && currentReveal.kind === 'missing_item' && <p role="status">{currentReveal.banner}</p>}
     {outside && <p role="status">Item {outside.item.id} is outside the current filters. <button type="button" onClick={() => setDismissedReveal(currentReveal)}>Dismiss temporary reveal</button></p>}
     {projection && !rows.length && <p>No sentences match these filters. <button type="button" disabled={writing || state.status !== 'ready'} onClick={clearFilters}>Clear filters</button></p>}
@@ -241,7 +291,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
         }
       }}>
       {rows.map(row => <SentenceItem key={row.item.id} row={row} selected={view.selected_item_id === row.item.id} focused={focusId === row.item.id}
-        later={later.has(row.item.id)} remember={remember} focus={focus} select={select} toggle={toggle} keyboard={keyboard} />)}
+        later={later.has(row.item.id)} toggleDisabled={row.childCount > 0 && disabled} remember={remember} focus={focus} select={select} toggle={toggle} keyboard={keyboard} />)}
     </div>
     {projection && <footer>{rows.length} visible · {projection.matchingTotal} matching · {projection.scopeTotal} in this scope · ↑/↓ or j/k to move · Enter to open · z for Later</footer>}
   </section>;

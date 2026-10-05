@@ -943,7 +943,10 @@
         "P3.3",
         "P0.5"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/59"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/59",
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/92"
+      }
     },
     {
       "id": "P3.5",
@@ -1049,7 +1052,10 @@
         "P3.3",
         "P3.5"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/74"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/74",
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/88"
+      }
     },
     {
       "id": "P3.8",
@@ -1130,7 +1136,10 @@
         "P0.4",
         "P0.6"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/46"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/46",
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/86"
+      }
     },
     {
       "id": "P4.2",
@@ -1171,7 +1180,10 @@
         "P4.1",
         "P0.5"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/53"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/53",
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/88"
+      }
     },
     {
       "id": "P4.3",
@@ -1204,7 +1216,10 @@
       "implementation_depends_on": [
         "P4.1"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73",
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/86"
+      }
     },
     {
       "id": "P4.4",
@@ -1544,7 +1559,8 @@
         "P4.4",
         "P0.6"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/75"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/75",
+      "active": true
     },
     {
       "id": "P6.2",
@@ -1616,7 +1632,10 @@
         "P0.5",
         "P0.6"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/81"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/81",
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/92"
+      }
     },
     {
       "id": "P6.4",
@@ -1647,7 +1666,8 @@
         "rtk proxy npm run test:install",
         "From clean checkout on recorded Mac: rtk proxy make install; rtk proxy ariadne doctor --json; rtk proxy make uninstall"
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/92"
     },
     {
       "id": "P7.1",

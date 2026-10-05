@@ -85,6 +85,25 @@ export async function observeOwned(root, binary, nonce, launcher, timeout = 6000
   }
   throw new Error('Startup witness deadline');
 }
+export async function activateOwned(root, binary, nonce) {
+  const owned = JSON.parse(await readFile(join(root, 'observed.json'), 'utf8'));
+  const launcher = JSON.parse(await readFile(join(root, 'launcher.json'), 'utf8'));
+  const current = identity(owned.pid);
+  if (owned.exe !== binary || current.exe !== binary || current.birth !== owned.birth) {
+    throw new Error('Refusing to activate changed native process identity');
+  }
+  // Recheck the startup nonce and actual ancestry against the owned launcher;
+  // a saved PID alone cannot authorize affecting another macOS application.
+  const verified = await observeOwned(root, binary, nonce, launcher.pid, 1000);
+  if (verified.pid !== owned.pid || verified.birth !== owned.birth) throw new Error('Native activation witness identity mismatch');
+  const source = `function run(args) {
+    ObjC.import('AppKit');
+    const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(args[0]));
+    app.unhide;
+    if (!app.activateWithOptions(2)) throw new Error('Owned native application activation failed');
+  }`;
+  execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', source, String(owned.pid)], { encoding: 'utf8', timeout: 5000 });
+}
 export async function releasedLeases(home, bindingId) {
   const paths = [join(home, 'run/runtime.lock'), join(home, 'run/leases', `${bindingId}.lock`)];
   const source = 'import fcntl,sys\nfor path in sys.argv[1:]:\n with open(path,"r+b") as lock:\n  fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)\n';
@@ -160,6 +179,11 @@ export function buildEnv(target, e2e = false) {
   if (e2e) env.VITE_ARIADNE_E2E = '1';
   return env;
 }
+export function nativeBuildEnv(target, e2e = false) {
+  // Match shipped Rust optimization without disabling dev assertions or E2E
+  // isolation. This override belongs only to the two native acceptance builds.
+  return { ...buildEnv(target, e2e), CARGO_PROFILE_DEV_OPT_LEVEL: '1', CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: 'true' };
+}
 export async function runNative() {
   if (process.platform !== 'darwin') throw new Error('Native E2E requires a logged-in macOS GUI session');
   const port = Number(process.env.ARIADNE_E2E_PORT || '4445'); await portFree(port);
@@ -172,12 +196,19 @@ export async function runNative() {
   try {
     const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--bundles', 'app', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
     const runtimeCommand = [process.execPath, join(repo, 'node_modules/@wdio/cli/bin/wdio.js'), 'run', 'wdio.native.conf.mjs'];
-    const details = { root, port, nonce, binary, toolchain: toolchain(), buildCommand, runtimeCommand, cwd: desktop };
+    const nativeEnv = nativeBuildEnv(join(repo, 'target/native-e2e'), true), cliEnv = nativeBuildEnv(join(repo, 'target/native-e2e'));
+    const cliBuildCommand = ['cargo', 'build', '-p', 'ariadne-cli', '--locked'];
+    const nativeProfile = { profile: 'dev', optLevel: Number(nativeEnv.CARGO_PROFILE_DEV_OPT_LEVEL),
+      debugAssertions: nativeEnv.CARGO_PROFILE_DEV_DEBUG_ASSERTIONS === 'true', artifactDirectory: 'debug' };
+    const details = { root, port, nonce, binary, toolchain: toolchain(), buildCommand, cliBuildCommand, nativeProfile, runtimeCommand, cwd: desktop };
     await json(join(evidence, 'run.json'), details);
-    await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: buildEnv(join(repo, 'target/native-e2e'), true), log: join(evidence, 'build.log') });
-    await command('cargo', ['build', '-p', 'ariadne-cli', '--locked'], { env: buildEnv(join(repo, 'target/native-e2e')), log: join(evidence, 'cli-build.log') });
+    await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: nativeEnv, log: join(evidence, 'build.log') });
+    await command(cliBuildCommand[0], cliBuildCommand.slice(1), { env: cliEnv, log: join(evidence, 'cli-build.log') });
     await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs'], {
       env: { ...process.env, ARIADNE_FIXTURE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'fixture-cli.log'),
+    });
+    await command(process.execPath, ['--test', 'tests/e2e/tree/fixture.test.mjs', 'tests/e2e/process-contract/search-timing-observation.test.mjs'], {
+      env: { ...process.env, ARIADNE_TREE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'tree-fixture.log'),
     });
     await json(join(evidence, 'run.json'), { ...details, binarySha256: await digest(binary) });
     const env = { ...buildEnv(join(repo, 'target/native-e2e')), ARIADNE_HOME: join(root, 'data'), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: nonce, ARIADNE_E2E_BINARY: binary, ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: evidence };

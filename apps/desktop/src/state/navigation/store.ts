@@ -113,6 +113,10 @@ export class NavigationStore {
         const projectId = selection.kind === 'project' ? selection.project_id : null;
         const [projects, sessions] = await Promise.all([catalogue.projects(this.service), catalogue.sessions(this.service, projectId)]);
         if (this.stopped || epoch !== this.epoch) continue;
+        // A receipt can advance preferences while these catalogue reads wait.
+        // Discard a formerly valid capture without regressing that saved state
+        // or reporting an invalid read; normal reconciliation captures it anew.
+        if (preferences.revision < Math.max(this.state.preferences?.revision ?? 0, this.preferencesFloor)) continue;
         const registered = new Set(projects.projects.items.map(project => project.project_id));
         if (sessions.sessions.items.some(session => !registered.has(session.project_id))) {
           // Independent read captures can straddle registration. Keep the last
@@ -278,7 +282,14 @@ export class NavigationStore {
       pending.confirmed(receipt);
       this.pending = null;
       this.publish({ writing: false, pendingOperationId: null });
-      await this.refresh();
+      // View/Later receipts already publish the exact saved preferences. Their
+      // completion must not wait for unrelated catalogue reads, which can remain
+      // busy under periodic reconciliation. Navigation/global and domain edits
+      // retain their immediate refresh; view edits reconcile on the normal timer.
+      const command = pending.request.command;
+      const viewOnly = command.command === 'preferences_patch' && command.params.entries.every(entry =>
+        entry.kind === 'set_session_view' || entry.kind === 'set_later');
+      if (!viewOnly) await this.refresh();
       if ('project_id' in receipt) await this.navigate({ kind: 'project', project_id: receipt.project_id });
       return true;
     } catch (error: unknown) {
