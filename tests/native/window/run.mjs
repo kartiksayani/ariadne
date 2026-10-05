@@ -15,8 +15,9 @@ import { withCancellation } from './cancellation.mjs';
 const ELEMENT = 'element-6066-11e4-a52e-4f735466cecf';
 const CLOSE = "//XCUIElementTypeButton[@identifier='_XCUI:CloseWindow']";
 const MINIMIZE = "//XCUIElementTypeButton[@identifier='_XCUI:MinimizeWindow']";
-const TRAY = "//XCUIElementTypeMenuBarItem[.//XCUIElementTypeMenuItem[@title='Show Ariadne']]";
-const menu = title => `//XCUIElementTypeMenuItem[@title='${title}']`;
+const TRAY = '//XCUIElementTypeStatusItem';
+const TRAY_MENU = "//XCUIElementTypeMenu[XCUIElementTypeMenuItem[@title='Show Ariadne']]";
+const menu = title => `./XCUIElementTypeMenuItem[@title='${title}']`;
 
 async function until(check, label, timeout = 20000, signal) {
   const deadline = Date.now() + timeout;
@@ -30,8 +31,8 @@ async function until(check, label, timeout = 20000, signal) {
   throw new Error(`${label} did not complete before its deadline`);
 }
 
-function mac2Client(trace, signal) {
-  let session;
+export function mac2Client(trace, signal, captureTraySource) {
+  let session, trayMenu;
   async function request(method, path, payload, cleanup = false) {
     const response = await globalThis.fetch(`http://127.0.0.1:4723${path}`, {
       method, headers: { 'Content-Type': 'application/json' },
@@ -44,13 +45,19 @@ function mac2Client(trace, signal) {
     return result.value;
   }
   const scoped = (method, path, payload) => request(method, `/session/${session}${path}`, payload);
-  const elements = xpath => scoped('POST', '/elements', { using: 'xpath', value: xpath });
-  async function unique(xpath) {
-    const found = await elements(xpath);
+  const elements = (xpath, parent) => scoped('POST', parent ? `/element/${parent}/elements` : '/elements', { using: 'xpath', value: xpath });
+  async function unique(xpath, parent) {
+    const found = await elements(xpath, parent);
     assert.equal(found.length, 1, `Expected one genuine AX element for ${xpath}; inspect retained source`);
     return found[0][ELEMENT];
   }
   const click = elementId => scoped('POST', '/execute/sync', { script: 'macos: click', args: [{ elementId }] });
+  async function trayItem(title) {
+    assert.ok(trayMenu, 'Open the genuine tray menu before choosing an action');
+    const item = await unique(menu(title), trayMenu);
+    assert.equal(await scoped('GET', `/element/${item}/attribute/hittable`), 'true', `Tray ${title} is not hittable`);
+    return item;
+  }
   return {
     async attach(fixture, bundleId) {
       const value = await request('POST', '/session', { capabilities: { alwaysMatch: {
@@ -62,7 +69,7 @@ function mac2Client(trace, signal) {
       session = value.sessionId;
       assert.ok(session, 'Mac2 returned no session');
     },
-    async detach() { if (session) { await request('DELETE', `/session/${session}`, undefined, true); session = undefined; } },
+    async detach() { if (session) { await request('DELETE', `/session/${session}`, undefined, true); session = undefined; trayMenu = undefined; } },
     source: () => scoped('GET', '/source'),
     unique, click,
     async closeVisible() {
@@ -78,10 +85,21 @@ function mac2Client(trace, signal) {
       const startX = rect.x + rect.width / 2, startY = rect.y + rect.height / 2;
       return scoped('POST', '/execute/sync', { script: 'macos: clickAndDrag', args: [{ duration: 0.2, startX, startY, endX: startX + 16, endY: startY + 16 }] });
     },
-    async openTray() { await click(await unique(TRAY)); },
-    async choose(title) { await click(await unique(menu(title))); },
+    async openTray() {
+      trayMenu = undefined;
+      const status = await unique(TRAY);
+      assert.equal(await scoped('GET', `/element/${status}/attribute/hittable`), 'true', 'Native status item is not hittable');
+      await click(status);
+      // The unopened status item is a leaf in the real AX tree. Preserve the
+      // actual post-click hierarchy before requiring its actionable menu.
+      const source = await scoped('GET', '/source');
+      await captureTraySource?.(source);
+      trayMenu = await unique(TRAY_MENU);
+      await trayItem('Show Ariadne');
+    },
+    async choose(title) { await click(await trayItem(title)); trayMenu = undefined; },
     async pinSelected() {
-      const selected = await scoped('GET', `/element/${await unique(menu('Pin'))}/selected`);
+      const selected = await scoped('GET', `/element/${await trayItem('Pin')}/selected`);
       assert.equal(typeof selected, 'boolean', 'Mac2 has no genuine Pin check-state observation');
       return selected;
     },
@@ -104,7 +122,8 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
   const root = await mkdtemp('/private/tmp/ariadne-window-');
   const data = await mkdtemp('/private/tmp/ariadne-window-data-');
   const trace = [], services = [], launches = [];
-  const client = mac2Client(trace, signal);
+  let trayOpen = 0;
+  const client = mac2Client(trace, signal, source => writeFile(join(evidence, `tray-open-${++trayOpen}.xml`), source));
   const wait = (check, label, timeout) => until(check, label, timeout, signal);
   let fixture, child, primary, ownership, failure, cleanupFailure;
   const env = { PATH: process.env.PATH, LANG: 'en_US.UTF-8', TMPDIR: process.env.TMPDIR || '/private/tmp' };
