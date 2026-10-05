@@ -34,7 +34,10 @@ function run(args) {
   if (!$.AXIsProcessTrustedWithOptions(null)) throw new Error('osascript Accessibility permission is unavailable; no prompt was requested');
   const services = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.systemevents');
   // JXA bridges NSUInteger (unsigned long) as a string; "0" is truthy.
-  if (Number(services.count) === 0) return JSON.stringify({ serviceRunning: false });
+  if (Number(services.count) === 0) {
+    if (args[0] === 'preflight') return JSON.stringify({ serviceRunning: false });
+    throw new Error('System Events is unavailable during native Quit acknowledgement');
+  }
   const address = $.NSAppleEventDescriptor.descriptorWithProcessIdentifier(services.objectAtIndex(0).processIdentifier);
   const permission = $.AEDeterminePermissionToAutomateTarget(address.aeDesc, 0x2a2a2a2a, 0x2a2a2a2a, false);
   if (permission !== 0) throw new Error('System Events automation permission is unavailable (' + permission + '); no prompt was requested');
@@ -95,6 +98,10 @@ export async function acknowledgeQuitNote(root, binary, nonce, owned, signal) {
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     await delay(25);
   }
+  // Build and the App journey can outlast the initial prerequisite check.
+  // Refresh it only after the owned Quit request and process witness match.
+  await verify();
+  await preflightQuitNote();
   const end = Date.now() + 5000;
   while (Date.now() < end) {
     if (!alive(owned.pid)) throw new Error('Owned app exited without the expected native Quit note');
@@ -102,7 +109,7 @@ export async function acknowledgeQuitNote(root, binary, nonce, owned, signal) {
     if (native('inspect', owned.pid)) {
       await verify();
       const note = native('press', owned.pid);
-      if (!note?.pressed || note.pid !== owned.pid) throw new Error('Native Quit note was not acknowledged');
+      if (!note?.pressed || note.pid !== owned.pid) throw new Error('Native Quit note was not acknowledged: ' + JSON.stringify(note));
       return note;
     }
     await delay(25);

@@ -100,6 +100,38 @@ test('missing Accessibility or Automation fails before UI observation without re
   const absent = nativeFixture({ serviceRunning: false });
   assert.deepEqual(absent.run('preflight'), { serviceRunning: false });
   assert.deepEqual(absent.effects(), { pressed: 0, applicationCalls: 0, permissionChecks: 0 });
+  for (const mode of ['inspect', 'press']) {
+    assert.throws(() => absent.run(mode), /System Events is unavailable during native Quit acknowledgement/);
+    assert.deepEqual(absent.effects(), { pressed: 0, applicationCalls: 0, permissionChecks: 0 });
+  }
+});
+
+test('acknowledgement refreshes prerequisites at owned Quit and revalidates the actual dialog before pressing', async () => {
+  const owned = { pid, exe: '/owned/Ariadne', birth: 'owned birth' }, nonce = 'owned Quit';
+  for (const changed of [false, true]) {
+    let refreshed = false;
+    const actual = nativeFixture(), replacement = dialog();
+    replacement.texts[1] = 'A different dialog';
+    const changedNative = nativeFixture({ dialogs: [replacement] });
+    const acknowledge = runInNewContext(`(${acknowledgeQuitNote.toString()})`, {
+      join, readFile: async path => JSON.stringify(path.endsWith('launcher.json') ? { pid: 10 } : { pid, nonce }),
+      identity: () => owned, observeOwned: async () => owned, alive: () => true,
+      preflightQuitNote: async () => { refreshed = true; },
+      native: (mode, target) => {
+        assert.equal(target, pid);
+        assert.ok(refreshed, 'refresh prerequisites before observing the owned Quit dialog');
+        return (mode === 'press' && changed ? changedNative : actual).run(mode);
+      },
+    });
+    const result = acknowledge('/owned', owned.exe, nonce, owned);
+    if (changed) {
+      await assert.rejects(result, /Unexpected native Quit note text/);
+      assert.equal(actual.effects().pressed + changedNative.effects().pressed, 0);
+    } else {
+      assert.equal((await result).pressed, true);
+      assert.equal(actual.effects().pressed, 1);
+    }
+  }
 });
 
 test('request nonce/PID, process birth and launcher ancestry gate acknowledgement before native access', async () => {
