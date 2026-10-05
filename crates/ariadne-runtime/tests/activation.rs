@@ -481,6 +481,20 @@ fn claude_activation(terminal: bool) {
     ))
     .unwrap();
     assert_eq!(facts_ids.load(Ordering::SeqCst), ids_before);
+    // The refreshed evidence must be observed by that retained worker. Reaching
+    // another qualification proves progress past the interrupted observation;
+    // the heartbeat alone cannot prove the worker resumed its polling loop.
+    let qualification = files.pause_qualification(&rt);
+    assert!(outcomes.lock().unwrap().is_empty());
+    // Clear the evidence again before releasing the last process barrier. This
+    // also keeps later polls from starting fresh version subprocesses at Quit.
+    discovery.refresh_after_wake().unwrap();
+    drop(qualification);
+    assert_eq!(
+        observed.recv_timeout(Duration::from_secs(3)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+        "the retained worker must also survive its next observation"
+    );
     assert!(rt.block_on(call(home.path().into(), claim)).is_err());
     assert_eq!(
         rt.block_on(call(home.path().into(), control)).unwrap(),
