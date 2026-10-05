@@ -15,6 +15,7 @@ export function NavigationSentenceTree({ navigation, store, onReveal, highlighte
   if (!preferences || !view) return <p role="status">The saved view preferences are unavailable. Refresh registered navigation.</p>;
   const later = new Set(preferences.later.filter(item => item.project_id === route.project_id && item.session_id === route.session_id).map(item => item.item_id));
   return <SentenceTree store={store} routes={navigation.routes} view={view} later={later} reveal={state.reveal} highlightedItemIds={highlightedItemIds} onHoverItem={onHoverItem}
+    preferencesBusy={state.writing || state.pendingOperationId !== null}
     saveView={next => navigation.saveSessionView(next, preferences.revision)}
     saveLater={(itemId, value) => navigation.setLater({ ...route, item_id: itemId }, value, preferences.revision)} onReveal={onReveal} />;
 }
