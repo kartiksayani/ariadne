@@ -1,11 +1,48 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { treeBatch, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { publishTreeRequest, treeBatch, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+
+test('tree setup repeats only definitive Busy with the identical frozen request and stops on other failures', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-tree-retry-')), priorEvidence = process.env.ARIADNE_E2E_EVIDENCE;
+  try {
+    process.env.ARIADNE_E2E_EVIDENCE = root;
+    const cli = join(root, 'fixture-cli.mjs'), journal = join(root, 'calls.json'), sessionPath = join(root, 'session.json');
+    await writeFile(sessionPath, JSON.stringify({ operation_receipts: {} }));
+    const configuration = { cli, sessionPath, bindingId: 'binding', generation: 'generation', sessionId: 'session' };
+    const request = { op_id: randomUUID(), operations: [], expected_item_revisions: { 1: 7 } };
+    const script = async failures => {
+      await writeFile(journal, '[]');
+      // This executable tests only fixture retry classification; the separate
+      // corpus test and native journey retain the actual CLI/Core/Store.
+      await writeFile(cli, `#!${process.execPath}\nimport{readFileSync,writeFileSync}from'node:fs';let input='';for await(const bytes of process.stdin)input+=bytes;const path=${JSON.stringify(journal)},calls=JSON.parse(readFileSync(path));calls.push({args:process.argv.slice(2),request:JSON.parse(input)});writeFileSync(path,JSON.stringify(calls));const code=${JSON.stringify(failures)}[calls.length-1];console.log(JSON.stringify(code?{ok:false,error:{code}}:{ok:true,data:{session_id:'session'}}));process.exitCode=code?4:0;\n`);
+      await chmod(cli, 0o700);
+    };
+    const calls = async () => JSON.parse(await readFile(journal, 'utf8'));
+    await script(['store_busy', 'store_busy']);
+    assert.deepEqual(await publishTreeRequest(configuration, request, true), { request, receipt: { session_id: 'session' } });
+    const repeated = await calls(); assert.equal(repeated.length, 3);
+    assert.ok(repeated.every(call => JSON.stringify(call) === JSON.stringify(repeated[0])));
+    assert.deepEqual(repeated[0].request, request); assert.ok(repeated[0].args.includes('--json'));
+    for (const failure of ['revision_conflict', 'commit_uncertain', 'store_io', 'binding_mismatch', 'store_busy']) {
+      await script(failure === 'store_busy' ? [failure, failure, failure] : [failure]);
+      await assert.rejects(publishTreeRequest(configuration, request, true), new RegExp(failure));
+      assert.equal((await calls()).length, failure === 'store_busy' ? 3 : 1);
+    }
+    await script(['store_busy', 'revision_conflict']);
+    await assert.rejects(publishTreeRequest(configuration, request, true), /revision_conflict/); assert.equal((await calls()).length, 2);
+    await script(['store_busy']);
+    await assert.rejects(publishTreeRequest(configuration, request), /store_busy/); assert.equal((await calls()).length, 1, 'Live edit defaults to one attempt');
+    assert.deepEqual(JSON.parse(await readFile(sessionPath, 'utf8')), { operation_receipts: {} });
+  } finally {
+    if (priorEvidence === undefined) delete process.env.ARIADNE_E2E_EVIDENCE; else process.env.ARIADNE_E2E_EVIDENCE = priorEvidence;
+    await rm(root, { recursive: true });
+  }
+});
 
 test('2,000-item / 5,000-message corpus requests pass real CLI wire validation and reach the Core dispatch barrier', { timeout: 60000 }, async () => {
   const cli = process.env.ARIADNE_TREE_TEST_CLI;

@@ -113,15 +113,12 @@ export class WaitingStore {
   private ensureSubscriptions(): Promise<void> {
     if (this.setup) return this.setup;
     this.setup = (async () => {
-      const results = await Promise.allSettled([
-        this.service.subscribe('ariadne://session_changed', this.invalidate),
-        this.service.subscribe('ariadne://presence_changed', this.invalidate),
-      ]);
-      const subscriptions = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
-      if (this.stopped || results.some(result => result.status === 'rejected')) {
-        subscriptions.forEach(unsubscribe => unsubscribe());
-        if (!this.stopped) throw new ServiceFailure('transport');
-      } else this.subscriptions = subscriptions;
+      // Captured SessionStores qualify presence hints and notify this reader.
+      // Only durable session changes invalidate the complete queue capture;
+      // heartbeats must keep otherwise-current answer controls mounted.
+      const unsubscribe = await this.service.subscribe('ariadne://session_changed', this.invalidate);
+      if (this.stopped) unsubscribe();
+      else this.subscriptions = [unsubscribe];
     })().catch((error: unknown) => { this.setup = null; throw error; });
     return this.setup;
   }

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
+import { identity } from '../../../../scripts/run-native-e2e.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
@@ -10,12 +12,53 @@ const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
 const search = () => browser.$('.sentence-search input');
 const applyRequest = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
-async function apply(configuration, operations, expectedItemRevisions = {}, summary = '') {
+async function apply(configuration, operations, expectedItemRevisions = {}, summary = '', setup = false) {
   const request = { ...applyRequest(operations), expected_item_revisions: expectedItemRevisions, summary };
+  return publishTreeRequest(configuration, request, setup);
+}
+export async function publishTreeRequest(configuration, request, setup = false) {
   assert.ok(Buffer.byteLength(JSON.stringify(request)) < 512 * 1024, 'Every real CLI request remains within its protocol limit');
-  const result = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request);
-  assert.equal(result.code, 0); assert.equal(result.value.session_id, configuration.sessionId);
-  return { request, receipt: result.value };
+  const args = ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--json'];
+  const before = await snapshot(configuration), rejections = [];
+  const maximumRetries = setup ? 2 : 0;
+  for (let retry = 0; retry <= maximumRetries; retry++) {
+    const started = Date.now();
+    const result = await cliRequest(configuration.cli, args, request);
+    if (result.value.ok === true) {
+      assert.equal(result.code, 0); assert.equal(result.value.data.session_id, configuration.sessionId);
+      return { request, receipt: result.value.data };
+    }
+    const elapsedMs = Date.now() - started, after = await snapshot(configuration); rejections.push({ retry, elapsedMs, result, after });
+    await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, `tree-apply-${request.op_id}-failure.json`), JSON.stringify({ args, request, before, rejections }, null, 2));
+    // StoreBusy is a definitive lock-acquisition rejection before the batch
+    // callback. Only setup may repeat this exact frozen operation; uncertain
+    // writes, revision conflicts and every other error remain failures.
+    assert.ok(!after.operation_receipts[request.op_id], 'Rejected tree setup must have no saved receipt for this operation');
+    if (result.value.error.code !== 'store_busy' || retry === maximumRetries) {
+      if (result.value.error.code === 'store_busy' && process.env.ARIADNE_E2E_ROOT) await captureBusy(configuration);
+      assert.fail(result.output);
+    }
+  }
+  assert.fail('Bounded tree setup publication did not complete');
+}
+async function captureBusy(configuration) {
+  const evidence = process.env.ARIADNE_E2E_EVIDENCE, facts = {};
+  try {
+    const owned = await readJson(join(process.env.ARIADNE_E2E_ROOT, 'observed.json')), current = identity(owned.pid);
+    assert.equal(current.exe, process.env.ARIADNE_E2E_BINARY); assert.equal(current.birth, owned.birth); facts.owned = owned;
+    const lock = join(configuration.projectRoot, '.ariadne/locks', `${configuration.sessionId}.lock`);
+    try { facts.lockHolder = execFileSync('/usr/sbin/lsof', ['-nP', lock], { encoding: 'utf8', timeout: 5000 }); }
+    catch (error) { facts.lockHolderError = error.message; }
+    execFileSync('/usr/bin/sample', [String(owned.pid), '1', '-file', join(evidence, 'native-app-busy-sample.txt')], { encoding: 'utf8', timeout: 5000 });
+    const probes = [ ['read', '--binding', configuration.bindingId, '--generation', configuration.generation, '--view', 'items', '--limit', '1', '--json'],
+      ['preferences', 'get', '--json'] ];
+    facts.reads = [];
+    for (const args of probes) {
+      const started = Date.now(), result = await cliRequest(configuration.cli, args, undefined);
+      facts.reads.push({ args, elapsedMs: Date.now() - started, result });
+    }
+  } catch (error) { facts.observationError = error.message; }
+  await writeFile(join(evidence, 'native-app-busy.json'), JSON.stringify(facts, null, 2));
 }
 function item(reference, topicId, parent, question, status, owner, outcome = null) {
   return { op: 'item.add', ref: reference, topic: { id: topicId }, parent, question, type: 'task', status, owner,
@@ -60,16 +103,16 @@ async function seedTree(configuration) {
   const tree = { ...selected, cli: configuration.cli, projectId, sessionId: receipt.session_id,
     bindingId: receipt.data.binding_id, generation: receipt.data.generation,
     sessionPath: join(selected.projectRoot, '.ariadne/sessions', `${receipt.session_id}.json`) };
-  const publication = [await apply(tree, [{ op: 'topic.add', ref: 'native_tree_topic', name: 'Native tree acceptance' }])];
+  const publication = [await apply(tree, [{ op: 'topic.add', ref: 'native_tree_topic', name: 'Native tree acceptance' }], {}, '', true)];
   const topic = Object.values((await snapshot(tree)).topics).find(topic => topic.name === 'Native tree acceptance'); assert.ok(topic);
-  for (let branch = 1; branch <= 20; branch++) publication.push(await apply(tree, treeBatch(topic.id, branch)));
+  for (let branch = 1; branch <= 20; branch++) publication.push(await apply(tree, treeBatch(topic.id, branch), {}, '', true));
   let live = await snapshot(tree), nextMessage = 1;
   while (live.messages.length < 5000) {
     // Every nonempty apply adds one genuine activity message as well as its
     // explicit replies. The final activity-only batch closes an exact count.
     const operations = treeMessageBatch(nextMessage, Math.min(100, 5000 - live.messages.length - 1));
     const revisions = Object.fromEntries(operations.map(operation => [operation.item.id, live.items[operation.item.id].revision]));
-    publication.push(await apply(tree, operations, revisions, 'Publish complete native message history.'));
+    publication.push(await apply(tree, operations, revisions, 'Publish complete native message history.', true));
     nextMessage += operations.length; live = await snapshot(tree);
   }
   const session = await snapshot(tree); assert.equal(Object.keys(session.items).length, 2000); assert.equal(Object.keys(session.inputs).length, 0);
@@ -92,7 +135,10 @@ async function focusedId() { return browser.execute(() => document.activeElement
 async function roving() {
   assert.equal(await browser.execute(() => [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].filter(element => element.tabIndex === 0).length), 1);
 }
-async function catalogue() { const button = await browser.$('button=All sessions'); await button.waitForEnabled(); await button.click(); }
+async function catalogue() {
+  const button = await browser.$('button[title="All sessions"]'); await button.waitForDisplayed(); await button.waitForEnabled(); await button.click();
+  await wait(async () => await button.getAttribute('aria-current') === 'page' && await button.isEnabled(), 'Tree catalogue navigation did not finish its actual preference write');
+}
 async function open(tree) {
   await catalogue(); const button = await browser.$(`[data-session-id="${tree.sessionId}"]`); await button.waitForDisplayed(); await button.click();
   await wait(async () => (await visibleIds()).includes('20.99'), 'The real native 2,000-item tree did not open');
@@ -117,7 +163,7 @@ async function measureAction(eventName, selector, expectedIds, action) {
   return browser.execute(() => { const result = window.__ariadneTreeMeasurement.elapsed; delete window.__ariadneTreeMeasurement; return result; });
 }
 async function choose(group, name, pressed) {
-  const button = await browser.$(`[aria-label="${group}"] button=${name}`); await button.waitForEnabled(); await button.click();
+  const button = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`); await button.waitForEnabled(); await button.click();
   await wait(async () => await button.getAttribute('aria-pressed') === String(pressed) && await button.isEnabled(), 'Native filter write was not confirmed');
 }
 async function anchor() {
@@ -177,7 +223,9 @@ export async function runTreeAcceptance(configuration) {
   const original = await snapshot(configuration), journal = await admissions(configuration), demoBytes = await readFile(configuration.demo.sessionPath);
   const { tree, publication, initialSession } = await seedTree(configuration);
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-publication.json'), JSON.stringify({ tree, publication, initialSession }, null, 2));
-  await browser.refresh(); await catalogue();
+  // Discover real CLI publication through the App's normal catalogue/event
+  // refresh. A document reload is unnecessary and races the native driver.
+  await catalogue();
   const expectedIds = Array.from({ length: 20 }, (_, index) => [String(index + 1), ...Array.from({ length: 99 }, (_, child) => `${index + 1}.${child + 1}`)]).flat();
   const sessionButton = await browser.$(`[data-session-id="${tree.sessionId}"]`); await sessionButton.waitForDisplayed();
   const usableMs = await measureAction('click', `[data-session-id="${tree.sessionId}"]`, expectedIds, () => sessionButton.click());
@@ -209,7 +257,7 @@ export async function runTreeAcceptance(configuration) {
   await (await search()).setValue('ＮＡＴＩＶＥ café needle');
   await wait(async () => (await visibleIds()).includes('1.1'), 'Filtered context must temporarily expose its ancestry');
   const beforeReveal = (await preferences(tree)).view;
-  const child = await browser.$('[aria-label="Child items"] button*=Item 1.2 ·'); await child.waitForDisplayed(); await child.click();
+  const child = await browser.$('[aria-label="Child items"]').$('button*=Item 1.2 ·'); await child.waitForDisplayed(); await child.click();
   await wait(async () => (await browser.$('.sentence-tree').getText()).includes('Item 1.2 is outside the current filters.'), 'Detail child reveal did not preserve the filter and expose an outside-filter row');
   assert.equal(await focusedId(), '1.2');
   const revealed = (await preferences(tree)).view;
