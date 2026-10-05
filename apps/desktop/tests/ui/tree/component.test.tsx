@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Session } from '../../../src/generated/domain/models';
 import type { QueryEnvelope, SessionPreferences } from '../../../src/generated/core';
@@ -188,6 +189,57 @@ describe('registered variable-height sentence tree', () => {
     fireEvent.click(within(rows()[0]).getByRole('button', { name: 'Expand or collapse' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('not confirmed'));
     expect(rows()[0].getAttribute('aria-expanded')).toBe('true');
+  });
+  it.each(['Native collaborator', 'Me'])('keeps keyboard focus on Me when saved owners reorder beside other %s', async name => {
+    const session = structuredClone(demo) as Session;
+    for (const item of Object.values(session.items)) if (item) item.owner = { kind: 'other', name };
+    session.items['1.1']!.owner = { kind: 'me' };
+    const value = await setup(session), user = userEvent.setup(); render(<value.Composition />);
+    const group = screen.getByRole('group', { name: 'Item owner' }), me = within(group).getAllByRole('button')[1];
+    expect(within(group).getAllByRole('button')[1]).toBe(me); me.focus();
+    await user.keyboard(' ');
+    await waitFor(() => expect(value.saved.at(-1)?.filters.owners).toEqual([{ kind: 'me' }]));
+    expect(within(group).getAllByRole('button')[0]).toBe(me);
+    expect(document.activeElement).toBe(me); expect(me.getAttribute('aria-pressed')).toBe('true');
+    await user.keyboard(' ');
+    await waitFor(() => expect(value.saved.at(-1)?.filters.owners).toEqual([]));
+    expect(within(group).getAllByRole('button')[1]).toBe(me); expect(document.activeElement).toBe(me);
+    expect(value.saved).toHaveLength(2);
+  });
+  it.each([false, true])('cancels owner focus after a deliberate move during save, then blur=%s', async blur => {
+    const session = structuredClone(demo) as Session;
+    for (const item of Object.values(session.items)) if (item) item.owner = { kind: 'other', name: 'Native collaborator' };
+    session.items['1.1']!.owner = { kind: 'me' };
+    let finish!: () => void;
+    const completion = new Promise<void>(resolve => { finish = resolve; }), value = await setup(session, preferences(), completion);
+    render(<><button>Deliberate next control</button><value.Composition /></>);
+    const group = screen.getByRole('group', { name: 'Item owner' }), me = within(group).getByRole('button', { name: 'Me' });
+    me.focus(); fireEvent.click(me); await waitFor(() => expect(value.saved).toHaveLength(1));
+    const next = screen.getByRole('button', { name: 'Deliberate next control' }); next.focus(); if (blur) next.blur();
+    await act(async () => { finish(); });
+    expect(within(group).getAllByRole('button')[0]).toBe(me); expect(me.getAttribute('aria-pressed')).toBe('true');
+    expect(document.activeElement).toBe(blur ? document.body : next); expect(value.saved).toHaveLength(1);
+  });
+  it('discards pending owner focus when the opened session changes', async () => {
+    const session = structuredClone(demo) as Session;
+    for (const item of Object.values(session.items)) if (item) item.owner = { kind: 'other', name: 'Native collaborator' };
+    session.items['1.1']!.owner = { kind: 'me' };
+    const first = await setup(session), nextSession = structuredClone(session);
+    nextSession.id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const nextView = preferences(); nextView.session = { ...route, session_id: nextSession.id };
+    const second = await setup(nextSession, nextView), saved: SessionPreferences[] = [];
+    let finish!: () => void;
+    const props = { routes: first.routes, later: new Set<string>(), onReveal: () => {}, saveLater: async () => true,
+      saveView: async (next: SessionPreferences) => { saved.push(next); await new Promise<void>(resolve => { finish = resolve; }); return true; } };
+    const rendered = render(<><button>Leaving this session</button><SentenceTree {...props} store={first.store} view={preferences()} /></>);
+    const me = within(screen.getByRole('group', { name: 'Item owner' })).getByRole('button', { name: 'Me' });
+    me.focus(); fireEvent.click(me); await waitFor(() => expect(saved).toHaveLength(1));
+    rendered.rerender(<><button>Leaving this session</button><SentenceTree {...props} store={second.store} view={nextView} /></>);
+    const external = screen.getByRole('button', { name: 'Leaving this session' }); external.focus(); external.blur();
+    expect(document.activeElement).toBe(document.body);
+    await act(async () => { finish(); });
+    expect(document.activeElement).toBe(document.body); expect(saved).toHaveLength(1);
+    expect(within(screen.getByRole('group', { name: 'Item owner' })).getByRole('button', { name: 'Me' }).getAttribute('aria-pressed')).toBe('false');
   });
   it('writes AND/OR filters through the canonical view record and offers a clear action for no matches', async () => {
     const value = await setup(); render(<value.Composition />);

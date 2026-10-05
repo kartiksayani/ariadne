@@ -1,96 +1,101 @@
 # Ariadne resumption handoff
 
-Checkpoint 2026-10-05 04:49 UTC. Continue autonomously. Delegates: **Sol 6.1 High only**.
-Local checks/builds/native runs are authorized when useful. MCP/the review tool remain disabled.
-Root alone squash merges after current-head review, green CI and actual acceptance.
-Preserve other worktrees, evidence and history. New spawns hit the thread limit;
-reuse relevant existing reviewer contexts for their ongoing work.
+Checkpoint 2026-10-05 06:28 UTC. Continue autonomously; delegates use **Sol 6.1 High only**.
+Local checks/builds/native runs are authorized. MCP/the review tool remain disabled. Root alone
+squash merges after exact-head independent review, green CI and proven acceptance.
+Preserve all worktrees, history and evidence. Reuse relevant reviewer contexts when
+new spawns hit the thread limit; four delegates ran concurrently after usage reset.
 
-**Main:** `d3502f7c207967ced6570cb38e2760e88f53d9db` (PR92 squash merged).
-[Post-merge main CI running](https://github.com/kartiksayani/ariadne/actions/runs/37264196572); previous main and exact PR92 head were green.
-PRs 86/88 are merged; overlap and flicker fixes are on main. The local roadmap is
-**34/49 complete**, with only P4.4 actively executing. Root's dirty HANDOFF,
-tasks.json and roadmap.html are intentional current state; carry into PR91 at
-publication. Two safety stashes remain. No cleanup is pending.
+**Main:** `d3502f7c207967ced6570cb38e2760e88f53d9db`, PR92 merged;
+[main CI passed](https://github.com/kartiksayani/ariadne/actions/runs/37264196572).
+**Roadmap: 34/49 complete; P4.4 and P6.1 actively executing.** Overlap/flicker fixes
+are merged. PR92 closed P3.4/P6.3; package coverage was 86.58%, with actual private
+production install/repeat/doctor/uninstall, native FIFO/Quit/restart, release
+isolation and browser proof. Audit: `/tmp/ariadne-pr92-green-ua0a96ik`.
+P6.4 still retains its physical dependencies. Root's dirty HANDOFF/tasks/roadmap
+are intentional current state. Two safety stashes remain; no cleanup is pending.
 
-| PR | Published → prepared local head | Current state |
-| --- | --- | --- |
-| 91 | 7a99411 → 3a2c55b | Current main integrated conflict-free; detached native run below. |
-| 92 | fbad9e5 → merged d3502f7 | [CI passed](https://github.com/kartiksayani/ariadne/actions/runs/37262049847); complete independent artifact audit clear. |
-| 94 | c0c2abe → 19f72e0 | History; final integration clear, 24 runner tests pass. |
-| 93 | 9bfbc74 → 980a76e | Guarded actions; 81 UI tests, final integration clear. |
-| 95 | 4bbd6b8 → c54847d | Graph; final integration clear, 26 runner/helper tests pass. |
-| 96 | 9254f3b → a48d710 | Package routes; 3/3 real-CLI/ownership tests, final integration clear. |
-| 97 | d5359fa → b68fbf0 | Accessibility; 137 UI tests, final integration clear. |
+## Published work
 
-**Active worker:** `prove_three_binding_fifo`, branch `task/native-tree-acceptance`,
-worktree `.worktrees/native-tree-acceptance`. It exclusively owns the native runner
-`.worktrees/local-native-startup` and `target/native-e2e` cache. Do not launch another
-App or build there. Private HOME: `/private/tmp/ariadne-local-native-home-kj60kx9v`.
-Retain real CARGO_HOME/RUSTUP_HOME and pinned Node22 PATH; npm user config is disabled.
+All six exact heads have independent source reviews with no required findings.
+CI/native acceptance remains pending; source review alone is not merge clearance.
+Stack: **91 → 94 → 93 → 97**. PR95/96 are independent children of91.
+Each worktree is under `.worktrees/`, on `task/<worktree>`.
 
-**PR91 blocker:** full 2,000-item/5,000-message publication succeeded twice, but
-acceptance remains unproved. Run6435 exposed a zero-tabstop bug, fixed with a
-layout-effect ordering change (21 author +21 independent tests). Run31f4 completed
-the corpus but session-opening measurement never finished. Passive click/DOM/prefs
-capture was added. Run3ee6412d then hit intermittent StoreBusy at 4,869 messages.
-Its actual App sample showed repeated lock-held decode/validation in presence
-admission, with other queries waiting. All failed runs and cleanup evidence remain.
+| PR | Worktree | Published head | CI |
+| --- | --- | --- | --- |
+| 91 | native-tree-acceptance | bb05c9e4 | [Queued](https://github.com/kartiksayani/ariadne/actions/runs/37271534010) |
+| 94 | native-history-acceptance | b329c5de | [Running](https://github.com/kartiksayani/ariadne/actions/runs/37271533980) |
+| 93 | guarded-history-actions | 52cfcf27 | [Running](https://github.com/kartiksayani/ariadne/actions/runs/37271534538) |
+| 95 | native-graph-acceptance | 6a1f7056 | [Running](https://github.com/kartiksayani/ariadne/actions/runs/37271534255) |
+| 96 | packaged-route-acceptance | 6d04e545 | [Running](https://github.com/kartiksayani/ariadne/actions/runs/37271534223) |
+| 97 | product-accessibility | cf87480d | [Running](https://github.com/kartiksayani/ariadne/actions/runs/37271533766) |
 
-Reviewed repairs in91 include domain lookup indexes, one catalogue per presence
-sweep with fresh admission checks, zero-Waiting tray read avoidance, strict typed-first
-snapshot decoding, roving focus and passive failure capture. Relevant focused tests,
-hooks and independent source reviews passed. Same-byte retained snapshot reads with
-production opt-level1: first 0.989s, repeats 0.129/0.098s; debug: 1.387/0.447/0.435s.
-The native App/CLI builds now use opt-level1 while retaining debug assertions and
-paths. Ordinary dev/test settings and separate production isolation are unchanged.
-All 24 runner tests passed. Exact repair a0384f89 is independently clear; integrated
-cd9f45e8 has identical tree `543d8425b4a3d6f5af572e4b15b8cb264f40d4dc`.
-**Latest native run:** `74bfd8ac-ee28-4284-83c9-284fd2856bcb` compiled optimized App
-in4m32s and published full2k/5k with zero StoreBusy retries. Roving focus, row bounds,
-20 search measurements, normalization/clear and Open filter count1320 were reached;
-Done filter aria-pressed never became true. Final performance/restart assertions were
-not reached. Cleanup passed. The pre-filter screenshot is cropped; source confirms
-900×650 initial native window below CSS/documented1000×700 minimum. Root authorized
-bringing already-reviewed97 minimum config hunk forward, supported genuine scrolling,
-and bounded tree-wide failure capture; no production filter semantics change without
-evidence. Repair3a2c55b is independently clear: supported minimum window, one genuine
-scroll/click per filter, bounded whole-journey failure capture that preserves the
-original error. Actual viewport and early timing evidence are asserted/retained.
-Current native run3622d32e-4108-4302-9c39-228ba02ca70c is active at exact3a2c55b.
-PR91 branch now includes package-only main d3502f7 as3f2411fa; detached run remains
-on cd9f45e8, with all native product/test source unchanged by the parent merge.
-No acceptance threshold/retry expansion or offline lifecycle workaround is approved.
+## Active owners and unpublished work
 
-**PR92:** worktree `.worktrees/personal-package-install`, branch `task/personal-package-install`.
-Previous CI passed native/release isolation and 86.57% coverage, then installed doctor
-rejected fixture-created `.ariadne`0755. Real CLI reproduced exit4 versus0700 exit0.
-fbad9e5 fixed only private fixture directory modes and failure reporting. Full CI and
-independent artifact audit passed: 86.58% coverage/all205 sources,31 installer tests,
-actual production install/repeat/doctor/uninstall with history/settings preserved,
-native five-input FIFO/Quit/restart/discovery, release isolation and42 browser tests.
-PR92 merged; **P3.4/P6.3 are complete**. Existing installed Claude tests prove real
-helper/Mod/Core/Discovery/ProviderFactory/NativeActivation and both join orders;
-canonical resource-export tests prove bundle parity. P6.4 retains its physical
-dependencies. Audit evidence: `/tmp/ariadne-pr92-green-ua0a96ik`.
+- `prove_three_binding_fifo`: P4.4, native tree and owner-filter focus repair.
+  PR91 branch is published; isolated repair in `native-tree-filter-observation`
+  has fixture commit `cb04e49` plus product/test fix `6802b51`; 26 author and
+  26 independent component tests pass, review clear. PR91 fast-forwarded locally
+  to67ce914, not pushed. **Exclusive** native runner/cache owner:
+  `.worktrees/local-native-startup`, `target/native-e2e`. Do not launch another App
+  or build there. Private HOME `/private/tmp/ariadne-local-native-home-kj60kx9v`;
+  retain real CARGO_HOME/RUSTUP_HOME, pinned Node22 PATH and disabled npm user config.
+- `review_validation_indexes`: independent PR91 repair review, then published delta.
+- `cache_tree_search_text`: `.worktrees/tree-search-text-cache`, branch
+  `fix/tree-search-text-cache` atop6802b51; owns only rows.ts/rows.test.tsx.
+  Unpushed candidate67ce914 adds private immutable-session search-text cache and
+  new-snapshot regression; 53 focused tests/hook pass; independent review clear with1,920 functional
+  old/new comparisons.
+  Same2k/5k warmed20-query selector batches: median54.094→13.712ms; this is not
+  native latency proof. Native owner holds next run for review and docs checkpoint.
+- `audit_next_native_journeys`: PR94/93/95/97 reviews clear; inspecting retained
+  search timing. PR97 has root-authored, independently cleared **unpushed266eaeb**
+  correcting outer-window evidence wording; include with next necessary code push.
+- `review_native_acceptance_repairs`: PR96 review clear; no distinct CI failure yet.
+- `native_window_acceptance`: fresh Sol 6.1 High worker preparing bounded P6.1
+  physical lifecycle checks atop PR96; owns only new tests/native/window/** and
+  docs/planning/evidence/native/window.md. No App/build execution until runner is free.
+- `audit_green_acceptance86_88`: preparing remaining P6.1/P6.2/P6.4 physical proof
+  assignments. Read-only; no second native App or live host execution.
 
-Prepared branches use matching `task/<worktree>` names under `.worktrees/`:
-`native-history-acceptance` (94), `guarded-history-actions` (93),
-`native-graph-acceptance` (95), `packaged-route-acceptance` (96),
-`product-accessibility` (97). Stack: 91→94→93→97; 95/96 are independent children of91.
-Root is publishing all prepared branches while the local native run continues. New package main+docs were
-propagated conflict-free to every branch;97 gate unit tests16/16 pass. Independent
-published delta review must cover these newest parent updates once pushed. PR94/95 final runner conflicts
-retain their history/graph fixture invocations plus the reviewed optimization env.
-`audit_next_native_journeys` cleared the exact local94/93/95/97 heads;
-`review_native_acceptance_repairs` cleared96. Published-head reviews remain required. PR descriptions are prepared at `/tmp/ariadne-pr{91,93,94,95,96,97}-body.md`;
-update actual native validation before publication. Full native/browser acceptance
-remains required; prepared source is not completion.
+## Current blocker and evidence
 
-**Next three steps:** (1) inspect run3622d32e and resolve only demonstrated failures;
-(2) monitor post-merge main and overlapping stack CI; (3) obtain exact published-head delta reviews and audit actual native artifacts before
-qualified squash/stack merges.
-Original closure:91→P4.4;94→P4.5/P4.6/P4.7;93→P5.3;95→P5.1/P5.2;97→P4.8.
-96 covers only part of P6.1. Physical Mac lifecycle/notifications and live M7 remain
-unproved. Owner installation and billable live hosts require approval once concrete
-reviewable work is ready. Do not reopen unrelated process work.
+Native run `95e3b26e-a7ef-4da6-963f-fc4f19434508` at published91 `bb05c9e4`
+completed **2,000 items / 5,000 messages with zero StoreBusy retries**. Actual native
+outer window1000×700 and WebView1000×668 are proved; Done filter now passed. Me save
+succeeded but index-key reuse broke element identity. Component regression confirms
+real keyboard focus can change to collaborator; stable keys alone blur on reverse
+reorder. Author is fixing stable type-qualified keys plus minimal guarded focus
+restoration, proving both Space toggles and no stealing another focused control.
+Do not merge the fixture-only selector repair as the complete fix.
+
+The prematurely started follow-up98abfe6a was safely stopped pre-App through
+owned-wrapper SIGINT; exit/port cleanup proved, warm artifacts preserved.
+
+First usable **1,013ms**; 20-search **p95 153ms exceeds150ms**. Final journey/anchor/
+Quit/restart assertions remain unproved. Cleanup succeeded. Keep every failed sample;
+no threshold relaxation, repeat-until-pass or offline Quit/relaunch workaround.
+Earlier optimized run measured1,136ms/142ms but failed before full acceptance.
+
+Reviewed91 repairs already include domain indexes, one presence catalogue per sweep
+with fresh admission checks, skipping zero-Waiting tray snapshots, strict typed-first
+snapshot decoding, roving-focus effect ordering and bounded passive diagnostics.
+Native App/CLI builds use opt-level1 **with debug assertions**; ordinary dev/test and
+separate production isolation remain unchanged. Original thresholds still apply.
+Window assertions use existing read-only outer_size/scale_factor, not inner height.
+Prior run details and repair history remain in git and retained local artifacts.
+
+## Next three steps
+
+1. Finish and independently review owner-focus repair; run full native acceptance
+   on the coherent candidate. Investigate the original150ms target honestly.
+2. Propagate parent correction to94→93→97 and95/96, publish one checkpoint, obtain
+   exact-head delta reviews and inspect CI while preparing physical acceptance.
+3. Audit actual native/browser artifacts, then merge qualified stack prefixes and
+   update local tasks/roadmap. Pending main CI does not block qualified merges;
+   failed main CI pauses merges.
+
+Closure map:91→P4.4;94→P4.5/P4.6/P4.7;93→P5.3;95→P5.1/P5.2;97→P4.8.
+PR96 proves only part of P6.1. Physical Mac lifecycle/notification proof remains;
+live M7 and actual owner installation need approval once concrete work is ready.
