@@ -244,7 +244,7 @@ export async function closeHistoryRailReferences(message) {
   }, message.id), 'Native rail Close did not clear transient tree and detail references');
 }
 async function rail(history, saved, paged) {
-  const toggle = await browser.$('button=Messages (m)');
+  const toggle = await browser.$('button[title="Messages (m)"]');
   if (!(await browser.$('.rail-messages').isExisting())) {
     await failureEvidence('rail-messages-toggle', () => toggle.waitForEnabled()); await toggle.scrollIntoView(); await toggle.click();
   }

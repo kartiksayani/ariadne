@@ -12,8 +12,8 @@ export function historyFailureFacts() {
   const stateButtons = /^(Refresh|Refreshing…|Reconcile operation|Register project|Connect existing session|Retry saving draft preferences|Retry saved input|Write another input)$/;
   const active = document.activeElement;
   return {
-    // Messages (m) is a title-only icon button; the spec's text selector can only match when a text label exists.
-    messagesToggle: { titled: control(titled), textLabelled: all('button').some(button => text(button) === 'Messages (m)'),
+    // Messages (m) is an icon-only button: the spec selects it by title and it is named by aria-label.
+    messagesToggle: { titled: control(titled), ariaLabel: titled?.getAttribute('aria-label') ?? null,
       railOpen: Boolean(document.querySelector('.rail-messages')), railMessageCount: all('.rail-messages [data-message-id]').length },
     // chromeDisabled follows writing / refreshPending / missing preferences; these labels expose that state.
     navigation: { banners: all('.nav-banner').map(node => ({ role: node.getAttribute('role'), text: text(node) })),
