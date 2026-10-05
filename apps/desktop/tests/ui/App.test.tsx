@@ -82,6 +82,10 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
     await screen.findAllByRole('region', { name: /Topic graph/ });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    expect(screen.queryByRole('group', { name: 'Owner actions' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Item 1:/ }));
+    expect(await screen.findByRole('group', { name: 'Owner actions' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     expect(await screen.findByRole('tree', { name: 'Sentences' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
@@ -203,6 +207,8 @@ describe('ordinary desktop composition', () => {
     await screen.findByRole('group', { name: 'Owner actions' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const filters = structuredClone(transport.preferences.sessions[0].filters);
+    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    expect(screen.queryByRole('group', { name: 'Owner actions' })).toBeNull();
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '2' }); });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('2'));
     expect(await screen.findByLabelText('Owner input for #2')).toBeTruthy();

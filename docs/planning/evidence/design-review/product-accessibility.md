@@ -24,6 +24,10 @@ and isolated, pinned source-runtime dependencies.
   before dispatching preferences; an already dispatched durable write is unchanged.
   Its valid receipt still confirms the saved preferences, but an invalidated guard
   suppresses local reveal so a newer Escape cannot be undone by completion.
+  App also records dismissal at the existing navigation epoch: passive selection
+  and session changes from that receipt cannot reopen detail. A deliberate tree,
+  graph or successful reveal opens explicitly; newer tab/native navigation retains
+  its ordinary opening behavior.
   Consumed focus tokens are acknowledged to App and cleared only when matching;
   an old editor callback cannot erase a newer request.
 - Numeric selection previously bypassed disabled changed-target choices and
@@ -106,8 +110,9 @@ size, real keyboard behavior and light/System contrast; CI must still confirm al
 four combinations at the final head.
 
 Review repair validation: the final focused desktop/reference selection passed
-228 tests across 12 files, including navigation validation cancellation, dismissed
-Reply/Bring after dispatched preference saves, failed navigation, stale/frozen
+231 tests across 12 files, including navigation validation cancellation, dismissed
+Reply/Bring after dispatched preference saves to the same or different item,
+cross-session oldest-waiting dismissal, subsequent tree/tab/native reveals, failed navigation, stale/frozen
 number requests, remount and old/new token acknowledgment.
 Normal type/lint/CSS checks passed. Local real-browser keyboard checks passed at
 dark 1000×700, light 1600×960 and light 1000×700. Light/System samples have a
