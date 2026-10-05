@@ -15,8 +15,10 @@
       {
         "label": "main",
         "title": "Ariadne",
-        "width": 900,
-        "height": 650
+        "width": 1000,
+        "height": 700,
+        "minWidth": 1000,
+        "minHeight": 700
       }
     ],
     "security": {

@@ -37,6 +37,9 @@ schemars08 = { package = "schemars", version = "=0.8.22" }
 sha2 = "=0.10.9"
 libc = "=0.2.190"
 
+[patch.crates-io]
+tauri-plugin-wdio-webdriver = { path = "vendor/tauri-plugin-wdio-webdriver" }
+
 [profile.dev]
 debug = 0
 incremental = false

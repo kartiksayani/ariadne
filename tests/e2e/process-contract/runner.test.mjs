@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
+import { activateOwned, command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import WebSocket from 'ws';
@@ -32,11 +32,15 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     assert.match((await rpc(1, 'initialize', {})).result.userAgent, /0\.160\.0/);
     const read = await rpc(2, 'thread/read', { threadId: thread });
     assert.equal(read.result.thread.id, thread); assert.equal(read.result.thread.cwd, config.project);
-    assert.deepEqual((await rpc(10, 'thread/loaded/list', {})).result.data, [thread, config.discovery.externalSessionId]);
+    assert.deepEqual((await rpc(10, 'thread/loaded/list', {})).result.data, [thread, config.discovery.externalSessionId, config.tree.externalSessionId]);
     const unbound = await rpc(11, 'thread/read', { threadId: config.discovery.externalSessionId });
     assert.equal(unbound.result.thread.id, config.discovery.externalSessionId); assert.equal(unbound.result.thread.cwd, config.discovery.projectRoot);
     assert.deepEqual((await rpc(12, 'thread/turns/list', { threadId: config.discovery.externalSessionId })).result.data, []);
     await assert.rejects(readFile(join(config.discovery.projectRoot, '.ariadne/project.json')), { code: 'ENOENT' });
+    const treeCandidate = await rpc(13, 'thread/read', { threadId: config.tree.externalSessionId });
+    assert.equal(treeCandidate.result.thread.id, config.tree.externalSessionId); assert.equal(treeCandidate.result.thread.cwd, config.tree.projectRoot);
+    assert.deepEqual((await rpc(14, 'thread/turns/list', { threadId: config.tree.externalSessionId })).result.data, []);
+    await assert.rejects(readFile(join(config.tree.projectRoot, '.ariadne/project.json')), { code: 'ENOENT' });
     assert.deepEqual((await rpc(3, 'thread/turns/list', { threadId: thread })).result.data, []);
     const inputId = '11111111-1111-4111-8111-111111111111', attemptId = '22222222-2222-4222-8222-222222222222';
     const body = { source_input_id: inputId, binding_id: '33333333-3333-4333-8333-333333333333', generation: '44444444-4444-4444-8444-444444444444', saved_input: { text: 'Exact owner input\nComplete second line' } };
@@ -44,6 +48,7 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', payload]);
     const [admitted] = await admissions(config); assert.equal(admitted.payload, payload); assert.equal(admitted.attemptId, attemptId);
     await assert.rejects(command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', config.discovery.externalSessionId, '--message', payload]), /failed \(3\)/);
+    await assert.rejects(command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', config.tree.externalSessionId, '--message', payload]), /failed \(3\)/);
     const turns = (await rpc(4, 'thread/turns/list', { threadId: thread })).result;
     assert.equal(turns.data[0].status, 'inProgress');
     assert.equal(turns.data[0].items[0].content[0].text, payload);
@@ -209,6 +214,27 @@ test('runner observes startup ancestry before any UI bridge assertion', async ()
     await assert.rejects(observeOwned(root, exe, 'nonce', process.pid, 50), /deadline/);
   } finally { await stop(child); await rm(root, { recursive: true }); }
 });
+test('native activation rejects changed identity and foreign launchers without affecting the process', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-activation-'));
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { detached: true, stdio: 'ignore' });
+  try {
+    const binary = identity(child.pid).exe;
+    await json(join(root, 'startup.json'), { pid: child.pid, nonce: 'owned' });
+    await json(join(root, 'launcher.json'), { pid: process.pid });
+    const owned = await observeOwned(root, binary, 'owned', process.pid);
+    await assert.rejects(activateOwned(root, '/different/executable', 'owned'), /changed native process identity/);
+    await json(join(root, 'observed.json'), { ...owned, birth: 'different birth' });
+    await assert.rejects(activateOwned(root, binary, 'owned'), /changed native process identity/);
+    await json(join(root, 'observed.json'), owned);
+    await assert.rejects(activateOwned(root, binary, 'foreign nonce'), /nonce/);
+    await json(join(root, 'launcher.json'), { pid: 999999 });
+    await assert.rejects(activateOwned(root, binary, 'owned'), /ancestry/);
+    await json(join(root, 'launcher.json'), { pid: process.pid });
+    await json(join(root, 'observed.json'), { ...owned, pid: process.pid, exe: identity(process.pid).exe, birth: identity(process.pid).birth });
+    await assert.rejects(activateOwned(root, binary, 'owned'), /witness identity mismatch/);
+    assert.ok(alive(child.pid)); assert.ok(alive(process.pid));
+  } finally { await stop(child); await rm(root, { recursive: true }); }
+});
 test('fresh launch rejects stale nonce and retains separate PID/birth/ancestry evidence', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-relaunch-'));
   let first, second;
@@ -286,6 +312,22 @@ test('production environment removes test switches without mutating owner enviro
     const env = buildEnv('/private/tmp/target'); assert.equal(env.ARIADNE_E2E_NONCE, undefined); assert.equal(env.TAURI_WEBDRIVER_PORT, undefined); assert.equal(env.VITE_ARIADNE_E2E, undefined); assert.equal(env.TAURI_CONFIG, undefined);
     assert.equal(env.MACOSX_DEPLOYMENT_TARGET, '13.0'); assert.equal(buildEnv('/private/tmp/target', true).VITE_ARIADNE_E2E, '1'); assert.equal(process.env.ARIADNE_E2E_NONCE, 'fixture');
   } finally { delete process.env.ARIADNE_E2E_NONCE; delete process.env.TAURI_WEBDRIVER_PORT; delete process.env.VITE_ARIADNE_E2E; delete process.env.TAURI_CONFIG; }
+});
+test('native App and CLI build commands receive shipped optimization with dev assertions and isolated features', async () => {
+  const keys = ['CARGO_PROFILE_DEV_OPT_LEVEL', 'CARGO_PROFILE_DEV_DEBUG_ASSERTIONS', 'VITE_ARIADNE_E2E', 'ARIADNE_E2E_NONCE'];
+  const previous = new Map(keys.map(key => [key, process.env[key]]));
+  Object.assign(process.env, { CARGO_PROFILE_DEV_OPT_LEVEL: '0', CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: 'false', VITE_ARIADNE_E2E: 'unexpected', ARIADNE_E2E_NONCE: 'parent-only' });
+  try {
+    for (const e2e of [true, false]) {
+      const env = nativeBuildEnv('/private/tmp/native-profile-target', e2e);
+      const source = `console.log(JSON.stringify({target:process.env.CARGO_TARGET_DIR,opt:process.env.CARGO_PROFILE_DEV_OPT_LEVEL,assertions:process.env.CARGO_PROFILE_DEV_DEBUG_ASSERTIONS,e2e:process.env.VITE_ARIADNE_E2E,nonce:process.env.ARIADNE_E2E_NONCE}))`;
+      const observed = JSON.parse((await command(process.execPath, ['-e', source], { env })).stdout);
+      assert.deepEqual(observed, { target: '/private/tmp/native-profile-target', opt: '1', assertions: 'true', ...(e2e ? { e2e: '1' } : {}) });
+    }
+    assert.equal(buildEnv('/private/tmp/ordinary-target').CARGO_PROFILE_DEV_OPT_LEVEL, '0');
+    assert.equal(buildEnv('/private/tmp/ordinary-target').CARGO_PROFILE_DEV_DEBUG_ASSERTIONS, 'false');
+    for (const [key, value] of Object.entries({ CARGO_PROFILE_DEV_OPT_LEVEL: '0', CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: 'false', VITE_ARIADNE_E2E: 'unexpected', ARIADNE_E2E_NONCE: 'parent-only' })) assert.equal(process.env[key], value);
+  } finally { for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
 test('compiler config and artifact evidence rejects unexpected inherited inputs and feature mismatch', () => {
   const base = { bundle: { active: true, icon: ['icons/icon.icns'] } };
