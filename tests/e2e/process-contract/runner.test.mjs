@@ -192,7 +192,10 @@ test('SIGINT and deadline clean owned descendants after delayed witness readines
       const pidFile = join(root, mode);
       // Force witness startup beyond both original timers. This is a regression
       // input, not a readiness wait: the parent must observe the actual witness.
-      const source = `const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log('spawned:'+child.pid); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,500); require('node:fs').writeFileSync(process.argv[1],String(child.pid)); console.log('ready:'+child.pid); setInterval(()=>{},1000)`;
+      // The failure fixture cannot publish a witness even if its parent is
+      // delayed. It stays alive until the owned-group cleanup interrupts it.
+      const witness = earlyFailure ? '' : `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,500); require('node:fs').writeFileSync(process.argv[1],String(child.pid)); console.log('ready:'+child.pid);`;
+      const source = `const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log('spawned:'+child.pid); ${witness} setInterval(()=>{},1000)`;
       const fixture = `
         import assert from 'node:assert/strict';
         import {readFile} from 'node:fs/promises';
