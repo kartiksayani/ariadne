@@ -356,6 +356,7 @@ describe('ordinary desktop composition', () => {
     { ordering: 'click then focus', outcome: 'uncertain' },
     { ordering: 'click then focus', outcome: 'rejected' },
     { ordering: 'click then focus', outcome: 'shortcut' },
+    { ordering: 'click then focus', outcome: 'bring' },
     { ordering: 'click then focus', outcome: 'native route' },
     { ordering: 'click then focus', outcome: 'stopped' },
   ])('admits only the current enabled fork after its blur write: $ordering / $outcome', async ({ ordering, outcome }) => {
@@ -402,8 +403,9 @@ describe('ordinary desktop composition', () => {
     if (outcome === 'uncertain') transport.failNext = 'preferences_patch';
     if (outcome === 'rejected') reject = true;
     if (outcome === 'shortcut') {
-      await act(async () => { fireEvent.keyDown(parent, { key: 'r' }); });
+      await act(async () => { fireEvent.keyDown(parent, { key: 'o' }); });
     }
+    if (outcome === 'bring') await act(async () => { fireEvent.keyDown(parent, { key: 'b' }); });
     if (outcome === 'native route') {
       await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '2' }); });
       expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '2')).toBe(true);
@@ -426,7 +428,13 @@ describe('ordinary desktop composition', () => {
         fireEvent.click(reconcile);
         await waitFor(() => expect(screen.getByLabelText('Search sentences').hasAttribute('disabled')).toBe(false));
         expect(mutations(transport, 'preferences_patch').at(-1)).toEqual(frozen);
-      } else if (outcome === 'shortcut') await screen.findByLabelText('Follow up message');
+      } else if (outcome === 'shortcut') {
+        const editor = await screen.findByLabelText('Reopen message');
+        await waitFor(() => expect(document.activeElement).toBe(editor));
+      } else if (outcome === 'bring') {
+        await waitFor(() => expect(mutations(transport, 'input_submit')).toHaveLength(1));
+        expect(mutations(transport, 'input_submit')[0].command).toMatchObject({ params: { kind: 'bring', text: 'Bring this up.', target: { item_id: '1' } } });
+      }
       else await waitFor(() => expect(screen.getByLabelText('Search sentences').hasAttribute('disabled')).toBe(false));
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
       expect(screen.queryByLabelText('Owner input for #1.1')).toBeNull();

@@ -129,7 +129,7 @@ function Workspace({ application }: { application: Application }) {
   }, [navigation, searchEdit, key, view, preferences, state.writing, state.pendingOperationId]);
   const invalidateOwnerRequest = () => { ++shortcutSequence.current; setOwnerFocus(null); };
   const consumeOwnerRequest = (token: number) => setOwnerFocus(current => current?.token === token ? null : current);
-  const reveal = async (result: RevealedItem, ownerToken?: number) => {
+  const reveal = async (result: RevealedItem, ownerToken?: number): Promise<number | null> => {
     if (ownerToken === undefined) invalidateOwnerRequest();
     const token = ownerToken ?? shortcutSequence.current;
     const intent = navigation.getNavigationIntent(), completion = navigation.getWritingCompletion();
@@ -137,18 +137,19 @@ function Workspace({ application }: { application: Application }) {
     // Leaving the tree can save its scroll anchor while this enabled link is
     // being resolved. Retain only this current, unsubmitted navigation intent.
     if (completion) {
-      if (!await completion) return false;
+      if (!await completion) return null;
       const current = navigation.getSnapshot();
-      if (current.writing || current.pendingOperationId !== null || current.error) return false;
+      if (current.writing || current.pendingOperationId !== null || current.error) return null;
     }
     if (intent === null || navigation.getNavigationIntent() !== intent || navigation.getNavigationRequest() !== navigationRequest
-      || shortcutSequence.current !== token) return false;
+      || shortcutSequence.current !== token) return null;
     const target = result.kind === 'item' ? result.route : result.session;
     const opened = navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result, ownerToken === undefined ? undefined : () => shortcutSequence.current === ownerToken);
     const request = navigation.getNavigationRequest();
-    if (!await opened || navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return false;
+    if (!await opened || navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
     detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true);
-    return true;
+    // Admission can follow an awaited write; continuations use this exact request.
+    return request;
   };
   // Tree and graph already save their own selection through navigation.
   const selected = (result: RevealedItem) => { invalidateOwnerRequest(); detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true); };
@@ -162,8 +163,8 @@ function Workspace({ application }: { application: Application }) {
     setOwnerFocus(null);
     void navigation.routes.revealItem(target).then(async result => {
       if (!result || result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== navigationRequest) return;
-      const opened = reveal(result, token), openedRequest = navigation.getNavigationRequest();
-      if (!await opened || shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
+      const openedRequest = await reveal(result, token);
+      if (openedRequest === null || shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex });
     }).catch((error: unknown) => setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'));
   };
@@ -176,8 +177,8 @@ function Workspace({ application }: { application: Application }) {
     try {
       const result = await navigation.routes.revealItem(target);
       if (!result || result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== navigationRequest) return;
-      const opened = reveal(result, token), openedRequest = navigation.getNavigationRequest();
-      if (!await opened) return;
+      const openedRequest = await reveal(result, token);
+      if (openedRequest === null) return;
       await application.drafts.load();
       if (shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       const current = result.store.getSnapshot(), session = current.snapshot?.session;
