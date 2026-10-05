@@ -85,6 +85,25 @@ export async function observeOwned(root, binary, nonce, launcher, timeout = 6000
   }
   throw new Error('Startup witness deadline');
 }
+export async function activateOwned(root, binary, nonce) {
+  const owned = JSON.parse(await readFile(join(root, 'observed.json'), 'utf8'));
+  const launcher = JSON.parse(await readFile(join(root, 'launcher.json'), 'utf8'));
+  const current = identity(owned.pid);
+  if (owned.exe !== binary || current.exe !== binary || current.birth !== owned.birth) {
+    throw new Error('Refusing to activate changed native process identity');
+  }
+  // Recheck the startup nonce and actual ancestry against the owned launcher;
+  // a saved PID alone cannot authorize affecting another macOS application.
+  const verified = await observeOwned(root, binary, nonce, launcher.pid, 1000);
+  if (verified.pid !== owned.pid || verified.birth !== owned.birth) throw new Error('Native activation witness identity mismatch');
+  const source = `function run(args) {
+    ObjC.import('AppKit');
+    const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(args[0]));
+    app.unhide;
+    if (!app.activateWithOptions(2)) throw new Error('Owned native application activation failed');
+  }`;
+  execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', source, String(owned.pid)], { encoding: 'utf8', timeout: 5000 });
+}
 export async function releasedLeases(home, bindingId) {
   const paths = [join(home, 'run/runtime.lock'), join(home, 'run/leases', `${bindingId}.lock`)];
   const source = 'import fcntl,sys\nfor path in sys.argv[1:]:\n with open(path,"r+b") as lock:\n  fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)\n';
