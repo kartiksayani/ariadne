@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
 
-test('scrolls full variable sentence rows inside the tree with setup and toolbar accessible', async ({ page }, testInfo) => {
+test('scrolls full variable sentence rows with history actions, setup and toolbar accessible', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -37,6 +37,8 @@ test('scrolls full variable sentence rows inside the tree with setup and toolbar
         headerTop: document.querySelector('.ref-workspace header')!.getBoundingClientRect().top };
     });
     const before = await geometry();
+    await testInfo.attach('initial-tree-geometry', { body: JSON.stringify(before), contentType: 'application/json' });
+    expect(before.rowsHeight).toBeGreaterThan(100);
     const row = tree.locator('[data-item-id="10.50"]');
     await row.evaluate(element => element.scrollIntoView({ block: 'start' }));
     await row.click();
@@ -57,6 +59,21 @@ test('scrolls full variable sentence rows inside the tree with setup and toolbar
       const binding = page.locator('.lifecycle-binding');
       await binding.getByRole('button', { name: 'Pause dispatch', exact: true }).scrollIntoViewIfNeeded();
       await expect(binding.getByRole('button', { name: 'Pause dispatch', exact: true })).toBeInViewport();
+      const history = page.getByRole('region', { name: 'History actions' });
+      for (const action of [...await binding.getByRole('button').all(), ...await history.getByRole('button').all()]) {
+        await action.scrollIntoViewIfNeeded();
+        await expect(action).toBeInViewport();
+        expect(await action.evaluate(element => {
+          const bounds = element.getBoundingClientRect();
+          return document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === element;
+        })).toBe(true);
+        await action.click();
+        const review = page.getByRole('dialog');
+        await expect(review).toBeInViewport();
+        await review.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await expect(review).toHaveCount(0);
+        await expect(action).toBeFocused();
+      }
       // A rectangle for the whole pre cannot prove the last instruction is
       // readable. Scroll its actual text range into this notice's viewport.
       const instruction = await setup.evaluate(element => {
@@ -80,6 +97,15 @@ test('scrolls full variable sentence rows inside the tree with setup and toolbar
           reachable: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button, input, select') === control };
       }));
       expect(controls.filter(control => !control.reachable)).toEqual([]);
+      const ordinary = tree.locator('[data-item-id="10.49"]');
+      await ordinary.evaluate(element => element.scrollIntoView({ block: 'start' }));
+      const completeRow = await ordinary.evaluate(element => {
+        const bounds = element.getBoundingClientRect(), viewport = element.closest('.sentence-rows')!.getBoundingClientRect();
+        return { height: bounds.height, top: bounds.top, bottom: bounds.bottom, viewportTop: viewport.top, viewportBottom: viewport.bottom };
+      });
+      expect(completeRow.height).toBeGreaterThan(40);
+      expect(completeRow.top).toBeGreaterThanOrEqual(completeRow.viewportTop);
+      expect(completeRow.bottom).toBeLessThanOrEqual(completeRow.viewportBottom);
     }
     // Session sizing ends with Tree mode. Other routes retain the centre pane
     // scroller, including complete setup content below the graph/catalogue.

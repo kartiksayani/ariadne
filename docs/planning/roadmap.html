@@ -1558,7 +1558,10 @@
         "P4.4",
         "P0.4"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73",
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/95"
+      }
     },
     {
       "id": "P5.2",
@@ -1594,7 +1597,10 @@
       "implementation_depends_on": [
         "P5.1"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/80"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/80",
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/95"
+      }
     },
     {
       "id": "P5.3",
@@ -1630,7 +1636,8 @@
         "P4.5",
         "P4.6",
         "P4.7"
-      ]
+      ],
+      "active": true
     },
     {
       "id": "P6.1",
@@ -1688,11 +1695,11 @@
       "acceptance": [
         "Tray waiting_unanswered count/oldest ten rows/partial-root marker match global queue, with 250ms coalescing and separate lifecycle diagnostics.",
         "One long-lived objc2 UserNotifications delegate owns permission/schedule/click; bounded waiting-episode watermark dedupes/burst groups and generic text is default.",
-        "Packaged foreground/hidden/cold click and already-answered routes open current detail; permission denial leaves in-app answering usable (D13)."
+        "Ariadne notification callback admission and shared registered routing open current detail, including already-answered items; permission denial leaves in-app answering usable (D13). Prove our delegate-to-Core/Store flow and retain packaged cold/second-instance routing evidence. Standard macOS notification presentation and permission UI are delegated to Apple APIs, not physical acceptance gates (owner clarification 2026-10-05)."
       ],
       "checks": [
         "rtk proxy npm run test:native -- --suite notifications",
-        "Record actual packaged macOS permission/denial, foreground/hidden/cold-click and tray parity evidence."
+        "Focused actual notification callback, registered-route/current-detail, Core/Store denial-and-answer, tray parity and lifecycle tests; retain existing packaged route/release-isolation proof. No Notification Center, permission-popup or standard window-operation automation."
       ],
       "estimate_days": 1.5,
       "implementation_depends_on": [
