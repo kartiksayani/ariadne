@@ -81,7 +81,7 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     await assert.rejects(completeTurn(config.history, journal[1]), /exact existing/);
     await completeTurn(config.history, historyAdmission);
     assert.deepEqual((await rpc(17, 'thread/turns/list', { threadId: config.history.externalSessionId })).result.data.map(turn => turn.status), ['completed']);
-    assert.deepEqual((await rpc(18, 'thread/turns/list', { threadId: thread })).result.data.map(turn => turn.status), ['completed', 'inProgress'], 'History completion cannot finish the original running turn');
+    assert.deepEqual((await rpc(18, 'thread/turns/list', { threadId: thread })).result.data.map(turn => ({ id: turn.id, status: turn.status })), after.map(turn => ({ id: turn.id, status: turn.status })), 'History completion cannot change either original turn or their descending order');
   } finally { client?.terminate(); await provider?.stop(); await rm(root, { recursive: true }); }
 });
 test('selectors are explicit and default runs the complete gate', () => {
