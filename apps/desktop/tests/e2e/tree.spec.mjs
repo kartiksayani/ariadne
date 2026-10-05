@@ -5,7 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
 import { installSearchTimingObservation, takeSearchTimingObservation } from './search-timing-observation.mjs';
-import { identity } from '../../../../scripts/run-native-e2e.mjs';
+import { activateOwned, identity } from '../../../../scripts/run-native-e2e.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
@@ -177,6 +177,7 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
     await wait(async () => typeof await browser.execute(() => window.__ariadneTreeMeasurement.elapsed) === 'number', 'Native layout measurement did not reach its exact expected rows');
   } catch (error) {
     const observed = await browser.execute(() => ({ measurement: window.__ariadneTreeMeasurement,
+      visibilityState: document.visibilityState, hidden: document.hidden, hasFocus: document.hasFocus(),
       rows: [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].map(element => ({ id: element.dataset.itemId, tabIndex: element.tabIndex })),
       active: document.activeElement?.outerHTML.slice(0, 1000),
       alerts: [...document.querySelectorAll('[role="alert"],.nav-banner')].map(element => element.textContent),
@@ -201,7 +202,8 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed, 
   const sample = { text: button.textContent, expectedPressed, priorPressed: button.getAttribute('aria-pressed'), disabled: button.disabled,
     bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
     centreTarget: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.outerHTML.slice(0, 1000),
-    click: null, readiness: { frames: 0, ready: false } };
+    click: null, readiness: { frames: 0, ready: false, callbacks: 0, recenters: 0, callbackError: null,
+      visibilityState: document.visibilityState, hidden: document.hidden, hasFocus: document.hasFocus() } };
   window.__ariadneTreeFilterAction = sample;
   let previous, frame;
   const observe = event => {
@@ -215,33 +217,75 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed, 
     delete window.__ariadneTreeFilterCleanup;
   };
   const inspect = () => {
-    const current = selector ? document.querySelector(selector) : [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
-      .find(value => value.textContent.trim() === name);
-    const rect = button.getBoundingClientRect(), hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    const scroll = [];
-    for (let parent = button.parentElement; parent; parent = parent.parentElement) scroll.push([parent.scrollLeft, parent.scrollTop]);
-    const geometry = { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, scroll };
-    const valid = button.isConnected && current === button && !button.disabled && hit !== null && button.contains(hit);
-    const signature = JSON.stringify(geometry);
-    sample.readiness.frames = valid ? (signature === previous ? sample.readiness.frames + 1 : 1) : 0;
-    sample.readiness.ready = sample.readiness.frames >= 2;
-    sample.readiness.geometry = geometry;
-    sample.readiness.connectedNamedTarget = button.isConnected && current === button;
-    sample.readiness.enabled = !button.disabled;
-    sample.readiness.centreHit = hit !== null && button.contains(hit);
-    previous = valid ? signature : undefined;
-    frame = window.requestAnimationFrame(inspect);
+    sample.readiness.callbacks++;
+    sample.readiness.visibilityState = document.visibilityState;
+    sample.readiness.hidden = document.hidden;
+    sample.readiness.hasFocus = document.hasFocus();
+    try {
+      const current = selector ? document.querySelector(selector) : [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
+        .find(value => value.textContent.trim() === name);
+      const rect = button.getBoundingClientRect(), hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const scroll = [];
+      for (let parent = button.parentElement; parent; parent = parent.parentElement) scroll.push([parent.scrollLeft, parent.scrollTop]);
+      const geometry = { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, scroll };
+      sample.readiness.geometry = geometry;
+      sample.readiness.connectedNamedTarget = button.isConnected && current === button;
+      sample.readiness.enabled = !button.disabled;
+      sample.readiness.centreHit = hit !== null && button.contains(hit);
+      const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+      if (button.isConnected && current === button && !button.disabled
+        && sample.readiness.visibilityState === 'visible' && !sample.readiness.hidden && sample.readiness.hasFocus
+        && (x < 0 || x >= window.innerWidth || y < 0 || y >= window.innerHeight)) {
+        // Native nested scrolling can settle after the initial centering. Move
+        // only the original offscreen target, then require two fresh frames.
+        button.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+        sample.readiness.recenters++;
+        sample.readiness.frames = 0; sample.readiness.ready = false; previous = undefined;
+        frame = window.requestAnimationFrame(inspect); return;
+      }
+      const valid = sample.readiness.visibilityState === 'visible' && !sample.readiness.hidden && sample.readiness.hasFocus
+        && button.isConnected && current === button && !button.disabled && hit !== null && button.contains(hit);
+      const signature = JSON.stringify(geometry);
+      sample.readiness.frames = valid ? (signature === previous ? sample.readiness.frames + 1 : 1) : 0;
+      sample.readiness.ready = sample.readiness.frames >= 2;
+      previous = valid ? signature : undefined;
+      frame = window.requestAnimationFrame(inspect);
+    } catch (error) {
+      sample.readiness.frames = 0; sample.readiness.ready = false;
+      sample.readiness.callbackError = { message: String(error.message ?? error), stack: error.stack ?? null };
+    }
   };
   frame = window.requestAnimationFrame(inspect);
 }
+export function treeClickReadinessStatus(admit = false) {
+  const sample = window.__ariadneTreeFilterAction;
+  const callbackError = sample.readiness.callbackError;
+  const ready = !callbackError && sample.readiness.ready && document.visibilityState === 'visible' && !document.hidden && document.hasFocus();
+  if (ready && admit) sample.admittedReadiness = { ...sample.readiness };
+  return { ready, callbackError };
+}
+async function waitClickReadiness(message, admit = false) {
+  let status;
+  await wait(async () => {
+    status = await browser.execute(treeClickReadinessStatus, admit);
+    // WDIO retries a rejected condition until its deadline. End the wait on a
+    // captured callback error and propagate it before any owner input instead.
+    return status.ready || status.callbackError !== null;
+  }, message);
+  if (status.callbackError) throw new Error(`Native readiness callback failed: ${status.callbackError.message}`);
+}
 async function readySessionButton(tree) {
+  // WKWebView suspends animation frames while the native App is hidden. Make
+  // the genuine owned window visible before readiness and timing begin.
+  await activateOwned(process.env.ARIADNE_E2E_ROOT, process.env.ARIADNE_E2E_BINARY, process.env.ARIADNE_E2E_NONCE);
+  await wait(() => browser.execute(() => document.visibilityState === 'visible' && !document.hidden && document.hasFocus()),
+    'Owned native App did not become visible and focused');
   const selector = `[data-session-id="${tree.sessionId}"]`, button = await browser.$(selector);
   await button.waitForDisplayed(); await button.waitForEnabled();
   await browser.execute(observeTreeClickReadiness, button, null, null, null, selector);
   let failure;
   try {
-    await wait(() => browser.execute(() => window.__ariadneTreeFilterAction.readiness.ready),
-      'Native session target did not become stable and enabled');
+    await waitClickReadiness('Native session target did not become stable and enabled');
   } catch (error) { failure = error;
   } finally {
     try { await browser.execute(() => window.__ariadneTreeFilterCleanup?.()); }
@@ -256,12 +300,7 @@ async function choose(group, name, pressed) {
   await browser.execute(observeTreeClickReadiness, button, group, name, pressed);
   let failure;
   try {
-    await wait(() => browser.execute(() => {
-      const sample = window.__ariadneTreeFilterAction;
-      if (!sample.readiness.ready) return false;
-      sample.admittedReadiness = { ...sample.readiness };
-      return true;
-    }), 'Native filter target did not become stable and enabled');
+    await waitClickReadiness('Native filter target did not become stable and enabled', true);
     await button.click();
     await wait(async () => {
       // Selected owners move first after the saved preference renders. Reacquire
@@ -338,6 +377,7 @@ export async function runTreeAcceptance(configuration) {
     try {
       const observed = await browser.execute(() => ({
         viewport: { width: window.innerWidth, height: window.innerHeight },
+        visibilityState: document.visibilityState, hidden: document.hidden, hasFocus: document.hasFocus(),
         measurement: window.__ariadneTreeMeasurement, filterAction: window.__ariadneTreeFilterAction,
         rows: [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].slice(0, 2000)
           .map(element => ({ id: element.dataset.itemId, tabIndex: element.tabIndex })),

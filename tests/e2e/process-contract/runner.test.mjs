@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
+import { activateOwned, command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import WebSocket from 'ws';
@@ -212,6 +212,27 @@ test('runner observes startup ancestry before any UI bridge assertion', async ()
     await assert.rejects(observeOwned(root, exe, 'nonce', 999999), /ancestry/);
     await rm(join(root, 'startup.json'));
     await assert.rejects(observeOwned(root, exe, 'nonce', process.pid, 50), /deadline/);
+  } finally { await stop(child); await rm(root, { recursive: true }); }
+});
+test('native activation rejects changed identity and foreign launchers without affecting the process', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-activation-'));
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { detached: true, stdio: 'ignore' });
+  try {
+    const binary = identity(child.pid).exe;
+    await json(join(root, 'startup.json'), { pid: child.pid, nonce: 'owned' });
+    await json(join(root, 'launcher.json'), { pid: process.pid });
+    const owned = await observeOwned(root, binary, 'owned', process.pid);
+    await assert.rejects(activateOwned(root, '/different/executable', 'owned'), /changed native process identity/);
+    await json(join(root, 'observed.json'), { ...owned, birth: 'different birth' });
+    await assert.rejects(activateOwned(root, binary, 'owned'), /changed native process identity/);
+    await json(join(root, 'observed.json'), owned);
+    await assert.rejects(activateOwned(root, binary, 'foreign nonce'), /nonce/);
+    await json(join(root, 'launcher.json'), { pid: 999999 });
+    await assert.rejects(activateOwned(root, binary, 'owned'), /ancestry/);
+    await json(join(root, 'launcher.json'), { pid: process.pid });
+    await json(join(root, 'observed.json'), { ...owned, pid: process.pid, exe: identity(process.pid).exe, birth: identity(process.pid).birth });
+    await assert.rejects(activateOwned(root, binary, 'owned'), /witness identity mismatch/);
+    assert.ok(alive(child.pid)); assert.ok(alive(process.pid));
   } finally { await stop(child); await rm(root, { recursive: true }); }
 });
 test('fresh launch rejects stale nonce and retains separate PID/birth/ancestry evidence', async () => {
