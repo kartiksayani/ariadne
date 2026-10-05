@@ -8,6 +8,7 @@ import type { NonnegativeSafeInteger } from '../domain/primitives/NonnegativeSaf
 import type { Sha256 } from '../domain/primitives/Sha256';
 import type { RequestRef } from '../domain/primitives/RequestRef';
 import type { AdapterConfig, EndpointRef, Freshness, Input, InputKind, InputState, InputTarget, ItemLinkTarget, ItemMessagesProjection, ItemOption, ItemOwner, ItemReadProjection, ItemRoundsProjection, ItemStatus, ItemType, Message, OwnerResolutionEvidence, Page, PresenceObservation, ProjectSummary, QueryCursor, ResolutionKind, ResultOutcome, SavedReceipt, Session, SessionState, SessionSummary, SummaryCounts, Topic, UniqueMap } from '../domain/models';
+import type { Availability, Compatibility } from '../adapter';
 export type AgentApplyToolRequest = { binding_id: UuidV4, generation: UuidV4, request: ApplyRequest, };
 export type AgentMessagesToolRequest = { binding_id: UuidV4, generation: UuidV4, source_input_id: UuidV4 | null, attempt_id: UuidV4 | null, params: ItemMessagesRequest, };
 export type AgentReadToolRequest = { binding_id: UuidV4, generation: UuidV4, source_input_id: UuidV4 | null, attempt_id: UuidV4 | null, params: SessionReadRequest, };
@@ -28,6 +29,9 @@ export type ContinuePreviewRequest = { source: SessionRef, source_topic_id: Uuid
 export type ContinueReadiness = { "kind": "ready", binding_id: UuidV4, generation: UuidV4, host_available: boolean, } | { "kind": "blocked", reasons: Array<ContinueBlockReason>, };
 export type CoreError = { code: CoreErrorCode, message: string, hint: string, retryable: boolean, field_errors: Array<FieldError>, current_revision?: PositiveSafeInteger, details?: ErrorDetails, };
 export type CoreErrorCode = "invalid_argument" | "not_found" | "binding_ambiguous" | "binding_mismatch" | "binding_conflict" | "stale_generation" | "incompatible_adapter" | "host_unreachable" | "revision_conflict" | "question_changed" | "unhandled_owner_message" | "invalid_ref" | "invalid_transition" | "operation_reused" | "result_already_committed" | "attempt_sealed" | "result_missing" | "delivery_uncertain" | "queue_full" | "topic_not_archivable" | "session_not_closable" | "preview_stale" | "snapshot_changed" | "io_error" | "store_busy" | "capacity_exceeded" | "commit_uncertain" | "corrupt_session" | "future_schema" | "permission_denied" | "unsupported" | "protocol_conflict" | "unsupported_host_version" | "control_path_too_long";
+export type DesktopDiscoveryCandidate = { adapter_id: string, endpoint: EndpointRef, external_session_id: string, cwd: string, title: string | null, host_version: string, observed_at: UtcMillis, freshness: Freshness, compatibility: Compatibility, availability: Availability, loaded: boolean, binding_id: UuidV4 | null, session: SessionRef | null, };
+export type DesktopDiscoverySnapshot = { candidates: Array<DesktopDiscoveryCandidate>, error: CoreError | null, };
+export type DiscoveryUiOpenRequest = { open: boolean, };
 export type EntityRef = ExistingRef | LocalRef;
 export type ErrorDetails = { reason: BarrierReason | null, binding_id: UuidV4 | null, input_id: UuidV4 | null, attempt_id: UuidV4 | null, blocking_item_ids: Array<ItemRef>, blocking_input_ids: Array<UuidV4>, dispatch_must_pause: boolean, };
 export type EventReceipt = { event_id: string, session_id: UuidV4, revision: PositiveSafeInteger | null, durable_effect: boolean, replayed: boolean, };

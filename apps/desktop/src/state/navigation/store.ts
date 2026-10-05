@@ -279,6 +279,7 @@ export class NavigationStore {
       this.pending = null;
       this.publish({ writing: false, pendingOperationId: null });
       await this.refresh();
+      if ('project_id' in receipt) await this.navigate({ kind: 'project', project_id: receipt.project_id });
       return true;
     } catch (error: unknown) {
       const failure = fail(error);

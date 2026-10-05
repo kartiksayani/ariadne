@@ -1,10 +1,12 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import type { EndpointRef, ProjectSummary, SessionSummary } from '../../generated/domain/models';
 import type { Immutable } from '../../data/session-store';
 import { useNavigation, type NavigationStore } from '../../state/navigation/store';
 import { CoreFailure } from '../../data/service';
 import type { AdapterChoice } from './NavigationWorkspace';
 import { ReferenceDialog } from '../reference/ReferenceDialog';
+import { candidateIdentity, useDiscovery, type DiscoveryController } from '../../data/discovery';
+import { CandidateList } from './Discovery';
 
 function RegistrationFailure({ store }: { store: NavigationStore }) {
   const state = useNavigation(store);
@@ -16,8 +18,8 @@ function RegistrationFailure({ store }: { store: NavigationStore }) {
   </div>;
 }
 
-export function RegisterProject({ store, disabled, close }: { store: NavigationStore; disabled: boolean; close: () => void }) {
-  const [root, setRoot] = useState('');
+export function RegisterProject({ store, disabled, close, initialRoot = '' }: { store: NavigationStore; disabled: boolean; close: () => void; initialRoot?: string }) {
+  const [root, setRoot] = useState(initialRoot);
   const submit = async (event: FormEvent) => { event.preventDefault(); if (await store.register(root)) close(); };
   return <ReferenceDialog title="Register project" onCancel={close} width={520} actions={null}><div className="nav-registration">
     <p>Choose the existing local project root.</p>
@@ -28,16 +30,25 @@ export function RegisterProject({ store, disabled, close }: { store: NavigationS
   </div></ReferenceDialog>;
 }
 
-export function BindSession({ store, project, sessions, adapters, disabled, close }: { store: NavigationStore; project: Immutable<ProjectSummary>;
-  sessions: readonly Immutable<SessionSummary>[]; adapters: readonly AdapterChoice[]; disabled: boolean; close: () => void }) {
+export function BindSession({ store, project, sessions, adapters, disabled, close, discovery }: { store: NavigationStore; project: Immutable<ProjectSummary>;
+  sessions: readonly Immutable<SessionSummary>[]; adapters: readonly AdapterChoice[]; disabled: boolean; close: () => void; discovery?: DiscoveryController }) {
   const [adapterId, setAdapterId] = useState(adapters[0]?.adapter_id ?? '');
   const [externalId, setExternalId] = useState('');
   const [kind, setKind] = useState<EndpointRef['kind']>('unix_socket');
   const [endpoint, setEndpoint] = useState('');
   const [existingSession, setExistingSession] = useState('');
   const [sessionChoice, setSessionChoice] = useState<'new' | 'existing'>('new');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [invalidated, setInvalidated] = useState(false);
+  const discoveryState = useDiscovery(discovery);
+  useEffect(() => discovery?.acquire(), [discovery]);
+  const candidate = discoveryState.snapshot?.candidates.find(value => candidateIdentity(value) === selected && value.cwd === project.canonical_root);
+  const noLongerFresh = selected !== null && (!candidate || candidate.freshness !== 'fresh' || discoveryState.error !== null);
+  useEffect(() => { if (noLongerFresh) setInvalidated(true); }, [noLongerFresh]);
+  const invalidSelection = selected !== null && (invalidated || noLongerFresh);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (invalidSelection || disabled) return;
     const adapter = adapters.find(choice => choice.adapter_id === adapterId);
     if (!adapter) return;
     if (await store.bind({ project_id: project.project_id, adapter_id: adapter.adapter_id, external_session_id: externalId,
@@ -47,12 +58,18 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
   return <ReferenceDialog title="Connect existing session" onCancel={close} width={520} actions={null}><div className="nav-registration">
     <p>{project.project?.display_name ?? 'Unavailable project'} · {project.canonical_root}</p>
     <p>Choose an existing host session explicitly. The backend verifies its identity and capabilities before connecting.</p>
+    {discovery && <CandidateList controller={discovery} root={project.canonical_root} selected={selected} select={candidate => {
+      setSelected(candidateIdentity(candidate)); setInvalidated(false); setAdapterId(candidate.adapter_id); setExternalId(candidate.external_session_id);
+      setKind(candidate.endpoint.kind); setEndpoint(candidate.endpoint.kind === 'unix_socket' ? candidate.endpoint.path : candidate.endpoint.name);
+    }} />}
+    {invalidSelection && <p role="alert">Selected host session is no longer fresh or present. Choose it again after refresh, or edit the manual fields.</p>}
+    <p>Manual connection remains available. For Codex, use the configured app-server socket and an existing thread ID.</p>
     <RegistrationFailure store={store} />
     <form onSubmit={event => { void submit(event); }}><fieldset disabled={disabled}>
-      <label>Adapter<select tabIndex={0} required value={adapterId} onChange={event => setAdapterId(event.target.value)}>{adapters.map(adapter => <option key={adapter.adapter_id} value={adapter.adapter_id}>{adapter.label}</option>)}</select></label>
-      <label>External session ID<input required value={externalId} onChange={event => setExternalId(event.target.value)} /></label>
-      <label>Endpoint<select tabIndex={0} value={kind} onChange={event => setKind(event.target.value as EndpointRef['kind'])}><option value="unix_socket">Unix socket</option><option value="local_bridge">Local bridge</option></select></label>
-      <label>{kind === 'unix_socket' ? 'Socket path' : 'Bridge name'}<input required value={endpoint} onChange={event => setEndpoint(event.target.value)} /></label>
+      <label>Adapter<select tabIndex={0} required value={adapterId} onChange={event => { setSelected(null); setAdapterId(event.target.value); }}>{adapters.map(adapter => <option key={adapter.adapter_id} value={adapter.adapter_id}>{adapter.label}</option>)}</select></label>
+      <label>External session ID<input required value={externalId} onChange={event => { setSelected(null); setExternalId(event.target.value); }} /></label>
+      <label>Endpoint<select tabIndex={0} value={kind} onChange={event => { setSelected(null); setKind(event.target.value as EndpointRef['kind']); }}><option value="unix_socket">Unix socket</option><option value="local_bridge">Local bridge</option></select></label>
+      <label>{kind === 'unix_socket' ? 'Socket path' : 'Bridge name'}<input required value={endpoint} onChange={event => { setSelected(null); setEndpoint(event.target.value); }} /></label>
       <fieldset className="nav-session-choice"><legend>Ariadne session</legend>
         <label><input type="radio" name="session-choice" checked={sessionChoice === 'new'} onChange={() => setSessionChoice('new')} />New Ariadne session</label>
         <label><input type="radio" name="session-choice" checked={sessionChoice === 'existing'} onChange={() => setSessionChoice('existing')} />Attach to an existing Ariadne session</label>
@@ -61,7 +78,7 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
         {sessions.map(session => <option key={session.session_id} value={session.session_id}>{session.title} · {session.state}</option>)}</select></label>
         <p>Ariadne keeps this session’s topics, items and history. Follow the saved setup instruction to attach this host conversation.</p></>}
       <div className="nav-dialog-actions"><button type="button" className="ref-button ref-secondary" onClick={close}>Cancel</button>
-        <button type="submit" className="ref-button ref-primary">Connect existing session</button></div>
+        <button type="submit" className="ref-button ref-primary" disabled={invalidSelection}>Connect existing session</button></div>
     </fieldset></form>
   </div></ReferenceDialog>;
 }

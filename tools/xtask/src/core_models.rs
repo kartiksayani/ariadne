@@ -52,6 +52,9 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         ItemRoute,
         SessionChangedHint,
         PresenceChangedHint,
+        DesktopDiscoveryCandidate,
+        DesktopDiscoverySnapshot,
+        DiscoveryUiOpenRequest,
         OpenRoute,
         ReadView,
         SessionReadRequest,
@@ -156,6 +159,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         "import type {{ {} }} from '../domain/models';\n",
         names.join(", ")
     ));
+    text.push_str("import type { Availability, Compatibility } from '../adapter';\n");
     text.push_str(&body);
     files.insert(Path::new(TYPES).join("index.ts"), text);
     // Transport manifests contain schema references by name for Tauri/CLI and
