@@ -114,11 +114,13 @@ fn definite_revision_conflict_is_not_automatically_overwritten() {
             || id(1),
             || Ok(snapshot()),
             |_| {
-                Err(CoreError::new(
+                let mut error = CoreError::new(
                     CoreErrorCode::RevisionConflict,
                     "Preferences changed.",
                     "Reload before a new action.",
-                ))
+                );
+                error.current_revision = Some(PositiveSafeInteger::new(5).unwrap());
+                Err(error)
             },
         )
         .unwrap_err();
@@ -157,6 +159,59 @@ fn malformed_success_retains_original_operation_and_unchanged_geometry_does_not_
             |_| panic!("no write")
         )
         .unwrap());
+}
+
+#[test]
+fn generic_errors_never_replace_a_pending_geometry_operation() {
+    let mut writer = WindowPreferenceWrite::default();
+    let mut original = None;
+    writer
+        .save(
+            geometry(20.0),
+            || id(1),
+            || Ok(snapshot()),
+            |request| {
+                original = Some(request.clone());
+                Err(CoreError::new(
+                    CoreErrorCode::CommitUncertain,
+                    "Lost receipt.",
+                    "Confirm it.",
+                ))
+            },
+        )
+        .unwrap_err();
+    for code in [
+        CoreErrorCode::IoError,
+        CoreErrorCode::HostUnreachable,
+        CoreErrorCode::StoreBusy,
+        CoreErrorCode::RevisionConflict,
+        CoreErrorCode::OperationReused,
+        CoreErrorCode::InvalidArgument,
+    ] {
+        writer
+            .save(
+                geometry(99.0),
+                || panic!("never allocate"),
+                || panic!("never reread"),
+                |request| {
+                    assert_eq!(Some(request), original.as_ref());
+                    Err(CoreError::new(
+                        code,
+                        "Generic failure.",
+                        "Confirm the same operation.",
+                    ))
+                },
+            )
+            .unwrap_err();
+        assert!(writer.ready_to_exit().is_err());
+    }
+    writer
+        .confirm(|request| {
+            assert_eq!(Some(request), original.as_ref());
+            Ok(receipt(request))
+        })
+        .unwrap();
+    writer.ready_to_exit().unwrap();
 }
 
 #[test]

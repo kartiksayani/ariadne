@@ -4,7 +4,9 @@ use crate::{
     discovery::AnnouncementBinding,
     leases::DesktopOwner,
     providers::{within, ProviderFactory, QualifiedProvider},
-    supervisor::{ConnectFailure, ConnectedSupervisor, SupervisorExit, SupervisorHandle},
+    supervisor::{
+        ConnectFailure, ConnectedSupervisor, PresenceObserver, SupervisorExit, SupervisorHandle,
+    },
 };
 use ariadne_core::{
     native::{AgentResolver, NativeCoreService},
@@ -54,6 +56,7 @@ pub struct NativeActivation {
     routes: ControlRoutes,
     runtime: tokio::runtime::Handle,
     outcomes: Arc<OutcomeHandler>,
+    presence: Option<Arc<PresenceObserver>>,
     state: Mutex<State>,
     stopping: AtomicBool,
 }
@@ -66,6 +69,17 @@ impl NativeActivation {
         runtime: tokio::runtime::Handle,
         outcomes: Arc<OutcomeHandler>,
     ) -> Arc<Self> {
+        Self::new_with_presence(core, providers, owner, routes, runtime, outcomes, None)
+    }
+    pub fn new_with_presence(
+        core: Arc<NativeCoreService>,
+        providers: ProviderFactory,
+        owner: Arc<DesktopOwner>,
+        routes: ControlRoutes,
+        runtime: tokio::runtime::Handle,
+        outcomes: Arc<OutcomeHandler>,
+        presence: Option<Arc<PresenceObserver>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             core,
             providers,
@@ -73,6 +87,7 @@ impl NativeActivation {
             routes,
             runtime,
             outcomes,
+            presence,
             state: Mutex::new(State {
                 active: BTreeMap::new(),
                 admitting: BTreeSet::new(),
@@ -329,18 +344,21 @@ impl NativeActivation {
         })
         .await
         .map_err(|_| unavailable())??;
-        if self.stopping.load(Ordering::Acquire) {
-            return Err(unavailable());
-        }
-        let mut handle = connected.start(lease)?;
-        let observed = handle.progress();
-        let route = handle.control_binding();
+        let connected = match &self.presence {
+            Some(observer) => connected.with_presence_observer(observer.clone()),
+            None => connected,
+        };
         {
             let mut state = self.state.lock().map_err(|_| unavailable())?;
             if self.stopping.load(Ordering::Acquire) {
-                handle.request_stop();
                 return Err(unavailable());
             }
+            // Starting schedules the worker. Serialize that scheduling and its
+            // handle installation with the synchronous stop-admission fence,
+            // so no live worker can exist outside the fence's active set.
+            let handle = connected.start(lease)?;
+            let observed = handle.progress();
+            let route = handle.control_binding();
             state.active.insert(
                 scope.binding_id.clone(),
                 Active {
@@ -421,8 +439,7 @@ impl NativeActivation {
     /// Explicit Quit fences admission, removes routes and awaits actual workers.
     /// It does not persist a domain disconnect, rotate generations or stop hosts.
     pub async fn shutdown(&self) -> Result<(), CoreError> {
-        self.stopping.store(true, Ordering::Release);
-        self.routes.close()?;
+        self.stop_admission()?;
         let (active, monitors) = {
             let mut state = self.state.lock().map_err(|_| unavailable())?;
             (
@@ -445,6 +462,21 @@ impl NativeActivation {
             monitor.await.map_err(|_| unavailable())?;
         }
         Ok(())
+    }
+    /// Synchronous wake/Quit fence only: no Core/provider IO or worker waits.
+    /// Already admitted calls retain their leases for the later owned drain.
+    pub fn stop_admission(&self) -> Result<(), CoreError> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.stopping.store(true, Ordering::Release);
+        for active in state.active.values_mut() {
+            active.handle.request_stop();
+        }
+        // Publication takes state before routes too, so it cannot reopen a
+        // route after this fence. Existing route copies share the stopped gates.
+        self.routes.close()
     }
     fn current(&self, scope: &BindingScope) -> Result<(RegisteredSession, Binding), CoreError> {
         current_binding(&self.core, scope)

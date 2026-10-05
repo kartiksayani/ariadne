@@ -1,0 +1,77 @@
+.lifecycle-binding, .lifecycle-recovery {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-divider);
+  background: var(--color-surface);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.lifecycle-binding p, .lifecycle-recovery p, .lifecycle-edge p {
+  margin: 4px 0;
+}
+
+.lifecycle-muted {
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+  font-size: 12px;
+}
+
+.lifecycle-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.lifecycle-notice, .lifecycle-recovery-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.lifecycle-edge[data-edge-state="loading"] .lifecycle-notice,
+.lifecycle-edge[data-edge-state="all_clear"] .lifecycle-notice,
+.lifecycle-edge[data-edge-state="empty"] .lifecycle-notice,
+.lifecycle-edge[data-edge-state="no_results"] .lifecycle-notice {
+  border-color: transparent;
+}
+
+.lifecycle-notice > div, .lifecycle-recovery-row > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.lifecycle-dialog {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  max-height: 65vh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.lifecycle-dialog label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lifecycle-dialog input:not([type="checkbox"]), .lifecycle-dialog select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.lifecycle-preserve {
+  white-space: pre-wrap;
+}

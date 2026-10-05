@@ -57,7 +57,7 @@ fn main() {
         ));
     }
     match args.as_slice() {
-        [] | ["--help" | "-h"] => println!("ariadne local helper\nUsage: ariadne [--help|--version]\n       ariadne bridge claim --binding UUID --generation UUID --request-id UUID\n       ariadne bridge report --binding UUID --generation UUID --json-stdin\nMCP: ariadne mcp serve (session_read, item_messages, item_rounds, apply). Production bridge report composition is not available yet.\n\n{}\n{}\n{}\n{}\n{}\n{}", ariadne_cli::agent::HELP, ariadne_cli::owner::HELP, ariadne_cli::demo::HELP, ariadne_cli::open::HELP, ariadne_cli::setup::HELP, ariadne_cli::doctor::HELP),
+        [] | ["--help" | "-h"] => println!("ariadne local helper\nUsage: ariadne [--help|--version]\n       ariadne bridge claim --binding UUID --generation UUID --request-id UUID\n       ariadne bridge report --binding UUID --generation UUID --json-stdin\nMCP: ariadne mcp serve (session_read, item_messages, item_rounds, apply). Bridge reports persist through registered Core state even when the desktop is closed.\n\n{}\n{}\n{}\n{}\n{}\n{}", ariadne_cli::agent::HELP, ariadne_cli::owner::HELP, ariadne_cli::demo::HELP, ariadne_cli::open::HELP, ariadne_cli::setup::HELP, ariadne_cli::doctor::HELP),
         ["--version" | "-V"] => println!("ariadne {}", env!("CARGO_PKG_VERSION")),
         _ => {
             eprintln!("Unsupported scaffold request; use --help.");
