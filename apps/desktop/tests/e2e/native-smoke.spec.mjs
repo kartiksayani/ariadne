@@ -5,6 +5,7 @@ import { alive, delay, identity, listeners, json, proveQuit } from '../../../../
 import { admissions, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
 import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
+import { sendDetailReply } from './owner-reply.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
 const nonce = process.env.ARIADNE_E2E_NONCE;
@@ -145,9 +146,7 @@ async function delivery(configuration) {
     await another.waitForDisplayed(); await another.waitForEnabled(); await another.click();
     const actions = await browser.$('[aria-label="Owner actions"]'); await actions.waitForDisplayed();
     const reply = await actions.$('button=Reply'); await reply.waitForDisplayed(); await reply.waitForEnabled(); await reply.click();
-    const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForDisplayed(); await editor.setValue(text);
-    await browser.$('[aria-label="Owner input for #1"]').$('button=Send reply').click();
-    await wait(async () => orderedInputs(await snapshot(configuration)).some(input => input.payload.text === text), 'Visible detail Reply did not save the exact owner text');
+    await sendDetailReply(configuration, text);
   }
   const held = await snapshot(configuration), inputs = orderedInputs(held), savedReceipts = receipts(held, inputs);
   assert.equal(inputs.length, 5); assert.equal(new Set(inputs.map(input => input.id)).size, 5);
