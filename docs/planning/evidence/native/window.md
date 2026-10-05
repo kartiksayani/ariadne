@@ -50,7 +50,7 @@ Node22 environment. Supply absolute paths to the ordinary release artifacts and
 its retained evidence directory; the script does not use a personal install:
 
 ```sh
-rtk proxy node --test tests/native/window/assertions.test.mjs
+rtk proxy node --test tests/native/window/*.test.mjs
 rtk proxy node tests/native/window/run.mjs \
   --bundle /absolute/ordinary-release/Ariadne.app \
   --cli /absolute/ordinary-release/ariadne \
@@ -64,7 +64,11 @@ The script starts the retained WDA build with `test-without-building`, owns its
 process group and a fresh loopback Appium server, checks ports 10100/4723 are free,
 and requires `webDriverAgentMacUrl` to prevent occupied-port takeover. It enables
 no insecure Appium feature, recording, AppleScript or permission changes. Cleanup
-stops only spawned groups. Private fixture roots and every run's XML, canonical
+stops only spawned groups. SIGINT and SIGTERM abort ordinary requests/waits and
+reach the same cleanup; handlers remain installed until cleanup finishes, and
+session teardown retains its bounded deadline. Disposable subprocess tests prove
+both signals exit with failure and remove all three owned detached Node stand-ins,
+without starting an App or native driver. Private fixture roots and every run's XML, canonical
 snapshot, command trace, failed samples and cleanup logs stay under their recorded
 paths; successful evidence is written only after the journey and cleanup succeed.
 

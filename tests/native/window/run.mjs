@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { preparePackagedRoutes, packagedOwnership, packagedPids, packagedRouteSelected } from '../../../scripts/check-release-boundary.mjs';
 import { repo, command, json, digest, portFree, identity, alive, delay, stop, waitForQuitExit, sourceState } from '../../../scripts/run-native-e2e.mjs';
 import { assertReleaseArtifacts, assertContinuity, assertGeometry, assertPin, assertRestored, assertQuit } from './assertions.mjs';
+import { withCancellation } from './cancellation.mjs';
 
 const ELEMENT = 'element-6066-11e4-a52e-4f735466cecf';
 const CLOSE = "//XCUIElementTypeButton[@identifier='_XCUI:CloseWindow']";
@@ -17,23 +18,25 @@ const MINIMIZE = "//XCUIElementTypeButton[@identifier='_XCUI:MinimizeWindow']";
 const TRAY = "//XCUIElementTypeMenuBarItem[.//XCUIElementTypeMenuItem[@title='Show Ariadne']]";
 const menu = title => `//XCUIElementTypeMenuItem[@title='${title}']`;
 
-async function until(check, label, timeout = 20000) {
+async function until(check, label, timeout = 20000, signal) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     const result = await check();
+    signal?.throwIfAborted();
     if (result) return result;
     await delay(100);
   }
   throw new Error(`${label} did not complete before its deadline`);
 }
 
-function mac2Client(trace) {
+function mac2Client(trace, signal) {
   let session;
-  async function request(method, path, payload) {
+  async function request(method, path, payload, cleanup = false) {
     const response = await globalThis.fetch(`http://127.0.0.1:4723${path}`, {
       method, headers: { 'Content-Type': 'application/json' },
       body: payload === undefined ? undefined : JSON.stringify(payload),
-      signal: globalThis.AbortSignal.timeout(30000),
+      signal: cleanup ? globalThis.AbortSignal.timeout(30000) : globalThis.AbortSignal.any([signal, globalThis.AbortSignal.timeout(30000)]),
     });
     const result = await response.json();
     trace.push({ method, path, request: payload, response: result });
@@ -59,7 +62,7 @@ function mac2Client(trace) {
       session = value.sessionId;
       assert.ok(session, 'Mac2 returned no session');
     },
-    async detach() { if (session) { await request('DELETE', `/session/${session}`); session = undefined; } },
+    async detach() { if (session) { await request('DELETE', `/session/${session}`, undefined, true); session = undefined; } },
     source: () => scoped('GET', '/source'),
     unique, click,
     async closeVisible() {
@@ -85,7 +88,9 @@ function mac2Client(trace) {
   };
 }
 
-export async function checkPhysicalWindow({ bundle, cli, tools, releaseEvidence }) {
+export const checkPhysicalWindow = options => withCancellation(signal => runPhysicalWindow(options, signal));
+
+async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal) {
   assert.equal(process.platform, 'darwin', 'Physical window acceptance requires macOS');
   for (const path of [bundle, cli, tools, releaseEvidence]) assert.ok(path && resolve(path) === path, 'Use explicit absolute fixture/tool/evidence paths');
   for (const port of [4723, 10100]) await portFree(port);
@@ -99,10 +104,12 @@ export async function checkPhysicalWindow({ bundle, cli, tools, releaseEvidence 
   const root = await mkdtemp('/private/tmp/ariadne-window-');
   const data = await mkdtemp('/private/tmp/ariadne-window-data-');
   const trace = [], services = [], launches = [];
-  const client = mac2Client(trace);
+  const client = mac2Client(trace, signal);
+  const wait = (check, label, timeout) => until(check, label, timeout, signal);
   let fixture, child, primary, ownership, failure, cleanupFailure;
   const env = { PATH: process.env.PATH, LANG: 'en_US.UTF-8', TMPDIR: process.env.TMPDIR || '/private/tmp' };
   function launch(binary, args, environment, label, collection) {
+    signal.throwIfAborted();
     const processChild = spawn(binary, args, { env: environment, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const owned = { child: processChild, label, logs: '', error: undefined };
     processChild.once('error', error => { owned.error = error; });
@@ -111,18 +118,20 @@ export async function checkPhysicalWindow({ bundle, cli, tools, releaseEvidence 
     return processChild;
   }
   async function ready(port, processChild) {
-    await until(async () => {
+    await wait(async () => {
       assert.ok(alive(processChild.pid), `Owned service ${port} exited`);
       try {
-        const response = await globalThis.fetch(`http://127.0.0.1:${port}/status`, { signal: globalThis.AbortSignal.timeout(1000) });
+        const response = await globalThis.fetch(`http://127.0.0.1:${port}/status`, { signal: globalThis.AbortSignal.any([signal, globalThis.AbortSignal.timeout(1000)]) });
         return response.ok && (await response.json()).value;
       } catch (error) {
+        signal.throwIfAborted();
         if (error instanceof SyntaxError) throw error;
         return false;
       }
     }, `Service ${port} readiness`, 60000);
   }
   async function snapshot() {
+    signal.throwIfAborted();
     const preferences = JSON.parse(await readFile(fixture.preferencesPath, 'utf8')).snapshot;
     assert.ok(packagedRouteSelected(preferences, fixture.coldRoute), 'Canonical registered selection was lost');
     return { primary: identity(child.pid), ownership: await packagedOwnership(data, child, primary, ownership),
@@ -136,7 +145,7 @@ export async function checkPhysicalWindow({ bundle, cli, tools, releaseEvidence 
   }
   async function launchApplication(args) {
     child = launch(fixture.binary, args, fixture.env, `application-${launches.length + 1}`, launches);
-    await until(async () => {
+    await wait(async () => {
       assert.ok(alive(child.pid), 'Private production App exited during startup');
       try {
         const socket = await stat(join(data, 'run/control.sock'));
@@ -164,7 +173,9 @@ export async function checkPhysicalWindow({ bundle, cli, tools, releaseEvidence 
     await client.detach();
   }
   try {
+    signal.throwIfAborted();
     fixture = await preparePackagedRoutes(cli, bundle, root, data, env);
+    signal.throwIfAborted();
     const bundleId = (await command('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleIdentifier', join(fixture.application, 'Contents/Info.plist')])).stdout.trim();
     const project = join(tools, 'node_modules/appium-mac2-driver/WebDriverAgentMac/WebDriverAgentMac.xcodeproj');
     const wdaArgs = ['test-without-building', '-project', project, '-scheme', 'WebDriverAgentRunner', '-derivedDataPath', join(tools, 'wda-derived-data'),
@@ -184,7 +195,7 @@ export async function checkPhysicalWindow({ bundle, cli, tools, releaseEvidence 
     await client.moveTitle();
     const movedFrame = await client.rectangle();
     assert.ok(Math.abs(movedFrame.x - originalFrame.x) > 2 || Math.abs(movedFrame.y - originalFrame.y) > 2, 'XCTest title drag did not move the native window');
-    await until(async () => {
+    await wait(async () => {
       const saved = (await snapshot()).preferences.global.window;
       return saved && ['x', 'y', 'width', 'height'].every(key => Number.isFinite(saved[key]) && Math.abs(saved[key] - movedFrame[key]) <= 2);
     }, 'Canonical moved geometry');
@@ -195,17 +206,17 @@ export async function checkPhysicalWindow({ bundle, cli, tools, releaseEvidence 
     assertGeometry(initial.preferences, await client.rectangle());
     for (const [label, control] of [['close', CLOSE], ['minimize', MINIMIZE]]) {
       await client.click(await client.unique(control));
-      await until(async () => !(await client.closeVisible()), `${label} removes the hittable window`);
+      await wait(async () => !(await client.closeVisible()), `${label} removes the hittable window`);
       const hidden = await capture(label); assertContinuity(initial, hidden, fixture.coldRoute);
       await client.openTray(); await client.choose('Show Ariadne');
-      await until(() => client.closeVisible(), `Show after ${label}`);
+      await wait(() => client.closeVisible(), `Show after ${label}`);
       const shown = await capture(`show-after-${label}`); assertContinuity(hidden, shown, fixture.coldRoute);
       assertGeometry(shown.preferences, await client.rectangle());
     }
     const beforePin = await snapshot();
     await client.openTray(); assert.equal(await client.pinSelected(), false);
     await client.choose('Pin');
-    await until(async () => (await snapshot()).preferences.global.pinned === true, 'Canonical Pin commit');
+    await wait(async () => (await snapshot()).preferences.global.pinned === true, 'Canonical Pin commit');
     await client.openTray();
     const pinned = await capture('pinned'); pinned.menuSelected = await client.pinSelected();
     assertPin(beforePin, pinned, true, fixture.coldRoute);
@@ -213,7 +224,7 @@ export async function checkPhysicalWindow({ bundle, cli, tools, releaseEvidence 
     await client.choose('Show Ariadne');
     await quit('quit-pinned');
     await launchApplication([]); await client.attach(fixture, bundleId);
-    await until(async () => {
+    await wait(async () => {
       if (!(await client.closeVisible())) return false;
       const frame = await client.rectangle(), saved = pinned.preferences.global.window;
       return ['x', 'y', 'width', 'height'].every(key => Math.abs(frame[key] - saved[key]) <= 2);
@@ -246,6 +257,7 @@ export async function checkPhysicalWindow({ bundle, cli, tools, releaseEvidence 
   }
   if (cleanupFailure) throw cleanupFailure;
   if (failure) throw failure;
+  signal.throwIfAborted();
   await json(join(evidence, 'result.json'), { passed: true,
     scope: 'Actual XCTest title drag/close/minimize, tray Show/Pin/Quit, canonical route/geometry/Pin persistence, production PID/socket/lease ownership and orderly restart.',
     heldExternalTurnProved: false, physicalMonitorChangeProved: false, genuineWakeProved: false, dockReopenProved: false, alwaysOnTopOverlapProved: false });
