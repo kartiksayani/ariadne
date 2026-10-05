@@ -4,6 +4,10 @@ use ariadne_domain::models::*;
 use ariadne_store::session::Store;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
+#[path = "tests/continuation.rs"]
+mod tests;
+
 impl HistoryActionService<'_> {
     /// Replay the target before reading the source. The source lock is released
     /// before the sole target transaction; no source bytes are ever published.
@@ -46,36 +50,45 @@ impl HistoryActionService<'_> {
             .into());
         }
         let source = self.snapshot(&params.source)?;
-        if source.revision != params.source_revision
-            || preview::hash(&source, &params.source_topic_id)? != params.source_sha256
-        {
-            return Err(core(
-                CoreErrorCode::PreviewStale,
-                "The source snapshot changed since the continuation preview",
-            )
-            .into());
-        }
         if !source.topics.0.contains_key(&params.source_topic_id) {
             return Err(core(CoreErrorCode::NotFound, "The source topic does not exist").into());
         }
-        let saved = store.transact(
-            &params.target.session_id,
-            &ReceiptActorScope::Owner {},
-            command.operation_id(),
-            &normalized,
-            |target| {
-                copy(
-                    target,
-                    &source,
-                    params,
-                    command.operation_id(),
-                    &mut allocate,
-                    &at,
-                )
-            },
-        )?;
+        let saved = commit_snapshot(&store, &source, command, &normalized, &mut allocate, &at)?;
         Ok(MutationReceipt::Session(Box::new(saved)))
     }
+}
+
+// The initial replay is a fast path before source IO. A competing identical
+// operation may save after that miss, so the locked replay must also precede
+// freshness rejection. Source IO/hash failures keep their existing semantics.
+fn commit_snapshot(
+    store: &Store,
+    source: &Session,
+    command: &OwnerCommand,
+    normalized: &serde_json::Value,
+    allocate: &mut impl FnMut() -> UuidV4,
+    at: &UtcMillis,
+) -> Result<SavedReceipt, HistoryActionError> {
+    let OwnerCommand::TopicContinue { params, .. } = command else {
+        unreachable!("validated continuation command")
+    };
+    Ok(store.transact(
+        &params.target.session_id,
+        &ReceiptActorScope::Owner {},
+        command.operation_id(),
+        normalized,
+        |target| {
+            if source.revision != params.source_revision
+                || preview::hash(source, &params.source_topic_id)? != params.source_sha256
+            {
+                return Err(core(
+                    CoreErrorCode::PreviewStale,
+                    "The source snapshot changed since the continuation preview",
+                ));
+            }
+            copy(target, source, params, command.operation_id(), allocate, at)
+        },
+    )?)
 }
 
 fn increment(value: PositiveSafeInteger) -> Result<PositiveSafeInteger, CoreError> {

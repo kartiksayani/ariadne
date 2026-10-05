@@ -1,89 +1,101 @@
-# Ariadne handoff — 2026-10-05 13:40 UTC
+# Ariadne handoff — 2026-10-05 16:16 UTC
 
-Continue autonomous delivery until the owner stops. Delegates: Sol 6.1 High only.
-Local validation authorized; MCP/Seezo disabled. Preserve worktrees, history,
-ignored evidence and safety stashes. Root coordinates reviews/merges;
-index_large_session_validation alone operates the interactive Mac runtime.
+Owner resumed autonomous parallel delivery. Delegates use Sol 6.1 High only.
+MCP/Seezo disabled by waiver. Test Ariadne behavior, not Apple menu/Pin/Show/
+minimize/Notification Center mechanics. Root alone adjudicates and squash merges.
+Preserve all branches, worktrees, ignored evidence and unrelated changes.
 
-**Main `22b70da7966a03e23e0e00546aa78169ea68206d`; roadmap 35/49.**
-P4.4 closed with PR91 (86.77% coverage). PR100 repaired the process-fixture readiness
-race and merged after independent review5414720722 and green
-[CI37312111856](https://github.com/kartiksayani/ariadne/actions/runs/37312111856).
-New [main CI37315944431](https://github.com/kartiksayani/ariadne/actions/runs/37315944431)
-is queued. Pending main permits qualified merges; failed main pauses other merges.
+**Main: 7dbecfb35aabb5b6a25af422ff61e1261b084f39. Roadmap: 37/49.**
+PR102 merged tray publication deduplication/reconciliation and the owner test
+boundary. Main [CI37332070267](https://github.com/kartiksayani/ariadne/actions/runs/37332070267)
+passed. PR95 merged at16:13:54 UTC after green37332514521 and exact review5416909835. New main CI pending; PR96 already proved startup-route retention and
+packaged cold/second-instance routing. Neither alone completed P6.1.
 
-## Published delivery
+## Open PR checkpoint — re-fetch before merge
 
-Check actual GitHub head/base/CI before acting. All open PRs remain drafts.
-Stack94→93→97;99 and102 depend on96; others target main.
+All listed PRs are drafts, against main above unless shown as children.
 
-| PR | Head | Independent review / remaining proof |
+| PR | Exact head prefix | CI / independent review |
 | --- | --- | --- |
-| 93 | 365c690 | clear5415160662; CI pending |
-| 94 | d6c9efc | clear5415160243; full native history running |
-| 95 | 263b872 | clear5415177184; actual-main integration CI pending |
-| 96 | 45e4870 | clear5415177503; actual-main integration CI pending |
-| 97 | 83bb87a | clear5415161006; full native run active |
-| 98 | 40640b9 | clear5414898124; CI running; partial deterministic acceptance |
-| 99 | 7f1401e | parent96 repair integrated; source unchanged, delta review/CI pending |
-| 101 | integration pending | source5de75d1 clear5414979189 and green [CI37314100942](https://github.com/kartiksayani/ariadne/actions/runs/37314100942); current-main delta review/CI pending; real composed shutdown test |
-| 102 | see PR | being trimmed to Ariadne tray publication; new CI/review required |
+| 94 | af913e4 | Queued37334360735; clear5417044161 |
+| 93 | 02490c2 | Child94; queued37334501053; clear5417074508 |
+| 97 | 3ae9ade | Child93; queued37334734685; clear5417091207 |
+| 98 | d83248b | Reply readiness fix published; source independently clear |
+| 103 | 2819185 | Child98; running37332819324; clear5416954477 |
+| 101 | 87b8e88 | Running37332890175; clear5416954711 |
+| 104 | 3925502 | FAILED37332409844 warning acknowledgement; clear5416898988 |
+| 99 | d5d4f71 | Running37333013942; clear5416968315 |
+| 105 | 703e986 | Child99; CI pending; clear5417106987 |
 
-## Owners and unpublished work
+95 has closed P5.1/P5.2: accepted native Graph run9f2bd9dc
+proved real2k/5k, culling/restoration/registered reveal,740ms/all20p95115; browser
+Graph performance and86.76% coverage previously passed. Its four feature files
+are unchanged at current head. Current integrated-head CI passed before merge.
+101+104 qualifying merges can close P6.1: independent completion audit found
+existing preference/geometry/wake/route tests sufficient; no new OS gates.
+99 replaces all five introduced Mac2 automation files with actual denial callback
+and real Core/Store answer proof.105 covers actual click admission and shared
+routing/current detail after durable answer. P6.2 still waits CI and P6.1.
 
-Worktrees are under .worktrees/ and branches task/<name> unless stated otherwise.
+## Owners, local state and unpushed work
 
-- **desktop_discovery_join:** published94 d6c9efc,93 365c690,97 83bb87a with source-clear
-  discovery capture. New deterministic-recovery-acceptance8a07d5b (one Rust fixture) is
-  independently clear, focused real CLI/Core/Store test passes; publishing a child of98.
-- **index_large_session_validation:** sole runtime operator; all Apps/services stopped,
-  ports4445/4723/10100 free. Native c7319341 failed our initial tree navigation after
-  discovery passed; source clean83bb87a. Physical03c47908 cleanup passed; owner cancelled
-  further generic OS testing. No Quit-note physical probe started.
-- **navigation_race_capture:** fresh worker owns only initial tree journey failure capture
-  on new isolated83bb branch. Bounded invoke/selection transitions; no retry or guessed fix.
-  Prior tree_open_diagnosis found click captured, confirmed All sessions then canonical
-  demo persisted, no tree selection or error; focus alone cannot explain navigation reset.
-- **window_lifecycle_acceptance:** native-window-delivery102 locally trimmed0d781125 to
-  product tray publication/cache invalidation and six pure tests plus historical evidence.
-  Seven PR-added generic window-test files removed from current diff; history/evidence
-  preserved. Carrying this root documentation snapshot before coherent push/review.
-  PR101 independently reviewed real shutdown test preserves external process/turn and
-  unsent input while releasing owned workers/socket/leases.
-- **notification_acceptance:** /private/tmp/ariadne-notification-acceptance99 published
-  7f1401e on96=45e4870;33 pure tests pass, unchanged notification source, CI queued.
-  /private/tmp/ariadne-quit-host-note-implementation unpublished4dc7d5: product note and
-  native acknowledgement helper independently source-clear (extra-text matcher finding
-  fixed); actual bridge remains unproved. No generic OS behavior test is authorized.
-- **review_validation_indexes:** current stack/95/96 and recovery fixture source-clear.
-  **resume_acceptance_closeout:** Quit helper4dc source-clear; four independent tests pass.
-  Completed or pending-init contexts are not counted as active engineers.
+- **delivery_stack** now owns integration mutations of94→93→97→101→104→99→105→98→103
+  onto merged95 main. Original authors hold further mutations. Top-down coherent
+  pushes preserve bounded PR diffs, full CI and exact independent review. This is
+  delivery order, not new task dependencies; rationale is in ORCHESTRATOR.
+  Bring only d83248b Reply fixture patch into earliest94, not98 feature ancestry.
+  95/94 native-smoke conflict: restoration→restoreTree→runGraph→restoreHistory,
+  because Graph assumes current large tree. Runner includes all three helper suites.
+  Preserve97 current-intent guard BEFORE startupRoute=null and Escape semantics.
+- **acceptance_integration** finished local focused proof; no App is running.
+  Current104 App9bc66a9 + fixture d83248b saved five exact owner inputs, acknowledged
+  real Quit warning, then exited/released port and actual leases. WDIO13.8s, warm
+  build+probe under7min. Evidence in104 WT/coverage/focused-reply-quit/
+  c8694746-0fbd-4512-b4c8-a12d9f2fdbdf; private root /private/tmp/ariadne-e2e-AnldYq.
+  No tree/discovery/restoration/performance claim. All temporary runner/spec files
+  are ignored and retained; tracked worktrees clean. Source d832 independently
+  cleared by review_history_busy; CI98's original disabled-click cause unproved.
+  103 local6cf4edbbd3f2303cfd136038c0eed5a2b0fcf429 is clean/unpushed for stack owner.
+- **notification_acceptance** has local clean/unpublished9bc66a960d3e493fb04c26b0c62037b7b08473c2
+  in /private/tmp/ariadne-quit-host-note-implementation. Helper separates missing
+  service from dialog, refreshes existing no-prompt prerequisite at owned Quit and
+  retains failed press receipt.31tests pass; graph_delivery independently cleared
+  with5focused tests. Real local warning/exit flow now passed as above; full CI and
+  exact public-head review remain. Original discarded CI receipt cannot prove cause.
+- **history_ci_repair** finished and pushed94→93→97; all WTs clean. Busy tree/rail
+  admission now guards mouse/keyboard. Review caught pending search consumed while
+  shared writer was busy; fixed existing effect and proved confirmation/replay.
+  Focused128/167/225 tests pass.97 preserves isCurrent guard BEFORE startupRoute
+  clearing, Escape dismissal and history actions. No observer/composed7662 payload
+  imported. Independent **review_history_busy** cleared all exact heads.
+- **notification_route_completion** finished105; **review_notification_denial**
+  cleared99/105. WTs /private/tmp/ariadne-notification-acceptance and
+  /private/tmp/ariadne-notification-route-completion are clean/published.
+- **prepare_install_workspace** prepared /private/tmp/ariadne-public-install.m19JDw:
+  clean sourcea7b658, private home with spaces, separate APFS clones of release
+  target/registry/toolchain/npm cache; no owner configs/credentials. No build or
+  install run. Before public make install→installed doctor→make uninstall, update
+  checkout to dependency-merged SHA. Isolated subprocess env only; estimated6–12min,
+  15min blocker cap. No owner-home installation approval inferred.
 
-## Owner steering — test our code
-
-The owner explicitly stopped redundant macOS Pin/Show/minimize/menu testing.
-Physical runtime is cleaned up; no further menu or screenshot-checkmark gates.
-PR102 is being trimmed to Ariadne tray publication + six pure tests and historical
-evidence only. Keep tests of our persistence, routing, geometry/wake policy and
-shutdown/external-turn preservation. P6.1 catalogue/ORCHESTRATOR reflect this scope.
-Native tree failure c7319341 is our navigation integration: discovery passed, but
-All sessions returned to canonical demo instead of opening the large session.
-Diagnosis found no justified product fix; next useful evidence is scoped invoke/
-preference transition tracing, without retry/timeout inflation or OS testing.
+Root local main is a7b658; origin main is7dbecfb. Dirty files: HANDOFF, tasks.json, roadmap.html. Active
+markers reflect current work; P6.2 prose now applies the owner's same Apple/owned
+behavior boundary as P6.1. Independently review these docs before publication.
+Pre-fast-forward root snapshot remains in stashd3cec9ff27069be624640e8628948636e2f970ae
+and /var/folders/vp/hz3q09mn0g3_q1q3yy1mvks00000gq/T/ariadne-root-delivery-checkpoint-yssejyw_.
 
 ## Next three steps
 
-1. Finish current-head CI for reviewed95/96 and94→93→97;95 closesP5.1/P5.2 only on merge. Children already containing100 may need no content change:
-   verify actual-main merge preview/tree equality and current head/base before deciding.
-2. Diagnose Ariadne navigation admission with bounded failure capture, then one informed native run.
-   Graph already passed full native9f2bd9dc (740ms/p95115). Closure mapping:
-   95→P5.1/P5.2;94→P4.5/P4.6/P4.7;93→P5.3;97→P4.8, subject to original acceptance.
-3. Finish102/notification/Quit-note acceptance in parallel. Ordinary286 build76cb4499 and
-   retained release proofed801683 in local-production-window/coverage are not a clean-build
-   claim. P6.1 Ariadne geometry/wake/shutdown joins, P6.2 notification joins and P7 remain incomplete.
-   Actual owner install/live paid M7 require approval when concrete work is ready.
+1. Finish the coordinated delivery stack and carry this bounded documentation
+   checkpoint in94. Review actual conflicts/interactions and exact public heads;
+   full CI runs on each integrated head. No blind retry or quality bypass.
+2. Merge qualified parents top-down and record task completion only when original
+   acceptance passes. Preserve CI for identical current-main merge trees. Pending
+   main does not block another qualified merge; failed main pauses merges.
+3. Close P6.1/P6.2 after required merges, then run prepared isolated public install
+   acceptance. Live paid hosts and actual owner-home installation need concrete
+   approval later. Do not create OS validation machinery or speculative tooling.
 
-Root tasks.json/HANDOFF/roadmap edits are intentional; prior snapshot committed in101.
-Regenerate local docs/planning/roadmap.html after honest completion. Pinned Node22,
-NPM_CONFIG_USERCONFIG=/dev/null; native HOME=/private/tmp/ariadne-local-native-home-kj60kx9v.
-RTK outer commands; GraphQL first. XCTest approved; notification allow/deny separate.
+RTK outer commands; GraphQL first; pinned Node22 and NPM_CONFIG_USERCONFIG=/dev/null.
+CI cost audit found successful quality runs47m01/44m44, no broken cache setup;
+no tooling change proposed. Do not revive stale pending_init/physical-window agents.

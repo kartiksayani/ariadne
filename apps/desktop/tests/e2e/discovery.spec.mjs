@@ -3,6 +3,37 @@ import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { snapshot, admissions } from './scripted-provider.mjs';
 
+export async function waitForDiscoveredCandidate(candidate) {
+  try {
+    await candidate.waitForDisplayed({ timeout: 20000 });
+  } catch (failure) {
+    const evidence = process.env.ARIADNE_E2E_EVIDENCE;
+    if (evidence) {
+      const facts = { assertion: 'discovery-candidate-visible', capture_errors: [] };
+      try {
+        facts.view = await browser.execute(() => {
+          const section = document.querySelector('section[aria-label="Discover host sessions"]');
+          const texts = selector => [...(section?.querySelectorAll(selector) ?? [])]
+            .slice(0, 16).map(element => element.textContent.slice(0, 4096));
+          return {
+            navigation_heading: document.querySelector('.ref-page-heading h1')?.textContent.slice(0, 4096) ?? null,
+            section_present: section !== null, section_hidden: section?.hidden ?? null,
+            expanded: section?.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded') ?? null,
+            status: texts('[role="status"]'), alerts: texts('[role="alert"]'),
+            candidate_ids: [...(section?.querySelectorAll('[data-discovery-id]') ?? [])]
+              .slice(0, 256).map(element => element.getAttribute('data-discovery-id').slice(0, 4096)),
+          };
+        });
+      } catch { facts.capture_errors.push('view'); }
+      try { await browser.saveScreenshot(join(evidence, 'discovery-failure.png')); }
+      catch { facts.capture_errors.push('screenshot'); }
+      try { await writeFile(join(evidence, 'discovery-failure.json'), JSON.stringify(facts, null, 2)); }
+      catch { /* Evidence failure cannot replace the original native assertion. */ }
+    }
+    throw failure;
+  }
+}
+
 // Invoked once inside the existing delivery phase, before its native Quit.
 // Discovery uses a distinct empty project/thread; it cannot change the FIFO fixture.
 export async function runDiscoveryAcceptance(configuration) {
@@ -20,7 +51,7 @@ export async function runDiscoveryAcceptance(configuration) {
   const discover = await browser.$('button=Discover host sessions');
   await discover.waitForDisplayed(); await discover.click();
   const candidate = await browser.$(`[data-discovery-id="${externalSessionId}"]`);
-  await candidate.waitForDisplayed({ timeout: 20000 });
+  await waitForDiscoveredCandidate(candidate);
   assert.ok((await candidate.getText()).includes('fresh'));
   assert.ok((await candidate.getText()).includes('daemon loaded'));
   await assert.rejects(stat(projectPath), { code: 'ENOENT' });
