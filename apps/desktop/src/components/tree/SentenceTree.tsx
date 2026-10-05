@@ -191,7 +191,8 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
       return () => document.removeEventListener('focusin', moved);
     }
     const button = ownerFocus.current; ownerFocus.current = null;
-    // Reordering a saved owner can move its focused DOM node and blur it.
+    // Saving disables controls before click-first activation can focus them;
+    // reordering can also move an already focused owner and blur it.
     // Restore only that pending control, never a deliberate new focus target.
     if (button?.isConnected && document.activeElement === document.body) button.focus({ preventScroll: true });
   }, [store, writing, view.filters.owners]);
@@ -274,7 +275,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
         key={owner.kind === 'me' ? 'me' : owner.kind === 'other' ? `other:${owner.name}` : `agent:${owner.binding_id}`}
         disabled={disabled} aria-pressed={view.filters.owners.some(value => sameOwner(value, owner))} className="ref-button ref-ghost"
         onClick={event => {
-          ownerFocus.current = document.activeElement === event.currentTarget ? event.currentTarget : null;
+          ownerFocus.current = event.currentTarget;
           filter(next => { next.owners = next.owners.some(value => sameOwner(value, owner))
             ? next.owners.filter(value => !sameOwner(value, owner)) : [...next.owners, structuredClone(owner) as ItemOwner]; });
         }}>
