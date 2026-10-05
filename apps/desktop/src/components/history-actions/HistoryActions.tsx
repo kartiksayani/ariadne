@@ -62,7 +62,7 @@ export function HistoryActions({ actions, targets, actionsForTarget, revealItem,
       {session.state === 'closed' ? 'Reopen session' : 'Close session'}</button>
     {Object.values(session.topics).filter(topic => !!topic).sort((a, b) => a!.order - b!.order).map(topic => topic && <div key={topic.id} className="history-action-topic" data-topic-id={topic.id}>
       <strong>{topic.name}</strong>
-      <button type="button" className="ref-button ref-secondary" disabled={disabled} onClick={() => prepare(topic.archived_at ? 'topic_restore' : 'topic_archive', topic.id)}>
+      <button type="button" className="ref-button ref-secondary" data-shortcut-archive-topic={topic.archived_at ? undefined : topic.id} disabled={disabled} onClick={() => prepare(topic.archived_at ? 'topic_restore' : 'topic_archive', topic.id)}>
         {topic.archived_at ? 'Restore' : 'Archive'} {topic.name}</button>
       <button type="button" className="ref-button ref-secondary" disabled={state.status !== 'ready' || !!state.error || operation.writing} onClick={() => setContinuing(topic.id)}>Continue {topic.name}</button>
     </div>)}

@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { OwnerDraftStore, blockedDraft, ownerActions, useOwnerDrafts, type OwnerIntent } from '../../state/drafts/store';
 import '../../styles/reference.css';
@@ -6,12 +6,16 @@ import './inputs.css';
 
 const labels: Record<OwnerIntent, string> = { answer: 'Answer', bring: 'Bring up', reply: 'Reply', note: 'Note', followup: 'Follow up', drop: 'Drop', reopen: 'Reopen' };
 
+export interface OwnerFocusRequest { intent: OwnerIntent; token: number; optionIndex?: number }
+
 // This module consumes the composition-owned current session and draft store;
 // Waiting/detail can share it without creating another persistence boundary.
-export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'answer', later = false, onLater, onEscape }: {
+export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'answer', later = false, onLater, onEscape, focusRequest }: {
   drafts: OwnerDraftStore; session: SessionStore; itemId: string; initialIntent?: OwnerIntent;
+  focusRequest?: OwnerFocusRequest;
   later?: boolean; onLater?: (value: boolean) => Promise<boolean>; onEscape?: () => void;
 }) {
+  const editor = useRef<HTMLDivElement>(null), focusedRequest = useRef<number | null>(null);
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
   const [intent, setIntent] = useState<OwnerIntent>(initialIntent), [laterError, setLaterError] = useState(false);
@@ -25,6 +29,19 @@ export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'an
   useEffect(() => {
     if (session && item && state.ready && !entry) drafts.begin(session, itemId, activeIntent);
   }, [drafts, session, item, itemId, activeIntent, state.ready, entry]);
+  useEffect(() => {
+    if (!focusRequest || focusedRequest.current === focusRequest.token || !entry || entry.saving || entry.uncertain || entry.receipt
+        || state.preferenceUncertain || activeIntent !== focusRequest.intent) return;
+    const control = focusRequest.intent === 'answer' ? editor.current?.querySelector<HTMLElement>('.owner-options button:not(:disabled),textarea:not(:disabled)')
+      : editor.current?.querySelector<HTMLElement>('textarea:not(:disabled)');
+    if (!control) return;
+    focusedRequest.current = focusRequest.token;
+    const choice = focusRequest.optionIndex === undefined ? undefined : item?.options[focusRequest.optionIndex];
+    if (choice && focusRequest.intent === 'answer') {
+      drafts.edit(entry.draft.op_id, { selected_option_id: choice.id });
+      editor.current?.querySelectorAll<HTMLElement>('.owner-options button')[focusRequest.optionIndex!]?.focus();
+    } else control.focus();
+  }, [focusRequest, entry, state.preferenceUncertain, activeIntent, item, drafts]);
   if (!session || !item) return <p role="status">The current item is unavailable. Refresh its registered session.</p>;
   if (!state.ready || !entry) return <div role="status">Loading saved drafts…{state.error && <p role="alert">{state.error.message}</p>}</div>;
   const retained = Object.values(state.entries).filter(value => value.uncertain && !value.receipt && value.draft.intent !== activeIntent
@@ -52,7 +69,7 @@ export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'an
     }
   };
   const changeLater = async () => { try { setLaterError(!await onLater?.(!later)); } catch { setLaterError(true); } };
-  return <div className="ariadne-reference owner-input ref-answer" onKeyDown={key} aria-label={`Owner input for #${item.id}`}>
+  return <div ref={editor} className="ariadne-reference owner-input ref-answer" onKeyDown={key} aria-label={`Owner input for #${item.id}`}>
     {retainedControls}
     <div className="owner-actions" role="group" aria-label="Owner actions">
       {actions.map(action => <button type="button" key={action} className="ref-button ref-secondary" aria-pressed={activeIntent === action}
