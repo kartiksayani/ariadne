@@ -19,7 +19,12 @@ const invoke = (command, request) => browser.execute(async (command, request) =>
 
 async function openSession(sessionId, itemId) {
   const catalogue = await browser.$('button[title="All sessions"]');
-  await catalogue.waitForDisplayed(); await catalogue.waitForEnabled(); await catalogue.click();
+  await catalogue.waitForDisplayed(); await catalogue.waitForEnabled();
+  await catalogue.click();
+  await wait(async () => {
+    const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
+    return selected.kind === 'all_sessions' && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
+  }, 'All sessions navigation did not finish its saved preference update');
   const session = await browser.$(`[data-session-id="${sessionId}"]`);
   try { await session.waitForDisplayed(); }
   catch (error) {
@@ -27,9 +32,13 @@ async function openSession(sessionId, itemId) {
     await browser.saveScreenshot(join(evidence, 'session-open-failure.png')); throw error;
   }
   await session.waitForEnabled(); await session.click();
+  await wait(async () => {
+    const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
+    return selected.kind === 'session' && selected.session.session_id === sessionId && await catalogue.isEnabled();
+  }, 'Selected session navigation did not finish its saved preference update');
   const item = await browser.$(`.ref-tree-row[data-item-id="${itemId}"]`);
   await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
-  await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(`Item ${itemId}`), 'Selected item detail did not load');
+  await wait(async () => await browser.$('.history-header strong').getText() === `Item ${itemId}`, 'Selected item detail did not load');
 }
 async function showHistory(texts) {
   const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline');
@@ -58,7 +67,11 @@ async function unchangedDemo(configuration) {
 
 async function delivery(configuration) {
   const setup = await seedJourney(configuration);
+  const initialDocument = await browser.execute(() => window.performance.timeOrigin);
   await browser.refresh();
+  // The native driver acknowledges refresh before the replacement document loads.
+  await wait(async () => await browser.execute(origin => window.performance.timeOrigin !== origin && document.readyState === 'complete', initialDocument),
+    'CLI seed refresh did not load a new complete document');
   // The demo is published by the real CLI into a separate project, retaining
   // its canonical pending/recovery examples rather than rebinding its storage.
   await openSession(configuration.demo.session_id, '1');
@@ -92,7 +105,8 @@ async function delivery(configuration) {
   for (const text of ownerTexts.slice(1)) {
     const another = await browser.$('.owner-input').$('button=Write another input');
     await another.waitForDisplayed(); await another.click();
-    const reply = await browser.$('[aria-label="Owner actions"]').$('button=Reply'); await reply.waitForDisplayed(); await reply.click();
+    const actions = await browser.$('[aria-label="Owner actions"]'); await actions.waitForDisplayed();
+    const reply = await actions.$('button=Reply'); await reply.waitForDisplayed(); await reply.waitForEnabled(); await reply.click();
     const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForDisplayed(); await editor.setValue(text);
     await browser.$('[aria-label="Owner input for #1"]').$('button=Send reply').click();
     await wait(async () => orderedInputs(await snapshot(configuration)).some(input => input.payload.text === text), 'Visible detail Reply did not save the exact owner text');
