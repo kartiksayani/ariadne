@@ -4,9 +4,10 @@ Status: **prepared; physical acceptance remains incomplete**. This checkpoint
 starts from reviewed PR96 `cf1ffa3ec24b4b9b28d0c8f05fa5cb8b07657269`, preserving
 its accepted startup/routing and owner-focus repairs. It adds the reviewed window
 runner, real status-item exposure probe, socket admission proof and native tray
-publication repair. Physical diagnostics have reached the tray menu; they have
-not proved Show Ariadne or completed the journey below. This does not complete
-P6.1, P6.2 or P6.4. The existing PR96 packaged route check
+publication repair. Physical run `c113cf8b`, using reviewed tray source
+`286bb37a` and runner source `3eb7bafb`, proved title drag, Close → Show Ariadne
+and minimize → Show Ariadne. It failed the Pin checked-state assertion; Quit and
+restart/restoration were not reached. This does not complete P6.1, P6.2 or P6.4. The existing PR96 packaged route check
 proves the cold registered route and installed CLI
 second-instance route; this supplement reuses its private package fixture,
 canonical `ui.json`, primary identity, control socket and physical instance lease
@@ -115,6 +116,8 @@ these decisions; they do not prove physical menu interaction or window overlap.
 
 ## Explicit remaining acceptance
 
+- **Pin, Quit and restart/restoration:** run `c113cf8b` stopped at Pin checked
+  state. The remaining journey requires retained physical proof after repair.
 - **Physical display disconnect and reachable monitor clamping:** owner action;
   existing pure clamp tests do not prove a real display transition.
 - **Genuine system sleep/wake and reconciliation:** owner action; the existing
