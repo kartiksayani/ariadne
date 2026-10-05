@@ -81,6 +81,26 @@ describe('registered variable-height sentence tree', () => {
     expect(value.calls.find(call => call.command === 'reveal_item')?.request).toEqual({ session: route, request: { command: 'reveal_item', params: { item_id: '1' } } });
     expect(value.saved.at(-1)?.selected_item_id).toBe('1');
   });
+  it.each([true, false])('disables fold controls during pending selection and accepts one click afterward, expanded=%s', async expanded => {
+    let finish!: () => void;
+    const view = preferences(); if (!expanded) view.expanded_item_ids = [];
+    const completion = new Promise<void>(resolve => { finish = resolve; }), value = await setup(undefined, view, completion);
+    render(<value.Composition />); fireEvent.click(rows()[0]);
+    await waitFor(() => expect(value.saved).toHaveLength(1));
+    const toggle = within(rows()[0]).getByRole('button', { name: 'Expand or collapse' }) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true); await userEvent.setup().click(toggle); expect(value.saved).toHaveLength(1);
+    if (!expanded) {
+      const summary = within(rows()[0]).getByRole('button', { name: /active descendants/ }) as HTMLButtonElement;
+      expect(summary.disabled).toBe(true); await userEvent.setup().click(summary); expect(value.saved).toHaveLength(1);
+    }
+    rows()[0].focus(); fireEvent.keyDown(rows()[0], { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(rows()[1]); expect(value.saved).toHaveLength(1);
+    fireEvent.keyDown(rows()[1], { key: 'ArrowUp' }); expect(document.activeElement).toBe(rows()[0]);
+    await act(async () => { finish(); }); await waitFor(() => expect(toggle.disabled).toBe(false));
+    fireEvent.click(toggle);
+    await waitFor(() => expect(rows()[0].getAttribute('aria-expanded')).toBe(String(!expanded)));
+    expect(value.saved).toHaveLength(2); expect(value.saved[1].expanded_item_ids).toEqual(expanded ? [] : ['1']);
+  });
   it('expands/collapses through persisted preferences and preserves a hidden descendant as temporary reveal', async () => {
     const value = await setup(); const rendered = render(<value.Composition />);
     fireEvent.keyDown(rows()[0], { key: 'h' });
@@ -174,6 +194,7 @@ describe('registered variable-height sentence tree', () => {
     const value = await setup(); render(<value.Composition />); const before = rows().length;
     value.unavailable(); await act(async () => { await value.store.refresh(); });
     expect(rows()).toHaveLength(before); expect((screen.getByRole('searchbox') as HTMLInputElement).disabled).toBe(true);
+    expect((within(rows()[0]).getByRole('button', { name: 'Expand or collapse' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.keyDown(rows()[0], { key: 'z' }); expect(value.laterWrites).toHaveLength(0);
     expect(screen.getByRole('status').textContent).toContain('missing');
   });

@@ -188,7 +188,7 @@ export async function runNative() {
     await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs', 'tests/e2e/graph/native-helper.test.mjs'], {
       env: { ...process.env, ARIADNE_FIXTURE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'fixture-cli.log'),
     });
-    await command(process.execPath, ['--test', 'tests/e2e/tree/fixture.test.mjs'], {
+    await command(process.execPath, ['--test', 'tests/e2e/tree/fixture.test.mjs', 'tests/e2e/process-contract/search-timing-observation.test.mjs'], {
       env: { ...process.env, ARIADNE_TREE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'tree-fixture.log'),
     });
     await json(join(evidence, 'run.json'), { ...details, binarySha256: await digest(binary) });

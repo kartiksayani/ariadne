@@ -23,11 +23,11 @@ const visualStatus = (status: Item['status']): Status => status === 'waiting_on_
 const statuses: readonly ItemStatus[] = ['open', 'waiting_on_me', 'in_progress', 'decided', 'done', 'dropped', 'replaced'];
 const editable = (target: EventTarget | null) => target instanceof HTMLElement
   && !!target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"]');
-type RowProps = { row: SentenceRow; selected: boolean; focused: boolean; later: boolean;
+type RowProps = { row: SentenceRow; selected: boolean; focused: boolean; later: boolean; toggleDisabled: boolean;
   remember: (id: string, element: HTMLDivElement | null) => void; focus: (id: string) => void;
   select: (id: string) => void; toggle: (id: string) => void; keyboard: (event: KeyboardEvent<HTMLDivElement>, id: string) => void };
 
-const SentenceItem = memo(function SentenceItem({ row, selected, focused, later, remember, focus, select, toggle, keyboard }: RowProps) {
+const SentenceItem = memo(function SentenceItem({ row, selected, focused, later, toggleDisabled, remember, focus, select, toggle, keyboard }: RowProps) {
   const item = row.item;
   return <TreeRow item={{ id: item.id, question: item.question, status: visualStatus(item.status),
     explanation: item.type === 'explanation', ask: item.ask ?? undefined, note: item.note ?? undefined,
@@ -35,7 +35,7 @@ const SentenceItem = memo(function SentenceItem({ row, selected, focused, later,
   depth={row.depth} selected={selected} focused={focused} context={row.context}
   tabIndex={focused ? 0 : -1} rowRef={element => remember(item.id, element)} onFocus={() => focus(item.id)}
   onKeyDown={event => keyboard(event, item.id)} onSelect={() => select(item.id)} onToggle={() => toggle(item.id)}
-  hasChildren={row.childCount > 0} expanded={row.expanded}
+  hasChildren={row.childCount > 0} expanded={row.expanded} toggleDisabled={toggleDisabled}
   collapsedSummary={!row.expanded && row.activeDescendants > 0 ? `${row.activeDescendants} active descendants` : undefined}
   replacement={row.replacement ? { question: row.replacement.question, status: visualStatus(row.replacement.status),
     onReveal: () => select(row.replacement!.id) } : undefined} />;
@@ -43,7 +43,7 @@ const SentenceItem = memo(function SentenceItem({ row, selected, focused, later,
   && a.row.depth === b.row.depth && a.row.context === b.row.context && a.row.expanded === b.row.expanded
   && a.row.childCount === b.row.childCount && a.row.activeDescendants === b.row.activeDescendants
   && a.row.replacement?.id === b.row.replacement?.id && a.row.replacement?.revision === b.row.replacement?.revision
-  && a.selected === b.selected && a.focused === b.focused && a.later === b.later
+  && a.selected === b.selected && a.focused === b.focused && a.later === b.later && a.toggleDisabled === b.toggleDisabled
   && a.remember === b.remember && a.focus === b.focus && a.select === b.select && a.toggle === b.toggle && a.keyboard === b.keyboard);
 
 export function SentenceTree({ store, routes, view, later, reveal, saveView, saveLater, onReveal }: SentenceTreeProps) {
@@ -257,7 +257,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
         }
       }}>
       {rows.map(row => <SentenceItem key={row.item.id} row={row} selected={view.selected_item_id === row.item.id} focused={focusId === row.item.id}
-        later={later.has(row.item.id)} remember={remember} focus={focus} select={select} toggle={toggle} keyboard={keyboard} />)}
+        later={later.has(row.item.id)} toggleDisabled={row.childCount > 0 && disabled} remember={remember} focus={focus} select={select} toggle={toggle} keyboard={keyboard} />)}
     </div>
     {projection && <footer>{rows.length} visible · {projection.matchingTotal} matching · {projection.scopeTotal} in this scope · ↑/↓ or j/k to move · Enter to open · z for Later</footer>}
   </section>;
