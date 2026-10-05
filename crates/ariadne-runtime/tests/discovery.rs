@@ -753,12 +753,12 @@ fn codex_discovery_rows_surface_untested_for_a_newer_patch_only() {
 }
 
 #[test]
-fn claude_announcement_rows_surface_untested_for_a_newer_patch_only() {
+fn claude_announcement_rows_surface_untested_for_a_newer_patch_and_incompatible_for_rejected() {
     for (version, expected) in [
         ("2.1.287", Compatibility::Unknown),
         ("2.1.289", Compatibility::Untested),
-        ("2.2.0", Compatibility::Unknown),
-        ("2.1.286", Compatibility::Unknown),
+        ("2.2.0", Compatibility::Incompatible),
+        ("2.1.286", Compatibility::Incompatible),
     ] {
         let home = home();
         let root = tempfile::tempdir().unwrap();

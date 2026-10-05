@@ -38,8 +38,10 @@ and 0.160.0.
 - The untested state is surfaced where each path can observe it:
   - Discovery candidate rows: Codex rows carry `Compatibility::Untested` when the CLI
     or daemon is a newer patch; Claude rows carry it when the announced host version
-    is a newer patch. Baseline rows stay `Unknown` (unqualified until bound) and
-    rejected versions never produce a bindable row.
+    is a newer patch. Baseline rows stay `Unknown` (unqualified until bound). A Claude
+    row with a rejected version (other major/minor, older patch, unparsable) carries
+    `Compatibility::Incompatible` and the desktop app disables "Use host session" for
+    it. Codex rejected versions never open a reader, so they produce no row.
   - Qualified bindings and `ProbeResult.compatibility` carry `Untested`.
   - `ProbeResult.setup_steps` carries the notice, naming the newer side (the Codex
     CLI or the Codex daemon). The desktop app shows it only where a caller runs the

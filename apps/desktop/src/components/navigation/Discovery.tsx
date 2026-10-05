@@ -4,7 +4,7 @@ import { candidateIdentity, useDiscovery, type DiscoveryController } from '../..
 
 function untestedNotice(candidate: DesktopDiscoveryCandidate) {
   const product = candidate.adapter_id === 'codex' ? 'Codex' : 'Claude Code';
-  return `${product} ${candidate.host_version} is newer than the tested version; it should work, but has not been verified.`;
+  return `This ${product} version is newer than the one Ariadne was tested with. It should work, but has not been verified.`;
 }
 
 export function CandidateList({ controller, root, select, selected }: { controller: DiscoveryController; root?: string;
@@ -23,7 +23,8 @@ export function CandidateList({ controller, root, select, selected }: { controll
       <strong>{candidate.title ?? candidate.external_session_id}</strong>
       <p>{candidate.cwd}</p><p>{candidate.adapter_id} · {candidate.host_version} · {candidate.freshness} · {candidate.compatibility} · {candidate.availability} · {candidate.loaded ? 'daemon loaded' : 'daemon not loaded'} · observed {candidate.observed_at}</p>
       {candidate.compatibility === 'untested' && <p role="note">{untestedNotice(candidate)}</p>}
-      <button type="button" className="ref-button ref-secondary" disabled={candidate.freshness !== 'fresh' || state.error !== null} aria-pressed={selected === candidateIdentity(candidate)} onClick={() => select(candidate)}>{root ? 'Use host session' : 'Register this project'}</button>
+      {root && candidate.compatibility === 'incompatible' && <p role="note">This Claude Code version is not supported by this Ariadne build.</p>}
+      <button type="button" className="ref-button ref-secondary" disabled={candidate.freshness !== 'fresh' || state.error !== null || (!!root && candidate.compatibility === 'incompatible')} aria-pressed={selected === candidateIdentity(candidate)} onClick={() => select(candidate)}>{root ? 'Use host session' : 'Register this project'}</button>
     </article>)}</section>)}
   </div>;
 }

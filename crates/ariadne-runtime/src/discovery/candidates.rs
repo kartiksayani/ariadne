@@ -147,13 +147,15 @@ impl Discovery {
             observed_at,
             freshness: Freshness::Fresh,
             // A newer same-minor patch is surfaced as `Untested` before binding;
-            // the baseline stays unqualified and rejected versions never look bindable.
+            // the baseline stays unqualified, and a rejected version (other
+            // major/minor, older patch, unparsable) is surfaced as `Incompatible`.
             compatibility: match classify_host_version(
                 SUPPORTED_HOST_VERSION,
                 &announcement.host_version,
             ) {
                 Some(HostVersionStatus::Untested) => Compatibility::Untested,
-                _ => Compatibility::Unknown,
+                Some(HostVersionStatus::Qualified) => Compatibility::Unknown,
+                None => Compatibility::Incompatible,
             },
             availability: Availability::Unknown,
             binding,

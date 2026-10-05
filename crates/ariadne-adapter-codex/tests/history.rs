@@ -734,6 +734,7 @@ fn newer_patch_cli_or_daemon_is_accepted_and_marked_untested() {
         ("0.160.1", "0.160.1", Untested),
         ("0.160.1", "0.160.0", Untested),
         ("0.160.0", "0.160.2", Untested),
+        ("0.160.1", "0.160.2", Untested),
     ] {
         let user_agent = format!("codex-tui/{daemon} (Mac OS)");
         let harness = Harness::new(move |request, _| {
@@ -761,6 +762,10 @@ fn newer_patch_cli_or_daemon_is_accepted_and_marked_untested() {
             ("0.160.1", "0.160.1") => vec![notice("Codex", "0.160.1")],
             ("0.160.1", "0.160.0") => vec![notice("Codex", "0.160.1")],
             ("0.160.0", "0.160.2") => vec![notice("Codex daemon", "0.160.2")],
+            ("0.160.1", "0.160.2") => vec![
+                notice("Codex", "0.160.1"),
+                notice("Codex daemon", "0.160.2"),
+            ],
             _ => unreachable!(),
         };
         assert_eq!(

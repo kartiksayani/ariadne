@@ -84,8 +84,16 @@ describe('explicit discovery registration and binding', () => {
     context.reads.mockResolvedValue({ candidates: [{ ...candidate(), host_version: '0.160.1', compatibility: 'untested' }], error: null });
     bind(context);
     await screen.findByText('Discovered conversation');
-    expect(screen.getByRole('note')).toHaveTextContent('Codex 0.160.1 is newer than the tested version; it should work, but has not been verified.');
+    expect(screen.getByRole('note')).toHaveTextContent('This Codex version is newer than the one Ariadne was tested with. It should work, but has not been verified.');
     expect(screen.getByText(/untested/)).toBeInTheDocument();
+  });
+  it('disables Use host session for an incompatible row and says why', async () => {
+    const context = setup(); await context.store.start();
+    context.reads.mockResolvedValue({ candidates: [{ ...candidate(), adapter_id: 'claude-mod', host_version: '2.2.0', compatibility: 'incompatible' }], error: null });
+    bind(context);
+    await screen.findByText('Discovered conversation');
+    expect(screen.getByRole('button', { name: 'Use host session' })).toBeDisabled();
+    expect(screen.getByRole('note')).toHaveTextContent('This Claude Code version is not supported by this Ariadne build.');
   });
   it('selection preserves the explicit existing Ariadne UUID and Connect retry retains its immutable request', async () => {
     const context = setup(); await context.store.start(); context.loseNextConnect(); bind(context);
