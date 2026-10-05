@@ -204,8 +204,13 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     const scroller = container.current;
     if (!scroller) return;
     const top = scroller.getBoundingClientRect().top;
-    const first = [...elements.current].find(([, element]) => element.getBoundingClientRect().bottom > top);
-    anchor.current = first ? { id: first[0], offset: first[1].getBoundingClientRect().top - top } : null;
+    // Ref callbacks may reinsert a rerendered row after its DOM successors.
+    const first = currentRows.current.find(row => {
+      const element = elements.current.get(row.item.id);
+      return element && element.getBoundingClientRect().bottom > top;
+    });
+    const element = first && elements.current.get(first.item.id);
+    anchor.current = first && element ? { id: first.item.id, offset: element.getBoundingClientRect().top - top } : null;
   }, []);
   useLayoutEffect(() => {
     const scroller = container.current;
