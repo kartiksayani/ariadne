@@ -54,7 +54,7 @@ async function run({ bundle, cli, releaseEvidence, permission }, signal) {
   const root = await mkdtemp('/private/tmp/ariadne-notifications-');
   const data = join(root, 'data'), evidence = join(repo, 'coverage/native-notifications', randomUUID());
   const trace = [], client = notificationClient(trace, signal), observations = [];
-  let fixture, provider, child, primary, ownership, failure, logs = '', spawnError;
+  let fixture, provider, child, primary, ownership, failure, primaryClose, logs = '', spawnError;
   const env = { PATH: process.env.PATH, LANG: 'en_US.UTF-8', TMPDIR: process.env.TMPDIR || '/private/tmp' };
   async function wait(check, label, timeout = 20000) {
     const deadline = Date.now() + timeout;
@@ -81,6 +81,13 @@ async function run({ bundle, cli, releaseEvidence, permission }, signal) {
     const controls = await client.elements(CLOSE);
     assert.ok(controls.length <= 1, 'Private fixture unexpectedly has multiple native windows');
     return controls.length === 1 && await client.attribute(controls[0]['element-6066-11e4-a52e-4f735466cecf'], 'hittable') === 'true';
+  }
+  async function hide() {
+    const controls = await client.elements(CLOSE);
+    assert.equal(controls.length, 1, 'Expected one owned Close control before hiding');
+    primaryClose = controls[0]['element-6066-11e4-a52e-4f735466cecf'];
+    await client.click(CLOSE);
+    await wait(async () => !await visible(), 'Hidden owned App before new waiting arrival');
   }
   async function current(configuration, route) {
     const item = await client.elements(`${detail}${named('StaticText', `Item ${route.item_id}`).slice(1)}`);
@@ -113,7 +120,12 @@ async function run({ bundle, cli, releaseEvidence, permission }, signal) {
     await client.click(notificationBody);
     // Observe focus restoration before switching the driver's AUT back to the
     // App. Driver activation itself must not stand in for notification behavior.
-    await wait(async () => await client.appState(fixture.application) === 4, 'Actual notification focus restoration');
+    await wait(async () => await client.appState(fixture.application) === 4 && packagedRouteSelected(await preferences(), route), 'Actual notification focus and registered route restoration');
+    // Mac2 keeps cached XCUI elements across AUT changes. Inspect this exact
+    // original App control while Notification Center is still AUT, before an
+    // activateApp command could repair a hidden or minimized native window.
+    // A stale element or false hittability is a failed proof, never a retry.
+    assert.equal(await client.attribute(primaryClose, 'hittable'), 'true', 'Notification did not restore the original native window before driver activation');
     await client.activate({ path: fixture.application });
     await wait(async () => {
       const observed = await current(configuration, route);
@@ -178,7 +190,7 @@ async function run({ bundle, cli, releaseEvidence, permission }, signal) {
       await wait(async () => (await client.elements(permissionAlert)).length === 0, 'Explicit authorization prompt completion');
       await client.activate({ path: fixture.application });
     }
-    await client.click(CLOSE); await wait(async () => !await visible(), 'Hidden owned App before new waiting arrival');
+    await hide();
     const setup = await seed(provider.configuration);
     await json(join(evidence, 'seed.json'), setup);
     if (permission === 'deny') {
@@ -194,7 +206,7 @@ async function run({ bundle, cli, releaseEvidence, permission }, signal) {
       await capture('denied-answer'); await json(join(evidence, 'denied-answer.json'), { saved, queued, text });
     } else {
       await clickNotification(provider.configuration, 'hidden');
-      await client.click(CLOSE); await wait(async () => !await visible(), 'Hidden App before foreground-case arrival');
+      await hide();
       const request = arrivalRequest(provider.configuration.bindingId, randomUUID());
       const result = await cliRequest(fixture.cli, ['apply', '--binding', provider.configuration.bindingId, '--generation', provider.configuration.generation, '--json-stdin', '--json'], request, fixture.env);
       assert.equal(result.code, 0, result.output);

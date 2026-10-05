@@ -30,7 +30,9 @@ Arrivals use the existing deterministic provider endpoint and real
 CLI/Core/Store. No renderer service, native callback or session file is replaced.
 The complete initial native watermark precedes arrival publication. Click checks
 require native app attribution, generic body, physical target hittability,
-notification-driven foreground restoration, exact persisted session/item,
+notification-driven foreground restoration and original Close-control
+hittability observed through the cached XCUI element before driver activation,
+exact persisted session/item,
 current detail and unchanged canonical session/process/socket/lease identity.
 Native selectors deliberately fail on absent or ambiguous targets; physical
 validation may identify an OS-specific AX layout adjustment. The runner records

@@ -78,6 +78,16 @@ test('missing, ambiguous or unhittable native targets never receive a click', as
   }
 });
 
+test('cached App control visibility is observable while Notification Center remains AUT', async () => {
+  const { client, requests } = transport([{ sessionId: 'one' }, null, [found('original-close')], null, 'true'], []);
+  await client.attach(fixture, 'com.ariadne');
+  const [close] = await client.elements("//XCUIElementTypeButton[@identifier='_XCUI:CloseWindow']");
+  await client.activate({ bundleId: 'com.apple.notificationcenterui' });
+  assert.equal(await client.attribute(close['element-6066-11e4-a52e-4f735466cecf'], 'hittable'), 'true');
+  assert.ok(requests.at(-1).url.endsWith('/element/original-close/attribute/hittable'));
+  assert.equal(requests.filter(request => request.body?.script === 'macos: activateApp').length, 1);
+});
+
 test('permission denial evidence requires one actual correlated saved answer and host admission', () => {
   const configuration = { itemId: '1', options: [{ id: 'saved' }] }, text = 'The full denied-permission answer';
   const saved = { items: { 1: { question_revision: 3 } },
