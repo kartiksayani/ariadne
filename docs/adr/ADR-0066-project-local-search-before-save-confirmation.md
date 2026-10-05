@@ -14,9 +14,9 @@ phase. Rendering local search does not itself require a disk acknowledgement.
 
 ## Decision
 
-Keep a transient, route-scoped debounced search projection. At 100 ms, project
-that search text over the latest canonical view while saving it through the
-unchanged revision-checked preferences writer. Only search is overlaid. Keep
+Keep a transient, route-scoped search projection. Project typed search on the
+next normal renderer update. Debounce only its durable preference write by 100 ms,
+using the unchanged revision-checked preferences writer. Only search is overlaid. Keep
 canonical revisions, other filters, selection, expansion and Later authoritative.
 
 Distinguish pending or unconfirmed persistence from confirmed preferences. A
@@ -27,8 +27,19 @@ and explicit reset discard the preview; restoration reads canonical preferences.
 
 ## Verification
 
-Hold a save unresolved: rows stay unchanged at 99 ms, change at 100 ms, and
-canonical preferences remain unchanged. Cover confirmation, rejection, uncertain
+Hold a save unresolved: rows reflect typed search before 100 ms, no preference
+write is submitted before 100 ms, and canonical preferences remain unchanged. Cover confirmation, rejection, uncertain
 completion, explicit reconciliation, route reset and absence of automatic resend.
-Retain the original native inputs, all 20 samples, 100 ms debounce and 150 ms p95
-limit. Local projection alone is not proof that the complete native journey passes.
+Retain the original native inputs, all 20 samples and 150 ms p95 limit. Local projection alone is not proof that the complete native journey passes.
+
+## Same-day refinement after renderer-only measurement
+
+PR #94 [run 37346055843](https://github.com/kartiksayani/ariadne/actions/runs/37346055843) measured search p95 of 193 ms after local projection was
+implemented. The 20 renderer-only samples exclude test-driver latency; 18 took
+108–126 ms, with 213 ms and 193 ms outliers. Input-to-row publication dominated; the
+final frame took 3 ms and 7 ms in the outliers. The 100 ms preview delay consumes most
+of the 150 ms interaction budget even though the durable write is now independent.
+Remove that intentional preview delay and retain 100 ms coalescing for disk writes.
+The existing canonical-state, cancellation and recovery rules remain unchanged.
+This is an implementation refinement; native measurement must still prove the
+unchanged responsiveness target.

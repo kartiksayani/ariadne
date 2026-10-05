@@ -124,10 +124,10 @@ Item detail renders full item history in two linked forms:
 
 The rail uses the same stored history, newest at bottom. Hovering a message highlights touched items; clicking pins that highlight. Selecting/hovering an item highlights its messages. Scrolling upward pauses follow; show `N new messages · Jump to latest`. Live updates never steal keyboard focus or scroll an owner away from older content.
 
-Search normalizes NFKC and locale-independent lowercase for indexing only; stored text is unchanged. Every whitespace token must match the combined question, outcome, why, topic name, or message excerpt. It excludes transient provider activity, raw tool input/result, and credentials. Debounce 100ms. Status/topic/owner filters combine with AND; choices within one filter combine with OR. Include matching items and labelled contextual ancestors. No-results offers Clear search/filters.
+Search normalizes NFKC and locale-independent lowercase for indexing only; stored text is unchanged. Every whitespace token must match the combined question, outcome, why, topic name, or message excerpt. It excludes transient provider activity, raw tool input/result, and credentials. Preview typed search on the next normal renderer update; debounce its durable preference write by 100ms. Status/topic/owner filters combine with AND; choices within one filter combine with OR. Include matching items and labelled contextual ancestors. No-results offers Clear search/filters.
 
-After that debounce, sentence-tree results may use transient search text while
-the canonical preference save is pending. Override only search in the current
+Sentence-tree results may use transient search text before the durable-write
+debounce expires and while the canonical preference save is pending. Override only search in the current
 canonical filter projection; do not publish a speculative preference revision or
 change selection, expansion, Later or other filters. Indicate pending or
 unconfirmed persistence without claiming the preview is saved. Failed or uncertain
