@@ -53,7 +53,12 @@ test('unpin proves pin removal independently, while deliberate rail Close requir
         mark.style.background = 'transparent';
         admitted.push(await condition()); // A cleared tree cannot excuse stale detail highlighting.
         detail.classList.remove('history-highlight');
-        admitted.push(await condition());
+        mark.remove(); admitted.push(Boolean(await condition())); // A missing marker cannot prove cleanup.
+        document.querySelector('[role="treeitem"]').append(mark);
+        for (const background of ['transparent', 'none', 'rgba(0, 0, 0, 0)']) {
+          mark.style.background = background;
+          admitted.push(await condition()); // Equivalent transparent shorthands share one computed color.
+        }
       }
       assert.equal(admitted.at(-1), true);
     },
@@ -63,7 +68,7 @@ test('unpin proves pin removal independently, while deliberate rail Close requir
   assert.equal(detail.classList.contains('history-highlight'), true, 'Unpin must not claim clearing a separate hover highlight');
   await closeHistoryRailReferences({ id: 'message' });
   assert.deepEqual(actions, ['scroll', 'unpin', 'close enabled', 'close']);
-  assert.deepEqual(admitted, [false, true, false, false, false, false, true]);
+  assert.deepEqual(admitted, [false, true, false, false, false, false, false, true, true, true]);
 });
 
 test('fork links and parent references cannot admit a different selected history item', async t => {
