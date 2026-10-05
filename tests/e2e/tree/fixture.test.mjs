@@ -4,8 +4,53 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { publishTreeRequest, treeBatch, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { observeTreeClickReadiness, publishTreeRequest, treeBatch, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+
+test('filter click readiness requires the same enabled hit target and stable nested geometry without clicking', () => {
+  const frames = new Map(), listeners = new Map(), scrolls = [];
+  let nextFrame = 0, rect = { top: 200, bottom: 220, left: 400, right: 440, width: 40, height: 20 };
+  const parent = { scrollLeft: 0, scrollTop: 0, parentElement: null };
+  const button = { textContent: 'Me', disabled: false, isConnected: true, parentElement: parent, outerHTML: '<button>Me</button>',
+    scrollIntoView: options => scrolls.push(options), getBoundingClientRect: () => ({ ...rect }),
+    getAttribute: () => 'false', contains: value => value === button };
+  let named = button, hit = button;
+  const document = {
+    querySelector: selector => { assert.equal(selector, '[aria-label="Item owner"]'); return { querySelectorAll: () => [named] }; },
+    elementFromPoint: () => hit,
+    addEventListener: (type, listener, capture) => { assert.equal(capture, true); listeners.set(type, listener); },
+    removeEventListener: (type, listener) => { assert.equal(listeners.get(type), listener); listeners.delete(type); },
+  };
+  const window = { requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
+    cancelAnimationFrame: id => frames.delete(id) };
+  // Exercise the same self-contained callback WebDriver serializes; this proves
+  // readiness admission only, not native rendering or OS input acceptance.
+  runInNewContext(`(${observeTreeClickReadiness.toString()})(button, 'Item owner', 'Me', true)`, { window, document, button });
+  const state = window.__ariadneTreeFilterAction;
+  const frame = () => { const [id, callback] = frames.entries().next().value; frames.delete(id); callback(); };
+  frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
+  rect = { ...rect, top: 210, bottom: 230 };
+  frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
+  parent.scrollTop = 20;
+  frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
+  for (const change of [
+    () => { button.disabled = true; },
+    () => { button.isConnected = false; },
+    () => { named = { ...button }; },
+    () => { hit = parent; },
+  ]) {
+    change(); frame(); assert.equal(state.readiness.ready, false); assert.equal(state.readiness.frames, 0);
+    button.disabled = false; button.isConnected = true; named = button; hit = button;
+    frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
+  }
+  assert.equal(scrolls.length, 1); assert.equal(scrolls[0].behavior, 'instant');
+  assert.equal(scrolls[0].block, 'center'); assert.equal(scrolls[0].inline, 'center');
+  assert.equal(state.click, null, 'Readiness must not generate an input');
+  listeners.get('click')({ target: parent, isTrusted: false }); assert.equal(state.click, null);
+  listeners.get('click')({ target: button, isTrusted: true }); assert.equal(state.click.trusted, true);
+  window.__ariadneTreeFilterCleanup(); assert.equal(frames.size, 0); assert.equal(listeners.size, 0);
+});
 
 test('tree setup repeats only definitive Busy with the identical frozen request and stops on other failures', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-tree-retry-')), priorEvidence = process.env.ARIADNE_E2E_EVIDENCE;
