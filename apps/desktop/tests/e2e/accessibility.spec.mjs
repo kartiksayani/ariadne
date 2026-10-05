@@ -10,10 +10,18 @@ const active = selector => browser.execute(selector => document.activeElement ==
 // writes only a retained preference draft; it never submits demo owner work.
 export async function runAccessibilityAcceptance(configuration) {
   const viewport = await browser.execute(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const nativeWindow = await browser.execute(async () => {
+    try {
+      const physical = await window.__TAURI_INTERNALS__.invoke('plugin:window|outer_size', { label: 'main' });
+      const scaleFactor = await window.__TAURI_INTERNALS__.invoke('plugin:window|scale_factor', { label: 'main' });
+      return { ok: true, physical, scaleFactor, logical: { width: physical.width / scaleFactor, height: physical.height / scaleFactor } };
+    } catch (error) { return { ok: false, message: String(error) }; }
+  });
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-minimum-window.json'), { actualWebView: true,
-    viewport, minimum: { width: 1000, height: 700 } });
-  assert.ok(viewport.width >= 1000 && viewport.height >= 700,
-    `Ordinary native WebView must reach minimum 1000×700; observed ${viewport.width}×${viewport.height}`);
+    viewport, nativeWindow, minimum: { width: 1000, height: 700 } });
+  assert.equal(nativeWindow.ok, true, nativeWindow.message);
+  assert.ok(nativeWindow.logical.width >= 1000 && nativeWindow.logical.height >= 700,
+    'Ordinary native window must reach minimum outer size 1000×700');
   const before = await readFile(configuration.demo.sessionPath);
   await (await browser.$('button*=All sessions')).click();
   await (await browser.$(`[data-session-id="${configuration.demo.session_id}"]`)).click();
