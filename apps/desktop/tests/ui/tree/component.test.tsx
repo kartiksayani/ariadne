@@ -141,7 +141,7 @@ describe('registered variable-height sentence tree', () => {
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'needle' } });
     expect(rowIds()).toEqual(['2']); expect(value.saved).toHaveLength(0);
     expect(value.canonical()).toEqual(preferences());
-    expect(screen.getByRole('status').textContent).toBe('Search preview · save not confirmed');
+    expect(screen.getByRole('status').textContent).toBe('Search preview · save pending');
     await act(async () => { vi.advanceTimersByTime(99); });
     expect(rowIds()).toEqual(['2']); expect(value.saved).toHaveLength(0);
     await act(async () => { vi.advanceTimersByTime(1); });
