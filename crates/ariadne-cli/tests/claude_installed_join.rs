@@ -8,7 +8,7 @@ use ariadne_core::{
 use ariadne_domain::models::*;
 use ariadne_runtime::{
     activation::{registered_announcement_resolver, NativeActivation},
-    control::{ControlRoutes, ControlServer},
+    control::{ControlRoutes, ControlServer, CONTROL_TIMEOUT},
     discovery::Discovery,
     leases::DesktopOwner,
     providers::{ProjectRootResolver, ProviderFactory, ProviderInstructions},
@@ -264,7 +264,10 @@ impl Fixture {
         let started = self.sdk.command(json!({"action":"start"}));
         assert_eq!(started["commands"].as_array().unwrap().len(), 3);
         assert!(started["prompts"].as_array().unwrap().is_empty());
-        let until = Instant::now() + Duration::from_secs(3);
+        // Readiness includes native qualification, route publication and an
+        // unchanged-operation retry. Its former 3s deadline was shorter than a
+        // single declared control request; bound this join by three requests.
+        let until = Instant::now() + CONTROL_TIMEOUT * 3;
         let (connected, receipt) = loop {
             let connected = self
                 .sdk
@@ -443,6 +446,25 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         self.close_desktop();
     }
+}
+
+#[test]
+fn installed_sdk_keeps_helper_exit_evidence_when_child_closes_stdin() {
+    let mut fixture = Fixture::new();
+    // Exceed the pipe capacity while the child deliberately reads no input.
+    // Closing fd 0 forces EPIPE instead of depending on helper exit timing.
+    let response = fixture.sdk.command(json!({
+        "action": "call",
+        "argv": ["node", "-e", "require('node:fs').closeSync(0); process.stdout.write('closed stdin\\n'); process.stderr.write('intentional helper failure\\n'); process.exitCode = 23;"],
+        "stdin": "x".repeat(2 * 1024 * 1024)
+    }));
+    assert_eq!(response["value"]["exitCode"], 23);
+    assert_eq!(response["value"]["stdout"], "closed stdin\n");
+    assert_eq!(response["value"]["stderr"], "intentional helper failure\n");
+    assert_eq!(response["replies"].as_array().unwrap().len(), 1);
+    assert_eq!(response["replies"][0]["result"], response["value"]);
+    let alive = fixture.sdk.command(json!({ "action": "state" }));
+    assert_eq!(alive["replies"], response["replies"]);
 }
 
 #[test]
