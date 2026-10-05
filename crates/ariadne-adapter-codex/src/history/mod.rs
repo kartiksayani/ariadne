@@ -7,7 +7,7 @@ use crate::{
     transport::{error, ExecutableIdentity, RpcClient, SocketIdentity, SUPPORTED_CODEX_VERSION},
 };
 use ariadne_agent_protocol::{
-    host_version::{accepted_range, classify_host_version, HostVersionStatus},
+    host_version::{accepted_range, classify_host_version, untested_notice, HostVersionStatus},
     AdapterError, AdapterErrorCode as Code, Capabilities, Capability, ConnectRequest,
     ConnectResult, DeliveryMode, EndpointRef, PresenceObservation, ReconcileRequest,
     ReconcileResult, UtcMillis, UuidV4,
@@ -463,9 +463,11 @@ impl CodexHistoryClient {
     }
 }
 /// Daemon `userAgent` is `codex-tui/<version> <platform...>`; apply the shared rule to it.
-fn daemon_version_status(user_agent: &str) -> Option<HostVersionStatus> {
+fn daemon_version_status(user_agent: &str) -> Option<(String, HostVersionStatus)> {
     let (product, _) = user_agent.split_once(' ')?;
-    classify_host_version(SUPPORTED_CODEX_VERSION, product.strip_prefix("codex-tui/")?)
+    let version = product.strip_prefix("codex-tui/")?;
+    classify_host_version(SUPPORTED_CODEX_VERSION, version)
+        .map(|status| (version.to_owned(), status))
 }
 fn bounded_identifier(id: &str) -> Result<(), AdapterError> {
     if id.is_empty() || id.len() > 4096 {

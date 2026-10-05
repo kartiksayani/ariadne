@@ -4,7 +4,8 @@ use ariadne_adapter_claude::{
     ClaudeOptions, LoadedModIdentity, ModEvidenceSlot, QualifiedClaudeHost, SUPPORTED_HOST_VERSION,
 };
 use ariadne_agent_protocol::{
-    host_version::classify_host_version, Availability, Compatibility, EndpointRef,
+    host_version::{classify_host_version, HostVersionStatus},
+    Availability, Compatibility, EndpointRef,
 };
 use ariadne_core::{CoreError, CoreErrorCode, SessionRef};
 use ariadne_domain::models::{Freshness, UtcMillis};
@@ -145,7 +146,15 @@ impl Discovery {
             host_version: announcement.host_version.clone(),
             observed_at,
             freshness: Freshness::Fresh,
-            compatibility: Compatibility::Unknown,
+            // A newer same-minor patch is surfaced as `Untested` before binding;
+            // the baseline stays unqualified and rejected versions never look bindable.
+            compatibility: match classify_host_version(
+                SUPPORTED_HOST_VERSION,
+                &announcement.host_version,
+            ) {
+                Some(HostVersionStatus::Untested) => Compatibility::Untested,
+                _ => Compatibility::Unknown,
+            },
             availability: Availability::Unknown,
             binding,
             loaded: false,

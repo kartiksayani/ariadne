@@ -27,9 +27,12 @@ fn parse(version: &str) -> Option<(u64, u64, u64)> {
     let mut parts = version.split('.');
     let mut next = || {
         let part = parts.next()?;
-        (!part.is_empty() && part.len() <= 9 && part.bytes().all(|b| b.is_ascii_digit()))
-            .then(|| part.parse::<u64>().ok())
-            .flatten()
+        (!part.is_empty()
+            && part.len() <= 9
+            && part.bytes().all(|b| b.is_ascii_digit())
+            && (part == "0" || !part.starts_with('0')))
+        .then(|| part.parse::<u64>().ok())
+        .flatten()
     };
     let parsed = (next()?, next()?, next()?);
     parts.next().is_none().then_some(parsed)
@@ -93,6 +96,10 @@ mod tests {
             (" 2.1.300", None),
             ("garbage", None),
             ("2.1.99999999999999999999", None),
+            ("02.1.287", None),
+            ("2.01.287", None),
+            ("2.1.0288", None),
+            ("2.1.00", None),
         ];
         for (observed, expected) in table {
             assert_eq!(

@@ -4,7 +4,8 @@ Status: accepted by the maintainer under the owner's standing ruling that a
 personal-use app must not be blocked by disproportionate gates; the owner may veto
 before publication.
 Supersedes: the exact-equality host-version clauses of
-[ADR-0035](ADR-0035-captured-claude-mod-lifecycle.md) and the Compatibility row of
+[ADR-0035](ADR-0035-captured-claude-mod-lifecycle.md),
+[ADR-0037](ADR-0037-claude-native-compatibility-and-normalization.md) and the Compatibility row of
 [DECISIONS.md](../../DECISIONS.md)
 Superseded by: none
 
@@ -32,10 +33,21 @@ and 0.160.0.
   rule to the CLI version and to the daemon `userAgent` independently; either being
   above the baseline makes the pair untested.
 - There is no environment or flag override.
-- The untested state is visible, never silent: `ProbeResult.compatibility` and a
-  setup step, `ariadne doctor` (a warning, never a failure), and the discovery
-  candidate row. Wording: "Claude Code 2.1.289 is newer than the tested 2.1.287; it
-  should work, but has not been verified."
+- Numeric components must be plain decimals without leading zeros (`2.1.0288` and
+  `02.1.287` are rejected).
+- The untested state is surfaced where each path can observe it:
+  - Discovery candidate rows: Codex rows carry `Compatibility::Untested` when the CLI
+    or daemon is a newer patch; Claude rows carry it when the announced host version
+    is a newer patch. Baseline rows stay `Unknown` (unqualified until bound) and
+    rejected versions never produce a bindable row.
+  - Qualified bindings and `ProbeResult.compatibility` carry `Untested`.
+  - `ProbeResult.setup_steps` carries the notice, naming the newer side (the Codex
+    CLI or the Codex daemon). The desktop app shows it only where a caller runs the
+    adapter probe; discovery rows show the compatibility value only.
+  - `ariadne doctor` reports a warning, never a failure.
+
+  Wording: "Claude Code 2.1.289 is newer than the tested 2.1.287; it should work, but
+  has not been verified."
 - Runtime safety is unchanged: wire or parse mismatches still fail closed into the
   existing uncertain/blocked states. The Codex wire generator and the 0.160.0
   contracts and fixtures are untouched.

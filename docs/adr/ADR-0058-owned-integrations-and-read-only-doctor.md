@@ -40,7 +40,7 @@ global readiness guarantee. No Store lock spans provider or control I/O.
 Doctor accepts explicit absolute `--claude-bin` and `--codex-bin` paths. Without
 trusted selection it reports unknown. Provider-owned version readers reuse their
 existing executable identity, output limits and original deadline/maximum five-second
-budget. Codex retains its exact qualified version gate and existing read-only daemon
+budget. Codex retains its qualified version gate (a same-minor newer patch is accepted as untested per ADR-0071) and existing read-only daemon
 and selected-thread APIs. Current native control status supplies timestamped binding
 presence without claiming input. Version strings and matching files alone never
 establish a loaded Mod, current host readiness or permission to dispatch.

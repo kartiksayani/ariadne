@@ -5,7 +5,7 @@ export const HOST_VERSION = '2.1.287';
 export function hostVersionStatus(version, baseline = HOST_VERSION) {
   const parse = text => {
     const parts = typeof text === 'string' ? text.split('.') : [];
-    return parts.length === 3 && parts.every(part => /^[0-9]{1,9}$/.test(part)) ? parts.map(Number) : null;
+    return parts.length === 3 && parts.every(part => /^(0|[1-9][0-9]{0,8})$/.test(part)) ? parts.map(Number) : null;
   };
   const base = parse(baseline), seen = parse(version);
   if (!base || !seen || base[0] !== seen[0] || base[1] !== seen[1] || seen[2] < base[2]) return null;

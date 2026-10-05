@@ -9,9 +9,14 @@ pub struct CodexDaemonReader {
     pub(super) options: CodexOptions,
     pub(super) host_version: String,
     pub(super) host_status: HostVersionStatus,
+    untested_notices: Vec<String>,
     usable: bool,
 }
 impl CodexDaemonReader {
+    /// One owner-visible notice per side (CLI or daemon) that is newer than the baseline.
+    pub fn untested_notices(&self) -> &[String] {
+        &self.untested_notices
+    }
     /// Observed CLI version and whether it (and the daemon) is the qualified baseline.
     pub fn host_version(&self) -> (&str, HostVersionStatus) {
         (&self.host_version, self.host_status)
@@ -65,7 +70,7 @@ impl CodexDaemonReader {
             },
             deadline,
         )?;
-        let daemon_status = daemon_version_status(&initialized.user_agent)
+        let (daemon_version, daemon_status) = daemon_version_status(&initialized.user_agent)
             .filter(|_| initialized.platform_family == "unix")
             .ok_or_else(|| {
                 error(
@@ -83,6 +88,23 @@ impl CodexDaemonReader {
         } else {
             HostVersionStatus::Untested
         };
+        let mut untested_notices = Vec::new();
+        if cli_status == HostVersionStatus::Untested {
+            untested_notices.push(untested_notice(
+                "Codex",
+                &host_version,
+                SUPPORTED_CODEX_VERSION,
+            ));
+        }
+        if daemon_status == HostVersionStatus::Untested
+            && !(cli_status == HostVersionStatus::Untested && daemon_version == host_version)
+        {
+            untested_notices.push(untested_notice(
+                "Codex daemon",
+                &daemon_version,
+                SUPPORTED_CODEX_VERSION,
+            ));
+        }
         rpc.notify_initialized()?;
         let reader = Self {
             rpc,
@@ -92,6 +114,7 @@ impl CodexDaemonReader {
             options,
             host_version,
             host_status,
+            untested_notices,
             usable: true,
         };
         reader.verify_identity()?;

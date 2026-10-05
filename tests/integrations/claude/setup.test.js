@@ -36,7 +36,7 @@ describe('installed owner helper setup', () => {
     const h = host();await qualify(h.$,descriptor);
     expect(h.calls[0]).toEqual({argv:[descriptor.helperPath,'--version'],options:{timeoutMs:5000}});
     for (const version of ['2.1.288','2.1.289','2.1.1000']) await qualify(host({version}).$,descriptor);
-    for (const version of ['2.1.286','2.2.287','2.0.999','3.1.287','2.1','2.1.287.1','2.1.x','','garbage',null,2.1]) {
+    for (const version of ['2.1.286','2.2.287','2.0.999','3.1.287','2.1','2.1.287.1','2.1.x','','garbage',null,2.1,'2.1.0','1.1.287','2.1.-1','2.1.+300','2.1.287-beta','2..300',' 2.1.300','2.1.300 ','2.1.300\n','2.1.99999999999999999999','02.1.287','2.01.287','2.1.0288','2.1.00']) {
       await expect(qualify(host({version}).$,descriptor)).rejects.toThrow('2.1.287');
     }
     await expect(qualify(h.$,null)).rejects.toThrow('descriptor');

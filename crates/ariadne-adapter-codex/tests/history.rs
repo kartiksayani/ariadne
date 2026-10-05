@@ -753,6 +753,21 @@ fn newer_patch_cli_or_daemon_is_accepted_and_marked_untested() {
         let reader =
             CodexDaemonReader::open(harness.options(), harness.request().endpoint).unwrap();
         assert_eq!(reader.host_version(), (cli, expected), "{cli}/{daemon}");
+        let notice = |product: &str, version: &str| {
+            format!("{product} {version} is newer than the tested 0.160.0; it should work, but has not been verified.")
+        };
+        let expected_notices: Vec<String> = match (cli, daemon) {
+            ("0.160.0", "0.160.0") => vec![],
+            ("0.160.1", "0.160.1") => vec![notice("Codex", "0.160.1")],
+            ("0.160.1", "0.160.0") => vec![notice("Codex", "0.160.1")],
+            ("0.160.0", "0.160.2") => vec![notice("Codex daemon", "0.160.2")],
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            reader.untested_notices(),
+            expected_notices.as_slice(),
+            "{cli}/{daemon}"
+        );
     }
 }
 

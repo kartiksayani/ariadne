@@ -29,7 +29,8 @@ Use pinned tungstenite on UnixStream with masked client frames, validated HTTP
 Upgrade, ping/pong and 8 MiB fragmented-message/frame limits. Resolve permitted
 provider endpoint symlinks deliberately, verify final socket owner and peer UID,
 then initialize the already-running daemon. Canonical executable identity,
-mtime and exact CLI/daemon version gate every connection; changed executable or
+mtime and CLI/daemon version gate (exact equality here; relaxed to a same-minor
+newer patch by ADR-0071) every connection; changed executable or
 socket identity and incompatible required history data fence further reads
 until a fresh connect. Native readiness polling retains an absolute deadline
 across partial Upgrade traffic and fragmented frames. This layer owns no domain storage or saved owner inputs.
