@@ -162,6 +162,39 @@ test('launcher failure before bridge/witness readiness aborts observation and cl
     await assertExited(Number(result.stdout.trim()));
   } finally { await rm(root, { recursive: true }); }
 });
+test('embedded launcher retains backend stderr when the app exits before readiness', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-backend-log-'));
+  const server = net.createServer();
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  const configUrl = new URL('../../../apps/desktop/wdio.native.conf.mjs', import.meta.url).href;
+  const diagnostic = 'fixture startup panic before embedded WebDriver readiness';
+  const appArgs = ['-e', `process.stderr.write(${JSON.stringify(diagnostic + '\n')}, () => process.exit(23))`];
+  const fixture = `
+    import logger from '@wdio/logger';
+    logger.setLogLevelsConfig({}, 'info');
+    const { config } = await import(${JSON.stringify(configUrl)});
+    const { launcher } = await import('@wdio/tauri-service');
+    const options = { ...config.services[0][1], startTimeout: 500 };
+    const service = new launcher(options, config.capabilities, config);
+    try { await service.onPrepare(config, config.capabilities); }
+    catch (error) { console.log(error.message); process.exitCode = 1; }
+  `;
+  try {
+    await assert.rejects(command(process.execPath, ['--input-type=module', '-e', fixture], {
+      env: { ...buildEnv(root), ARIADNE_E2E_BINARY: process.execPath, ARIADNE_E2E_ROOT: root,
+        ARIADNE_E2E_NONCE: 'fixture', ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: root,
+        ARIADNE_E2E_APP_ARGS: JSON.stringify(appArgs) },
+      timeout: 10000, log: join(root, 'launcher.log'),
+    }), /failed \(1\)/);
+    assert.match(await readFile(join(root, 'launcher.log'), 'utf8'), /exited before.*ready \(code=23/);
+    const logs = (await readdir(root)).filter(name => /^wdio-.*\.log$/.test(name));
+    assert.equal(logs.length, 1);
+    assert.match(await readFile(join(root, logs[0]), 'utf8'), new RegExp(diagnostic));
+    await portFree(port);
+  } finally { await rm(root, { recursive: true }); }
+});
 test('SIGINT and deadline clean owned descendants while preserving the test parent', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-signal-'));
   const runner = new URL('../../../scripts/run-native-e2e.mjs', import.meta.url).href;

@@ -188,8 +188,12 @@ impl ControlServer {
             let accepted = tokio::select! {
                 biased;
                 _ = &mut stop => {
-                    self.bindings.close()?;
-                    return Ok(());
+                    let closed = self.bindings.close();
+                    // Cancellation must finish dropping admitted async handlers
+                    // before serve returns. Started blocking work independently
+                    // retains its real owner/lease until that work completes.
+                    connections.shutdown().await;
+                    return closed;
                 },
                 _ = connections.join_next(), if !connections.is_empty() => continue,
                 accepted = listener.accept() => accepted,
