@@ -153,10 +153,10 @@ export async function runNative() {
   await mkdir(evidence, { recursive: true });
   const root = await mkdtemp('/private/tmp/ariadne-e2e-'); await chmod(root, 0o700);
   const nonce = randomBytes(32).toString('hex');
-  const binary = join(repo, 'target/native-e2e/debug/ariadne-desktop');
+  const binary = join(repo, 'target/native-e2e/debug/bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop');
   let failure, owned, provider;
   try {
-    const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--no-bundle', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
+    const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--bundles', 'app', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
     const runtimeCommand = [process.execPath, join(repo, 'node_modules/@wdio/cli/bin/wdio.js'), 'run', 'wdio.native.conf.mjs'];
     const details = { root, port, nonce, binary, toolchain: toolchain(), buildCommand, runtimeCommand, cwd: desktop };
     await json(join(evidence, 'run.json'), details);

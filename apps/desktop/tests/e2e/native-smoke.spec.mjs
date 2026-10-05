@@ -13,11 +13,12 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const invoke = (command, request) => browser.execute(async (command, request) => {
   try { return { ok: true, data: await window.__TAURI_INTERNALS__.invoke(command, { request }) }; }
-  catch (error) { return { ok: false, error }; }
+  // WebDriver reserves top-level "error" in its script-result envelope.
+  catch (error) { return { ok: false, rejection: error }; }
 }, command, request);
 
 async function openSession(sessionId, itemId) {
-  const catalogue = await browser.$('button*=All sessions');
+  const catalogue = await browser.$('button[title="All sessions"]');
   await catalogue.waitForDisplayed(); await catalogue.click();
   const session = await browser.$(`[data-session-id="${sessionId}"]`);
   await session.waitForDisplayed(); await session.click();
@@ -72,7 +73,11 @@ async function delivery(configuration) {
   const choice = await card.$('button*=Use the native window'); await choice.click();
   await card.$('textarea[aria-label="Reply in your own words"]').setValue(ownerTexts[0]);
   await card.$('button*=Send').click();
-  await wait(async () => orderedInputs(await snapshot(configuration)).length === 1 && (await admissions(configuration)).length === 1, 'Waiting answer did not persist and reach the host');
+  await wait(async () => {
+    const saved = orderedInputs(await snapshot(configuration)), queued = await admissions(configuration);
+    return saved.length === 1 && queued.length === 1 && saved[0].attempts.length === 1
+      && queued[0].payload === saved[0].attempts[0].formatted_payload;
+  }, 'Waiting answer did not persist and reach the host with its exact saved payload');
   await wait(async () => !(await nativeCard('waiting', configuration.question)), 'Answered Waiting episode remained in Waiting');
   await wait(async () => !!(await nativeCard('sent', configuration.question)), 'Waiting answer did not appear in Sent');
   const sent = await nativeCard('sent', configuration.question);
@@ -169,7 +174,7 @@ describe('native owner FIFO and real process restoration', () => {
     const bytes = await readFile(receiptPath), disk = JSON.parse(bytes); assert.deepEqual(ping.data, disk);
     assert.equal(disk.nonce, nonce); assert.equal(disk.payload, payload); assert.equal(disk.pid, witness.pid); assert.match(disk.receipt_id, /^ping-\d+-\d+$/);
     const wrongNonce = nonce === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64);
-    const rejected = await invoke('native_ping', { nonce: wrongNonce, payload }); assert.equal(rejected.ok, false); assert.equal(rejected.error.code, 'nonce_mismatch');
+    const rejected = await invoke('native_ping', { nonce: wrongNonce, payload }); assert.equal(rejected.ok, false); assert.equal(rejected.rejection.code, 'nonce_mismatch');
     for (const request of [{ nonce: wrongNonce }, {}]) {
       assert.equal((await invoke('native_e2e_quit', request)).ok, false);
       await assert.rejects(stat(join(root, 'quit-request.json')), { code: 'ENOENT' }); assert.ok(alive(witness.pid));
