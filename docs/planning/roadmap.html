@@ -1366,7 +1366,9 @@
         "P4.2"
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/58",
-      "active": true
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/91"
+      }
     },
     {
       "id": "P4.5",
@@ -1402,7 +1404,8 @@
         "P4.1",
         "P4.4"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73",
+      "active": true
     },
     {
       "id": "P4.6",
@@ -1650,11 +1653,11 @@
       ],
       "acceptance": [
         "Single-instance registers before plugins and queues ID routes until webview ready; actual packaged CLI open handles paths with spaces and same revealItem route.",
-        "Pin/geometry/monitor clamping/hide vs Quit/wake reconciliation work on recorded Mac; Quit stops only Ariadne dispatch and explicitly preserves active external host turn."
+        "Ariadne persists Pin and geometry, clamps stored geometry to supplied monitor bounds, reconciles on wake, and distinguishes hide from Quit. Focused tests prove our state/routing/lifecycle logic; Quit stops only Ariadne dispatch and preserves active external host work. Standard macOS window/menu behavior is delegated to Apple APIs, not a physical acceptance gate (owner clarification 2026-10-05)."
       ],
       "checks": [
         "rtk proxy npm run test:native -- --suite routes",
-        "Packaged manual native evidence: hidden/minimized/cold launch, monitor change, wake, pin, path with spaces and second-instance route."
+        "Focused Ariadne preference, geometry, wake, route and shutdown tests plus actual packaged cold/second-instance routing and release isolation; no repeated physical Pin/Show/minimize or menu-checkmark tests."
       ],
       "estimate_days": 1,
       "implementation_depends_on": [
@@ -1695,7 +1698,8 @@
       "implementation_depends_on": [
         "P6.1",
         "P4.3"
-      ]
+      ],
+      "active": true
     },
     {
       "id": "P6.3",
@@ -1805,7 +1809,8 @@
         "rtk proxy npm run test:e2e -- --suite acceptance",
         "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree"
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "active": true
     },
     {
       "id": "P7.2",
