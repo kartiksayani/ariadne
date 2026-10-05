@@ -137,7 +137,9 @@ async function seed(configuration) {
 // A draft marked changed by a newer saved target stays locked until the owner reviews it explicitly.
 async function reviewCurrentTarget() {
   const review = await browser.$('.owner-input').$('button=Review current target');
-  if (await review.isExisting()) { await review.waitForEnabled(); await review.scrollIntoView(); await review.click(); }
+  if (!await review.isExisting()) return false;
+  await review.waitForEnabled(); await review.scrollIntoView(); await review.click();
+  return true;
 }
 async function answer(history, ordinal, text) {
   const another = await browser.$('.owner-input').$('button=Write another input');
@@ -146,7 +148,7 @@ async function answer(history, ordinal, text) {
   await reviewCurrentTarget();
   if (ordinal % 2) { const choice = await browser.$('.owner-input').$(`button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.scrollIntoView(); await choice.click(); }
   await editor.scrollIntoView(); await editor.setValue(text);
-  const send = await browser.$('.owner-input .ref-send-row button'); await failureEvidence('owner-input-send-first', () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
+  const send = await browser.$('.owner-input .ref-send-row button'); await failureEvidence(`owner-input-send-${ordinal}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
   await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal,
     'A genuine native round answer did not persist and reach its isolated host');
 }
@@ -378,6 +380,7 @@ export async function runHistoryAcceptance(configuration) {
   let saved = await snapshot(history);
   const proof = await proveRounds(history, saved, ownerTexts, resultTexts, paged);
   let previousReply = resultTexts.at(-1).split('\n')[0];
+  const reviewedTarget = {};
   for (const [intent, ordinal] of [['followup', 6], ['reopen', 7]]) {
     // The renderer must show the previous CLI-applied result before the next intent, or its draft is marked changed.
     await failureEvidence(`previous-result-${intent}`, () => wait(async () => (await detail().getText()).includes(previousReply),
@@ -385,7 +388,7 @@ export async function runHistoryAcceptance(configuration) {
     const control = await browser.$('.history-actions').$(`button=${intent === 'followup' ? 'Follow up' : 'Request reopen'}`);
     await control.scrollIntoView(); await control.waitForEnabled(); await control.click();
     const editor = await browser.$('.owner-input textarea'); await failureEvidence(`owner-input-editor-${intent}`, () => editor.waitForEnabled());
-    await reviewCurrentTarget();
+    reviewedTarget[intent] = await reviewCurrentTarget();
     const text = `Native ${intent} after closed history\nThe owner's deliberate request leaves the status unchanged.`;
     await editor.scrollIntoView(); await editor.setValue(text);
     const send = await browser.$('.owner-input .ref-send-row button'); await failureEvidence(`owner-input-send-${intent}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
@@ -416,7 +419,7 @@ export async function runHistoryAcceptance(configuration) {
   assert.equal(new Set((await admissions(history)).map(entry => entry.attemptId)).size, 7);
   await browser.saveScreenshot(join(evidence(), 'native-complete-history.png'));
   await writeFile(join(evidence(), 'history-acceptance.json'), JSON.stringify({ history, publication, ownerTexts, resultTexts, paged,
-    roundIds, proof, railProof, nativePinAndSelectionRefs: true, clearReferenceProof: 'Actual Unpin removes pin state without preferences writes; deliberate rail Close clears references',
+    roundIds, reviewedTarget, proof, railProof, nativePinAndSelectionRefs: true, clearReferenceProof: 'Actual Unpin removes pin state without preferences writes; deliberate rail Close clears references',
     hoverProof: 'Focused actual-App component tests; embedded driver lacks hover transitions', finalSession, queued: await admissions(history), originalAdmissions }, null, 2));
 }
 
