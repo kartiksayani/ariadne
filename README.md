@@ -1,13 +1,9 @@
 # Ariadne
 
-**One window for every question your Claude Code and Codex sessions ask you.**
+**Run several Claude Code or Codex sessions? Ariadne puts every question they ask you in one Mac window and sends each answer back to the session that asked.**
 
-Run a few coding-agent sessions and their questions end up scattered across
-terminal scrollback. After an hour you cannot say what is waiting on you, what
-you already decided, or why. Ariadne is a local Mac app that gathers those
-questions in one place. You answer there, and each answer goes back into the
-right running session. The questions, replies and decisions stay as a history you
-can browse and trace back (like a thread through a labyrinth).
+Questions, replies and decisions stay as a history you can follow, like a thread
+through a labyrinth. Local only: no account, no cloud, no telemetry.
 
 ![Design mockup of the Ariadne window: the Waiting list on the left, the tree of
 topics and items in the middle, an item's detail and the message rail on the
@@ -46,7 +42,7 @@ right](docs/planning/assets/mockup-dark-tree.png)
 
 ## Status
 
-Ariadne is early and built first for one person's own use.
+Early preview. macOS 13 or newer, built from source.
 
 - **macOS only:** macOS 13 or newer, Apple Silicon or Intel.
 - **Build from source.** There is no downloadable release. The app is not signed
@@ -103,10 +99,13 @@ to Ariadne).
 
 It puts everything under `~/.local/share/ariadne/versions/<version>` and points
 `current` at it. It adds links at `~/Applications/Ariadne.app`,
-`~/.local/bin/ariadne` and `~/.local/bin/ariadne-mcp`. It does not edit your
-shell startup files. The two `~/.local/bin` links are made only if that folder
-already exists, so run `mkdir -p ~/.local/bin` before `make install`. Running it
-again with the same version changes nothing.
+`~/.local/bin/ariadne` and `~/.local/bin/ariadne-mcp`. It also adds a link at
+`~/.agents/skills/ariadne`, the Ariadne skill that Codex reads. It does not edit
+your shell startup files. The two `~/.local/bin` links are made only if that
+folder already exists, so run `mkdir -p ~/.local/bin` before `make install`. The
+skill link is skipped, with a message, if something else already sits at that
+path. Move it aside and run `make install` again. Running it again with the same
+version changes nothing.
 
 ### First launch (unsigned app)
 
@@ -154,7 +153,10 @@ You can point it at specific programs with `--claude-bin` and `--codex-bin`
    - `/plugin install ariadne@ariadne-local`
    - `/reload-plugins`
    - `/ariadne-connect`
-3. To attach a fresh Claude conversation to an Ariadne session you already have,
+3. Connecting sends nothing to the model. When Ariadne shows a setup
+   instruction, paste it into that Claude conversation, once per connection.
+   The agent gets the Ariadne rules from it.
+4. To attach a fresh Claude conversation to an Ariadne session you already have,
    use `/ariadne-connect <session-id>`. The new conversation reads the saved
    items and history. It does not receive the old terminal transcript.
 
@@ -165,9 +167,14 @@ Claude Code will ask you to trust the plugin. That choice stays yours.
 1. Run `~/.local/bin/ariadne setup --agent codex`.
 2. In the already-running Codex terminal, run `/status`.
 3. In Ariadne, open the Projects page and click **Register project**. Type the
-   project folder and click **Register project** again.
-4. Open that project. Click **Discover host sessions**, pick the thread from
-   `/status`, then click **Connect existing session**.
+   project folder and click **Register project** again. (On the Projects page,
+   **Discover host sessions** can also list running sessions and register their
+   project for you.)
+4. Open that project and click **Connect existing session**. In the dialog, pick
+   the thread from `/status`, then click **Connect existing session** again.
+5. Ariadne shows a setup instruction. Paste it into that Codex thread, once per
+   connection. Connecting sends nothing to the model, so the agent gets the
+   Ariadne rules only from this paste.
 
 Codex approvals stay yours. Ariadne does not turn them on or off.
 
@@ -196,7 +203,10 @@ closed.
 
 ## What the agents are told
 
-Agents get a short set of rules when they connect. In one paragraph: record
+Connecting a session sends nothing to the model. Agents get the rules from the
+setup instruction you paste into the session (Codex and Claude Code), and from
+the Ariadne skill: a Codex skill linked by the installer, and a skill inside the
+Claude Code plugin. In one paragraph: record
 findings as structured items through `ariadne apply`, write full replies on the
 item rather than only in the terminal, choose item statuses deliberately, and
 finish every input Ariadne sends them with exactly one explicit result. Agents
@@ -216,7 +226,7 @@ recovery decision**.
 | State you see | What it means | What you can choose |
 |---|---|---|
 | Delivery uncertain | Ariadne sent your message but never got a confirmation. It may or may not have arrived. | Look at the terminal. If the message ran, choose **Confirm evidence**. If not, choose **Prepare resend** (may repeat work, so you must tick a warning) or **Skip and continue**. |
-| Needs attention (sent but rejected) | The agent refused the message, so it never ran. | **Prepare retry** (offered only here), **Prepare resend**, **Skip and continue** or **Confirm evidence**. |
+| `needs_attention` (sent but rejected) | The agent refused the message, so it never ran. | **Prepare retry** (offered only here), **Prepare resend**, **Skip and continue** or **Confirm evidence**. |
 | Missing result | The agent finished its turn but did not record the required result. | **Request missing result** (asks only for the result), **Prepare resend**, **Skip and continue** or **Confirm evidence**. |
 
 Every choice needs a short reason and is saved in the history. Before choosing,
@@ -233,7 +243,8 @@ make uninstall                    # removes the installed app and command-line t
 ```
 
 Removed: the files Ariadne installed itself, and the links
-`~/Applications/Ariadne.app`, `~/.local/bin/ariadne` and `~/.local/bin/ariadne-mcp`.
+`~/Applications/Ariadne.app`, `~/.local/bin/ariadne`, `~/.local/bin/ariadne-mcp`
+and `~/.agents/skills/ariadne` (the last only if the installer created it).
 Only unchanged files that Ariadne owns are removed. Anything you edited or
 anything that is not Ariadne's is left in place and listed.
 
@@ -263,25 +274,9 @@ Checked in the app configuration and source:
 
 A Rust core, the `ariadne` command-line tool and the `ariadne-mcp` server share
 one saved store of plain JSON files on disk. The window is a Tauri 2 app (a
-desktop shell around a web view) with a React interface. Design and planning
-documents:
+desktop shell around a web view) with a React interface.
 
-- [Build handoff](docs/planning/BUILD_HANDOFF.md)
-- [Architecture](docs/planning/ARCHITECTURE.md) and
-  [product contract](docs/planning/PRODUCT.md)
-- [Personal release scope](docs/planning/PERSONAL_RELEASE.md)
-- [Roadmap](docs/planning/ROADMAP.md) and [interactive Gantt](docs/planning/roadmap.html)
-- [Planning index](docs/planning/README.md), including all 30 design frames
-- [Development checks](docs/planning/DEVELOPMENT_CHECKS.md) and
-  [macOS test setup](docs/development/MACOS_TEST_SETUP.md)
-- [Harness overview](docs/delivery/HARNESS_OVERVIEW.md) and
-  [orchestrator](ORCHESTRATOR.md)
-- [Communication simulation](docs/planning/communication-explorer.html)
-- [Installation details](scripts/install/README.md)
-
-Source inputs: [build prompt](BUILD_PROMPT.md), [design brief](DESIGN_PROMPT.md),
-[UI mockups](<designs/Ariadne UI mockups.zip>). Historical planning and POCs are in
-the [immutable archive](https://github.com/kartiksayani/ariadne/tree/a5e306f).
+Design notes: [docs/planning](docs/planning/README.md).
 
 ## License
 
