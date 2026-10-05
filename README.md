@@ -153,9 +153,9 @@ You can point it at specific programs with `--claude-bin` and `--codex-bin`
    - `/plugin install ariadne@ariadne-local`
    - `/reload-plugins`
    - `/ariadne-connect`
-3. Connecting sends nothing to the model. When Ariadne shows a setup
-   instruction, paste it into that Claude conversation, once per connection.
-   The agent gets the Ariadne rules from it.
+3. `/ariadne-connect` prints a setup instruction. Connecting sends nothing to
+   the model, so paste that instruction into the same conversation, once per
+   connection. The agent gets the Ariadne rules from it.
 4. To attach a fresh Claude conversation to an Ariadne session you already have,
    use `/ariadne-connect <session-id>`. The new conversation reads the saved
    items and history. It does not receive the old terminal transcript.
@@ -168,8 +168,8 @@ Claude Code will ask you to trust the plugin. That choice stays yours.
 2. In the already-running Codex terminal, run `/status`.
 3. In Ariadne, open the Projects page and click **Register project**. Type the
    project folder and click **Register project** again. (On the Projects page,
-   **Discover host sessions** can also list running sessions and register their
-   project for you.)
+   **Discover host sessions** can also list running sessions and fill in their
+   project folder.)
 4. Open that project and click **Connect existing session**. In the dialog, pick
    the thread from `/status`, then click **Connect existing session** again.
 5. Ariadne shows a setup instruction. Paste it into that Codex thread, once per
