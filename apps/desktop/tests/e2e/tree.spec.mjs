@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
+import { identity } from '../../../../scripts/run-native-e2e.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
@@ -20,20 +22,43 @@ export async function publishTreeRequest(configuration, request, setup = false) 
   const before = await snapshot(configuration), rejections = [];
   const maximumRetries = setup ? 2 : 0;
   for (let retry = 0; retry <= maximumRetries; retry++) {
+    const started = Date.now();
     const result = await cliRequest(configuration.cli, args, request);
     if (result.value.ok === true) {
       assert.equal(result.code, 0); assert.equal(result.value.data.session_id, configuration.sessionId);
       return { request, receipt: result.value.data };
     }
-    const after = await snapshot(configuration); rejections.push({ retry, result, after });
+    const elapsedMs = Date.now() - started, after = await snapshot(configuration); rejections.push({ retry, elapsedMs, result, after });
     await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, `tree-apply-${request.op_id}-failure.json`), JSON.stringify({ args, request, before, rejections }, null, 2));
     // StoreBusy is a definitive lock-acquisition rejection before the batch
     // callback. Only setup may repeat this exact frozen operation; uncertain
     // writes, revision conflicts and every other error remain failures.
     assert.ok(!after.operation_receipts[request.op_id], 'Rejected tree setup must have no saved receipt for this operation');
-    if (result.value.error.code !== 'store_busy' || retry === maximumRetries) assert.fail(result.output);
+    if (result.value.error.code !== 'store_busy' || retry === maximumRetries) {
+      if (result.value.error.code === 'store_busy' && process.env.ARIADNE_E2E_ROOT) await captureBusy(configuration);
+      assert.fail(result.output);
+    }
   }
   assert.fail('Bounded tree setup publication did not complete');
+}
+async function captureBusy(configuration) {
+  const evidence = process.env.ARIADNE_E2E_EVIDENCE, facts = {};
+  try {
+    const owned = await readJson(join(process.env.ARIADNE_E2E_ROOT, 'observed.json')), current = identity(owned.pid);
+    assert.equal(current.exe, process.env.ARIADNE_E2E_BINARY); assert.equal(current.birth, owned.birth); facts.owned = owned;
+    const lock = join(configuration.projectRoot, '.ariadne/locks', `${configuration.sessionId}.lock`);
+    try { facts.lockHolder = execFileSync('/usr/sbin/lsof', ['-nP', lock], { encoding: 'utf8', timeout: 5000 }); }
+    catch (error) { facts.lockHolderError = error.message; }
+    execFileSync('/usr/bin/sample', [String(owned.pid), '1', '-file', join(evidence, 'native-app-busy-sample.txt')], { encoding: 'utf8', timeout: 5000 });
+    const probes = [ ['read', '--binding', configuration.bindingId, '--generation', configuration.generation, '--view', 'items', '--limit', '1', '--json'],
+      ['preferences', 'get', '--json'] ];
+    facts.reads = [];
+    for (const args of probes) {
+      const started = Date.now(), result = await cliRequest(configuration.cli, args, undefined);
+      facts.reads.push({ args, elapsedMs: Date.now() - started, result });
+    }
+  } catch (error) { facts.observationError = error.message; }
+  await writeFile(join(evidence, 'native-app-busy.json'), JSON.stringify(facts, null, 2));
 }
 function item(reference, topicId, parent, question, status, owner, outcome = null) {
   return { op: 'item.add', ref: reference, topic: { id: topicId }, parent, question, type: 'task', status, owner,
