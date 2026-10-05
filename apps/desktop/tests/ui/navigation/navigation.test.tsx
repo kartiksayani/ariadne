@@ -51,10 +51,10 @@ function deferred<T>() {
 }
 class Transport implements DesktopTransport {
   readonly calls: { name: string; request: OwnerMutationRequest | Parameters<DesktopTransport['invoke']>[1]['request'] }[] = [];
-  readonly responses = new Map<string, (QueryEnvelope | MutationEnvelope | Promise<QueryEnvelope> | Error)[]>();
+  readonly responses = new Map<string, (QueryEnvelope | MutationEnvelope | Promise<QueryEnvelope | MutationEnvelope> | Error)[]>();
   readonly listeners = new Map<keyof HintPayloads, Set<(hint: never) => void>>();
   readonly unsubscribed: string[] = [];
-  enqueue(name: string, ...responses: (QueryEnvelope | MutationEnvelope | Promise<QueryEnvelope> | Error)[]) {
+  enqueue(name: string, ...responses: (QueryEnvelope | MutationEnvelope | Promise<QueryEnvelope | MutationEnvelope> | Error)[]) {
     const queue = this.responses.get(name) ?? []; queue.push(...responses); this.responses.set(name, queue);
   }
   async invoke<T>(name: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
@@ -495,6 +495,45 @@ describe('source-backed navigation views and explicit registration', () => {
 
 
 describe('tree edits through canonical navigation preferences', () => {
+  it('keeps a confirmed search receipt when an overlapping refresh finishes its catalogues and uses that revision for the next filter', async () => {
+    const { transport, store } = setup(), prefs = preferences();
+    prefs.sessions[0].filters = { search: 'native', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false };
+    read(transport, prefs); await store.start(); transport.enqueue('session_get', loaded());
+    const opened = store.opened.open(route); await opened.refresh();
+    render(<NavigationSentenceTree navigation={store} store={opened} onReveal={() => {}} />);
+    const receipt = deferred<MutationEnvelope>(), projects = deferred<QueryEnvelope>();
+    transport.enqueue('preferences_patch', receipt.promise);
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(store.getSnapshot().writing).toBe(true);
+    transport.enqueue('preferences_get', success('preferences_get', prefs));
+    transport.enqueue('project_list', projects.promise);
+    transport.enqueue('session_list', success('session_list', sessionResult()));
+    let refresh!: Promise<void>;
+    await act(async () => { refresh = store.refresh(); });
+    expect(transport.calls.filter(call => call.name === 'project_list')).toHaveLength(2);
+    await act(async () => { receipt.resolve(patchReceipt(2)); });
+    expect(store.getSnapshot().preferences?.revision).toBe(2);
+    expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe('');
+    await act(async () => { projects.resolve(success('project_list', projectResult())); await refresh; });
+    expect(store.getSnapshot().preferences?.revision).toBe(2);
+    expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe('');
+    expect(store.getSnapshot().status).toBe('ready'); expect(store.getSnapshot().error).toBeNull();
+    transport.enqueue('preferences_patch', patchReceipt(3));
+    const statuses = screen.getByRole('group', { name: 'Item status' });
+    await act(async () => { fireEvent.click(within(statuses).getByRole('button', { name: 'Open' })); });
+    expect(store.getSnapshot().preferences?.revision).toBe(3);
+    expect(store.getSnapshot().preferences?.sessions[0]).toEqual({ ...prefs.sessions[0],
+      filters: { ...prefs.sessions[0].filters, search: '', statuses: ['open'] } });
+    expect(store.getSnapshot().preferences?.global).toEqual(prefs.global);
+    expect(store.getSnapshot().preferences?.drafts).toEqual(prefs.drafts);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')[1].request).toMatchObject({ command: {
+      params: { expected_preferences_revision: 2, entries: [{ kind: 'set_session_view',
+        preferences: { filters: { search: '', statuses: ['open'] } } }] },
+    } });
+  });
   it('keeps the newest tree selection reveal through Later and new search after dismissing an older external reveal', async () => {
     const { transport, store } = setup(), prefs = preferences(), session = structuredClone(demo) as Session;
     prefs.global.selected_navigation = { kind: 'session', session: route };
