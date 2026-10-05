@@ -142,12 +142,14 @@ The runner executes the pinned local Tauri CLI with working directory
 `apps/desktop`, using an argument array:
 
 ```text
-tauri build --debug --features e2e --no-bundle --config src-tauri/tauri.e2e.conf.json -- --locked
+tauri build --debug --features e2e --bundles app --config src-tauri/tauri.e2e.conf.json -- --locked
 ```
 
 Set `VITE_ARIADNE_E2E=1` and `CARGO_TARGET_DIR=<repo>/target/native-e2e` only in
 the build subprocess environment. The resulting `appBinaryPath` is the absolute
-`<repo>/target/native-e2e/debug/ariadne-desktop`. The
+`<repo>/target/native-e2e/debug/bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop`.
+Launching the executable inside the generated app bundle supplies macOS notification
+identity while preserving direct process ancestry and PID ownership. The
 [CLI reference](https://v2.tauri.app/reference/cli/#build) specifies these build
 flags. Build and start a real native executable with embedded frontend assets;
 this smoke requires no Vite server.

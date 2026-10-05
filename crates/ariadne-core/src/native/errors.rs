@@ -15,7 +15,10 @@ pub(super) fn local(code: CoreErrorCode, message: impl Into<String>) -> CoreErro
 }
 
 pub(super) fn store(error: StoreError) -> CoreError {
-    local(store_code(&error), error.to_string())
+    store_ref(&error)
+}
+pub(super) fn store_ref(error: &StoreError) -> CoreError {
+    local(store_code(error), error.to_string())
 }
 fn store_code(error: &StoreError) -> CoreErrorCode {
     match error {

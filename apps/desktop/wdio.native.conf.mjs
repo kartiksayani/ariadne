@@ -10,6 +10,8 @@ export const config = {
   services: [['@wdio/tauri-service', {
     mode: 'native', driverProvider: 'embedded', appBinaryPath: binary, appArgs,
     embeddedPort: Number(process.env.ARIADNE_E2E_PORT),
+    // Retain startup stderr in the private fixture evidence, including onPrepare failures.
+    captureBackendLogs: true,
     startTimeout: 60000, statusPollTimeout: 5000, commandTimeout: 30000,
   }]],
   capabilities: [{ browserName: 'tauri', 'tauri:options': { application: binary, args: appArgs } }],

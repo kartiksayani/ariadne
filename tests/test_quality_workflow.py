@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMAND_DOUBLE = '''import json, os, sys
@@ -74,6 +75,8 @@ class QualityWorkflowTests(unittest.TestCase):
                 ("application release=true reference=true", 0, "workflow_dispatch", "refs/heads/feature", 0, 0),
                 ("application release=true reference=true", 0, "push", "refs/heads/feature", 23, 0),
                 ("application release=true reference=true", 0, "push", "refs/heads/feature", 0, 29),
+                ("application release=true reference=true", 17, "push", "refs/heads/feature", 23, 29),
+                ("tooling release=false reference=true", 17, "push", "refs/heads/browser-test", 23, 29),
             ]
             cases = [(*case, 0) for case in cases] + [
                 ("application release=true reference=true", 0, "push", "refs/heads/feature", 0, 0, 42),
@@ -95,7 +98,7 @@ class QualityWorkflowTests(unittest.TestCase):
                                             text=True, capture_output=True)
                     application = scope.startswith("application")
                     reference = "reference=true" in scope
-                    expected_status = setup_status or ((provision_status or capture_status or status) if reference else status)
+                    expected_status = setup_status or status or ((provision_status or capture_status) if reference else 0)
                     self.assertEqual(result.returncode, expected_status, result.stderr)
                     calls = [json.loads(line) for line in log.read_text().splitlines()]
                     gate = ["python", "scripts/check-commit.py", "--ci", "--base", "whole-pr-base"]
@@ -103,16 +106,16 @@ class QualityWorkflowTests(unittest.TestCase):
                         gate += ["--merge-base"]
                     if event == "workflow_dispatch":
                         gate += ["--full"]
-                    capture_ok = not setup_status and (not reference or not (provision_status or capture_status))
-                    self.assertEqual(calls.count(gate), int(capture_ok))
+                    gate_ok = not (setup_status or status)
+                    self.assertEqual(calls.count(gate), int(not setup_status))
                     provisioning = ["node", "node_modules/playwright/cli.js", "install", "chromium"]
                     capture = ["npm", "run", "capture:reference"]
-                    self.assertEqual(calls.count(provisioning), int(reference and not setup_status))
-                    self.assertEqual(calls.count(capture), int(reference and not (setup_status or provision_status)))
-                    if reference and not (setup_status or provision_status):
+                    self.assertEqual(calls.count(provisioning), int(reference and gate_ok))
+                    self.assertEqual(calls.count(capture), int(reference and gate_ok and not provision_status))
+                    if reference and gate_ok and not provision_status:
                         self.assertLess(calls.index(provisioning), calls.index(capture))
-                    if reference and capture_ok:
-                        self.assertLess(calls.index(capture), calls.index(gate))
+                    if reference and gate_ok:
+                        self.assertLess(calls.index(gate), calls.index(provisioning))
                     installs = [call for call in calls if call[0] == "rustup"]
                     self.assertEqual(len(installs), int(application))
                     version_checks = [[name, "--version"] for name in ("cargo", "rustc")]
@@ -121,6 +124,24 @@ class QualityWorkflowTests(unittest.TestCase):
                     if application and not setup_status:
                         for version in version_checks:
                             self.assertLess(calls.index(installs[0]), calls.index(version))
-                        if reference:
-                            self.assertLess(calls.index(version_checks[-1]), calls.index(provisioning))
+                        self.assertLess(calls.index(version_checks[-1]), calls.index(gate))
                     self.assertFalse(any(call[0] == "rtk" for call in calls))
+
+    def test_captures_before_gate_are_rejected(self):
+        workflow_path = ROOT / ".github/workflows/quality.yml"
+        workflow = workflow_path.read_text()
+        gate = '          .venv-quality/bin/python scripts/check-commit.py "${args[@]}"\n'
+        self.assertEqual(workflow.count(gate), 1)
+        next_step = "      - name: Preserve native and coverage evidence\n"
+        mutation = workflow.replace(gate, "").replace(next_step, gate + next_step)
+        original_read_text = Path.read_text
+
+        def read_text(path, *args, **kwargs):
+            return mutation if path == workflow_path else original_read_text(path, *args, **kwargs)
+
+        result = unittest.TestResult()
+        fixture = QualityWorkflowTests("test_single_push_head_scope_and_failures_are_reported")
+        with patch.object(Path, "read_text", read_text):
+            fixture.run(result)
+        self.assertFalse(result.errors, result.errors)
+        self.assertTrue(result.failures, "Workflow matrix accepted captures before the required gate")

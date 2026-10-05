@@ -1,94 +1,78 @@
 # Ariadne handoff
 
-Checked 2026-10-05 00:12 UTC. Verify GitHub before acting. Continue autonomously;
-Sol 6.1 High delegates only. Ten delegate slots are supported. Reviewed-parent
-stacks are authorized. Publishing this checkpoint with the one-file workflow-fixture repair; verify
-current GitHub heads after the coordinated parent pushes.
+Checkpoint 2026-10-05 02:46 UTC. Continue autonomously; delegates Sol 6.1 High only.
+Owner authorizes focused local builds/tests to save overall time. MCP/Seezo disabled.
 
-**Main:** `20eb77d715c0aa58664dddea0232465598cf8cb1` (PR85);
-[postmerge CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37244941515).
-PR85 merged after exact-head independent review and coverage/native/release audit.
-PRs80–82 and84 also merged. Preserve intentional root tasks.json/roadmap overlays.
+**Main:** `c773f3438f55f443860b3c6d88cd60a3deee7281` (PR83 merged).
+Main CI pending; previous main green. PR83 passed [CI](https://github.com/kartiksayani/ariadne/actions/runs/37252266595),
+[exact independent review](https://github.com/kartiksayani/ariadne/pull/83#pullrequestreview-5409284459),
+and artifact audit: 86.44% weighted coverage, all 200 required sources, actual native
+Reply/Send/result/host completion, packaged release isolation and all reference captures.
+**28/49 tasks complete:** newly closed P2.4, P3.1, P3.2, P3.3, P3.6, P3.8.
+Root local tasks.json/roadmap.html already reflect these closures; refresh the local page.
+P4.4 is the active implementation marker. PR86 and PR88 native acceptance passed locally; their CI/review/merge remain pending.
 
-| PR | Head / base | Review and CI |
+| Open PR | Published head | CI / review |
 | --- | --- | --- |
-| [83](https://github.com/kartiksayani/ariadne/pull/83) | Local `e897c39` plus checkpoint / main | Publishing workflow-fixture repair; [previous CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37245309717) |
-| [85](https://github.com/kartiksayani/ariadne/pull/85) | Merged as20eb77d | Clear5408629599; [CI green](https://github.com/kartiksayani/ariadne/actions/runs/37241561932), artifacts audited |
-| [86](https://github.com/kartiksayani/ariadne/pull/86) | `568a51e` /83 | Clear5408879961; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245408157) |
-| [88](https://github.com/kartiksayani/ariadne/pull/88) | `57ab2e5` /86 | Clear5408880014; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245454134) |
-| [90](https://github.com/kartiksayani/ariadne/pull/90) | Local `3d022c4` / main | Publishing same fixture repair; [previous CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37245310924) |
-| [91](https://github.com/kartiksayani/ariadne/pull/91) | `7ec65b8` /88 | Clear5408877294; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245484743) |
-| [92](https://github.com/kartiksayani/ariadne/pull/92) | `b2306db` /88 | Clear5408882161; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245493115) |
-| [93](https://github.com/kartiksayani/ariadne/pull/93) | `a8f5de2` /94 | Combined source clear5408901847; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245921123) |
-| [94](https://github.com/kartiksayani/ariadne/pull/94) | `097fdc8` /91 | Clear5408884753; CI pending |
-| [95](https://github.com/kartiksayani/ariadne/pull/95) | `a21e6d0` /91 | Clear5408882221; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245534352) |
+| [86](https://github.com/kartiksayani/ariadne/pull/86) | 7c87e35 | Newly pushed after full native pass; exact independent review5409534195 clear; CI pending. Base mainc773f34. |
+| [88](https://github.com/kartiksayani/ariadne/pull/88) | eca5758 source | Full native passed locally; this docs checkpoint is next push. Final delta review/CI pending. |
+| [91](https://github.com/kartiksayani/ariadne/pull/91) | 7a99411 | Old CI canceled; source review clear at old head. |
+| [92](https://github.com/kartiksayani/ariadne/pull/92) | 68e0a54 | Old CI canceled; source review clear at old head. |
+| [93](https://github.com/kartiksayani/ariadne/pull/93) | 9bfbc74 | Old CI canceled; source review clear at old head. |
+| [94](https://github.com/kartiksayani/ariadne/pull/94) | c0c2abe | Old CI canceled; source review clear at old head. |
+| [95](https://github.com/kartiksayani/ariadne/pull/95) | 4bbd6b8 | Old CI canceled; source review clear at old head. |
+| [96](https://github.com/kartiksayani/ariadne/pull/96) | 9254f3b | Old installed SDK fixture failure; source review clear at old head. |
+| [97](https://github.com/kartiksayani/ariadne/pull/97) | d5359fa | [CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37252990615), audit underway; exact review5409329259 clear, all threads resolved. |
 
-| [96](https://github.com/kartiksayani/ariadne/pull/96) | `c45feef` /91 | Clear5408892476; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245702501) |
-
-GitHub stack87 is83 →86 →88 →91 →94 →93.92/95/96 remain independent siblings. Atomic squash only a qualified prefix.
-Prioritize this critical stack over an unrelated main update that restarts its
-checks; independent siblings stay independent. Every merged state must satisfy
-current-base validation. No new full task closure is claimed.
-
-| Responsibility | Worktree / branch | Local state |
-| --- | --- | --- |
-| Maintainer | .worktrees/resume-integration / maintenance/resume-integration | Clean published source401d620; this local checkpoint uncommitted; shared contracts/catalogue |
-| prove_three_binding_fifo | .worktrees/packaged-route-acceptance / task/packaged-route-acceptance |96 published/clean; independent24 checks and source review clear; actual packaged CI pending |
-| guarded_history_actions | .worktrees/guarded-history-actions / task/guarded-history-actions |93 stacked on94; combined source clear5408901847, reviewer130 UI pass; parent update pending |
-| native_graph_acceptance | .worktrees/native-graph-acceptance / task/native-graph-acceptance |95 published/clean and source-cleared |
-| repair_runtime_ci_races | .worktrees/runtime-wake-reuse / fix/runtime-wake-reuse |5bbd5ac committed/clean, cherry-picked into83 as2d57711; no other unpushed work |
-| review_guarded_actions | Separate review context |93 integration source-clear5408901847 |
-| audit_claude85_green | Separate review context;85 evidence in /tmp/ariadne-pr85-ci37241561932-audit.XEXXMN |83/86/88 cleared; CI pacing audit complete, no cache changes |
-| review_native_history | Separate review context |90/94 cleared |
-| review_personal_package92 | Separate review context |Reviewing91/92/95 parent integration |
-
-85 audit: 21,090/23,466 =89.87% weighted coverage, all176 required sources;
-exact head/tree with no tracked changes, native PID54199/nonce/receipt/clean exit,
-packaged PID64494 no test service/writes and clean exit. Native evidence is the
-scaffold journey; actual Claude behavior is proved by its real Core/installed tests.
-
-83 contains control-write, activation-fixture, recovery-transport and physical
-lease repairs, propagated through descendants. Final lease drop unlocks only in
-its acquiring process (ADR0064); exact old CI interleaving remains inferred.
-90 now also carries the same lease, wake and CI setup fixes, independently
-reviewed. Its previous first failure was the
-unchanged Claude wake/heartbeat counter107 versus106 at activation.rs402. Source
-trace was proved deterministically: clearing evidence during helper inspection
-stopped the worker.5bbd5ac now yields Unknown without losing the worker; preserves
-actual identity/resource errors. Six activation and21 conformance tests passed.
-83 also relocated two byte-identical test files under tests/ and excluded only
-the declaration-only tray/mod.rs from source inventory. Original80% floor stays.
+**Owners and unpushed work** (paths relative to `.worktrees/`):
+- PR86 `native-domain-acceptance`, branch `task/native-domain-acceptance`: published
+  `7c87e35`; `prove_three_binding_fifo` finished full local native proof at exact head.
+  Evidence: `local-native-startup/coverage/native-e2e/bbf9a400-f467-4863-82d4-0361f3682ff5`.
+  Five actual UI inputs, all FIFO result/host-completion joins, unchanged demo,
+  real delivery Quit, fresh PID/nonce restored history/receipts without resend,
+  and restoration Quit all passed. Final source review `review_native_acceptance_repairs`
+  posted exact-head clear5409534195; CI remains pending. Navigation error retention,
+  Waiting heartbeat mount stability and saved-answer overlap independently reviewed.
+- PR88 `desktop-discovery-join`, branch `task/desktop-discovery-join`: source
+  `eca5758` passed full native: explicit registration/connection to exact discovered
+  Codex thread/socket, five FIFO inputs/joins, both Quit proofs and restoration.
+  Evidence `local-native-startup/coverage/native-e2e/1c10140f-c2b8-4834-bbfb-c122494f9a41`.
+  Maintainer carries this updated catalogue/handoff before coordinated push.
+- `prove_three_binding_fifo`: owns PR91 `native-tree-acceptance`, branch
+  `task/native-tree-acceptance`; integrating final88, preserving selectorc301ed3,
+  and proving original 2k/5k native tree acceptance. Exclusive owner of
+  `local-native-startup` and `target/native-e2e` after88 handover.
+- `repair_history_graph_native_helpers`: owns only dedicated history/graph native
+  helpers in their existing worktrees. Real scrolling before offviewport controls;
+  history seed/navigation race adaptation awaits bounded root adjudication.
+- `product-accessibility`, branch `task/product-accessibility`: local5b768e7,
+  published d5359fa; held ec0055c minimum1000×700/actual viewport assertion and
+  5b768e7 navigation error fix (already integrated86). Await propagated parents.
+  Latest97 failed solely inherited pure-test coverage inventory before native.
+- `guarded-history-actions`, branch `task/guarded-history-actions`: unpushed02bbbbd
+  relocates pure Rust test into existing tests-directory convention; targeted real
+  Rust test and hook pass. No coverage gate or production exclusion change.
+- Other unpushed selector repairs: `native-tree-acceptance`c301ed3;
+  `native-history-acceptance`7278706; `native-graph-acceptance`6318721.
+  Corresponding branches are `task/` plus worktree basename. Preserve during propagation.
+- Root owns catalogue/chart/HANDOFF; this88 checkpoint carries latest copies.
+  Root local roadmap already shows28/49; never restart CI solely for status text.
 
 **Next three steps**
+1. Obtain final86 exact-head review and green CI, audit artifacts and squash merge.
+   Then close P4.1/P4.3 immediately; do not call pending CI a pass.
+2. Push/review88 and run91 native while86 CI runs; propagate86 →88 →91 →94 →93,
+   retaining selector and pure-test repairs;97 follows93.
+   92/95/96 are siblings. Reuse local native build for critical journeys while CI runs.
+   Squash only qualified PRs integrated with current main; failed main pauses merges.
+3. Audit acceptance and immediately update roadmap on each merge. Physical Mac
+   lifecycle/notification/tray checks and M7 live hosts remain unproved; actual owner
+   installation and billable hosts still require explicit approval.
 
-1. Review/push the workflow-fixture repair on83/90, then propagate once through
-   all children including96. All product scopes are independently source-clear.
-   Review only the exact shared fix and integration; retain full current-head CI.
-2. Audit critical stack coverage/native/release artifacts before squash merge.
-   Close P2.4/P3.1 and P3.2 only with required merges/proof, then original dependent
-   tasks.85 is now merged; main failure pauses further merges, pending does not.
-3. Publish this single handoff with the next substantive checkpoint. Purple+A
-   means actual coding; amber includes partial work waiting for review or CI.
-   Preserve root overlays, historical evidence and all worktrees.
-
-Use pinned Node22 with NPM_CONFIG_USERCONFIG=/dev/null; old global npm may print
-failure but exit0. Explicit warm caches only: primary native-provider-activation,
-guarded author binding-connect-relay, guarded reviewer domain-transitions,
-83 reviewer owner-answer-ui (all /target). No cold native builds. Heavy native,
-browser and package checks stay in CI. Real owner install, paid hosts and M7 need
-approval; temporary private-home fixtures are authorized. MCP/Seezo disabled by
-owner waiver; no organization security approval claimed.
-
-Bounded CI setup repair: run37238789118 lost10m22s to a partial Rust install;
-run37243736889 failed on conflicting cargo-clippy after8.1m of reference captures.
-No earlier Rust invocation or cache restore was found; runner cause remains
-unproven. A fresh mktemp RUSTUP_HOME isolates inherited state, and setup now runs
-before captures to avoid wasting those8m on setup failure. Existing gates remain.
-
-Current CI blocker:83/90 failed test_quality_workflow because the fixture mocked
-rustup/cargo but invoked real rustc under the new empty RUSTUP_HOME, and expected
-setup after captures. Production setup succeeded. Author cfe2edf changes only that
-test file: mock rustc, isolate each RUNNER_TEMP, assert early install/version probes
-and failing-install short circuit. All16 workflow cases,19 Python tests and19 Node
-process-contract checks pass. Fresh review_workflow_fixture is reviewing the fix.
-No production gate or Rust behavior changes; no real toolchain installed locally.
+Preserve ignored evidence and shared ui-reference/node_modules. Owner-authorized
+cleanup removed five verified merged worktrees, preserving branches/history; about
+10GiB free after cleanup. binding-connect-relay target is cold; native-provider-activation,
+domain-transitions and owner-answer-ui caches remain. Native runs use private HOME,
+existing RUSTUP_HOME/CARGO_HOME and pinned Node22 plus worktree node_modules/.bin.
+User's 07:35 recording showed a genuine Waiting heartbeat remount bug, now fixed
+and locally independently reviewed; app closure at end was test cleanup.
