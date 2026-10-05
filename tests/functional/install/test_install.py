@@ -614,19 +614,25 @@ class BuildTests(unittest.TestCase):
                 "xcode-select": "/Xcode", "xcrun": "/SDK"}
         facts = self.preflight_with(base)
         self.assertEqual((facts["architecture"], facts["rust_toolchain"]), ("arm64", "1.98.1"))
-        newer = {**base, "node": "v24.1.0", "npm": "11.0.0", "rustc": "rustc 1.99.0 (fixture)", "cargo": "cargo 1.99.0 (fixture)"}
+        newer = {**base, "node": "v24.15.1", "npm": "11.0.0", "rustc": "rustc 1.99.0 (fixture)", "cargo": "cargo 1.99.0 (fixture)"}
         facts = self.preflight_with(newer, pinned_installed=False)
         self.assertEqual((facts["node"], facts["npm"], facts["rustc"], facts["cargo"]),
-                         ("v24.1.0", "11.0.0", "rustc 1.99.0 (fixture)", "cargo 1.99.0 (fixture)"))
+                         ("v24.15.1", "11.0.0", "rustc 1.99.0 (fixture)", "cargo 1.99.0 (fixture)"))
         self.assertEqual(facts["rust_toolchain"], "stable-aarch64-apple-darwin")
         patch_newer = {**base, "node": "v22.24.0", "npm": "10.9.9"}
         self.assertEqual(self.preflight_with(patch_newer)["node"], "v22.24.0")
+        for node in ("v22.23.2", "v22.30.0", "v24.15.0", "v26.0.0"):
+            self.assertEqual(self.preflight_with({**base, "node": node})["node"], node)
 
     def test_preflight_rejects_older_or_unparsable_tools_plainly(self):
         base = {"node": "v22.23.2", "npm": "10.9.8", "rustc": "rustc 1.98.1 (fixture)", "cargo": "cargo 1.98.1 (fixture)",
                 "xcode-select": "/Xcode", "xcrun": "/SDK"}
-        cases = [("node", "v22.23.1", "Ariadne needs Node 22.23.2 or newer; found v22.23.1"),
-                 ("node", "v20.0.0", "Ariadne needs Node 22.23.2 or newer"),
+        node_msg = "Ariadne needs Node 22.23.2 or newer on the 22 line, 24.15.0 or newer on the 24 line, or 26 and later"
+        cases = [("node", "v22.23.1", node_msg + "; found v22.23.1"),
+                 ("node", "v20.0.0", node_msg),
+                 ("node", "v23.5.0", node_msg),
+                 ("node", "v24.14.0", node_msg),
+                 ("node", "v25.1.0", node_msg),
                  ("npm", "wrong", "Ariadne needs npm 10.9.8 or newer; found wrong"),
                  ("npm", "10.9.7", "Ariadne needs npm 10.9.8 or newer"),
                  ("rustc", "rustc 1.97.0 (fixture)", "Ariadne needs Rust 1.98.1 or newer"),

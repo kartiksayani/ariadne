@@ -338,6 +338,18 @@ def at_least(label, text, pattern, minimum):
             f"Ariadne needs {label.split(' ')[0]} {minimum} or newer; found {text or 'nothing'}.")
 
 
+def node_supported(text):
+    """Accept the Node lines locked dependencies support: ^22.23.2 || ^24.15.0 || >=26."""
+    found = re.match(r"v(\d+)\.(\d+)\.(\d+)", text)
+    version = tuple(int(part) for part in found.groups()) if found else None
+    ok = version is not None and (
+        (version[0] == 22 and version >= (22, 23, 2))
+        or (version[0] == 24 and version >= (24, 15, 0))
+        or version[0] >= 26)
+    require(ok, "Ariadne needs Node 22.23.2 or newer on the 22 line, 24.15.0 or newer on the 24 line, "
+                f"or 26 and later; found {text or 'nothing'}.")
+
+
 def rust_toolchain(env):
     """Pick an installed toolchain without ever downloading one.
 
@@ -372,7 +384,7 @@ def preflight():
     env = {**os.environ, "RUSTUP_AUTO_INSTALL": "0"}
     env.pop("RUSTUP_TOOLCHAIN", None)
     observed = {name: run([name, "--version"], capture=True, env=env).strip() for name in ("node", "npm")}
-    at_least("Node", observed["node"], r"v(\d+)\.(\d+)\.(\d+)", MIN_NODE)
+    node_supported(observed["node"])
     at_least("npm", observed["npm"], r"(\d+)\.(\d+)\.(\d+)", MIN_NPM)
     toolchain, observed["rustc"], observed["cargo"] = rust_toolchain(env)
     at_least("Rust", observed["rustc"], r"rustc (\d+)\.(\d+)\.(\d+)", MIN_RUST)

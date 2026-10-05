@@ -16,9 +16,9 @@ would download when missing; that conflicts with the no-download contract.
 
 ## Decision
 
-- The installer preflight accepts Node >= 22.23.2, npm >= 10.9.8 and Rust >= 1.98.1
-  (any newer version) and rejects only older or unparsable versions with a plain
-  message. The receipt still records the versions actually used.
+- The installer preflight accepts Node 22.x >= 22.23.2, 24.x >= 24.15.0 or >= 26 (the lines the locked
+  dependencies support; `engines.node` is `^22.23.2 || ^24.15.0 || >=26`), npm >= 10.9.8
+  and Rust >= 1.98.1, and rejects other or unparsable versions with a plain message. The receipt still records the versions actually used.
 - Rust: use the pinned 1.98.1 toolchain when already installed; otherwise use the
   owner's default toolchain, resolved outside the checkout so `rust-toolchain.toml`
   does not apply. The build sets `RUSTUP_TOOLCHAIN` to the chosen toolchain and
