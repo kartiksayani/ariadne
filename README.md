@@ -151,13 +151,14 @@ the generated files.
 
 Ariadne never resends something on its own. If a message cannot be confirmed, it
 stops and asks you. Look for **Delivery needs attention** and click **Review
-recovery**.
+recovery**. Pick from **Recovery choice**, type a reason, then click **Save
+recovery decision**.
 
 | State you see | What it means | What you can choose |
 |---|---|---|
-| Delivery uncertain | Ariadne sent your message but never got a confirmation. It may or may not have arrived. | Look at the terminal. If the message ran, click **Confirm evidence**. If not, click **Prepare resend** (may repeat work, so you must tick a warning) or **Skip and continue**. |
-| Delivery rejected | The agent refused the message, so it never ran. | Click **Prepare retry**. This button appears only in this state. |
-| Missing result | The agent finished its turn but did not record the required result. | Click **Request missing result** (asks the agent for the result only). Or click **Prepare resend** or **Confirm evidence**. |
+| Delivery uncertain | Ariadne sent your message but never got a confirmation. It may or may not have arrived. | Look at the terminal. If the message ran, choose **Confirm evidence**. If not, choose **Prepare resend** (may repeat work, so you must tick a warning) or **Skip and continue**. |
+| Needs attention (sent but rejected) | The agent refused the message, so it never ran. | **Prepare retry** (offered only here), **Prepare resend**, **Skip and continue** or **Confirm evidence**. |
+| Missing result | The agent finished its turn but did not record the required result. | **Request missing result** (asks only for the result), **Prepare resend**, **Skip and continue** or **Confirm evidence**. |
 
 Every choice needs a short reason and is saved in the history. Before choosing,
 make sure the terminal is idle. If the agent does not record a result soon after
