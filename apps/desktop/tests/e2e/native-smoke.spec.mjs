@@ -18,29 +18,34 @@ const invoke = (command, request) => browser.execute(async (command, request) =>
 }, command, request);
 
 async function openSession(sessionId, itemId) {
-  const catalogue = await browser.$('button[title="All sessions"]');
-  await catalogue.waitForDisplayed(); await catalogue.waitForEnabled();
-  await catalogue.click();
-  await wait(async () => {
-    const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
-    return selected.kind === 'all_sessions' && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
-  }, 'All sessions navigation did not finish its saved preference update');
-  const session = await browser.$(`[data-session-id="${sessionId}"]`);
-  try { await session.waitForDisplayed(); }
-  catch (error) {
-    await json(join(evidence, 'session-open-failure.json'), { sessionId, body: await browser.$('body').getText() });
-    await browser.saveScreenshot(join(evidence, 'session-open-failure.png')); throw error;
+  const before = await readJson(join(process.env.ARIADNE_HOME, 'ui.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+  try {
+    const catalogue = await browser.$('button[title="All sessions"]');
+    await catalogue.waitForDisplayed(); await catalogue.waitForEnabled();
+    await catalogue.click();
+    await wait(async () => {
+      const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
+      return selected.kind === 'all_sessions' && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
+    }, 'All sessions navigation did not finish its saved preference update');
+    const session = await browser.$(`[data-session-id="${sessionId}"]`);
+    await session.waitForDisplayed();
+    await session.waitForEnabled();
+    // Session cards can extend beyond the nested catalogue viewport.
+    await session.scrollIntoView({ block: 'center', inline: 'center' }); await session.waitForClickable(); await session.click();
+    await wait(async () => {
+      const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
+      return selected.kind === 'session' && selected.session.session_id === sessionId && await catalogue.isEnabled();
+    }, 'Selected session navigation did not finish its saved preference update');
+    const item = await browser.$(`.ref-tree-row[data-item-id="${itemId}"]`);
+    await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
+    await wait(async () => await browser.$('.history-header strong').getText() === `Item ${itemId}`, 'Selected item detail did not load');
+  } catch (error) {
+    await json(join(evidence, `navigation-failure-${sessionId}.json`), { before,
+      after: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
+      frame: await browser.execute(() => ({ origin: window.performance.timeOrigin, ready: document.readyState,
+        body: document.body.textContent, tabs: Array.from(document.querySelectorAll('.ref-tabs button')).map(element => element.outerHTML) })) });
+    await browser.saveScreenshot(join(evidence, `navigation-failure-${sessionId}.png`)); throw error;
   }
-  await session.waitForEnabled();
-  // Session cards can extend beyond the nested catalogue viewport.
-  await session.scrollIntoView({ block: 'center', inline: 'center' }); await session.waitForClickable(); await session.click();
-  await wait(async () => {
-    const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
-    return selected.kind === 'session' && selected.session.session_id === sessionId && await catalogue.isEnabled();
-  }, 'Selected session navigation did not finish its saved preference update');
-  const item = await browser.$(`.ref-tree-row[data-item-id="${itemId}"]`);
-  await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
-  await wait(async () => await browser.$('.history-header strong').getText() === `Item ${itemId}`, 'Selected item detail did not load');
 }
 async function showHistory(texts) {
   const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline');
@@ -69,6 +74,14 @@ async function unchangedDemo(configuration) {
 
 async function delivery(configuration) {
   const setup = await seedJourney(configuration);
+  const questionRevision = (await snapshot(configuration)).items[configuration.itemId].question_revision;
+  // Observe the real seed-triggered native preference write before replacing
+  // the renderer document. No owner mutation is retried or preference fabricated.
+  await wait(async () => {
+    const preferences = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot;
+    return (preferences.global.notification_ledger ?? []).some(episode => episode.session.session_id === configuration.sessionId
+      && episode.session.project_id === configuration.projectId && episode.item_id === configuration.itemId && episode.question_revision === questionRevision);
+  }, 'Seeded question did not reach the genuine native notification ledger');
   const initialDocument = await browser.execute(() => window.performance.timeOrigin);
   await browser.refresh();
   // The native driver acknowledges refresh before the replacement document loads.
