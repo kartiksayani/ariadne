@@ -675,6 +675,15 @@ fn malformed_apply_stdin_reports_the_parser_message_and_help_documents_it() {
         .as_str()
         .unwrap()
         .contains("item.nope"));
+    // A control character echoed from the input must not turn the parse error
+    // into a different error class.
+    command = request(501);
+    command["operations"] = json!([{"op": "\u{0}"}]);
+    let value = envelope(&setup.apply(&command), 2);
+    assert_eq!(value["error"]["code"], "invalid_argument");
+    let message = value["error"]["message"].as_str().unwrap();
+    assert!(message.starts_with("Stdin must contain one canonical ApplyRequest"));
+    assert!(!message.chars().any(char::is_control), "{message}");
     assert_eq!(setup.bytes(), before);
     let help = invoke(Command::new(env!("CARGO_BIN_EXE_ariadne")), None);
     assert!(String::from_utf8(help.stdout)

@@ -12,14 +12,15 @@ Publish with `ariadne apply --binding B --generation G --json-stdin --json`,
 passing one complete ApplyRequest on stdin (use a quoted heredoc). The same
 operations exist as MCP tools `session_read`, `item_messages`, `item_rounds` and
 `apply` only if the owner configured them; the CLI is the baseline. A malformed
-request fails with exit 2 and names the offending field.
+CLI request fails with exit 2 and names the offending field (MCP returns only a
+generic message).
 
-Publish substantive findings through `apply`. Preserve its `op_id` (a fresh
-lowercase UUIDv4 per new request) and exact bytes after timeout or uncertainty;
-only a saved receipt proves commit. `expected_item_revisions` must give the current
-revision of every existing item the request touches (reply, status, ask, edit, or
-a new child's parent); `expected_topic_revisions` does the same for topics. Only
-item and topic revisions are guarded. Never blindly repeat the underlying work.
+Publish substantive findings through `apply`. Each new request gets a fresh
+lowercase UUIDv4 `op_id`; for uncertainty see the error table. Only a saved
+receipt proves commit. `expected_item_revisions` must give the current
+revision of every existing item the request touches (reply, status, ask, edit,
+replace, close a round, or a new child's parent); `expected_topic_revisions` does
+the same for topics. Only item and topic revisions are guarded.
 
 Words and their wire names: Activity = the request `summary`; Reply = op `reply`
 (full text of an item reply, with the useful reasoning and outcome; an Activity is
@@ -41,8 +42,7 @@ use `null` when unused.
 
 For each dispatched Ariadne input (first line `[ARIADNE_INPUT:<input>:<attempt>]`,
 then a JSON envelope), copy the envelope `source_input_id` and `attempt_id` into
-the request, use its `binding_id` and `generation` for routing, and commit exactly
-one `input_result` with outcome `answered`, `deferred` or `unable`, an
+the request, and commit exactly one `input_result` with outcome `answered`, `deferred` or `unable`, an
 explanation, `reply_refs` (your replies), `followup_item_refs` and
 `handled_through_message_number` = the envelope `owner_message_number`. Without a
 dispatched input, set `source_input_id`, `attempt_id` and `input_result` to null.
@@ -70,10 +70,10 @@ Ask the owner a question on item 1 (new round):
 {"op_id":"00000000-0000-4000-8000-000000000103","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":4},"expected_topic_revisions":{},"summary":"Asked which option","operations":[{"op":"item.ask","item":{"id":"1"},"ask":"Which option?","options":[{"id":"x","label":"X","consequence":"Faster","recommended":true}],"recipient_binding_id":"00000000-0000-4000-8000-000000000003"},{"op":"reply","ref":"r1","item":{"id":"1"},"text":"Blocked on the owner's choice.","round_id":null}],"input_result":{"outcome":"answered","explanation":"Asked the owner.","reply_refs":[{"ref":"r1"}],"followup_item_refs":[],"handled_through_message_number":7}}
 ```
 
-Cannot do the work (existing message by UUID as reply reference):
+Cannot do the work (no replies to cite, so `reply_refs` is empty):
 
 ```json
-{"op_id":"00000000-0000-4000-8000-000000000104","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":{"outcome":"unable","explanation":"Cannot run the tests here.","reply_refs":[{"id":"00000000-0000-4000-8000-000000000030"}],"followup_item_refs":[],"handled_through_message_number":7}}
+{"op_id":"00000000-0000-4000-8000-000000000104","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":{"outcome":"unable","explanation":"Cannot run the tests here.","reply_refs":[],"followup_item_refs":[],"handled_through_message_number":7}}
 ```
 
 No dispatched input: start an item, then close an earlier round:
@@ -92,12 +92,13 @@ rebuild with current revisions and a new `op_id`. Specific codes:
 | `stale_generation` | 3 | The generation is no longer current. Stop writing for this input; ask the owner for the current setup instruction. Never guess one. |
 | `attempt_sealed` | 3 | This input/attempt is closed. Do not retry or invent another attempt; tell the owner. |
 | `result_already_committed` | 3 | The result is already saved. Send nothing more for this attempt; only an exact replay is valid. |
-| `commit_uncertain`, `store_busy`, `io_error` | 4 | The save may have happened. Replay the SAME bytes with the SAME `op_id` until you receive a receipt; never a new `op_id`. |
+| `commit_uncertain`, `store_busy`, `io_error` | 4 | The save may have happened. Replay the SAME bytes with the SAME `op_id`, at most 3 times, never a new `op_id`. If there is still no receipt, stop and tell the owner; uncertain delivery stays visible and nothing is resent automatically. |
+| any other exit 4 (e.g. `capacity_exceeded`, `host_unreachable`) | 4 | Stop and tell the owner; do not retry in a loop. |
 | `unsupported`, `future_schema` | 5 | Stop and tell the owner. |
 
-Never resend the owner's message, re-run completed work, scrape a transcript or
-infer non-delivery from missing output, presence, a timeout or a failed
-persistence receipt.
+Never resend the owner's message, re-run completed work (including after a
+retry), scrape a transcript or infer non-delivery from missing output, presence,
+a timeout or a failed persistence receipt.
 
 When the owner explicitly attaches a fresh host conversation to an existing
 Ariadne session, read its recorded topics, items, current questions/options,

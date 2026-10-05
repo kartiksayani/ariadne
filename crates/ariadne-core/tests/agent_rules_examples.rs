@@ -28,7 +28,7 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
     let mut ops = BTreeSet::new();
     let mut outcomes = BTreeSet::new();
     let mut owners = BTreeSet::new();
-    let (mut local_ref, mut id_ref, mut child) = (false, false, false);
+    let (mut local_ref, mut child) = (false, false);
     for block in &blocks {
         let request: ApplyRequest = serde_json::from_str(block)
             .unwrap_or_else(|error| panic!("example does not deserialize: {error}\n{block}"));
@@ -56,10 +56,13 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
                     .to_owned(),
             );
             for reference in &result.reply_refs {
-                match reference {
-                    UuidRef::Local(_) => local_ref = true,
-                    UuidRef::Existing(_) => id_ref = true,
-                }
+                // A result cites replies the agent wrote in this request; an
+                // existing message id would be someone else's text.
+                assert!(
+                    matches!(reference, UuidRef::Local(_)),
+                    "reply_refs must cite this request's replies"
+                );
+                local_ref = true;
             }
         }
     }
@@ -76,7 +79,7 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
         assert!(outcomes.contains(outcome), "{outcome}");
     }
     assert!(owners.contains("agent") && owners.contains("other"));
-    assert!(child && local_ref && id_ref);
+    assert!(child && local_ref);
 }
 
 #[test]
@@ -109,5 +112,28 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
         serde_json::from_value::<CoreErrorCode>(serde_json::json!(code))
             .unwrap_or_else(|_| panic!("rules name unknown error code {code}"));
         assert!(RULES.contains(&format!("`{code}`")), "{code}");
+    }
+}
+
+#[test]
+fn error_table_exit_codes_match_the_real_cli_exit_mapping() {
+    let mut rows = 0;
+    for line in RULES.lines().filter(|line| line.starts_with("| `")) {
+        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        let exit: i32 = cells[2].parse().unwrap();
+        for code in cells[1].split('`').skip(1).step_by(2) {
+            if let Ok(code) = serde_json::from_value::<CoreErrorCode>(serde_json::json!(code)) {
+                assert_eq!(code.cli_exit(), exit, "{line}");
+                rows += 1;
+            }
+        }
+    }
+    assert!(rows >= 8, "table rows not found");
+    // The catch-all exit 4 row names examples of codes outside the named rows.
+    for code in [
+        CoreErrorCode::CapacityExceeded,
+        CoreErrorCode::HostUnreachable,
+    ] {
+        assert_eq!(code.cli_exit(), 4);
     }
 }

@@ -462,7 +462,11 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(store.getSnapshot().setup?.data).toMatchObject({ kind: 'binding_connect', setup_instruction: 'Read Ariadne structured context, then summarize unresolved questions.' });
     expect(close).toHaveBeenCalledOnce();
   });
-  it('tells the owner to paste the saved setup instruction into the host thread once per binding', async () => {
+  it.each([
+    ['codex', /Paste this setup instruction into the selected Codex thread/],
+    ['claude_code_mod', /Run \/ariadne-connect in the selected Claude conversation/],
+    ['demo.local', /Paste this setup instruction into the selected host conversation/],
+  ])('tells the owner how to give the saved setup instruction to a %s host once per binding', async (adapterId, wording) => {
     const { transport, store } = setup(); read(transport);
     const binding = Object.values((demo as Session).bindings)[0]!;
     render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
@@ -470,10 +474,11 @@ describe('source-backed navigation views and explicit registration', () => {
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
         setup_instruction: 'Saved Ariadne rules.' } } }); read(transport);
-    await act(async () => { await store.bind({ project_id: projectId, adapter_id: adapter.adapter_id, configuration: adapter.configuration,
+    await act(async () => { await store.bind({ project_id: projectId, adapter_id: adapterId, configuration: adapter.configuration,
       external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
     const banner = await screen.findByLabelText('Session setup');
-    expect(within(banner).getByText(/Paste this setup instruction into the selected Codex thread/)).toBeTruthy();
+    expect(within(banner).getByText(wording)).toBeTruthy();
+    expect(within(banner).getByText(/Connecting sent nothing to the model/)).toBeTruthy();
     expect(within(banner).getByText(/once per binding/)).toBeTruthy();
     expect(within(banner).getByText('Saved Ariadne rules.')).toBeTruthy();
   });

@@ -21,6 +21,7 @@ export interface NavigationState {
   readonly pendingOperationId: string | null;
   readonly reveal: RevealedItem | null;
   readonly setup: Immutable<Extract<MutationReceipt, { session_id: string }>> | null;
+  readonly setupAdapterId: string | null;
 }
 const sameRoute = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
 const fail = (error: unknown): Failure => error instanceof CoreFailure || error instanceof ServiceFailure
@@ -31,7 +32,7 @@ export class NavigationStore {
   readonly opened: OpenSessions;
   readonly routes: RegisteredRoutes;
   private state: NavigationState = Object.freeze({ preferences: null, projects: null, sessions: null,
-    sessionProjectId: null, status: 'loading', error: null, writing: false, pendingOperationId: null, reveal: null, setup: null });
+    sessionProjectId: null, status: 'loading', error: null, writing: false, pendingOperationId: null, reveal: null, setup: null, setupAdapterId: null });
   private readonly listeners = new Set<() => void>();
   private subscriptions: Unsubscribe[] = [];
   private setup: Promise<void> | null = null;
@@ -284,11 +285,11 @@ export class NavigationStore {
   }
   async bind(params: BindingConnectParams): Promise<boolean> {
     if (this.stopped || this.pending) return false;
-    this.publish({ setup: null });
+    this.publish({ setup: null, setupAdapterId: null });
     return this.execute({ session: null, command: { api_version: 1, command: 'binding_connect',
       op_id: this.operationId(), params } }, receipt => {
       if (!('session_id' in receipt) || receipt.data.kind !== 'binding_connect') throw new ServiceFailure('invalid_response');
-      this.publish({ setup: immutable(receipt) });
+      this.publish({ setup: immutable(receipt), setupAdapterId: params.adapter_id });
     });
   }
   private async execute(request: OwnerMutationRequest, confirmed: (receipt: MutationReceipt) => void): Promise<boolean> {

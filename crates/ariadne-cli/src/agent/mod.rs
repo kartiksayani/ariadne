@@ -20,7 +20,9 @@ Read source scope: add both --source-input UUID and --attempt UUID, or neither.
 Stdin is the complete canonical SessionReadRequest, ItemMessagesRequest,
 ItemRoundsRequest or ApplyRequest (not an actor/context envelope), at most 512KiB.
 A malformed stdin request fails with exit 2 and the parser's message (offending
-field, variant or type, plus line/column); fix that and resend the same op_id.
+field, variant or type, plus line/column); fix that and send the corrected
+request with a new op_id (the same op_id is only for replaying the same bytes
+after an uncertain commit).
 Worked ApplyRequest examples are in the Ariadne rules text given to you at setup.
 Use stdin for filters and all outer/nested continuation cursors. --json emits one
 canonical envelope on stdout, including failures. Text failures use stderr.
@@ -377,7 +379,12 @@ fn read_stdin(input: &mut dyn Read) -> Result<Vec<u8>, CoreError> {
 /// Names the first serde failure (field, variant or type, with line/column) so a
 /// model can correct its own request. Only the caller's own bytes are echoed.
 fn bad_stdin(kind: &str, error: &serde_json::Error) -> CoreError {
-    let detail: String = error.to_string().chars().take(400).collect();
+    let detail: String = error
+        .to_string()
+        .chars()
+        .map(|c| if c.is_control() { '?' } else { c })
+        .take(400)
+        .collect();
     invalid(&format!(
         "Stdin must contain one canonical {kind}: {detail}"
     ))
