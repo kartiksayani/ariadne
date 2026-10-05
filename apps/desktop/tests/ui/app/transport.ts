@@ -20,7 +20,7 @@ export function assertOwnerWire(request: OwnerQueryRequest | OwnerMutationReques
   const reject = (): never => { throw Object.assign(new Error('invalid_argument: owner request session route mismatch'), { code: 'invalid_argument' }); };
   if ('command' in request) {
     if (mutationsWithoutSession.includes(request.command.command) === (request.session != null)) reject();
-    if (request.command.command === 'topic_continue' && JSON.stringify(request.session) !== JSON.stringify(request.command.params.target)) reject();
+    if (request.command.command === 'topic_continue' && (request.session?.project_id !== request.command.params.target.project_id || request.session?.session_id !== request.command.params.target.session_id)) reject();
   } else if (queriesWithSession.includes(request.request.command) !== (request.session != null)) reject();
 }
 export class AppTransport implements DesktopTransport {
