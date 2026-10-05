@@ -99,6 +99,8 @@ describe('ordinary desktop composition', () => {
     expect(await screen.findByRole('group', { name: 'Owner actions' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     expect(await screen.findByRole('tree', { name: 'Sentences' })).toBeTruthy();
+    // The icon-only toggle carries its own accessible name, not only a tooltip title.
+    expect(screen.getByRole('button', { name: 'Messages (m)' }).getAttribute('aria-label')).toBe('Messages (m)');
     fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
     await screen.findByRole('log', { name: 'Complete session messages' });
     await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
