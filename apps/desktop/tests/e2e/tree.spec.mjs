@@ -199,7 +199,12 @@ async function choose(group, name, pressed) {
     document.addEventListener('click', observe, true);
   }, button, pressed);
   await button.click();
-  await wait(async () => await button.getAttribute('aria-pressed') === String(pressed) && await button.isEnabled(), 'Native filter write was not confirmed');
+  await wait(async () => {
+    // Selected owners move first after the saved preference renders. Reacquire
+    // the named control instead of observing its former index's DOM element.
+    const current = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`);
+    return await current.getAttribute('aria-pressed') === String(pressed) && await current.isEnabled();
+  }, 'Native filter write was not confirmed');
 }
 async function anchor() {
   return browser.execute(() => {

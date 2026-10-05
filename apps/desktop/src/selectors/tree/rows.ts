@@ -23,6 +23,7 @@ export function sameOwner(left: Immutable<ItemOwner>, right: Immutable<ItemOwner
 }
 export const normalizeSearch = (text: string): string => text.normalize('NFKC').toLowerCase();
 const selectedBySession = new WeakMap<Immutable<Session>, { key: string; value: SentenceRows }>();
+const searchTextBySession = new WeakMap<Immutable<Session>, Map<string, string>>();
 
 // Initial expansion belongs to a new view only. Explicit persisted collapse
 // choices are never recomputed when a live snapshot changes.
@@ -55,11 +56,21 @@ export function sentenceRows(session: Immutable<Session>, view: Immutable<Sessio
     if (filters.statuses.length && !filters.statuses.includes(item.status)) continue;
     if (filters.owners.length && !filters.owners.some(owner => sameOwner(owner, item.owner))) continue;
     if (filters.hide_later && later.has(id)) continue;
-    // The canonical conversation index excludes shared activity, raw provider
-    // observations and unrelated operation backlinks.
-    const text = normalizeSearch([item.question, item.outcome, item.why, session.topics[item.topic_id]!.name,
-      ...(indexes.messagesByItem.get(id) ?? []).map(message => message.body)].filter(Boolean).join('\n'));
-    if (tokens.every(token => text.includes(token))) matching.add(id);
+    if (tokens.length) {
+      let texts = searchTextBySession.get(session);
+      if (!texts) { texts = new Map(); searchTextBySession.set(session, texts); }
+      let text = texts.get(id);
+      if (text === undefined) {
+        // Immutable snapshot identity invalidates text when item, topic or
+        // canonical conversation changes; queries reuse it within that snapshot.
+        // The canonical index excludes activity and operation backlinks.
+        text = normalizeSearch([item.question, item.outcome, item.why, session.topics[item.topic_id]!.name,
+          ...(indexes.messagesByItem.get(id) ?? []).map(message => message.body)].filter(Boolean).join('\n'));
+        texts.set(id, text);
+      }
+      if (!tokens.every(token => text.includes(token))) continue;
+    }
+    matching.add(id);
   }
   const included = new Set(matching), expanded = new Set([...view.expanded_item_ids, ...temporaryAncestors]);
   const addAncestors = (id: string, open: boolean): void => {
