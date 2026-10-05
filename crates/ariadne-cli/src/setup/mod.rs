@@ -1,5 +1,6 @@
 //! Explicit integration setup. Host trust stays in the host UI.
 pub mod owned;
+pub mod package_resources;
 pub mod resources;
 
 use ariadne_core::{CoreError, CoreErrorCode};
