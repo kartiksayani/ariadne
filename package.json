@@ -13,7 +13,8 @@
     "capture:reference": "playwright test --config tests/ui/reference/playwright.config.ts",
     "test:native": "node scripts/run-native-e2e.mjs --suite native",
     "test:e2e": "node scripts/run-native-e2e.mjs",
-    "test:integration": "vitest run --config apps/desktop/vite.config.ts"
+    "test:integration": "vitest run --config apps/desktop/vite.config.ts",
+    "test:install": ".venv-quality/bin/python -m unittest discover -s tests/functional/install -p 'test_*.py'"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
