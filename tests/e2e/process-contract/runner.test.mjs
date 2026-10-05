@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { activateOwned, command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
+import { activateOwned, command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit, isSameBirthZombie } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import WebSocket from 'ws';
@@ -351,6 +351,17 @@ test('Quit proof requires actual owned PID exit, free port and released physical
     assert.deepEqual(proof.leases.paths, files);
   } finally { if (child && alive(child.pid)) child.kill(); await rm(root, { recursive: true }); }
 });
+test('Quit executable display changes require confirmed same-PID same-birth zombie state', () => {
+  const owned = { pid: 51344, birth: 'original birth', exe: '/owned/Ariadne.app/ariadne-desktop' };
+  for (const exe of ['<defunct>', '(ariadne-desktop)', '/changed/executable']) {
+    const current = { ...owned, exe };
+    assert.equal(isSameBirthZombie(owned, current, 'Z'), true);
+    assert.equal(isSameBirthZombie(owned, current, 'Z+'), true);
+    for (const state of [undefined, '', 'S', 'R', 'T']) assert.equal(isSameBirthZombie(owned, current, state), false);
+    assert.equal(isSameBirthZombie(owned, { ...current, birth: 'reused birth' }, 'Z'), false);
+    assert.equal(isSameBirthZombie(owned, { ...current, pid: 51345 }, 'Z'), false);
+  }
+});
 test('Quit wait rejects live identity changes and waits for a same-birth macOS zombie to disappear', async () => {
   const child = spawn(process.execPath, ['-e', 'process.stdout.write("ready"); process.stdin.once("data",()=>process.exit(0))'], { stdio: ['pipe', 'pipe', 'pipe'] });
   try {
@@ -368,7 +379,7 @@ test('Quit wait rejects live identity changes and waits for a same-birth macOS z
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       state = execFileSync('/bin/ps', ['-p', String(child.pid), '-o', 'stat='], { encoding: 'utf8' }).trim();
     } while (!state.startsWith('Z') && Date.now() < end);
-    assert.ok(state.startsWith('Z')); assert.equal(identity(child.pid).exe, '<defunct>');
+    assert.ok(state.startsWith('Z'));
     assert.equal(identity(child.pid).birth, owned.birth); assert.ok(alive(child.pid));
     await waitForQuitExit(owned.exe, owned); assert.equal(alive(child.pid), false);
   } finally { if (alive(child.pid)) child.kill(); }
