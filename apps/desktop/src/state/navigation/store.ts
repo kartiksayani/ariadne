@@ -126,6 +126,10 @@ export class NavigationStore {
         const projectId = selection.kind === 'project' ? selection.project_id : null;
         const [projects, sessions] = await Promise.all([catalogue.projects(this.service), catalogue.sessions(this.service, projectId)]);
         if (this.stopped || epoch !== this.epoch) continue;
+        // A receipt can advance preferences while these catalogue reads wait.
+        // Discard a formerly valid capture without regressing that saved state
+        // or reporting an invalid read; normal reconciliation captures it anew.
+        if (preferences.revision < Math.max(this.state.preferences?.revision ?? 0, this.preferencesFloor)) continue;
         const registered = new Set(projects.projects.items.map(project => project.project_id));
         if (sessions.sessions.items.some(session => !registered.has(session.project_id))) {
           // Independent read captures can straddle registration. Keep the last
