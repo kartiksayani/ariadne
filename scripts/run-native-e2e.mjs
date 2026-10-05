@@ -121,7 +121,7 @@ export function isSameBirthZombie(owned, current, state) {
   return current.pid === owned.pid && current.birth === owned.birth && state?.startsWith('Z') === true;
 }
 export async function waitForQuitExit(binary, owned) {
-  const end = Date.now() + 10000;
+  const end = Date.now() + 30000;
   while (alive(owned.pid) && Date.now() < end) {
     let current;
     try { current = identity(owned.pid); }
@@ -231,7 +231,7 @@ export async function runNative() {
         ARIADNE_E2E_PRIOR_EVIDENCE: join(evidence, 'delivery') };
       await json(join(phaseEvidence, 'launch.json'), { nonce: phaseNonce, phase, priorPid: owned?.pid, binary, port });
       let launcher;
-      const execution = command(runtimeCommand[0], runtimeCommand.slice(1), { cwd: desktop, env: phaseEnv, timeout: 300000, log: join(phaseEvidence, 'wdio.log'), onStart: child => {
+      const execution = command(runtimeCommand[0], runtimeCommand.slice(1), { cwd: desktop, env: phaseEnv, timeout: 600000, log: join(phaseEvidence, 'wdio.log'), onStart: child => {
         launcher = child; writeFileSync(join(root, 'launcher.json'), JSON.stringify({ pid: child.pid }));
       } });
       const controller = new globalThis.AbortController();

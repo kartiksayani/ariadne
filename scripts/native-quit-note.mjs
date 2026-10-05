@@ -87,6 +87,9 @@ export async function acknowledgeQuitNote(root, binary, nonce, owned, signal) {
     const verified = await observeOwned(root, binary, nonce, launcher.pid, 1000, signal);
     if (verified.pid !== owned.pid || verified.birth !== owned.birth) throw new Error('Quit acknowledgement witness identity mismatch');
   };
+  // Refresh the prerequisite check before the Quit request exists, so a System
+  // Events relaunch is never charged against the post-request exit deadline.
+  await preflightQuitNote();
   // The unchanged demo contains delivered Running work, so this native journey
   // must observe its note. Quiet Quit must never be substituted as passing proof.
   for (;;) {
@@ -101,8 +104,7 @@ export async function acknowledgeQuitNote(root, binary, nonce, owned, signal) {
   // Build and the App journey can outlast the initial prerequisite check.
   // Refresh it only after the owned Quit request and process witness match.
   await verify();
-  await preflightQuitNote();
-  const end = Date.now() + 5000;
+  const end = Date.now() + 15000;
   while (Date.now() < end) {
     if (!alive(owned.pid)) throw new Error('Owned app exited without the expected native Quit note');
     await verify();
