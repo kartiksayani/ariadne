@@ -2,7 +2,7 @@ use ariadne_agent_protocol::{EventPayload, NormalizedEvent, TurnFinishedStatus};
 use ariadne_core::{
     apply::ApplyService,
     bindings::BindingService,
-    delivery::{DeliveryError, DeliveryService},
+    delivery::{DeliveryError, DeliveryService, AGENT_QUERY_TOOLS},
     inputs::InputService,
     recovery::{RecoveryError, RecoveryObservation, RecoveryService},
     *,
@@ -564,6 +564,46 @@ fn uncertain_is_not_proven_retry_and_unrelated_barriers_are_retained() {
         .is_err());
 }
 
+fn envelope(prepared: &PreparedAttempt) -> serde_json::Value {
+    serde_json::from_str(prepared.formatted_payload.split_once('\n').unwrap().1).unwrap()
+}
+
+#[test]
+fn work_envelope_carries_attempt_id_and_names_only_real_query_tools() {
+    let s = Setup::new();
+    let input = s.queue_text(170, "work");
+    let p = s.claim(171);
+    let body = envelope(&p);
+    assert_eq!(body["attempt_id"], p.attempt_id.as_str());
+    assert_eq!(body["source_input_id"], input.as_str());
+    assert!(p
+        .wire_marker
+        .ends_with(&format!(":{}]", body["attempt_id"].as_str().unwrap())));
+    let tools: Vec<&str> = body["tools"]["queries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|name| name.as_str().unwrap())
+        .collect();
+    assert_eq!(tools, AGENT_QUERY_TOOLS);
+    let manifest: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../contracts/generated/core/mcp-tools.json"
+    ))
+    .unwrap();
+    let real: Vec<&str> = manifest["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    for name in tools
+        .iter()
+        .chain([&body["tools"]["mutation"].as_str().unwrap()])
+    {
+        assert!(real.contains(name), "envelope names unknown tool {name}");
+    }
+}
+
 #[test]
 fn repair_claim_is_result_only_and_repeated_repair_keeps_original_effect_references() {
     let s = Setup::new();
@@ -588,6 +628,11 @@ fn repair_claim_is_result_only_and_repeated_repair_keeps_original_effect_referen
     assert_eq!(a.repair_for_attempt_id, Some(p.attempt_id.clone()));
     assert!(!repair.formatted_payload.contains(text));
     assert!(repair.formatted_payload.contains("result-only"));
+    assert_eq!(
+        envelope(&repair)["attempt_id"],
+        repair.attempt_id.as_str(),
+        "repair envelope carries its own attempt id"
+    );
     let original_reply = one
         .messages
         .iter()

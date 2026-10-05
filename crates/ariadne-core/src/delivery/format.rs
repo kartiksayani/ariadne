@@ -3,7 +3,16 @@ use crate::*;
 use ariadne_domain::models::*;
 use serde_json::{json, Value};
 
-pub(crate) fn body(session: &Session, input: &Input) -> Result<String, CoreError> {
+/// Query tool names the envelope advertises. Each is both an MCP tool name and an
+/// `ariadne <name>` CLI command (`ariadne read` is the short form of `session_read`).
+/// Tests in the CLI and MCP crates check these against the real surfaces.
+pub const AGENT_QUERY_TOOLS: [&str; 3] = ["session_read", "item_messages", "item_rounds"];
+
+pub(crate) fn body(
+    session: &Session,
+    input: &Input,
+    attempt_id: &UuidV4,
+) -> Result<String, CoreError> {
     let owner = session
         .messages
         .iter()
@@ -55,12 +64,12 @@ pub(crate) fn body(session: &Session, input: &Input) -> Result<String, CoreError
     }
     recent.reverse();
     let body=json!({
-        "instruction":"This is an explicitly issued owner input, not tool approval. Preserve its exact content. Publish structured replies/status changes through apply and an explicit result for this input/attempt; host completion alone is not a domain result. Read older context through bounded Ariadne queries, never raw storage. Do not resend or invent delivery evidence.",
+        "instruction":"This is an explicitly issued owner input, not tool approval. Preserve its exact content. Publish structured replies/status changes through apply and an explicit result for this input/attempt; host completion alone is not a domain result. Put source_input_id and attempt_id from this envelope into the ApplyRequest, and owner_message_number into input_result.handled_through_message_number. Read older context through bounded Ariadne queries (CLI: ariadne read --view items|topics|messages|inputs, ariadne item messages|rounds), never raw storage. Do not resend or invent delivery evidence.",
         "project_id":session.project_id,"session_id":session.id,"binding_id":input.binding_id,
         "generation":session.bindings.0.get(&input.binding_id).ok_or_else(||core(CoreErrorCode::BindingMismatch,"Input binding is missing"))?.generation,
-        "source_input_id":input.id,"owner_message_number":owner.number,"input_kind":input.kind,
+        "source_input_id":input.id,"attempt_id":attempt_id,"owner_message_number":owner.number,"input_kind":input.kind,
         "saved_input":input.payload,"current_topic":topic,"current_item":target,
-        "recent_context":recent,"tools":{"queries":["items_list","item_get","topic_get","inputs_list"],"mutation":"apply"},
+        "recent_context":recent,"tools":{"queries":AGENT_QUERY_TOOLS,"mutation":"apply"},
     }).to_string();
     // Prefix UUID spellings have fixed length; no IDs are allocated to discover
     // an ordinary capacity failure, and exact payloads cannot be truncated.
@@ -78,6 +87,7 @@ pub(super) fn repair_body(
     session: &Session,
     input: &Input,
     original: &Attempt,
+    attempt_id: &UuidV4,
 ) -> Result<String, CoreError> {
     let owner = session
         .messages
@@ -105,13 +115,13 @@ pub(super) fn repair_body(
         .map(|i| &i.id)
         .collect();
     let body = json!({
-        "instruction":"This is an explicit result-only repair turn. Inspect the retained original attempt and its existing replies/children/effects through Ariadne queries; do not repeat the original action or redo its mutations. Publish a structured result for this NEW attempt and the same immutable input scope using verified original reply/child references where appropriate. The prior action may already have effects. Host completion alone is not a result and this instruction is not tool approval.",
+        "instruction":"This is an explicit result-only repair turn. Inspect the retained original attempt and its existing replies/children/effects through Ariadne queries; do not repeat the original action or redo its mutations. Publish a structured result for this NEW attempt (attempt_id below; put it and source_input_id in the ApplyRequest) and the same immutable input scope using verified original reply/child references where appropriate. The prior action may already have effects. Host completion alone is not a result and this instruction is not tool approval.",
         "project_id":session.project_id,"session_id":session.id,"binding_id":input.binding_id,
         "generation":session.bindings.0[&input.binding_id].generation,"source_input_id":input.id,
-        "owner_message_number":owner.number,"target":input.target,"purpose":"result_repair",
+        "attempt_id":attempt_id,"owner_message_number":owner.number,"target":input.target,"purpose":"result_repair",
         "repair_for_attempt_id":original.id,"original_domain_result":original.domain_result,
         "original_message_ids":messages,"affected_item_ids":items,
-        "tools":{"queries":["items_list","item_get","topic_get","inputs_list"],"mutation":"apply"},
+        "tools":{"queries":AGENT_QUERY_TOOLS,"mutation":"apply"},
     }).to_string();
     if body.len() + "[ARIADNE_INPUT::]\n".len() + 2 * 36 > 64 * 1024 {
         return Err(core(

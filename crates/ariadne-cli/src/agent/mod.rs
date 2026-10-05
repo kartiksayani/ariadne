@@ -19,6 +19,11 @@ pub const HELP: &str = r#"Agent tools (explicit routing; no cwd/session default)
 Read source scope: add both --source-input UUID and --attempt UUID, or neither.
 Stdin is the complete canonical SessionReadRequest, ItemMessagesRequest,
 ItemRoundsRequest or ApplyRequest (not an actor/context envelope), at most 512KiB.
+A malformed stdin request fails with exit 2 and the parser's message (offending
+field, variant or type, plus line/column); fix that and send the corrected
+request with a new op_id (the same op_id is only for replaying the same bytes
+after an uncertain commit).
+Worked ApplyRequest examples are in the Ariadne rules text given to you at setup.
 Use stdin for filters and all outer/nested continuation cursors. --json emits one
 canonical envelope on stdout, including failures. Text failures use stderr.
 ARIADNE_HOME selects the same existing application data directory as bridge;
@@ -241,7 +246,7 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
         "apply" => {
             let bytes = bytes.ok_or_else(|| invalid("Apply requires --json-stdin."))?;
             let request: ApplyRequest = serde_json::from_slice(&bytes)
-                .map_err(|_| invalid("Stdin must contain one canonical ApplyRequest."))?;
+                .map_err(|error| bad_stdin("ApplyRequest", &error))?;
             request.validate_wire()?;
             Ok(Tool::Apply(AgentApplyToolRequest {
                 binding_id,
@@ -255,7 +260,7 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
             }
             let params = if let Some(bytes) = bytes {
                 serde_json::from_slice(&bytes)
-                    .map_err(|_| invalid("Stdin must contain one canonical SessionReadRequest."))?
+                    .map_err(|error| bad_stdin("SessionReadRequest", &error))?
             } else {
                 let selection = match flags.get("--view").copied().unwrap_or("items") {
                     "items" => ReadView::Items {
@@ -302,9 +307,8 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
             }
             if method == "messages" {
                 let params = if let Some(bytes) = bytes {
-                    serde_json::from_slice(&bytes).map_err(|_| {
-                        invalid("Stdin must contain one canonical ItemMessagesRequest.")
-                    })?
+                    serde_json::from_slice(&bytes)
+                        .map_err(|error| bad_stdin("ItemMessagesRequest", &error))?
                 } else {
                     ItemMessagesRequest {
                         item_id: item.ok_or_else(|| invalid("Explicit --item is required."))?,
@@ -321,9 +325,8 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
                 }))
             } else {
                 let params = if let Some(bytes) = bytes {
-                    serde_json::from_slice(&bytes).map_err(|_| {
-                        invalid("Stdin must contain one canonical ItemRoundsRequest.")
-                    })?
+                    serde_json::from_slice(&bytes)
+                        .map_err(|error| bad_stdin("ItemRoundsRequest", &error))?
                 } else {
                     ItemRoundsRequest {
                         item_id: item.ok_or_else(|| invalid("Explicit --item is required."))?,
@@ -371,6 +374,20 @@ fn read_stdin(input: &mut dyn Read) -> Result<Vec<u8>, CoreError> {
         return Err(invalid("Agent request exceeds 512KiB."));
     }
     Ok(bytes)
+}
+
+/// Names the first serde failure (field, variant or type, with line/column) so a
+/// model can correct its own request. Only the caller's own bytes are echoed.
+fn bad_stdin(kind: &str, error: &serde_json::Error) -> CoreError {
+    let detail: String = error
+        .to_string()
+        .chars()
+        .map(|c| if c.is_control() { '?' } else { c })
+        .take(400)
+        .collect();
+    invalid(&format!(
+        "Stdin must contain one canonical {kind}: {detail}"
+    ))
 }
 
 fn invalid(message: &str) -> CoreError {

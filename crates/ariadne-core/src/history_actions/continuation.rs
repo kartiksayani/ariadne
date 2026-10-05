@@ -540,6 +540,7 @@ fn copy(
         .0
         .insert(operation_id.clone(), continuation.clone());
     target.updated_at = at.clone();
-    crate::delivery::format::body(target, &target.inputs.0[&input_id])?;
+    // Capacity check only: a UUID-length stand-in sizes the future attempt id.
+    crate::delivery::format::body(target, &target.inputs.0[&input_id], &input_id)?;
     Ok(SavedReceiptData::Continuation { continuation })
 }
