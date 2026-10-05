@@ -187,6 +187,8 @@ export function nativeBuildEnv(target, e2e = false) {
 export async function runNative() {
   if (process.platform !== 'darwin') throw new Error('Native E2E requires a logged-in macOS GUI session');
   const port = Number(process.env.ARIADNE_E2E_PORT || '4445'); await portFree(port);
+  const quitNote = await import('./native-quit-note.mjs');
+  await quitNote.preflightQuitNote();
   const run = randomUUID(), evidence = join(repo, 'coverage/native-e2e', run);
   await mkdir(evidence, { recursive: true });
   const root = await mkdtemp('/private/tmp/ariadne-e2e-'); await chmod(root, 0o700);
@@ -235,7 +237,10 @@ export async function runNative() {
         const previous = owned;
         owned = await observeOwned(root, binary, phaseNonce, launcher.pid, 60000, controller.signal);
         if (previous && owned.pid === previous.pid) throw new Error('Relaunch reused the first native PID');
-        await json(join(phaseEvidence, 'observed.json'), owned); await execution;
+        await json(join(phaseEvidence, 'observed.json'), owned);
+        const acknowledgement = quitNote.acknowledgeQuitNote(root, binary, phaseNonce, owned, controller.signal)
+          .then(note => json(join(phaseEvidence, 'quit-note.json'), note));
+        await Promise.all([execution, acknowledgement]);
         const quit = JSON.parse(await readFile(join(phaseEvidence, 'quit.json'), 'utf8'));
         if (!quit.pidExited || !quit.leases?.released || quit.request.pid !== owned.pid || quit.request.nonce !== phaseNonce) throw new Error('Missing independently verified native Quit before teardown');
         await portFree(port);
@@ -261,7 +266,7 @@ export async function runNative() {
 }
 async function main() {
   const suite = selector(process.argv.slice(2));
-  if (suite === 'process-contract') return command(process.execPath, ['--test', 'tests/e2e/process-contract/runner.test.mjs']);
+  if (suite === 'process-contract') return command(process.execPath, ['--test', 'tests/e2e/process-contract/runner.test.mjs', 'tests/e2e/process-contract/native-quit-note.test.mjs']);
   await runNative();
   if (suite === 'all') await (await import('./check-release-boundary.mjs')).checkRelease();
 }
