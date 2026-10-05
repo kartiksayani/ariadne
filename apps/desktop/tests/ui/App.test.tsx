@@ -489,6 +489,8 @@ describe('ordinary desktop composition', () => {
     } else {
       await screen.findByRole('button', { name: 'Reconcile operation' });
       const writes = mutations(transport, 'preferences_patch').length;
+      await act(async () => {});
+      await screen.findByRole('button', { name: 'Reconcile operation' });
       expect(screen.queryByLabelText('Owner input for #1.1')).toBeNull();
       expect(selections()).toHaveLength(0);
       expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);

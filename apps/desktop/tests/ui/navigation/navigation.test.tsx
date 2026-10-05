@@ -229,6 +229,22 @@ describe('canonical preference mutations', () => {
     expect(store.settledAsConflict(completion)).toBe(true);
     next.resolve(patchReceipt()); await again;
   });
+  it('stops reporting a conflict once a later write is rejected with a different failure', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
+    const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);
+    const edit = structuredClone(prefs.sessions[0]); edit.scroll = { item_id: '1', offset: 12 };
+    const saved = store.saveSessionView(edit, prefs.revision);
+    await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
+    const completion = store.getWritingCompletion()!;
+    read(transport, preferences(prefs.revision + 1));
+    held.resolve({ api_version: 1, ok: false, error: { ...error, code: 'revision_conflict', current_revision: 2 } });
+    expect(await saved).toBe(false);
+    expect(store.settledAsConflict(completion)).toBe(true);
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'invalid_transition' } });
+    expect(await store.saveSessionView(edit, prefs.revision + 1)).toBe(false);
+    expect(store.getSnapshot().error).toMatchObject({ error: { code: 'invalid_transition' } });
+    expect(store.settledAsConflict(completion)).toBe(false);
+  });
   it('cancels older unsubmitted intent on a current busy navigation attempt while ignoring stale callbacks', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
     const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);

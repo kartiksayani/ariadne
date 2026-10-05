@@ -52,7 +52,8 @@ export class NavigationStore {
   // Reconciled reads recover their own errors, not the last rejected edit.
   private mutationFailure: Failure | null = null;
   // Write operations that settled with a definite revision_conflict (already cleared and refreshed).
-  private readonly conflicted = new WeakSet<Promise<boolean>>();
+  // Keyed to the failure so a later, different rejection is not mistaken for it.
+  private readonly conflicted = new WeakMap<Promise<boolean>, Failure>();
   private readonly reconcile = () => { void this.refresh(); };
   private readonly visibility = () => { if (document.visibilityState === 'visible') this.reconcile(); };
 
@@ -70,7 +71,11 @@ export class NavigationStore {
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
   // True only when this exact write operation settled with a definite revision_conflict, which
   // the store has already cleared and refreshed. Uncertain and other rejections are never reported.
-  readonly settledAsConflict = (completion: Promise<boolean>) => this.conflicted.has(completion);
+  readonly settledAsConflict = (completion: Promise<boolean>) => {
+    const failure = this.conflicted.get(completion);
+    // A newer write clears the failure on start; only a different, newer failure disqualifies it.
+    return failure !== undefined && (this.mutationFailure === null || this.mutationFailure === failure);
+  };
   readonly subscribe = (receive: () => void): Unsubscribe => {
     this.listeners.add(receive);
     return () => { this.listeners.delete(receive); };
@@ -354,7 +359,7 @@ export class NavigationStore {
       if (failure instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(failure.error.code)) this.pending = null;
       this.publish({ writing: false, pendingOperationId: this.pending?.request.command.op_id ?? null, error: failure });
       if (failure instanceof CoreFailure && failure.error.code === 'revision_conflict') {
-        this.conflicted.add(operation());
+        this.conflicted.set(operation(), failure);
         await this.refresh();
       }
       return false;
