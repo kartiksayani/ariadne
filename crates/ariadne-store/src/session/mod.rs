@@ -241,7 +241,8 @@ impl Store {
     }
 
     /// Enumerates only generated authoritative session names in this registered
-    /// directory. Each snapshot is reread and validated under its own stable lock.
+    /// directory. Each snapshot is captured under its own stable lock and then
+    /// fully validated before being returned.
     pub fn sessions(&self) -> Result<Vec<Session>, StoreError> {
         let mut result = Vec::new();
         let names = self
@@ -268,11 +269,13 @@ impl Store {
         Ok(result)
     }
 
-    /// Reads share the writer lock and validation boundary; no backup recovery.
+    /// Capture stable bytes under the writer lock, then validate the owned snapshot.
+    /// No backup recovery or second read is performed.
     pub fn read(&self, session_id: &UuidV4) -> Result<Session, StoreError> {
-        self.with_lock(session_id, || {
-            self.live(session_id).map(|(session, _)| session)
-        })
+        let bytes = self.with_lock(session_id, || {
+            self.sessions.read(&format!("{}.json", session_id.as_str()))
+        })?;
+        Self::decode_diagnostic_snapshot(&bytes, session_id, &self.project_id)
     }
 
     /// `normalized_command` is ephemeral canonical command input, with explicit
@@ -503,6 +506,10 @@ pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, 
 #[cfg(test)]
 #[path = "tests/decode.rs"]
 mod decode_tests;
+
+#[cfg(test)]
+#[path = "tests/read_capture.rs"]
+mod read_capture_tests;
 
 fn uncertain_operation(error: StoreError, operation_id: &UuidV4) -> StoreError {
     match error {
