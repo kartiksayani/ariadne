@@ -203,6 +203,28 @@ it.each(['r', 'b'])('failed preference navigation cannot authorize %s focus or B
   expect(document.activeElement).toBe(row); expect(transport.preferences.drafts).toEqual([]);
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
 });
+it.each(['r', 'b'])('keeps a dismissed detail closed when already dispatched %s saves its preferences', async key => {
+  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Reply message');
+  await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('4'));
+  const invoke = transport.invoke.bind(transport); let dispatched = false, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }), beforeRevision = transport.preferences.revision;
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if ('command' in args.request && args.request.command.command === 'preferences_patch'
+      && args.request.command.params.entries.some(entry => entry.kind === 'set_global')) {
+      dispatched = true; await gate;
+    }
+    return invoke(name, args);
+  });
+  const beforeMutations = transport.mutations.length, row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+  row.focus(); fireEvent.keyDown(row, { key }); await waitFor(() => expect(dispatched).toBe(true));
+  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
+  await act(async () => { release(); await gate; await new Promise(resolve => setTimeout(resolve, 150)); });
+  expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(row);
+  expect(transport.preferences.revision).toBeGreaterThan(beforeRevision);
+  expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
+  expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('4');
+  expect(transport.mutations.slice(beforeMutations)).toHaveLength(1); expect(transport.preferences.drafts).toEqual([]);
+});
 it('keeps detail dismissed when shortcut navigation session read completes afterward', async () => {
   const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Reply message');
   const invoke = transport.invoke.bind(transport); let reads = 0, resolving = false, release!: () => void;

@@ -144,6 +144,9 @@ guard, checked on entry and after asynchronous route validation before dispatchi
 the preferences mutation. A dismissed or replaced keyboard action returns false
 without publishing its route. Existing callers retain their behavior; this guard
 does not cancel or rewrite an already dispatched durable mutation.
+After dispatch, its confirmed preference result remains authoritative, but an
+invalidated caller guard suppresses the obsolete shortcut's local reveal so a
+newer dismissal does not reopen detail when the saved receipt arrives.
 
 Guarded history actions reuse the application-lifetime `SessionActionControllers`
 registry and existing `SessionActions.execute(command, reviewedRevision)` /
