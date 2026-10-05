@@ -73,12 +73,12 @@ async function seed(configuration) {
   return { history, publication };
 }
 async function answer(history, ordinal, text) {
-  const another = await browser.$('.owner-input button=Write another input');
+  const another = await browser.$('.owner-input').$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.click(); }
   const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForEnabled();
-  const review = await browser.$('.owner-input button=Review current target');
+  const review = await browser.$('.owner-input').$('button=Review current target');
   if (await review.isExisting()) { await review.waitForEnabled(); await review.click(); }
-  if (ordinal % 2) { const choice = await browser.$(`.owner-input button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.click(); }
+  if (ordinal % 2) { const choice = await browser.$('.owner-input').$(`button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.click(); }
   await editor.setValue(text);
   const send = await browser.$('.owner-input .ref-send-row button'); await send.waitForEnabled(); await send.click();
   await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal,
@@ -108,7 +108,7 @@ async function renderedBodies(selector) {
   })), selector);
 }
 async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
-  const back = await browser.$('[aria-label="Item history view"] button=Back and forth'); await back.waitForEnabled(); await back.click();
+  const back = await browser.$('[aria-label="Item history view"]').$('button=Back and forth'); await back.waitForEnabled(); await back.click();
   await wait(async () => (await browser.$$('.history-round')).length === 5, 'Native detail did not load all five real rounds');
   const rounds = Object.values(saved.rounds).sort((a, b) => a.ordinal - b.ordinal);
   assert.equal(rounds.length, 5); assert.equal(Object.keys(saved.items).length, 3);
@@ -137,7 +137,7 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
     assert.ok((await detail().getText()).includes(saved.items[id].source_round_id));
     await selectParent();
   }
-  const timeline = await browser.$('[aria-label="Item history view"] button*=Timeline'); await timeline.waitForEnabled(); await timeline.click();
+  const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline'); await timeline.waitForEnabled(); await timeline.click();
   await wait(async () => (await renderedBodies('.history-timeline [data-message-id]')).length > 100, 'Native item conversation paging did not produce complete history');
   const visible = await renderedBodies('.history-timeline [data-message-id]');
   assert.equal(new Set(visible.map(value => value.id)).size, visible.length, 'Overlapping created/updated/round pages must not duplicate timeline entries');
@@ -176,7 +176,7 @@ async function rail(history, saved, paged) {
   await wait(async () => browser.execute(id => document.querySelector(`.rail-messages [data-message-id="${id}"]`)?.classList.contains('history-highlight'), childMessage.id), 'Native tree selection did not highlight its canonical rail backlink');
   assert.ok((await card.getAttribute('class')).includes('history-pinned'));
   await selectParent();
-  const timeline = await browser.$('[aria-label="Item history view"] button*=Timeline'); await timeline.waitForEnabled(); await timeline.click();
+  const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline'); await timeline.waitForEnabled(); await timeline.click();
   await wait(async () => browser.execute(id => document.querySelector(`.history-timeline [data-message-id="${id}"]`)?.classList.contains('history-highlight'), parentMessage.id), 'Pinned canonical detail reference was lost after registered child navigation');
   const preferences = async () => {
     const result = await cliRequest(history.cli, ['preferences', 'get', '--json-stdin'], { session: null, request: { command: 'preferences_get', params: {} } });
@@ -197,8 +197,8 @@ async function rail(history, saved, paged) {
   const beforeUp = await railState();
   await card.scrollIntoView({ block: 'start' });
   await wait(async () => (await railState()).top < beforeUp.top - 100, 'Older-message navigation did not actually scroll the nested rail upward');
-  const reply = await browser.$('[aria-label="Owner actions"] button=Reply'); await reply.waitForEnabled(); await reply.click();
-  const another = await browser.$('.owner-input button=Write another input');
+  const reply = await browser.$('[aria-label="Owner actions"]').$('button=Reply'); await reply.waitForEnabled(); await reply.click();
+  const another = await browser.$('.owner-input').$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.click(); }
   const editor = await browser.$('.owner-input textarea'); await editor.waitForEnabled();
   const draft = `Unsent native history draft ${process.env.ARIADNE_E2E_NONCE}\nKeep focus and every word.`;
@@ -272,7 +272,7 @@ export async function runHistoryAcceptance(configuration) {
   let saved = await snapshot(history);
   const proof = await proveRounds(history, saved, ownerTexts, resultTexts, paged);
   for (const [intent, ordinal] of [['followup', 6], ['reopen', 7]]) {
-    const control = await browser.$(`.history-actions button=${intent === 'followup' ? 'Follow up' : 'Request reopen'}`);
+    const control = await browser.$('.history-actions').$(`button=${intent === 'followup' ? 'Follow up' : 'Request reopen'}`);
     await control.scrollIntoView(); await control.waitForEnabled(); await control.click();
     const editor = await browser.$('.owner-input textarea'); await editor.waitForEnabled();
     const text = `Native ${intent} after closed history\nThe owner's deliberate request leaves the status unchanged.`;
