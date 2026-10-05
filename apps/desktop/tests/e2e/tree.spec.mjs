@@ -92,7 +92,10 @@ async function focusedId() { return browser.execute(() => document.activeElement
 async function roving() {
   assert.equal(await browser.execute(() => [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].filter(element => element.tabIndex === 0).length), 1);
 }
-async function catalogue() { const button = await browser.$('button=All sessions'); await button.waitForEnabled(); await button.click(); }
+async function catalogue() {
+  const button = await browser.$('button[title="All sessions"]'); await button.waitForDisplayed(); await button.waitForEnabled(); await button.click();
+  await wait(async () => await button.getAttribute('aria-current') === 'page' && await button.isEnabled(), 'Tree catalogue navigation did not finish its actual preference write');
+}
 async function open(tree) {
   await catalogue(); const button = await browser.$(`[data-session-id="${tree.sessionId}"]`); await button.waitForDisplayed(); await button.click();
   await wait(async () => (await visibleIds()).includes('20.99'), 'The real native 2,000-item tree did not open');
@@ -177,7 +180,9 @@ export async function runTreeAcceptance(configuration) {
   const original = await snapshot(configuration), journal = await admissions(configuration), demoBytes = await readFile(configuration.demo.sessionPath);
   const { tree, publication, initialSession } = await seedTree(configuration);
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-publication.json'), JSON.stringify({ tree, publication, initialSession }, null, 2));
-  await browser.refresh(); await catalogue();
+  // Discover real CLI publication through the App's normal catalogue/event
+  // refresh. A document reload is unnecessary and races the native driver.
+  await catalogue();
   const expectedIds = Array.from({ length: 20 }, (_, index) => [String(index + 1), ...Array.from({ length: 99 }, (_, child) => `${index + 1}.${child + 1}`)]).flat();
   const sessionButton = await browser.$(`[data-session-id="${tree.sessionId}"]`); await sessionButton.waitForDisplayed();
   const usableMs = await measureAction('click', `[data-session-id="${tree.sessionId}"]`, expectedIds, () => sessionButton.click());
