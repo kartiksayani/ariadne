@@ -129,6 +129,14 @@ A tooling blocker gets one cheap attempt (about 15 minutes), then explain the co
 and cheaper route to the owner. Change harness/gates only for a demonstrated
 delivery issue or repeatedly solved manual work; keep changes small and
 proportionate while preserving quality. Do not grow another delivery framework.
+
+PR #83 runs [37243524591](https://github.com/kartiksayani/ariadne/actions/runs/37243524591)
+and [37246640362](https://github.com/kartiksayani/ariadne/actions/runs/37246640362)
+spent 8m31s and 8m36s on reference captures before failing coverage inventory and
+native checks respectively. CI now runs the required checks before reference
+provisioning/captures, saving about 8m30s on such failures while requiring both
+checks and all relevant captures for success.
+
 The maintainer writes
 retrospectives/docs directly and reports delivered capability, completed tasks and
 concrete blockers. Use concise handoffs on interruption; reconcile them with
