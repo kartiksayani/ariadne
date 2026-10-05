@@ -261,6 +261,10 @@ def main(argv=None):
         run("npm", "run", "build")
         run("cargo", "build", "--workspace", "--locked", "--all-features")
         run("cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings")
+        # The pinned driver's two local key mappings are outside the workspace;
+        # exercise their actual dispatcher as well as the native Home/End journey.
+        run("cargo", "test", "-p", "ariadne-desktop", "-p", "tauri-plugin-wdio-webdriver",
+            "--features", "ariadne-desktop/e2e", "--lib", "key_event_tests", "--locked", "--offline")
         run("env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean", "--workspace", "--locked", "--offline")
         ignored = "(^|/)(tools|generated|vendor|tests|__tests__)/|" + "|".join(
             re.escape(name).replace(r"\*", ".*").replace(r"\?", ".") + "$"

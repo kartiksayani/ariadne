@@ -282,7 +282,14 @@ export class NavigationStore {
       pending.confirmed(receipt);
       this.pending = null;
       this.publish({ writing: false, pendingOperationId: null });
-      await this.refresh();
+      // View/Later receipts already publish the exact saved preferences. Their
+      // completion must not wait for unrelated catalogue reads, which can remain
+      // busy under periodic reconciliation. Navigation/global and domain edits
+      // retain their immediate refresh; view edits reconcile on the normal timer.
+      const command = pending.request.command;
+      const viewOnly = command.command === 'preferences_patch' && command.params.entries.every(entry =>
+        entry.kind === 'set_session_view' || entry.kind === 'set_later');
+      if (!viewOnly) await this.refresh();
       if ('project_id' in receipt) await this.navigate({ kind: 'project', project_id: receipt.project_id });
       return true;
     } catch (error: unknown) {
