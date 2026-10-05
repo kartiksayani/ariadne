@@ -1,6 +1,33 @@
 import { useSyncExternalStore } from 'react';
 import type { MutationReceipt, OwnerCommand, OwnerMutationRequest, SessionRef } from '../../generated/core';
 import { CoreFailure, immutable, ServiceFailure, type Immutable, type RendererService, type SessionStore } from '../../data';
+import type { ContinuationReceipt } from '../../generated/domain/models';
+
+const uuid = (value: unknown): value is string => typeof value === 'string'
+  && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+const timestamp = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value));
+function validContinuation(receipt: ContinuationReceipt): boolean {
+  const itemRef = (value: unknown) => typeof value === 'string'
+    && value.split('.').every(part => /^[1-9][0-9]*$/.test(part) && Number.isSafeInteger(Number(part)));
+  const values = new Set([receipt.target_topic_id, receipt.target_input_id, receipt.operation_id]);
+  const sourceIds = new Set([receipt.source_project_id, receipt.source_session_id, receipt.source_topic_id,
+    ...Object.keys(receipt.message_id_map ?? {}), ...Object.keys(receipt.round_id_map ?? {}), ...Object.keys(receipt.answer_id_map ?? {})]);
+  if (values.size !== 3 || ![...values].every(uuid) || !timestamp(receipt.confirmed_at)) return false;
+  if (sourceIds.has(receipt.target_topic_id) || sourceIds.has(receipt.target_input_id)) return false;
+  for (const [index, map] of [receipt.item_id_map, receipt.message_id_map, receipt.round_id_map, receipt.answer_id_map].entries()) {
+    if (!map || typeof map !== 'object' || Array.isArray(map)) return false;
+    const entries = Object.entries(map);
+    if (entries.some(([key, value]) => !(index === 0 ? itemRef(key) && itemRef(value) : uuid(key) && uuid(value)))
+        || new Set(entries.map(([, value]) => value)).size !== entries.length) return false;
+    if (index > 0) {
+      for (const [, value] of entries) {
+        if (!uuid(value) || sourceIds.has(value) || values.has(value)) return false;
+        values.add(value);
+      }
+    }
+  }
+  return true;
+}
 
 interface ActionState {
   readonly writing: boolean;
@@ -16,6 +43,13 @@ function definitiveRejection(failure: CoreFailure | ServiceFailure, command: Own
   // Generic routing/store/host failures can precede replay of an earlier save;
   // their error codes cannot establish that the original operation was unsaved.
   const lifecycle = command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect';
+  const history = command.command === 'topic_archive' || command.command === 'topic_restore'
+    || command.command === 'session_close' || command.command === 'session_reopen';
+  // History lifecycle guards and Continue's freshness/copy guards execute
+  // inside target Store.transact, after locked exact-operation replay. Generic
+  // routing/source IO errors (including binding_mismatch) remain uncertain.
+  if (history && ['revision_conflict', 'invalid_transition', 'topic_not_archivable', 'session_not_closable'].includes(failure.error.code)) return true;
+  if (command.command === 'topic_continue' && ['preview_stale', 'queue_full', 'invalid_transition', 'incompatible_adapter'].includes(failure.error.code)) return true;
   return (lifecycle || command.command === 'input_resolve')
       && ['revision_conflict', 'binding_mismatch', 'invalid_transition'].includes(failure.error.code)
     || command.command === 'input_resolve' && failure.error.code === 'delivery_uncertain'
@@ -65,7 +99,23 @@ export class SessionActions {
         throw new ServiceFailure('invalid_response');
       }
       const command = request.command, data = receipt.data;
-      const matches = command.command === 'binding_connect' ? data.kind === 'binding_connect'
+      const matches = command.command === 'topic_archive' || command.command === 'topic_restore'
+        ? data.kind === 'topic_lifecycle' && data.topic_id === command.params.topic_id
+          && data.topic_revision === command.params.expected_revision + 1
+          && (command.command === 'topic_archive' ? timestamp(data.archived_at) : data.archived_at === null)
+        : command.command === 'session_close' || command.command === 'session_reopen'
+          ? data.kind === 'session_lifecycle' && receipt.revision === command.params.expected_revision + 1
+            && data.state === (command.command === 'session_close' ? 'closed' : 'active')
+            && (command.command === 'session_close' ? timestamp(data.closed_at) : data.closed_at === null)
+        : command.command === 'topic_continue'
+          ? data.kind === 'continuation' && validContinuation(data.continuation) && data.continuation.operation_id === command.op_id
+            && data.continuation.source_project_id === command.params.source.project_id
+            && data.continuation.source_session_id === command.params.source.session_id
+            && data.continuation.source_topic_id === command.params.source_topic_id
+            && data.continuation.source_revision === command.params.source_revision
+            && data.continuation.source_sha256 === command.params.source_sha256
+            && data.continuation.summary === command.params.summary
+        : command.command === 'binding_connect' ? data.kind === 'binding_connect'
         : command.command === 'input_resolve' ? data.kind === 'input_resolve' && data.input_id === command.params.input_id
           && data.attempt_id === command.params.attempt_id && data.resolution_kind === command.params.decision
         : (command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect')

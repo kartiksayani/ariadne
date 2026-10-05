@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import demo from '../../../../../fixtures/domain/demo/session.json';
@@ -272,6 +272,27 @@ describe('owner input component and durable draft controller', () => {
     if (guard === 'option') value.drafts.edit(id, { selected_option_id: 'missing-current-option' });
     expect(await value.drafts.submit(id)).toBe(false); expect(value.calls).toHaveLength(0);
     expect(value.drafts.getSnapshot().entries[id]?.draft.text).toBe('Retained guard input');
+  });
+  it.each(['saving', 'uncertain', 'preferences', 'stale'] as const)('consumes a disabled numeric request during %s without altering frozen choice/body or replaying it later', async guard => {
+    const value = await setup(), id = value.drafts.begin(value.store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    value.drafts.edit(id, { text: 'Exact retained bytes  ', selected_option_id: 'yes' });
+    await waitFor(() => expect(value.prefs.drafts[0]?.selected_option_id).toBe('yes'));
+    let finish: (() => void) | undefined, submission: Promise<boolean> | undefined;
+    if (guard === 'saving') { finish = value.gate(); act(() => { submission = value.drafts.submit(id); }); await waitFor(() => expect(value.drafts.getSnapshot().entries[id]?.saving).toBe(true)); }
+    if (guard === 'uncertain') { value.outcome('uncertain'); await act(async () => { await value.drafts.submit(id); }); }
+    if (guard === 'preferences') { value.preferenceOutcome('uncertain'); act(() => { value.drafts.edit(id, { text: 'Exact retained bytes  ' }); }); await waitFor(() => expect(value.drafts.getSnapshot().preferenceUncertain).toBe(true)); }
+    if (guard === 'stale') { value.unavailable(); await act(async () => { await value.store.refresh(); }); }
+    const before = structuredClone(value.drafts.getSnapshot().entries[id]!.draft), consumed = vi.fn();
+    const view = value.render('2', { focusRequest: { intent: 'answer', token: 1, optionIndex: 1 }, onFocusRequestConsumed: consumed });
+    await waitFor(() => expect(consumed).toHaveBeenCalledWith(1));
+    expect(screen.getByRole('button', { name: /2Change the design/ }).hasAttribute('disabled')).toBe(true);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Answer' }), { key: '2' });
+    expect(value.drafts.getSnapshot().entries[id]!.draft).toEqual(before);
+    if (guard === 'saving') { await act(async () => { finish!(); await submission; }); expect(value.calls[0]?.command).toMatchObject({ params: { selected_option_id: 'yes', text: before.text } }); }
+    if (guard === 'preferences') { value.preferenceOutcome('ok'); await act(async () => { await value.drafts.retryPreferences(); }); expect(value.drafts.getSnapshot().entries[id]!.draft).toEqual(before); }
+    view.rerender(<OwnerInput drafts={value.drafts} session={value.store} itemId="2" focusRequest={{ intent: 'answer', token: 1, optionIndex: 1 }} onFocusRequestConsumed={consumed} />);
+    expect(consumed).toHaveBeenCalledTimes(1);
+    if (guard !== 'saving') expect(value.drafts.getSnapshot().entries[id]!.draft).toEqual(before);
   });
   it('connects the actual Waiting control to the same durable draft store and registered reveal callback', async () => {
     const value = await setup(), queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue);
