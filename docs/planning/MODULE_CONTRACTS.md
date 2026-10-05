@@ -17,6 +17,15 @@ proof. See [ROADMAP](ROADMAP.md) and [tasks.json](../delivery/tasks.json).
 | Adapter / B, P0.5 | [PROCESS section 2](low-level/PROCESS_AND_PROTOCOLS.md#2-shared-adapter-contract); six async methods, owned DTOs, pull/push capability, normalized events | Runtime plus Claude/Codex implementations; P3 and P7.1 join actual core/runtime/providers |
 | Renderer / C, P4.1 | [UI service and route seam](low-level/UI_AND_NATIVE.md#module-service-and-route-contract); generated DTOs, revision hints, registered reveal route | Screens, graph, native routes/counts; each retains real Tauri/core/store acceptance |
 
+Desktop composition joins P3.2/P4.1 through the actual NativeCoreService,
+ProviderFactory, shared DesktopOwner/control routes and registered-parent watcher.
+Its native-only qualified connect callback preserves the command admission
+Instant. The opt-in supervisor presence observer publishes only accepted scoped
+facts; the existing SessionList presence projection supplies late-reader seeds.
+Ordinary App/WebView receipt-and-disk acceptance remains required; these additive
+internal seams do not change public CoreService/DTOs or complete live-host and
+packaged-default milestones. See [ADR0059](../adr/ADR-0059-desktop-core-and-runtime-composition.md).
+
 P0.3b publishes exact stored entities, receipts and query projection shapes. P0.5
 publishes exact adapter method DTOs and normalized event payloads. P0.6 publishes
 the callable core trait, typed command/query unions and shared semantic fixtures.
@@ -41,6 +50,88 @@ final Store lock, with exact replay preceding the guard. Store's additive
 write; existing `create_with_receipt` remains a compatible no-op wrapper. Existing
 session mutation checks in `transact`'s apply callback. Deadline rejection never
 cancels persistence already begun or changes commit uncertainty/replay semantics.
+
+Desktop composition owns the native startup, executor and shutdown wiring. Its
+private bridge admits Core calls onto that owned executor and returns their
+authoritative results; it must not mask saved replay or persistence with an outer
+deadline. Provider admission retains the original deadline. Wake fences new
+admissions and drains admitted work before replacing activation; Quit wins over
+wake and retains ownership until admitted work has drained. Both fences also
+synchronously stop the current activation's claim/delivery gates before any
+preference or admitted-work drain. Activation supervisor start/installation is
+serialized with that fence; wake fences the old activation before taking it out
+of shared runtime state. Its later replacement is published only while Quit has
+not begun. The synchronous fence performs no Core/provider IO or waits; actual
+worker shutdown remains off the UI thread. No ordinary worker lock is held
+across Core/provider IO or result waits.
+
+The composition-only `DesktopService::with_native_preferences(read, write)`
+builder preserves existing request and receipt validation. Its parameterless
+read returns only the fixed global preferences snapshot; its write accepts only
+the validated global preferences patch. It serves the two native window/tray
+preference writers on the same owned executor. Quit fences ordinary
+renderer/control/provider admission and the two preference producers, then
+drains their already queued or frozen saves through this preferences-only
+callback before releasing the executor. A writer-owned save may reach its first
+Core call after the fence; a second runtime request tracker must not mistake
+that drain for a new user action. This is not a renderer or CoreService admission
+bypass. Writers own exact retry identity, reject new producer actions after the
+fence, and never substitute a pending request after an unknown failure. Drain
+off the UI thread without holding the worker lock across IO. Only a validated
+receipt or a replay-first preference revision rejection with a differing
+canonical current revision clears an attempted request.
+
+The tray consumes the existing validated desktop query envelope through the
+additive `DesktopService::native_query` method. Composition installs `NativeTray`
+after managing the real service, feeds `refresh` from existing watcher/fallback/
+focus events, and calls `stop` before runtime shutdown. Tray owns its bounded
+coalescing feed and notification policy, not a second global scanner. Lifecycle
+diagnostics replace a bounded display snapshot; they never consume recovery
+facts or grant dispatch authority. Install the single notification delegate on
+the main thread before launch callbacks, retain it there, and fence callbacks
+before draining the feed. Shutdown failure does not reactivate callbacks.
+
+Recovery action controllers live for the application lifetime, independently of
+open views. Reopening a session may attach its new data reader only to the same
+immutable project/session route; pending request bodies and operation IDs remain
+frozen. Generic pre-Core errors cannot prove an earlier uncertain action was
+unsaved. Only verified replay-first transactional rejections permit a corrected
+new deliberate action. Actual restart reloads canonical state without automatic
+resend or a new persisted client journal.
+
+Native recovery consumes qualified presence through the additive
+`NativeCoreService::execute_recovery_with_observation(context, command, observation)`
+entry point, accepting only InputResolve and an optional native-only
+RecoveryObservation. Ordinary CoreService calls retain Unknown by default.
+Desktop composition selects the existing presence-cache fact for the registered
+session's current binding/generation/instance, rechecks freshness at execution,
+and passes it off the UI thread without a cache lock across Core IO. Missing,
+stale or unqualified facts remain Unknown; fresh Running/WaitingForApproval
+blocks recovery, and Idle permits the existing explicit recovery command.
+Observation lookup must not reject an exact saved replay before Core's
+transaction: it supplies an optional fact, while Core owns replay and current
+binding guards. No renderer-supplied presence is trusted and no new wire DTO,
+second presence cache, provider call or automatic resend is introduced.
+
+Instance and binding leases retain physical locks until their final owning
+reference is dropped, including references held by already admitted work. The
+acquiring process explicitly unlocks at that final drop before closing its file:
+a concurrent fork may temporarily retain an inherited descriptor despite
+close-on-exec. An inherited descriptor does not give the child ownership. A child
+dropping an inherited Rust object must only close its copy, never unlock the
+parent's still-live lease; compare the acquiring process ID before explicit
+unlock. A shared binding lease continues to retain the instance owner until its
+own final drop. This preserves drain order and introduces no early release or
+new dispatch authority.
+
+Ordinary App assembly reuses NavigationWorkspace and ReferenceWorkspace with
+optional Waiting and rail content, the existing detail slot, and explicit
+query/view/rail/theme callbacks. Default reference-gallery output remains stable.
+NavigationStore keeps canonical theme changes on its existing serialized
+preferences writer; graph display mode stays local because it is not a canonical
+session preference. Application-lifetime routing and recovery controllers share
+one desktop service. Nonvisual session/item data attributes on the real controls
+support native acceptance without adding a separate test flow.
 
 ### Claude installed-helper acceptance join
 

@@ -23,6 +23,24 @@ pub struct GlobalPreferences {
     pub window: Option<WindowGeometry>,
     pub pinned: bool,
     pub notification_watermark: Option<UtcMillis>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 256))]
+    #[ts(as = "Option<Vec<NotificationEpisode>>", optional)]
+    pub notification_ledger: Vec<NotificationEpisode>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(as = "Option<bool>", optional)]
+    pub notification_preview: bool,
+}
+
+pub const NOTIFICATION_LEDGER_CAPACITY: usize = 256;
+
+/// Waiting episode identity is item + question revision within a registered session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct NotificationEpisode {
+    pub session: SessionRef,
+    pub item_id: ItemRef,
+    pub question_revision: PositiveSafeInteger,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

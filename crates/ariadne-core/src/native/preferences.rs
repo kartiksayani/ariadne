@@ -163,6 +163,8 @@ fn defaults() -> PreferencesSnapshot {
             window: None,
             pinned: false,
             notification_watermark: None,
+            notification_ledger: vec![],
+            notification_preview: false,
         },
         sessions: vec![],
         later: vec![],

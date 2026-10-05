@@ -11,7 +11,7 @@ use ariadne_runtime::{
     discovery::*,
     leases::DesktopOwner,
     providers::*,
-    supervisor::NativeFacts,
+    supervisor::{NativeFacts, PresenceUpdate},
 };
 use std::{
     fs,
@@ -255,8 +255,9 @@ fn claude_activation(terminal: bool) {
     let routes = ControlRoutes::new();
     let outcomes = Arc::new(Mutex::new(Vec::new()));
     let reported = outcomes.clone();
-    let (stopped, observed) = std::sync::mpsc::channel();
-    let activation = NativeActivation::new(
+    let (observation, observed) = std::sync::mpsc::channel();
+    let stopped = observation.clone();
+    let activation = NativeActivation::new_with_presence(
         core.clone(),
         factory,
         owner.clone(),
@@ -264,10 +265,20 @@ fn claude_activation(terminal: bool) {
         rt.handle().clone(),
         Arc::new(move |outcome| {
             if matches!(&outcome, ActivationOutcome::Stopped { .. }) {
-                let _ = stopped.send(());
+                let _ = stopped.send(false);
             }
             reported.lock().unwrap().push(outcome);
         }),
+        Some(Arc::new(move |update| {
+            if matches!(update, PresenceUpdate::Observed { hint, .. }
+                if hint.observation.connection_state == ConnectionState::Unknown
+                && hint.observation.freshness == Freshness::Unknown
+                && hint.observation.last_seen_at.is_none()
+                && hint.observation.source.is_none())
+            {
+                let _ = observation.send(true);
+            }
+        })),
     );
     let server = ControlServer::bind_shared(owner.clone(), core.clone(), vec![])
         .unwrap()
@@ -457,10 +468,9 @@ fn claude_activation(terminal: bool) {
         CoreErrorCode::StaleGeneration
     );
     drop(qualification);
-    assert_eq!(
-        observed.recv_timeout(Duration::from_secs(3)),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout),
-        "clearing evidence during observation must preserve the supervisor"
+    assert!(
+        observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+        "clearing evidence during observation must report Unknown without stopping the supervisor"
     );
     rt.block_on(call(
         home.path().into(),
@@ -480,10 +490,9 @@ fn claude_activation(terminal: bool) {
     // also keeps later polls from starting fresh version subprocesses at Quit.
     discovery.refresh_after_wake().unwrap();
     drop(qualification);
-    assert_eq!(
-        observed.recv_timeout(Duration::from_secs(3)),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout),
-        "the retained worker must also survive its next observation"
+    assert!(
+        observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+        "the retained worker must report Unknown and survive its next observation"
     );
     assert!(rt.block_on(call(home.path().into(), claim)).is_err());
     assert_eq!(
@@ -636,16 +645,25 @@ fn claude_activation(terminal: bool) {
     }
 }
 
+type DaemonBarrier = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+struct ReleaseObservation(std::sync::mpsc::Sender<()>);
+impl Drop for ReleaseObservation {
+    fn drop(&mut self) {
+        // Unblock provider IO even if an assertion unwinds before normal drain.
+        let _ = self.0.send(());
+    }
+}
 struct CodexDaemon {
     _home: tempfile::TempDir,
     options: ariadne_adapter_codex::CodexOptions,
     endpoint: EndpointRef,
     calls: Arc<Mutex<Vec<String>>>,
+    observation_pause: Arc<Mutex<Option<DaemonBarrier>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 impl CodexDaemon {
-    fn new(root: PathBuf, wrong_final_root: bool) -> Self {
+    fn new(root: PathBuf, wrong_final_root: bool, final_read: Option<DaemonBarrier>) -> Self {
         use std::os::unix::net::UnixListener;
         let home = home();
         let executable = home.path().join("codex");
@@ -656,6 +674,8 @@ impl CodexDaemon {
         listener.set_nonblocking(true).unwrap();
         let calls = Arc::new(Mutex::new(Vec::new()));
         let observed = calls.clone();
+        let observation_pause = Arc::new(Mutex::new(None::<DaemonBarrier>));
+        let pause = observation_pause.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopped = stop.clone();
         let worker = std::thread::spawn(move || {
@@ -687,6 +707,13 @@ impl CodexDaemon {
                 if method == "initialized" {
                     continue;
                 }
+                if method == "thread/read" {
+                    let barrier = pause.lock().unwrap().take();
+                    if let Some((entered, release)) = barrier {
+                        entered.send(()).unwrap();
+                        release.recv_timeout(Duration::from_secs(3)).unwrap();
+                    }
+                }
                 let fixture = match method {
                     "initialize" => "initialize-response.json",
                     "thread/read" => "read-response.json",
@@ -701,6 +728,12 @@ impl CodexDaemon {
                     serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
                 if method == "thread/read" {
                     reads += 1;
+                    if reads == 2 {
+                        if let Some((entered, release)) = &final_read {
+                            entered.send(()).unwrap();
+                            release.recv_timeout(Duration::from_secs(3)).unwrap();
+                        }
+                    }
                     result["thread"]["id"] = request["params"]["threadId"].clone();
                     result["thread"]["cwd"] = serde_json::json!(if wrong_final_root && reads > 1 {
                         PathBuf::from("/tmp")
@@ -728,9 +761,21 @@ impl CodexDaemon {
                 path: socket.to_str().unwrap().into(),
             },
             calls,
+            observation_pause,
             stop,
             worker: Some(worker),
         }
+    }
+    fn pause_observation(&self) -> (std::sync::mpsc::Receiver<()>, ReleaseObservation) {
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        assert!(self
+            .observation_pause
+            .lock()
+            .unwrap()
+            .replace((entered, released))
+            .is_none());
+        (waiting, ReleaseObservation(release))
     }
 }
 impl Drop for CodexDaemon {
@@ -739,7 +784,15 @@ impl Drop for CodexDaemon {
         self.worker.take().unwrap().join().unwrap();
     }
 }
-fn codex_activation(wrong_final_root: bool) {
+#[derive(Clone, Copy, PartialEq)]
+enum CodexCase {
+    Connected,
+    WrongRoot,
+    StopInstalling,
+    StopActive,
+}
+fn codex_activation(case: CodexCase) {
+    let wrong_final_root = case == CodexCase::WrongRoot;
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(3)
         .enable_all()
@@ -748,7 +801,13 @@ fn codex_activation(wrong_final_root: bool) {
     let project = home();
     let home = home();
     let root = project.path().canonicalize().unwrap();
-    let daemon = CodexDaemon::new(root.clone(), wrong_final_root);
+    let (entered, waiting) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let daemon = CodexDaemon::new(
+        root.clone(),
+        wrong_final_root,
+        (case == CodexCase::StopInstalling).then_some((entered, released)),
+    );
     let next = Arc::new(AtomicU64::new(200));
     let allocated = next.clone();
     let core = Arc::new(NativeCoreService::new(
@@ -793,13 +852,19 @@ fn codex_activation(wrong_final_root: bool) {
     let routes = ControlRoutes::new();
     let outcomes = Arc::new(Mutex::new(Vec::new()));
     let reported = outcomes.clone();
+    let (worker_stopped, stopped_worker) = std::sync::mpsc::channel();
     let activation = NativeActivation::new(
         core.clone(),
         factory,
         owner.clone(),
         routes.clone(),
         rt.handle().clone(),
-        Arc::new(move |outcome| reported.lock().unwrap().push(outcome)),
+        Arc::new(move |outcome| {
+            if matches!(&outcome, ActivationOutcome::Stopped { .. }) {
+                worker_stopped.send(()).unwrap();
+            }
+            reported.lock().unwrap().push(outcome);
+        }),
     );
     let server = ControlServer::bind_shared(owner.clone(), core.clone(), vec![])
         .unwrap()
@@ -826,9 +891,13 @@ fn codex_activation(wrong_final_root: bool) {
         },
     };
     let wire = wire_request(id(21), ControlMethod::BindingConnect(Box::new(request)));
-    let ControlResult::BindingConnect(receipt) =
-        rt.block_on(call(home.path().into(), wire.clone())).unwrap()
-    else {
+    let connected = rt.spawn(call(home.path().into(), wire.clone()));
+    if case == CodexCase::StopInstalling {
+        waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+        activation.stop_admission().unwrap();
+        release.send(()).unwrap();
+    }
+    let ControlResult::BindingConnect(receipt) = rt.block_on(connected).unwrap().unwrap() else {
         panic!()
     };
     let MutationReceipt::Session(saved) = &receipt else {
@@ -847,7 +916,7 @@ fn codex_activation(wrong_final_root: bool) {
         generation: generation.clone(),
     };
     let until = Instant::now() + Duration::from_secs(3);
-    if wrong_final_root {
+    if wrong_final_root || case == CodexCase::StopInstalling {
         assert_eq!(
             rt.block_on(call(
                 home.path().into(),
@@ -862,9 +931,17 @@ fn codex_activation(wrong_final_root: bool) {
                 .bindings
                 .0[binding_id]
                 .connection_state,
-            ConnectionState::Disconnected
+            if wrong_final_root {
+                ConnectionState::Disconnected
+            } else {
+                ConnectionState::Unknown
+            }
         );
-        assert!(outcomes.lock().unwrap().iter().any(|outcome| matches!(outcome, ActivationOutcome::ConnectFailed { failure, .. } if failure.cause.code==CoreErrorCode::BindingMismatch && failure.pending.is_none())));
+        if wrong_final_root {
+            assert!(outcomes.lock().unwrap().iter().any(|outcome| matches!(outcome, ActivationOutcome::ConnectFailed { failure, .. } if failure.cause.code==CoreErrorCode::BindingMismatch && failure.pending.is_none())));
+        } else {
+            assert!(outcomes.lock().unwrap().iter().any(|outcome| matches!(outcome, ActivationOutcome::Failed { error, .. } if error.code == CoreErrorCode::HostUnreachable)));
+        }
     } else {
         loop {
             match rt.block_on(call(
@@ -894,9 +971,114 @@ fn codex_activation(wrong_final_root: bool) {
             }),
         );
         assert_eq!(
-            rt.block_on(call(home.path().into(), claim)).unwrap(),
+            rt.block_on(call(home.path().into(), claim.clone()))
+                .unwrap(),
             ControlResult::Claim(None)
         );
+        if case == CodexCase::StopActive {
+            let (observing, release_observation) = daemon.pause_observation();
+            observing.recv_timeout(Duration::from_secs(3)).unwrap();
+            // The serial supervisor observes only after its previous claim has
+            // finished. Pause here so the fence has no pre-admitted Core claim
+            // that could legitimately prepare the subsequently created input.
+            activation.stop_admission().unwrap();
+            assert_eq!(
+                rt.block_on(call(home.path().into(), claim))
+                    .unwrap_err()
+                    .code,
+                CoreErrorCode::NotFound
+            );
+            // A real, enabled input becomes eligible while native preference
+            // draining could still keep the executor alive. Neither the active
+            // supervisor nor its removed route may claim or submit that input.
+            let session = RegisteredSession::from_trusted_entrypoint(
+                project.project_id.clone(),
+                saved.session_id.clone(),
+            );
+            let apply: ApplyRequest = serde_json::from_value(serde_json::json!({
+                "op_id":id(24), "source_input_id":null, "attempt_id":null,
+                "expected_item_revisions":{}, "expected_topic_revisions":{},
+                "summary":"Eligible input after synchronous admission fence",
+                "operations":[
+                    {"op":"topic.add","ref":"topic","name":"Fence regression"},
+                    {"op":"item.add","ref":"item","topic":{"ref":"topic"},
+                     "parent":null,"question":"Reply while preference drain waits",
+                     "type":"task","status":"open","owner":{"kind":"me"},
+                     "ask":null,"options":null,"note":null,"links":null,
+                     "outcome":null,"why":null,"replaced_by":null,"source_round_id":null}
+                ], "input_result":null
+            }))
+            .unwrap();
+            core.apply(
+                AgentContext::from_trusted_entrypoint(
+                    session.clone(),
+                    binding_id.clone(),
+                    generation.clone(),
+                    AgentReadScope::Terminal {
+                        issued_through_message_number: NonnegativeSafeInteger::new(0).unwrap(),
+                    },
+                ),
+                apply,
+            )
+            .unwrap();
+            let topic_id = read(&core, project.project_id.clone(), saved.session_id.clone())
+                .topics
+                .0
+                .keys()
+                .next()
+                .unwrap()
+                .clone();
+            let MutationReceipt::Session(submitted) = core
+                .execute_owner(
+                    OwnerContext::from_trusted_entrypoint(OwnerScope::Session(session)),
+                    OwnerCommand::InputSubmit {
+                        api_version: SchemaVersion::new(1).unwrap(),
+                        op_id: id(25),
+                        params: InputSubmitParams {
+                            binding_id: binding_id.clone(),
+                            target: InputTarget {
+                                topic_id,
+                                item_id: Some(ItemRef::new("1").unwrap()),
+                            },
+                            kind: InputKind::Reply,
+                            text: "A real eligible owner input".into(),
+                            selected_option_id: None,
+                            expected_question_revision: None,
+                            supersedes_answer_id: None,
+                        },
+                    },
+                )
+                .unwrap()
+            else {
+                panic!("input receipt")
+            };
+            let SavedReceiptData::InputSubmit { input_id, .. } = submitted.data else {
+                panic!("input")
+            };
+            let assert_fenced = || {
+                let persisted = read(&core, project.project_id.clone(), saved.session_id.clone());
+                assert!(persisted.inputs.0[&input_id].attempts.is_empty());
+                assert_eq!(persisted.bindings.0[binding_id].generation, *generation);
+                assert!(!daemon
+                    .calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|method| method == "thread/queue/add"));
+            };
+            assert_fenced();
+            assert!(
+                DesktopOwner::acquire(home.path()).is_err(),
+                "fencing cannot release the owner lease"
+            );
+            drop(release_observation);
+            // The synchronous fence itself must stop the worker. Waiting for
+            // its outcome before shutdown avoids letting shutdown hide a fence
+            // that left the active supervisor admitting new claims.
+            stopped_worker.recv_timeout(Duration::from_secs(3)).unwrap();
+            rt.block_on(activation.shutdown()).unwrap();
+            assert_fenced();
+        }
     }
     assert_eq!(
         rt.block_on(call(home.path().into(), wire)).unwrap(),
@@ -924,9 +1106,18 @@ fn codex_activation(wrong_final_root: bool) {
 }
 #[test]
 fn codex_owns_one_preflight_reader_then_rechecks_final_ids_before_route_activation() {
-    codex_activation(false);
+    codex_activation(CodexCase::Connected);
 }
 #[test]
 fn codex_changed_final_root_reports_disconnect_without_route_or_new_preflight() {
-    codex_activation(true);
+    codex_activation(CodexCase::WrongRoot);
+}
+
+#[test]
+fn synchronous_stop_fences_active_claims_and_provider_submission_before_drain() {
+    codex_activation(CodexCase::StopActive);
+}
+#[test]
+fn synchronous_stop_prevents_installing_worker_from_publishing_after_fence() {
+    codex_activation(CodexCase::StopInstalling);
 }

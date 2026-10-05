@@ -7,11 +7,41 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
+import { startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
+import WebSocket from 'ws';
 async function assertExited(pid) {
   const end = Date.now() + 1000;
   while (alive(pid) && Date.now() < end) await delay(10);
   assert.ok(!alive(pid), 'Owned descendant did not exit within one second');
 }
+test('scripted native provider uses an explicit UNIX endpoint, pinned version and exact queue arguments', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-scripted-'));
+  const evidence = join(root, 'evidence'); await mkdir(evidence);
+  let provider, client;
+  try {
+    provider = await startScriptedProvider(root, '/unused-actual-cli', evidence, {});
+    const config = provider.configuration;
+    assert.equal((await command(config.executable, ['--version'])).stdout.trim(), 'codex-cli 0.160.0');
+    await assert.rejects(command(config.executable, ['resume', thread]), /failed \(3\)/);
+    client = new WebSocket('ws://localhost', { createConnection: () => net.connect(config.socket) });
+    await new Promise((resolve, reject) => { client.once('open', resolve); client.once('error', reject); });
+    const rpc = async (id, method, params) => {
+      const result = new Promise(resolve => client.once('message', bytes => resolve(JSON.parse(bytes.toString()))));
+      client.send(JSON.stringify({ id, method, params })); return result;
+    };
+    assert.match((await rpc(1, 'initialize', {})).result.userAgent, /0\.160\.0/);
+    const read = await rpc(2, 'thread/read', { threadId: thread });
+    assert.equal(read.result.thread.id, thread); assert.equal(read.result.thread.cwd, config.project);
+    assert.deepEqual((await rpc(3, 'thread/turns/list', { threadId: thread })).result.data, []);
+    const payload = '[ARIADNE_INPUT:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222]\nExact owner input';
+    await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', payload]);
+    assert.equal(JSON.parse(await readFile(config.queuedPath, 'utf8')).payload, payload);
+    const turns = (await rpc(4, 'thread/turns/list', { threadId: thread })).result;
+    assert.equal(turns.data[0].status, 'inProgress');
+    assert.equal(turns.data[0].items[0].content[0].text, payload);
+    assert.equal(turns.data[0].items.length, 1, 'Provider transport creates no domain reply or result');
+  } finally { client?.terminate(); await provider?.stop(); await rm(root, { recursive: true }); }
+});
 test('selectors are explicit and default runs the complete gate', () => {
   assert.equal(selector([]), 'all');
   for (const name of ['all', 'native', 'process-contract']) assert.equal(selector(['--suite', name]), name);
@@ -90,6 +120,39 @@ test('launcher failure before bridge/witness readiness aborts observation and cl
     await assert.rejects(observeOwned(root, process.execPath, 'nonce', launcher.pid, 1000, controller.signal), /exited before readiness/);
     const result = await execution;
     await assertExited(Number(result.stdout.trim()));
+  } finally { await rm(root, { recursive: true }); }
+});
+test('embedded launcher retains backend stderr when the app exits before readiness', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-backend-log-'));
+  const server = net.createServer();
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  const configUrl = new URL('../../../apps/desktop/wdio.native.conf.mjs', import.meta.url).href;
+  const diagnostic = 'fixture startup panic before embedded WebDriver readiness';
+  const appArgs = ['-e', `process.stderr.write(${JSON.stringify(diagnostic + '\n')}, () => process.exit(23))`];
+  const fixture = `
+    import logger from '@wdio/logger';
+    logger.setLogLevelsConfig({}, 'info');
+    const { config } = await import(${JSON.stringify(configUrl)});
+    const { launcher } = await import('@wdio/tauri-service');
+    const options = { ...config.services[0][1], startTimeout: 500 };
+    const service = new launcher(options, config.capabilities, config);
+    try { await service.onPrepare(config, config.capabilities); }
+    catch (error) { console.log(error.message); process.exitCode = 1; }
+  `;
+  try {
+    await assert.rejects(command(process.execPath, ['--input-type=module', '-e', fixture], {
+      env: { ...buildEnv(root), ARIADNE_E2E_BINARY: process.execPath, ARIADNE_E2E_ROOT: root,
+        ARIADNE_E2E_NONCE: 'fixture', ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: root,
+        ARIADNE_E2E_APP_ARGS: JSON.stringify(appArgs) },
+      timeout: 10000, log: join(root, 'launcher.log'),
+    }), /failed \(1\)/);
+    assert.match(await readFile(join(root, 'launcher.log'), 'utf8'), /exited before.*ready \(code=23/);
+    const logs = (await readdir(root)).filter(name => /^wdio-.*\.log$/.test(name));
+    assert.equal(logs.length, 1);
+    assert.match(await readFile(join(root, logs[0]), 'utf8'), new RegExp(diagnostic));
+    await portFree(port);
   } finally { await rm(root, { recursive: true }); }
 });
 test('SIGINT and deadline clean owned descendants while preserving the test parent', async () => {

@@ -132,16 +132,19 @@ export async function runNative() {
   await mkdir(evidence, { recursive: true });
   const root = await mkdtemp('/private/tmp/ariadne-e2e-'); await chmod(root, 0o700);
   const nonce = randomBytes(32).toString('hex');
-  const binary = join(repo, 'target/native-e2e/debug/ariadne-desktop');
-  let failure, owned;
+  const binary = join(repo, 'target/native-e2e/debug/bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop');
+  let failure, owned, provider;
   try {
-    const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--no-bundle', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
+    const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--bundles', 'app', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
     const runtimeCommand = [process.execPath, join(repo, 'node_modules/@wdio/cli/bin/wdio.js'), 'run', 'wdio.native.conf.mjs'];
     const details = { root, port, nonce, binary, toolchain: toolchain(), buildCommand, runtimeCommand, cwd: desktop };
     await json(join(evidence, 'run.json'), details);
     await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: buildEnv(join(repo, 'target/native-e2e'), true), log: join(evidence, 'build.log') });
+    await command('cargo', ['build', '-p', 'ariadne-cli', '--locked'], { env: buildEnv(join(repo, 'target/native-e2e')), log: join(evidence, 'cli-build.log') });
     await json(join(evidence, 'run.json'), { ...details, binarySha256: await digest(binary) });
-    const env = { ...buildEnv(join(repo, 'target/native-e2e')), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: nonce, ARIADNE_E2E_BINARY: binary, ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: evidence };
+    const env = { ...buildEnv(join(repo, 'target/native-e2e')), ARIADNE_HOME: join(root, 'data'), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: nonce, ARIADNE_E2E_BINARY: binary, ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: evidence };
+    provider = await (await import('../apps/desktop/tests/e2e/scripted-provider.mjs')).startScriptedProvider(root, join(repo, 'target/native-e2e/debug/ariadne'), evidence, env);
+    env.ARIADNE_E2E_APP_ARGS = JSON.stringify(provider.configuration.appArgs);
     let launcher;
     const execution = command(runtimeCommand[0], runtimeCommand.slice(1), { cwd: desktop, env, timeout: 180000, log: join(evidence, 'wdio.log'), onStart: child => {
       launcher = child; writeFileSync(join(root, 'launcher.json'), JSON.stringify({ pid: child.pid }));
@@ -154,6 +157,7 @@ export async function runNative() {
     }
     catch (error) { await stop(launcher); await execution.catch(() => {}); throw error; }
   } catch (error) { failure = error; }
+  try { await provider?.stop(); } catch (error) { failure ||= error; }
   try {
       if (owned && alive(owned.pid)) {
         const current = identity(owned.pid);
