@@ -5,7 +5,49 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { historyAsk, historyMessageBatch, historySeedRequest } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { historyAsk, historyMessageBatch, historySeedRequest, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+
+test('five existing round sections do not admit assertions before the final closed result reaches native detail', async t => {
+  const round = { ordinal: 5, closed_at: '2026-10-05T11:51:57.000Z' };
+  const reply = 'Explicit native round 5 result\nFull correlated agent reply for the saved answer.';
+  const explanation = 'Explicit native result 5\nComplete stored explanation for answer #5.';
+  const initial = 'Round 5Current round\nFull owner explanation for round 5.';
+  const closed = `Round 5Closed · ${round.closed_at}\n${reply}`;
+  const completed = `${closed}\n${explanation}`;
+  let text = initial;
+  const admitted = [];
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  globalThis.browser = {
+    $(selector) { assert.equal(selector, '[aria-label="Round 5"]'); return { getText: async () => text }; },
+    async waitUntil(condition, options) {
+      assert.equal(options.timeout, 20000);
+      for (text of [initial, closed, completed]) admitted.push(await condition());
+      assert.equal(admitted.at(-1), true);
+    },
+  };
+  await waitForRoundResult(round, reply, explanation);
+  assert.deepEqual(admitted, [false, false, true]);
+});
+
+test('a permanently omitted or truncated final result remains a native acceptance failure', async t => {
+  const round = { ordinal: 5, closed_at: '2026-10-05T11:51:57.000Z' };
+  const reply = 'Explicit native round 5 result\nFull correlated agent reply for the saved answer.';
+  const explanation = 'Explicit native result 5\nComplete stored explanation for answer #5.';
+  let text;
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  globalThis.browser = {
+    $() { return { getText: async () => text }; },
+    async waitUntil(condition, options) {
+      for (text of [`Round 5Closed · ${round.closed_at}\n${reply}`, `Round 5Closed · ${round.closed_at}\n${reply}\nExplicit native result 5`]) {
+        assert.equal(await condition(), false);
+      }
+      throw new Error(options.timeoutMsg);
+    },
+  };
+  await assert.rejects(waitForRoundResult(round, reply, explanation), /did not publish the final closed round and its complete correlated result/);
+});
 
 test('complete native history batches deserialize through the real CLI/Core dispatch barrier', { timeout: 15000 }, async () => {
   const cli = process.env.ARIADNE_FIXTURE_TEST_CLI;
