@@ -35,10 +35,10 @@ export async function runDiscoveryAcceptance(configuration) {
     catch (error) { if (error.code === 'ENOENT') return false; throw error; }
   }, { timeout: 15000, timeoutMsg: 'Explicit Register did not persist the discovered project' });
   const metadata = JSON.parse(await readFile(projectPath, 'utf8'));
-  const connect = await browser.$('.nav-group-heading button=Connect existing session');
+  const connect = await browser.$('.nav-group-heading').$('button=Connect existing session');
   await connect.waitForDisplayed(); await connect.waitForEnabled(); await connect.click();
   const dialog = await browser.$('[role="dialog"][aria-label="Connect existing session"]');
-  const chosen = await dialog.$(`[data-discovery-id="${externalSessionId}"] button=Use host session`);
+  const chosen = await dialog.$(`[data-discovery-id="${externalSessionId}"]`).$('button=Use host session');
   await chosen.waitForEnabled(); await chosen.click();
   assert.equal(await dialog.$('label*=External session ID').$('input').getValue(), externalSessionId);
   assert.equal(await dialog.$('label*=Socket path').$('input').getValue(), socketPath);

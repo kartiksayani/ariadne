@@ -24,6 +24,11 @@ async function execute(argv, options) {
       child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
       child.once('error', reject);
       child.once('close', exitCode => resolve({ exitCode, stdout, stderr }));
+      child.stdin.once('error', error => {
+        // An early helper exit can close stdin before the SDK finishes writing.
+        // Keep its actual close/status/output evidence; other transport errors fail.
+        if (error.code !== 'EPIPE') reject(error);
+      });
       child.stdin.end(options.stdin ?? '');
     });
     replies.push({ argv, result });
