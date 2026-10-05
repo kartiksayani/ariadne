@@ -142,7 +142,7 @@ async function catalogue() {
   await wait(async () => await button.getAttribute('aria-current') === 'page' && await button.isEnabled(), 'Tree catalogue navigation did not finish its actual preference write');
 }
 async function open(tree) {
-  await catalogue(); const button = await browser.$(`[data-session-id="${tree.sessionId}"]`); await button.waitForDisplayed(); await button.click();
+  await catalogue(); const button = await readySessionButton(tree); await button.click();
   await wait(async () => (await visibleIds()).includes('20.99'), 'The real native 2,000-item tree did not open');
 }
 // Passive WebView measurement starts at the real driver-generated click/input,
@@ -191,7 +191,7 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
   }
   return browser.execute(() => { const result = window.__ariadneTreeMeasurement.elapsed; delete window.__ariadneTreeMeasurement; return result; });
 }
-export function observeTreeClickReadiness(button, group, name, expectedPressed) {
+export function observeTreeClickReadiness(button, group, name, expectedPressed, selector = null) {
   window.__ariadneTreeFilterCleanup?.();
   // Match the driver's own centering before observing readiness. WDIO's wheel
   // scroll returns before nested layout settles; a subsequent driver centering
@@ -215,7 +215,7 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed) 
     delete window.__ariadneTreeFilterCleanup;
   };
   const inspect = () => {
-    const current = [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
+    const current = selector ? document.querySelector(selector) : [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
       .find(value => value.textContent.trim() === name);
     const rect = button.getBoundingClientRect(), hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
     const scroll = [];
@@ -233,6 +233,16 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed) 
     frame = window.requestAnimationFrame(inspect);
   };
   frame = window.requestAnimationFrame(inspect);
+}
+async function readySessionButton(tree) {
+  const selector = `[data-session-id="${tree.sessionId}"]`, button = await browser.$(selector);
+  await button.waitForDisplayed(); await button.waitForEnabled();
+  await browser.execute(observeTreeClickReadiness, button, null, null, null, selector);
+  try {
+    await wait(() => browser.execute(() => window.__ariadneTreeFilterAction.readiness.ready),
+      'Native session target did not become stable and enabled');
+  } finally { await browser.execute(() => window.__ariadneTreeFilterCleanup?.()); }
+  return button;
 }
 async function choose(group, name, pressed) {
   const button = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`);
@@ -365,7 +375,7 @@ async function treeAcceptance(configuration) {
   // refresh. A document reload is unnecessary and races the native driver.
   await catalogue();
   const expectedIds = Array.from({ length: 20 }, (_, index) => [String(index + 1), ...Array.from({ length: 99 }, (_, child) => `${index + 1}.${child + 1}`)]).flat();
-  const sessionButton = await browser.$(`[data-session-id="${tree.sessionId}"]`); await sessionButton.waitForDisplayed();
+  const sessionButton = await readySessionButton(tree);
   const usableMs = await measureAction('click', `[data-session-id="${tree.sessionId}"]`, expectedIds, () => sessionButton.click(), tree);
   assert.deepEqual(await visibleIds(), expectedIds); await roving();
   assert.equal(await (await row('1')).getAttribute('aria-level'), '1'); assert.equal(await (await row('1.1')).getAttribute('aria-level'), '2');
