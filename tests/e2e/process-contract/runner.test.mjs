@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit } from '../../../scripts/run-native-e2e.mjs';
+import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import WebSocket from 'ws';
@@ -56,10 +56,12 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     const secondPayload = `[ARIADNE_INPUT:${secondInput}:${secondAttempt}]\n${JSON.stringify({ ...body, source_input_id: secondInput })}`;
     await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', secondPayload]);
     const journal = await admissions(config); assert.equal(journal.length, 2); assert.notEqual(journal[0].turnId, journal[1].turnId);
-    const after = (await rpc(5, 'thread/turns/list', { threadId: thread })).result.data;
-    assert.deepEqual(after.map(turn => turn.status), ['completed', 'inProgress']);
-    assert.deepEqual(after.map(turn => turn.items[0].content[0].text), [payload, secondPayload]);
-    assert.equal(after[1].id, journal[1].turnId, 'Completing the first admission cannot complete the successor');
+    const after = (await rpc(5, 'thread/turns/list', { threadId: thread, sortDirection: 'desc' })).result.data;
+    assert.deepEqual(after.map(turn => turn.id), [journal[1].turnId, journal[0].turnId], 'The newest exact original must precede the prior queue anchor');
+    assert.deepEqual(after.map(turn => turn.status), ['inProgress', 'completed']);
+    assert.deepEqual(after.map(turn => turn.items[0].content[0].text), [secondPayload, payload]);
+    assert.equal(after[0].id, journal[1].turnId, 'Completing the first admission cannot complete the successor');
+    assert.deepEqual((await admissions(config)).map(entry => entry.turnId), journal.map(entry => entry.turnId), 'History order cannot rewrite FIFO admissions');
     await assert.rejects(completeTurn(config, admitted), /occurs once/);
   } finally { client?.terminate(); await provider?.stop(); await rm(root, { recursive: true }); }
 });
@@ -143,6 +145,39 @@ test('launcher failure before bridge/witness readiness aborts observation and cl
     await assertExited(Number(result.stdout.trim()));
   } finally { await rm(root, { recursive: true }); }
 });
+test('embedded launcher retains backend stderr when the app exits before readiness', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-backend-log-'));
+  const server = net.createServer();
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  const configUrl = new URL('../../../apps/desktop/wdio.native.conf.mjs', import.meta.url).href;
+  const diagnostic = 'fixture startup panic before embedded WebDriver readiness';
+  const appArgs = ['-e', `process.stderr.write(${JSON.stringify(diagnostic + '\n')}, () => process.exit(23))`];
+  const fixture = `
+    import logger from '@wdio/logger';
+    logger.setLogLevelsConfig({}, 'info');
+    const { config } = await import(${JSON.stringify(configUrl)});
+    const { launcher } = await import('@wdio/tauri-service');
+    const options = { ...config.services[0][1], startTimeout: 500 };
+    const service = new launcher(options, config.capabilities, config);
+    try { await service.onPrepare(config, config.capabilities); }
+    catch (error) { console.log(error.message); process.exitCode = 1; }
+  `;
+  try {
+    await assert.rejects(command(process.execPath, ['--input-type=module', '-e', fixture], {
+      env: { ...buildEnv(root), ARIADNE_E2E_BINARY: process.execPath, ARIADNE_E2E_ROOT: root,
+        ARIADNE_E2E_NONCE: 'fixture', ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: root, ARIADNE_E2E_PHASE: 'delivery',
+        ARIADNE_E2E_APP_ARGS: JSON.stringify(appArgs) },
+      timeout: 10000, log: join(root, 'launcher.log'),
+    }), /failed \(1\)/);
+    assert.match(await readFile(join(root, 'launcher.log'), 'utf8'), /exited before.*ready \(code=23/);
+    const logs = (await readdir(root)).filter(name => /^wdio-.*\.log$/.test(name));
+    assert.equal(logs.length, 1);
+    assert.match(await readFile(join(root, logs[0]), 'utf8'), new RegExp(diagnostic));
+    await portFree(port);
+  } finally { await rm(root, { recursive: true }); }
+});
 test('SIGINT and deadline clean owned descendants while preserving the test parent', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-signal-'));
   const runner = new URL('../../../scripts/run-native-e2e.mjs', import.meta.url).href;
@@ -214,6 +249,28 @@ test('Quit proof requires actual owned PID exit, free port and released physical
     assert.equal(proof.pidExited, true); assert.equal(proof.portFree, true); assert.equal(proof.leases.released, true);
     assert.deepEqual(proof.leases.paths, files);
   } finally { if (child && alive(child.pid)) child.kill(); await rm(root, { recursive: true }); }
+});
+test('Quit wait rejects live identity changes and waits for a same-birth macOS zombie to disappear', async () => {
+  const child = spawn(process.execPath, ['-e', 'process.stdout.write("ready"); process.stdin.once("data",()=>process.exit(0))'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  try {
+    await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); });
+    const owned = identity(child.pid);
+    await assert.rejects(waitForQuitExit('/different-live-executable', owned), /identity changed/);
+    await assert.rejects(waitForQuitExit(owned.exe, { ...owned, birth: 'different birth' }), /identity changed/);
+    assert.ok(alive(child.pid), 'Rejected identity checks cannot signal the owned process');
+    child.stdin.end('quit');
+    // Hold this parent event loop briefly so the genuinely exited child remains
+    // observable as a zombie before libuv can reap it.
+    const end = Date.now() + 1000;
+    let state;
+    do {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      state = execFileSync('/bin/ps', ['-p', String(child.pid), '-o', 'stat='], { encoding: 'utf8' }).trim();
+    } while (!state.startsWith('Z') && Date.now() < end);
+    assert.ok(state.startsWith('Z')); assert.equal(identity(child.pid).exe, '<defunct>');
+    assert.equal(identity(child.pid).birth, owned.birth); assert.ok(alive(child.pid));
+    await waitForQuitExit(owned.exe, owned); assert.equal(alive(child.pid), false);
+  } finally { if (alive(child.pid)) child.kill(); }
 });
 test('occupied loopback port fails without touching listener, invalid ports fail', async () => {
   const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

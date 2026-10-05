@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
@@ -55,7 +56,7 @@ class Transport implements DesktopTransport {
     return await next as T;
   }
   async listen<E extends keyof HintPayloads>(name: E, receive: (hint: HintPayloads[E]) => void) {
-    if (this.failListener && name === 'ariadne://presence_changed') throw new Error('Listener unavailable');
+    if (this.failListener && name === 'ariadne://session_changed') throw new Error('Listener unavailable');
     const group = this.listeners.get(name) ?? new Set();
     group.add(receive as (value: never) => void); this.listeners.set(name, group);
     return () => { group.delete(receive as (value: never) => void); };
@@ -285,9 +286,9 @@ describe('registered global capture', () => {
     await store.refresh(); expect(store.getSnapshot().status).toBe('stale'); expect(store.getSnapshot().waiting).toBe(before.waiting);
     expect(store.getSnapshot().error).toBeInstanceOf(ServiceFailure);
   });
-  it('rolls back partial listener setup, retries and suppresses late capture after stop', async () => {
+  it('retries failed listener setup and suppresses late capture after stop', async () => {
     const { store, transport } = setup(); transport.failListener = true; await store.start();
-    expect(transport.listeners.get('ariadne://session_changed')!.size).toBe(0);
+    expect(transport.listeners.get('ariadne://session_changed')?.size ?? 0).toBe(0);
     transport.failListener = false; const pending = deferred<QueryEnvelope>(); transport.push('project_list', pending.promise);
     const capture = store.refresh(); await vi.waitFor(() => expect(transport.calls).toHaveLength(1));
     store.stop(); pending.resolve(projectPage()); await capture;
@@ -306,6 +307,65 @@ describe('registered global capture', () => {
 });
 
 describe('source-backed Waiting and Sent panel', () => {
+  it('keeps the answer control, focus and draft through qualified presence heartbeats without recapturing the queue', async () => {
+    const { store, transport } = setup(), seed = mutableSession(), summary = fixture().summary;
+    summary.active_binding!.presence = null;
+    const queued = seed.inputs[inputId('76')]!; queued.state = 'queued'; queued.active_attempt_id = null;
+    transport.push('project_list', projectPage()); transport.push('session_list', sessionPage([summary])); transport.push('session_get', loaded(seed));
+    await store.start();
+    const submit = vi.fn();
+    function Panel() {
+      const [draft, setDraft] = useState('');
+      return <WaitingPanel store={store} revealItem={vi.fn()} openSession={vi.fn()}
+        answerControl={() => ({ options: [], selected: null, draft, onSelect: vi.fn(), onDraft: setDraft, onSubmit: submit })} />;
+    }
+    render(<Panel />);
+    const textbox = screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement;
+    textbox.focus(); fireEvent.change(textbox, { target: { value: 'owner draft in progress' } });
+    textbox.setSelectionRange(6, 11);
+    const before = store.getSnapshot(), reads = transport.calls.length;
+    const card = screen.getAllByRole('button').find(element => element.textContent?.includes(queued.payload.target_snapshot.item_question!))!;
+    expect(card.textContent).toContain('Saved');
+    const active = summary.active_binding!, observation = { ...structuredClone(binding.presence!), freshness: 'fresh' as const,
+      generation: active.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
+    for (const [index, execution] of ['running', 'idle', 'running'].entries()) {
+      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
+        observation: { ...observation, execution_state: execution as 'running' | 'idle', last_seen_at: `2026-10-05T02:05:0${index}.000Z` } }); });
+      expect(screen.getByRole('textbox')).toBe(textbox); expect(document.activeElement).toBe(textbox);
+      expect(textbox.value).toBe('owner draft in progress'); expect(textbox.selectionStart).toBe(6); expect(textbox.selectionEnd).toBe(11);
+      expect(store.getSnapshot().status).toBe('ready'); expect(store.getSnapshot().waiting).toBe(before.waiting);
+      expect(store.getSnapshot().sent).toBe(before.sent); expect(store.getSnapshot().counts).toBe(before.counts);
+      expect(card.textContent).toContain(execution === 'running' ? 'Queued · waiting for connection' : 'Saved');
+      expect(transport.calls).toHaveLength(reads);
+    }
+    fireEvent.keyDown(textbox, { key: 'Enter', metaKey: true });
+    expect(submit).toHaveBeenCalledWith({ text: 'owner draft in progress' });
+  });
+  it('fences an old question immediately after a durable revision hint until the complete new question is captured', async () => {
+    const { store, transport } = setup(); transport.capture(); await store.start();
+    const answer = vi.fn<NonNullable<Parameters<typeof WaitingPanel>[0]['answerControl']>>(() => ({ options: [], selected: null,
+      draft: 'old question draft', onSelect: vi.fn(), onDraft: vi.fn(), onSubmit: vi.fn() }));
+    render(<WaitingPanel store={store} revealItem={vi.fn()} openSession={vi.fn()} answerControl={answer} />);
+    const oldControl = screen.getByRole('textbox'), changed = mutableSession(), summary = fixture().summary;
+    changed.revision++; summary.revision = changed.revision;
+    changed.items['2']!.question_revision++; changed.items['2']!.question = 'The revised current question';
+    const pending = deferred<QueryEnvelope>();
+    transport.push('project_list', pending.promise); transport.push('session_list', sessionPage([summary]), sessionPage([summary]), sessionPage([summary]));
+    transport.push('session_get', loaded(changed), loaded(changed));
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: demo.id, revision: changed.revision }); });
+    expect(store.getSnapshot().status).toBe('stale'); expect(screen.queryByRole('textbox')).toBeNull();
+    expect(oldControl.isConnected).toBe(false); expect(screen.getByText(/Refresh is pending/)).toBeTruthy();
+    const active = summary.active_binding!;
+    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
+      observation: { ...structuredClone(binding.presence!), generation: active.generation, last_seen_at: '2026-10-05T02:05:00.000Z' } }); });
+    expect(store.getSnapshot().status).toBe('stale'); expect(screen.queryByRole('textbox')).toBeNull();
+    const calls = answer.mock.calls.length;
+    await act(async () => { pending.resolve(projectPage()); await store.refresh(); });
+    expect(store.getSnapshot().status).toBe('ready'); expect(screen.getByText(changed.items['2']!.question)).toBeTruthy();
+    expect(answer.mock.calls.length).toBeGreaterThan(calls);
+    expect(answer.mock.lastCall).toEqual([expect.objectContaining({ item: expect.objectContaining({ question_revision: 2 }) })]);
+    expect(screen.getByRole('textbox')).not.toBe(oldControl);
+  });
   it('renders live scoped session presence when catalogue summaries have no observation', async () => {
     const { store, transport, opened } = setup(), seed = mutableSession();
     const summary = fixture().summary; summary.active_binding!.presence = null;
@@ -317,14 +377,7 @@ describe('source-backed Waiting and Sent panel', () => {
     expect(card.textContent).toContain('Saved');
     const active = summary.active_binding!, running = { ...structuredClone(binding.presence!), freshness: 'fresh' as const,
       generation: active.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
-    const publish = async (observation: typeof running, generation = active.generation) => {
-      // Keep reconciliation pending to prove that the shared cache update itself
-      // reaches the rendered label before another catalogue read completes.
-      const hold = deferred<QueryEnvelope>(); transport.push('project_list', hold.promise);
-      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation, observation }); });
-      return hold;
-    };
-    const pending = await publish(running);
+    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
     expect(card.textContent).toContain('Queued · waiting for connection');
     expect(opened.open(route).getSnapshot().presence[active.id].execution_state).toBe('running');
     expect(store.getSnapshot().sessions[0].summary.active_binding!.presence).toBeNull();
@@ -342,7 +395,6 @@ describe('source-backed Waiting and Sent panel', () => {
     const captured = store.getSnapshot(); store.stop();
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
     expect(store.getSnapshot()).toBe(captured);
-    pending.resolve({ api_version: 1, ok: false, error }); await store.refresh();
   });
   it('routes waiting/current and original Sent targets, including a topic-only input', async () => {
     const { store, transport } = setup(); transport.capture(); await store.start();
