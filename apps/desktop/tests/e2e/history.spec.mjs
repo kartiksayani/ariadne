@@ -10,6 +10,17 @@ const evidence = () => process.env.ARIADNE_E2E_EVIDENCE;
 const request = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
 const detail = () => browser.$('.item-history');
+export async function waitForHistoryItem(item) {
+  await wait(() => browser.execute(expected => {
+    const header = document.querySelector('.item-history > .history-header > strong');
+    const question = document.querySelector('.item-history > h2');
+    const source = [...document.querySelectorAll('.item-history > .history-meta')]
+      .some(value => value.textContent === `Source round · ${expected.source_round_id}`);
+    return header?.textContent === `Item ${expected.id}` && question?.textContent === expected.question
+      && (expected.source_round_id === null || source);
+  }, { id: item.id, question: item.question, source_round_id: item.source_round_id }),
+  'Native detail did not reveal the registered item, complete question and correlated source round');
+}
 const inputs = session => Object.values(session.inputs).sort((a, b) => a.seq - b.seq);
 const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
 let navigationRecovered = false;
@@ -82,12 +93,12 @@ async function open(history, itemId = '1') {
     return selected.kind === 'session' && selected.session.session_id === history.sessionId && await catalogue.isEnabled();
   }, 'History session navigation did not finish its saved preference update');
   const target = await row(itemId); await target.waitForDisplayed(); await target.scrollIntoView(); await target.click();
-  await wait(async () => (await detail().getText()).includes(`Item ${itemId}`), 'Registered native history detail did not open');
+  await waitForHistoryItem((await snapshot(history)).items[itemId]);
 }
-async function selectParent() {
+async function selectParent(item) {
   await (await browser.$('.sentence-search input')).waitForEnabled();
   const parent = await row('1'); await parent.waitForDisplayed(); await parent.scrollIntoView(); await parent.click();
-  await wait(async () => (await detail().getText()).includes('Retain five complete native rounds'), 'Fork did not return to its registered parent');
+  await waitForHistoryItem(item);
   await (await browser.$('.sentence-search input')).waitForEnabled();
 }
 async function seed(configuration) {
@@ -182,9 +193,9 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
   assert.equal((await browser.$$('button.history-fork')).length, 2);
   for (const id of ['1.1', '1.2']) {
     const fork = await browser.$(`button.history-fork*=Fork · Item ${id}`); await fork.scrollIntoView(); await fork.click();
-    await wait(async () => (await detail().getText()).includes(`Native history fork ${id}`), 'Actual round fork did not reveal its registered child');
+    await waitForHistoryItem(saved.items[id]);
     assert.ok((await detail().getText()).includes(saved.items[id].source_round_id));
-    await selectParent();
+    await selectParent(saved.items['1']);
   }
   const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline'); await timeline.waitForEnabled(); await timeline.scrollIntoView(); await timeline.click();
   await wait(async () => (await renderedBodies('.history-timeline [data-message-id]')).length > 100, 'Native item conversation paging did not produce complete history');
@@ -225,10 +236,10 @@ async function rail(history, saved, paged) {
   }
   await (await browser.$('.sentence-search input')).waitForEnabled();
   const child = await row('1.1'); await child.waitForDisplayed(); await child.scrollIntoView(); await child.click();
-  await wait(async () => (await detail().getText()).includes('Native history fork 1.1'), 'Registered tree selection did not reveal the genuine child');
+  await waitForHistoryItem(saved.items['1.1']);
   await wait(async () => browser.execute(id => document.querySelector(`.rail-messages [data-message-id="${id}"]`)?.classList.contains('history-highlight'), childMessage.id), 'Native tree selection did not highlight its canonical rail backlink');
   assert.ok((await card.getAttribute('class')).includes('history-pinned'));
-  await selectParent();
+  await selectParent(saved.items['1']);
   const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline'); await timeline.waitForEnabled(); await timeline.scrollIntoView(); await timeline.click();
   await wait(async () => browser.execute(id => document.querySelector(`.history-timeline [data-message-id="${id}"]`)?.classList.contains('history-highlight'), parentMessage.id), 'Pinned canonical detail reference was lost after registered child navigation');
   const preferences = async () => {
@@ -343,7 +354,10 @@ export async function runHistoryAcceptance(configuration) {
     publication.push(await result(history, ordinal, `Explicit native ${intent} response\nRetain the full result.`, extra));
   }
   saved = await snapshot(history); assert.equal(saved.items['1'].status, 'open'); assert.equal(saved.items['1'].outcome, null);
-  await wait(async () => (await detail().getText()).includes('Full native completed outcome\nKeep the former outcome after reopening.'), 'Genuine reopening lost its former outcome in native detail');
+  await wait(async () => {
+    const former = await browser.$('.item-history > [aria-label="Former outcome"]');
+    return await former.isExisting() && (await former.getText()).includes('Full native completed outcome\nKeep the former outcome after reopening.');
+  }, 'Genuine reopening lost its former outcome in native detail');
   assert.ok((await detail().getText()).includes('Full native completion reason\nEvery round was answered explicitly.'));
   publication.push(await apply(history, [{ op: 'reply', ref: 'history_child_reply', item: { id: '1.1' }, round_id: null,
     text: 'Native child rail backlink\nIts registered link remains distinct from the selected parent.' }], { '1.1': saved.items['1.1'].revision }));
