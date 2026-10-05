@@ -1792,7 +1792,7 @@
         "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#3-claude-code-21287-adapter"
       ],
       "acceptance": [
-        "On the installed Claude Code version (recorded in the evidence) in disposable project, five distinct queued owner messages reach same existing conversation in FIFO without coalescing, each full item reply/result joined to matching input/attempt.",
+        "On the installed Claude Code version (must be one Ariadne accepts; record it in the evidence) in disposable project, five distinct queued owner messages reach same existing conversation in FIFO without coalescing, each full item reply/result joined to matching input/attempt.",
         "Include busy queue, terminal-item message, multi-item replies, status/topic/children chosen via CLI/MCP, both result/completion orders, missing-result repair/resend/skip and app quit/relaunch.",
         "Run two sessions in same project plus another project for binding/generation isolation; record installed Mod versions, discovery/freshness/manual fallback and redacted actual evidence."
       ],
@@ -1823,7 +1823,7 @@
         "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md#4-codex-01600-adapter"
       ],
       "acceptance": [
-        "On the installed Codex CLI/daemon version (recorded in the evidence) in disposable project, five distinct native-queue messages reach exact already-running thread, preserving context and FIFO; full explicit item replies/results join each attempt.",
+        "On the installed Codex CLI/daemon version (must be one Ariadne accepts; record it in the evidence) in disposable project, five distinct native-queue messages reach exact already-running thread, preserving context and FIFO; full explicit item replies/results join each attempt.",
         "Exercise busy queue, closed-item message, multi-item reply/topic/children/status, disconnect/relaunch, duplicates, both join orders and audited missing-result/uncertain recovery.",
         "Prove same-project/cross-project isolation and loaded-thread discovery/manual fallback; record socket identity and precise observed limitations without private transcript import."
       ],

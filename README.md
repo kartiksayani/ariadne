@@ -9,7 +9,8 @@ through terminals.
 Each question becomes an item. Items sit in a tree, and the agents add replies
 and statuses to them. Your answers are sent back into the same session that
 asked. The app, a command-line tool (`ariadne`) and an MCP server
-(`ariadne-mcp`) share the same saved data.
+(`ariadne-mcp`, a helper agents use to talk to Ariadne) share the same saved
+data.
 
 Ariadne works with sessions that are already running. It does not start them.
 
@@ -17,7 +18,7 @@ Ariadne works with sessions that are already running. It does not start them.
 
 You need macOS 13 or newer, Python 3.11 or newer, Xcode command line tools, and
 these exact tools already installed: Node v22.23.2, npm 10.9.8 and Rust 1.98.1
-(through `rustup`). Ariadne does not install any of them.
+(through `rustup`, the Rust installer). Ariadne does not install any of them.
 
 From the repository folder:
 
@@ -38,8 +39,9 @@ stops with a clear message if something is missing. Then it builds the app, the
 It puts everything under `~/.local/share/ariadne/versions/<version>` and points
 `current` at it. It adds links at `~/Applications/Ariadne.app`,
 `~/.local/bin/ariadne` and `~/.local/bin/ariadne-mcp`. It does not edit your
-shell startup files. If `~/.local/bin` does not exist, it tells you which folder
-to add to your PATH. Running it again with the same version changes nothing.
+shell startup files. The two `~/.local/bin` links are made only if that folder
+already exists. So run `mkdir -p ~/.local/bin` before `make install`. Running it
+again with the same version changes nothing.
 
 ## First launch (unsigned app)
 
@@ -52,13 +54,17 @@ The app is not signed or notarized. If macOS refuses to open it:
 
 ## Setup and `ariadne doctor`
 
-Setup prepares the Claude and Codex integration files. Run it from the
-installed command:
+Setup prepares the Claude and Codex integration files. Run it with the full
+path of the installed command. macOS does not look in `~/.local/bin` by
+default, so a bare `ariadne` gives "command not found":
 
 ```sh
-ariadne setup --agent claude    # or codex, or both
-ariadne setup --agent both --project /absolute/path/to/project
+~/.local/bin/ariadne setup --agent claude    # or codex, or both
+~/.local/bin/ariadne setup --agent both --project /absolute/path/to/project
 ```
+
+Optional: to type just `ariadne`, add `~/.local/bin` to your PATH (the list of
+folders the terminal searches for commands) in `~/.zshrc`.
 
 `--project` is optional. When you give it, that project is registered too. Setup
 never edits Claude Code or Codex settings. It prints the commands you run
@@ -67,8 +73,8 @@ yourself in the host. Running setup again is safe.
 Check the result at any time:
 
 ```sh
-ariadne doctor
-ariadne doctor --project /absolute/path/to/project
+~/.local/bin/ariadne doctor
+~/.local/bin/ariadne doctor --project /absolute/path/to/project
 ```
 
 Doctor only reads. It repairs nothing, resends nothing and starts no session.
@@ -78,12 +84,12 @@ You can point it at specific programs with `--claude-bin` and `--codex-bin`
 To try the app without any agent, create an offline demo project:
 
 ```sh
-ariadne demo --root /absolute/path/to/an/empty/folder
+~/.local/bin/ariadne demo --root /absolute/path/to/an/empty/folder
 ```
 
 ## Connect Claude Code
 
-1. Run `ariadne setup --agent claude`.
+1. Run `~/.local/bin/ariadne setup --agent claude`.
 2. In your Claude Code session, run the commands setup prints. They look like:
    - `/plugin marketplace add <path>/claude-mod`
    - `/plugin install ariadne@ariadne-local`
@@ -97,17 +103,19 @@ Claude Code will ask you to trust the plugin. That choice stays yours.
 
 ## Connect Codex
 
-1. Run `ariadne setup --agent codex`.
+1. Run `~/.local/bin/ariadne setup --agent codex`.
 2. In the already-running Codex terminal, run `/status`.
-3. In Ariadne, choose that thread in the connect panel (Discover host sessions,
-   then Connect existing session).
+3. In Ariadne, open the Projects page and click **Register project**. Type the
+   project folder and click **Register project** again.
+4. Open that project. Click **Discover host sessions**, pick the thread from
+   `/status`, then click **Connect existing session**.
 
 Codex approvals stay yours. Ariadne does not turn them on or off.
 
 ## A 60-second tour
 
 - **Waiting panel.** Every question waiting on you, across sessions. Click one to
-  open it. Use **Later** to push one aside.
+  open it. Inside an item, click **Later** to push it aside.
 - **Tree and Graph.** Switch between them with the two buttons in the top bar.
   The tree is a list of items. The graph is the same items drawn as a map; use
   the `+` and `-` buttons to zoom.
@@ -120,10 +128,12 @@ Codex approvals stay yours. Ariadne does not turn them on or off.
 - **Menu-bar icon.** Shows how many questions wait on you and lists the oldest.
   Clicking one opens it. Ariadne can also send a macOS notification when an
   agent asks something.
-- **Binding controls.** Pause or resume sending to a session, or disconnect it.
+- **Connection controls.** Pause or resume sending to a session, or disconnect
+  it. (The app calls a session's connection a "binding".)
 
 Quitting Ariadne does not stop Claude Code or Codex sessions. Your saved data
-stays readable by the CLI and MCP while the app is closed.
+stays readable by the command-line tool and the MCP server while the app is
+closed.
 
 ## What the agents are told
 
@@ -145,19 +155,20 @@ recovery**.
 
 | State you see | What it means | What you can choose |
 |---|---|---|
-| Delivery uncertain | Ariadne sent your message but never got a confirmation. It may or may not have arrived. | Confirm what you saw in the terminal; prepare a retry if it never ran; or resend, which may repeat work and needs you to tick a warning. |
-| Missing result | The agent finished its turn but did not record the required result. | Request the missing result (asks the agent for a result only); or skip and continue. |
+| Delivery uncertain | Ariadne sent your message but never got a confirmation. It may or may not have arrived. | Look at the terminal. If the message ran, click **Confirm evidence**. If not, click **Prepare resend** (may repeat work, so you must tick a warning) or **Skip and continue**. |
+| Delivery rejected | The agent refused the message, so it never ran. | Click **Prepare retry**. This button appears only in this state. |
+| Missing result | The agent finished its turn but did not record the required result. | Click **Request missing result** (asks the agent for the result only). Or click **Prepare resend** or **Confirm evidence**. |
 
 Every choice needs a short reason and is saved in the history. Before choosing,
 make sure the terminal is idle. If the agent does not record a result soon after
 finishing, Ariadne marks the result missing by itself. The check runs while the
-app is open. Dispatch for that session stays paused until you decide. Resuming
-dispatch is a separate click.
+app is open. Sending to that session stays paused until you decide. Resuming
+sending is a separate click.
 
 ## Uninstall
 
 ```sh
-ariadne uninstall --agent both    # removes only the integration files setup wrote
+~/.local/bin/ariadne uninstall --agent both    # removes only the integration files setup wrote
 make uninstall                    # removes the installed app and command-line tools
 ```
 

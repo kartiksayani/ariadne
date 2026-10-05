@@ -33,14 +33,14 @@ version is recorded there.
 | V18 | Codex first-party adapter | live run | pending live run | Pending live run |
 | V19 | Third executable adapter | none | none | Deferred (outside this personal release) |
 | V20 | Known-metadata discovery and liveness | test | to confirm (`crates/ariadne-runtime/tests/discovery.rs` exists; not confirmed against the PID-alone rule) | To confirm |
-| V21 | Native macOS app (manual checklist: notification click opens item, tray count matches, second launch routes to running app, quit keeps external sessions) | manual check | pending live run (checklist) | Pending manual check |
+| V21 | Native macOS app (manual checklist: notification click opens item, tray count matches, second launch routes to running app, quit keeps external sessions; project path with spaces; cold-start notification click) | manual check | pending manual check (checklist) | Pending manual check |
 | V22 | Simple setup, install and uninstall | test | `crates/ariadne-cli/tests/setup.rs`, `tests/functional/install/test_install.py` | Test present; CI run pending merge |
 | V23 | Offline and release boundary | CI run | to confirm | To confirm |
 | V24 | Full release journey | manual check | to confirm | To confirm; after V17/V18 |
 | V25 | Waiting episode and counts | test | to confirm | To confirm |
 | V26 | Provider compatibility and generated wire DTOs | test | to confirm | To confirm |
 | V27 | SVG viewport culling | test | `apps/desktop/tests/ui/graph-culling/index.test.tsx`, `apps/desktop/tests/ui/graph-culling/component.test.tsx` | Test present; CI run pending merge (row unchanged by ADR-0069) |
-| V28 | Thin entry points | test | `crates/ariadne-cli/tests/mcp_alias.rs` (alias and CLI share receipts) | Test present; install of all entry points covered by V22 |
+| V28 | Thin entry points | test | `crates/ariadne-cli/tests/mcp_alias.rs` (alias and CLI share receipts), `crates/ariadne-mcp/tests/native_process.rs` | Test present; install of all entry points covered by V22 |
 | V29 | Quality gate | CI run | pending merge | Pending merge: one link to a passing required CI run on main |
 
 Counts: 13 rows with a confirmed test path (V01–V04, V06, V07, V09, V13, V14, V16,

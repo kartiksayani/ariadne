@@ -25,16 +25,19 @@ exact host versions.
 - The P8.1 evidence matrix has one "evidence kind" column (test / CI run / live
   run / manual check) instead of separating mock, transport, production, live and
   native evidence per row.
-- V17, V18, V26, P7.2 and P7.3 no longer pin Claude Code 2.1.287 or Codex 0.160.0.
-  They use the installed version, recorded in the evidence. The five-input live
-  scope is unchanged.
+- V17, V18, V26, P7.2 and P7.3 no longer pin Claude Code 2.1.287 or Codex 0.160.0
+  for live runs. Live runs use the installed host version, which must be one
+  Ariadne accepts; record it in the evidence. The V26 exact-version schema hash
+  drift test stays. The five-input live scope is unchanged.
+- V21 also checks that a project path containing spaces works and that a
+  cold-start notification click opens the right item.
 - V15 and V27 are unchanged. V19 stays deferred.
 
 ## Consequences
 
 Release sign-off needs one CI link, a manual checklist and the live run, not a
 per-row evidence archive. Native OS-mechanics regressions are caught by use, not a
-gate. A host upgrade does not require editing the acceptance text.
+gate.
 
 ## Spec references
 
