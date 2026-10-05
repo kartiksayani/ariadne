@@ -1,9 +1,12 @@
 # Production window lifecycle acceptance
 
-Status: **prepared; physical execution has not run**. This supplement integrates
-local PR96 `b1ffbdd5bf81db08c1de23efc0662d080f897542` and current PR91
-`4f0d9519`, including the reviewed parent repairs and captured-read validation.
-It does not complete P6.1, P6.2 or P6.4. The existing PR96 packaged route check
+Status: **prepared; physical acceptance remains incomplete**. This checkpoint
+starts from reviewed PR96 `cf1ffa3ec24b4b9b28d0c8f05fa5cb8b07657269`, preserving
+its accepted startup/routing and owner-focus repairs. It adds the reviewed window
+runner, real status-item exposure probe, socket admission proof and native tray
+publication repair. Physical diagnostics have reached the tray menu; they have
+not proved Show Ariadne or completed the journey below. This does not complete
+P6.1, P6.2 or P6.4. The existing PR96 packaged route check
 proves the cold registered route and installed CLI
 second-instance route; this supplement reuses its private package fixture,
 canonical `ui.json`, primary identity, control socket and physical instance lease
@@ -31,15 +34,17 @@ The single physical journey will:
    endpoint reports only existence and is deliberately not visibility evidence.
 3. Click native tray **Pin**, require a new canonical preference revision and
    agreeing native checked state, then click **Quit Ariadne**. Confirm PID exit,
-   no additional private packaged PID, socket removal and an independently
-   acquired instance lease. Forced cleanup cannot satisfy Quit assertions.
+   no additional private packaged PID, a real socket connection rejected with
+   `ECONNREFUSED` or `ENOENT`, and an independently acquired instance lease.
+   A stale socket pathname alone does not establish an active listener. Forced
+   cleanup cannot satisfy Quit assertions.
 4. Restart the same private ordinary package without an explicit route. Confirm
    the committed selection, moved geometry and Pin survive, including the native
    checked state. Quit again through the real tray and prove release again.
 
 The AX title, controls and tray must be uniquely observable in the actual app.
-Selectors currently follow the retained disposable Mac2 probe and production
-menu titles; their viability in production is **unproved**. Missing/ambiguous
+Selectors follow the retained disposable Mac2 probe and production menu titles;
+the complete production action sequence is **unproved**. Missing/ambiguous
 hierarchy or unavailable check state fails with retained XML/command trace. There
 is no fallback to guessed screen coordinates, an injected route or simulated OS
 event. Allow one bounded accessibility attempt, then report a blocker rather
@@ -98,6 +103,15 @@ session bytes, stale Pin commits, wrong native Pin state, inner-vs-outer geometr
 lost geometry/Pin at restart and incomplete Quit release. Passing them proves
 these assertions, not OS acceptance. Source syntax and the commit hook are also
 required before publication.
+
+## Tray publication behavior
+
+The native tray reuses its published menu when the actionable capture is
+unchanged, avoiding periodic replacement while an owner interacts with it. A
+changed capture publishes a fresh menu. Pin invalidates the cached capture before
+persisting its change so the native checked state is republished even when the
+remaining menu contents are unchanged. Deterministic publication tests cover
+these decisions; they do not prove physical menu interaction or window overlap.
 
 ## Explicit remaining acceptance
 
