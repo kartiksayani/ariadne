@@ -13,6 +13,12 @@ from pathlib import Path
 name = Path(sys.argv[0]).name
 with open(os.environ["COMMAND_LOG"], "a") as output:
     output.write(json.dumps([name, *sys.argv[1:]]) + "\\n")
+if name in ("rustup", "cargo", "rustc"):
+    toolchain_home = Path(os.environ["RUSTUP_HOME"]).resolve()
+    assert toolchain_home.parent == Path(os.environ["RUNNER_TEMP"]).resolve()
+    assert toolchain_home.is_dir() and toolchain_home.name.startswith("ariadne-rustup.")
+if name == "rustup":
+    sys.exit(int(os.environ["SETUP_EXIT"]))
 if name == "python" and sys.argv[1:3] == ["-m", "venv"]:
     target = Path(sys.argv[3]) / "bin/python"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -50,9 +56,9 @@ class QualityWorkflowTests(unittest.TestCase):
             command = commands / "python"
             command.write_text(f"#!{sys.executable}\n" + COMMAND_DOUBLE)
             command.chmod(0o755)
-            for name in ("npm", "cargo", "rustup", "node"):
+            for name in ("npm", "cargo", "rustc", "rustup", "node"):
                 (commands / name).symlink_to(command)
-            for index, (scope, status, event, ref, provision_status, capture_status) in enumerate([
+            cases = [
                 ("docs release=false reference=false", 0, "push", "refs/heads/docs", 23, 29),
                 ("tooling release=false reference=false", 0, "push", "refs/heads/tooling", 23, 29),
                 ("docs release=false reference=true", 0, "push", "refs/heads/design", 0, 0),
@@ -68,21 +74,28 @@ class QualityWorkflowTests(unittest.TestCase):
                 ("application release=true reference=true", 0, "workflow_dispatch", "refs/heads/feature", 0, 0),
                 ("application release=true reference=true", 0, "push", "refs/heads/feature", 23, 0),
                 ("application release=true reference=true", 0, "push", "refs/heads/feature", 0, 29),
-            ]):
-                with self.subTest(scope=scope, status=status, event=event, ref=ref):
+            ]
+            cases = [(*case, 0) for case in cases] + [
+                ("application release=true reference=true", 0, "push", "refs/heads/feature", 0, 0, 42),
+            ]
+            for index, (scope, status, event, ref, provision_status, capture_status, setup_status) in enumerate(cases):
+                with self.subTest(scope=scope, status=status, event=event, ref=ref, setup_status=setup_status):
                     checkout = root / str(index)
                     checkout.mkdir()
+                    runner_temp = checkout / "runner-temp"
+                    runner_temp.mkdir()
                     log = checkout / "commands.jsonl"
                     env = {**os.environ, "PATH": str(commands) + os.pathsep + os.environ["PATH"],
                            "BASE_SHA": "whole-pr-base", "GITHUB_EVENT_NAME": event,
                            "GITHUB_REF": ref, "GITHUB_WORKSPACE": str(checkout),
+                           "RUNNER_TEMP": str(runner_temp), "SETUP_EXIT": str(setup_status),
                            "PROVISION_EXIT": str(provision_status), "CAPTURE_EXIT": str(capture_status),
                            "COMMAND_LOG": str(log), "SCOPE": scope, "GATE_EXIT": str(status)}
                     result = subprocess.run(["bash", "-c", script], cwd=checkout, env=env,
                                             text=True, capture_output=True)
                     application = scope.startswith("application")
                     reference = "reference=true" in scope
-                    expected_status = (provision_status or capture_status or status) if reference else status
+                    expected_status = setup_status or ((provision_status or capture_status or status) if reference else status)
                     self.assertEqual(result.returncode, expected_status, result.stderr)
                     calls = [json.loads(line) for line in log.read_text().splitlines()]
                     gate = ["python", "scripts/check-commit.py", "--ci", "--base", "whole-pr-base"]
@@ -90,16 +103,24 @@ class QualityWorkflowTests(unittest.TestCase):
                         gate += ["--merge-base"]
                     if event == "workflow_dispatch":
                         gate += ["--full"]
-                    capture_ok = not reference or not (provision_status or capture_status)
+                    capture_ok = not setup_status and (not reference or not (provision_status or capture_status))
                     self.assertEqual(calls.count(gate), int(capture_ok))
                     provisioning = ["node", "node_modules/playwright/cli.js", "install", "chromium"]
                     capture = ["npm", "run", "capture:reference"]
-                    self.assertEqual(calls.count(provisioning), int(reference))
-                    self.assertEqual(calls.count(capture), int(reference and not provision_status))
-                    if reference and not provision_status:
+                    self.assertEqual(calls.count(provisioning), int(reference and not setup_status))
+                    self.assertEqual(calls.count(capture), int(reference and not (setup_status or provision_status)))
+                    if reference and not (setup_status or provision_status):
                         self.assertLess(calls.index(provisioning), calls.index(capture))
                     if reference and capture_ok:
                         self.assertLess(calls.index(capture), calls.index(gate))
                     installs = [call for call in calls if call[0] == "rustup"]
-                    self.assertEqual(bool(installs), application and capture_ok)
+                    self.assertEqual(len(installs), int(application))
+                    version_checks = [[name, "--version"] for name in ("cargo", "rustc")]
+                    for version in version_checks:
+                        self.assertEqual(calls.count(version), int(application and not setup_status))
+                    if application and not setup_status:
+                        for version in version_checks:
+                            self.assertLess(calls.index(installs[0]), calls.index(version))
+                        if reference:
+                            self.assertLess(calls.index(version_checks[-1]), calls.index(provisioning))
                     self.assertFalse(any(call[0] == "rtk" for call in calls))
