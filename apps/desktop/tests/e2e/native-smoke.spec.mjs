@@ -25,11 +25,12 @@ describe('native WebView, typed invoke and independently observed Rust file', ()
     const configuration = JSON.parse(await readFile(join(root, 'journey.json'), 'utf8'));
     const setup = await seedJourney(configuration);
     await browser.refresh();
+    await browser.$('button[title="All sessions"]').click();
     const sessionButton = await browser.$(`[data-session-id="${configuration.sessionId}"]`);
     await sessionButton.waitForDisplayed(); await sessionButton.click();
     const item = await browser.$(`[data-item-id="${configuration.itemId}"]`);
     await item.waitForDisplayed(); await item.click();
-    const replyButton = await browser.$('[aria-label="Owner actions"] button=Reply');
+    const replyButton = await browser.$('[aria-label="Owner actions"]').$('button=Reply');
     await replyButton.click();
     const editor = await browser.$('[aria-label="Owner input for #1"] textarea');
     const ownerText = `native-owner-${nonce}`;
@@ -37,8 +38,13 @@ describe('native WebView, typed invoke and independently observed Rust file', ()
     await browser.$('button=Send reply').click();
     await browser.waitUntil(async () => {
       const session = await snapshot(configuration);
+      const queued = await readFile(configuration.queuedPath, 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
       return session.messages.some(message => message.author === 'owner' && message.body === ownerText)
-        && Object.values(session.inputs).some(input => input.attempts.length > 0);
+        && Object.values(session.inputs).some(input => input.attempts.length > 0
+          && queued !== null && JSON.parse(queued).payload === input.attempts.at(-1).formatted_payload);
     }, { timeout: 20000, timeoutMsg: 'Actual owner Send did not persist and reach native provider queue' });
     const admitted = await snapshot(configuration);
     const ownerMessage = admitted.messages.find(message => message.author === 'owner' && message.body === ownerText);
@@ -67,7 +73,8 @@ describe('native WebView, typed invoke and independently observed Rust file', ()
     // product debug form. Owner input above uses ordinary visible controls.
     const invokePing = request => browser.execute(async request => {
       try { return { ok: true, data: await window.__TAURI_INTERNALS__.invoke('native_ping', { request }) }; }
-      catch (error) { return { ok: false, error }; }
+      // WebDriver reserves a top-level "error" in its script-result envelope.
+      catch (error) { return { ok: false, rejection: error }; }
     }, request);
     const payload = `native-domain-${Date.now()}`;
     const displayed = (await invokePing({ nonce, payload })).data;
@@ -76,7 +83,7 @@ describe('native WebView, typed invoke and independently observed Rust file', ()
     assert.equal(disk.nonce, nonce); assert.equal(disk.payload, payload); assert.equal(disk.pid, witness.pid);
     assert.match(disk.receipt_id, /^ping-\d+-\d+$/);
     const rejected = await invokePing({ nonce: nonce === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64), payload });
-    assert.equal(rejected.ok, false); assert.equal(rejected.error.code, 'nonce_mismatch');
+    assert.equal(rejected.ok, false); assert.equal(rejected.rejection.code, 'nonce_mismatch');
     await json(join(evidence, 'domain-journey.json'), { setup, configuration, ownerMessage, input: committed.inputs[input.id], savedReceipt, queued, reply, finalSession: committed });
     assert.deepEqual(await readFile(receiptPath), bytes);
     assert.deepEqual(await readdir(join(root, 'smoke')), ['receipt.json']);
