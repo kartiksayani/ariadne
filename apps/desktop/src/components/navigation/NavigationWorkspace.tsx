@@ -123,7 +123,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
     topics={[]} actions={[{ label: 'Open', icon: 'ph ph-arrow-square-out', kind: 'secondary',
       disabled, sessionId: session.session_id, onClick: () => select({ kind: 'session', session: { project_id: session.project_id, session_id: session.session_id } }) }]} />;
   const counts = selection.kind === 'projects' ? state.projects?.counts : matchingSessions?.counts;
-  const center = <div className="nav-content">
+  const center = <div className={`nav-content${selection.kind === 'session' ? ' nav-session-content' : ''}`}>
     {state.error && <div className="nav-banner" role="alert"><p>{state.error.message}</p>
       {state.error instanceof CoreFailure && <p>{state.error.error.hint}</p>}
       {state.pendingOperationId ? <><p>Completion is unknown. Reconcile operation {state.pendingOperationId} with its original request.</p>
