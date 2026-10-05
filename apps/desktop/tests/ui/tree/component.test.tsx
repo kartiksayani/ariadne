@@ -311,6 +311,27 @@ describe('registered variable-height sentence tree', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('not confirmed'));
     expect(rows()[0].getAttribute('aria-expanded')).toBe('true');
   });
+  it('restores the activated owner after click-before-focus is blocked by the pending save', async () => {
+    const session = structuredClone(demo) as Session;
+    for (const item of Object.values(session.items)) if (item) item.owner = { kind: 'other', name: 'Native collaborator' };
+    session.items['1.1']!.owner = { kind: 'me' };
+    let finish!: () => void;
+    const completion = new Promise<void>(resolve => { finish = resolve; }), value = await setup(session, preferences(), completion);
+    render(<value.Composition />);
+    const group = screen.getByRole('group', { name: 'Item owner' }), me = within(group).getByRole<HTMLButtonElement>('button', { name: 'Me' });
+    expect(document.activeElement).toBe(document.body);
+    // The pinned native driver clicks first, then focuses the same element.
+    // React has disabled the control by then, so that focus cannot succeed.
+    act(() => { me.click(); });
+    expect(me.disabled).toBe(true); me.focus();
+    expect(document.activeElement).toBe(document.body);
+    expect(value.saved).toHaveLength(1);
+    await act(async () => { finish(); });
+    expect(me.disabled).toBe(false); expect(me.getAttribute('aria-pressed')).toBe('true');
+    expect(within(group).getAllByRole('button')[0]).toBe(me);
+    expect(document.activeElement).toBe(me);
+    expect(value.saved).toHaveLength(1);
+  });
   it.each(['Native collaborator', 'Me'])('keeps keyboard focus on Me when saved owners reorder beside other %s', async name => {
     const session = structuredClone(demo) as Session;
     for (const item of Object.values(session.items)) if (item) item.owner = { kind: 'other', name };
@@ -326,6 +347,22 @@ describe('registered variable-height sentence tree', () => {
     await waitFor(() => expect(value.saved.at(-1)?.filters.owners).toEqual([]));
     expect(within(group).getAllByRole('button')[1]).toBe(me); expect(document.activeElement).toBe(me);
     expect(value.saved).toHaveLength(2);
+  });
+  it('keeps a previously focused unrelated control after click-first owner activation', async () => {
+    const session = structuredClone(demo) as Session;
+    for (const item of Object.values(session.items)) if (item) item.owner = { kind: 'other', name: 'Native collaborator' };
+    session.items['1.1']!.owner = { kind: 'me' };
+    let finish!: () => void;
+    const completion = new Promise<void>(resolve => { finish = resolve; }), value = await setup(session, preferences(), completion);
+    render(<><button>Existing focus target</button><value.Composition /></>);
+    const existing = screen.getByRole('button', { name: 'Existing focus target' }); existing.focus();
+    const me = within(screen.getByRole('group', { name: 'Item owner' })).getByRole<HTMLButtonElement>('button', { name: 'Me' });
+    act(() => { me.click(); });
+    expect(me.disabled).toBe(true); me.focus();
+    expect(document.activeElement).toBe(existing);
+    await act(async () => { finish(); });
+    expect(me.getAttribute('aria-pressed')).toBe('true'); expect(document.activeElement).toBe(existing);
+    expect(value.saved).toHaveLength(1);
   });
   it.each([false, true])('cancels owner focus after a deliberate move during save, then blur=%s', async blur => {
     const session = structuredClone(demo) as Session;
