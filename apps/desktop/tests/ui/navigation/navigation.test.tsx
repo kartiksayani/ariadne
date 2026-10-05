@@ -208,6 +208,27 @@ describe('canonical preference mutations', () => {
     expect(store.getSnapshot().pendingOperationId).toBe(outcome === 'uncertain' || outcome === 'stopped' ? operationId : null);
     expect(store.getSnapshot().preferences?.sessions[0].scroll).toEqual(outcome === 'confirmed' ? edit.scroll : prefs.sessions[0].scroll);
   });
+  it('settles a revision_conflict as current, unblocked and reported only for that rejection', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
+    const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);
+    const edit = structuredClone(prefs.sessions[0]); edit.scroll = { item_id: '1', offset: 12 };
+    const saved = store.saveSessionView(edit, prefs.revision);
+    await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
+    const completion = store.getWritingCompletion()!;
+    expect(store.settledAsConflict(completion)).toBe(false);
+    read(transport, preferences(prefs.revision + 1));
+    held.resolve({ api_version: 1, ok: false, error: { ...error, code: 'revision_conflict', current_revision: 2 } });
+    expect(await saved).toBe(false);
+    expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: null });
+    expect(store.getSnapshot().error).toMatchObject({ error: { code: 'revision_conflict' } });
+    expect(store.settledAsConflict(completion)).toBe(true);
+    const next = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', next.promise);
+    const again = store.saveSessionView(edit, prefs.revision + 1);
+    await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
+    expect(store.settledAsConflict(store.getWritingCompletion()!)).toBe(false);
+    expect(store.settledAsConflict(completion)).toBe(true);
+    next.resolve(patchReceipt()); await again;
+  });
   it('cancels older unsubmitted intent on a current busy navigation attempt while ignoring stale callbacks', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
     const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);

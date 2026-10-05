@@ -137,9 +137,12 @@ function Workspace({ application }: { application: Application }) {
     // Leaving the tree can save its scroll anchor while this enabled link is
     // being resolved. Retain only this current, unsubmitted navigation intent.
     if (completion) {
-      if (!await completion) return null;
+      const saved = await completion;
       const current = navigation.getSnapshot();
-      if (current.writing || current.pendingOperationId !== null || current.error) return null;
+      // A write that definitely failed with revision_conflict was cleared and refreshed by the store,
+      // so this one explicit click proceeds against current state. Everything else stays refused.
+      if (!saved && !navigation.settledAsConflict(completion)) return null;
+      if (current.writing || current.pendingOperationId !== null || (saved && current.error)) return null;
     }
     if (intent === null || navigation.getNavigationIntent() !== intent || navigation.getNavigationRequest() !== navigationRequest
       || shortcutSequence.current !== token) return null;

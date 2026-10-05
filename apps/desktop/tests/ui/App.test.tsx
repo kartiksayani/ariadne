@@ -444,6 +444,57 @@ describe('ordinary desktop composition', () => {
     if (outcome !== 'confirmed') expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(false);
   });
+  it.each(['revision_conflict', 'commit_uncertain'] as const)('after a %s on the blur write, the fork click proceeds only for a definite conflict', async code => {
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.matches('[role="treeitem"]') ? new DOMRect(0, 20, 300, 40) : rectangle.call(this);
+    });
+    const { transport } = setup(), invoke = transport.invoke.bind(transport);
+    let release!: () => void, entered = false, rejected = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if ('request' in request && request.request.command === 'item_rounds' && request.request.params.item_id === '1') {
+        const session = transport.sessions.get(route.session_id)!;
+        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: page(projections(session).rounds, session.revision) } } };
+      }
+      if (!rejected && 'command' in request && request.command.command === 'preferences_patch'
+        && request.command.params.entries.every(entry => entry.kind === 'set_session_view' && entry.preferences.scroll !== null)) {
+        entered = true; await gate; rejected = true; transport.mutations.push(structuredClone(request));
+        // A native-side writer advanced the document without notifying the renderer.
+        if (code === 'revision_conflict') ++transport.preferences.revision;
+        return { api_version: 1, ok: false, error: { code, message: 'Scroll edit rejected.', hint: 'Choose the view again.',
+          retryable: false, field_errors: [] } };
+      }
+      return invoke(name, args);
+    });
+    await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
+    await screen.findByLabelText('Owner input for #1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
+    await act(async () => { parent.focus(); });
+    const fork = await screen.findByRole('button', { name: /^Fork · Item 1\.1/ });
+    await act(async () => { fireEvent.click(fork); fork.focus(); });
+    await waitFor(() => expect(entered).toBe(true));
+    await act(async () => { release(); await gate; });
+    const selections = () => mutations(transport, 'preferences_patch').filter(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'));
+    if (code === 'revision_conflict') {
+      await screen.findByLabelText('Owner input for #1.1');
+      expect(selections()).toHaveLength(1);
+      const selection = selections()[0].command;
+      expect(selection.command === 'preferences_patch' && selection.params.expected_preferences_revision).toBe(transport.preferences.revision - 1);
+      expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
+    } else {
+      await screen.findByRole('button', { name: 'Reconcile operation' });
+      const writes = mutations(transport, 'preferences_patch').length;
+      expect(screen.queryByLabelText('Owner input for #1.1')).toBeNull();
+      expect(selections()).toHaveLength(0);
+      expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
+      expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+    }
+  });
   it.each(['parent selection', 'tab close', 'read failure'])('cancels a waiting detail link after %s during catalogue completion', async outcome => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);

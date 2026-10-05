@@ -51,6 +51,8 @@ export class NavigationStore {
   private activeMutation: Promise<boolean> | null = null;
   // Reconciled reads recover their own errors, not the last rejected edit.
   private mutationFailure: Failure | null = null;
+  // Write operations that settled with a definite revision_conflict (already cleared and refreshed).
+  private readonly conflicted = new WeakSet<Promise<boolean>>();
   private readonly reconcile = () => { void this.refresh(); };
   private readonly visibility = () => { if (document.visibilityState === 'visible') this.reconcile(); };
 
@@ -66,6 +68,9 @@ export class NavigationStore {
   // Observe only the already executing write; uncertain operations still need
   // explicit reconciliation. This neither schedules nor retries a mutation.
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
+  // True only when this exact write operation settled with a definite revision_conflict, which
+  // the store has already cleared and refreshed. Uncertain and other rejections are never reported.
+  readonly settledAsConflict = (completion: Promise<boolean>) => this.conflicted.has(completion);
   readonly subscribe = (receive: () => void): Unsubscribe => {
     this.listeners.add(receive);
     return () => { this.listeners.delete(receive); };
@@ -316,14 +321,14 @@ export class NavigationStore {
     if (this.stopped || !pending || this.state.writing) return Promise.resolve(false);
     this.mutationFailure = null;
     ++this.epoch;
-    const operation = Promise.resolve().then(() => this.completeMutation(pending));
+    const operation: Promise<boolean> = Promise.resolve().then(() => this.completeMutation(pending, () => operation));
     this.activeMutation = operation;
     this.publish({ writing: true, pendingOperationId: pending.request.command.op_id, error: null });
     const clear = () => { if (this.activeMutation === operation) this.activeMutation = null; };
     void operation.then(clear, clear);
     return operation;
   }
-  private async completeMutation(pending: PendingMutation): Promise<boolean> {
+  private async completeMutation(pending: PendingMutation, operation: () => Promise<boolean>): Promise<boolean> {
     if (this.stopped) return false;
     try {
       const receipt = await this.service.executeOwner(pending.request);
@@ -348,7 +353,10 @@ export class NavigationStore {
       // Definitive typed rejection permits a new, explicitly chosen action.
       if (failure instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(failure.error.code)) this.pending = null;
       this.publish({ writing: false, pendingOperationId: this.pending?.request.command.op_id ?? null, error: failure });
-      if (failure instanceof CoreFailure && failure.error.code === 'revision_conflict') await this.refresh();
+      if (failure instanceof CoreFailure && failure.error.code === 'revision_conflict') {
+        this.conflicted.add(operation());
+        await this.refresh();
+      }
       return false;
     }
   }
