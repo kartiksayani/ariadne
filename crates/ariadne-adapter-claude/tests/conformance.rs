@@ -152,6 +152,91 @@ fn executable_file(path: &Path, bytes: &str) {
 }
 
 #[test]
+fn observation_qualification_child_process() {
+    use std::io::Read;
+    let Some(path) = std::env::var_os("ARIADNE_OBSERVATION_BARRIER") else {
+        return;
+    };
+    let mut stream = std::os::unix::net::UnixStream::connect(path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream.read_exact(&mut [0]).unwrap();
+}
+
+#[test]
+fn clearing_retained_evidence_during_qualification_emits_unknown_without_renewing_heartbeat() {
+    use std::io::Write;
+    use std::os::unix::net::UnixListener;
+
+    let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+    let barrier = tempfile::tempdir_in("/tmp").unwrap();
+    let path = barrier.path().join("qualification.sock");
+    let shell_path =
+        |path: &Path| format!("'{}'", path.display().to_string().replace('\'', "'\\''"));
+    executable_file(
+        &fixture.options.helper,
+        &format!(
+            "#!/bin/sh\nif [ -S {socket} ]; then ARIADNE_OBSERVATION_BARRIER={socket} {test} --exact observation_qualification_child_process >/dev/null || exit 4; fi\nprintf 'ariadne 0.1.0\\n'\n",
+            socket = shell_path(&path),
+            test = shell_path(&std::env::current_exe().unwrap()),
+        ),
+    );
+    fixture.publish();
+    let adapter = fixture.adapter();
+    wait(adapter.connect(connect())).unwrap();
+
+    let listener = UnixListener::bind(&path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let pending = adapter.observe(observe());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut qualification = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    Instant::now() < deadline,
+                    "observation did not qualify its retained snapshot"
+                );
+                std::thread::park_timeout(Duration::from_millis(10));
+            }
+            Err(error) => panic!("qualification barrier failed: {error}"),
+        }
+    };
+    // The native worker has already retained the fresh evidence and reached its
+    // actual helper version probe. Clear the slot before that probe completes.
+    fs::remove_file(path).unwrap();
+    fixture.slot.clear().unwrap();
+    qualification.write_all(&[1]).unwrap();
+    let result = wait(pending).unwrap();
+    result.validate_for(&observe()).unwrap();
+    assert_eq!(result.events.len(), 1);
+    let EventPayload::Presence { observation } = &result.events[0].event else {
+        panic!("presence expected after in-flight evidence invalidation")
+    };
+    assert_eq!(observation.instance_id, instance());
+    assert_eq!(observation.generation, generation());
+    assert_eq!(observation.connection_state, ConnectionState::Unknown);
+    assert_eq!(observation.execution_state, ExecutionState::Unknown);
+    assert_eq!(observation.freshness, Freshness::Unknown);
+    assert!(observation.last_seen_at.is_none());
+    assert!(observation.source.is_none());
+    assert!(observation.process_identity.is_none());
+    assert!(result.next_checkpoint.is_none());
+
+    // A genuinely new heartbeat restores presence on the existing connection.
+    fixture.publish();
+    let refreshed = wait(adapter.observe(observe())).unwrap();
+    let EventPayload::Presence { observation } = &refreshed.events[0].event else {
+        panic!("presence expected after a fresh heartbeat")
+    };
+    assert_eq!(observation.instance_id, instance());
+    assert_eq!(observation.generation, generation());
+    assert_eq!(observation.connection_state, ConnectionState::Connected);
+    assert_eq!(observation.freshness, Freshness::Fresh);
+}
+
+#[test]
 fn original_expired_connect_deadline_starts_no_resource_probe() {
     let fixture = Fixture::new("2.1.287 (Claude Code)");
     fixture.publish();

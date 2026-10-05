@@ -480,8 +480,16 @@ fn sorted(value: Value) -> Value {
 }
 
 pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, StoreError> {
-    // Probe only for an actionable future-version error; final typed decode
-    // rejects duplicate keys, unknown fields and all lexical/shape violations.
+    // Internal callers are strict versioned Project, Session, registry Projects
+    // or BindingIndex DTOs, all requiring SchemaVersion(1). Successful typed
+    // decoding therefore proves the current version without building a second
+    // generic Value tree. Do not use this helper with permissive/unversioned T.
+    if let Ok(value) = serde_json::from_slice::<T>(bytes) {
+        return Ok(value);
+    }
+    // Preserve the existing diagnostic precedence on typed failure, including
+    // Value's last-key semantics for duplicate schema_version fields. The typed
+    // decoder still rejects duplicate keys, unknown fields and invalid shapes.
     if serde_json::from_slice::<Value>(bytes)
         .ok()
         .and_then(|value| value.get("schema_version").and_then(Value::as_u64))
@@ -489,8 +497,12 @@ pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, 
     {
         return Err(StoreError::FutureSchema);
     }
-    serde_json::from_slice(bytes).map_err(|_| StoreError::InvalidSnapshot)
+    Err(StoreError::InvalidSnapshot)
 }
+
+#[cfg(test)]
+#[path = "tests/decode.rs"]
+mod decode_tests;
 
 fn uncertain_operation(error: StoreError, operation_id: &UuidV4) -> StoreError {
     match error {
