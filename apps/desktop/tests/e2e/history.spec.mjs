@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { historyFailureFacts, withFailureEvidence } from './history-evidence.mjs';
 import { admissions, cliRequest, completeTurn, journeyResultRequest, snapshot } from './scripted-provider.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
@@ -10,8 +11,18 @@ const evidence = () => process.env.ARIADNE_E2E_EVIDENCE;
 const request = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
 const detail = () => browser.$('.item-history');
-export async function waitForHistoryItem(item) {
-  await wait(() => browser.execute(expected => {
+const failureEvidence = (label, action, expected = null) => withFailureEvidence(action, async error => {
+  const dom = await browser.execute(historyFailureFacts);
+  let canonical;
+  try {
+    const preferences = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot;
+    canonical = { revision: preferences.revision, selectedNavigation: preferences.global.selected_navigation,
+      sessions: preferences.sessions.map(value => ({ session: value.session, selectedItemId: value.selected_item_id })) };
+  } catch (reading) { canonical = { unreadable: String(reading) }; }
+  await writeFile(join(evidence(), `history-failure-${label}.json`), JSON.stringify({ failedWait: label, error: String(error?.message ?? error), expected, dom, canonical }, null, 2));
+});
+export async function waitForHistoryItem(item, label = 'history-item') {
+  await failureEvidence(label, () => wait(() => browser.execute(expected => {
     const header = document.querySelector('.item-history > .history-header > strong');
     const question = document.querySelector('.item-history > h2');
     const source = [...document.querySelectorAll('.item-history > .history-meta')]
@@ -19,7 +30,8 @@ export async function waitForHistoryItem(item) {
     return header?.textContent === `Item ${expected.id}` && question?.textContent === expected.question
       && (expected.source_round_id === null || source);
   }, { id: item.id, question: item.question, source_round_id: item.source_round_id }),
-  'Native detail did not reveal the registered item, complete question and correlated source round');
+  'Native detail did not reveal the registered item, complete question and correlated source round'),
+  { id: item.id, question: item.question, source_round_id: item.source_round_id });
 }
 const inputs = session => Object.values(session.inputs).sort((a, b) => a.seq - b.seq);
 const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
@@ -130,7 +142,7 @@ async function answer(history, ordinal, text) {
   if (await review.isExisting()) { await review.waitForEnabled(); await review.scrollIntoView(); await review.click(); }
   if (ordinal % 2) { const choice = await browser.$('.owner-input').$(`button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.scrollIntoView(); await choice.click(); }
   await editor.scrollIntoView(); await editor.setValue(text);
-  const send = await browser.$('.owner-input .ref-send-row button'); await send.waitForEnabled(); await send.scrollIntoView(); await send.click();
+  const send = await browser.$('.owner-input .ref-send-row button'); await failureEvidence('owner-input-send-first', () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
   await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal,
     'A genuine native round answer did not persist and reach its isolated host');
 }
@@ -193,7 +205,7 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
   assert.equal((await browser.$$('button.history-fork')).length, 2);
   for (const id of ['1.1', '1.2']) {
     const fork = await browser.$(`button.history-fork*=Fork · Item ${id}`); await fork.scrollIntoView(); await fork.click();
-    await waitForHistoryItem(saved.items[id]);
+    await waitForHistoryItem(saved.items[id], `after-fork-${id}`);
     assert.ok((await detail().getText()).includes(saved.items[id].source_round_id));
     await selectParent(saved.items['1']);
   }
@@ -233,7 +245,9 @@ export async function closeHistoryRailReferences(message) {
 }
 async function rail(history, saved, paged) {
   const toggle = await browser.$('button=Messages (m)');
-  if (!(await browser.$('.rail-messages').isExisting())) { await toggle.waitForEnabled(); await toggle.scrollIntoView(); await toggle.click(); }
+  if (!(await browser.$('.rail-messages').isExisting())) {
+    await failureEvidence('rail-messages-toggle', () => toggle.waitForEnabled()); await toggle.scrollIntoView(); await toggle.click();
+  }
   await wait(async () => (await browser.$$('.rail-messages [data-message-id]')).length === saved.messages.length, 'Rail did not load every actual canonical message page');
   const visible = await renderedBodies('.rail-messages [data-message-id]');
   assert.equal(new Set(visible.map(value => value.id)).size, saved.messages.length);
@@ -282,7 +296,7 @@ async function rail(history, saved, paged) {
   const reply = await browser.$('[aria-label="Owner actions"]').$('button=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const another = await browser.$('.owner-input').$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
-  const editor = await browser.$('.owner-input textarea'); await editor.waitForEnabled();
+  const editor = await browser.$('.owner-input textarea'); await failureEvidence('owner-input-editor-first', () => editor.waitForEnabled());
   const draft = `Unsent native history draft ${process.env.ARIADNE_E2E_NONCE}\nKeep focus and every word.`;
   await editor.scrollIntoView(); await editor.setValue(draft);
   const paused = await railState(); assert.equal(paused.focused, true); assert.equal(paused.draft, draft);
@@ -362,10 +376,10 @@ export async function runHistoryAcceptance(configuration) {
   for (const [intent, ordinal] of [['followup', 6], ['reopen', 7]]) {
     const control = await browser.$('.history-actions').$(`button=${intent === 'followup' ? 'Follow up' : 'Request reopen'}`);
     await control.scrollIntoView(); await control.waitForEnabled(); await control.click();
-    const editor = await browser.$('.owner-input textarea'); await editor.waitForEnabled();
+    const editor = await browser.$('.owner-input textarea'); await failureEvidence(`owner-input-editor-${intent}`, () => editor.waitForEnabled());
     const text = `Native ${intent} after closed history\nThe owner's deliberate request leaves the status unchanged.`;
     await editor.scrollIntoView(); await editor.setValue(text);
-    const send = await browser.$('.owner-input .ref-send-row button'); await send.waitForEnabled(); await send.scrollIntoView(); await send.click();
+    const send = await browser.$('.owner-input .ref-send-row button'); await failureEvidence(`owner-input-send-${intent}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
     await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal, 'Closed-item deliberate owner intent did not reach its isolated host');
     saved = await snapshot(history); assert.equal(saved.items['1'].status, 'done'); assert.equal(inputs(saved)[ordinal - 1].kind, intent);
     const extra = intent === 'reopen' ? [{ op: 'item.status', item: { id: '1' }, status: 'open', outcome: null, why: null, reason: 'The owner explicitly requested native reopening.' }] : [];
