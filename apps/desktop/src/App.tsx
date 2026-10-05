@@ -132,6 +132,17 @@ function Workspace({ application }: { application: Application }) {
   const reveal = async (result: RevealedItem, ownerToken?: number) => {
     if (ownerToken === undefined) invalidateOwnerRequest();
     const token = ownerToken ?? shortcutSequence.current;
+    const intent = navigation.getNavigationIntent(), completion = navigation.getWritingCompletion();
+    const navigationRequest = navigation.getNavigationRequest();
+    // Leaving the tree can save its scroll anchor while this enabled link is
+    // being resolved. Retain only this current, unsubmitted navigation intent.
+    if (completion) {
+      if (!await completion) return false;
+      const current = navigation.getSnapshot();
+      if (current.writing || current.pendingOperationId !== null || current.error) return false;
+    }
+    if (intent === null || navigation.getNavigationIntent() !== intent || navigation.getNavigationRequest() !== navigationRequest
+      || shortcutSequence.current !== token) return false;
     const target = result.kind === 'item' ? result.route : result.session;
     const opened = navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result, ownerToken === undefined ? undefined : () => shortcutSequence.current === ownerToken);
     const request = navigation.getNavigationRequest();

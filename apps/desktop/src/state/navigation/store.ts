@@ -9,6 +9,7 @@ import { initialExpansion } from '../../selectors/tree/rows';
 import * as catalogue from './catalogue';
 
 type Failure = CoreFailure | ServiceFailure;
+type PendingMutation = { request: OwnerMutationRequest; confirmed: (receipt: MutationReceipt) => void };
 type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' }>;
 export interface NavigationState {
   readonly preferences: Immutable<PreferencesSnapshot> | null;
@@ -40,12 +41,14 @@ export class NavigationStore {
   private stopped = false;
   private epoch = 0;
   private navigationRequest = 0;
+  private navigationIntent = 0;
   private preferencesFloor = 0;
   private startupRoute: { selection: NavigationSelection; reveal: RevealedItem | null } | null = null;
   private startupRoutes = false;
   private startupRouteFlight = false;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private pending: { request: OwnerMutationRequest; confirmed: (receipt: MutationReceipt) => void } | null = null;
+  private pending: PendingMutation | null = null;
+  private activeMutation: Promise<boolean> | null = null;
   // Reconciled reads recover their own errors, not the last rejected edit.
   private mutationFailure: Failure | null = null;
   private readonly reconcile = () => { void this.refresh(); };
@@ -57,6 +60,12 @@ export class NavigationStore {
   }
   readonly getSnapshot = () => this.state;
   readonly getNavigationRequest = () => this.navigationRequest;
+  // A current navigation attempt cancels older unsubmitted UI intent even when
+  // the canonical writer cannot admit it. Dispatch/startup ordering is separate.
+  readonly getNavigationIntent = () => this.stopped ? null : this.navigationIntent;
+  // Observe only the already executing write; uncertain operations still need
+  // explicit reconciliation. This neither schedules nor retries a mutation.
+  readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
   readonly subscribe = (receive: () => void): Unsubscribe => {
     this.listeners.add(receive);
     return () => { this.listeners.delete(receive); };
@@ -231,7 +240,9 @@ export class NavigationStore {
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   async navigate(selection: NavigationSelection, reveal: RevealedItem | null = null, isCurrent: () => boolean = () => true): Promise<boolean> {
-    if (this.stopped || this.pending || !isCurrent()) return false;
+    if (this.stopped || !isCurrent()) return false;
+    ++this.navigationIntent;
+    if (this.pending) return false;
     this.startupRoute = null;
     const request = ++this.navigationRequest;
     try {
@@ -300,12 +311,20 @@ export class NavigationStore {
     this.pending = { request: structuredClone(request), confirmed };
     return this.retryMutation();
   }
-  async retryMutation(): Promise<boolean> {
+  retryMutation(): Promise<boolean> {
     const pending = this.pending;
-    if (this.stopped || !pending || this.state.writing) return false;
+    if (this.stopped || !pending || this.state.writing) return Promise.resolve(false);
     this.mutationFailure = null;
     ++this.epoch;
+    const operation = Promise.resolve().then(() => this.completeMutation(pending));
+    this.activeMutation = operation;
     this.publish({ writing: true, pendingOperationId: pending.request.command.op_id, error: null });
+    const clear = () => { if (this.activeMutation === operation) this.activeMutation = null; };
+    void operation.then(clear, clear);
+    return operation;
+  }
+  private async completeMutation(pending: PendingMutation): Promise<boolean> {
+    if (this.stopped) return false;
     try {
       const receipt = await this.service.executeOwner(pending.request);
       if (this.stopped) return false;

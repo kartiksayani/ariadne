@@ -8,6 +8,7 @@ import { WaitingStore } from '../../src/selectors/waiting/store';
 import { MessageRail } from '../../src/components/rail/MessageRail';
 import { NavigationSentenceTree } from '../../src/components/tree/NavigationSentenceTree';
 import { AppTransport, route, secondId } from './app/transport';
+import { page, projections } from './history/fixtures';
 
 vi.mock('react-dom/client', async importOriginal => {
   const actual = await importOriginal<typeof ReactDOM>();
@@ -348,6 +349,140 @@ describe('ordinary desktop composition', () => {
     await act(async () => { release(); await gate; });
     await waitFor(() => expect(mutations(transport, 'input_submit')).toHaveLength(1));
     expect(mutations(transport, 'input_submit')[0].command).toMatchObject({ params: { text } });
+  });
+  it.each([
+    { ordering: 'click then focus', outcome: 'confirmed' },
+    { ordering: 'focus then click', outcome: 'confirmed' },
+    { ordering: 'click then focus', outcome: 'uncertain' },
+    { ordering: 'click then focus', outcome: 'rejected' },
+    { ordering: 'click then focus', outcome: 'shortcut' },
+    { ordering: 'click then focus', outcome: 'native route' },
+    { ordering: 'click then focus', outcome: 'stopped' },
+  ])('admits only the current enabled fork after its blur write: $ordering / $outcome', async ({ ordering, outcome }) => {
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.matches('[role="treeitem"]') ? new DOMRect(0, 20, 300, 40) : rectangle.call(this);
+    });
+    const { transport, unmount } = setup(), invoke = transport.invoke.bind(transport);
+    let release!: () => void, entered = false, reject = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if ('request' in request && request.request.command === 'item_rounds' && request.request.params.item_id === '1') {
+        const session = transport.sessions.get(route.session_id)!;
+        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: page(projections(session).rounds, session.revision) } } };
+      }
+      if ('command' in request && request.command.command === 'preferences_patch'
+        && request.command.params.entries.every(entry => entry.kind === 'set_session_view' && entry.preferences.scroll !== null)) {
+        entered = true; await gate;
+        if (reject) {
+          reject = false; transport.mutations.push(structuredClone(request));
+          return { api_version: 1, ok: false, error: { code: 'invalid_transition', message: 'Scroll edit rejected.',
+            hint: 'Choose the view again.', retryable: false, field_errors: [] } };
+        }
+      }
+      return invoke(name, args);
+    });
+    await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
+    await screen.findByLabelText('Owner input for #1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
+    await act(async () => { parent.focus(); });
+    expect(document.activeElement).toBe(parent);
+    const fork = await screen.findByRole('button', { name: /^Fork · Item 1\.1/ });
+    expect(fork.hasAttribute('disabled')).toBe(false);
+    await act(async () => {
+      if (ordering === 'click then focus') { fireEvent.click(fork); fork.focus(); }
+      else { fork.focus(); fireEvent.click(fork); }
+    });
+    await waitFor(() => expect(entered).toBe(true));
+    expect(screen.getByLabelText('Search sentences').hasAttribute('disabled')).toBe(true);
+    expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '1.1')).toBe(true);
+    if (outcome === 'uncertain') transport.failNext = 'preferences_patch';
+    if (outcome === 'rejected') reject = true;
+    if (outcome === 'shortcut') {
+      await act(async () => { fireEvent.keyDown(parent, { key: 'r' }); });
+    }
+    if (outcome === 'native route') {
+      await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '2' }); });
+      expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '2')).toBe(true);
+    }
+    if (outcome === 'stopped') unmount();
+    await act(async () => { release(); await gate; });
+    if (outcome === 'stopped') {
+      expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+      expect(document.querySelector('.product-app')).toBeNull();
+    } else if (outcome === 'confirmed') {
+      await waitFor(() => expect(screen.getByLabelText('Search sentences').hasAttribute('disabled')).toBe(false));
+      await screen.findByLabelText('Owner input for #1.1');
+      expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
+      expect(transport.preferences.sessions[0].scroll).toEqual({ item_id: '1', offset: 20 });
+    } else {
+      if (outcome === 'uncertain') {
+        const reconcile = await screen.findByRole('button', { name: 'Reconcile operation' });
+        const frozen = structuredClone(mutations(transport, 'preferences_patch').at(-1));
+        expect(screen.queryByLabelText('Owner input for #1.1')).toBeNull();
+        fireEvent.click(reconcile);
+        await waitFor(() => expect(screen.getByLabelText('Search sentences').hasAttribute('disabled')).toBe(false));
+        expect(mutations(transport, 'preferences_patch').at(-1)).toEqual(frozen);
+      } else if (outcome === 'shortcut') await screen.findByLabelText('Follow up message');
+      else await waitFor(() => expect(screen.getByLabelText('Search sentences').hasAttribute('disabled')).toBe(false));
+      expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+      expect(screen.queryByLabelText('Owner input for #1.1')).toBeNull();
+    }
+    if (outcome !== 'confirmed') expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(false);
+  });
+  it.each(['parent selection', 'tab close', 'read failure'])('cancels a waiting detail link after %s during catalogue completion', async outcome => {
+    const { transport } = setup(); await openSession();
+    fireEvent.click(document.querySelector('[data-item-id="1"]')!);
+    await screen.findByLabelText('Owner input for #1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    let releaseWrite!: () => void, releaseRead!: () => void, writing = false, reading = false, completed = false;
+    const writeGate = new Promise<void>(resolve => { releaseWrite = resolve; });
+    const readGate = new Promise<void>(resolve => { releaseRead = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.theme === 'light')) {
+        writing = true; await writeGate;
+      }
+      const hold = 'request' in args.request && args.request.request.command === 'project_list'
+        && transport.preferences.global.theme === 'light' && !reading;
+      if (hold) { reading = true; await readGate; }
+      if (hold && outcome === 'read failure') { completed = true; throw new Error('Catalogue read unavailable'); }
+      const response = await invoke(name, args);
+      if (hold) completed = true;
+      return response;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Theme: system' }));
+    await waitFor(() => expect(writing).toBe(true));
+    await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Item 1\.1/ })); });
+    expect(screen.getByLabelText('Search sentences').hasAttribute('disabled')).toBe(true);
+    await act(async () => { releaseWrite(); await writeGate; });
+    await waitFor(() => expect(reading).toBe(true));
+    const search = screen.getByLabelText('Search sentences');
+    await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
+    expect(completed).toBe(false);
+    if (outcome === 'parent selection') {
+      fireEvent.click(document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!);
+      await screen.findByLabelText('Owner input for #1');
+      await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
+    } else if (outcome === 'tab close') {
+      fireEvent.click(screen.getByRole('button', { name: /Close .* tab/ }));
+      await screen.findByRole('heading', { name: 'Projects' });
+    }
+    await act(async () => { releaseRead(); await readGate; });
+    await waitFor(() => expect(completed).toBe(true));
+    if (outcome === 'tab close') {
+      expect(screen.queryByLabelText('Owner input for #1')).toBeNull();
+      expect(transport.preferences.sessions[0].tab_open).toBe(false);
+    } else expect(screen.getByLabelText('Owner input for #1')).toBeTruthy();
+    if (outcome === 'read failure') expect(document.querySelector('.nav-banner[role="alert"]')).not.toBeNull();
+    expect(transport.preferences.global.theme).toBe('light');
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+    expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(false);
   });
   it('retains the newer parent selection when child navigation finishes its late catalogue read', async () => {
     const { transport } = setup(); await openSession();

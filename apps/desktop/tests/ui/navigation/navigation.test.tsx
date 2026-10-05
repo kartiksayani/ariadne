@@ -188,6 +188,42 @@ describe('complete registered navigation reads', () => {
 });
 
 describe('canonical preference mutations', () => {
+  it.each(['confirmed', 'uncertain', 'rejected', 'stopped'] as const)('exposes only the executing write completion when it is %s', async outcome => {
+    const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
+    const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);
+    const edit = structuredClone(prefs.sessions[0]); edit.scroll = { item_id: '1', offset: 12 };
+    expect(store.getWritingCompletion()).toBeNull();
+    const saved = store.saveSessionView(edit, prefs.revision);
+    await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
+    const completion = store.getWritingCompletion(); expect(completion).not.toBeNull();
+    expect(store.getWritingCompletion()).toBe(completion);
+    if (outcome === 'stopped') store.stop();
+    held.resolve(outcome === 'uncertain' || outcome === 'rejected'
+      ? { api_version: 1, ok: false, error: { ...error, code: outcome === 'uncertain' ? 'commit_uncertain' : 'invalid_transition' } }
+      : patchReceipt());
+    expect(await completion).toBe(outcome === 'confirmed');
+    expect(await saved).toBe(outcome === 'confirmed');
+    expect(store.getWritingCompletion()).toBeNull();
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    expect(store.getSnapshot().pendingOperationId).toBe(outcome === 'uncertain' || outcome === 'stopped' ? operationId : null);
+    expect(store.getSnapshot().preferences?.sessions[0].scroll).toEqual(outcome === 'confirmed' ? edit.scroll : prefs.sessions[0].scroll);
+  });
+  it('cancels older unsubmitted intent on a current busy navigation attempt while ignoring stale callbacks', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
+    const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);
+    const saved = store.saveSessionView(prefs.sessions[0], prefs.revision);
+    await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
+    const intent = store.getNavigationIntent(), request = store.getNavigationRequest();
+    expect(await store.navigate({ kind: 'all_sessions' }, null, () => false)).toBe(false);
+    expect(store.getNavigationIntent()).toBe(intent);
+    expect(await store.navigate({ kind: 'all_sessions' })).toBe(false);
+    expect(store.getNavigationIntent()).toBe(intent! + 1);
+    expect(store.getNavigationRequest()).toBe(request);
+    held.resolve(patchReceipt()); expect(await saved).toBe(true);
+    store.stop(); expect(store.getNavigationIntent()).toBeNull();
+    expect(await store.navigate({ kind: 'projects' })).toBe(false);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+  });
   it('closing a tab preserves all view settings and drafts and sends only preference entries', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
     read(transport, prefs); await store.start();
