@@ -100,7 +100,9 @@ impl State {
         }
         match probe::resource_identity(&self.options, &evidence, deadline) {
             Ok(_) => {
-                self.current_evidence(&evidence, deadline)?;
+                if !self.current_evidence(&evidence, deadline)? {
+                    return Ok(unknown(version, "Mod evidence was cleared during inspection; refresh the original conversation's heartbeat."));
+                }
                 Ok(ProbeResult {
                     host_version: Some(version),
                     compatibility: Compatibility::Compatible,
@@ -156,26 +158,28 @@ impl State {
         deadline: Instant,
     ) -> Result<EndpointFingerprint, AdapterError> {
         let fingerprint = probe::qualify(&self.options, evidence, deadline)?;
-        self.current_evidence(evidence, deadline)?;
+        if !self.current_evidence(evidence, deadline)? {
+            return Err(unavailable());
+        }
         Ok(fingerprint)
     }
     fn current_evidence(
         &self,
         evidence: &ModEvidence,
         deadline: Instant,
-    ) -> Result<(), AdapterError> {
+    ) -> Result<bool, AdapterError> {
         probe::check_deadline(deadline)?;
         if !fresh(evidence) {
             return Err(unavailable());
         }
-        if self
-            .evidence
-            .snapshot()?
-            .is_none_or(|current| current.identity != evidence.identity)
-        {
-            return Err(error(AdapterErrorCode::BindingMismatch, "Mod identity changed or disappeared during native qualification; refresh and recover explicitly"));
+        match self.evidence.snapshot()? {
+            None => Ok(false),
+            Some(current) if current.identity == evidence.identity => Ok(true),
+            Some(_) => Err(error(
+                AdapterErrorCode::BindingMismatch,
+                "Mod identity changed during native qualification; refresh and recover explicitly",
+            )),
         }
-        Ok(())
     }
     fn observe(
         &self,
@@ -186,16 +190,22 @@ impl State {
         if request.checkpoint.is_some() {
             return Err(error(AdapterErrorCode::InvalidArgument, "Claude native presence has no lifecycle checkpoint; explicitly reconcile persisted attempts after restart"));
         }
-        let evidence = self.evidence.snapshot()?;
+        let mut evidence = self.evidence.snapshot()?;
         if let Some(evidence) = evidence.as_ref() {
             check_evidence_scope(evidence, connection)?;
         }
-        if let Some(evidence) = evidence.as_ref().filter(|evidence| fresh(evidence)) {
-            if self.qualify(evidence, deadline)? != *identity {
+        if let Some(snapshot) = evidence.as_ref().filter(|evidence| fresh(evidence)) {
+            if probe::qualify(&self.options, snapshot, deadline)? != *identity {
                 return Err(error(
                     AdapterErrorCode::BindingMismatch,
                     "Claude qualified resource/executable identity changed; recover explicitly",
                 ));
+            }
+            // Wake can clear the slot while the owned snapshot is inspected.
+            // Successful identity/resource checks do not renew that snapshot:
+            // report Unknown and keep the connected supervisor for a heartbeat.
+            if !self.current_evidence(snapshot, deadline)? {
+                evidence = None;
             }
         }
         let observation = self.presence(request.generation.clone(), evidence.as_deref());

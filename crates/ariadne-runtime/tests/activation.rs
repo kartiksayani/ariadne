@@ -46,6 +46,25 @@ struct Fixture {
     options: ClaudeOptions,
     loaded: PathBuf,
 }
+struct ReleaseQualification(std::os::unix::net::UnixStream);
+impl Drop for ReleaseQualification {
+    fn drop(&mut self) {
+        use std::io::Write;
+        let _ = self.0.write_all(&[1]);
+    }
+}
+#[test]
+fn qualification_version_child_process() {
+    use std::io::Read;
+    let Some(path) = std::env::var_os("ARIADNE_QUALIFICATION_BARRIER") else {
+        return;
+    };
+    let mut stream = std::os::unix::net::UnixStream::connect(path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream.read_exact(&mut [0]).unwrap();
+}
 impl Fixture {
     fn new() -> Self {
         let files = home();
@@ -55,11 +74,24 @@ impl Fixture {
         fs::create_dir(&project).unwrap();
         let executable = files.path().join("claude");
         let helper = files.path().join("ariadne");
+        let barrier = files.path().join("qualification.sock");
+        let shell_path = |path: &std::path::Path| {
+            format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+        };
         for (path, version) in [
             (&executable, "2.1.287 (Claude Code)"),
             (&helper, "ariadne 0.1.0"),
         ] {
-            fs::write(path, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' '{version}'\n")).unwrap();
+            let pause = if path == &helper {
+                format!(
+                    "if [ -S {socket} ]; then ARIADNE_QUALIFICATION_BARRIER={socket} {test} --exact qualification_version_child_process >/dev/null || exit 4; fi\n",
+                    socket = shell_path(&barrier),
+                    test = shell_path(&std::env::current_exe().unwrap()),
+                )
+            } else {
+                String::new()
+            };
+            fs::write(path, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n{pause}printf '%s\\n' '{version}'\n")).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
         }
         for root in [&installed, &loaded] {
@@ -93,6 +125,23 @@ impl Fixture {
                 app_version: "0.1.0".into(),
             },
         }
+    }
+    fn pause_qualification(&self, rt: &tokio::runtime::Runtime) -> ReleaseQualification {
+        let path = self._files.path().join("qualification.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let stream = rt.block_on(async {
+            let listener = tokio::net::UnixListener::from_std(listener).unwrap();
+            tokio::time::timeout(Duration::from_secs(3), listener.accept())
+                .await
+                .unwrap()
+                .unwrap()
+                .0
+        });
+        fs::remove_file(path).unwrap();
+        let stream = stream.into_std().unwrap();
+        stream.set_nonblocking(false).unwrap();
+        ReleaseQualification(stream)
     }
     fn announcement(&self, scope: Option<BindingScope>) -> SessionAnnouncement {
         SessionAnnouncement {
@@ -206,13 +255,19 @@ fn claude_activation(terminal: bool) {
     let routes = ControlRoutes::new();
     let outcomes = Arc::new(Mutex::new(Vec::new()));
     let reported = outcomes.clone();
+    let (stopped, observed) = std::sync::mpsc::channel();
     let activation = NativeActivation::new(
         core.clone(),
         factory,
         owner.clone(),
         routes.clone(),
         rt.handle().clone(),
-        Arc::new(move |outcome| reported.lock().unwrap().push(outcome)),
+        Arc::new(move |outcome| {
+            if matches!(&outcome, ActivationOutcome::Stopped { .. }) {
+                let _ = stopped.send(());
+            }
+            reported.lock().unwrap().push(outcome);
+        }),
     );
     let server = ControlServer::bind_shared(owner.clone(), core.clone(), vec![])
         .unwrap()
@@ -383,6 +438,7 @@ fn claude_activation(terminal: bool) {
     );
     // Wake invalidation cannot renew the retained announcement's evidence. The
     // next independently qualified heartbeat must reuse the same active slot.
+    let qualification = files.pause_qualification(&rt);
     discovery.refresh_after_wake().unwrap();
     assert_eq!(
         activation
@@ -400,6 +456,12 @@ fn claude_activation(terminal: bool) {
             .code,
         CoreErrorCode::StaleGeneration
     );
+    drop(qualification);
+    assert_eq!(
+        observed.recv_timeout(Duration::from_secs(3)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+        "clearing evidence during observation must preserve the supervisor"
+    );
     rt.block_on(call(
         home.path().into(),
         wire_request(
@@ -409,6 +471,20 @@ fn claude_activation(terminal: bool) {
     ))
     .unwrap();
     assert_eq!(facts_ids.load(Ordering::SeqCst), ids_before);
+    // The refreshed evidence must be observed by that retained worker. Reaching
+    // another qualification proves progress past the interrupted observation;
+    // the heartbeat alone cannot prove the worker resumed its polling loop.
+    let qualification = files.pause_qualification(&rt);
+    assert!(outcomes.lock().unwrap().is_empty());
+    // Clear the evidence again before releasing the last process barrier. This
+    // also keeps later polls from starting fresh version subprocesses at Quit.
+    discovery.refresh_after_wake().unwrap();
+    drop(qualification);
+    assert_eq!(
+        observed.recv_timeout(Duration::from_secs(3)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+        "the retained worker must also survive its next observation"
+    );
     assert!(rt.block_on(call(home.path().into(), claim)).is_err());
     assert_eq!(
         rt.block_on(call(home.path().into(), control)).unwrap(),
@@ -466,6 +542,9 @@ fn claude_activation(terminal: bool) {
     );
     assert!(outcomes.lock().unwrap().iter().all(|outcome| matches!(outcome, ActivationOutcome::Stopped { exit: Ok(exit), .. } if exit.error.is_none() && exit.pending.is_none())));
     drop(activation);
+    // Async shutdown can cancel a waiter while its admitted blocking Core call
+    // retains the real lease. Drain this fixture's executor ownership first.
+    drop(rt);
     drop(owner);
     DesktopOwner::acquire(home.path()).unwrap();
     let event = ariadne_agent_protocol::NormalizedEvent {
@@ -493,6 +572,11 @@ fn claude_activation(terminal: bool) {
     if terminal {
         // Reopen real persisted Core/Store and construct a fresh activation. The
         // end receipt is authoritative before any host qualification or route.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(3)
+            .enable_all()
+            .build()
+            .unwrap();
         let allocated = facts_ids.clone();
         let reopened = Arc::new(NativeCoreService::new(
             AgentResolver::open_data_directory(home.path()).unwrap(),

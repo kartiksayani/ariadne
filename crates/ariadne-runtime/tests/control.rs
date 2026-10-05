@@ -91,9 +91,22 @@ fn raw(home: &Path, bytes: &[u8], declared: usize) -> Option<serde_json::Value> 
     stream
         .set_write_timeout(Some(Duration::from_secs(2)))
         .unwrap();
-    stream.write_all(&(declared as u32).to_be_bytes()).unwrap();
-    if !bytes.is_empty() {
-        stream.write_all(bytes).unwrap();
+    let written = stream
+        .write_all(&(declared as u32).to_be_bytes())
+        .and_then(|()| stream.write_all(bytes));
+    if let Err(error) = written {
+        // Admission rejection can close the socket before either frame write.
+        // The peer's close is the same rejection observed by the read below.
+        assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+            ),
+            "request frame write failed without a peer close: {error}"
+        );
+        return None;
     }
     let mut length = [0; 4];
     if stream.read_exact(&mut length).is_err() {
@@ -163,6 +176,51 @@ fn shared_claim_receipts_replay_before_generation_and_preserve_barrier_errors_ov
         );
     }
 }
+#[test]
+fn shutdown_awaits_admitted_idle_handler_ownership_before_releasing_desktop_lease() {
+    let home = home();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let owner = Arc::new(DesktopOwner::acquire(home.path()).unwrap());
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let server = ControlServer::bind_shared(owner.clone(), core, vec![]).unwrap();
+    let (stop, stopped) = oneshot::channel();
+    rt.block_on(async {
+        let _idle = tokio::net::UnixStream::connect(home.path().join("run/control.sock"))
+            .await
+            .unwrap();
+        let mut serving = Box::pin(server.serve(stopped));
+        // Admission clones the actual desktop owner into the idle handler. A
+        // current-thread executor makes its cancellation cleanup ordering exact.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                result = &mut serving => panic!("server stopped before handler admission: {result:?}"),
+                _ = async {
+                    while Arc::strong_count(&owner) < 3 {
+                        tokio::task::yield_now().await;
+                    }
+                } => {},
+            }
+        })
+        .await
+        .unwrap();
+        stop.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), serving)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            Arc::strong_count(&owner),
+            1,
+            "serve returned before its admitted handler released desktop ownership"
+        );
+        drop(owner);
+        DesktopOwner::acquire(home.path()).unwrap();
+    });
+}
+
 #[test]
 fn ping_is_scoped_reachability_and_connection_status_uses_actual_core_binding() {
     let corpus = corpus();
