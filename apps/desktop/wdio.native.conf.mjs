@@ -1,4 +1,4 @@
-for (const key of ['ARIADNE_E2E_BINARY', 'ARIADNE_E2E_ROOT', 'ARIADNE_E2E_NONCE', 'ARIADNE_E2E_PORT', 'ARIADNE_E2E_EVIDENCE']) {
+for (const key of ['ARIADNE_E2E_BINARY', 'ARIADNE_E2E_ROOT', 'ARIADNE_E2E_NONCE', 'ARIADNE_E2E_PORT', 'ARIADNE_E2E_EVIDENCE', 'ARIADNE_E2E_PHASE']) {
   if (!process.env[key]) throw new Error(`Missing ${key}`);
 }
 const binary = process.env.ARIADNE_E2E_BINARY;
@@ -16,5 +16,5 @@ export const config = {
   }]],
   capabilities: [{ browserName: 'tauri', 'tauri:options': { application: binary, args: appArgs } }],
   connectionRetryTimeout: 60000, connectionRetryCount: 0,
-  waitforTimeout: 10000, specFileRetries: 0, mochaOpts: { timeout: 60000, parallel: false },
+  waitforTimeout: 10000, specFileRetries: 0, mochaOpts: { timeout: 240000, parallel: false },
 };

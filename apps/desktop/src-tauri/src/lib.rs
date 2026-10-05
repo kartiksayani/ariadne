@@ -9,6 +9,8 @@ use std::sync::{
 use tauri::Manager;
 pub mod commands;
 pub mod composition;
+#[cfg(feature = "e2e")]
+mod e2e_quit;
 pub mod native;
 pub mod watchers;
 
@@ -164,7 +166,7 @@ pub fn run() {
 
 fn desktop_handler<R: tauri::Runtime>(
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![
+    let handler: fn(tauri::ipc::Invoke<R>) -> bool = tauri::generate_handler![
         native_ping,
         native::routes::route_ready,
         native::notifications::notification_permission,
@@ -191,7 +193,21 @@ fn desktop_handler<R: tauri::Runtime>(
         commands::session_reopen,
         commands::topic_continue,
         commands::preferences_patch,
-    ]
+    ];
+    #[cfg(feature = "e2e")]
+    {
+        let quit: fn(tauri::ipc::Invoke<R>) -> bool =
+            tauri::generate_handler![e2e_quit::native_e2e_quit];
+        move |invoke: tauri::ipc::Invoke<R>| {
+            if invoke.message.command() == "native_e2e_quit" {
+                quit(invoke)
+            } else {
+                handler(invoke)
+            }
+        }
+    }
+    #[cfg(not(feature = "e2e"))]
+    handler
 }
 
 #[cfg(target_os = "macos")]
