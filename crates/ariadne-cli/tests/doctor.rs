@@ -299,7 +299,7 @@ fn explicit_versions_are_sanitized_and_unsupported_never_qualifies_a_host() {
     let claude = profile.home.path().join("claude");
     let codex = profile.home.path().join("codex");
     executable(&claude, "2.1.289 (Claude Code)");
-    executable(&codex, "codex-cli 0.161.0");
+    executable(&codex, "codex-cli 0.159.0");
     let options = Options {
         claude_bin: Some(claude.clone()),
         codex_bin: Some(codex.clone()),
@@ -312,9 +312,21 @@ fn explicit_versions_are_sanitized_and_unsupported_never_qualifies_a_host() {
     );
     assert_eq!(
         checks(&report, "codex.version")[0]["facts"]["detected_version"],
-        "0.161.0"
+        "0.159.0"
     );
     assert_eq!(checks(&report, "claude.version")[0]["status"], "warning");
+    assert_eq!(
+        checks(&report, "claude.version")[0]["facts"]["host_version_status"],
+        "untested"
+    );
+    assert_eq!(
+        checks(&report, "claude.version")[0]["message"],
+        "Claude Code 2.1.289 is newer than the tested 2.1.287; it should work, but has not been verified."
+    );
+    assert_eq!(
+        checks(&report, "codex.version")[0]["facts"]["host_version_status"],
+        "unsupported"
+    );
     assert!(checks(&report, "codex.daemon").is_empty());
     executable(&claude, "secret-body malformed");
     executable(&codex, "secret-body malformed");

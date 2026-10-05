@@ -160,8 +160,9 @@ P6 renders plugin/hooks/installed.js as a static ESM export of
 The source artifact exports null. The Mod uses supported plugin-local static
 imports and SDK argv/stdin calls, with no Node/filesystem/environment/PATH/cache
 fallback. Missing or mismatched resources give actionable local status and no
-connect/poll. Exact supported SDK engine2.1.287 remains required; observed CLI
-2.1.289 remains unqualified until new-version conformance and live existing-session proof.
+connect/poll. The SDK engine must equal the CLI version, 2.1.287 or newer; a
+newer version such as 2.1.289 or 2.2.0 is accepted and shown as untested until
+conformance and live existing-session proof exist (ADR-0071).
 
 Connect uses canonical owner receipts plus scoped BindingSummary to show the
 actual connection state. It does not invent canonical Connected from receipts

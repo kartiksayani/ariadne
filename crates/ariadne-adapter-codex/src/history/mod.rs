@@ -4,9 +4,10 @@ mod normalize;
 mod preflight;
 use crate::{
     generated::v0_160_0 as wire,
-    transport::{error, ExecutableIdentity, RpcClient, SocketIdentity},
+    transport::{error, ExecutableIdentity, RpcClient, SocketIdentity, SUPPORTED_CODEX_VERSION},
 };
 use ariadne_agent_protocol::{
+    host_version::{accepted_range, classify_host_version, untested_notice, HostVersionStatus},
     AdapterError, AdapterErrorCode as Code, Capabilities, Capability, ConnectRequest,
     ConnectResult, DeliveryMode, EndpointRef, PresenceObservation, ReconcileRequest,
     ReconcileResult, UtcMillis, UuidV4,
@@ -461,10 +462,12 @@ impl CodexHistoryClient {
         self.daemon.fence(result)
     }
 }
-fn supported_daemon(user_agent: &str) -> bool {
-    user_agent
-        .split_once(' ')
-        .is_some_and(|(product, _)| product == "codex-tui/0.160.0")
+/// Daemon `userAgent` is `codex-tui/<version> <platform...>`; apply the shared rule to it.
+fn daemon_version_status(user_agent: &str) -> Option<(String, HostVersionStatus)> {
+    let (product, _) = user_agent.split_once(' ')?;
+    let version = product.strip_prefix("codex-tui/")?;
+    classify_host_version(SUPPORTED_CODEX_VERSION, version)
+        .map(|status| (version.to_owned(), status))
 }
 fn bounded_identifier(id: &str) -> Result<(), AdapterError> {
     if id.is_empty() || id.len() > 4096 {
@@ -478,7 +481,10 @@ fn bounded_identifier(id: &str) -> Result<(), AdapterError> {
 fn read_capabilities() -> Capabilities {
     let yes = || Capability {
         supported: true,
-        conditions: vec!["Read-only, initialized Codex 0.160.0 existing daemon/thread.".to_owned()],
+        conditions: vec![format!(
+            "Read-only, initialized Codex {} existing daemon/thread.",
+            accepted_range(SUPPORTED_CODEX_VERSION)
+        )],
     };
     let no = || Capability {
         supported: false,

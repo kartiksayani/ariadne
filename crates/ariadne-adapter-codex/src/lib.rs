@@ -28,3 +28,4 @@ pub use history::{
     CodexDaemonReader, CodexHistoryClient, CodexHostFacts, CodexOptions, DiscoveryPage,
     HistoryScan, QualifiedCodexThread, ScanProgress, ThreadCandidate, UserMessageIdentity,
 };
+pub use transport::SUPPORTED_CODEX_VERSION;

@@ -169,7 +169,7 @@ export function validateDiscovery(snapshot: DesktopDiscoverySnapshot): void {
         || !(candidate.endpoint.kind === 'unix_socket' ? bounded(candidate.endpoint.path) : candidate.endpoint.kind === 'local_bridge' && bounded(candidate.endpoint.name))
         || (candidate.title !== null && (typeof candidate.title !== 'string' || candidate.title.includes('\0') || new TextEncoder().encode(candidate.title).length > 4096))
         || !['fresh', 'stale', 'historical', 'unknown'].includes(candidate.freshness)
-        || !['compatible', 'incompatible', 'unknown'].includes(candidate.compatibility)
+        || !['compatible', 'untested', 'incompatible', 'unknown'].includes(candidate.compatibility)
         || !['available', 'unavailable', 'unknown'].includes(candidate.availability)
         || typeof candidate.loaded !== 'boolean' || typeof candidate.observed_at !== 'string' || !Number.isFinite(Date.parse(candidate.observed_at))
         || (candidate.binding_id !== null && !uuid(candidate.binding_id))

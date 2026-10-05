@@ -238,13 +238,14 @@ impl State {
         request: ProbeRequest,
         deadline: Instant,
     ) -> Result<ProbeResult, AdapterError> {
-        let _reader =
+        let reader =
             CodexDaemonReader::open_before(self.options.clone(), request.endpoint, deadline)?;
+        let (version, status) = reader.host_version();
         Ok(ProbeResult {
-            host_version: Some("0.160.0".to_owned()),
-            compatibility: Compatibility::Compatible,
+            host_version: Some(version.to_owned()),
+            compatibility: status.compatibility(),
             availability: Availability::Available,
-            setup_steps: Vec::new(),
+            setup_steps: reader.untested_notices().to_vec(),
         })
     }
     pub(crate) fn connect(

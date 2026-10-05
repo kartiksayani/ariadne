@@ -3,7 +3,9 @@ use super::{
     capacity, invalid, Candidate, Discovery,
 };
 use ariadne_adapter_codex::{CodexDiscovery, CodexOptions};
-use ariadne_agent_protocol::{Availability, Compatibility, EndpointRef};
+use ariadne_agent_protocol::{
+    host_version::HostVersionStatus, Availability, Compatibility, EndpointRef,
+};
 use ariadne_core::{CoreError, CoreErrorCode};
 use ariadne_domain::models::Freshness;
 use std::{
@@ -142,6 +144,7 @@ async fn run(
                         }
                         Ok(page)
                     });
+                    let result = result.map(|page| (page, source.host_version()));
                     (source, result)
                 }).await;
                 let Ok((returned, page)) = page else {
@@ -165,7 +168,19 @@ async fn run(
                         error = Some(cause);
                         break;
                     }
-                    Ok(page) => {
+                    Ok((page, observed)) => {
+                        // Rejected versions never open a reader, so only accepted
+                        // versions reach here: a newer version is surfaced as
+                        // `Untested`; the baseline keeps the unqualified `Unknown`.
+                        let (observed_version, compatibility) = match observed {
+                            Some((version, HostVersionStatus::Untested)) => {
+                                (Some(version), Compatibility::Untested)
+                            }
+                            Some((version, HostVersionStatus::Qualified)) => {
+                                (Some(version), Compatibility::Unknown)
+                            }
+                            None => (None, Compatibility::Unknown),
+                        };
                         for candidate in page.candidates {
                             if !ids.insert(candidate.external_session_id.clone()) {
                                 error = Some(invalid("Loaded discovery repeated a host session identity across pages."));
@@ -181,10 +196,10 @@ async fn run(
                                 external_session_id: candidate.external_session_id,
                                 cwd: candidate.cwd,
                                 title: candidate.title,
-                                host_version: "0.160.0".into(),
+                                host_version: observed_version.clone().unwrap_or_default(),
                                 observed_at: (discovery.now)(),
                                 freshness: Freshness::Fresh,
-                                compatibility: Compatibility::Unknown,
+                                compatibility,
                                 availability: Availability::Unknown,
                                 binding: None,
                                 loaded: true,
