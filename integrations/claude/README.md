@@ -48,8 +48,8 @@ coverage includes all handwritten Mod JS, including untested files.
 
 Real installer rendering, owner CLI commands, durable core/report composition,
 trusted native Claude qualification, discovery announcements, and live host
-acceptance remain the P6/P2.4/P2.2/P3.4/P3.7 joins. The currently shipped helper
-truthfully cannot perform those owner/report operations, so this Mod fails clearly
+acceptance remain the P6/P2.4/P2.2/P3.4/P3.7 joins. The installed `ariadne` helper provides
+the owner, bridge and agent commands; if one is unavailable the Mod fails clearly
 instead of pretending to connect or persist. No live host was launched or prompted.
 
 Native compatibility/normalization follows ADR0037: actual SDK plugin{name,root},

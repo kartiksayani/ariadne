@@ -659,6 +659,38 @@ fn private_data_directory_constructor_is_shared_with_bridge_and_never_nests_or_r
     assert!(Registry::open_data_directory(&setup.data()).is_err());
 }
 #[test]
+fn malformed_apply_stdin_reports_the_parser_message_and_help_documents_it() {
+    let setup = Setup::new(&seed());
+    let before = setup.bytes();
+    let mut command = request(501);
+    command["caller_actor"] = json!("owner");
+    let value = envelope(&setup.apply(&command), 2);
+    let message = value["error"]["message"].as_str().unwrap();
+    assert!(message.contains("ApplyRequest"), "{message}");
+    assert!(message.contains("caller_actor"), "{message}");
+    command = request(501);
+    command["operations"] = json!([{"op": "item.nope"}]);
+    let value = envelope(&setup.apply(&command), 2);
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("item.nope"));
+    assert_eq!(setup.bytes(), before);
+    let help = invoke(Command::new(env!("CARGO_BIN_EXE_ariadne")), None);
+    assert!(String::from_utf8(help.stdout)
+        .unwrap()
+        .contains("parser's message"));
+}
+#[test]
+fn every_query_tool_named_in_the_envelope_is_a_real_cli_command() {
+    for name in ariadne_core::delivery::AGENT_QUERY_TOOLS
+        .iter()
+        .chain(&["apply"])
+    {
+        assert!(ariadne_cli::agent::handles(&[name]), "{name}");
+    }
+}
+#[test]
 fn oversize_json_unknown_fields_and_source_mismatch_reject_before_write() {
     let setup = Setup::new(&seed());
     let before = setup.bytes();
