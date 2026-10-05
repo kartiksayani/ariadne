@@ -1,10 +1,7 @@
 // Self-contained callbacks: WebDriver serializes these into the real WebView.
-// Record timings only; production requests, promises and payloads stay intact.
+// Renderer timings only: Tauri's non-writable invoke cannot be intercepted.
 export function installSearchTimingObservation() {
   if (window.__ariadneSearchTimingObservation) return { installed: false, reason: 'already_installed' };
-  const internals = window.__TAURI_INTERNALS__, original = internals?.invoke;
-  if (typeof original !== 'function') return { installed: false, reason: 'invoke_unavailable' };
-  const commands = new Set(['preferences_patch', 'preferences_get', 'project_list', 'session_list', 'session_get']);
   const records = [];
   let active = true, dropped = 0;
   const append = record => {
@@ -12,17 +9,6 @@ export function installSearchTimingObservation() {
     if (records.length === 256) { dropped++; return false; }
     records.push(record); return true;
   };
-  function observedInvoke(command, ...args) {
-    if (!active || !commands.has(command)) return Reflect.apply(original, this, [command, ...args]);
-    const record = { kind: 'ipc', command, start: window.performance.now(), end: null };
-    if (!append(record)) return Reflect.apply(original, this, [command, ...args]);
-    const finish = () => { if (active) record.end = window.performance.now(); };
-    let result;
-    try { result = Reflect.apply(original, this, [command, ...args]); }
-    catch (error) { finish(); throw error; }
-    result.then(finish, finish);
-    return result;
-  }
   const observation = {
     mark(phase) {
       if (phase === 'input' || phase === 'result' || phase === 'frame') {
@@ -31,18 +17,15 @@ export function installSearchTimingObservation() {
     },
     take() {
       active = false;
-      const restored = internals.invoke === observedInvoke;
-      if (restored) internals.invoke = original;
       if (window.__ariadneSearchTimingObservation === observation) delete window.__ariadneSearchTimingObservation;
-      return { records: records.map(record => ({ ...record })), dropped, restored };
+      return { mode: 'renderer_only', ipcObserved: false, records: records.map(record => ({ ...record })), dropped };
     },
   };
-  internals.invoke = observedInvoke;
   window.__ariadneSearchTimingObservation = observation;
-  return { installed: true };
+  return { installed: true, mode: 'renderer_only', ipcObserved: false };
 }
 
 export function takeSearchTimingObservation() {
   return window.__ariadneSearchTimingObservation?.take()
-    ?? { records: [], dropped: 0, restored: false, reason: 'not_installed' };
+    ?? { mode: 'renderer_only', ipcObserved: false, records: [], dropped: 0, reason: 'not_installed' };
 }
