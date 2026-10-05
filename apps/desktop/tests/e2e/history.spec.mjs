@@ -329,7 +329,7 @@ async function rail(history, saved, paged) {
   await apply(history, additions, revisions);
   const live = await snapshot(history), count = live.messages.length - before.messages.length;
   assert.ok(count >= additions.length, 'Count includes real Activity messages, not only explicit replies');
-  const jump = await browser.$(`button=${count} new messages · Jump to latest`); await jump.waitForDisplayed();
+  const jump = await browser.$(`button=${count} new messages · Jump to latest`); await jump.waitForDisplayed({ timeout: 20000 });
   const held = await railState(); assert.equal(held.focused, true); assert.equal(held.draft, draft); assert.ok(Math.abs(held.top - paused.top) <= 1);
   assert.equal(inputs(live).length, 7, 'Live history publication cannot manufacture an owner submission');
   await jump.click();

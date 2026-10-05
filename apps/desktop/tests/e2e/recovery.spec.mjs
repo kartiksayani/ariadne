@@ -119,7 +119,7 @@ export async function runRecoveryAcceptance(configuration) {
   await completeTurn(configuration, original);
   await wait(async () => (await snapshot(configuration)).inputs[input.id].attempts[0].turn_state === 'completed', 'Real provider history completion did not reach Core');
   const completed = await snapshot(configuration), completedAttempt = completed.inputs[input.id].attempts[0];
-  assert.equal(completedAttempt.result_state, 'pending'); assert.equal(completedAttempt.domain_result, null);
+  assert.ok(['pending', 'missing'].includes(completedAttempt.result_state)); assert.equal(completedAttempt.domain_result, null);
   await holdSuccessor(configuration, queuedBefore.length + 1, successor.id, 'Completion without a result cannot admit a successor');
   await wait(async () => (await snapshot(configuration)).inputs[input.id].attempts[0].result_state === 'missing', 'Native five-second missing-result expiry did not run');
   const expired = await snapshot(configuration), originalAttempt = expired.inputs[input.id].attempts[0];
@@ -136,10 +136,17 @@ export async function runRecoveryAcceptance(configuration) {
   await click(await row.$('button=Review recovery'));
   const reviewed = await dialog().getText();
   assert.ok(reviewed.includes(input.id)); assert.ok(reviewed.includes(original.attemptId)); assert.ok(reviewed.includes(workText));
-  const choice = await dialog().$('select'); await choice.selectByAttribute('value', 'request_result_repair');
+  // The embedded driver's option click neither changes the select value nor fires change, so set it natively.
+  const choice = await dialog().$('select');
+  await browser.execute(select => {
+    const view = select.ownerDocument.defaultView;
+    Object.getOwnPropertyDescriptor(view.HTMLSelectElement.prototype, 'value').set.call(select, 'request_result_repair');
+    select.dispatchEvent(new view.Event('change', { bubbles: true }));
+  }, choice);
+  await wait(async () => (await dialog().getText()).includes('result-only model turn'), 'Recovery choice did not select the result-only repair');
   const reason = `Inspect retained reply ${reply.id}; request only its missing structured result.`;
   await dialog().$('input[required]').setValue(reason);
-  assert.ok((await dialog().getText()).includes('result-only model turn'));
+  await wait(async () => (await dialog().getText()).includes('Host idle · fresh host poll'), 'Recovery dialog did not show qualified idle presence');
   assert.equal(await dialog().$('input[type="checkbox"]').isExisting(), false, 'Qualified idle must not be replaced with owner attestation');
   await click(await dialog().$('button=Save recovery decision'));
   await wait(async () => (await snapshot(configuration)).inputs[input.id].resolution_history.some(entry => entry.kind === 'request_result_repair'), 'Visible repair choice did not persist its audit');

@@ -207,4 +207,24 @@ describe('complete message rail', () => {
     await screen.findByText('New exact message 18');
     expect(screen.queryByRole('button', { name: /Jump to latest/ })).toBeNull();
   });
+  it('a scrollTop that shrank only because the viewport grew keeps following after a jump', async () => {
+    const value = await ready();
+    render(<MessageRail {...value} onHighlight={vi.fn()} onReveal={vi.fn()} />);
+    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(15));
+    Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, writable: true, value: 200 } });
+    log.scrollTop = 800; fireEvent.scroll(log); log.scrollTop = 250; fireEvent.scroll(log);
+    value.transport.session.messages.push(extraMessage(value.transport.session, 16));
+    value.transport.session.revision = 22;
+    await act(() => value.store.refresh());
+    fireEvent.click(await screen.findByRole('button', { name: '1 new messages · Jump to latest' }));
+    expect(log.scrollTop).toBe(1000);
+    // The Jump button unmounted; the viewport grew, so the browser clamped scrollTop but it is still at the bottom.
+    Object.defineProperty(log, 'clientHeight', { configurable: true, value: 240 });
+    log.scrollTop = 760;
+    value.transport.session.messages.push(extraMessage(value.transport.session, 17)); value.transport.session.revision = 23;
+    await act(() => value.store.refresh());
+    await screen.findByText('New exact message 17');
+    expect(screen.queryByRole('button', { name: /Jump to latest/ })).toBeNull();
+    expect(log.scrollTop).toBe(1000);
+  });
 });
