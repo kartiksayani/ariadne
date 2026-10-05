@@ -27,8 +27,8 @@ export async function runAccessibilityAcceptance(configuration) {
   await focus(row); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-retained-editor.png'));
-  const pause = '[aria-label="Binding lifecycle"] button=Pause dispatch';
-  const pauseButton = await browser.$(pause); await pauseButton.waitForEnabled(); await pauseButton.click();
+  const lifecycle = await browser.$('[aria-label="Binding lifecycle"]');
+  const pauseButton = await lifecycle.$('button=Pause dispatch'); await pauseButton.waitForEnabled(); await pauseButton.click();
   await (await browser.$('[role="dialog"]')).waitForDisplayed();
   await focus('[role="dialog"] button');
   await browser.keys(['Shift', 'Tab']);

@@ -117,3 +117,104 @@ it.each([false, true])('reveals an existing Bring draft without editing/submitti
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(transport.preferences.drafts[0]).toEqual(before); expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
 });
+
+async function delayedReveal(transport: AppTransport) {
+  const invoke = transport.invoke.bind(transport);
+  let release!: () => void, started = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if ('request' in args.request && args.request.request.command === 'reveal_item') { started = true; await gate; }
+    return invoke(name, args);
+  });
+  return { started: () => started, release: async () => { await act(async () => { release(); await gate; }); } };
+}
+it.each(['r', 'a', 'b'])('rejects delayed %s before it can undo newer All sessions navigation or mutate Bring', async key => {
+  const transport = await setup(), pending = await delayedReveal(transport);
+  const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+  row.focus(); fireEvent.keyDown(row, { key }); await waitFor(() => expect(pending.started()).toBe(true));
+  fireEvent.click(screen.getByRole('button', { name: 'All sessions' }));
+  await screen.findByRole('heading', { name: 'All sessions' });
+  const selected = structuredClone(transport.preferences.global.selected_navigation), destination = document.activeElement;
+  await pending.release(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+  expect(screen.getByRole('heading', { name: 'All sessions' })).toBeTruthy();
+  expect(transport.preferences.global.selected_navigation).toEqual(selected); expect(document.activeElement).toBe(destination);
+  expect(screen.queryByLabelText('Reply message')).toBeNull(); expect(screen.queryByLabelText('Bring up message')).toBeNull();
+  expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
+});
+it('rejects delayed Reply after detail dismissal', async () => {
+  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!);
+  await screen.findByLabelText('Reply message'); const pending = await delayedReveal(transport);
+  const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+  row.focus(); fireEvent.keyDown(row, { key: 'r' }); await waitFor(() => expect(pending.started()).toBe(true));
+  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
+  await pending.release(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+  expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(row);
+});
+it.each(['item', 'question', 'binding'])('preserves retained option until explicit %s target review and requires a new number afterward', async change => {
+  const transport = await setup(transport => {
+    const session = transport.sessions.get(route.session_id)!, item = session.items['2']!;
+    item.options = [{ id: 'morning', label: 'Morning', consequence: 'Before lunch.', recommended: true }, { id: 'afternoon', label: 'Afternoon', consequence: 'After lunch.', recommended: false }];
+    transport.preferences.drafts.push({ op_id: '00000000-0000-4000-8000-000000001234', session: route, binding_id: change === 'binding' ? '00000000-0000-4000-8000-000000001235' : session.active_binding_id!,
+      target: { topic_id: item.topic_id, item_id: item.id }, target_revision: item.revision - (change === 'item' ? 1 : 0), question_revision: item.question_revision - (change === 'question' ? 1 : 0),
+      intent: 'answer', selected_option_id: 'morning', text: 'Retain deliberate draft.', supersedes_answer_id: null, submission_attempted: false });
+  });
+  const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
+  row.focus(); fireEvent.keyDown(row, { key: '2' }); await screen.findByLabelText('Reply in your own words');
+  const detail = within(document.querySelector('.ref-detail-scroll')!);
+  expect(detail.getByRole('button', { name: /^2Afternoon/ }).hasAttribute('disabled')).toBe(true);
+  expect(detail.getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.keyDown(detail.getByRole('button', { name: 'Answer' }), { key: '2' });
+  expect(transport.preferences.drafts[0].selected_option_id).toBe('morning');
+  fireEvent.click(detail.getByRole('button', { name: 'Review current target' }));
+  await waitFor(() => expect(transport.preferences.drafts[0].selected_option_id).toBeNull());
+  expect(detail.getByRole('button', { name: /^2Afternoon/ }).getAttribute('aria-pressed')).toBe('false');
+  row.focus(); fireEvent.keyDown(row, { key: '2' });
+  await waitFor(() => expect(transport.preferences.drafts[0].selected_option_id).toBe('afternoon'));
+  expect(transport.preferences.drafts[0].text).toBe('Retain deliberate draft.');
+  expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
+});
+it('consumes a numeric request so detail remount preserves the owner’s later choice', async () => {
+  const transport = await setup(transport => { transport.sessions.get(route.session_id)!.items['2']!.options = [
+    { id: 'morning', label: 'Morning', consequence: 'Before lunch.', recommended: true }, { id: 'afternoon', label: 'Afternoon', consequence: 'After lunch.', recommended: false }]; });
+  const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
+  row.focus(); fireEvent.keyDown(row, { key: '2' });
+  const saved = () => transport.preferences.drafts.find(value => value.intent === 'answer' && value.target.item_id === '2')!;
+  await waitFor(() => expect(saved().selected_option_id).toBe('afternoon'));
+  const editor = document.querySelector<HTMLElement>('.ref-detail-scroll .owner-input')!;
+  fireEvent.click(within(editor).getByRole('button', { name: /^1Morning/ })); await waitFor(() => expect(saved().selected_option_id).toBe('morning'));
+  fireEvent.keyDown(editor, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
+  fireEvent.click(row); await waitFor(() => expect(document.querySelector('.ref-detail-scroll .owner-input')).not.toBeNull());
+  expect(within(document.querySelector('.ref-detail-scroll')!).getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
+  expect(saved().selected_option_id).toBe('morning');
+});
+
+it.each(['r', 'b'])('failed preference navigation cannot authorize %s focus or Bring submission', async key => {
+  const transport = await setup(), invoke = transport.invoke.bind(transport);
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if ('command' in args.request && args.request.command.command === 'preferences_patch') {
+      return { api_version: 1, ok: false, error: { code: 'commit_uncertain', message: 'Navigation save unknown.', hint: 'Reconcile explicitly.', retryable: true, field_errors: [] } };
+    }
+    return invoke(name, args);
+  });
+  const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+  row.focus(); fireEvent.keyDown(row, { key });
+  await screen.findByText('Navigation save unknown.');
+  expect(screen.queryByLabelText('Reply message')).toBeNull(); expect(screen.queryByLabelText('Bring up message')).toBeNull();
+  expect(document.activeElement).toBe(row); expect(transport.preferences.drafts).toEqual([]);
+  expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
+});
+it('keeps detail dismissed when shortcut navigation session read completes afterward', async () => {
+  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Reply message');
+  const invoke = transport.invoke.bind(transport); let reads = 0, resolving = false, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if ('request' in args.request && args.request.request.command === 'reveal_item') resolving = true;
+    if (resolving && 'request' in args.request && args.request.request.command === 'session_get' && ++reads === 2) await gate;
+    return invoke(name, args);
+  });
+  const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+  row.focus(); fireEvent.keyDown(row, { key: 'r' }); await waitFor(() => expect(reads).toBe(2));
+  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
+  await act(async () => { release(); await gate; await new Promise(resolve => setTimeout(resolve, 150)); });
+  expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(row);
+});

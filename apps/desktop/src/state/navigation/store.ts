@@ -51,6 +51,7 @@ export class NavigationStore {
     this.routes = new RegisteredRoutes(service, this.opened);
   }
   readonly getSnapshot = () => this.state;
+  readonly getNavigationRequest = () => this.navigationRequest;
   readonly subscribe = (receive: () => void): Unsubscribe => {
     this.listeners.add(receive);
     return () => { this.listeners.delete(receive); };
@@ -197,15 +198,15 @@ export class NavigationStore {
       return await this.patch(preferences, [{ kind: 'set_later', item: structuredClone(item), later }]);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
-  async navigate(selection: NavigationSelection, reveal: RevealedItem | null = null): Promise<boolean> {
-    if (this.stopped || this.pending) return false;
+  async navigate(selection: NavigationSelection, reveal: RevealedItem | null = null, isCurrent: () => boolean = () => true): Promise<boolean> {
+    if (this.stopped || this.pending || !isCurrent()) return false;
     const request = ++this.navigationRequest;
     try {
       const preferences = this.preferences();
       const entries: NavigationPatch[] = [{ kind: 'set_global', preferences: { ...preferences.global, selected_navigation: selection } }];
       if (selection.kind === 'session') {
         const snapshot = await this.service.query({ session: selection.session, request: { command: 'session_get', params: {} } });
-        if (this.stopped || this.pending || request !== this.navigationRequest) return false;
+        if (this.stopped || this.pending || request !== this.navigationRequest || !isCurrent()) return false;
         if (!sameRoute(selection.session, { project_id: snapshot.session.project_id, session_id: snapshot.session.id })) {
           throw new ServiceFailure('invalid_response');
         }
@@ -217,11 +218,12 @@ export class NavigationStore {
           selected_item_id: reveal?.kind === 'item' ? reveal.route.item_id : view.selected_item_id } });
         if (equal(preferences.global.selected_navigation, selection) && existing?.tab_open && !reveal) {
           await this.opened.open(selection.session).refresh();
-          return true;
+          return isCurrent() && request === this.navigationRequest;
         }
       } else if (selection.kind === 'project' && !this.state.projects?.projects.items.some(project => project.project_id === selection.project_id)) {
         throw new ServiceFailure('invalid_response');
       }
+      if (!isCurrent() || request !== this.navigationRequest) return false;
       return await this.patch(preferences, entries, () => {
         this.publish({ reveal });
         if (selection.kind === 'session') this.opened.open(selection.session);

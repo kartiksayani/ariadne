@@ -4,7 +4,9 @@ P4.8 source starts at reviewed integrated parent
 `9bfbc74ed1358e00e56848e8a35ab6e7f4aa08ef`. This record distinguishes renderer
 fixture checks, immutable-source comparisons, and the real native journey.
 Browser/native evidence is pending the pushed-head CI run; no local browser or
-native build was run under the owner's resource constraint.
+native build was run under the owner's resource constraint. After CI findings,
+the owner authorized bounded local browser checks using existing warm Chrome
+and isolated, pinned source-runtime dependencies.
 
 ## Concrete discrepancies and corrections
 
@@ -14,6 +16,18 @@ native build was run under the owner's resource constraint.
   Replaced never exposes reopen. Options select without submitting. Archive
   opens the existing guard. A fresh Bring uses the maintainer's §7 decision;
   existing or attempted drafts are only revealed.
+- Independent review reproduced an old delayed shortcut reopening a session
+  after All sessions navigation or dismissal. The existing navigation intent
+  counter now has a read-only accessor: stale route resolution is rejected before
+  navigation, and failed/superseded navigation cannot authorize focus or Bring.
+  The optional caller guard is rechecked after asynchronous session validation
+  before dispatching preferences; an already dispatched durable write is unchanged.
+  Consumed focus tokens are acknowledged to App and cleared only when matching;
+  an old editor callback cannot erase a newer request.
+- Numeric selection previously bypassed disabled changed-target choices and
+  replayed on detail remount. Both number paths now honor the rendered option
+  eligibility, including revisions/binding, stale reads and frozen operations.
+  A blocked number is consumed immediately, never replayed after explicit review.
 - Focus after asynchronous reveal could return to the tree when navigation
   preferences completed. The focus request now follows that completion; repeating
   a shortcut has a new token and refocuses the control.
@@ -27,6 +41,11 @@ native build was run under the owner's resource constraint.
   new question-revision episodes and known unresolved inputs transitioning to
   handled/cancelled/skipped. Initial data, duplicate refreshes, stale reads, message
   deltas, and removed rows do not manufacture announcements or move focus.
+- Actual CI light-theme samples measured muted text at 4.328:1 and Open/Waiting
+  statuses at 3.385:1/3.086:1. Product-only light foregrounds now retain the status
+  hues with darker values; the immutable gallery and global tokens stay intact.
+  Bounded browser measurements now exceed 4.5:1 for all 22 samples, including
+  System appearance resolving to light.
 - All ordinary controls receive the two-pixel focus outline. Reduced motion
   disables transitions/animation/animated scrolling in the product subtree.
   System appearance follows OS changes only while the saved theme is System.
@@ -72,6 +91,25 @@ Observed locally with pinned Node 22, existing ignored dependency cache:
   ordinary frame fixture mounts, original action tests, and new accessibility
   assertions.
 - Scope selector regression tests: 16 passed after removing the stale history/rail capture exemptions.
+
+Initial pushed-head [CI run 37249848470](https://github.com/kartiksayani/ariadne/actions/runs/37249848470)
+failed the new ordinary captures: empty/filter fixtures incorrectly required a
+nonempty visible tree, and actual light contrast failed. Its
+[artifact](https://github.com/kartiksayani/ariadne/actions/runs/37249848470/artifacts/11320053426)
+retains before screenshots, contrast and the passing immutable-gallery evidence.
+The empty/filter checks now assert zero rows plus their exact semantic UI; Follow
+up is scoped to its actual owner-action group. No tolerance or contrast threshold
+was lowered. Local bounded checks cover all 27 states at dark minimum/light full
+size, real keyboard behavior and light/System contrast; CI must still confirm all
+four combinations at the final head.
+
+Review repair validation: the final focused desktop/reference selection passed
+226 tests across 12 files, including navigation validation cancellation, failed
+navigation, stale/frozen number requests, remount and old/new token acknowledgment.
+Normal type/lint/CSS checks passed. Local real-browser keyboard checks passed at
+dark 1000×700, light 1600×960 and light 1000×700. Light/System samples have a
+measured minimum 4.949:1. Existing warm Chrome was used; final CI still uses the
+package-pinned Chromium. Exact pushed-head evidence will be appended.
 
 Required pushed-head checks: `npm run capture:reference` (both themes/sizes,
 immutable source gallery + ordinary captures), application tests/weighted coverage,

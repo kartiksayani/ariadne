@@ -34,7 +34,9 @@ export async function captureOrdinaryFrames(page: Page, origin: string, testInfo
     else if (scenario.loading) await expect(page.getByText('Loading session…', { exact: true })).toBeVisible();
     else {
       await expect(page.getByRole('button', { name: 'Pause dispatch', exact: true })).toBeEnabled();
-      await expect(page.getByRole('tree', { name: 'Sentences' })).toBeVisible();
+      const tree = page.getByRole('tree', { name: 'Sentences' });
+      if (scenario.empty || scenario.filtered) { await expect(tree).toHaveCount(1); await expect(tree.getByRole('treeitem')).toHaveCount(0); }
+      else await expect(tree).toBeVisible();
       if (scenario.item) await expect(page.locator('.ref-detail-scroll .owner-input')).toBeVisible();
     }
     if (scenario.id === '1p') {
@@ -56,7 +58,7 @@ export async function captureOrdinaryFrames(page: Page, origin: string, testInfo
       await expect(detail.getByRole('button', { name: /Afternoon delivery/, pressed: true })).toBeVisible();
     } else if (scenario.action === 'reply' || scenario.action === 'followup') {
       const detail = page.locator('.ref-detail-scroll');
-      await detail.getByRole('button', { name: scenario.action === 'reply' ? 'Reply' : 'Follow up', exact: true }).click();
+      await detail.getByRole('group', { name: 'Owner actions' }).getByRole('button', { name: scenario.action === 'reply' ? 'Reply' : 'Follow up', exact: true }).click();
       await detail.getByRole('textbox').fill('Keep the complete owner draft across views.');
     } else if (scenario.action === 'continue') {
       await page.getByRole('button', { name: 'Continue Delivery decisions', exact: true }).click();
@@ -161,4 +163,14 @@ export async function checkOrdinaryKeyboard(page: Page, origin: string, testInfo
     const style = getComputedStyle(node); return style.animationName !== 'none' || style.transitionDuration.split(',').some(value => parseFloat(value) > 0);
   }).map(node => node.className));
   expect(moving).toEqual([]);
+  if (theme === 'light') {
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.getByRole('button', { name: 'Theme: light', exact: true }).click();
+    await page.getByRole('button', { name: 'Theme: dark', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Theme: system', exact: true })).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    const systemContrast = await contrastEvidence(page);
+    await testInfo.attach('system-light-contrast', { body: JSON.stringify(systemContrast), contentType: 'application/json' });
+    for (const sample of systemContrast) expect.soft(sample.contrast, `system light ${sample.selector}: ${sample.text}`).toBeGreaterThanOrEqual(4.5);
+  }
 }
