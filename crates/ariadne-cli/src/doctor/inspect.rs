@@ -128,6 +128,22 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
                 }
             }
         }
+        // A brand-new install has no private data directory yet: only an explicit
+        // project register or demo creates it, so "no data" is healthy here.
+        Err(_)
+            if matches!(
+                std::fs::symlink_metadata(data),
+                Err(ref e) if e.kind() == std::io::ErrorKind::NotFound
+            ) =>
+        {
+            report.add(
+                "ok",
+                "registry.empty",
+                "No sessions yet. Connect a session to get started.",
+                "Nothing to repair: Ariadne creates its data on first project registration.",
+                json!({"state":"no_data_yet"}),
+            );
+        }
         Err(error) => {
             let (status, cause) = match error {
                 RegistryError::Store(ref e)
@@ -219,7 +235,7 @@ fn binding_check(
             unresolved += 1;
         }
     }
-    report.add(if unresolved>0 || binding.dispatch_state==DispatchState::RecoveryRequired {"warning"} else {"ok"}, "binding.recovery", "Saved outbox and unresolved attempts were inspected without resending.", &format!("Run ariadne recovery show {} --json to inspect; make an explicit owner recovery decision.",binding.id.as_str()), json!({"binding_id":binding.id,"generation":binding.generation,"adapter_id":binding.adapter_id,"external_session_id":"[redacted]","endpoint_fingerprint":"[redacted]","queued":queued,"claimed":claimed,"uncertain":uncertain,"missing_result":missing,"unresolved":unresolved,"owner_paused":binding.owner_paused,"dispatch_state":binding.dispatch_state,"existing_session_capability":binding.capabilities.existing_session.supported,"domain_cli_capability":binding.capabilities.domain_cli.supported,"dispatch_ready":false}));
+    report.add(if unresolved>0 || binding.dispatch_state==DispatchState::RecoveryRequired {"warning"} else {"ok"}, "binding.recovery", "Saved outbox and unresolved attempts were inspected without resending.", &format!("Open Ariadne and choose \"Review recovery\" for binding {} to inspect it; make an explicit owner recovery decision.",binding.id.as_str()), json!({"binding_id":binding.id,"generation":binding.generation,"adapter_id":binding.adapter_id,"external_session_id":"[redacted]","endpoint_fingerprint":"[redacted]","queued":queued,"claimed":claimed,"uncertain":uncertain,"missing_result":missing,"unresolved":unresolved,"owner_paused":binding.owner_paused,"dispatch_state":binding.dispatch_state,"existing_session_capability":binding.capabilities.existing_session.supported,"domain_cli_capability":binding.capabilities.domain_cli.supported,"dispatch_ready":false}));
     let mut fresh_native = false;
     if control_available {
         let request = UuidV4::new(uuid::Uuid::new_v4().to_string()).expect("native UUID");
