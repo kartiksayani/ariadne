@@ -31,7 +31,9 @@ async function openSession(sessionId, itemId) {
     await json(join(evidence, 'session-open-failure.json'), { sessionId, body: await browser.$('body').getText() });
     await browser.saveScreenshot(join(evidence, 'session-open-failure.png')); throw error;
   }
-  await session.waitForEnabled(); await session.click();
+  await session.waitForEnabled();
+  // Session cards can extend beyond the nested catalogue viewport.
+  await session.scrollIntoView({ block: 'center', inline: 'center' }); await session.waitForClickable(); await session.click();
   await wait(async () => {
     const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
     return selected.kind === 'session' && selected.session.session_id === sessionId && await catalogue.isEnabled();
@@ -78,12 +80,18 @@ async function delivery(configuration) {
   await showHistory(configuration.demo.before.messages.filter(message => message.item_id === '1').map(message => message.body));
   const child = await browser.$('[aria-label="Child items"] button');
   await child.waitForDisplayed(); assert.ok((await child.getText()).includes('1.1')); await child.click();
-  await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
+  await wait(async () => await browser.$('.history-header strong').getText() === 'Item 1.1'
+    && (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
   await browser.saveScreenshot(join(evidence, 'canonical-demo.png'));
 
   await openSession(configuration.sessionId, configuration.itemId);
   let card;
-  await wait(async () => { card = await nativeCard('waiting', configuration.question); return !!card; }, 'The real unanswered item.ask did not appear in Waiting');
+  await wait(async () => {
+    card = await nativeCard('waiting', configuration.question);
+    if (!card) return false;
+    const choice = await card.$('button*=Use the native window');
+    return await choice.isExisting() && await choice.isEnabled();
+  }, 'The real unanswered item.ask did not become editable in Waiting');
   const cardText = await card.getText();
   assert.ok(cardText.includes(configuration.ask)); assert.ok(cardText.includes(configuration.options[0].label));
   assert.ok(cardText.includes(configuration.options[0].consequence));
@@ -104,7 +112,7 @@ async function delivery(configuration) {
 
   for (const text of ownerTexts.slice(1)) {
     const another = await browser.$('.owner-input').$('button=Write another input');
-    await another.waitForDisplayed(); await another.click();
+    await another.waitForDisplayed(); await another.waitForEnabled(); await another.click();
     const actions = await browser.$('[aria-label="Owner actions"]'); await actions.waitForDisplayed();
     const reply = await actions.$('button=Reply'); await reply.waitForDisplayed(); await reply.waitForEnabled(); await reply.click();
     const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForDisplayed(); await editor.setValue(text);
