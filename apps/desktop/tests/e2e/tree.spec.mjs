@@ -145,10 +145,15 @@ async function open(tree) {
 }
 // Passive WebView measurement starts at the real driver-generated click/input,
 // stops after the expected canonical rows render and a layout frame completes.
-async function measureAction(eventName, selector, expectedIds, action) {
+async function measureAction(eventName, selector, expectedIds, action, tree) {
   await browser.execute(({ eventName, selector, expectedIds }) => {
-    const sample = { started: null, elapsed: null }; window.__ariadneTreeMeasurement = sample;
-    const start = event => { if (event.target.closest(selector)) sample.started = window.performance.now(); };
+    const target = document.querySelector(selector), bounds = target?.getBoundingClientRect();
+    const sample = { started: null, elapsed: null, target: target ? { disabled: target.disabled,
+      bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      centreTarget: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.outerHTML.slice(0, 1000) } : null };
+    window.__ariadneTreeMeasurement = sample;
+    const start = event => { if (event.target.closest(selector)) { sample.started = window.performance.now(); sample.trusted = event.isTrusted; } };
     document.addEventListener(eventName, start, true);
     const observer = new window.MutationObserver(() => {
       const ids = [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].map(element => element.dataset.itemId);
@@ -159,7 +164,22 @@ async function measureAction(eventName, selector, expectedIds, action) {
     observer.observe(document.body, { childList: true, subtree: true, attributes: true });
   }, { eventName, selector, expectedIds });
   await action();
-  await wait(async () => typeof await browser.execute(() => window.__ariadneTreeMeasurement.elapsed) === 'number', 'Native layout measurement did not reach its exact expected rows');
+  try {
+    await wait(async () => typeof await browser.execute(() => window.__ariadneTreeMeasurement.elapsed) === 'number', 'Native layout measurement did not reach its exact expected rows');
+  } catch (error) {
+    const observed = await browser.execute(() => ({ measurement: window.__ariadneTreeMeasurement,
+      rows: [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].map(element => ({ id: element.dataset.itemId, tabIndex: element.tabIndex })),
+      active: document.activeElement?.outerHTML.slice(0, 1000),
+      alerts: [...document.querySelectorAll('[role="alert"],.nav-banner')].map(element => element.textContent),
+      statuses: [...document.querySelectorAll('[role="status"]')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
+      sessions: [...document.querySelectorAll('button[data-session-id]')].map(element => ({ id: element.dataset.sessionId, text: element.textContent, disabled: element.disabled })),
+      current: [...document.querySelectorAll('[aria-current]')].map(element => element.outerHTML.slice(0, 1000)) }));
+    await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-measurement-failure.json'), JSON.stringify({ eventName, selector, expectedIds,
+      observed, preferences: tree ? await cliRequest(tree.cli, ['preferences', 'get', '--json-stdin'],
+        { session: null, request: { command: 'preferences_get', params: {} } }) : null }, null, 2));
+    await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-measurement-failure.png'));
+    throw error;
+  }
   return browser.execute(() => { const result = window.__ariadneTreeMeasurement.elapsed; delete window.__ariadneTreeMeasurement; return result; });
 }
 async function choose(group, name, pressed) {
@@ -228,7 +248,7 @@ export async function runTreeAcceptance(configuration) {
   await catalogue();
   const expectedIds = Array.from({ length: 20 }, (_, index) => [String(index + 1), ...Array.from({ length: 99 }, (_, child) => `${index + 1}.${child + 1}`)]).flat();
   const sessionButton = await browser.$(`[data-session-id="${tree.sessionId}"]`); await sessionButton.waitForDisplayed();
-  const usableMs = await measureAction('click', `[data-session-id="${tree.sessionId}"]`, expectedIds, () => sessionButton.click());
+  const usableMs = await measureAction('click', `[data-session-id="${tree.sessionId}"]`, expectedIds, () => sessionButton.click(), tree);
   assert.deepEqual(await visibleIds(), expectedIds); await roving();
   assert.equal(await (await row('1')).getAttribute('aria-level'), '1'); assert.equal(await (await row('1.1')).getAttribute('aria-level'), '2');
   const initialLayouts = await Promise.all(['1', '1.1', '1.3'].map(id => completeRowLayout(id, initialSession.items[id])));
@@ -238,7 +258,7 @@ export async function runTreeAcceptance(configuration) {
   const measuredIds = ['1.1', '20.99', '10.50', '2.10', '15.25', '5.60',
     ...Array.from({ length: 14 }, (_, index) => `${index + 3}.${1 + (index * 17) % 99}`)];
   for (const id of measuredIds) {
-    searchMs.push(await measureAction('input', '.sentence-search input', [id.split('.')[0], id], async () => { const input = await search(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }));
+    searchMs.push(await measureAction('input', '.sentence-search input', [id.split('.')[0], id], async () => { const input = await search(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree));
   }
   await (await search()).setValue('ＮＡＴＩＶＥ café needle');
   await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'NFKC/lowercase AND-token search did not retain the contextual ancestor');

@@ -154,6 +154,24 @@ identity while preserving direct process ancestry and PID ownership. The
 flags. Build and start a real native executable with embedded frontend assets;
 this smoke requires no Vite server.
 
+The native App and fixture CLI build subprocesses use
+`CARGO_PROFILE_DEV_OPT_LEVEL=1`, matching the shipped release profile, with
+`CARGO_PROFILE_DEV_DEBUG_ASSERTIONS=true`. They retain the debug artifact paths,
+assertions and isolated `e2e` feature. Ordinary development/test profiles and the
+separate packaged release-isolation check retain their existing settings.
+`run.json` records the effective native profile and both build command arrays.
+
+This follows two measured local failures on 2026-10-05: runs
+`4d6d6248-3756-4797-a550-cb5c9c83d2e9` and
+`3ee6412d-7127-47e4-84c5-e21c7084961c` spent about 3m38s and 2m34s respectively
+before repeated StoreBusy rejections near the end of corpus publication. App
+samples showed locked snapshot decoding/validation and waiting catalogue readers.
+On identical retained 2,000-item/4,667-message bytes, repeated CLI reads took
+447/435ms in debug and 129/98ms at shipped optimization; first reads were slower
+at 1,387/989ms respectively. This diagnostic comparison does not prove native
+performance. Native acceptance retains its original thresholds, owner actions,
+retry limits and full process-restoration requirements.
+
 ## WDIO service configuration and lifecycle
 
 The runner provides absolute `ARIADNE_E2E_BINARY`, `ARIADNE_E2E_ROOT`, a fresh
