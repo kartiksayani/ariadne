@@ -134,12 +134,16 @@ async function seed(configuration) {
   const publication = [await apply(history, [], {}, historySeedRequest(history.bindingId))];
   return { history, publication };
 }
+// A draft marked changed by a newer saved target stays locked until the owner reviews it explicitly.
+async function reviewCurrentTarget() {
+  const review = await browser.$('.owner-input').$('button=Review current target');
+  if (await review.isExisting()) { await review.waitForEnabled(); await review.scrollIntoView(); await review.click(); }
+}
 async function answer(history, ordinal, text) {
   const another = await browser.$('.owner-input').$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
   const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForEnabled();
-  const review = await browser.$('.owner-input').$('button=Review current target');
-  if (await review.isExisting()) { await review.waitForEnabled(); await review.scrollIntoView(); await review.click(); }
+  await reviewCurrentTarget();
   if (ordinal % 2) { const choice = await browser.$('.owner-input').$(`button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.scrollIntoView(); await choice.click(); }
   await editor.scrollIntoView(); await editor.setValue(text);
   const send = await browser.$('.owner-input .ref-send-row button'); await failureEvidence('owner-input-send-first', () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
@@ -373,10 +377,15 @@ export async function runHistoryAcceptance(configuration) {
   }
   let saved = await snapshot(history);
   const proof = await proveRounds(history, saved, ownerTexts, resultTexts, paged);
+  let previousReply = resultTexts.at(-1).split('\n')[0];
   for (const [intent, ordinal] of [['followup', 6], ['reopen', 7]]) {
+    // The renderer must show the previous CLI-applied result before the next intent, or its draft is marked changed.
+    await failureEvidence(`previous-result-${intent}`, () => wait(async () => (await detail().getText()).includes(previousReply),
+      'Native detail did not show the previous explicit response before the next owner intent'));
     const control = await browser.$('.history-actions').$(`button=${intent === 'followup' ? 'Follow up' : 'Request reopen'}`);
     await control.scrollIntoView(); await control.waitForEnabled(); await control.click();
     const editor = await browser.$('.owner-input textarea'); await failureEvidence(`owner-input-editor-${intent}`, () => editor.waitForEnabled());
+    await reviewCurrentTarget();
     const text = `Native ${intent} after closed history\nThe owner's deliberate request leaves the status unchanged.`;
     await editor.scrollIntoView(); await editor.setValue(text);
     const send = await browser.$('.owner-input .ref-send-row button'); await failureEvidence(`owner-input-send-${intent}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
@@ -384,6 +393,7 @@ export async function runHistoryAcceptance(configuration) {
     saved = await snapshot(history); assert.equal(saved.items['1'].status, 'done'); assert.equal(inputs(saved)[ordinal - 1].kind, intent);
     const extra = intent === 'reopen' ? [{ op: 'item.status', item: { id: '1' }, status: 'open', outcome: null, why: null, reason: 'The owner explicitly requested native reopening.' }] : [];
     publication.push(await result(history, ordinal, `Explicit native ${intent} response\nRetain the full result.`, extra));
+    previousReply = `Explicit native ${intent} response`;
   }
   saved = await snapshot(history); assert.equal(saved.items['1'].status, 'open'); assert.equal(saved.items['1'].outcome, null);
   await wait(async () => {

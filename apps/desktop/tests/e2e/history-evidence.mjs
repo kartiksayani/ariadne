@@ -31,7 +31,9 @@ export function historyFailureFacts() {
       send: control(send), buttons: owner ? [...owner.querySelectorAll('button')].map(control) : [],
       alerts: owner ? [...owner.querySelectorAll('[role="alert"]')].map(text) : [],
       statuses: owner ? [...owner.querySelectorAll('[role="status"]')].map(text) : [],
-      blocked: text(owner?.querySelector('.ref-blocked') ?? null) },
+      blocked: text(owner?.querySelector('.ref-blocked') ?? null),
+      // Identifies a missing editor: "Loading saved drafts…", the receipt view or a locked draft all render here.
+      innerText: owner?.innerText ?? null },
     activeElement: active ? { tag: active.tagName, className: String(active.className), title: active.getAttribute('title'), ariaLabel: active.getAttribute('aria-label') } : null,
   };
 }
