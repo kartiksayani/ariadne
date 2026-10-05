@@ -41,6 +41,9 @@ export class NavigationStore {
   private epoch = 0;
   private navigationRequest = 0;
   private preferencesFloor = 0;
+  private startupRoute: { selection: NavigationSelection; reveal: RevealedItem | null } | null = null;
+  private startupRoutes = false;
+  private startupRouteFlight = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private pending: { request: OwnerMutationRequest; confirmed: (receipt: MutationReceipt) => void } | null = null;
   // Reconciled reads recover their own errors, not the last rejected edit.
@@ -77,9 +80,19 @@ export class NavigationStore {
     this.setup = (async () => {
       const results = await Promise.allSettled([
         this.service.subscribe('ariadne://session_changed', () => { this.requested = true; this.reconcile(); }),
-        this.routes.subscribe((route, reveal) => { void this.navigate({ kind: 'session', session: {
-          project_id: route.project_id, session_id: route.session_id,
-        } }, reveal); },
+        this.routes.subscribe((route, reveal) => {
+          const selection: NavigationSelection = { kind: 'session', session: {
+            project_id: route.project_id, session_id: route.session_id,
+          } };
+          // Native acknowledges listener readiness before our initial catalogue
+          // read finishes. Retain the latest registered intent until preferences
+          // are available, including when that first read needs reconciliation.
+          if (!this.state.preferences || this.startupRoutes) {
+            this.startupRoutes = true;
+            this.startupRoute = { selection, reveal };
+            this.flushStartupRoute();
+          } else void this.navigate(selection, reveal);
+        },
           error => this.publish({ error })),
       ]);
       const subscriptions = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
@@ -125,10 +138,22 @@ export class NavigationStore {
         }
         this.publish({ preferences: immutable(preferences), projects: immutable(projects), sessions: immutable(sessions),
           sessionProjectId: projectId, status: 'ready', error: this.mutationFailure });
+        this.flushStartupRoute();
       } catch (error: unknown) {
         if (epoch === this.epoch) this.publish({ status: this.state.projects ? 'stale' : 'unavailable', error: fail(error) });
       }
     }
+  }
+  private flushStartupRoute(): void {
+    if (this.stopped || this.startupRouteFlight || this.pending || !this.state.preferences) return;
+    const route = this.startupRoute;
+    if (!route) { this.startupRoutes = false; return; }
+    this.startupRoute = null;
+    this.startupRouteFlight = true;
+    void this.navigate(route.selection, route.reveal).finally(() => {
+      this.startupRouteFlight = false;
+      this.flushStartupRoute();
+    });
   }
   selectedSession(): SessionStore | null {
     const selection = this.state.preferences?.global.selected_navigation;
@@ -206,6 +231,7 @@ export class NavigationStore {
   }
   async navigate(selection: NavigationSelection, reveal: RevealedItem | null = null): Promise<boolean> {
     if (this.stopped || this.pending) return false;
+    this.startupRoute = null;
     const request = ++this.navigationRequest;
     try {
       const preferences = this.preferences();
@@ -306,6 +332,8 @@ export class NavigationStore {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.startupRoute = null;
+    this.startupRoutes = false;
     ++this.epoch;
     if (this.timer) clearInterval(this.timer);
     window.removeEventListener('focus', this.reconcile);
