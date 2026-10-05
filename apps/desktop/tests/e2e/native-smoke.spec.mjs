@@ -5,6 +5,8 @@ import { alive, delay, identity, listeners, json, proveQuit } from '../../../../
 import { admissions, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
 import { runHistoryActionsAcceptance } from './history-actions.spec.mjs';
+import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
+import { runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
 const nonce = process.env.ARIADNE_E2E_NONCE;
@@ -168,9 +170,11 @@ describe('native owner FIFO and real process restoration', () => {
       await assert.rejects(stat(receiptPath), { code: 'ENOENT' });
       await delivery(configuration);
       await runDiscoveryAcceptance(configuration);
+      await runTreeAcceptance(configuration);
+      await runHistoryAcceptance(configuration);
       await runHistoryActionsAcceptance(configuration);
     }
-    else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); }
+    else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); await restoreTreeAcceptance(configuration); await restoreHistoryAcceptance(configuration); }
 
     const payload = `native-domain-${nonce}`, ping = await invoke('native_ping', { nonce, payload }); assert.equal(ping.ok, true);
     const bytes = await readFile(receiptPath), disk = JSON.parse(bytes); assert.deepEqual(ping.data, disk);

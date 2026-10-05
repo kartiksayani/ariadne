@@ -158,6 +158,17 @@ saved concurrent operation wins over stale-preview rejection, and an unsaved
 preview. Source read/hash failures before that transaction remain uncertain.
 No new DTO or alternate mutation path is introduced.
 
+History/rail composition owns transient cross-highlights for the current session.
+`NavigationSentenceTree` and `SentenceTree` accept optional
+`highlightedItemIds: ReadonlySet<string>` and `onHoverItem(itemId: string | null)`
+props. Rail hover/pin uses its existing item/message refs to highlight both tree
+rows and detail messages; tree hover feeds the existing rail `hoveredItemId`.
+Selection retains its existing reveal route. Highlights never write preferences,
+change selection, move focus or scroll. Clear transient refs on session changes
+and view disposal; memoized rows must update when their highlight changes.
+The App owns this wiring, reusing existing TreeRow touched styling and rail
+callbacks. No CoreService, persisted DTO or second session reader is introduced.
+
 ### Claude installed-helper acceptance join
 
 P3.3 joins the actual setup-rendered immutable Mod, executable CLI, native

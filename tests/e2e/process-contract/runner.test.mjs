@@ -32,11 +32,19 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     assert.match((await rpc(1, 'initialize', {})).result.userAgent, /0\.160\.0/);
     const read = await rpc(2, 'thread/read', { threadId: thread });
     assert.equal(read.result.thread.id, thread); assert.equal(read.result.thread.cwd, config.project);
-    assert.deepEqual((await rpc(10, 'thread/loaded/list', {})).result.data, [thread, config.discovery.externalSessionId]);
+    assert.deepEqual((await rpc(10, 'thread/loaded/list', {})).result.data, [thread, config.discovery.externalSessionId, config.tree.externalSessionId, config.history.externalSessionId]);
     const unbound = await rpc(11, 'thread/read', { threadId: config.discovery.externalSessionId });
     assert.equal(unbound.result.thread.id, config.discovery.externalSessionId); assert.equal(unbound.result.thread.cwd, config.discovery.projectRoot);
     assert.deepEqual((await rpc(12, 'thread/turns/list', { threadId: config.discovery.externalSessionId })).result.data, []);
     await assert.rejects(readFile(join(config.discovery.projectRoot, '.ariadne/project.json')), { code: 'ENOENT' });
+    const treeCandidate = await rpc(13, 'thread/read', { threadId: config.tree.externalSessionId });
+    assert.equal(treeCandidate.result.thread.id, config.tree.externalSessionId); assert.equal(treeCandidate.result.thread.cwd, config.tree.projectRoot);
+    assert.deepEqual((await rpc(14, 'thread/turns/list', { threadId: config.tree.externalSessionId })).result.data, []);
+    await assert.rejects(readFile(join(config.tree.projectRoot, '.ariadne/project.json')), { code: 'ENOENT' });
+    const historyCandidate = await rpc(15, 'thread/read', { threadId: config.history.externalSessionId });
+    assert.equal(historyCandidate.result.thread.id, config.history.externalSessionId); assert.equal(historyCandidate.result.thread.cwd, config.history.projectRoot);
+    assert.deepEqual((await rpc(16, 'thread/turns/list', { threadId: config.history.externalSessionId })).result.data, []);
+    await assert.rejects(readFile(join(config.history.projectRoot, '.ariadne/project.json')), { code: 'ENOENT' });
     assert.deepEqual((await rpc(3, 'thread/turns/list', { threadId: thread })).result.data, []);
     const inputId = '11111111-1111-4111-8111-111111111111', attemptId = '22222222-2222-4222-8222-222222222222';
     const body = { source_input_id: inputId, binding_id: '33333333-3333-4333-8333-333333333333', generation: '44444444-4444-4444-8444-444444444444', saved_input: { text: 'Exact owner input\nComplete second line' } };
@@ -44,6 +52,7 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', payload]);
     const [admitted] = await admissions(config); assert.equal(admitted.payload, payload); assert.equal(admitted.attemptId, attemptId);
     await assert.rejects(command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', config.discovery.externalSessionId, '--message', payload]), /failed \(3\)/);
+    await assert.rejects(command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', config.tree.externalSessionId, '--message', payload]), /failed \(3\)/);
     const turns = (await rpc(4, 'thread/turns/list', { threadId: thread })).result;
     assert.equal(turns.data[0].status, 'inProgress');
     assert.equal(turns.data[0].items[0].content[0].text, payload);
@@ -61,6 +70,16 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     assert.deepEqual(after.map(turn => turn.items[0].content[0].text), [payload, secondPayload]);
     assert.equal(after[1].id, journal[1].turnId, 'Completing the first admission cannot complete the successor');
     await assert.rejects(completeTurn(config, admitted), /occurs once/);
+    assert.deepEqual(await admissions(config.history), []);
+    const historyInput = '77777777-7777-4777-8777-777777777777', historyAttempt = '88888888-8888-4888-8888-888888888888';
+    const historyPayload = `[ARIADNE_INPUT:${historyInput}:${historyAttempt}]\n${JSON.stringify({ ...body, source_input_id: historyInput, binding_id: '99999999-9999-4999-8999-999999999999', generation: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })}`;
+    await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', config.history.externalSessionId, '--message', historyPayload]);
+    const [historyAdmission] = await admissions(config.history); assert.equal(historyAdmission.payload, historyPayload);
+    assert.deepEqual(await admissions(config), journal, 'The history candidate owns a separate admission journal');
+    await assert.rejects(completeTurn(config.history, journal[1]), /exact existing/);
+    await completeTurn(config.history, historyAdmission);
+    assert.deepEqual((await rpc(17, 'thread/turns/list', { threadId: config.history.externalSessionId })).result.data.map(turn => turn.status), ['completed']);
+    assert.deepEqual((await rpc(18, 'thread/turns/list', { threadId: thread })).result.data.map(turn => turn.status), ['completed', 'inProgress'], 'History completion cannot finish the original running turn');
   } finally { client?.terminate(); await provider?.stop(); await rm(root, { recursive: true }); }
 });
 test('selectors are explicit and default runs the complete gate', () => {
