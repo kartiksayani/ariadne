@@ -131,10 +131,11 @@ function Workspace({ application }: { application: Application }) {
   const consumeOwnerRequest = (token: number) => setOwnerFocus(current => current?.token === token ? null : current);
   const reveal = async (result: RevealedItem, ownerToken?: number) => {
     if (ownerToken === undefined) invalidateOwnerRequest();
+    const token = ownerToken ?? shortcutSequence.current;
     const target = result.kind === 'item' ? result.route : result.session;
     const opened = navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result, ownerToken === undefined ? undefined : () => shortcutSequence.current === ownerToken);
     const request = navigation.getNavigationRequest();
-    if (!await opened || navigation.getNavigationRequest() !== request || ownerToken !== undefined && shortcutSequence.current !== ownerToken) return false;
+    if (!await opened || navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return false;
     detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true);
     return true;
   };
