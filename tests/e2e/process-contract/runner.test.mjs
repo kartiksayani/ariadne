@@ -8,7 +8,71 @@ import { tmpdir } from 'node:os';
 import { activateOwned, command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
+import { waitForDiscoveredCandidate } from '../../../apps/desktop/tests/e2e/discovery.spec.mjs';
+import { JSDOM } from 'jsdom';
 import WebSocket from 'ws';
+
+test('discovery failure retains scoped view facts and an App screenshot without changing the candidate wait', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-discovery-evidence-'));
+  const previousBrowser = globalThis.browser, previousDocument = globalThis.document, previousEvidence = process.env.ARIADNE_E2E_EVIDENCE;
+  const dom = new JSDOM(`<div class="ref-page-heading"><h1>Projects</h1></div><p role="alert">Unrelated owner error</p>
+    <section aria-label="Discover host sessions"><button aria-expanded="true">Discover host sessions</button>
+      <p role="status">Reading host sessions…</p><p role="alert">Discovery could not refresh.</p>
+      <article data-discovery-id="exact-thread"></article></section><article data-discovery-id="unrelated-thread"></article>`);
+  t.after(async () => {
+    globalThis.browser = previousBrowser; globalThis.document = previousDocument;
+    if (previousEvidence === undefined) delete process.env.ARIADNE_E2E_EVIDENCE; else process.env.ARIADNE_E2E_EVIDENCE = previousEvidence;
+    dom.window.close(); await rm(root, { recursive: true, force: true });
+  });
+  process.env.ARIADNE_E2E_EVIDENCE = root; globalThis.document = dom.window.document;
+  const captures = [];
+  globalThis.browser = {
+    async execute(read) { captures.push('view'); return read(); },
+    async saveScreenshot(path) { captures.push('screenshot'); assert.equal(path, join(root, 'discovery-failure.png')); await writeFile(path, 'App-only screenshot fixture'); },
+  };
+  await waitForDiscoveredCandidate({ async waitForDisplayed(options) { assert.deepEqual(options, { timeout: 20000 }); } });
+  assert.deepEqual(captures, []); assert.deepEqual(await readdir(root), []);
+  const failure = new Error('original candidate visibility assertion');
+  let waits = 0;
+  await assert.rejects(waitForDiscoveredCandidate({ async waitForDisplayed(options) {
+    ++waits; assert.deepEqual(options, { timeout: 20000 }); throw failure;
+  } }), error => error === failure);
+  assert.equal(waits, 1); assert.deepEqual(captures, ['view', 'screenshot']);
+  const facts = JSON.parse(await readFile(join(root, 'discovery-failure.json'), 'utf8'));
+  assert.deepEqual(facts, { assertion: 'discovery-candidate-visible', capture_errors: [], view: {
+    navigation_heading: 'Projects', section_present: true, section_hidden: false, expanded: 'true',
+    status: ['Reading host sessions…'], alerts: ['Discovery could not refresh.'], candidate_ids: ['exact-thread'],
+  } });
+  assert.equal(await readFile(join(root, 'discovery-failure.png'), 'utf8'), 'App-only screenshot fixture');
+});
+
+test('discovery view, screenshot and evidence-write failures each preserve the original assertion failure', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-discovery-capture-error-'));
+  const previousBrowser = globalThis.browser, previousEvidence = process.env.ARIADNE_E2E_EVIDENCE;
+  t.after(async () => {
+    globalThis.browser = previousBrowser;
+    if (previousEvidence === undefined) delete process.env.ARIADNE_E2E_EVIDENCE; else process.env.ARIADNE_E2E_EVIDENCE = previousEvidence;
+    await rm(root, { recursive: true, force: true });
+  });
+  for (const stage of ['view', 'screenshot', 'write']) {
+    const evidence = join(root, stage); if (stage !== 'write') await mkdir(evidence);
+    process.env.ARIADNE_E2E_EVIDENCE = evidence;
+    const captures = [], failure = new Error(`original ${stage} assertion`);
+    globalThis.browser = {
+      async execute() { captures.push('view'); if (stage === 'view') throw new Error('view unavailable'); return { section_present: false }; },
+      async saveScreenshot() { captures.push('screenshot'); if (stage === 'screenshot') throw new Error('screenshot unavailable'); },
+    };
+    await assert.rejects(waitForDiscoveredCandidate({ async waitForDisplayed() { throw failure; } }), error => error === failure);
+    assert.deepEqual(captures, ['view', 'screenshot'], 'Failed view capture must still attempt the existing App screenshot');
+    if (stage === 'write') await assert.rejects(readFile(join(evidence, 'discovery-failure.json')), { code: 'ENOENT' });
+    else {
+      const facts = JSON.parse(await readFile(join(evidence, 'discovery-failure.json'), 'utf8'));
+      assert.deepEqual(facts.capture_errors, [stage]);
+      assert.equal('view' in facts, stage !== 'view');
+    }
+  }
+});
+
 async function assertExited(pid) {
   const end = Date.now() + 1000;
   while (alive(pid) && Date.now() < end) await delay(10);
