@@ -238,10 +238,16 @@ async function readySessionButton(tree) {
   const selector = `[data-session-id="${tree.sessionId}"]`, button = await browser.$(selector);
   await button.waitForDisplayed(); await button.waitForEnabled();
   await browser.execute(observeTreeClickReadiness, button, null, null, null, selector);
+  let failure;
   try {
     await wait(() => browser.execute(() => window.__ariadneTreeFilterAction.readiness.ready),
       'Native session target did not become stable and enabled');
-  } finally { await browser.execute(() => window.__ariadneTreeFilterCleanup?.()); }
+  } catch (error) { failure = error;
+  } finally {
+    try { await browser.execute(() => window.__ariadneTreeFilterCleanup?.()); }
+    catch (error) { failure ??= error; }
+  }
+  if (failure) throw failure;
   return button;
 }
 async function choose(group, name, pressed) {
