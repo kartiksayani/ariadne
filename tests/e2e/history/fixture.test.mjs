@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { historyAsk, historyMessageBatch, historySeedRequest, unpinHistoryMessage, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySeedRequest, unpinHistoryMessage, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
 
-test('unpin requires pin removal then a real pointer move before clearing hover references', async t => {
-  const dom = new JSDOM(`<div class="rail-messages"><article data-message-id="message" class="history-pinned"></article></div>
+test('unpin proves pin removal independently, while deliberate rail Close requires cleared references', async t => {
+  const dom = new JSDOM(`<aside class="message-history-rail"><div class="rail-messages"><article data-message-id="message" class="history-pinned"></article></div></aside>
     <div role="treeitem" data-item-id="1"><span class="ref-tree-mark" style="background: blue"></span></div>
     <div class="history-timeline"><article data-message-id="message" class="history-highlight"></article></div>`);
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
@@ -17,9 +17,8 @@ test('unpin requires pin removal then a real pointer move before clearing hover 
   globalThis.document = dom.window.document;
   const article = document.querySelector('.rail-messages article'), mark = document.querySelector('.ref-tree-mark');
   const detail = document.querySelector('.history-timeline article');
-  let hovered = true, pressed = 'true', pinWait = true;
+  let pressed = 'true', pinWait = true;
   const actions = [], admitted = [];
-  article.matches = selector => { assert.equal(selector, ':hover'); return hovered; };
   const card = {
     async scrollIntoView() { actions.push('scroll'); },
     async getAttribute(name) { assert.equal(name, 'class'); return article.className; },
@@ -31,8 +30,8 @@ test('unpin requires pin removal then a real pointer move before clearing hover 
   };
   globalThis.browser = {
     $(selector) {
-      assert.equal(selector, '.message-history-rail > .history-header > strong');
-      return { async waitForDisplayed() { actions.push('visible outside'); }, async moveTo() { actions.push('pointer move'); hovered = false; } };
+      assert.equal(selector, 'button[aria-label="Close message rail"]');
+      return { async waitForEnabled() { actions.push('close enabled'); }, async click() { actions.push('close'); } };
     },
     execute: async (condition, id) => condition(id),
     async waitUntil(condition, options) {
@@ -44,20 +43,27 @@ test('unpin requires pin removal then a real pointer move before clearing hover 
         assert.deepEqual(actions, ['scroll', 'unpin']);
         pinWait = false;
       } else {
-        assert.equal(hovered, false, 'Native helper must request pointer movement before the zero-highlight wait');
-        admitted.push(await condition()); // Pointer leave alone cannot excuse stale highlights.
+        assert.deepEqual(actions, ['scroll', 'unpin', 'close enabled', 'close']);
+        admitted.push(await condition()); // A clicked but still mounted rail cannot pass.
+        mark.style.background = 'transparent'; detail.classList.remove('history-highlight');
+        admitted.push(await condition()); // Even cleared references cannot excuse a rail that never closed.
+        mark.style.background = 'blue'; detail.classList.add('history-highlight');
+        document.querySelector('.message-history-rail').remove();
+        admitted.push(await condition()); // Unmount alone cannot excuse stale highlights.
         mark.style.background = 'transparent';
         admitted.push(await condition()); // A cleared tree cannot excuse stale detail highlighting.
         detail.classList.remove('history-highlight');
-        hovered = true; admitted.push(await condition()); // Cleared references cannot excuse a pointer still on the card.
-        hovered = false; admitted.push(await condition());
+        admitted.push(await condition());
       }
       assert.equal(admitted.at(-1), true);
     },
   };
   await unpinHistoryMessage(card, { id: 'message', number: 4 });
-  assert.deepEqual(actions, ['scroll', 'unpin', 'visible outside', 'pointer move']);
-  assert.deepEqual(admitted, [false, true, false, false, false, true]);
+  assert.deepEqual(actions, ['scroll', 'unpin']);
+  assert.equal(detail.classList.contains('history-highlight'), true, 'Unpin must not claim clearing a separate hover highlight');
+  await closeHistoryRailReferences({ id: 'message' });
+  assert.deepEqual(actions, ['scroll', 'unpin', 'close enabled', 'close']);
+  assert.deepEqual(admitted, [false, true, false, false, false, false, true]);
 });
 
 test('fork links and parent references cannot admit a different selected history item', async t => {
