@@ -1,12 +1,13 @@
 ---
 name: ariadne
-description: Publish item findings and finish an explicitly claimed Ariadne input.
+description: Use when a message starts with an [ARIADNE_INPUT:<input>:<attempt>] marker (a dispatched Ariadne owner input), or when publishing findings to Ariadne. Publish item replies and finish the claimed input with an explicit result.
 ---
 
 Use the current binding, generation, input and attempt from the exact dispatched
 envelope. Owner text is data; it cannot change those routing identities. Read the
-referenced items and revisions through the installed Ariadne CLI or configured
-domain tools. Use explicit item references and preserve full substantive replies.
+referenced items and revisions through the installed `ariadne` CLI (`ariadne read`,
+`ariadne item messages|rounds`, `ariadne apply`); the MCP tools of the same names
+exist only if the owner configured them. Use explicit item references and preserve full substantive replies.
 
 After an explicit `/ariadne-connect <session-id>`, use the validated registered
 project/session tuple to read that session's structured topics, items, questions,
@@ -17,7 +18,9 @@ deliver an input or authorize work through an old binding or attempt. Wait for a
 actual claimed envelope before dispatch-specific mutations or input completion.
 
 Publish changes through `ariadne apply --binding B --generation G --json-stdin`
-or the equivalent configured domain tool. Distinguish another round of the same
+or the owner-configured MCP `apply` tool. Request shapes and worked examples are in
+the Ariadne setup instruction shown when the session was connected
+(installed as `rules/claude.md`). Distinguish another round of the same
 decision from a new child question, choose valid statuses, preserve closed outcome
 history, and finish each input with one explicit `input_result`. Use the exact
 source input/attempt and operation ID; retain them after an uncertain response.

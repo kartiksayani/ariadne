@@ -189,6 +189,10 @@ class InlineScripts(HTMLParser):
             self.scripts.append(data)
 
 
+def rules_inputs(name):
+    return name.startswith("integrations/rules/") or name == "tools/xtask/src/rules.rs"
+
+
 def lint(paths, full=False):
     existing = [ROOT / name for name in paths if (ROOT / name).is_file()]
     check_frontend = full or any(path.suffix in {".ts", ".tsx", ".mts", ".cts", ".css"}
@@ -211,6 +215,9 @@ def lint(paths, full=False):
                 "--stdin-filename", "planning-inline.mjs", "--max-warnings=0", input="\n".join(parser.scripts))
     if full or any(path.suffix == ".rs" for path in existing):
         run("cargo", "fmt", "--all", "--", "--check")
+    if full or any(rules_inputs(name) for name in paths):
+        # Generated agent rules must match their authored source (also checked at install).
+        run("cargo", "run", "--locked", "-p", "ariadne-xtask", "--", "gen-rules", "--check")
     if check_frontend:
         run("npm", "run", "check")
 

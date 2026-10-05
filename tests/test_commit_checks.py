@@ -254,6 +254,21 @@ class LintTests(unittest.TestCase):
                     self.assertIn(("cargo", "fmt", "--all", "--", "--check"), calls)
 
 
+    def test_generated_agent_rules_are_checked_for_rule_or_generator_changes_and_full_runs(self):
+        check = ("cargo", "run", "--locked", "-p", "ariadne-xtask", "--", "gen-rules", "--check")
+        for changed, full, expected in [
+            (["integrations/rules/source.md"], False, True),
+            (["integrations/rules/codex.md"], False, True),
+            (["tools/xtask/src/rules.rs"], False, True),
+            (["crates/core/src/lib.rs"], False, False),
+            ([], True, True),
+        ]:
+            with self.subTest(changed=changed, full=full), tempfile.TemporaryDirectory() as folder:
+                with mock.patch.object(commit, "ROOT", Path(folder)), mock.patch.object(commit, "run") as run:
+                    commit.lint(changed, full=full)
+                self.assertEqual(check in [call.args for call in run.call_args_list], expected)
+
+
 class CoverageTests(unittest.TestCase):
     def test_ci_exports_independent_xtask_report_from_workspace_profiles(self):
         for changed, native_command in [
