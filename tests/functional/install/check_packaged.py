@@ -22,7 +22,8 @@ def check(artifacts, evidence):
         home.mkdir(mode=0o700)
         (home / ".local/bin").mkdir(parents=True)
         history = home / ".ariadne/sessions/fixture.json"
-        history.parent.mkdir(parents=True)
+        (home / ".ariadne").mkdir(mode=0o700)
+        history.parent.mkdir(mode=0o700)
         history.write_bytes(b"existing history and backups")
         foreign = home / ".claude/settings.json"
         foreign.parent.mkdir()
@@ -34,8 +35,15 @@ def check(artifacts, evidence):
         env = {**os.environ, "HOME": str(home), "ARIADNE_HOME": str(home / ".ariadne")}
         helper = installed / "bin/ariadne"
         def invoke(*args):
-            return subprocess.run([str(helper), *args], env=env, check=True, text=True,
-                                  stdout=subprocess.PIPE, timeout=30).stdout
+            try:
+                return subprocess.run([str(helper), *args], env=env, check=True, text=True,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      timeout=30).stdout
+            except subprocess.CalledProcessError as error:
+                raise AssertionError(
+                    f"Installed helper {args!r} failed ({error.returncode}):\n"
+                    f"stdout: {error.stdout}\nstderr: {error.stderr}"
+                ) from error
         descriptor = installer.json_read(installed / "install.json")
         assert installer.inventory(installed) == descriptor["owned_files"]
         assert (home / "Applications/Ariadne.app").resolve() == installed / "Ariadne.app"
