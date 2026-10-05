@@ -133,6 +133,57 @@ session preference. Application-lifetime routing and recovery controllers share
 one desktop service. Nonvisual session/item data attributes on the real controls
 support native acceptance without adding a separate test flow.
 
+`NavigationStore.getNavigationRequest()` exposes the existing navigation intent
+counter for cancellation checks only. It is not a persisted preference or a new
+navigation command. Async keyboard actions capture it before resolving a route
+and abandon stale work before navigating, focusing or submitting an owner input.
+The existing navigate/close-tab operations remain the only owners of the counter;
+a failed or superseded navigation cannot authorize a later shortcut effect.
+`navigate(selection, reveal, isCurrent?)` accepts an optional caller cancellation
+guard, checked on entry and after asynchronous route validation before dispatching
+the preferences mutation. A dismissed or replaced keyboard action returns false
+without publishing its route. Existing callers retain their behavior; this guard
+does not cancel or rewrite an already dispatched durable mutation.
+After dispatch, its confirmed preference result remains authoritative, but an
+invalidated caller guard suppresses the obsolete shortcut's local reveal so a
+newer dismissal does not reopen detail when the saved receipt arrives.
+
+Guarded history actions reuse the application-lifetime `SessionActionControllers`
+registry and existing `SessionActions.execute(command, reviewedRevision)` /
+`retry()` methods. Topic archive/restore and session close/reopen share the same
+write barrier as binding/recovery actions. Continue previews use explicit source
+and target refs and the target owner context; Send uses the target session's
+controller. An uncertain request retains its exact operation ID and body across
+view changes, and cannot be replaced by a newly edited preview.
+
+Receipt admission verifies the registered target session, operation ID and
+positive revision, plus the command-specific result: topic ID, next topic revision
+and archive state; next session revision, requested state and close timestamp;
+or continuation operation/source IDs, source revision/hash and approved summary.
+Continuation receipt admission also validates canonical target IDs and map
+key/value shapes and uniqueness; envelope/kind validation alone is insufficient.
+Only errors proven to arise after atomic receipt replay may clear pending work:
+lifecycle revision/transition/blocker guards, and Continue queue/target-state/
+adapter guards inside its target transaction. Generic routing, source IO and
+validation errors retain pending work. Continue captures an owned source snapshot
+without holding both session locks, then checks its preview revision/hash inside
+the replay-first target transaction, before any copy or allocation. Therefore a
+saved concurrent operation wins over stale-preview rejection, and an unsaved
+`preview_stale` safely clears pending work for explicit preparation of a new
+preview. Source read/hash failures before that transaction remain uncertain.
+No new DTO or alternate mutation path is introduced.
+
+History/rail composition owns transient cross-highlights for the current session.
+`NavigationSentenceTree` and `SentenceTree` accept optional
+`highlightedItemIds: ReadonlySet<string>` and `onHoverItem(itemId: string | null)`
+props. Rail hover/pin uses its existing item/message refs to highlight both tree
+rows and detail messages; tree hover feeds the existing rail `hoveredItemId`.
+Selection retains its existing reveal route. Highlights never write preferences,
+change selection, move focus or scroll. Clear transient refs on session changes
+and view disposal; memoized rows must update when their highlight changes.
+The App owns this wiring, reusing existing TreeRow touched styling and rail
+callbacks. No CoreService, persisted DTO or second session reader is introduced.
+
 ### Claude installed-helper acceptance join
 
 P3.3 joins the actual setup-rendered immutable Mod, executable CLI, native
