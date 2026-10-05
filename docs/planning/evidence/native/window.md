@@ -1,8 +1,10 @@
 # Production window lifecycle acceptance
 
-Status: **prepared; physical execution has not run**. This supplement starts at
-reviewed PR96 `6d04e545`. It does not complete P6.1, P6.2 or P6.4. The existing
-PR96 packaged route check proves the cold registered route and installed CLI
+Status: **prepared; physical execution has not run**. This supplement integrates
+local PR96 `b1ffbdd5bf81db08c1de23efc0662d080f897542` and current PR91
+`4f0d9519`, including the reviewed parent repairs and captured-read validation.
+It does not complete P6.1, P6.2 or P6.4. The existing PR96 packaged route check
+proves the cold registered route and installed CLI
 second-instance route; this supplement reuses its private package fixture,
 canonical `ui.json`, primary identity, control socket and physical instance lease
 helpers without changing them.
@@ -47,7 +49,25 @@ than expanding the harness.
 
 Do not run while another worker owns a native App/cache session. Use the pinned
 Node22 environment. Supply absolute paths to the ordinary release artifacts and
-its retained evidence directory; the script does not use a personal install:
+its retained evidence directory; the script does not use a personal install.
+
+After the maintainer releases the native session, the existing complete release
+boundary entry point, run from this clean worktree with the pinned Node22/toolchain
+on PATH, builds the ordinary App and CLI and records matching route evidence:
+
+```sh
+rtk proxy node scripts/check-release-boundary.mjs
+```
+
+This entry point removes this worktree's `target/release-boundary`, rebuilds the
+ordinary App with no default features, launches a private production App for the
+cold/second-instance routes, verifies release isolation and cleanup, and runs the
+packaged helper installation check. It records the current source in `run.json`
+and prints the completed evidence directory. The original artifacts are
+`target/release-boundary/release/bundle/macos/Ariadne.app` and
+`target/release-boundary/release/ariadne`; pass their absolute paths and the printed
+evidence directory below. This is an authorized later native execution step, not
+preparation evidence.
 
 ```sh
 rtk proxy node --test tests/native/window/*.test.mjs
