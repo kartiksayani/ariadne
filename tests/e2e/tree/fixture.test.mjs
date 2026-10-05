@@ -6,17 +6,18 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { observeTreeClickReadiness, publishTreeRequest, treeBatch, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { observeTreeClickReadiness, publishTreeRequest, treeBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
 
 for (const target of ['filter', 'session']) test(`${target} click readiness requires the same enabled hit target and stable nested geometry without clicking`, () => {
   const frames = new Map(), listeners = new Map(), scrolls = [];
   let nextFrame = 0, rect = { top: 200, bottom: 220, left: 400, right: 440, width: 40, height: 20 };
   const parent = { scrollLeft: 0, scrollTop: 0, parentElement: null };
   const button = { textContent: 'Me', disabled: false, isConnected: true, parentElement: parent, outerHTML: '<button>Me</button>',
-    scrollIntoView: options => scrolls.push(options), getBoundingClientRect: () => ({ ...rect }),
+    scrollIntoView: options => { scrolls.push(options); if (rect.top > 700) rect = { ...rect, top: 200, bottom: 220 }; }, getBoundingClientRect: () => ({ ...rect }),
     getAttribute: () => 'false', contains: value => value === button };
   let named = button, hit = button;
   const document = {
+    visibilityState: 'visible', hidden: false, hasFocus: () => true,
     querySelector: selector => {
       assert.equal(selector, target === 'filter' ? '[aria-label="Item owner"]' : '[data-session-id="fixture"]');
       return target === 'filter' ? { querySelectorAll: () => [named] } : named;
@@ -25,13 +26,16 @@ for (const target of ['filter', 'session']) test(`${target} click readiness requ
     addEventListener: (type, listener, capture) => { assert.equal(capture, true); listeners.set(type, listener); },
     removeEventListener: (type, listener) => { assert.equal(listeners.get(type), listener); listeners.delete(type); },
   };
-  const window = { requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
+  const window = { innerWidth: 1000, innerHeight: 700, requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
     cancelAnimationFrame: id => frames.delete(id) };
   // Exercise the same self-contained callback WebDriver serializes; this proves
   // readiness admission only, not native rendering or OS input acceptance.
   runInNewContext(`(${observeTreeClickReadiness.toString()})(button, 'Item owner', 'Me', true, selector)`,
     { window, document, button, selector: target === 'session' ? '[data-session-id="fixture"]' : null });
   const state = window.__ariadneTreeFilterAction;
+  const status = () => runInNewContext(`(${treeClickReadinessStatus.toString()})(true)`, { window, document });
+  assert.equal(state.readiness.callbacks, 0); assert.equal(state.readiness.callbackError, null);
+  assert.equal(state.readiness.visibilityState, 'visible'); assert.equal(state.readiness.hidden, false); assert.equal(state.readiness.hasFocus, true);
   const frame = () => { const [id, callback] = frames.entries().next().value; frames.delete(id); callback(); };
   frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
   rect = { ...rect, top: 210, bottom: 230 };
@@ -50,9 +54,34 @@ for (const target of ['filter', 'session']) test(`${target} click readiness requ
   }
   assert.equal(scrolls.length, 1); assert.equal(scrolls[0].behavior, 'instant');
   assert.equal(scrolls[0].block, 'center'); assert.equal(scrolls[0].inline, 'center');
+  rect = { ...rect, top: 900, bottom: 920 };
+  frame(); assert.equal(state.readiness.ready, false); assert.equal(state.readiness.frames, 0);
+  assert.equal(state.readiness.recenters, 1); assert.equal(scrolls.length, 2);
+  frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
+  hit = parent; frame(); assert.equal(state.readiness.ready, false);
+  assert.equal(scrolls.length, 2, 'An overlay over a visible target must not trigger re-centering');
+  rect = { ...rect, top: 900, bottom: 920 }; named = { ...button };
+  frame(); assert.equal(scrolls.length, 2, 'A replacement target must not trigger re-centering');
+  rect = { ...rect, top: 200, bottom: 220 }; named = button; hit = button;
+  frame(); frame(); assert.equal(status().ready, true);
+  document.visibilityState = 'hidden'; document.hidden = true;
+  assert.equal(state.readiness.ready, true, 'Last ready frame remains stale while native animation callbacks pause');
+  assert.equal(status().ready, false, 'Live hidden state prevents admission without waiting for another animation frame');
+  document.visibilityState = 'visible'; document.hidden = false; document.hasFocus = () => false;
+  assert.equal(status().ready, false, 'Live focus loss prevents admission even if the last frame was ready');
+  document.hasFocus = () => true;
   assert.equal(state.click, null, 'Readiness must not generate an input');
   listeners.get('click')({ target: parent, isTrusted: false }); assert.equal(state.click, null);
   listeners.get('click')({ target: button, isTrusted: true }); assert.equal(state.click.trusted, true);
+  document.visibilityState = 'hidden'; document.hidden = true; document.hasFocus = () => false;
+  frame(); assert.equal(state.readiness.visibilityState, 'hidden'); assert.equal(state.readiness.hasFocus, false);
+  assert.equal(state.readiness.ready, false); assert.equal(state.readiness.frames, 0);
+  assert.ok(state.readiness.callbacks > 0); assert.equal(state.readiness.callbackError, null);
+  document.elementFromPoint = () => { throw new Error('native hit-test diagnostic failure'); };
+  frame();
+  assert.equal(state.readiness.ready, false); assert.equal(state.readiness.callbackError.message, 'native hit-test diagnostic failure');
+  assert.match(state.readiness.callbackError.stack, /native hit-test diagnostic failure/);
+  assert.equal(status().ready, false); assert.equal(status().callbackError.message, 'native hit-test diagnostic failure');
   window.__ariadneTreeFilterCleanup(); assert.equal(frames.size, 0); assert.equal(listeners.size, 0);
 });
 
