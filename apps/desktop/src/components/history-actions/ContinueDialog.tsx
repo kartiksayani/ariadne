@@ -22,7 +22,7 @@ function TargetPreview({ sourceActions, topicId, target, actions, revealItem, on
     setLoading(true); setError(null); setPrepared(null);
     void (async () => {
       await Promise.all([actions.session.refresh(), sourceActions.session.refresh()]);
-      const preview = await sourceActions.service.query({ session: target.route, request: { command: 'topic_continue_preview', params: {
+      const preview = await sourceActions.service.query({ session: null, request: { command: 'topic_continue_preview', params: {
         source: structuredClone(sourceState.route), source_topic_id: topicId, target: target.route,
       } } });
       const snapshot = await sourceActions.service.query({ session: structuredClone(sourceState.route), request: { command: 'session_get', params: {} } });

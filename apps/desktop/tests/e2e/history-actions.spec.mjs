@@ -26,7 +26,9 @@ async function continuePreview(sourceSession, topicName, targetTitle) {
   await click(await historyControls().$(`button=Continue ${topicName}`));
   await click(await dialog().$(`button=${targetTitle}`));
   const send = await dialog().$(`button=Send to ${targetTitle}`);
-  await send.waitForEnabled();
+  try { await send.waitForEnabled(); } catch (failure) {
+    throw new Error(`${failure.message}\nDialog text: ${await dialog().getText().catch(() => '(unavailable)')}`, { cause: failure });
+  }
   const text = await dialog().getText();
   for (const label of ['Waiting (', 'Open (', 'Terminal (', 'Source revision', 'immutable source provenance']) assert.ok(text.includes(label), `Preview omitted ${label}`);
   return send;
