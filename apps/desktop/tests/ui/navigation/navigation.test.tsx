@@ -462,6 +462,21 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(store.getSnapshot().setup?.data).toMatchObject({ kind: 'binding_connect', setup_instruction: 'Read Ariadne structured context, then summarize unresolved questions.' });
     expect(close).toHaveBeenCalledOnce();
   });
+  it('tells the owner to paste the saved setup instruction into the host thread once per binding', async () => {
+    const { transport, store } = setup(); read(transport);
+    const binding = Object.values((demo as Session).bindings)[0]!;
+    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
+      data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
+        setup_instruction: 'Saved Ariadne rules.' } } }); read(transport);
+    await act(async () => { await store.bind({ project_id: projectId, adapter_id: adapter.adapter_id, configuration: adapter.configuration,
+      external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
+    const banner = await screen.findByLabelText('Session setup');
+    expect(within(banner).getByText(/Paste this setup instruction into the selected Codex thread/)).toBeTruthy();
+    expect(within(banner).getByText(/once per binding/)).toBeTruthy();
+    expect(within(banner).getByText('Saved Ariadne rules.')).toBeTruthy();
+  });
   it('retains actionable rebind guard errors without showing setup or changing session data', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
     transport.enqueue('binding_connect', { api_version: 1, ok: false, error: { ...error, code: 'invalid_transition', message: 'Old binding has queued inputs.', hint: 'Resolve its queued inputs before rebinding.' } });

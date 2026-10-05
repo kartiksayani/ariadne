@@ -157,6 +157,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
       </section>)}
     </>}
     {state.setup?.data.kind === 'binding_connect' && <section className="nav-banner" aria-label="Session setup"><h2>Session connected</h2>
+      <p>Connecting sent nothing to the model. Paste this setup instruction into the selected Codex thread (or Claude conversation) once per binding so the agent has the Ariadne rules.</p>
       <pre>{state.setup.data.setup_instruction}</pre><p>Session {state.setup.session_id}</p>
       <ul>{Object.entries(state.setup.data.capabilities).filter(([, value]) => typeof value === 'object').map(([name, value]) =>
         typeof value === 'object' && <li key={name}>{name.replace(/_/g, ' ')}: {value.supported ? 'supported' : 'unavailable'}{value.conditions.length > 0 && ` · ${value.conditions.join('; ')}`}</li>)}</ul>
