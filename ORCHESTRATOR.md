@@ -41,6 +41,14 @@ Prefer existing caches, isolated fixture data and the smallest useful reproducti
 reuse the build to verify the fix. Required CI and merge acceptance still apply.
 This standing authorization was confirmed on 2026-10-05.
 
+The owner clarified the test boundary on 2026-10-05: test Ariadne-owned behavior,
+not standard macOS window/menu behavior. Verify our preference persistence, route
+selection, tray projection, lifecycle ordering and external-turn preservation.
+Use focused unit/Core/Store integration tests and the existing native/release smoke
+where it proves our wiring. Physical Pin checkmarks, Show/minimize mechanics and
+repeated window/menu operations are not acceptance gates. Do not expand OS-level
+automation to prove behavior delegated unchanged to Apple APIs.
+
 - **Pre-push timing:** Measure `cargo check --workspace --all-features --locked`
   and `tsc --noEmit` on an existing warm cache, recording each duration and the
   combined time. Include a representative incremental source change so a no-op
