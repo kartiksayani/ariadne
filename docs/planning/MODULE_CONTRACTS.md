@@ -368,6 +368,24 @@ checkpoint-after-persist ordering. Tests that merely echo fixture fields do not
 prove producer semantics. Actual core/store/module integration completes each
 original task, then P7.1 proves the assembly.
 
+## Personal package resource export
+
+P6.4 reuses the CLI's compiled integration inventory through the read-only
+`ariadne package-resources --helper-path /absolute/final/bin/ariadne` command.
+Its JSON response is `{schema_version: 1, version, files}`, where `files` maps
+the existing `setup::resources::bundle` relative names to UTF-8 contents. The
+helper path is absolute and normalized, may name a not-yet-installed binary,
+and is rendered as data; this command neither writes files nor invokes a host.
+Invalid arguments or an unrepresentable resource return a nonzero status.
+
+The installer validates the bounded response and version, installs these files
+under the version's `integrations/` directory, and rejects absolute or escaping
+resource names. It must not maintain a second resource inventory. The existing
+v1 `install.json` routing fields stay unchanged; fixed-path ownership digests
+may extend that manifest for conservative uninstall. Unknown inventory paths
+never authorize filesystem deletion. Tests use isolated temporary homes, and
+actual installed-artifact acceptance remains a CI/release gate.
+
 ## Shared contract changes
 
 Workers propose signature or semantic changes to the maintainer **before**

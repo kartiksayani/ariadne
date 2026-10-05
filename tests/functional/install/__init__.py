@@ -1,0 +1,1 @@
+"""Personal package installation fixtures."""
