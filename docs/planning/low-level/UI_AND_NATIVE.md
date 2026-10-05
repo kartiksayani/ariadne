@@ -126,6 +126,17 @@ The rail uses the same stored history, newest at bottom. Hovering a message high
 
 Search normalizes NFKC and locale-independent lowercase for indexing only; stored text is unchanged. Every whitespace token must match the combined question, outcome, why, topic name, or message excerpt. It excludes transient provider activity, raw tool input/result, and credentials. Debounce 100ms. Status/topic/owner filters combine with AND; choices within one filter combine with OR. Include matching items and labelled contextual ancestors. No-results offers Clear search/filters.
 
+After that debounce, sentence-tree results may use transient search text while
+the canonical preference save is pending. Override only search in the current
+canonical filter projection; do not publish a speculative preference revision or
+change selection, expansion, Later or other filters. Indicate pending or
+unconfirmed persistence without claiming the preview is saved. Failed or uncertain
+saves retain the typed preview and the existing explicit reconciliation path;
+never automatically resubmit an attempted operation. Preserve newer unsubmitted
+text across unrelated confirmed writes. Discard the preview on route change,
+reopen or explicit reset; restored state comes from canonical preferences.
+See [ADR-0066](../../adr/ADR-0066-project-local-search-before-save-confirmation.md).
+
 Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, scroll nearest, and open detail. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
 
 Start with variable-height DOM rows memoized by item revision. Add virtualization only if the documented 2,000-item performance target is missed; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
