@@ -52,6 +52,14 @@ export function mac2Client(trace, signal, captureTraySource) {
     return found[0][ELEMENT];
   }
   const click = elementId => scoped('POST', '/execute/sync', { script: 'macos: click', args: [{ elementId }] });
+  async function observeStatus() {
+    const elementId = await unique(TRAY);
+    return { elementId,
+      rectangle: await scoped('GET', `/element/${elementId}/rect`),
+      focused: await scoped('GET', `/element/${elementId}/attribute/focused`),
+      hittable: await scoped('GET', `/element/${elementId}/attribute/hittable`),
+    };
+  }
   async function trayItem(title) {
     assert.ok(trayMenu, 'Open the genuine tray menu before choosing an action');
     const item = await unique(menu(title), trayMenu);
@@ -85,15 +93,26 @@ export function mac2Client(trace, signal, captureTraySource) {
       const startX = rect.x + rect.width / 2, startY = rect.y + rect.height / 2;
       return scoped('POST', '/execute/sync', { script: 'macos: clickAndDrag', args: [{ duration: 0.2, startX, startY, endX: startX + 16, endY: startY + 16 }] });
     },
+    async statusState(application) {
+      const appState = await scoped('POST', '/execute/sync', { script: 'macos: queryAppState', args: [{ path: application }] });
+      return { appState, ...await observeStatus() };
+    },
     async openTray() {
       trayMenu = undefined;
-      const status = await unique(TRAY);
-      assert.equal(await scoped('GET', `/element/${status}/attribute/hittable`), 'true', 'Native status item is not hittable');
-      await click(status);
+      let status = await observeStatus();
+      if (status.hittable !== 'true') {
+        // A single genuine hover can expose a hidden menu bar. Retain what
+        // XCTest actually reports; it must become hittable before any click.
+        await scoped('POST', '/execute/sync', { script: 'macos: hover', args: [{ elementId: status.elementId }] });
+        await captureTraySource?.(await scoped('GET', '/source'), 'hover');
+        status = await observeStatus();
+      }
+      assert.equal(status.hittable, 'true', 'Native status item is not hittable after one physical hover');
+      await click(status.elementId);
       // The unopened status item is a leaf in the real AX tree. Preserve the
       // actual post-click hierarchy before requiring its actionable menu.
       const source = await scoped('GET', '/source');
-      await captureTraySource?.(source);
+      await captureTraySource?.(source, 'open');
       trayMenu = await unique(TRAY_MENU);
       await trayItem('Show Ariadne');
     },
@@ -122,8 +141,8 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
   const root = await mkdtemp('/private/tmp/ariadne-window-');
   const data = await mkdtemp('/private/tmp/ariadne-window-data-');
   const trace = [], services = [], launches = [];
-  let trayOpen = 0;
-  const client = mac2Client(trace, signal, source => writeFile(join(evidence, `tray-open-${++trayOpen}.xml`), source));
+  let trayObservation = 0;
+  const client = mac2Client(trace, signal, (source, stage) => writeFile(join(evidence, `tray-${stage}-${++trayObservation}.xml`), source));
   const wait = (check, label, timeout) => until(check, label, timeout, signal);
   let fixture, child, primary, ownership, failure, cleanupFailure;
   const env = { PATH: process.env.PATH, LANG: 'en_US.UTF-8', TMPDIR: process.env.TMPDIR || '/private/tmp' };
@@ -223,10 +242,12 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
     assert.equal(initial.preferences.global.pinned, false, 'Fresh private fixture was already pinned');
     assert.ok(await client.closeVisible(), 'Initial native close control is not hittable');
     assertGeometry(initial.preferences, await client.rectangle());
+    await json(join(evidence, 'status-before-close.json'), await client.statusState(fixture.application));
     for (const [label, control] of [['close', CLOSE], ['minimize', MINIMIZE]]) {
       await client.click(await client.unique(control));
       await wait(async () => !(await client.closeVisible()), `${label} removes the hittable window`);
       const hidden = await capture(label); assertContinuity(initial, hidden, fixture.coldRoute);
+      if (label === 'close') await json(join(evidence, 'status-after-close.json'), await client.statusState(fixture.application));
       await client.openTray(); await client.choose('Show Ariadne');
       await wait(() => client.closeVisible(), `Show after ${label}`);
       const shown = await capture(`show-after-${label}`); assertContinuity(hidden, shown, fixture.coldRoute);
