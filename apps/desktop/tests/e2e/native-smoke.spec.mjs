@@ -188,12 +188,14 @@ async function delivery(configuration) {
     }
   }
   const finalSession = await snapshot(configuration), finalInputs = orderedInputs(finalSession);
+  await json(join(evidence, 'completed-inputs.json'), { finalSession, admissions: await admissions(configuration), completed: await readJson(configuration.completePath) });
   assert.ok(finalInputs.every(input => input.state === 'handled' && input.attempts.length === 1));
   assert.equal(new Set(queued.map(entry => entry.turnId)).size, 5);
   assert.deepEqual(receipts(finalSession, finalInputs), savedReceipts);
   assert.equal(finalSession.bindings[configuration.bindingId].generation, configuration.generation);
   for (let index = 0; index < finalInputs.length; index++) {
-    const input = finalInputs[index], messages = finalSession.messages.filter(message => message.author === 'agent' && message.input_id === input.id && message.attempt_id === input.attempts[0].id);
+    const input = finalInputs[index], messages = finalSession.messages.filter(message => message.author === 'agent' && message.kind === 'reply'
+      && message.input_id === input.id && message.attempt_id === input.attempts[0].id);
     assert.equal(input.attempts[0].host_turn_id, queued[index].turnId);
     assert.ok(input.attempts[0].domain_result);
     assert.equal(messages.length, 1); assert.equal(messages[0].body, replies[index]);
