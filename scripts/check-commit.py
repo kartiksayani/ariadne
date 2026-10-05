@@ -59,7 +59,7 @@ def scope_for(paths):
         return "application", True
     scope, release = "docs", False
     for name in paths:
-        if (name in RELEASE_FILES or name.startswith((".github/", ".githooks/", "apps/desktop/src-tauri/"))
+        if (name in RELEASE_FILES or name.startswith((".github/", ".githooks/", "apps/desktop/src-tauri/", "scripts/install/", "tests/functional/install/"))
                 or (name.startswith(("crates/ariadne-agent-protocol/", "crates/ariadne-core/")) and name.endswith(".rs")
                     and not name.startswith(("crates/ariadne-agent-protocol/tests/", "crates/ariadne-core/tests/")))
                 or (name.startswith(("apps/", "crates/", "integrations/")) and
@@ -68,7 +68,7 @@ def scope_for(paths):
                      name.endswith((".json", ".mjs", ".html", ".css"))))):
             release = True
         if name in FULL_FILES or name in RELEASE_FILES or name.startswith(
-                ("apps/", "crates/", "integrations/", ".github/", ".githooks/")):
+                ("apps/", "crates/", "integrations/", ".github/", ".githooks/", "scripts/install/", "tests/functional/install/")):
             scope = "application"
         elif name.startswith(("scripts/", "tests/", "tools/")) or name in {"requirements-dev.txt", "pyproject.toml", ".gitignore"}:
             if scope == "docs":
@@ -257,6 +257,13 @@ def main(argv=None):
         for report in [*reports, xtask_report]:
             report.unlink(missing_ok=True)
         (ROOT / "coverage").mkdir(exist_ok=True)
+        run(sys.executable, "-m", "coverage", "run", "--data-file=coverage/install.coverage",
+            "--source=scripts/install", "-m", "unittest", "discover",
+            "-s", "tests/functional/install", "-p", "test_*.py")
+        run(sys.executable, "-m", "coverage", "xml", "--data-file=coverage/install.coverage",
+            "-o", "coverage/install.xml")
+        run(sys.executable, "-m", "coverage", "report", "--data-file=coverage/install.coverage",
+            "--fail-under=80")
         run("npm", "run", "build")
         run("cargo", "build", "--workspace", "--locked", "--all-features")
         run("cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings")

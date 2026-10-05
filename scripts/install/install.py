@@ -1,0 +1,581 @@
+#!/usr/bin/env python3
+"""Personal macOS package installation. No provider or shell configuration writes."""
+import argparse
+import contextlib
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import platform
+import plistlib
+import re
+import shutil
+import selectors
+import stat
+import subprocess
+import sys
+import time
+import uuid
+
+ROOT = Path(__file__).resolve().parents[2]
+LIMIT = 512 * 1024
+BINARIES = ("ariadne", "ariadne-mcp")
+RUST_VERSION = "1.98.1"
+
+
+class InstallError(ValueError):
+    pass
+
+
+def require(condition, message):
+    if not condition:
+        raise InstallError(message)
+
+
+def component(value):
+    require(isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value),
+            "Invalid package version.")
+    return value
+
+
+def safe_name(value):
+    require(isinstance(value, str) and value and "\\" not in value, "Invalid inventory path.")
+    path = PurePosixPath(value)
+    require(not path.is_absolute() and all(p not in ("", ".", "..") for p in value.split("/")),
+            "Inventory path escapes its package.")
+    return path
+
+
+def exists(path):
+    return os.path.lexists(path)
+
+
+def exists_at(parent_fd, name):
+    try:
+        os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def directory(path, create=False):
+    if path.parent != path:
+        directory(path.parent, create)
+    if not exists(path):
+        require(create, f"Missing directory: {path}")
+        path.mkdir(mode=0o700)
+    require(not path.is_symlink() and path.is_dir(), f"Unsafe directory: {path}")
+    return path
+
+
+@contextlib.contextmanager
+def anchored_directory(path, parent_fd=None, create=False):
+    """Walk each directory component without following any ancestor symlink."""
+    if parent_fd is None:
+        path = Path(path)
+        require(path.is_absolute(), "Directory anchor requires an absolute path.")
+        parts = path.parts[1:]
+        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    else:
+        parts = safe_name(str(path)).parts
+        fd = os.dup(parent_fd)
+    try:
+        for part in parts:
+            try:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except FileNotFoundError:
+                require(create, f"Missing directory: {path}")
+                os.mkdir(part, mode=0o700, dir_fd=fd)
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as error:
+                raise InstallError(f"Unsafe directory: {path}") from error
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def anchored_parent(root, relative):
+    """Retain the package inode or walk its complete absolute no-follow chain."""
+    parts = safe_name(relative).parts
+    with contextlib.ExitStack() as stack:
+        fd = os.dup(root) if isinstance(root, int) else stack.enter_context(anchored_directory(root))
+        if isinstance(root, int):
+            stack.callback(os.close, fd)
+        for part in parts[:-1]:
+            fd = stack.enter_context(anchored_directory(part, parent_fd=fd))
+        yield fd, parts[-1]
+
+
+def unchanged_identity(before, after):
+    return (before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns) == (
+        after.st_dev, after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns)
+
+
+def remove_owned(root, name, expected):
+    with anchored_parent(root, name) as (parent, leaf):
+        before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if expected["kind"] == "symlink":
+            if not stat.S_ISLNK(before.st_mode) or os.readlink(leaf, dir_fd=parent) != expected["target"]:
+                return False
+        else:
+            if not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode) != expected["mode"]:
+                return False
+            fd = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            with os.fdopen(fd, "rb") as source:
+                if not unchanged_identity(before, os.fstat(source.fileno())):
+                    return False
+                digest = hashlib.sha256()
+                for block in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(block)
+            if digest.hexdigest() != expected["sha256"]:
+                return False
+        if not unchanged_identity(before, os.stat(leaf, dir_fd=parent, follow_symlinks=False)):
+            return False
+        os.unlink(leaf, dir_fd=parent)
+        return True
+
+
+def remove_owned_directory(root, name, mode, identity=None):
+    with anchored_parent(root, name) as (parent, leaf):
+        info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != mode:
+            return False
+        if identity is not None and (info.st_dev, info.st_ino) != identity:
+            return False
+        os.rmdir(leaf, dir_fd=parent)
+        return True
+
+
+def encode(value):
+    return (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=True) + "\n").encode()
+
+
+def json_read(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as source:
+        info = os.fstat(source.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_size <= LIMIT,
+                f"Not a bounded regular descriptor: {path}")
+        content = source.read(LIMIT + 1)
+        require(len(content) <= LIMIT, "Descriptor exceeds its size limit.")
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, "Duplicate descriptor field.")
+            result[key] = value
+        return result
+    return json.loads(content, object_pairs_hook=unique)
+
+
+def record(path, root):
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode):
+        target = os.readlink(path)
+        require(not Path(target).is_absolute() and path.resolve().is_relative_to(root.resolve()),
+                f"Package symlink escapes its application: {path}")
+        return {"kind": "symlink", "target": target}
+    require(stat.S_ISREG(info.st_mode), f"Nonregular package file: {path}")
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return {"kind": "file", "sha256": digest.hexdigest(), "mode": stat.S_IMODE(info.st_mode)}
+
+
+def inventory(root):
+    result = {}
+    def visit(path):
+        for child in sorted(path.iterdir()):
+            if child.is_dir() and not child.is_symlink():
+                visit(child)
+            else:
+                result[str(child.relative_to(root))] = record(child, root / "Ariadne.app")
+    visit(root)
+    result.pop("install.json", None)
+    return result
+
+
+def links(home):
+    return {
+        "Applications/Ariadne.app": "../.local/share/ariadne/current/Ariadne.app",
+        **{f".local/bin/{name}": f"../share/ariadne/current/bin/{name}" for name in BINARIES},
+    }
+
+
+def manifest(root, home, version, files, directories, owned_links, preflight):
+    return {"schema_version": 1, "version": version,
+            "app_path": str(home / "Applications/Ariadne.app"), "inventory_version": 1,
+            "owned_files": files, "owned_directories": directories,
+            "owned_links": owned_links, "preflight": preflight}
+
+
+def descriptor(root, home):
+    value = json_read(root / "install.json")
+    require(set(value) == {"schema_version", "version", "app_path", "inventory_version",
+                           "owned_files", "owned_directories", "owned_links", "preflight"}, "Unknown install inventory format.")
+    require(type(value["schema_version"]) is int and value["schema_version"] == 1 and
+            type(value["inventory_version"]) is int and value["inventory_version"] == 1,
+            "Unsupported install inventory version.")
+    require(component(value["version"]) == root.name and value["app_path"] == str(home / "Applications/Ariadne.app"),
+            "Descriptor package identity does not match its version directory.")
+    require(isinstance(value["owned_files"], dict) and value["owned_files"], "Missing owned inventory.")
+    for name, item in value["owned_files"].items():
+        parts = safe_name(name).parts
+        require(name in ("bin/ariadne", "bin/ariadne-mcp", "integrations/setup.lock") or
+                (len(parts) > 2 and parts[:2] == ("Ariadne.app", "Contents")) or
+                (len(parts) > 2 and parts[0] == "integrations" and parts[1] in ("rules", "claude-mod")),
+                f"Unknown owned package path: {name}")
+        require(isinstance(item, dict), "Invalid inventory record.")
+        if item.get("kind") == "file":
+            require(set(item) == {"kind", "sha256", "mode"} and
+                    isinstance(item["sha256"], str) and re.fullmatch(r"[a-f0-9]{64}", item["sha256"]) and
+                    type(item["mode"]) is int and 0 <= item["mode"] <= 0o777,
+                    "Invalid file ownership record.")
+        else:
+            require(item.get("kind") == "symlink" and set(item) == {"kind", "target"} and
+                    parts[0] == "Ariadne.app" and isinstance(item["target"], str) and
+                    not Path(item["target"]).is_absolute(), "Invalid owned symlink.")
+    require(isinstance(value["owned_links"], dict) and
+            all(name in links(home) and links(home)[name] == target for name, target in value["owned_links"].items()),
+            "Unknown external link inventory.")
+    require(encode(value) == (root / "install.json").read_bytes(), "Edited or noncanonical install descriptor.")
+    require(isinstance(value["owned_directories"], dict), "Missing directory ownership inventory.")
+    for name, mode in value["owned_directories"].items():
+        parts = safe_name(name).parts
+        require(type(mode) is int and mode == 0o700 and (name in ("bin", "Ariadne.app", "integrations") or
+                (len(parts) >= 2 and parts[:2] == ("Ariadne.app", "Contents")) or
+                (len(parts) >= 2 and parts[0] == "integrations" and parts[1] in ("rules", "claude-mod"))),
+                "Unknown owned directory.")
+    # The canonical compiled inventory authorizes integration names. Check the
+    # helper before executing its read-only exporter; edited/missing helpers
+    # cannot establish ownership of the remaining package.
+    helper = root / "bin/ariadne"
+    directory(helper.parent)
+    require(not helper.is_symlink() and helper.is_file() and
+            value["owned_files"].get("bin/ariadne", {}).get("mode") == 0o700 and
+            record(helper, root / "Ariadne.app") == value["owned_files"]["bin/ariadne"],
+            "Installed helper identity is unavailable; preserve the entire package.")
+    bundle = resources(helper, helper)
+    known_resources = {"integrations/" + name for name in bundle} | {"integrations/setup.lock"}
+    require({name for name in value["owned_files"] if name.startswith("integrations/")} == known_resources,
+            "Unknown integration inventory; preserve the entire package.")
+    known_directories = {str(parent) for name in known_resources for parent in PurePosixPath(name).parents
+                         if str(parent).startswith("integrations")}
+    require({name for name in value["owned_directories"] if name.startswith("integrations")} == known_directories,
+            "Unknown integration directory inventory.")
+    return value
+
+
+def current(root, home):
+    path = root / "current"
+    if not exists(path):
+        return None
+    require(path.is_symlink(), "Existing current pointer is not a package symlink.")
+    target = os.readlink(path)
+    require(target.startswith("versions/") and len(PurePosixPath(target).parts) == 2,
+            "Existing current pointer escapes the versions directory.")
+    version = component(target.split("/")[1])
+    selected = directory(root / "versions" / version)
+    require(path.resolve() == selected, "Current pointer redirects outside its exact version.")
+    return selected, descriptor(selected, home)
+
+
+@contextlib.contextmanager
+def locked(home):
+    require(home.is_absolute() and home.is_dir() and not home.is_symlink(), "HOME must be a real absolute directory.")
+    root = home / ".local/share/ariadne"
+    with contextlib.ExitStack() as stack:
+        home_fd = stack.enter_context(anchored_directory(home))
+        root_fd = stack.enter_context(anchored_directory(".local/share/ariadne", parent_fd=home_fd, create=True))
+        versions_fd = stack.enter_context(anchored_directory("versions", parent_fd=root_fd, create=True))
+        fd = os.open("install.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=root_fd)
+        stack.callback(os.close, fd)
+        require(stat.S_ISREG(os.fstat(fd).st_mode), "Install coordination file is not regular.")
+        require(os.fstat(fd).st_uid == os.getuid(), "Install coordination file belongs to another user.")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise InstallError("Another install/uninstall owns the package lock; retry later.") from error
+        yield root, home_fd, root_fd, versions_fd
+
+
+def run(args, cwd=ROOT, env=None, capture=False):
+    return subprocess.run([str(arg) for arg in args], cwd=cwd, env=env, check=True,
+                          text=True, stdout=subprocess.PIPE if capture else None,
+                          timeout=900 if not capture else 30).stdout
+
+
+def preflight():
+    require(sys.version_info >= (3, 11), "Python 3.11 or newer is required.")
+    require(platform.system() == "Darwin", "Personal install requires macOS.")
+    os_version = platform.mac_ver()[0]
+    require(os_version and int(os_version.split(".")[0]) >= 13, "macOS 13 or newer is required.")
+    arch = platform.machine()
+    require(arch in ("arm64", "x86_64"), "Only arm64 and x86_64 macOS are supported.")
+    expected = {"node": "v22.23.2", "npm": "10.9.8", "rustc": f"rustc {RUST_VERSION}", "cargo": f"cargo {RUST_VERSION}"}
+    env = {**os.environ, "RUSTUP_AUTO_INSTALL": "0", "RUSTUP_TOOLCHAIN": RUST_VERSION}
+    observed = {name: run([name, "--version"], capture=True, env=env).strip() for name in ("node", "npm")}
+    try:
+        # `rustup run` without --install only selects an already installed
+        # toolchain; invoking the rustc proxy in this checkout could install it.
+        observed["rustc"] = run(["rustup", "run", RUST_VERSION, "rustc", "--version"], capture=True, env=env).strip()
+        observed["cargo"] = run(["rustup", "run", RUST_VERSION, "cargo", "--version"], capture=True, env=env).strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        raise InstallError(f"Install/select Rust {RUST_VERSION} with rustc and cargo explicitly before retrying; no toolchain download was attempted.") from error
+    for name, version in expected.items():
+        require(observed[name] == version if name in ("node", "npm") else observed[name].startswith(version + " "),
+                f"Use the pinned {name} version {version}; no toolchain was installed.")
+    observed["xcode"] = run(["xcode-select", "-p"], capture=True).strip()
+    require(observed["xcode"], "Install/select Xcode command line tools explicitly.")
+    run(["xcrun", "--sdk", "macosx", "--show-sdk-path"], capture=True)
+    return {"os": "macOS", "os_version": os_version, "architecture": arch,
+            "python": platform.python_version(), **observed}
+
+
+def build():
+    facts = preflight()
+    print(json.dumps({"preflight": facts}), flush=True)
+    target = ROOT / "target/personal-install"
+    env = dict(os.environ)
+    for name in list(env):
+        if re.match(r"^(ARIADNE_E2E_|CARGO_FEATURE_|CARGO_ENCODED_RUSTFLAGS$|RUSTFLAGS$|TAURI_CONFIG$|TAURI_WEBDRIVER_PORT$|WDIO_EMBEDDED_SERVER$|VITE_ARIADNE_E2E$)", name):
+            del env[name]
+    env.update(CARGO_TARGET_DIR=str(target), MACOSX_DEPLOYMENT_TARGET="13.0",
+               RUSTUP_AUTO_INSTALL="0", RUSTUP_TOOLCHAIN=RUST_VERSION)
+    run(["npm", "ci", "--ignore-scripts", "--engine-strict"], env=env)
+    for command in ("gen-contracts", "gen-rules", "gen-codex-wire"):
+        arguments = ["cargo", "run", "--locked", "-p", "ariadne-xtask", "--", command]
+        if command == "gen-codex-wire":
+            arguments += ["--version", "0.160.0"]
+        run([*arguments, "--check"], env=env)
+    run(["cargo", "build", "--release", "--locked", "-p", "ariadne-cli", "-p", "ariadne-mcp"], env=env)
+    run(["node", ROOT / "node_modules/@tauri-apps/cli/tauri.js", "build", "--ci", "--bundles", "app",
+         "--", "--locked", "--no-default-features"], cwd=ROOT / "apps/desktop", env=env)
+    return target / "release", facts
+
+
+def resources(helper, final_helper):
+    # Consume bounded stdout while the producer runs, with a deadline. A malformed
+    # exporter cannot allocate unbounded memory or block an installation forever.
+    with subprocess.Popen([str(helper), "package-resources", "--helper-path", str(final_helper)],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as child:
+        output = bytearray()
+        try:
+            with selectors.DefaultSelector() as selected:
+                selected.register(child.stdout, selectors.EVENT_READ)
+                deadline = time.monotonic() + 30
+                while selected.get_map():
+                    require(time.monotonic() < deadline, "Package resource export timed out.")
+                    for key, _ in selected.select(min(1, max(0, deadline - time.monotonic()))):
+                        block = os.read(key.fd, min(65536, LIMIT + 1 - len(output)))
+                        if not block:
+                            selected.unregister(key.fileobj)
+                            continue
+                        output.extend(block)
+                        require(len(output) <= LIMIT, "Package resources exceed their output limit.")
+            require(child.wait(timeout=max(0.01, deadline - time.monotonic())) == 0, "Package resource export failed.")
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+    value = json.loads(output)
+    require(isinstance(value, dict) and set(value) == {"schema_version", "version", "files"} and
+            type(value["schema_version"]) is int and value["schema_version"] == 1 and
+            value["version"] == final_helper.parent.parent.name and
+            isinstance(value["files"], dict) and value["files"], "Invalid integration resource export.")
+    for name, text in value["files"].items():
+        path = safe_name(name)
+        require(path.parts[0] in ("rules", "claude-mod") and len(path.parts) > 1 and isinstance(text, str),
+                "Unknown package resource path.")
+    return value["files"]
+
+
+def install(home, artifacts, facts, resource_loader=resources):
+    with locked(home) as (root, home_fd, root_fd, versions_fd):
+        before = current(root, home)
+        require(not exists(root / ".current-next"), "Unexpected pointer staging path.")
+        expected_links = links(home)
+        owned_links = {}
+        for name, target in expected_links.items():
+            path = home / name
+            if name.startswith(".local/bin/") and not exists(path.parent):
+                continue
+            if exists(path):
+                require(before and before[1]["owned_links"].get(name) == target and
+                        path.is_symlink() and os.readlink(path) == target, f"Foreign or edited install path: {path}")
+            if exists(path.parent):
+                directory(path.parent)
+            owned_links[name] = target
+        app = artifacts / "bundle/macos/Ariadne.app"
+        directory(app)
+        directory(app / "Contents")
+        info = app / "Contents/Info.plist"
+        require(not info.is_symlink() and info.is_file() and info.stat().st_size <= LIMIT,
+                "App Info.plist is not a bounded regular file.")
+        with info.open("rb") as source:
+            version = component(plistlib.load(source)["CFBundleShortVersionString"])
+        final = root / "versions" / version
+        for name in BINARIES:
+            binary = artifacts / name
+            require(not binary.is_symlink() and binary.is_file() and os.access(binary, os.X_OK), f"Missing executable: {binary}")
+            require(run([binary, "--version"], capture=True).strip() == f"{name} {version}", "App/helper versions differ.")
+        bundle = resource_loader(artifacts / "ariadne", final / "bin/ariadne")
+        if before:
+            require(inventory(before[0]) == before[1]["owned_files"], "Installed package contains edits or foreign files; preserve it and inspect manually.")
+        stage = root / "versions" / f".stage-{uuid.uuid4()}"
+        os.mkdir(stage.name, mode=0o700, dir_fd=versions_fd)
+        created_links = []
+        published = False
+        try:
+            shutil.copytree(app, stage / "Ariadne.app", symlinks=True)
+            (stage / "Ariadne.app").chmod(0o700)
+            for path in (stage / "Ariadne.app").rglob("*"):
+                if not path.is_symlink():
+                    path.chmod(0o700 if path.is_dir() else (0o700 if path.stat().st_mode & 0o111 else 0o600))
+            directory(stage / "bin", True)
+            for name in BINARIES:
+                shutil.copyfile(artifacts / name, stage / "bin" / name)
+                (stage / "bin" / name).chmod(0o700)
+            for name, text in bundle.items():
+                path = stage / "integrations" / str(safe_name(name))
+                directory(path.parent, True)
+                path.write_text(text)
+                path.chmod(0o600)
+            # Doctor's parity read uses this stable coordination inode. Setup
+            # owns a separate optional receipt only for resources it creates.
+            (stage / "integrations/setup.lock").touch(mode=0o600)
+            files = inventory(stage)
+            directories = {str(path.relative_to(stage)): stat.S_IMODE(path.stat().st_mode)
+                           for path in stage.rglob("*") if path.is_dir() and not path.is_symlink()}
+            receipt = manifest(final, home, version, files, directories, owned_links, facts)
+            (stage / "install.json").write_bytes(encode(receipt))
+            (stage / "install.json").chmod(0o600)
+            if exists(final):
+                directory(final)
+                existing = descriptor(final, home)
+                require(existing["owned_files"] == files and inventory(final) == files and
+                        existing["owned_directories"] == directories and
+                        existing["owned_links"] == owned_links,
+                        "Same-version package identity differs; use a new release version.")
+                shutil.rmtree(stage.name, dir_fd=versions_fd)
+            else:
+                os.rename(stage.name, final.name, src_dir_fd=versions_fd, dst_dir_fd=versions_fd)
+                published = True
+            for name, target in owned_links.items():
+                path = home / name
+                directory(path.parent, True)
+                if not exists(path):
+                    with anchored_parent(home_fd, name) as (parent, leaf):
+                        os.symlink(target, leaf, dir_fd=parent)
+                    created_links.append(path)
+            temporary = root / ".current-next"
+            require(not exists(temporary), f"Unexpected pointer staging path: {temporary}")
+            os.symlink(f"versions/{version}", ".current-next", dir_fd=root_fd)
+            os.replace(".current-next", "current", src_dir_fd=root_fd, dst_dir_fd=root_fd)
+        except BaseException:
+            for path in reversed(created_links):
+                if path.is_symlink() and os.readlink(path) == owned_links[str(path.relative_to(home))]:
+                    remove_owned(home_fd, str(path.relative_to(home)), {"kind": "symlink", "target": owned_links[str(path.relative_to(home))]})
+            temporary = root / ".current-next"
+            if temporary.is_symlink() and os.readlink(temporary) == f"versions/{version}":
+                remove_owned(root_fd, ".current-next", {"kind": "symlink", "target": f"versions/{version}"})
+            # This directory was created by this attempt and remains unpublished.
+            if published and not (root / "current").resolve() == final:
+                if inventory(final) == files:
+                    shutil.rmtree(final.name, dir_fd=versions_fd)
+            raise
+        finally:
+            if exists_at(versions_fd, stage.name):
+                shutil.rmtree(stage.name, dir_fd=versions_fd)
+        print(f"Installed Ariadne {version}: {home / 'Applications/Ariadne.app'}\nHelpers: {final / 'bin'}", flush=True)
+        if not exists(home / ".local/bin"):
+            print(f"PATH directory is absent. Add {root / 'current/bin'} to PATH explicitly; shell startup files were not edited.")
+        return final
+
+
+def uninstall(home):
+    root_path = home / ".local/share/ariadne"
+    if not exists(root_path):
+        print("No personal Ariadne package installed.")
+        return []
+    retained = []
+    with locked(home) as (root, home_fd, root_fd, versions_fd):
+        selected = current(root, home)
+        packages = []
+        # Validate every receipt before removing anything; unknown versions are retained.
+        with contextlib.ExitStack() as anchors:
+            for name in sorted(os.listdir(versions_fd)):
+                child = root / "versions" / name
+                try:
+                    package_fd = anchors.enter_context(anchored_directory(name, parent_fd=versions_fd))
+                    packages.append((child, descriptor(child, home), package_fd))
+                except (InstallError, OSError, ValueError):
+                    retained.append(str(child))
+            _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained)
+    for path in sorted(set(retained)):
+        print(f"Retained edited, foreign or unverifiable path: {path}")
+    print("Personal package uninstall finished. Project history and host configuration were preserved.")
+    return retained
+
+
+def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained):
+    for package, receipt, package_fd in packages:
+        for name, expected in receipt["owned_files"].items():
+            try:
+                if not remove_owned(package_fd, name, expected):
+                    retained.append(str(package / name))
+            except FileNotFoundError:
+                pass
+            except (InstallError, OSError):
+                retained.append(str(package / name))
+        for name, target in receipt["owned_links"].items():
+            path = home / name
+            if exists(path):
+                if path.is_symlink() and os.readlink(path) == target:
+                    if not remove_owned(home_fd, name, {"kind": "symlink", "target": target}):
+                        retained.append(str(path))
+                else:
+                    retained.append(str(path))
+        # Foreign files and nonempty directories survive. Keep descriptor for retained files.
+        for name in sorted(receipt["owned_directories"], key=lambda p: len(PurePosixPath(p).parts), reverse=True):
+            with contextlib.suppress(OSError):
+                remove_owned_directory(package_fd, name, receipt["owned_directories"][name])
+        if os.listdir(package_fd) == ["install.json"]:
+            expected = {"kind": "file", "mode": 0o600,
+                        "sha256": hashlib.sha256(encode(receipt)).hexdigest()}
+            if remove_owned(package_fd, "install.json", expected):
+                info = os.fstat(package_fd)
+                if not remove_owned_directory(versions_fd, package.name, 0o700, (info.st_dev, info.st_ino)):
+                    retained.append(str(package))
+            else:
+                retained.append(str(package))
+        else:
+            retained.append(str(package))
+    if selected and not exists_at(versions_fd, selected[0].name):
+        if not remove_owned(root_fd, "current", {"kind": "symlink", "target": f"versions/{selected[0].name}"}):
+            retained.append(str(root / "current"))
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("install", "uninstall"))
+    args = parser.parse_args(argv)
+    home = Path(os.environ.get("HOME", ""))
+    require(home.is_absolute(), "An absolute HOME is required.")
+    if args.action == "uninstall":
+        uninstall(home)
+    else:
+        artifacts, facts = build()
+        installed = install(home, artifacts, facts)
+        run([installed / "bin/ariadne", "doctor"])
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (InstallError, OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f"Personal package action stopped: {error}", file=sys.stderr)
+        sys.exit(1)
