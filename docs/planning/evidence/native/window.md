@@ -7,7 +7,8 @@ runner, real status-item exposure probe, socket admission proof and native tray
 publication repair. Physical run `c113cf8b`, using reviewed tray source
 `286bb37a` and runner source `3eb7bafb`, proved title drag, Close → Show Ariadne
 and minimize → Show Ariadne. It failed the Pin checked-state assertion; Quit and
-restart/restoration were not reached. This does not complete P6.1, P6.2 or P6.4. The existing PR96 packaged route check
+restart/restoration were not reached. This does not complete P6.1, P6.2 or P6.4.
+The existing PR96 packaged route check
 proves the cold registered route and installed CLI
 second-instance route; this supplement reuses its private package fixture,
 canonical `ui.json`, primary identity, control socket and physical instance lease
@@ -33,20 +34,24 @@ The single physical journey will:
    and canonical session bytes. Hide/minimize must remove the hittable close
    control; Show must restore it and the canonical outer frame. Mac2's `displayed`
    endpoint reports only existence and is deliberately not visibility evidence.
-3. Click native tray **Pin**, require a new canonical preference revision and
-   agreeing native checked state, then click **Quit Ariadne**. Confirm PID exit,
+3. Capture the scoped native menu before Pin, click native tray **Pin**, require
+   a new canonical preference revision and capture the menu after its commit.
+   Independent visual review must confirm the native checkmark agrees with the
+   preference. Then click **Quit Ariadne**. Confirm PID exit,
    no additional private packaged PID, a real socket connection rejected with
    `ECONNREFUSED` or `ENOENT`, and an independently acquired instance lease.
    A stale socket pathname alone does not establish an active listener. Forced
    cleanup cannot satisfy Quit assertions.
 4. Restart the same private ordinary package without an explicit route. Confirm
    the committed selection, moved geometry and Pin survive, including the native
-   checked state. Quit again through the real tray and prove release again.
+   checked state in another scoped menu capture. Quit again through the real
+   tray and prove release again.
 
 The AX title, controls and tray must be uniquely observable in the actual app.
 Selectors follow the retained disposable Mac2 probe and production menu titles;
 the complete production action sequence is **unproved**. Missing/ambiguous
-hierarchy or unavailable check state fails with retained XML/command trace. There
+hierarchy or unavailable native menu screenshots fail with retained XML/command
+trace. There
 is no fallback to guessed screen coordinates, an injected route or simulated OS
 event. Allow one bounded accessibility attempt, then report a blocker rather
 than expanding the harness.
@@ -96,14 +101,28 @@ session teardown retains its bounded deadline. Disposable subprocess tests prove
 both signals exit with failure and remove all three owned detached Node stand-ins,
 without starting an App or native driver. Private fixture roots and every run's XML, canonical
 snapshot, command trace, failed samples and cleanup logs stay under their recorded
-paths; successful evidence is written only after the journey and cleanup succeed.
+paths. `automatedJourneyPassed: true` is written only after the automated journey
+and cleanup succeed. Exit zero alone does not prove Pin checked state: the result
+keeps `passed: false` and `pinCheckmarkProved: false` while visual review is pending.
 
 The meaningful pure tests reject stale/different release artifacts, process
 replacement/PID reuse, changed lease/socket ownership, lost routes, changed
-session bytes, stale Pin commits, wrong native Pin state, inner-vs-outer geometry,
+session bytes, stale Pin commits, missing or invalid native menu screenshot
+transport, inner-vs-outer geometry,
 lost geometry/Pin at restart and incomplete Quit release. Passing them proves
 these assertions, not OS acceptance. Source syntax and the commit hook are also
 required before publication.
+
+## Required independent Pin checkmark review
+
+XCTest selected state is not an established native menu checkmark contract. The
+runner captures the actual scoped tray menu as `pin-before.png`, `pin-after.png`
+and `pin-restart.png`; `pin-visual-review.json` records their SHA256 hashes and
+expected check states. An independent reviewer must confirm no checkmark before
+the click, a checkmark after the canonical Pin commit, and the same checkmark
+after restart. Bind the review to those exact hashes before claiming checked-state
+acceptance. The runner records this review as required and pending; it validates
+PNG transport bytes without interpreting pixels or declaring visual success.
 
 ## Tray publication behavior
 
@@ -117,7 +136,8 @@ these decisions; they do not prove physical menu interaction or window overlap.
 ## Explicit remaining acceptance
 
 - **Pin, Quit and restart/restoration:** run `c113cf8b` stopped at Pin checked
-  state. The remaining journey requires retained physical proof after repair.
+  state. The remaining journey requires retained physical proof and independent
+  review of all three scoped native checkmark images.
 - **Physical display disconnect and reachable monitor clamping:** owner action;
   existing pure clamp tests do not prove a real display transition.
 - **Genuine system sleep/wake and reconciliation:** owner action; the existing
