@@ -63,7 +63,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   const request = useRef(0), mounted = useRef(true);
   const latest = useRef({ view, saveView, saveLater, onReveal, routes, later, state, writing, search });
   latest.current = { view, saveView, saveLater, onReveal, routes, later, state, writing, search };
-  const offeredReveal = reveal ?? localReveal;
+  const offeredReveal = localReveal ?? reveal ?? null;
   const currentReveal = offeredReveal === dismissedReveal ? null : offeredReveal;
   const belongs = currentReveal?.store === store;
   const revealedId = belongs && currentReveal.kind === 'item' ? currentReveal.route.item_id : null;
@@ -168,6 +168,9 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
       filters: { ...structuredClone(latest.current.view.filters), search: pendingSearch.text } } as SessionPreferences));
   }, [pendingSearch, writing, state.status, store, search, view, write]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
+  // A later tree selection supersedes the last external route. A new external
+  // route supersedes that local selection before rows and focus are painted.
+  useLayoutEffect(() => { setLocalReveal(null); }, [reveal]);
   useLayoutEffect(() => {
     ++request.current; setLocalReveal(null); ownerFocus.current = null;
     setFocusId(reveal?.store === store && reveal.kind === 'item' ? reveal.route.item_id : latest.current.view.selected_item_id);
