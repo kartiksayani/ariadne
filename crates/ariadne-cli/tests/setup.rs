@@ -198,6 +198,9 @@ fn host_commands_preserve_spaces_and_keep_trust_explicit() {
         ]
     );
     assert!(commands[4].contains("/status"));
+    assert!(commands[4].contains("paste the setup instruction"));
+    assert!(commands[4].contains("once per binding"));
+    assert!(commands[4].contains("/home/private profile/current/integrations/rules/codex.md"));
     assert_eq!(
         resources::host_commands(Path::new("/home/private/current/integrations"), "codex").len(),
         1

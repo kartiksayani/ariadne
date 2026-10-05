@@ -167,11 +167,13 @@ impl DeliveryService<'_> {
                     })
                     .transpose()?
                     .flatten();
-                let body = if let Some(original) = repair {
-                    super::format::repair_body(session, &input, original)?
+                // Capacity and reference failures must precede id allocation. A
+                // UUID-length stand-in sizes the attempt id the real body will carry.
+                if let Some(original) = repair {
+                    super::format::repair_body(session, &input, original, &input.id)?;
                 } else {
-                    super::format::body(session, &input)?
-                };
+                    super::format::body(session, &input, &input.id)?;
+                }
                 let attempt_id = allocate();
                 if occupied(session, &attempt_id) {
                     return Err(core(
@@ -180,6 +182,11 @@ impl DeliveryService<'_> {
                     )
                     .into());
                 }
+                let body = if let Some(original) = repair {
+                    super::format::repair_body(session, &input, original, &attempt_id)?
+                } else {
+                    super::format::body(session, &input, &attempt_id)?
+                };
                 let wire_marker = format!(
                     "[ARIADNE_INPUT:{}:{}]",
                     input.id.as_str(),

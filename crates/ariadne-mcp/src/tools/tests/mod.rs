@@ -156,6 +156,16 @@ fn canonical_manifest_and_error_budget_are_enforced_without_raw_error_leaks() {
         assert_eq!(tool.schema_as_json_value(), original["inputSchema"]);
         assert!(tool.output_schema.is_some());
     }
+    assert!(tools.iter().all(|tool| tool
+        .description
+        .as_deref()
+        .is_some_and(|text| text.len() > 20)));
+    for name in ariadne_core::delivery::AGENT_QUERY_TOOLS {
+        assert!(
+            tools.iter().any(|tool| tool.name == name),
+            "envelope names MCP tool {name} that is not exposed"
+        );
+    }
     let mut invalid = CoreError::new(CoreErrorCode::IoError, "x".repeat(8192), "private raw path");
     invalid.retryable = true;
     let value = tool_result(Err(invalid)).structured_content.unwrap();

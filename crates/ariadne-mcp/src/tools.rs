@@ -277,7 +277,13 @@ fn manifest() -> Result<Vec<Tool>, CoreError> {
             "ApplicationEnvelope_SavedReceipt" => include_str!("../../../contracts/generated/core/ApplicationEnvelope_SavedReceipt.schema.json"),
             _ => return Err(fallback()),
         };
-        let mut tool = Tool::new_with_raw(definition.name, None, definition.input_schema);
+        let description = match definition.name.as_str() {
+            "session_read" => "Read a bounded page of items, topics, messages or inputs for an explicit binding and generation.",
+            "item_messages" => "Read a bounded page of the full message history of one explicit item.",
+            "item_rounds" => "Read a bounded page of the ask rounds of one explicit item.",
+            _ => "Publish replies, item changes and the input result as one atomic ApplyRequest; retry uncertain saves with the same op_id and bytes.",
+        };
+        let mut tool = Tool::new_with_raw(definition.name, Some(description.into()), definition.input_schema);
         tool.output_schema = Some(Arc::new(serde_json::from_str(schema).map_err(|_| fallback())?));
         Ok(tool)
     }).collect()

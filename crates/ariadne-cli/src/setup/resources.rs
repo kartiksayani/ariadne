@@ -107,7 +107,11 @@ pub fn host_commands(stable_integrations: &Path, agent: &str) -> Vec<String> {
         ]);
     }
     if agent != "claude" {
-        commands.push("In the existing Codex terminal, run /status and select that thread in Ariadne; keep host approvals explicit.".into());
+        let rules = stable_integrations.join("rules/codex.md");
+        commands.push(format!(
+            "In the existing Codex terminal, run /status and select that thread in Ariadne; keep host approvals explicit. Codex is never sent the Ariadne rules automatically: after connecting, paste the setup instruction Ariadne shows into that Codex thread once per binding (same rules: {}).",
+            rules.display()
+        ));
     }
     commands
 }
