@@ -24,6 +24,7 @@ describe('native history failure evidence', () => {
     expect(facts.ownerInput.textarea).toEqual({ disabled: true, valueLength: 3 });
     expect(facts.ownerInput.send).toMatchObject({ text: 'Saving…', disabled: true });
     expect(facts.ownerInput.statuses).toEqual(['Save completion is unknown.']);
+    expect(facts.ownerInput).toHaveProperty('innerText');
   });
   it('reports absent controls without throwing', () => {
     const facts = historyFailureFacts();
