@@ -60,10 +60,10 @@ export async function startScriptedProvider(root, cli, evidence, env) {
         assert.ok(input, 'Queue payload must identify the actual persisted attempt');
         const attempt = input.attempts.find(attempt => queued.payload === attempt.formatted_payload);
         const owner = session.messages.find(message => message.id === input.message_id);
-        const request = { ...applyRequest([{ op: 'reply', ref: 'native-reply', item: { id: configuration.itemId }, text: complete.reply, round_id: null }]),
+        const request = { ...applyRequest([{ op: 'reply', ref: 'native_reply', item: { id: configuration.itemId }, text: complete.reply, round_id: null }]),
           source_input_id: input.id, attempt_id: attempt.id,
           expected_item_revisions: { [configuration.itemId]: session.items[configuration.itemId].revision },
-          input_result: { outcome: 'answered', explanation: 'Explicit scripted provider result', reply_refs: [{ ref: 'native-reply' }], followup_item_refs: [], handled_through_message_number: owner.number } };
+          input_result: { outcome: 'answered', explanation: 'Explicit scripted provider result', reply_refs: [{ ref: 'native_reply' }], followup_item_refs: [], handled_through_message_number: owner.number } };
         const applied = await cliRequest(cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request, env);
         assert.equal(applied.code, 0); assert.equal(applied.value.session_id, configuration.sessionId);
         await writeFile(join(evidence, 'agent-apply.json'), JSON.stringify({ request, receipt: applied.value }, null, 2));
@@ -147,8 +147,8 @@ export async function seedJourney(configuration, env = process.env) {
   const readArgs = read.slice('Use ariadne '.length).replace(/\.$/, '').split(/\s+/);
   assert.equal((await cliRequest(configuration.cli, readArgs, undefined, env)).code, 0);
   const seed = applyRequest([
-    { op: 'topic.add', ref: 'native-topic', name: 'Native provider journey' },
-    { op: 'item.add', ref: 'native-item', topic: { ref: 'native-topic' }, parent: null, question: 'Reply to this native owner message', type: 'task', status: 'open', owner: { kind: 'me' }, ask: null, options: null, note: null, links: null, outcome: null, why: null, replaced_by: null, source_round_id: null },
+    { op: 'topic.add', ref: 'native_topic', name: 'Native provider journey' },
+    { op: 'item.add', ref: 'native_item', topic: { ref: 'native_topic' }, parent: null, question: 'Reply to this native owner message', type: 'task', status: 'open', owner: { kind: 'me' }, ask: null, options: null, note: null, links: null, outcome: null, why: null, replaced_by: null, source_round_id: null },
   ]);
   const apply = receipt.data.setup_instruction.split('\n').find(line => line.startsWith('Publish full item replies with ariadne apply '));
   assert.ok(apply, 'Saved setup contains pasteable canonical apply arguments');
