@@ -255,7 +255,18 @@ fn quit_preserves_running_external_turn_and_queued_input_with_real_native_runtim
         "Quit changed durable host/queue/history state"
     );
     assert_eq!(read(&core, &route), before);
-    assert!(!fixture.home.join("run/control.sock").exists());
+    // Unix listener release can leave its stale pathname until the next owner
+    // binds. Prove the endpoint no longer admits connections, rather than
+    // treating pathname metadata as evidence of a running desktop.
+    let closed =
+        std::os::unix::net::UnixStream::connect(fixture.home.join("run/control.sock")).unwrap_err();
+    assert!(
+        matches!(
+            closed.kind(),
+            std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+        ),
+        "Unexpected control endpoint failure after Quit: {closed}"
+    );
     let replacement = DesktopOwner::acquire(&fixture.home).unwrap();
     let lease = replacement
         .binding_lease(
