@@ -133,10 +133,16 @@ export async function startScriptedProvider(root, cli, evidence) {
       switch (request.method) {
         case 'initialized': return;
         case 'initialize': result = await load('initialize-response.json'); result.codexHome = provider; break;
-        case 'thread/read':
-          assert.ok([thread, discoveryThread].includes(request.params.threadId), 'Only the two explicit existing sessions are readable');
-          result = await load('read-response.json'); result.thread.id = request.params.threadId; result.thread.sessionId = request.params.threadId;
-          result.thread.cwd = request.params.threadId === thread ? project : discoveryProject; break;
+        case 'thread/read': {
+          const requested = request.params.threadId;
+          assert.ok([thread, discoveryThread, 'another-explicit-thread'].includes(requested), 'Only explicit candidates and the deliberate identity-mismatch probe are readable');
+          // A reachable host reports its actual existing session for the known
+          // negative probe. Real qualification must reject that different ID;
+          // closing the transport would test HostUnreachable instead.
+          const actual = requested === 'another-explicit-thread' ? thread : requested;
+          result = await load('read-response.json'); result.thread.id = actual; result.thread.sessionId = actual;
+          result.thread.cwd = actual === thread ? project : discoveryProject; break;
+        }
         case 'thread/loaded/list': result = { data: [thread, discoveryThread], nextCursor: null }; break;
         case 'thread/queue/list': result = { data: [], nextCursor: null }; break;
         case 'thread/turns/list':

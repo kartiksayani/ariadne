@@ -481,6 +481,19 @@ fn claude_activation(terminal: bool) {
     ))
     .unwrap();
     assert_eq!(facts_ids.load(Ordering::SeqCst), ids_before);
+    // The refreshed evidence must be observed by that retained worker. Reaching
+    // another qualification proves progress past the interrupted observation;
+    // the heartbeat alone cannot prove the worker resumed its polling loop.
+    let qualification = files.pause_qualification(&rt);
+    assert!(outcomes.lock().unwrap().is_empty());
+    // Clear the evidence again before releasing the last process barrier. This
+    // also keeps later polls from starting fresh version subprocesses at Quit.
+    discovery.refresh_after_wake().unwrap();
+    drop(qualification);
+    assert!(
+        observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+        "the retained worker must report Unknown and survive its next observation"
+    );
     assert!(rt.block_on(call(home.path().into(), claim)).is_err());
     assert_eq!(
         rt.block_on(call(home.path().into(), control)).unwrap(),
@@ -538,6 +551,9 @@ fn claude_activation(terminal: bool) {
     );
     assert!(outcomes.lock().unwrap().iter().all(|outcome| matches!(outcome, ActivationOutcome::Stopped { exit: Ok(exit), .. } if exit.error.is_none() && exit.pending.is_none())));
     drop(activation);
+    // Async shutdown can cancel a waiter while its admitted blocking Core call
+    // retains the real lease. Drain this fixture's executor ownership first.
+    drop(rt);
     drop(owner);
     DesktopOwner::acquire(home.path()).unwrap();
     let event = ariadne_agent_protocol::NormalizedEvent {
@@ -565,6 +581,11 @@ fn claude_activation(terminal: bool) {
     if terminal {
         // Reopen real persisted Core/Store and construct a fresh activation. The
         // end receipt is authoritative before any host qualification or route.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(3)
+            .enable_all()
+            .build()
+            .unwrap();
         let allocated = facts_ids.clone();
         let reopened = Arc::new(NativeCoreService::new(
             AgentResolver::open_data_directory(home.path()).unwrap(),

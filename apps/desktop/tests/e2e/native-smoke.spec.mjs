@@ -14,20 +14,62 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const invoke = (command, request) => browser.execute(async (command, request) => {
   try { return { ok: true, data: await window.__TAURI_INTERNALS__.invoke(command, { request }) }; }
-  catch (error) { return { ok: false, error }; }
+  // WebDriver reserves top-level "error" in its script-result envelope.
+  catch (error) { return { ok: false, rejection: error }; }
 }, command, request);
 
+let navigationRecovered = false;
+const revisionConflict = 'Preferences revision changed; reload before applying this new patch';
+async function navigationRejection() {
+  const message = await browser.$('.nav-banner[role="alert"] p');
+  return await message.isExisting() && await message.getText() === revisionConflict;
+}
 async function openSession(sessionId, itemId) {
-  const catalogue = await browser.$('button*=All sessions');
-  await catalogue.waitForDisplayed(); await catalogue.click();
-  const session = await browser.$(`[data-session-id="${sessionId}"]`);
-  await session.waitForDisplayed(); await session.click();
-  const item = await browser.$(`.ref-tree-row[data-item-id="${itemId}"]`);
-  await item.waitForDisplayed(); await item.click();
-  await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(`Item ${itemId}`), 'Selected item detail did not load');
+  const before = await readJson(join(process.env.ARIADNE_HOME, 'ui.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+  try {
+    const catalogue = await browser.$('button[title="All sessions"]');
+    await catalogue.waitForDisplayed(); await catalogue.waitForEnabled();
+    await catalogue.click();
+    const selectedCatalogue = async () => {
+      const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
+      return selected.kind === 'all_sessions' && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
+    };
+    await wait(async () => await selectedCatalogue() || await navigationRejection(), 'All sessions navigation neither completed nor showed a definitive rejection');
+    if (await navigationRejection()) {
+      assert.equal(navigationRecovered, false, 'Only one explicit visible navigation recovery is allowed per native launch');
+      navigationRecovered = true;
+      const rejected = { sessionId, message: revisionConflict, preferences: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
+        body: await browser.$('body').getText() };
+      const refresh = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
+      await refresh.waitForDisplayed(); await refresh.waitForEnabled(); await refresh.click();
+      // This is a deliberate new owner choice after the visible typed rejection.
+      // Unknown completion and other errors cannot enter this recovery path.
+      await catalogue.waitForEnabled(); await catalogue.click();
+      await wait(selectedCatalogue, 'Explicit refreshed All sessions choice did not persist');
+      await json(join(evidence, 'navigation-recovery.json'), { rejected, recovered: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')) });
+    }
+    const session = await browser.$(`[data-session-id="${sessionId}"]`);
+    await session.waitForDisplayed();
+    await session.waitForEnabled();
+    // Session cards can extend beyond the nested catalogue viewport.
+    await session.scrollIntoView({ block: 'center', inline: 'center' }); await session.waitForClickable(); await session.click();
+    await wait(async () => {
+      const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
+      return selected.kind === 'session' && selected.session.session_id === sessionId && await catalogue.isEnabled();
+    }, 'Selected session navigation did not finish its saved preference update');
+    const item = await browser.$(`.ref-tree-row[data-item-id="${itemId}"]`);
+    await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
+    await wait(async () => await browser.$('.history-header strong').getText() === `Item ${itemId}`, 'Selected item detail did not load');
+  } catch (error) {
+    await json(join(evidence, `navigation-failure-${sessionId}.json`), { before,
+      after: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
+      frame: await browser.execute(() => ({ origin: window.performance.timeOrigin, ready: document.readyState,
+        body: document.body.textContent, tabs: Array.from(document.querySelectorAll('.ref-tabs button')).map(element => element.outerHTML) })) });
+    await browser.saveScreenshot(join(evidence, `navigation-failure-${sessionId}.png`)); throw error;
+  }
 }
 async function showHistory(texts) {
-  const timeline = await browser.$('[aria-label="Item history view"] button*=Timeline');
+  const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline');
   await timeline.waitForDisplayed(); await timeline.click();
   await wait(async () => {
     const detail = await browser.$('[aria-label="Item detail"]').getText();
@@ -53,19 +95,32 @@ async function unchangedDemo(configuration) {
 
 async function delivery(configuration) {
   const setup = await seedJourney(configuration);
-  await browser.refresh();
+  const questionRevision = (await snapshot(configuration)).items[configuration.itemId].question_revision;
+  // Observe genuine seed-triggered native preference publication. The running
+  // App discovers the CLI data through its ordinary events and catalogue polling.
+  await wait(async () => {
+    const preferences = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot;
+    return (preferences.global.notification_ledger ?? []).some(episode => episode.session.session_id === configuration.sessionId
+      && episode.session.project_id === configuration.projectId && episode.item_id === configuration.itemId && episode.question_revision === questionRevision);
+  }, 'Seeded question did not reach the genuine native notification ledger');
   // The demo is published by the real CLI into a separate project, retaining
   // its canonical pending/recovery examples rather than rebinding its storage.
   await openSession(configuration.demo.session_id, '1');
   await showHistory(configuration.demo.before.messages.filter(message => message.item_id === '1').map(message => message.body));
   const child = await browser.$('[aria-label="Child items"] button');
   await child.waitForDisplayed(); assert.ok((await child.getText()).includes('1.1')); await child.click();
-  await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
+  await wait(async () => await browser.$('.history-header strong').getText() === 'Item 1.1'
+    && (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
   await browser.saveScreenshot(join(evidence, 'canonical-demo.png'));
 
   await openSession(configuration.sessionId, configuration.itemId);
   let card;
-  await wait(async () => { card = await nativeCard('waiting', configuration.question); return !!card; }, 'The real unanswered item.ask did not appear in Waiting');
+  await wait(async () => {
+    card = await nativeCard('waiting', configuration.question);
+    if (!card) return false;
+    const choice = await card.$('button*=Use the native window');
+    return await choice.isExisting() && await choice.isEnabled();
+  }, 'The real unanswered item.ask did not become editable in Waiting');
   const cardText = await card.getText();
   assert.ok(cardText.includes(configuration.ask)); assert.ok(cardText.includes(configuration.options[0].label));
   assert.ok(cardText.includes(configuration.options[0].consequence));
@@ -73,7 +128,11 @@ async function delivery(configuration) {
   const choice = await card.$('button*=Use the native window'); await choice.click();
   await card.$('textarea[aria-label="Reply in your own words"]').setValue(ownerTexts[0]);
   await card.$('button*=Send').click();
-  await wait(async () => orderedInputs(await snapshot(configuration)).length === 1 && (await admissions(configuration)).length === 1, 'Waiting answer did not persist and reach the host');
+  await wait(async () => {
+    const saved = orderedInputs(await snapshot(configuration)), queued = await admissions(configuration);
+    return saved.length === 1 && queued.length === 1 && saved[0].attempts.length === 1
+      && queued[0].payload === saved[0].attempts[0].formatted_payload;
+  }, 'Waiting answer did not persist and reach the host with its exact saved payload');
   await wait(async () => !(await nativeCard('waiting', configuration.question)), 'Answered Waiting episode remained in Waiting');
   await wait(async () => !!(await nativeCard('sent', configuration.question)), 'Waiting answer did not appear in Sent');
   const sent = await nativeCard('sent', configuration.question);
@@ -81,11 +140,12 @@ async function delivery(configuration) {
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
 
   for (const text of ownerTexts.slice(1)) {
-    const another = await browser.$('.owner-input button=Write another input');
-    await another.waitForDisplayed(); await another.click();
-    const reply = await browser.$('[aria-label="Owner actions"] button=Reply'); await reply.waitForDisplayed(); await reply.click();
+    const another = await browser.$('.owner-input').$('button=Write another input');
+    await another.waitForDisplayed(); await another.waitForEnabled(); await another.click();
+    const actions = await browser.$('[aria-label="Owner actions"]'); await actions.waitForDisplayed();
+    const reply = await actions.$('button=Reply'); await reply.waitForDisplayed(); await reply.waitForEnabled(); await reply.click();
     const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForDisplayed(); await editor.setValue(text);
-    await browser.$('[aria-label="Owner input for #1"] button=Send reply').click();
+    await browser.$('[aria-label="Owner input for #1"]').$('button=Send reply').click();
     await wait(async () => orderedInputs(await snapshot(configuration)).some(input => input.payload.text === text), 'Visible detail Reply did not save the exact owner text');
   }
   const held = await snapshot(configuration), inputs = orderedInputs(held), savedReceipts = receipts(held, inputs);
@@ -174,7 +234,7 @@ describe('native owner FIFO and real process restoration', () => {
     const bytes = await readFile(receiptPath), disk = JSON.parse(bytes); assert.deepEqual(ping.data, disk);
     assert.equal(disk.nonce, nonce); assert.equal(disk.payload, payload); assert.equal(disk.pid, witness.pid); assert.match(disk.receipt_id, /^ping-\d+-\d+$/);
     const wrongNonce = nonce === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64);
-    const rejected = await invoke('native_ping', { nonce: wrongNonce, payload }); assert.equal(rejected.ok, false); assert.equal(rejected.error.code, 'nonce_mismatch');
+    const rejected = await invoke('native_ping', { nonce: wrongNonce, payload }); assert.equal(rejected.ok, false); assert.equal(rejected.rejection.code, 'nonce_mismatch');
     for (const request of [{ nonce: wrongNonce }, {}]) {
       assert.equal((await invoke('native_e2e_quit', request)).ok, false);
       await assert.rejects(stat(join(root, 'quit-request.json')), { code: 'ENOENT' }); assert.ok(alive(witness.pid));

@@ -34,12 +34,20 @@ parent updates before workers publish, with current-head CI and delta reviews.
 
 ## Delivery feedback rules
 
+The owner authorizes local builds, native runs, browser tests and other focused
+checks whenever they are necessary and likely to save time overall. No further
+confirmation is needed to make an exception to the earlier CI-only default.
+Prefer existing caches, isolated fixture data and the smallest useful reproduction;
+reuse the build to verify the fix. Required CI and merge acceptance still apply.
+This standing authorization was confirmed on 2026-10-05.
+
 - **Pre-push timing:** Measure `cargo check --workspace --all-features --locked`
   and `tsc --noEmit` on an existing warm cache, recording each duration and the
   combined time. Include a representative incremental source change so a no-op
   check does not mislead. If the combined check takes **under 90 seconds**, propose
   it to the owner as a pre-push step. Until explicitly approved, the existing rule
-  remains. If no warm cache exists, report that rather than starting a cold build.
+  remains. If no warm cache exists, report that rather than starting a cold build solely
+  for this timing measurement.
   Keep one build directory per worker.
 - **Process budget:** No new process or tooling PR until the same concrete
   delivery problem has occurred twice. Record both occurrences, their observed
@@ -121,6 +129,14 @@ A tooling blocker gets one cheap attempt (about 15 minutes), then explain the co
 and cheaper route to the owner. Change harness/gates only for a demonstrated
 delivery issue or repeatedly solved manual work; keep changes small and
 proportionate while preserving quality. Do not grow another delivery framework.
+
+PR #83 runs [37243524591](https://github.com/kartiksayani/ariadne/actions/runs/37243524591)
+and [37246640362](https://github.com/kartiksayani/ariadne/actions/runs/37246640362)
+spent 8m31s and 8m36s on reference captures before failing coverage inventory and
+native checks respectively. CI now runs the required checks before reference
+provisioning/captures, saving about 8m30s on such failures while requiring both
+checks and all relevant captures for success.
+
 The maintainer writes
 retrospectives/docs directly and reports delivered capability, completed tasks and
 concrete blockers. Use concise handoffs on interruption; reconcile them with
