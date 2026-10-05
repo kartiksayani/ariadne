@@ -438,6 +438,30 @@ describe('registered variable-height sentence tree', () => {
     await act(async () => { await value.store.refresh(); });
     expect(tree.scrollTop).toBe(70);
   });
+  it('anchors the first visible row after selection rerenders and persists its actual offset on blur', async () => {
+    const session = structuredClone(demo) as Session, base = session.items['1']!;
+    session.items = {};
+    for (let n = 1; n <= 20; n++) session.items[String(n)] = { ...base, id: String(n), ordinal: n, parent: null,
+      question: `Complete visible sentence ${n}` };
+    const value = await setup(session), user = userEvent.setup(); render(<value.Composition />);
+    const tree = screen.getByRole('tree', { name: 'Sentences' }); let growth = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const index = rows().indexOf(this), height = index === 9 ? 20 + growth : 20;
+      const top = index < 0 ? 0 : index * 20 + (index > 9 ? growth : 0) - tree.scrollTop;
+      return { top, bottom: top + (index < 0 ? 100 : height), height, left: 0, right: 500, width: 500, x: 0, y: top, toJSON: () => ({}) };
+    });
+    tree.scrollTop = 180; fireEvent.scroll(tree);
+    await user.click(rows()[9]);
+    await waitFor(() => expect(value.canonical().selected_item_id).toBe('10'));
+    expect(document.activeElement).toBe(rows()[9]);
+    growth = 30; value.session.revision++; value.session.items['10']!.revision++;
+    value.session.items['10']!.question += '\nThis selected sentence now wraps to another retained line.';
+    await act(async () => { await value.store.refresh(); });
+    expect(tree.scrollTop).toBe(180);
+    expect(rows()[9].getBoundingClientRect().top).toBe(0);
+    await user.click(screen.getByRole('searchbox'));
+    await waitFor(() => expect(value.canonical().scroll).toEqual({ item_id: '10', offset: 0 }));
+  });
 });
 
 
