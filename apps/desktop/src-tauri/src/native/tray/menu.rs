@@ -141,6 +141,22 @@ pub(crate) fn install<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<()
                 match id {
                     "ariadne-show" => show(app),
                     "ariadne-pin" => {
+                        // macOS toggles this checkmark before delivering the
+                        // event. Even a rejected save must restore canonical Pin.
+                        let invalidated = (|| {
+                            let publication = app
+                                .try_state::<Mutex<Publication>>()
+                                .ok_or_else(super::feed::unavailable)?;
+                            publication
+                                .lock()
+                                .map_err(|_| super::feed::unavailable())?
+                                .invalidate();
+                            Ok::<_, CoreError>(())
+                        })();
+                        if invalidated.is_err() {
+                            eprintln!("Ariadne could not reconcile its native Pin state.");
+                            return;
+                        }
                         if let Some(tray) = app.try_state::<NativeTray>() {
                             tray.pin();
                         }

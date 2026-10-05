@@ -18,6 +18,10 @@ pub(super) struct Publication {
 }
 
 impl Publication {
+    pub fn invalidate(&mut self) {
+        self.last = None;
+    }
+
     pub fn publish<E>(
         &mut self,
         next: MenuSnapshot,
@@ -159,6 +163,36 @@ mod tests {
         );
         assert!(publication
             .publish(next, false, |_| Ok::<_, &str>(()))
+            .unwrap());
+    }
+
+    #[test]
+    fn native_pin_mutation_requires_same_canonical_state_to_restore_the_checkmark() {
+        let mut publication = Publication::default();
+        let canonical = snapshot();
+        let mut native_pinned = false;
+        publication
+            .publish(canonical.clone(), false, |next| {
+                native_pinned = next.pinned;
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        // macOS changes the checkmark before sending the Pin event. A rejected
+        // save or replay of an earlier operation may leave canonical Pin false.
+        native_pinned = !native_pinned;
+        assert!(native_pinned);
+        publication.invalidate();
+        assert!(publication
+            .publish(canonical.clone(), false, |next| {
+                native_pinned = next.pinned;
+                Ok::<_, ()>(())
+            })
+            .unwrap());
+        assert!(!native_pinned);
+        assert!(!publication
+            .publish::<()>(canonical, false, |_| panic!(
+                "Restored state should deduplicate"
+            ))
             .unwrap());
     }
 
