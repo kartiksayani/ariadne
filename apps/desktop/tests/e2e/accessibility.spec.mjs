@@ -9,6 +9,11 @@ const active = selector => browser.execute(selector => document.activeElement ==
 // Real embedded-WebDriver key input, actual DesktopApp/core/store. This helper
 // writes only a retained preference draft; it never submits demo owner work.
 export async function runAccessibilityAcceptance(configuration) {
+  const viewport = await browser.execute(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-minimum-window.json'), { actualWebView: true,
+    viewport, minimum: { width: 1000, height: 700 } });
+  assert.ok(viewport.width >= 1000 && viewport.height >= 700,
+    `Ordinary native WebView must reach minimum 1000×700; observed ${viewport.width}×${viewport.height}`);
   const before = await readFile(configuration.demo.sessionPath);
   await (await browser.$('button*=All sessions')).click();
   await (await browser.$(`[data-session-id="${configuration.demo.session_id}"]`)).click();
