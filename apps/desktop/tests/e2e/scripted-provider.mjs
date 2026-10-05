@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, chmod, appendFile, rename } from 'node:fs/promises';
 import http from 'node:http';
 import { join } from 'node:path';
@@ -128,7 +128,7 @@ export async function startScriptedProvider(root, cli, evidence) {
   server.on('upgrade', (request, stream, head) => websocket.handleUpgrade(request, stream, head, client => websocket.emit('connection', client)));
   websocket.on('connection', client => client.on('message', async bytes => {
     try {
-      const request = JSON.parse(bytes.toString()); calls.push({ method: request.method, params: request.params });
+      const request = JSON.parse(bytes.toString()), call = { method: request.method, params: request.params }; calls.push(call);
       let result;
       switch (request.method) {
         case 'initialized': return;
@@ -150,6 +150,9 @@ export async function startScriptedProvider(root, cli, evidence) {
           result = request.params.threadId === thread ? await turns() : { data: [], nextCursor: null }; break;
         default: throw new Error(`Unexpected provider operation ${request.method}`);
       }
+      if (request.method === 'thread/turns/list') call.turns = result.data.map(turn => ({ id: turn.id, status: turn.status,
+        originals: turn.items.filter(item => item.type === 'userMessage').map(item => ({ id: item.id,
+          marker: item.content[0].text.split('\n')[0], sha256: createHash('sha256').update(item.content[0].text).digest('hex') })) }));
       client.send(JSON.stringify({ id: request.id, result }));
     } catch (error) { failure ||= error; client.close(); }
   }));
