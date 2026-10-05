@@ -28,9 +28,17 @@ combining PR. Prefer units one PR can finish.
 The owner authorizes stacked implementation on reviewed parent code while CI runs.
 Use settled contracts and disjoint ownership; keep each child diff bounded and
 its merge behind its prerequisites. Independent discovery UI work may run as a
-third stream. Use the existing GitHub stack support for linear dependent PRs;
-do not create artificial dependencies between independent siblings. Coordinate
-parent updates before workers publish, with current-head CI and delta reviews.
+third stream. Use the existing GitHub stack support for linear dependent PRs. The maintainer
+may also order already-reviewed changes in a delivery stack when they share full
+composed-application CI: this is integration order, not a new product-task dependency
+or a restriction on parallel implementation. Keep each child diff bounded and
+independently reviewed, run full required CI on each integrated head, and merge
+parents first. Coordinate parent updates before workers publish; review conflicts
+and interacting upstream changes. The owner requested use of PR stacks; the
+2026-10-05 checkpoint adopts this ordering to avoid restarting every independent
+PR after each main update. Runs37316408492 and37322016757 took47m01s and44m44s;
+validating successive integrated heads in parallel removes repeated full rounds
+without weakening checks or current-main qualification.
 
 ## Delivery feedback rules
 
