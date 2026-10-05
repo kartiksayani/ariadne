@@ -54,12 +54,12 @@ jobs:
           python -m venv .venv-quality
           .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
           npm ci --ignore-scripts --engine-strict
+          .venv-quality/bin/python scripts/check-commit.py "${args[@]}"
           if [[ "$scope" == *" reference=true" ]]; then
             export PLAYWRIGHT_BROWSERS_PATH="$GITHUB_WORKSPACE/target/reference-browser"
             node node_modules/playwright/cli.js install chromium
             npm run capture:reference
           fi
-          .venv-quality/bin/python scripts/check-commit.py "${args[@]}"
       - name: Preserve native and coverage evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

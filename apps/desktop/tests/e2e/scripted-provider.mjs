@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, chmod, appendFile, rename } from 'node:fs/promises';
 import http from 'node:http';
 import { join } from 'node:path';
@@ -119,7 +119,9 @@ export async function startScriptedProvider(root, cli, evidence) {
     const queued = await admissions(control), completed = await optional(control.completePath) ?? [];
     for (const control of completed) assert.deepEqual(queued.find(entry => entry.attemptId === control.attemptId), control, 'Foreign completion identity cannot affect another turn');
     const result = await load('turns-response.json');
-    return { ...result, data: queued.map(entry => {
+    // Existing Codex history reads are descending: the newest turn precedes
+    // the prior queue anchor while the admission journal retains FIFO order.
+    return { ...result, data: [...queued].reverse().map(entry => {
       const turn = globalThis.structuredClone(result.data[0]), complete = completed.some(control => control.attemptId === entry.attemptId);
       turn.id = entry.turnId; turn.status = complete ? 'completed' : 'inProgress';
       turn.startedAt = Math.floor(entry.admittedAt / 1000); turn.completedAt = complete ? turn.startedAt + 1 : null;
@@ -133,15 +135,21 @@ export async function startScriptedProvider(root, cli, evidence) {
   server.on('upgrade', (request, stream, head) => websocket.handleUpgrade(request, stream, head, client => websocket.emit('connection', client)));
   websocket.on('connection', client => client.on('message', async bytes => {
     try {
-      const request = JSON.parse(bytes.toString()); calls.push({ method: request.method, params: request.params });
+      const request = JSON.parse(bytes.toString()), call = { method: request.method, params: request.params }; calls.push(call);
       let result;
       switch (request.method) {
         case 'initialized': return;
         case 'initialize': result = await load('initialize-response.json'); result.codexHome = provider; break;
-        case 'thread/read':
-          assert.ok([thread, discoveryThread, treeThread, historyThread].includes(request.params.threadId), 'Only the four explicit existing sessions are readable');
-          result = await load('read-response.json'); result.thread.id = request.params.threadId; result.thread.sessionId = request.params.threadId;
-          result.thread.cwd = request.params.threadId === thread ? project : request.params.threadId === discoveryThread ? discoveryProject : request.params.threadId === treeThread ? treeProject : historyProject; break;
+        case 'thread/read': {
+          const requested = request.params.threadId;
+          assert.ok([thread, discoveryThread, treeThread, historyThread, 'another-explicit-thread'].includes(requested), 'Only explicit candidates and the deliberate identity-mismatch probe are readable');
+          // A reachable host reports its actual existing session for the known
+          // negative probe. Real qualification must reject that different ID;
+          // closing the transport would test HostUnreachable instead.
+          const actual = requested === 'another-explicit-thread' ? thread : requested;
+          result = await load('read-response.json'); result.thread.id = actual; result.thread.sessionId = actual;
+          result.thread.cwd = actual === thread ? project : actual === discoveryThread ? discoveryProject : actual === treeThread ? treeProject : historyProject; break;
+        }
         case 'thread/loaded/list': result = { data: [thread, discoveryThread, treeThread, historyThread], nextCursor: null }; break;
         case 'thread/queue/list': result = { data: [], nextCursor: null }; break;
         case 'thread/turns/list':
@@ -149,6 +157,9 @@ export async function startScriptedProvider(root, cli, evidence) {
           result = request.params.threadId === thread ? await turns(configuration) : request.params.threadId === historyThread ? await turns(configuration.history) : { data: [], nextCursor: null }; break;
         default: throw new Error(`Unexpected provider operation ${request.method}`);
       }
+      if (request.method === 'thread/turns/list') call.turns = result.data.map(turn => ({ id: turn.id, status: turn.status,
+        originals: turn.items.filter(item => item.type === 'userMessage').map(item => ({ id: item.id,
+          marker: item.content[0].text.split('\n')[0], sha256: createHash('sha256').update(item.content[0].text).digest('hex') })) }));
       client.send(JSON.stringify({ id: request.id, result }));
     } catch (error) { failure ||= error; client.close(); }
   }));
