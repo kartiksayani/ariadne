@@ -15,7 +15,7 @@ fn locked_replay_wins_over_stale_owned_source_after_initial_replay_miss() {
         .unwrap();
     let store = Store::open_registered(root.path(), id(1)).unwrap();
     let source: Session = serde_json::from_str(include_str!(
-        "../../../../fixtures/domain/history/seed.json"
+        "../../../../../fixtures/domain/history/seed.json"
     ))
     .unwrap();
     store.create(&source).unwrap();
