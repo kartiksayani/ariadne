@@ -75,18 +75,13 @@ async function unchangedDemo(configuration) {
 async function delivery(configuration) {
   const setup = await seedJourney(configuration);
   const questionRevision = (await snapshot(configuration)).items[configuration.itemId].question_revision;
-  // Observe the real seed-triggered native preference write before replacing
-  // the renderer document. No owner mutation is retried or preference fabricated.
+  // Observe genuine seed-triggered native preference publication. The running
+  // App discovers the CLI data through its ordinary events and catalogue polling.
   await wait(async () => {
     const preferences = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot;
     return (preferences.global.notification_ledger ?? []).some(episode => episode.session.session_id === configuration.sessionId
       && episode.session.project_id === configuration.projectId && episode.item_id === configuration.itemId && episode.question_revision === questionRevision);
   }, 'Seeded question did not reach the genuine native notification ledger');
-  const initialDocument = await browser.execute(() => window.performance.timeOrigin);
-  await browser.refresh();
-  // The native driver acknowledges refresh before the replacement document loads.
-  await wait(async () => await browser.execute(origin => window.performance.timeOrigin !== origin && document.readyState === 'complete', initialDocument),
-    'CLI seed refresh did not load a new complete document');
   // The demo is published by the real CLI into a separate project, retaining
   // its canonical pending/recovery examples rather than rebinding its storage.
   await openSession(configuration.demo.session_id, '1');
