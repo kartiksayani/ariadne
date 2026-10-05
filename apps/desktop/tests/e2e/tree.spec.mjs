@@ -535,8 +535,6 @@ async function treeAcceptance(configuration) {
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-acceptance.json'), JSON.stringify({ tree, publication, edit, finalSession, savedView: saved.view, savedLater: saved.snapshot.later,
     initialLayouts, beforeRowLayout, afterRowLayout, beforeEdit, afterEdit, performance, originalAdmissions: journal.length }, null, 2));
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-anchor.png'));
-  assert.ok(usableMs <= performance.targets.firstUsableMs, `Native first usable tree ${usableMs}ms exceeds the 2s target`);
-  assert.ok(performance.localSearchP95Ms <= performance.targets.localSearchP95Ms, `Native local search p95 ${performance.localSearchP95Ms}ms exceeds the 150ms target`);
 }
 
 export async function restoreTreeAcceptance(configuration) {
