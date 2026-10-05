@@ -23,8 +23,9 @@ export async function runAccessibilityAcceptance(configuration) {
   assert.ok(nativeWindow.logical.width >= 1000 && nativeWindow.logical.height >= 700,
     'Ordinary native window must reach minimum outer size 1000×700');
   const before = await readFile(configuration.demo.sessionPath);
-  await (await browser.$('button*=All sessions')).click();
-  await (await browser.$(`[data-session-id="${configuration.demo.session_id}"]`)).click();
+  const catalogue = await browser.$('button*=All sessions'); await catalogue.waitForEnabled(); await catalogue.click();
+  const session = await browser.$(`[data-session-id="${configuration.demo.session_id}"]`);
+  await session.waitForDisplayed(); await session.waitForEnabled(); await session.click();
   const row = '[role="treeitem"][data-item-id="2"]';
   await (await browser.$(row)).waitForDisplayed(); await focus(row);
   await browser.keys('r');
