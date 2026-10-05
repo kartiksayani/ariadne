@@ -160,6 +160,7 @@ async function delivery(configuration) {
   assert.deepEqual(answer.options_snapshot, configuration.options); assert.equal(answer.selected_option_id, configuration.options[0].id);
   assert.equal(answer.text, ownerTexts[0]); assert.equal(answer.question_revision, held.items[configuration.itemId].question_revision);
   await delay(750); assert.equal((await admissions(configuration)).length, 1, 'Queued successors cannot overlap the held host turn');
+  await json(join(evidence, 'held-inputs.json'), { held, savedReceipts, admissions: await admissions(configuration) });
 
   const results = [], replies = [], queued = [];
   for (let index = 0; index < inputs.length; index++) {
@@ -178,15 +179,24 @@ async function delivery(configuration) {
     assert.notEqual(resultOnly.inputs[input.id].state, 'handled', 'Result alone cannot finish a running host turn');
     assert.equal((await admissions(configuration)).length, index + 1, 'Result alone cannot admit the next FIFO input');
     await completeTurn(configuration, admission);
-    await wait(async () => (await snapshot(configuration)).inputs[input.id].state === 'handled', 'Explicit result and matching host completion did not join');
+    try {
+      await wait(async () => (await snapshot(configuration)).inputs[input.id].state === 'handled', 'Explicit result and matching host completion did not join');
+    } catch (error) {
+      await json(join(evidence, 'result-completion-failure.json'), { index, admission, result: results[index],
+        session: await snapshot(configuration), admissions: await admissions(configuration), completed: await readJson(configuration.completePath),
+        body: await browser.$('body').getText() });
+      await browser.saveScreenshot(join(evidence, 'result-completion-failure.png')); throw error;
+    }
   }
   const finalSession = await snapshot(configuration), finalInputs = orderedInputs(finalSession);
+  await json(join(evidence, 'completed-inputs.json'), { finalSession, admissions: await admissions(configuration), completed: await readJson(configuration.completePath) });
   assert.ok(finalInputs.every(input => input.state === 'handled' && input.attempts.length === 1));
   assert.equal(new Set(queued.map(entry => entry.turnId)).size, 5);
   assert.deepEqual(receipts(finalSession, finalInputs), savedReceipts);
   assert.equal(finalSession.bindings[configuration.bindingId].generation, configuration.generation);
   for (let index = 0; index < finalInputs.length; index++) {
-    const input = finalInputs[index], messages = finalSession.messages.filter(message => message.author === 'agent' && message.input_id === input.id && message.attempt_id === input.attempts[0].id);
+    const input = finalInputs[index], messages = finalSession.messages.filter(message => message.author === 'agent' && message.kind === 'reply'
+      && message.input_id === input.id && message.attempt_id === input.attempts[0].id);
     assert.equal(input.attempts[0].host_turn_id, queued[index].turnId);
     assert.ok(input.attempts[0].domain_result);
     assert.equal(messages.length, 1); assert.equal(messages[0].body, replies[index]);
