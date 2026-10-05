@@ -30,7 +30,12 @@ function nativeFixture({ dialogs = [dialog()], actualPid = pid, trusted = true, 
       AXIsProcessTrustedWithOptions: options => { assert.equal(options, null); return trusted; },
       NSRunningApplication: { runningApplicationsWithBundleIdentifier: id => {
         assert.equal(id, 'com.apple.systemevents');
-        return { count: Number(serviceRunning), objectAtIndex: () => ({ processIdentifier: 17 }) };
+        // The JXA bridge returns C longs as strings, including the truthy "0".
+        return { count: String(Number(serviceRunning)), objectAtIndex: index => {
+          assert.equal(index, 0);
+          assert.ok(serviceRunning, 'must not index an empty native application list');
+          return { processIdentifier: 17 };
+        } };
       } },
       NSAppleEventDescriptor: { descriptorWithProcessIdentifier: service => { assert.equal(service, 17); return { aeDesc: 'descriptor' }; } },
       AEDeterminePermissionToAutomateTarget: (address, eventClass, eventId, ask) => {

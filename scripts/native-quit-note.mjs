@@ -33,7 +33,8 @@ function run(args) {
   ObjC.bindFunction('AEDeterminePermissionToAutomateTarget', ['int', ['void *', 'unsigned int', 'unsigned int', 'bool']]);
   if (!$.AXIsProcessTrustedWithOptions(null)) throw new Error('osascript Accessibility permission is unavailable; no prompt was requested');
   const services = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.systemevents');
-  if (!services.count) return JSON.stringify({ serviceRunning: false });
+  // JXA bridges NSUInteger (unsigned long) as a string; "0" is truthy.
+  if (Number(services.count) === 0) return JSON.stringify({ serviceRunning: false });
   const address = $.NSAppleEventDescriptor.descriptorWithProcessIdentifier(services.objectAtIndex(0).processIdentifier);
   const permission = $.AEDeterminePermissionToAutomateTarget(address.aeDesc, 0x2a2a2a2a, 0x2a2a2a2a, false);
   if (permission !== 0) throw new Error('System Events automation permission is unavailable (' + permission + '); no prompt was requested');
