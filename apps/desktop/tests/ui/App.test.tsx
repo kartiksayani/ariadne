@@ -197,6 +197,48 @@ describe('ordinary desktop composition', () => {
     expect(await screen.findByText(/No sentences match these filters/)).toBeTruthy();
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
+  it.each(['confirmed', 'reconciled'])('retains an unsubmitted tree search until the shared preference write is %s', async completion => {
+    const { transport } = setup();
+    transport.preferences.sessions[0].filters.owners = [{ kind: 'me' }];
+    await openSession();
+    const before = structuredClone(transport.preferences.sessions[0]);
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.theme === 'light')) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    const writes = mutations(transport, 'preferences_patch').length;
+    const search = screen.getByLabelText('Search sentences') as HTMLInputElement;
+    fireEvent.change(search, { target: { value: 'missing pending needle' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Theme: system' }));
+    await waitFor(() => expect(entered).toBe(true));
+    expect(search.disabled).toBe(true);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+    expect(screen.getByText(/No sentences match these filters/)).toBeTruthy();
+    expect(transport.preferences.sessions[0].filters.search).toBe(before.filters.search);
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
+    if (completion === 'reconciled') transport.failNext = 'preferences_patch';
+    await act(async () => { release(); await gate; });
+    if (completion === 'reconciled') {
+      const reconcile = await screen.findByRole('button', { name: 'Reconcile operation' });
+      expect(search.disabled).toBe(true);
+      expect(search.value).toBe('missing pending needle');
+      expect(mutations(transport, 'preferences_patch')).toHaveLength(writes + 1);
+      fireEvent.click(reconcile);
+    }
+    await waitFor(() => expect(transport.preferences.sessions[0].filters.search).toBe('missing pending needle'));
+    await waitFor(() => expect(search.disabled).toBe(false));
+    expect(transport.preferences.global.theme).toBe('light');
+    expect(transport.preferences.sessions[0]).toEqual({ ...before, filters: { ...before.filters, search: 'missing pending needle' } });
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(writes + (completion === 'reconciled' ? 3 : 2));
+    const searches = mutations(transport, 'preferences_patch').filter(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.filters.search === 'missing pending needle'));
+    expect(searches).toHaveLength(1);
+  });
   it('opens a native route over an earlier local selection without clearing its filters', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
