@@ -385,6 +385,40 @@ describe('source-backed navigation views and explicit registration', () => {
 
 
 describe('tree edits through canonical navigation preferences', () => {
+  it('completes saved view edits while a catalogue refresh is blocked and rejects its older snapshot', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
+    const blocked = deferred<QueryEnvelope>(); transport.enqueue('preferences_get', blocked.promise);
+    const refresh = store.refresh();
+    await waitFor(() => expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(2));
+    const edit = structuredClone(prefs.sessions[0]); edit.filters.search = 'first saved search';
+    transport.enqueue('preferences_patch', patchReceipt(2), patchReceipt(3));
+    let completed: boolean | undefined;
+    const save = store.saveSessionView(edit, 1).then(value => { completed = value; });
+    try {
+      await waitFor(() => expect(completed).toBe(true), { timeout: 200 });
+      const second = structuredClone(edit); second.filters.search = 'second saved search';
+      expect(await store.saveSessionView(second, 2)).toBe(true);
+      expect(store.getSnapshot().preferences?.revision).toBe(3);
+      expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(2);
+    } finally { blocked.resolve(success('preferences_get', prefs)); await refresh; await save; }
+    expect(store.getSnapshot().preferences?.revision).toBe(3);
+    expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe('second saved search');
+  });
+  it('retains periodic reconciliation and its errors after a confirmed view edit', async () => {
+    vi.useFakeTimers();
+    const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
+    const edit = structuredClone(prefs.sessions[0]); edit.filters.search = 'saved before background failure';
+    transport.enqueue('preferences_patch', patchReceipt());
+    expect(await store.saveSessionView(edit, 1)).toBe(true);
+    expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(1);
+    transport.enqueue('preferences_get', new Error('Background read unavailable'));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(store.getSnapshot().status).toBe('stale'); expect(store.getSnapshot().error).not.toBeNull();
+    expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe(edit.filters.search);
+    const next = structuredClone(prefs); next.revision = 2; next.sessions[0] = edit; read(transport, next);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(store.getSnapshot().status).toBe('ready'); expect(store.getSnapshot().error).toBeNull();
+  });
   it('saves only the current session view while preserving tab state, other sessions, global state and drafts', async () => {
     const { transport, store } = setup(); const prefs = preferences();
     prefs.sessions.push({ ...structuredClone(prefs.sessions[0]), session: { ...route, session_id: projectId }, tab_order: 3 });
