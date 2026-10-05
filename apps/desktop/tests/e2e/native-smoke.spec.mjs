@@ -26,7 +26,7 @@ async function openSession(sessionId, itemId) {
   await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(`Item ${itemId}`), 'Selected item detail did not load');
 }
 async function showHistory(texts) {
-  const timeline = await browser.$('[aria-label="Item history view"] button*=Timeline');
+  const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline');
   await timeline.waitForDisplayed(); await timeline.click();
   await wait(async () => {
     const detail = await browser.$('[aria-label="Item detail"]').getText();
@@ -80,11 +80,11 @@ async function delivery(configuration) {
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
 
   for (const text of ownerTexts.slice(1)) {
-    const another = await browser.$('.owner-input button=Write another input');
+    const another = await browser.$('.owner-input').$('button=Write another input');
     await another.waitForDisplayed(); await another.click();
-    const reply = await browser.$('[aria-label="Owner actions"] button=Reply'); await reply.waitForDisplayed(); await reply.click();
+    const reply = await browser.$('[aria-label="Owner actions"]').$('button=Reply'); await reply.waitForDisplayed(); await reply.click();
     const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForDisplayed(); await editor.setValue(text);
-    await browser.$('[aria-label="Owner input for #1"] button=Send reply').click();
+    await browser.$('[aria-label="Owner input for #1"]').$('button=Send reply').click();
     await wait(async () => orderedInputs(await snapshot(configuration)).some(input => input.payload.text === text), 'Visible detail Reply did not save the exact owner text');
   }
   const held = await snapshot(configuration), inputs = orderedInputs(held), savedReceipts = receipts(held, inputs);
