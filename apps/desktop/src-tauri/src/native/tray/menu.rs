@@ -3,7 +3,7 @@ use crate::native::routes::NativeRoutes;
 use ariadne_core::{CoreError, OpenRoute};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
@@ -13,53 +13,61 @@ use tauri::{
 
 const ID: &str = "ariadne-waiting";
 const ROUTE: &str = "ariadne:route:";
+mod publication;
+use publication::{label, MenuRow, MenuSnapshot, Publication};
 
 fn error(_: tauri::Error) -> CoreError {
     super::feed::unavailable()
 }
-fn label(text: &str) -> String {
-    text.chars()
-        .filter(|character| !character.is_control())
-        .take(64)
-        .collect()
+fn snapshot(projection: &TrayProjection, pinned: bool) -> Result<MenuSnapshot, CoreError> {
+    Ok(MenuSnapshot {
+        title: projection.title.clone(),
+        rows: projection
+            .oldest
+            .iter()
+            .map(|row| {
+                let route =
+                    serde_json::to_string(&row.route()).map_err(|_| super::feed::unavailable())?;
+                Ok(MenuRow {
+                    id: format!("{ROUTE}{route}"),
+                    label: format!(
+                        "{} · {} · #{}",
+                        label(&row.project_label),
+                        label(&row.session_label),
+                        row.episode.item_id.as_str()
+                    ),
+                })
+            })
+            .collect::<Result<_, CoreError>>()?,
+        diagnostics: projection
+            .diagnostics
+            .iter()
+            .map(|text| label(text))
+            .collect(),
+        pinned,
+    })
 }
 
 fn build<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    projection: Option<&TrayProjection>,
-    pinned: bool,
+    projection: Option<&MenuSnapshot>,
 ) -> Result<Menu<R>, CoreError> {
     let menu = Menu::new(app).map_err(error)?;
     if let Some(projection) = projection {
-        for row in &projection.oldest {
-            let route =
-                serde_json::to_string(&row.route()).map_err(|_| super::feed::unavailable())?;
-            let item = MenuItem::with_id(
-                app,
-                format!("{ROUTE}{route}"),
-                format!(
-                    "{} · {} · #{}",
-                    label(&row.project_label),
-                    label(&row.session_label),
-                    row.episode.item_id.as_str()
-                ),
-                true,
-                None::<&str>,
-            )
-            .map_err(error)?;
+        for row in &projection.rows {
+            let item = MenuItem::with_id(app, row.id.clone(), &row.label, true, None::<&str>)
+                .map_err(error)?;
             menu.append(&item).map_err(error)?;
         }
-        if projection.oldest.is_empty() {
+        if projection.rows.is_empty() {
             menu.append(
                 &MenuItem::new(app, "No questions waiting", false, None::<&str>).map_err(error)?,
             )
             .map_err(error)?;
         }
         for diagnostic in &projection.diagnostics {
-            menu.append(
-                &MenuItem::new(app, label(diagnostic), false, None::<&str>).map_err(error)?,
-            )
-            .map_err(error)?;
+            menu.append(&MenuItem::new(app, diagnostic, false, None::<&str>).map_err(error)?)
+                .map_err(error)?;
         }
     } else {
         menu.append(
@@ -81,8 +89,15 @@ fn build<R: tauri::Runtime>(
     )
     .map_err(error)?;
     menu.append(
-        &CheckMenuItem::with_id(app, "ariadne-pin", "Pin", true, pinned, None::<&str>)
-            .map_err(error)?,
+        &CheckMenuItem::with_id(
+            app,
+            "ariadne-pin",
+            "Pin",
+            true,
+            projection.is_some_and(|snapshot| snapshot.pinned),
+            None::<&str>,
+        )
+        .map_err(error)?,
     )
     .map_err(error)?;
     menu.append(
@@ -113,7 +128,7 @@ pub(crate) fn install<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<()
         .title("*")
         .icon(icon)
         .icon_as_template(true)
-        .menu(&build(app, None, false)?)
+        .menu(&build(app, None)?)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
@@ -126,6 +141,22 @@ pub(crate) fn install<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<()
                 match id {
                     "ariadne-show" => show(app),
                     "ariadne-pin" => {
+                        // macOS toggles this checkmark before delivering the
+                        // event. Even a rejected save must restore canonical Pin.
+                        let invalidated = (|| {
+                            let publication = app
+                                .try_state::<Mutex<Publication>>()
+                                .ok_or_else(super::feed::unavailable)?;
+                            publication
+                                .lock()
+                                .map_err(|_| super::feed::unavailable())?
+                                .invalidate();
+                            Ok::<_, CoreError>(())
+                        })();
+                        if invalidated.is_err() {
+                            eprintln!("Ariadne could not reconcile its native Pin state.");
+                            return;
+                        }
                         if let Some(tray) = app.try_state::<NativeTray>() {
                             tray.pin();
                         }
@@ -149,6 +180,13 @@ pub(crate) fn install<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<()
         })
         .build(app)
         .map_err(error)?;
+    // A new install starts from its loading menu even if setup is retried on
+    // the same App. Publication state is never shared between App lifetimes.
+    if let Some(publication) = app.try_state::<Mutex<Publication>>() {
+        *publication.lock().map_err(|_| super::feed::unavailable())? = Publication::default();
+    } else {
+        app.manage(Mutex::new(Publication::default()));
+    }
     Ok(())
 }
 
@@ -164,10 +202,19 @@ pub(crate) fn update<R: tauri::Runtime>(
             return;
         }
         let result = (|| {
-            let tray = handle.tray_by_id(ID).ok_or_else(super::feed::unavailable)?;
-            tray.set_title(Some(&projection.title)).map_err(error)?;
-            tray.set_menu(Some(build(&handle, Some(&projection), pinned)?))
-                .map_err(error)
+            let next = snapshot(&projection, pinned)?;
+            let publication = handle
+                .try_state::<Mutex<Publication>>()
+                .ok_or_else(super::feed::unavailable)?;
+            let mut publication = publication.lock().map_err(|_| super::feed::unavailable())?;
+            publication
+                .publish(next, stopped.load(Ordering::Acquire), |next| {
+                    let tray = handle.tray_by_id(ID).ok_or_else(super::feed::unavailable)?;
+                    let menu = build(&handle, Some(next))?;
+                    tray.set_title(Some(&next.title)).map_err(error)?;
+                    tray.set_menu(Some(menu)).map_err(error)
+                })
+                .map(|_| ())
         })();
         if result.is_err() {
             eprintln!("Ariadne could not refresh its native Waiting menu.");
