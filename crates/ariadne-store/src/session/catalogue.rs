@@ -14,19 +14,26 @@ pub struct ProjectCatalogue {
     pub sessions: Result<Vec<SessionReadOutcome>, StoreError>,
 }
 
+struct CapturedSessionRead {
+    session_id: Option<UuidV4>,
+    path: PathBuf,
+    result: Result<Vec<u8>, StoreError>,
+}
+
 impl Store {
     pub fn read_registered(
         root: &Path,
         project_id: &UuidV4,
         session_id: &UuidV4,
     ) -> Result<Session, StoreError> {
-        with_project(root, project_id, true, |data, _| {
+        let bytes = with_project(root, project_id, true, |data, _| {
             let sessions = data.child("sessions", false)?;
             let locks = data.child("locks", true)?;
             lock::with_lock(&locks, &format!("{}.lock", session_id.as_str()), || {
-                Self::read_validated(&sessions, session_id, project_id).map(|(session, _)| session)
+                sessions.read(&format!("{}.json", session_id.as_str()))
             })
-        })
+        })?;
+        Self::decode_diagnostic_snapshot(&bytes, session_id, project_id)
     }
     /// Read current verified metadata and each generated session filename. Unlike
     /// setup's fail-fast uniqueness scan, one unreadable session retains its ID
@@ -35,10 +42,7 @@ impl Store {
         root: &Path,
         project_id: &UuidV4,
     ) -> Result<ProjectCatalogue, StoreError> {
-        with_project(root, project_id, true, |data, project| {
-            let sessions = inspect_sessions(data, project_id, true);
-            Ok(ProjectCatalogue { project, sessions })
-        })
+        read_catalogue(root, project_id, true)
     }
 
     /// Strict diagnostic read: all coordination files/directories must exist.
@@ -46,12 +50,7 @@ impl Store {
         root: &Path,
         project_id: &UuidV4,
     ) -> Result<ProjectCatalogue, StoreError> {
-        with_project(root, project_id, false, |data, project| {
-            Ok(ProjectCatalogue {
-                project,
-                sessions: inspect_sessions(data, project_id, false),
-            })
-        })
+        read_catalogue(root, project_id, false)
     }
 
     /// Canonical identity/schema/semantic checks for an explicitly selected backup.
@@ -60,10 +59,41 @@ impl Store {
         session_id: &UuidV4,
         project_id: &UuidV4,
     ) -> Result<Session, StoreError> {
+        #[cfg(test)]
+        read_capture_tests::before_decode();
         let session = decode(bytes)?;
         Self::validate_in_project(&session, session_id, project_id)?;
         Ok(session)
     }
+}
+
+fn read_catalogue(
+    root: &Path,
+    project_id: &UuidV4,
+    create_locks: bool,
+) -> Result<ProjectCatalogue, StoreError> {
+    let (project, captured) = with_project(root, project_id, create_locks, |data, project| {
+        Ok((project, capture_sessions(data, create_locks)))
+    })?;
+    // Both the outer project guard and each individual session guard have ended.
+    // Validation uses only captured bytes and the requested canonical identities.
+    let sessions = captured.map(|sessions| {
+        sessions
+            .into_iter()
+            .map(|captured| SessionReadOutcome {
+                result: captured.result.and_then(|bytes| {
+                    Store::decode_diagnostic_snapshot(
+                        &bytes,
+                        captured.session_id.as_ref().expect("captured generated ID"),
+                        project_id,
+                    )
+                }),
+                session_id: captured.session_id,
+                path: captured.path,
+            })
+            .collect()
+    });
+    Ok(ProjectCatalogue { project, sessions })
 }
 
 fn with_project<T>(
@@ -86,11 +116,10 @@ fn with_project<T>(
     })
 }
 
-fn inspect_sessions(
+fn capture_sessions(
     data: &Directory,
-    project_id: &UuidV4,
     create_locks: bool,
-) -> Result<Vec<SessionReadOutcome>, StoreError> {
+) -> Result<Vec<CapturedSessionRead>, StoreError> {
     let sessions = match data.child("sessions", false) {
         Ok(sessions) => sessions,
         Err(StoreError::Io {
@@ -110,7 +139,7 @@ fn inspect_sessions(
         let session_id = match UuidV4::new(name.strip_suffix(".json").expect("filtered suffix")) {
             Ok(id) => id,
             Err(_) => {
-                results.push(SessionReadOutcome {
+                results.push(CapturedSessionRead {
                     session_id: None,
                     path: sessions.path.join(&name),
                     result: Err(StoreError::UnsafePath {
@@ -126,18 +155,13 @@ fn inspect_sessions(
             create_locks,
             || {
                 if create_locks {
-                    Store::read_validated(&sessions, &session_id, project_id)
-                        .map(|(session, _)| session)
+                    sessions.read(&name)
                 } else {
-                    Store::decode_diagnostic_snapshot(
-                        &sessions.read_diagnostic(&name)?,
-                        &session_id,
-                        project_id,
-                    )
+                    sessions.read_diagnostic(&name)
                 }
             },
         );
-        results.push(SessionReadOutcome {
+        results.push(CapturedSessionRead {
             session_id: Some(session_id),
             path: sessions.path.join(&name),
             result,
