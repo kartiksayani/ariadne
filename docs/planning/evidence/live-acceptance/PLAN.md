@@ -127,20 +127,39 @@ freshness and manual fallback honestly; loaded thread/PID alone proves no livene
 
 ## Extra turns: completion ordering and ordinary recovery
 
+**Execution prerequisite for both missing-result cases:** implement, independently
+review and verify the production native/runtime caller of
+`DeliveryService::expire_missing_result` (the `native_result_expiry` work), then
+qualify its merged artifact through required CI. Candidate `954ab4b` has the Core
+method but no production caller; it cannot prove automatic missing-result expiry.
+Follow the [queue contract](../../low-level/QUEUES_AND_RECOVERY.md): after actual
+successful completion, allow the **five-second grace** for result/report ordering;
+only after that grace may the production caller persist `result_missing` and
+recovery-required state. Observe the genuine persisted transition, never invoke
+the expiry method manually or manufacture a host event as live proof.
+
 - **Completion before result (one turn/host):** submit a reply to A asking the
   agent to persist one full reply without `input_result`, return the exact
   result-only ApplyRequest referencing that receipt, then end normally. After
-  the genuine completed host turn is persisted, verify `result_missing`/paused
-  and no next dispatch. Feed the agent-authored draft through installed
+  the genuine completed host turn is persisted, wait for the production
+  five-second expiry and verify `result_missing`/paused and no next dispatch.
+  Feed the agent-authored draft through installed
   `apply --binding B --generation G --json-stdin`; retain original input/attempt,
   fresh operation ID, issued watermark and valid refs. Record operator submission
   explicitly. Verify late result joins/seals once, with no duplicate reply; exact
   operation replay returns the same receipt. Never fabricate `turn_finished`.
 - **Missing-result repair (two turns/host):** repeat an intentional omitted result
-  on A, without publishing a delayed result. After genuine completion, inspect
-  paused state/effects in App and owner `session read`/`item messages`. Use existing
+  on A, without publishing a delayed result. After genuine completion and the
+  production five-second expiry, inspect paused state/effects in App and owner
+  `session read`/`item messages`. Use existing
   `input resolve --json-stdin` with `request_result_repair`, current session revision,
-  exact input/attempt, reason and truthful current owner-idle evidence if required.
+  exact input/attempt and reason. This CLI uses ordinary Core recovery with
+  observation `None`/Unknown, so it requires `owner_attested_idle:true`: immediately
+  before submission, obtain the actual owner's fresh, deliberate confirmation that
+  the named Claude conversation or Codex thread is stopped or idle **at that moment**.
+  Record its identity and confirmation time in owner-attributed evidence. An agent
+  cannot infer this from completion, prior approval or general permission to test;
+  without that current confirmation, stop before resolving.
   Recovery preserves owner pause; explicitly resume the binding. Require a new
   `result_repair` attempt referencing original work, no repeated mutation, one
   committed result and genuine completion. Other binding remains usable.
