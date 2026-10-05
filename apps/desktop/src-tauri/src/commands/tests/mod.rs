@@ -561,6 +561,62 @@ fn rejected_or_invalid_preference_receipts_never_notify_native_consumers() {
 }
 
 #[test]
+fn native_preference_writes_announce_only_saved_revisions() {
+    let entry: PreferencesPatchEntry = serde_json::from_value(
+        inventory()["owner_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["command"] == "preferences_patch")
+            .unwrap()["params"]["entries"][0]
+            .clone(),
+    )
+    .unwrap();
+    let request = preference_request(vec![entry]);
+    for (result, announced) in [
+        (
+            Ok(MutationReceipt::PreferencesPatched(
+                PreferencesPatchedReceipt {
+                    operation_id: request.command.operation_id().clone(),
+                    preferences_revision: PositiveSafeInteger::new(7).unwrap(),
+                },
+            )),
+            vec![7],
+        ),
+        (
+            Err(CoreError::new(
+                CoreErrorCode::RevisionConflict,
+                "Preferences changed.",
+                "Reload preferences.",
+            )),
+            vec![],
+        ),
+        (
+            Err(CoreError::new(
+                CoreErrorCode::CommitUncertain,
+                "Receipt was not confirmed.",
+                "Reconcile the original operation.",
+            )),
+            vec![],
+        ),
+    ] {
+        let core = Arc::new(ScriptedCoreService::new([ScriptStep {
+            request: RecordedRequest::Owner(
+                OwnerContext::from_trusted_entrypoint(OwnerScope::Preferences),
+                Box::new(request.command.clone()),
+            ),
+            response: ScriptedResponse::Owner(Box::new(result)),
+        }]));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = seen.clone();
+        let service = DesktopService::from_trusted_startup(core, resolve)
+            .with_preferences_changed(move |revision| record.lock().unwrap().push(revision));
+        let _ = service.native_preferences_write(&request);
+        assert_eq!(*seen.lock().unwrap(), announced);
+    }
+}
+
+#[test]
 fn qualified_connect_keeps_admission_deadline_and_validation_before_native_handoff() {
     let core = Arc::new(ScriptedCoreService::new([]));
     let command: OwnerCommand = serde_json::from_value(
