@@ -1,5 +1,16 @@
 {
   "schema_version": 1,
+  "status": {
+    "updated_at": "2026-10-05T19:34:00Z",
+    "headline": "37/49 merged. All remaining non-live work is in review/CI: PRs #94–#106. Shared native e2e failure root-caused; fixes in progress.",
+    "notes": [
+      "main 7dbecfb is green. Nine stacked draft PRs #94, #93, #97, #101, #104, #99, #105, #98, #103 plus draft #106 on top.",
+      "All nine failed the same native e2e test on 2026-10-05.",
+      "Root causes found 2026-10-06 from CI artifacts: (A) tree-search p95 193 ms vs 150 ms target, fix reviewed clear; (B) history spec selected the icon-only Messages (m) button by visible text, test bug, proved; (C) follow-up/reopen spec step raced the previous result, test sequencing, likely; (D) a Fork click dropped when the awaited preference write hit a revision conflict, minor product bug, likely.",
+      "Fixes are being pushed to #106, then get independent review, then propagate down the stack so all PRs re-run CI in parallel. Merges go top-down from #94.",
+      "P7.2 and P7.3 live runs need owner approval."
+    ]
+  },
   "tasks": [
     {
       "id": "P0.1",
@@ -1303,7 +1314,12 @@
         "P4.4"
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73",
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [94],
+        "note": "Native complete-history journey with rail cross-highlights; CI failing on the shared native e2e test."
+      }
     },
     {
       "id": "P4.6",
@@ -1342,7 +1358,13 @@
         "P4.1",
         "P4.4"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/80"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/80",
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [94],
+        "note": "Answer/action paths exercised in the #94 native history journey; CI failing on the shared native e2e test."
+      }
     },
     {
       "id": "P4.7",
@@ -1380,7 +1402,13 @@
         "P4.3",
         "P4.6",
         "P0.6"
-      ]
+      ],
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [94, 106],
+        "note": "Missing-result recovery journey and native result expiry in #106; #94 lists P4.7 as still open. Native e2e failing."
+      }
     },
     {
       "id": "P4.8",
@@ -1407,7 +1435,7 @@
         "docs/planning/MODULE_CONTRACTS.md#implementation-prerequisites-and-acceptance-joins"
       ],
       "acceptance": [
-        "Capture every applicable frame and component variant in both themes at reference/minimum sizes; source reference sheets remain gallery states rather than new pages (D01/D14).",
+        "Captures of the implemented product states in both themes plus keyboard/accessibility evidence, as provided by the merged accessibility PR; pending exhaustive pinned-browser captures are not required; source reference sheets remain gallery states rather than new pages (D01/D14).",
         "Verify roving focus, labels, non-color status, dialog focus trap/return, shortcuts outside editors, reduced motion and polite once-only announcements.",
         "Resolve actual visual/interaction discrepancies with before/after evidence; raster-only tolerance cannot waive missing states or clipped/inaccessible controls."
       ],
@@ -1424,7 +1452,13 @@
         "P4.5",
         "P4.6",
         "P4.7"
-      ]
+      ],
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [97],
+        "note": "Keyboard/accessibility and 27-state theme capture; CI failing on the shared native e2e test."
+      }
     },
     {
       "id": "P5.1",
@@ -1446,7 +1480,7 @@
       ],
       "acceptance": [
         "SVG uses fixed node/depth/leaf/root dimensions, stable ordered tree layout, cubic parent edges and distinct labelled dashed replacement edges (D07).",
-        "Shared filters/selection route to same detail; cursor-anchored zoom 0.25\u20132.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
+        "Shared filters/selection route to same detail; cursor-anchored zoom 0.25–2.0, blank pan, Fit full bounds plus 32px and accessible tree fallback work."
       ],
       "checks": [
         "rtk proxy npm run test:ui -- apps/desktop/tests/ui/graph-layout"
@@ -1535,7 +1569,12 @@
         "P4.6",
         "P4.7"
       ],
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [93],
+        "note": "Guarded archive/close/Continue native journey; CI failing on the shared native e2e test. Also needs P4.7."
+      }
     },
     {
       "id": "P6.1",
@@ -1558,7 +1597,7 @@
       ],
       "acceptance": [
         "Single-instance registers before plugins and queues ID routes until webview ready; actual packaged CLI open handles paths with spaces and same revealItem route.",
-        "Ariadne persists Pin and geometry, clamps stored geometry to supplied monitor bounds, reconciles on wake, and distinguishes hide from Quit. Focused tests prove our state/routing/lifecycle logic; Quit stops only Ariadne dispatch and preserves active external host work. Standard macOS window/menu behavior is delegated to Apple APIs, not a physical acceptance gate (owner clarification 2026-10-05)."
+        "Ariadne persists Pin and geometry, clamps stored geometry to supplied monitor bounds, reconciles on wake (wake triggers Ariadne's window reconcile: observer registered, reconcile invoked off the posting thread; physical-monitor behaviour is delegated to macOS and not a gate), and distinguishes hide from Quit. Focused tests prove our state/routing/lifecycle logic; Quit stops only Ariadne dispatch and preserves active external host work. Standard macOS window/menu behavior is delegated to Apple APIs, not a physical acceptance gate (owner clarification 2026-10-05)."
       ],
       "checks": [
         "rtk proxy npm run test:native -- --suite routes",
@@ -1570,7 +1609,12 @@
         "P0.6"
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/75",
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [101, 104],
+        "note": "Quit-preserves-external-turn and quit-warning acceptance; CI failing on the shared native e2e test."
+      }
     },
     {
       "id": "P6.2",
@@ -1604,7 +1648,12 @@
         "P6.1",
         "P4.3"
       ],
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [99, 105],
+        "note": "Notification denial and click-routing regressions; CI failing on the shared native e2e test. Completion also waits for P6.1."
+      }
     },
     {
       "id": "P6.3",
@@ -1678,7 +1727,12 @@
         "From clean checkout on recorded Mac: rtk proxy make install; rtk proxy ariadne doctor --json; rtk proxy make uninstall"
       ],
       "estimate_days": 1,
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/92"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/92",
+      "progress": {
+        "state": "queued",
+        "prs": [],
+        "note": "Implementation merged in #92; final artifact qualification waits for the stack to merge."
+      }
     },
     {
       "id": "P7.1",
@@ -1706,16 +1760,21 @@
       ],
       "acceptance": [
         "Actual Tauri UI/core/store/CLI/MCP with fake only at provider seam passes five-input FIFO, same-project parallel isolation, duplicate/out-of-order events, missing result and ordinary quit/reopen.",
-        "Each fixture asserts persisted state and public UI/API result; retain reproducible seeds/logs and explicitly label mocked provider evidence.",
+        "Each fixture asserts persisted state and public UI/API result; retain reproducible seeds/logs and explicitly label mocked provider evidence; link the passing required CI run on main as evidence.",
         "Run required full per-commit gates; do not add exotic recovery matrices or live billable sessions to every commit.",
         "Join every product module and all unresolved original-task integration acceptance; early implementation PRs and scripted service doubles never count as completed native/core/store acceptance."
       ],
       "checks": [
-        "rtk proxy npm run test:e2e -- --suite acceptance",
+        "rtk proxy npm run test:e2e",
         "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree"
       ],
       "estimate_days": 1,
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [98, 103],
+        "note": "Parallel-lane and missing-result repair acceptance tests are in the stack; waiting on the shared native e2e fix."
+      }
     },
     {
       "id": "P7.2",
@@ -1741,7 +1800,12 @@
         "rtk proxy npm run test:live -- --host claude --inputs 5",
         "Review saved live receipts, input/attempt/host-turn mapping and on-disk state; POC three-turn transport evidence cannot satisfy this gate."
       ],
-      "estimate_days": 0.5
+      "estimate_days": 0.5,
+      "progress": {
+        "state": "blocked_owner",
+        "prs": [],
+        "note": "Live paid-host run needs owner approval; plan drafted on unpushed branch docs/live-acceptance-plan."
+      }
     },
     {
       "id": "P7.3",
@@ -1767,7 +1831,12 @@
         "rtk proxy npm run test:live -- --host codex --inputs 5",
         "Review saved live receipts, original user-item marker-to-turn map and persistent domain results; queue POC alone cannot satisfy acceptance."
       ],
-      "estimate_days": 0.5
+      "estimate_days": 0.5,
+      "progress": {
+        "state": "blocked_owner",
+        "prs": [],
+        "note": "Live paid-host run needs owner approval; plan drafted on unpushed branch docs/live-acceptance-plan."
+      }
     },
     {
       "id": "P8.1",
@@ -1790,7 +1859,7 @@
       ],
       "acceptance": [
         "Clean checkout builds/installs recorded source revision; packaged offline demo/history/owner edits, both supported integrations, native routing and owned uninstall pass on recorded Mac.",
-        "Every non-deferred V01\u2013V29 row links proved-on-version evidence or a concrete external blocker; distinguish mock/transport/production/live/native evidence and retain seeds/hashes/logs.",
+        "Every non-deferred V01–V29 row links proved-on-version evidence or a concrete external blocker; distinguish mock/transport/production/live/native evidence and retain seeds/hashes/logs.",
         "README covers install/unsigned Open Anyway/setup/both hosts/60-second tour/rules/recovery/uninstall/limits; record no remote assets, telemetry, updater, host transcript/credential handling or release test service.",
         "Public plugin and exotic recovery remain deferred; reviewed repository changes are publishable under existing authorization, while signed public app distribution is a later decision."
       ],
@@ -1798,7 +1867,12 @@
         "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree",
         "Clean-checkout make install, packaged offline/live/native acceptance and make uninstall; record exact version/platform/source/artifact evidence."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "progress": {
+        "state": "queued",
+        "prs": [],
+        "note": "Waits for P7.2 and P7.3 live acceptance."
+      }
     }
   ]
 }

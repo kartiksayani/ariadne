@@ -7,6 +7,9 @@ is the task and completion catalogue.
 
 - The owner starts the maintainer on **Astra, High effort**. Delegated implementers
   and independent reviewers use **Sol 6.1, High effort** exclusively.
+- When delivery runs on Claude Code instead: the maintainer is **Fable 5.1**,
+  independent reviewers and critical work use **Opus 5.5**, and implementers,
+  test runs and documentation use **Sonnet 5.5**.
 - Use an isolated worktree, one bounded task and declared owned paths. You are not
   alone. Preserve others' changes, worktrees, branches, history and ignored evidence.
 - Product implementation is paused until the corrected plan is reviewed and the

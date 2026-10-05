@@ -96,7 +96,8 @@ capabilities without promising unsupported controls today.
 
 Target on a documented reference Mac: normal external writes visible within1s,
 local save p95≤250ms, first usable view≤2s, local search p95≤150ms with2,000 items /
-5,000 messages. These are measurements to pass, not current performance claims.
+5,000 messages. These are targets recorded as evidence, not pass/fail gates for
+the personal release (owner ruling 2026-10-06), and not current performance claims.
 Both themes, keyboard/focus, errors/recovery and offline assets must pass. Use
 the canonical SDK-cache example from DESIGN_PROMPT and handoff scenario fixtures.
 The [verification ledger](low-level/VERIFICATION.md) specifies executable gates.

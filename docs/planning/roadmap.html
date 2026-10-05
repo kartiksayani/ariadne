@@ -47,6 +47,12 @@
     .task.merged rect { fill: #255343; stroke: var(--merged); }
     .task.active rect { stroke: #c2a0ff; stroke-width: 3; stroke-dasharray: 5 3; }
     .task.selected rect { stroke: white; stroke-width: 3; }
+    .status-banner { margin: 14px 0; }
+    .status-banner h2 { margin-bottom: 4px; }
+    .status-banner ul { margin: 6px 0; padding-left: 20px; }
+    .status-banner table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+    .status-banner th, .status-banner td { text-align: left; vertical-align: top; padding: 5px 8px; border-top: 1px solid var(--line); }
+    .status-banner th { color: var(--muted); font-weight: 600; }
     .task { cursor: pointer; }
     .task:focus { outline: none; }
     .task:focus rect { stroke: white; stroke-width: 3; }
@@ -88,11 +94,12 @@
   <main>
     <div class="layout">
       <section class="panel" aria-label="Roadmap charts">
+        <section id="status-banner" class="status-banner" aria-label="Current delivery status" hidden></section>
         <div class="view-buttons" role="group" aria-label="Chart view">
           <button id="gantt-view" type="button" aria-pressed="true">Gantt estimate</button>
           <button id="graph-view" type="button" aria-pressed="false">Dependency graph</button>
         </div>
-        <div class="legend"><span>Orange + C: projected acceptance critical path</span><span>Amber + I: implementation merged, acceptance in progress</span><span>Purple dashed outline + A: active product implementation</span><span>Green + M: maintainer-recorded merge</span><span>Solid: full acceptance joins</span><span>Dashed: implementation prerequisites</span><span>W: assigned worker lane</span></div>
+        <div class="legend"><span>Orange + C: projected acceptance critical path</span><span>Amber + I: implementation merged, acceptance in progress</span><span>Purple dashed outline + A: active product implementation</span><span>Green + M: maintainer-recorded merge</span><span>P: in-flight work recorded in status (see table above the chart)</span><span>Solid: full acceptance joins</span><span>Dashed: implementation prerequisites</span><span>W: assigned worker lane</span></div>
         <p class="muted" id="chart-note">Filters hide rows only; estimates use full acceptance joins. Implementation edges show earlier work eligibility after published contracts, not a validated completion forecast.</p>
         <div id="chart" class="scroll" aria-label="Interactive task chart"></div>
       </section>
@@ -102,6 +109,17 @@
   </main>
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
+  "status": {
+    "updated_at": "2026-10-05T19:34:00Z",
+    "headline": "37/49 merged. All remaining non-live work is in review/CI: PRs #94–#106. Shared native e2e failure root-caused; fixes in progress.",
+    "notes": [
+      "main 7dbecfb is green. Nine stacked draft PRs #94, #93, #97, #101, #104, #99, #105, #98, #103 plus draft #106 on top.",
+      "All nine failed the same native e2e test on 2026-10-05.",
+      "Root causes found 2026-10-06 from CI artifacts: (A) tree-search p95 193 ms vs 150 ms target, fix reviewed clear; (B) history spec selected the icon-only Messages (m) button by visible text, test bug, proved; (C) follow-up/reopen spec step raced the previous result, test sequencing, likely; (D) a Fork click dropped when the awaited preference write hit a revision conflict, minor product bug, likely.",
+      "Fixes are being pushed to #106, then get independent review, then propagate down the stack so all PRs re-run CI in parallel. Merges go top-down from #94.",
+      "P7.2 and P7.3 live runs need owner approval."
+    ]
+  },
   "tasks": [
     {
       "id": "P0.1",
@@ -1405,7 +1423,14 @@
         "P4.4"
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73",
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [
+          94
+        ],
+        "note": "Native complete-history journey with rail cross-highlights; CI failing on the shared native e2e test."
+      }
     },
     {
       "id": "P4.6",
@@ -1444,7 +1469,15 @@
         "P4.1",
         "P4.4"
       ],
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/80"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/80",
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [
+          94
+        ],
+        "note": "Answer/action paths exercised in the #94 native history journey; CI failing on the shared native e2e test."
+      }
     },
     {
       "id": "P4.7",
@@ -1482,7 +1515,16 @@
         "P4.3",
         "P4.6",
         "P0.6"
-      ]
+      ],
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [
+          94,
+          106
+        ],
+        "note": "Missing-result recovery journey and native result expiry in #106; #94 lists P4.7 as still open. Native e2e failing."
+      }
     },
     {
       "id": "P4.8",
@@ -1509,7 +1551,7 @@
         "docs/planning/MODULE_CONTRACTS.md#implementation-prerequisites-and-acceptance-joins"
       ],
       "acceptance": [
-        "Capture every applicable frame and component variant in both themes at reference/minimum sizes; source reference sheets remain gallery states rather than new pages (D01/D14).",
+        "Captures of the implemented product states in both themes plus keyboard/accessibility evidence, as provided by the merged accessibility PR; pending exhaustive pinned-browser captures are not required; source reference sheets remain gallery states rather than new pages (D01/D14).",
         "Verify roving focus, labels, non-color status, dialog focus trap/return, shortcuts outside editors, reduced motion and polite once-only announcements.",
         "Resolve actual visual/interaction discrepancies with before/after evidence; raster-only tolerance cannot waive missing states or clipped/inaccessible controls."
       ],
@@ -1526,7 +1568,15 @@
         "P4.5",
         "P4.6",
         "P4.7"
-      ]
+      ],
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [
+          97
+        ],
+        "note": "Keyboard/accessibility and 27-state theme capture; CI failing on the shared native e2e test."
+      }
     },
     {
       "id": "P5.1",
@@ -1637,7 +1687,14 @@
         "P4.6",
         "P4.7"
       ],
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [
+          93
+        ],
+        "note": "Guarded archive/close/Continue native journey; CI failing on the shared native e2e test. Also needs P4.7."
+      }
     },
     {
       "id": "P6.1",
@@ -1660,7 +1717,7 @@
       ],
       "acceptance": [
         "Single-instance registers before plugins and queues ID routes until webview ready; actual packaged CLI open handles paths with spaces and same revealItem route.",
-        "Ariadne persists Pin and geometry, clamps stored geometry to supplied monitor bounds, reconciles on wake, and distinguishes hide from Quit. Focused tests prove our state/routing/lifecycle logic; Quit stops only Ariadne dispatch and preserves active external host work. Standard macOS window/menu behavior is delegated to Apple APIs, not a physical acceptance gate (owner clarification 2026-10-05)."
+        "Ariadne persists Pin and geometry, clamps stored geometry to supplied monitor bounds, reconciles on wake (wake triggers Ariadne's window reconcile: observer registered, reconcile invoked off the posting thread; physical-monitor behaviour is delegated to macOS and not a gate), and distinguishes hide from Quit. Focused tests prove our state/routing/lifecycle logic; Quit stops only Ariadne dispatch and preserves active external host work. Standard macOS window/menu behavior is delegated to Apple APIs, not a physical acceptance gate (owner clarification 2026-10-05)."
       ],
       "checks": [
         "rtk proxy npm run test:native -- --suite routes",
@@ -1672,7 +1729,15 @@
         "P0.6"
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/75",
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [
+          101,
+          104
+        ],
+        "note": "Quit-preserves-external-turn and quit-warning acceptance; CI failing on the shared native e2e test."
+      }
     },
     {
       "id": "P6.2",
@@ -1706,7 +1771,15 @@
         "P6.1",
         "P4.3"
       ],
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [
+          99,
+          105
+        ],
+        "note": "Notification denial and click-routing regressions; CI failing on the shared native e2e test. Completion also waits for P6.1."
+      }
     },
     {
       "id": "P6.3",
@@ -1780,7 +1853,12 @@
         "From clean checkout on recorded Mac: rtk proxy make install; rtk proxy ariadne doctor --json; rtk proxy make uninstall"
       ],
       "estimate_days": 1,
-      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/92"
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/92",
+      "progress": {
+        "state": "queued",
+        "prs": [],
+        "note": "Implementation merged in #92; final artifact qualification waits for the stack to merge."
+      }
     },
     {
       "id": "P7.1",
@@ -1808,16 +1886,24 @@
       ],
       "acceptance": [
         "Actual Tauri UI/core/store/CLI/MCP with fake only at provider seam passes five-input FIFO, same-project parallel isolation, duplicate/out-of-order events, missing result and ordinary quit/reopen.",
-        "Each fixture asserts persisted state and public UI/API result; retain reproducible seeds/logs and explicitly label mocked provider evidence.",
+        "Each fixture asserts persisted state and public UI/API result; retain reproducible seeds/logs and explicitly label mocked provider evidence; link the passing required CI run on main as evidence.",
         "Run required full per-commit gates; do not add exotic recovery matrices or live billable sessions to every commit.",
         "Join every product module and all unresolved original-task integration acceptance; early implementation PRs and scripted service doubles never count as completed native/core/store acceptance."
       ],
       "checks": [
-        "rtk proxy npm run test:e2e -- --suite acceptance",
+        "rtk proxy npm run test:e2e",
         "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree"
       ],
       "estimate_days": 1,
-      "active": true
+      "active": true,
+      "progress": {
+        "state": "fixing_ci",
+        "prs": [
+          98,
+          103
+        ],
+        "note": "Parallel-lane and missing-result repair acceptance tests are in the stack; waiting on the shared native e2e fix."
+      }
     },
     {
       "id": "P7.2",
@@ -1843,7 +1929,12 @@
         "rtk proxy npm run test:live -- --host claude --inputs 5",
         "Review saved live receipts, input/attempt/host-turn mapping and on-disk state; POC three-turn transport evidence cannot satisfy this gate."
       ],
-      "estimate_days": 0.5
+      "estimate_days": 0.5,
+      "progress": {
+        "state": "blocked_owner",
+        "prs": [],
+        "note": "Live paid-host run needs owner approval; plan drafted on unpushed branch docs/live-acceptance-plan."
+      }
     },
     {
       "id": "P7.3",
@@ -1869,7 +1960,12 @@
         "rtk proxy npm run test:live -- --host codex --inputs 5",
         "Review saved live receipts, original user-item marker-to-turn map and persistent domain results; queue POC alone cannot satisfy acceptance."
       ],
-      "estimate_days": 0.5
+      "estimate_days": 0.5,
+      "progress": {
+        "state": "blocked_owner",
+        "prs": [],
+        "note": "Live paid-host run needs owner approval; plan drafted on unpushed branch docs/live-acceptance-plan."
+      }
     },
     {
       "id": "P8.1",
@@ -1900,7 +1996,12 @@
         "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree",
         "Clean-checkout make install, packaged offline/live/native acceptance and make uninstall; record exact version/platform/source/artifact evidence."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "progress": {
+        "state": "queued",
+        "prs": [],
+        "note": "Waits for P7.2 and P7.3 live acceptance."
+      }
     }
   ]
 }</script>
@@ -2058,6 +2159,53 @@
       return element;
     }
 
+    const stateLabels = {fixing_ci: 'Fixing CI', in_ci: 'In CI', in_review: 'In review',
+      ready_to_merge: 'Ready to merge', blocked_owner: 'Blocked on owner', queued: 'Queued'};
+    const repoPulls = 'https://github.com/kartiksayani/ariadne/pull/';
+
+    function stateLabel(progress) {
+      return stateLabels[progress.state] || String(progress.state);
+    }
+
+    function prLinks(progress, parent) {
+      const prs = Array.isArray(progress.prs) ? progress.prs.filter(Number.isInteger) : [];
+      if (!prs.length) { parent.append('none'); return; }
+      prs.forEach((number, index) => {
+        if (index) parent.append(', ');
+        const link = node('a', '#' + number, parent);
+        link.href = repoPulls + number;
+      });
+    }
+
+    function renderStatus() {
+      const banner = $('status-banner');
+      banner.replaceChildren();
+      const status = catalogue.status;
+      const inFlight = tasks.filter(task => task.progress && typeof task.progress === 'object');
+      if (!status && !inFlight.length) { banner.hidden = true; return; }
+      banner.hidden = false;
+      node('h2', completed.size + '/' + tasks.length + ' complete', banner);
+      if (status && status.headline) node('p', status.headline, banner);
+      if (status && status.updated_at) node('p', 'Updated ' + status.updated_at, banner).className = 'muted';
+      if (status && Array.isArray(status.notes) && status.notes.length) {
+        const list = node('ul', undefined, banner);
+        for (const note of status.notes) node('li', String(note), list);
+      }
+      if (!inFlight.length) return;
+      const table = node('table', undefined, banner);
+      const head = node('tr', undefined, node('thead', undefined, table));
+      for (const title of ['Task', 'Title', 'State', 'PRs', 'Note']) node('th', title, head).scope = 'col';
+      const body = node('tbody', undefined, table);
+      for (const task of inFlight) {
+        const row = node('tr', undefined, body);
+        node('td', task.id, row);
+        node('td', task.title, row);
+        node('td', stateLabel(task.progress), row);
+        prLinks(task.progress, node('td', undefined, row));
+        node('td', task.progress.note || '', row);
+      }
+    }
+
     function taskButton(task, parent) {
       const button = node('button', task.id + ' · ' + task.title, parent);
       button.type = 'button';
@@ -2093,6 +2241,13 @@
       if (task.implementation_pr_url && !task.completion) {
         const link = node('a', 'Implementation merged; acceptance in progress', panel);
         link.href = task.implementation_pr_url;
+      }
+      if (task.progress && typeof task.progress === 'object') {
+        node('h3', 'Current progress', panel);
+        node('p', stateLabel(task.progress), panel);
+        const prLine = node('p', 'PRs: ', panel);
+        prLinks(task.progress, prLine);
+        if (task.progress.note) node('p', task.progress.note, panel);
       }
       node('h3', 'Owned paths', panel);
       const paths = node('ul', undefined, panel);
@@ -2151,11 +2306,11 @@
       const status = engine.taskStatus(task, completed);
       const classes = ['task', record.critical ? 'critical' : '', status, task.active ? 'active' : '', selected === task.id ? 'selected' : ''].join(' ');
       const group = svgNode('g', {class: classes, role: 'button', tabindex: 0,
-        'aria-label': task.id + ': ' + task.title + ', ' + task.estimate_days + ' estimated days, ' + engine.taskStatus(task, completed) + (task.active ? ', active product implementation' : ''),
+        'aria-label': task.id + ': ' + task.title + ', ' + task.estimate_days + ' estimated days, ' + engine.taskStatus(task, completed) + (task.active ? ', active product implementation' : '') + (task.progress ? ', in flight: ' + stateLabel(task.progress) : ''),
         'aria-pressed': String(selected === task.id), 'data-task-id': task.id}, svg);
       svgNode('title', {}, group, task.id + ' · ' + task.title);
       svgNode('rect', {x, y, width, height}, group);
-      const suffix = (completed.has(task.id) ? ' M' : (status === 'in_progress' ? ' I' : '') + (record.critical ? ' C' : '')) + (task.active ? ' A' : '');
+      const suffix = (completed.has(task.id) ? ' M' : (status === 'in_progress' ? ' I' : '') + (record.critical ? ' C' : '')) + (task.active ? ' A' : '') + (task.progress ? ' P' : '');
       const label = graph ? task.id + suffix + ' · ' + task.estimate_days + 'd' :
         task.id + suffix + ' · W' + (record.lane === null ? '–' : record.lane + 1);
       svgNode('text', {x: graph ? x + 6 : x + width + 6, y: y + 17, class: 'label'}, group, label);
@@ -2275,6 +2430,7 @@
     });
     $('catalogue-summary').textContent = tasks.length + ' tasks · ' + tasks.reduce((sum, task) => sum + task.estimate_days, 0) +
       ' estimated work days · Contract-ready, dependency-led parallel delivery; full release scope retained.';
+    renderStatus();
     render();
   })();
   </script>

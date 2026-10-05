@@ -3,6 +3,8 @@
 Status: Accepted
 Date: 2026-10-05
 
+Partially superseded by [ADR-0067](ADR-0067-performance-budgets-are-recorded-not-gating.md): the "retain the 150 ms p95 limit" clause is no longer a gate.
+
 ## Context
 
 The native 2,000-item journey records search p95 of 208 ms locally and 198 ms in

@@ -139,7 +139,7 @@ See [ADR-0066](../../adr/ADR-0066-project-local-search-before-save-confirmation.
 
 Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, scroll nearest, and open detail. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
 
-Start with variable-height DOM rows memoized by item revision. Add virtualization only if the documented 2,000-item performance target is missed; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
+Start with variable-height DOM rows memoized by item revision. Add virtualization only if the recorded large-fixture performance evidence shows a real problem; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
 
 The early P4.4 module publishes `SentenceTree`, `NavigationSentenceTree` and the
 canonical snapshot projection. It preserves complete sentence/outcome text,
@@ -147,7 +147,7 @@ contextual ancestors, exact owner filters, roving focus, saved collapse/Later an
 scroll anchors. It reuses the registered reveal route and NavigationStore's typed
 revision-checked preference writes; no renderer-local persistence is added.
 Active branches initialize expanded only for a newly created session view, and
-explicit collapse remains saved across later snapshots. A focused 2,000-row
+explicit collapse remains saved across later snapshots. A focused large-fixture
 jsdom measurement records complete initial DOM rendering before any virtualization
 choice. Native layout/scroll performance, App composition and the original native
 P4.4 acceptance remain pending; these reusable module tests do not complete them.
@@ -178,7 +178,7 @@ bounds cross the viewport even if both endpoints are off screen. Deduplicate IDs
 from buckets. Update transform and visible IDs once per animation frame; Fit uses
 full layout bounds, never culled bounds. A remote selection first centers/reveals
 the node, then focuses it. Culling affects rendering only, not counts, search,
-ancestry or stored data. Test 2,000-node topics at multiple zoom levels, crossing
+ancestry or stored data. Test a large-fixture topic at multiple zoom levels, crossing
 edges, selection off screen and tree/graph parity before accepting M5.
 
 ## 5. Owner input and delivery UI
