@@ -1,9 +1,9 @@
 # Ariadne handoff
 
-Checked 2026-10-04 23:49 UTC. Verify GitHub before acting. Continue autonomously;
+Checked 2026-10-05 00:12 UTC. Verify GitHub before acting. Continue autonomously;
 Sol 6.1 High delegates only. Ten delegate slots are supported. Reviewed-parent
-stacks are authorized. Publishing this checkpoint with the composed app repairs; check the current
-GitHub head and checks rather than treating this snapshot as live status.
+stacks are authorized. Publishing this checkpoint with the one-file workflow-fixture repair; verify
+current GitHub heads after the coordinated parent pushes.
 
 **Main:** `20eb77d715c0aa58664dddea0232465598cf8cb1` (PR85);
 [postmerge CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37244941515).
@@ -12,33 +12,35 @@ PRs80–82 and84 also merged. Preserve intentional root tasks.json/roadmap overl
 
 | PR | Head / base | Review and CI |
 | --- | --- | --- |
-| [83](https://github.com/kartiksayani/ariadne/pull/83) | Local `2d57711` plus checkpoint / main | Publishing repairs; independent delta review underway; [old CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37243524591) |
+| [83](https://github.com/kartiksayani/ariadne/pull/83) | Local `e897c39` plus checkpoint / main | Publishing workflow-fixture repair; [previous CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37245309717) |
 | [85](https://github.com/kartiksayani/ariadne/pull/85) | Merged as20eb77d | Clear5408629599; [CI green](https://github.com/kartiksayani/ariadne/actions/runs/37241561932), artifacts audited |
-| [86](https://github.com/kartiksayani/ariadne/pull/86) | `b8b1bb3` /83 | Clear5408722087; [CI running](https://github.com/kartiksayani/ariadne/actions/runs/37243590020) |
-| [88](https://github.com/kartiksayani/ariadne/pull/88) | `59eac83` /86 | Clear5408722152; [CI running](https://github.com/kartiksayani/ariadne/actions/runs/37243661426) |
-| [90](https://github.com/kartiksayani/ariadne/pull/90) | `9628e68` / main | Clear5408675830; [CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37242652964), wake-test diagnosis assigned |
-| [91](https://github.com/kartiksayani/ariadne/pull/91) | `37b650a` /88 | Clear5408725188; [CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37243736889) |
-| [92](https://github.com/kartiksayani/ariadne/pull/92) | `1572661` /88 | Clear5408725538; [CI running](https://github.com/kartiksayani/ariadne/actions/runs/37243771774) |
-| [93](https://github.com/kartiksayani/ariadne/pull/93) | `281baf4` /88 | Clear5408797489; retained-blocker fix verified; CI pending |
-| [94](https://github.com/kartiksayani/ariadne/pull/94) | `cfaeb59` /91 | Clear5408753598; CI pending |
-| [95](https://github.com/kartiksayani/ariadne/pull/95) | `e40f4fb` /91 | Clear5408787995; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37244480495) |
+| [86](https://github.com/kartiksayani/ariadne/pull/86) | `568a51e` /83 | Clear5408879961; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245408157) |
+| [88](https://github.com/kartiksayani/ariadne/pull/88) | `57ab2e5` /86 | Clear5408880014; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245454134) |
+| [90](https://github.com/kartiksayani/ariadne/pull/90) | Local `3d022c4` / main | Publishing same fixture repair; [previous CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37245310924) |
+| [91](https://github.com/kartiksayani/ariadne/pull/91) | `7ec65b8` /88 | Clear5408877294; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245484743) |
+| [92](https://github.com/kartiksayani/ariadne/pull/92) | `b2306db` /88 | Clear5408882161; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245493115) |
+| [93](https://github.com/kartiksayani/ariadne/pull/93) | `a8f5de2` /94 | Combined source clear5408901847; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245921123) |
+| [94](https://github.com/kartiksayani/ariadne/pull/94) | `097fdc8` /91 | Clear5408884753; CI pending |
+| [95](https://github.com/kartiksayani/ariadne/pull/95) | `a21e6d0` /91 | Clear5408882221; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245534352) |
 
-GitHub stack87 is83 →86 →88 →91 →94. Atomic squash only a qualified prefix.
+| [96](https://github.com/kartiksayani/ariadne/pull/96) | `c45feef` /91 | Clear5408892476; [CI pending](https://github.com/kartiksayani/ariadne/actions/runs/37245702501) |
+
+GitHub stack87 is83 →86 →88 →91 →94 →93.92/95/96 remain independent siblings. Atomic squash only a qualified prefix.
 Prioritize this critical stack over an unrelated main update that restarts its
 checks; independent siblings stay independent. Every merged state must satisfy
 current-base validation. No new full task closure is claimed.
 
 | Responsibility | Worktree / branch | Local state |
 | --- | --- | --- |
-| Maintainer | .worktrees/resume-integration / maintenance/resume-integration | Publishing source2d57711 plus workflow/checkpoint; shared contracts/catalogue |
-| prove_three_binding_fifo | .worktrees/packaged-route-acceptance / task/packaged-route-acceptance | P6.1 cold launch, second-instance route and path spaces using real packaged release/CLI; no OS driver |
-| guarded_history_actions | .worktrees/guarded-history-actions / task/guarded-history-actions |93 fix published/clean; review-local errors preserve controller pending identity |
+| Maintainer | .worktrees/resume-integration / maintenance/resume-integration | Clean published source401d620; this local checkpoint uncommitted; shared contracts/catalogue |
+| prove_three_binding_fifo | .worktrees/packaged-route-acceptance / task/packaged-route-acceptance |96 published/clean; independent24 checks and source review clear; actual packaged CI pending |
+| guarded_history_actions | .worktrees/guarded-history-actions / task/guarded-history-actions |93 stacked on94; combined source clear5408901847, reviewer130 UI pass; parent update pending |
 | native_graph_acceptance | .worktrees/native-graph-acceptance / task/native-graph-acceptance |95 published/clean and source-cleared |
 | repair_runtime_ci_races | .worktrees/runtime-wake-reuse / fix/runtime-wake-reuse |5bbd5ac committed/clean, cherry-picked into83 as2d57711; no other unpushed work |
-| review_guarded_actions | Separate review context |93 targeted review clear5408797489; prior thread resolved |
-| audit_claude85_green | Separate review context;85 evidence in /tmp/ariadne-pr85-ci37241561932-audit.XEXXMN |83 integration, coverage, wake and CI-setup delta review; exclusive owner-answer-ui/target |
-| review_native_history | Separate review context |94 cleared;90 first-failure source diagnosis complete |
-| review_personal_package92 | Separate review context |92 and95 source-cleared |
+| review_guarded_actions | Separate review context |93 integration source-clear5408901847 |
+| audit_claude85_green | Separate review context;85 evidence in /tmp/ariadne-pr85-ci37241561932-audit.XEXXMN |83/86/88 cleared; CI pacing audit complete, no cache changes |
+| review_native_history | Separate review context |90/94 cleared |
+| review_personal_package92 | Separate review context |Reviewing91/92/95 parent integration |
 
 85 audit: 21,090/23,466 =89.87% weighted coverage, all176 required sources;
 exact head/tree with no tracked changes, native PID54199/nonce/receipt/clean exit,
@@ -48,7 +50,8 @@ scaffold journey; actual Claude behavior is proved by its real Core/installed te
 83 contains control-write, activation-fixture, recovery-transport and physical
 lease repairs, propagated through descendants. Final lease drop unlocks only in
 its acquiring process (ADR0064); exact old CI interleaving remains inferred.
-90 has the control repair but not83 lease repair. Its new first failure is the
+90 now also carries the same lease, wake and CI setup fixes, independently
+reviewed. Its previous first failure was the
 unchanged Claude wake/heartbeat counter107 versus106 at activation.rs402. Source
 trace was proved deterministically: clearing evidence during helper inspection
 stopped the worker.5bbd5ac now yields Unknown without losing the worker; preserves
@@ -58,9 +61,9 @@ the declaration-only tray/mod.rs from source inventory. Original80% floor stays.
 
 **Next three steps**
 
-1. Finish83 independent review, push its composed repairs once, then propagate
-   through the reviewed stack and siblings. Integrate90 with main and shared fixes.
-   Continue isolated P6.1 product acceptance while CI runs.
+1. Review/push the workflow-fixture repair on83/90, then propagate once through
+   all children including96. All product scopes are independently source-clear.
+   Review only the exact shared fix and integration; retain full current-head CI.
 2. Audit critical stack coverage/native/release artifacts before squash merge.
    Close P2.4/P3.1 and P3.2 only with required merges/proof, then original dependent
    tasks.85 is now merged; main failure pauses further merges, pending does not.
@@ -81,3 +84,11 @@ run37243736889 failed on conflicting cargo-clippy after8.1m of reference capture
 No earlier Rust invocation or cache restore was found; runner cause remains
 unproven. A fresh mktemp RUSTUP_HOME isolates inherited state, and setup now runs
 before captures to avoid wasting those8m on setup failure. Existing gates remain.
+
+Current CI blocker:83/90 failed test_quality_workflow because the fixture mocked
+rustup/cargo but invoked real rustc under the new empty RUSTUP_HOME, and expected
+setup after captures. Production setup succeeded. Author cfe2edf changes only that
+test file: mock rustc, isolate each RUNNER_TEMP, assert early install/version probes
+and failing-install short circuit. All16 workflow cases,19 Python tests and19 Node
+process-contract checks pass. Fresh review_workflow_fixture is reviewing the fix.
+No production gate or Rust behavior changes; no real toolchain installed locally.
