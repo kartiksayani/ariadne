@@ -6,7 +6,7 @@ afterEach(() => { document.body.innerHTML = ''; });
 
 describe('native history failure evidence', () => {
   it('reports the disabled Messages toggle, pending navigation state and owner-input lock', () => {
-    document.body.innerHTML = `<header class="ref-header"><button title="Messages (m)" disabled></button></header>
+    document.body.innerHTML = `<header class="ref-header"><button title="Messages (m)" aria-label="Messages (m)" disabled></button></header>
       <div class="nav-banner" role="alert"><p>Preferences revision changed</p></div>
       <button disabled>Refreshing…</button><button>Reconcile operation</button>
       <label class="sentence-search"><input disabled value="needle"></label><p role="status">Search preview · save pending</p>
@@ -14,7 +14,7 @@ describe('native history failure evidence', () => {
       <div class="owner-input" aria-label="Owner input for #1"><textarea disabled>abc</textarea>
         <div class="ref-send-row"><button disabled>Saving…</button></div><p role="status">Save completion is unknown.</p></div>`;
     const facts = historyFailureFacts();
-    expect(facts.messagesToggle).toMatchObject({ titled: { disabled: true }, textLabelled: false, railOpen: false });
+    expect(facts.messagesToggle).toMatchObject({ titled: { disabled: true }, ariaLabel: 'Messages (m)', railOpen: false });
     expect(facts.navigation.banners).toEqual([{ role: 'alert', text: 'Preferences revision changed' }]);
     expect(facts.navigation.stateButtons).toEqual([{ text: 'Refreshing…', disabled: true, ariaPressed: null },
       { text: 'Reconcile operation', disabled: false, ariaPressed: null }]);
