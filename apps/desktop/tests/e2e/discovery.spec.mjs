@@ -3,6 +3,12 @@ import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { snapshot, admissions } from './scripted-provider.mjs';
 
+export async function waitForRegistrationCompletion(dialog, persisted, options) {
+  // Core persistence can precede the receipt and awaited catalogue refresh.
+  // The submitted form closes only when that ordinary UI operation completes.
+  await browser.waitUntil(async () => await persisted() && !await dialog.isExisting(), options);
+}
+
 export async function waitForDiscoveredCandidate(candidate) {
   try {
     await candidate.waitForDisplayed({ timeout: 20000 });
@@ -61,10 +67,10 @@ export async function runDiscoveryAcceptance(configuration) {
   assert.equal(await registerDialog.$('input').getValue(), projectRoot);
   await assert.rejects(stat(projectPath), { code: 'ENOENT' });
   await registerDialog.$('button=Register project').click();
-  await browser.waitUntil(async () => {
+  await waitForRegistrationCompletion(registerDialog, async () => {
     try { return JSON.parse(await readFile(projectPath, 'utf8')).id !== undefined; }
     catch (error) { if (error.code === 'ENOENT') return false; throw error; }
-  }, { timeout: 15000, timeoutMsg: 'Explicit Register did not persist the discovered project' });
+  }, { timeout: 15000, timeoutMsg: 'Explicit Register did not persist the discovered project and dismiss its completed form' });
   const metadata = JSON.parse(await readFile(projectPath, 'utf8'));
   const connect = await browser.$('.nav-group-heading').$('button=Connect existing session');
   await connect.waitForDisplayed(); await connect.waitForEnabled(); await connect.click();
@@ -77,13 +83,13 @@ export async function runDiscoveryAcceptance(configuration) {
   assert.deepEqual(beforeConnect.filter(name => name.endsWith('.json')), []);
   await dialog.$('button=Connect existing session').click();
   let connected;
-  await browser.waitUntil(async () => {
+  await waitForRegistrationCompletion(dialog, async () => {
     const files = await readdir(sessionsPath).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
     const names = files.filter(name => name.endsWith('.json'));
     if (names.length !== 1) return false;
     connected = JSON.parse(await readFile(join(sessionsPath, names[0]), 'utf8'));
     return connected.active_binding_id !== null;
-  }, { timeout: 20000, timeoutMsg: 'Explicit Connect did not persist the exact selected host identity' });
+  }, { timeout: 20000, timeoutMsg: 'Explicit Connect did not persist the exact selected host identity and dismiss its completed form' });
   assert.equal(connected.project_id, metadata.id);
   const binding = connected.bindings[connected.active_binding_id];
   assert.equal(binding.adapter_id, 'codex'); assert.equal(binding.external_session_id, externalSessionId);

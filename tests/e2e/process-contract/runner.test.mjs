@@ -8,9 +8,53 @@ import { tmpdir } from 'node:os';
 import { activateOwned, command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit, isSameBirthZombie } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { waitForDiscoveredCandidate } from '../../../apps/desktop/tests/e2e/discovery.spec.mjs';
+import { waitForDiscoveredCandidate, waitForRegistrationCompletion } from '../../../apps/desktop/tests/e2e/discovery.spec.mjs';
 import { JSDOM } from 'jsdom';
 import WebSocket from 'ws';
+
+for (const [title, timeout] of [['Register project', 15000], ['Connect existing session', 20000]]) {
+  test(`${title} waits for the delayed receipt and normal form dismissal after disk persistence`, async t => {
+    const dom = new JSDOM(`<div role="dialog" aria-label="${title}"><button type="submit">${title}</button></div>`);
+    const previousBrowser = globalThis.browser;
+    t.after(() => { globalThis.browser = previousBrowser; dom.window.close(); });
+    const dialog = dom.window.document.querySelector('[role="dialog"]');
+    let committed = false;
+    const admitted = [];
+    const options = { timeout, timeoutMsg: `${title} did not complete` };
+    globalThis.browser = {
+      async waitUntil(condition, actualOptions) {
+        assert.deepEqual(actualOptions, options);
+        admitted.push(await condition());
+        committed = true;
+        admitted.push(await condition()); // Saved files exist, but the receipt is still held.
+        dom.window.document.body.insertAdjacentHTML('beforeend', '<section aria-label="Session setup">Session connected</section>');
+        admitted.push(await condition()); // Receipt projection alone still leaves the submitted form blocking navigation.
+        dialog.hidden = true;
+        admitted.push(await condition()); // Hiding is not the product's successful unmount.
+        dialog.remove();
+        admitted.push(await condition());
+        assert.equal(admitted.at(-1), true);
+      },
+    };
+    await waitForRegistrationCompletion({ isExisting: async () => dialog.isConnected }, async () => committed, options);
+    assert.deepEqual(admitted, [false, false, false, false, true]);
+  });
+}
+
+test('persisted discovery registration cannot pass when its completed form never dismisses', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  const failure = new Error('Completed discovery form remained open');
+  globalThis.browser = {
+    async waitUntil(condition, options) {
+      assert.equal(options.timeout, 20000);
+      assert.equal(await condition(), false);
+      throw failure;
+    },
+  };
+  await assert.rejects(waitForRegistrationCompletion({ isExisting: async () => true }, async () => true,
+    { timeout: 20000, timeoutMsg: failure.message }), error => error === failure);
+});
 
 test('discovery failure retains scoped view facts and an App screenshot without changing the candidate wait', async t => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-discovery-evidence-'));
