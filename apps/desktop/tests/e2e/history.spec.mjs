@@ -212,6 +212,24 @@ async function railState() {
       focused: document.activeElement === editor, draft: editor?.value };
   });
 }
+export async function unpinHistoryMessage(card, message) {
+  await card.scrollIntoView(); await card.$(`button[aria-label="Unpin message ${message.number}"]`).click();
+  await wait(async () => !(await card.getAttribute('class')).includes('history-pinned')
+    && await card.$(`button[aria-label="Pin message ${message.number}"]`).getAttribute('aria-pressed') === 'false',
+  'Native unpin did not remove the actual message pin');
+}
+export async function closeHistoryRailReferences(message) {
+  // Unpin does not clear a separate hover source. This embedded driver cannot
+  // produce hover transitions; deliberate Close proves the rail cleanup instead.
+  const close = await browser.$('button[aria-label="Close message rail"]');
+  await close.waitForEnabled(); await close.click();
+  await wait(async () => browser.execute(id => {
+    const mark = document.querySelector('[role="treeitem"][data-item-id="1"] .ref-tree-mark');
+    const message = document.querySelector(`.history-timeline [data-message-id="${id}"]`);
+    return !document.querySelector('.message-history-rail')
+      && mark?.style.background === 'transparent' && message && !message.classList.contains('history-highlight');
+  }, message.id), 'Native rail Close did not clear transient tree and detail references');
+}
 async function rail(history, saved, paged) {
   const toggle = await browser.$('button=Messages (m)');
   if (!(await browser.$('.rail-messages').isExisting())) { await toggle.waitForEnabled(); await toggle.scrollIntoView(); await toggle.click(); }
@@ -220,7 +238,7 @@ async function rail(history, saved, paged) {
   assert.equal(new Set(visible.map(value => value.id)).size, saved.messages.length);
   for (const message of saved.messages) assert.equal(visible.find(value => value.id === message.id).body, message.body);
   const parentMessage = saved.messages.find(message => message.body === paged[0].text);
-  const card = await browser.$(`.rail-messages [data-message-id="${parentMessage.id}"]`);
+  let card = await browser.$(`.rail-messages [data-message-id="${parentMessage.id}"]`);
   await card.scrollIntoView();
   await card.$(`button[aria-label="Pin message ${parentMessage.number}"]`).click();
   await wait(async () => browser.execute(id => {
@@ -248,13 +266,12 @@ async function rail(history, saved, paged) {
   };
   await wait(async () => (await preferences()).sessions.find(view => view.session.session_id === history.sessionId)?.selected_item_id === '1', 'Registered parent selection did not finish its deliberate preference write');
   const beforeUnpin = await preferences();
-  await card.scrollIntoView(); await card.$(`button[aria-label="Unpin message ${parentMessage.number}"]`).click();
-  await wait(async () => browser.execute(id => {
-    const mark = document.querySelector('[role="treeitem"][data-item-id="1"] .ref-tree-mark');
-    const message = document.querySelector(`.history-timeline [data-message-id="${id}"]`);
-    return mark.style.background === 'transparent' && !message?.classList.contains('history-highlight');
-  }, parentMessage.id), 'Native unpin did not clear transient tree and detail references');
+  await unpinHistoryMessage(card, parentMessage);
   assert.deepEqual(await preferences(), beforeUnpin, 'Unpin must not write saved navigation or selection');
+  await closeHistoryRailReferences(parentMessage);
+  await toggle.waitForEnabled(); await toggle.click();
+  await wait(async () => (await browser.$$('.rail-messages [data-message-id]')).length === saved.messages.length, 'Reopened rail did not reload the complete canonical history');
+  card = await browser.$(`.rail-messages [data-message-id="${parentMessage.id}"]`);
   // WebDriver scrollIntoView performs an actual nested WebView scroll. This is
   // programmatic DOM scrolling, not an injected physical wheel gesture.
   const latest = await browser.$(`.rail-messages [data-message-id="${saved.messages.at(-1).id}"]`); await latest.scrollIntoView({ block: 'end' });
@@ -374,7 +391,8 @@ export async function runHistoryAcceptance(configuration) {
   assert.equal(new Set((await admissions(history)).map(entry => entry.attemptId)).size, 7);
   await browser.saveScreenshot(join(evidence(), 'native-complete-history.png'));
   await writeFile(join(evidence(), 'history-acceptance.json'), JSON.stringify({ history, publication, ownerTexts, resultTexts, paged,
-    roundIds, proof, railProof, nativePinAndSelectionRefs: true, hoverProof: 'Focused actual-App component tests; embedded driver lacks hover transitions', finalSession, queued: await admissions(history), originalAdmissions }, null, 2));
+    roundIds, proof, railProof, nativePinAndSelectionRefs: true, clearReferenceProof: 'Actual Unpin removes pin state without preferences writes; deliberate rail Close clears references',
+    hoverProof: 'Focused actual-App component tests; embedded driver lacks hover transitions', finalSession, queued: await admissions(history), originalAdmissions }, null, 2));
 }
 
 export async function restoreHistoryAcceptance(configuration) {
