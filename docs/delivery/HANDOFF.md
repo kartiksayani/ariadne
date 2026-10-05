@@ -1,80 +1,66 @@
 # Ariadne handoff
 
-Checkpoint 2026-10-05, after full local native journey passed. Continue autonomously;
-delegates use Sol 6.1 High only. Owner authorizes local builds/tests whenever they
-save overall time; required CI and independent review still apply. MCP/the review tool disabled.
+Checkpoint 2026-10-05 02:25 UTC. Continue autonomously; delegates Sol 6.1 High only.
+Owner authorizes focused local builds/tests to save overall time. MCP/the review tool disabled.
 
-**Main:** `6387674f358c9dd9c82e12aec224760861582238`, PR90,
-[CI running](https://github.com/kartiksayani/ariadne/actions/runs/37251995721).
-PR90 merged after exact independent review, 89.91% coverage with all176 required
-sources, actual native receipt/cleanup and packaged release isolation. Previous
-main20eb77d was green.
-22/49 full tasks complete. Preserve root's dirty tasks.json/roadmap.html overlay.
+**Main:** `c773f3438f55f443860b3c6d88cd60a3deee7281` (PR83 merged).
+Main CI pending; previous main green. PR83 passed [CI](https://github.com/kartiksayani/ariadne/actions/runs/37252266595),
+[exact independent review](https://github.com/kartiksayani/ariadne/pull/83#pullrequestreview-5409284459),
+and artifact audit: 86.44% weighted coverage, all 200 required sources, actual native
+Reply/Send/result/host completion, packaged release isolation and all reference captures.
+**28/49 tasks complete:** newly closed P2.4, P3.1, P3.2, P3.3, P3.6, P3.8.
+Root local tasks.json/roadmap.html already reflect these closures; refresh the local page.
+P4.1 is the sole active implementation marker. Five-input/relaunch acceptance is still open.
 
-| PR | Published head | CI / independent review |
+| Open PR | Published head | CI / review |
 | --- | --- | --- |
-| [83](https://github.com/kartiksayani/ariadne/pull/83) | b2fd962 | [Failed startup](https://github.com/kartiksayani/ariadne/actions/runs/37249102645); clear5409059548. Local repair below awaits push/review. |
-| [86](https://github.com/kartiksayani/ariadne/pull/86) | d4e0c2c | Failed same startup; clear5408938387. |
-| [88](https://github.com/kartiksayani/ariadne/pull/88) | 49ba507 | Failed same startup; clear5408938541. |
-| [90](https://github.com/kartiksayani/ariadne/pull/90) | 6069d9d | Merged; [green audited CI](https://github.com/kartiksayani/ariadne/actions/runs/37249498936); clear5409080891. |
-| [91](https://github.com/kartiksayani/ariadne/pull/91) | 7a99411 | Canceled: inherited startup; clear5408938690. |
-| [92](https://github.com/kartiksayani/ariadne/pull/92) | 68e0a54 | Canceled: inherited startup; clear5408938803. |
-| [93](https://github.com/kartiksayani/ariadne/pull/93) | 9bfbc74 | Canceled: inherited startup; clear5408938904. |
-| [94](https://github.com/kartiksayani/ariadne/pull/94) | c0c2abe | Canceled: inherited startup; clear5408939009. |
-| [95](https://github.com/kartiksayani/ariadne/pull/95) | 4bbd6b8 | Canceled: inherited startup; clear5408939098. |
-| [96](https://github.com/kartiksayani/ariadne/pull/96) | 9254f3b | Failed installed SDK EPIPE fixture; clear5408939186. |
-| [97](https://github.com/kartiksayani/ariadne/pull/97) | e0292ae | [Failed captures](https://github.com/kartiksayani/ariadne/actions/runs/37249848470); required review5409105752/5409111194 being fixed. |
+| [86](https://github.com/kartiksayani/ariadne/pull/86) | d4e0c2c | Old startup failure; repaired local head below, new exact-head review/CI required. Base now main. |
+| [88](https://github.com/kartiksayani/ariadne/pull/88) | 49ba507 | Old inherited startup failure; source review clear at old head. |
+| [91](https://github.com/kartiksayani/ariadne/pull/91) | 7a99411 | Old CI canceled; source review clear at old head. |
+| [92](https://github.com/kartiksayani/ariadne/pull/92) | 68e0a54 | Old CI canceled; source review clear at old head. |
+| [93](https://github.com/kartiksayani/ariadne/pull/93) | 9bfbc74 | Old CI canceled; source review clear at old head. |
+| [94](https://github.com/kartiksayani/ariadne/pull/94) | c0c2abe | Old CI canceled; source review clear at old head. |
+| [95](https://github.com/kartiksayani/ariadne/pull/95) | 4bbd6b8 | Old CI canceled; source review clear at old head. |
+| [96](https://github.com/kartiksayani/ariadne/pull/96) | 9254f3b | Old installed SDK fixture failure; source review clear at old head. |
+| [97](https://github.com/kartiksayani/ariadne/pull/97) | d5359fa | [CI failed](https://github.com/kartiksayani/ariadne/actions/runs/37252990615), audit underway; exact review5409329259 clear, all threads resolved. |
 
-Stack87:83 →86 →88 →91 →94 →93;97 is based93.92/95/96 are siblings.
-Merge only a qualified squash prefix, with current main integration, exact-head
-review and full green CI. Never count canceled checks or source review as acceptance.
-
-**Active owners / local work** (worktrees below are under `.worktrees/`):
-- Maintainer: `resume-integration`, `maintenance/resume-integration`, native repair published at `cc11095`, independently clear5409236668.
-  Current local HEAD integrates main6387674; conflicts preserve the reviewed
-  check-before-capture order and presence-aware activation assertions. Includes runtime
-  fixture drainage, canonical Unknown proof, installed readiness deadline, required
-  checks before captures, bundled native launch and native fixture corrections.
-  Shared contracts/catalogue/merges remain maintainer-owned.
-- `repair_composed_native_startup`: `local-native-startup`, preserved branch
-  `fix/local-native-startup` at `a561be7`, passed exact clean assembled `dd14960` (cc11095 differs only by HANDOFF).
-  Evidence `coverage/native-e2e/fc0cc383-41f6-4391-bd70-e622f5035079`.
-  Warm target is now exclusively assigned to `prove_three_binding_fifo` for86. Exclusive target `target/native-e2e`; private HOME/store.
-  Confirmed raw executable aborts in macOS notification initialization because
-  bundleProxyForCurrentProcess is nil. Build/launch the actual `.app` executable
-  fixes startup. Full original journey passed at `025c245` plus fixture overlay
-  committed as `a561be7`: receipt/provider handling, negative nonce, file integrity,
-  PID exit and port cleanup. Evidence `coverage/native-e2e/1e8706ad-a1f4-4d7e-abbb-2a56fe248657`.
-- `validate_product_accessibility`: `product-accessibility`, `task/product-accessibility`.
-  Checkpoint5b55583 pushed; further fix and parent merge local: stale async navigation guard; stale/consumed numeric
-  token protection; real light-theme contrast; empty/filter capture assertions.
-  Remaining review P2: after a dispatched preference write, Escape must suppress
-  stale local reveal without rewriting the durable result. Root authorized and
-  updated MODULE_CONTRACTS/UI_AND_NATIVE. Navigation getter
-  plus optional pre-dispatch cancellation guard are approved. 224 focused tests
-  and 27 ordinary browser states have passed; final regression/checkpoint pending.
-  `review_product_accessibility` will independently re-review the new exact head.
-- `prove_three_binding_fifo` owns86 merge a939a4e and warm native five-input/
-  Quit/reopen validation. Selector repairs committed without pushes:86 74a8a49;
-  88 442295b;91 c301ed3;94 7278706;93 067f1e0;95 6318721. Preserve these
-  during parent propagation. `repair_descendant_native_selectors` now checks
-  integrated83 activation/Codex tests with native-provider-activation/target.
-  Root owns83 commits; worker must preserve the root activation assertion fix.
-- PR90 branch `task/codex-native-join` is clean/pushed. Runtime/cache repairs reviewed.
-  Warm Rust targets domain-transitions/target, owner-answer-ui/target and
-  binding-connect-relay/target are idle; assign exclusively.
+**Owners and unpushed work** (paths relative to `.worktrees/`):
+- `prove_three_binding_fifo`: `native-domain-acceptance`, branch `task/native-domain-acceptance`,
+  local `4ed6fea`. Integrated reviewed parent064dfce and merged mainc773f34 with
+  identical-tree proof. Owns native smoke/provider fixture and exclusive warm
+  `local-native-startup/target/native-e2e`; full native run underway on detached4ed6fea.
+  Local commits include real scoped selectors, delivery phase, genuine wrong-identity
+  provider facts, actual ledger publication/viewport waits, removal of unnecessary
+  WebDriver refresh, and one explicit recovery action after visible revision conflict.
+  Navigation error retention01dc932 (source5b768e7) and Waiting heartbeat repair
+  a50d337 (source045d103) independently reviewed locally; exact pushed-head review remains.
+  Maintainer exclusively owns this branch's tasks.json, roadmap.html and HANDOFF update.
+- `review_product_accessibility`: local independent clear for both two-file fixes;
+  navigation71+2 independent probes; Waiting71 tests including focus/draft identity
+  and durable question fencing. No automatic mutation retry was introduced.
+- `audit_accessibility_ci_failure`: read-only diagnosis of latest97 failure.
+- `product-accessibility`, branch `task/product-accessibility`: local5b768e7,
+  published d5359fa; held ec0055c minimum1000×700/actual viewport assertion and
+  5b768e7 navigation error fix. Native acceptance and propagated parent still needed.
+- Other unpushed selector repairs: `desktop-discovery-join`442295b;
+  `native-tree-acceptance`c301ed3; `native-history-acceptance`7278706;
+  `guarded-history-actions`067f1e0; `native-graph-acceptance`6318721.
+  Corresponding branches are `task/` plus worktree basename. Preserve during propagation.
 
 **Next three steps**
-1. Verify assembled83 locally, push coherent repairs, independent exact-head delta
-   review, full CI. CI now checks before eight-minute captures, retaining both gates.
-2. Propagate repaired parents/selectors once; reuse warm local native cache for
-   critical86/88 journeys while CI/reviews run. Audit native/coverage/release artifacts,
-   merge qualified prefixes and immediately update honest local roadmap closures.
-   83 can close P2.4/P3.1/P3.2 plus P3.3/P3.8 with merged85/76 when proof passes.
-3. Finish97 review/browser/native acceptance and siblings. Physical Mac lifecycle,
-   notifications/tray, M7 live hosts and final release remain open; actual owner
-   installation/live paid hosts need approval. Do not invent completion.
+1. Finish actual five-input/Quit/reopen86 proof, push coherent checkpoint with this
+   catalogue update, obtain independent exact-head delta/affected-flow review and full CI.
+2. Propagate86 →88 →91 →94 →93 once, retaining scoped-selector repairs;97 follows93.
+   92/95/96 are siblings. Reuse local native build for critical journeys while CI runs.
+   Squash only qualified PRs integrated with current main; failed main pauses merges.
+3. Audit acceptance and immediately update roadmap on each merge. Physical Mac
+   lifecycle/notification/tray checks and M7 live hosts remain unproved; actual owner
+   installation and billable hosts still require explicit approval.
 
-Pinned Node22 path `/opt/homebrew/opt/node@22/bin`; NPM_CONFIG_USERCONFIG=/dev/null.
-Native beforeBuild additionally needs worktree node_modules/.bin in PATH. Preserve
-all worktrees, ignored evidence and caches; no new delivery framework or log copies.
+Preserve ignored evidence and shared ui-reference/node_modules. Owner-authorized
+cleanup removed five verified merged worktrees, preserving branches/history; about
+10GiB free after cleanup. binding-connect-relay target is cold; native-provider-activation,
+domain-transitions and owner-answer-ui caches remain. Native runs use private HOME,
+existing RUSTUP_HOME/CARGO_HOME and pinned Node22 plus worktree node_modules/.bin.
+User's 07:35 recording showed a genuine Waiting heartbeat remount bug, now fixed
+and locally independently reviewed; app closure at end was test cleanup.
