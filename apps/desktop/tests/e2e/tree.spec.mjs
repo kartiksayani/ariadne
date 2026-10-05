@@ -288,7 +288,17 @@ export async function runTreeAcceptance(configuration) {
 }
 async function treeAcceptance(configuration) {
   const viewport = await browser.execute(() => ({ width: window.innerWidth, height: window.innerHeight }));
-  assert.ok(viewport.width >= 1000 && viewport.height >= 700, 'Native tree acceptance must use the supported minimum window size');
+  const nativeWindow = await browser.execute(async () => {
+    try {
+      const physical = await window.__TAURI_INTERNALS__.invoke('plugin:window|outer_size', { label: 'main' });
+      const scaleFactor = await window.__TAURI_INTERNALS__.invoke('plugin:window|scale_factor', { label: 'main' });
+      return { ok: true, physical, scaleFactor, logical: { width: physical.width / scaleFactor, height: physical.height / scaleFactor } };
+    } catch (error) { return { ok: false, message: String(error) }; }
+  });
+  await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-window.json'), JSON.stringify({ viewport, nativeWindow }, null, 2));
+  assert.equal(nativeWindow.ok, true, nativeWindow.message);
+  assert.ok(nativeWindow.logical.width >= 1000 && nativeWindow.logical.height >= 700,
+    'Native tree acceptance must use the supported minimum outer-window size');
   const original = await snapshot(configuration), journal = await admissions(configuration), demoBytes = await readFile(configuration.demo.sessionPath);
   const { tree, publication, initialSession } = await seedTree(configuration);
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-publication.json'), JSON.stringify({ tree, publication, initialSession }, null, 2));
