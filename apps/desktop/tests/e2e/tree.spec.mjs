@@ -10,6 +10,7 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
 const search = () => browser.$('.sentence-search input');
+async function setSearch(value) { const input = await search(); await input.waitForEnabled(); await input.setValue(value); }
 const applyRequest = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
 async function apply(configuration, operations, expectedItemRevisions = {}, summary = '', setup = false) {
@@ -326,10 +327,10 @@ async function treeAcceptance(configuration) {
   }
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-performance-samples.json'), JSON.stringify({ rows: 2000,
     messages: initialSession.messages.length, viewport, firstUsableMs: usableMs, localSearchSamplesMs: searchMs }, null, 2));
-  await (await search()).setValue('ＮＡＴＩＶＥ café needle');
+  await setSearch('ＮＡＴＩＶＥ café needle');
   await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'NFKC/lowercase AND-token search did not retain the contextual ancestor');
   assert.equal((await snapshot(tree)).items['1.1'].question, initialSession.items['1.1'].question, 'Search normalization must not rewrite stored text');
-  await (await search()).setValue(''); await wait(async () => (await visibleIds()).length === 2000, 'Clear search did not restore the complete tree');
+  await setSearch(''); await wait(async () => (await visibleIds()).length === 2000, 'Clear search did not restore the complete tree');
   await choose('Item status', 'Open', true); await wait(async () => (await browser.$('.sentence-tree footer').getText()).includes('1320 matching'), 'Open status count differs from the canonical fixture');
   await choose('Item status', 'Done', true); await wait(async () => (await browser.$('.sentence-tree footer').getText()).includes('2000 matching'), 'Within-category status OR did not restore all items');
   await choose('Item owner', 'Me', true); await wait(async () => (await browser.$('.sentence-tree footer').getText()).includes('1000 matching'), 'Owner AND filtering did not retain exactly the Me items');
@@ -338,10 +339,12 @@ async function treeAcceptance(configuration) {
   await choose('Item status', 'Open', false); await choose('Item status', 'Done', false);
 
   await (await row('1')).click(); await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(initialSession.items['1'].question), 'Native tree selection did not use full registered item detail');
-  await (await row('1')).$('button[aria-label="Expand or collapse"]').click();
+  const firstToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
+  await firstToggle.waitForEnabled(); await firstToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('1'), 'Explicit collapse was not persisted');
-  await (await search()).setValue('ＮＡＴＩＶＥ café needle');
+  await setSearch('ＮＡＴＩＶＥ café needle');
   await wait(async () => (await visibleIds()).includes('1.1'), 'Filtered context must temporarily expose its ancestry');
+  await (await search()).waitForEnabled();
   const beforeReveal = (await preferences(tree)).view;
   const child = await browser.$('[aria-label="Child items"]').$('button*=Item 1.2 ·'); await child.waitForDisplayed(); await child.click();
   await wait(async () => (await browser.$('.sentence-tree').getText()).includes('Item 1.2 is outside the current filters.'), 'Detail child reveal did not preserve the filter and expose an outside-filter row');
@@ -350,30 +353,33 @@ async function treeAcceptance(configuration) {
   assert.deepEqual(revealed.filters, beforeReveal.filters); assert.deepEqual(revealed.expanded_item_ids, beforeReveal.expanded_item_ids);
   await browser.$('button=Dismiss temporary reveal').click();
   await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'Dismiss must remove only temporary outside-filter reveal');
-  await (await row('1.1')).click(); await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'Selected item preference did not persist');
+  await (await search()).waitForEnabled(); await (await row('1.1')).click(); await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'Selected item preference did not persist');
   const beforeKeys = (await preferences(tree)).view;
   for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '1.1'], ['Home', '1'], ['l', '1.1'], ['h', '1']]) {
     await browser.keys(key); assert.equal(await focusedId(), id); await roving();
   }
   assert.equal((await preferences(tree)).view.selected_item_id, beforeKeys.selected_item_id, 'Focus movement alone must not select or mutate preferences');
   await browser.keys('Enter'); await wait(async () => (await preferences(tree)).view.selected_item_id === '1', 'Keyboard Enter did not select through the registered reveal route');
-  await (await row('1.1')).click();
+  await (await search()).waitForEnabled(); await (await row('1.1')).click();
   await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'The explicit selection must finish before the separate Later key');
   await (await search()).waitForEnabled(); await browser.keys('z');
   await wait(async () => (await preferences(tree)).snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'), 'Later keyboard action did not persist canonical local preferences');
-  await (await search()).setValue('No canonical native tree question matches this phrase');
+  await setSearch('No canonical native tree question matches this phrase');
   await wait(async () => await browser.$('button=Dismiss temporary reveal').isExisting(), 'A selected item outside new filters must offer explicit dismissal');
   await browser.$('button=Dismiss temporary reveal').click();
   await wait(async () => (await browser.$('.sentence-tree').getText()).includes('No sentences match these filters.'), 'No-result state did not provide explicit clear');
-  await browser.$('button=Clear filters').click();
+  const clear = await browser.$('button=Clear filters'); await clear.waitForEnabled(); await clear.click();
   await wait(async () => (await visibleIds()).length === 1901, 'Clear filters must preserve the saved collapsed branch');
 
   // Reopen the explicitly collapsed branch through its visible toggle, then
   // collapse a different branch so restart can prove this exact saved choice.
-  await (await row('1')).$('button[aria-label="Expand or collapse"]').click();
+  const reopenToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
+  await reopenToggle.waitForEnabled(); await reopenToggle.click();
   await wait(async () => (await visibleIds()).length === 2000, 'Explicit re-expansion did not restore children');
-  await (await row('2')).scrollIntoView(); await (await row('2')).$('button[aria-label="Expand or collapse"]').click();
+  await (await row('2')).scrollIntoView(); const secondToggle = await (await row('2')).$('button[aria-label="Expand or collapse"]');
+  await secondToggle.waitForEnabled(); await secondToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('2'), 'Second explicit collapse was not persisted');
+  await (await search()).waitForEnabled();
   await (await row('10.50')).scrollIntoView({ block: 'start' }); await (await row('10.50')).click();
   await wait(async () => (await preferences(tree)).view.selected_item_id === '10.50', 'The anchor selection must finish before the real CLI live edit');
   await (await search()).waitForEnabled();
@@ -389,6 +395,7 @@ async function treeAcceptance(configuration) {
   assert.equal(await focusedId(), '10.50', 'Live update must not steal native keyboard focus');
   await (await search()).click();
   await wait(async () => (await preferences(tree)).view.scroll?.item_id === afterEdit.id, 'Native blur did not persist the scroll anchor');
+  await (await search()).waitForEnabled();
   const saved = await preferences(tree), finalSession = await snapshot(tree);
   assert.equal(Object.keys(finalSession.items).length, 2000); assert.equal(Object.keys(finalSession.inputs).length, 0);
   assert.ok(saved.snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'));
