@@ -6,7 +6,59 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { historyAsk, historyMessageBatch, historySeedRequest, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { historyAsk, historyMessageBatch, historySeedRequest, unpinHistoryMessage, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+
+test('unpin requires pin removal then a real pointer move before clearing hover references', async t => {
+  const dom = new JSDOM(`<div class="rail-messages"><article data-message-id="message" class="history-pinned"></article></div>
+    <div role="treeitem" data-item-id="1"><span class="ref-tree-mark" style="background: blue"></span></div>
+    <div class="history-timeline"><article data-message-id="message" class="history-highlight"></article></div>`);
+  const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
+  t.after(() => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); });
+  globalThis.document = dom.window.document;
+  const article = document.querySelector('.rail-messages article'), mark = document.querySelector('.ref-tree-mark');
+  const detail = document.querySelector('.history-timeline article');
+  let hovered = true, pressed = 'true', pinWait = true;
+  const actions = [], admitted = [];
+  article.matches = selector => { assert.equal(selector, ':hover'); return hovered; };
+  const card = {
+    async scrollIntoView() { actions.push('scroll'); },
+    async getAttribute(name) { assert.equal(name, 'class'); return article.className; },
+    $(selector) {
+      if (selector === 'button[aria-label="Unpin message 4"]') return { async click() { actions.push('unpin'); } };
+      assert.equal(selector, 'button[aria-label="Pin message 4"]');
+      return { async getAttribute(name) { assert.equal(name, 'aria-pressed'); return pressed; } };
+    },
+  };
+  globalThis.browser = {
+    $(selector) {
+      assert.equal(selector, '.message-history-rail > .history-header > strong');
+      return { async waitForDisplayed() { actions.push('visible outside'); }, async moveTo() { actions.push('pointer move'); hovered = false; } };
+    },
+    execute: async (condition, id) => condition(id),
+    async waitUntil(condition, options) {
+      assert.equal(options.timeout, 20000);
+      if (pinWait) {
+        admitted.push(await condition()); // A clicked but still pinned card cannot pass.
+        article.classList.remove('history-pinned'); pressed = 'false';
+        admitted.push(await condition());
+        assert.deepEqual(actions, ['scroll', 'unpin']);
+        pinWait = false;
+      } else {
+        assert.equal(hovered, false, 'Native helper must request pointer movement before the zero-highlight wait');
+        admitted.push(await condition()); // Pointer leave alone cannot excuse stale highlights.
+        mark.style.background = 'transparent';
+        admitted.push(await condition()); // A cleared tree cannot excuse stale detail highlighting.
+        detail.classList.remove('history-highlight');
+        hovered = true; admitted.push(await condition()); // Cleared references cannot excuse a pointer still on the card.
+        hovered = false; admitted.push(await condition());
+      }
+      assert.equal(admitted.at(-1), true);
+    },
+  };
+  await unpinHistoryMessage(card, { id: 'message', number: 4 });
+  assert.deepEqual(actions, ['scroll', 'unpin', 'visible outside', 'pointer move']);
+  assert.deepEqual(admitted, [false, true, false, false, false, true]);
+});
 
 test('fork links and parent references cannot admit a different selected history item', async t => {
   const child = { id: '1.1', question: 'Native history fork 1.1\nKeep its original source round.', source_round_id: 'round-one' };
