@@ -525,8 +525,10 @@ describe('source-backed navigation views and explicit registration', () => {
     const native = structuredClone(prefs); native.revision = 3;
     native.global.window = { x: 100, y: 100, width: 1000, height: 700, monitor_id: 'main' };
     // The single re-apply against the refreshed revision conflicts too, so the banner surfaces.
-    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: conflict }, { api_version: 1, ok: false, error: conflict });
-    read(transport, native); read(transport, native);
+    // A foreign write bumps the revision to 2 before the first attempt lands, and again to 3 before the retry lands.
+    const first = structuredClone(prefs); first.revision = 2;
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...conflict, current_revision: 2 } }, { api_version: 1, ok: false, error: conflict });
+    read(transport, first); read(transport, native);
     await act(async () => { fireEvent.click(allSessions); });
     expect(store.getSnapshot().preferences).toEqual(native);
     expect(screen.getByRole('alert').textContent).toContain(conflict.message);
@@ -879,6 +881,7 @@ describe('tree edits through canonical navigation preferences', () => {
     const { transport, store } = setup(); read(transport); await store.start();
     const conflict: MutationEnvelope = { api_version: 1, ok: false, error: { ...error, code: 'revision_conflict' } };
     transport.enqueue('preferences_patch', conflict, conflict);
+    // Foreign writes: revision 3 before the first attempt lands, 4 before the retry lands.
     const newer = preferences(3); newer.sessions[0].filters.search = 'newer owner choice'; read(transport, newer);
     const newest = preferences(4); newest.sessions[0].filters.search = 'newest owner choice'; read(transport, newest);
     expect(await store.setLater({ ...route, item_id: '1' }, true, 1)).toBe(false);
@@ -908,6 +911,21 @@ describe('tree edits through canonical navigation preferences', () => {
     expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
     expect(store.getSnapshot().preferences?.global.window).toEqual(native.global.window);
     expect(store.getSnapshot().preferences?.drafts).toEqual(prefs.drafts);
+  });
+  it('does not re-apply a conflicted navigation write after the owner chose a different target meanwhile', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
+    read(transport, prefs); await store.start();
+    const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);
+    const native = structuredClone(prefs); native.revision = 2; read(transport, native); read(transport, native);
+    const clickA = store.navigate({ kind: 'all_sessions' });
+    await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
+    // Click B arrives while A's write is pending and is dropped, but it supersedes A as the owner's intent.
+    expect(await store.navigate({ kind: 'project', project_id: projectId })).toBe(false);
+    held.resolve({ api_version: 1, ok: false, error: { ...error, code: 'revision_conflict', current_revision: 2 } });
+    expect(await clickA).toBe(false);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    expect(store.getSnapshot().error).toMatchObject({ error: { code: 'revision_conflict' } });
+    expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'projects' });
   });
   it('retries a conflicted session-view edit without overwriting a foreign change to another field', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
@@ -954,11 +972,13 @@ describe('tree edits through canonical navigation preferences', () => {
     read(transport, prefs); await store.start();
     const conflict: CoreError = { ...error, code: 'revision_conflict', message: 'Preferences revision changed.', current_revision: 3 };
     // The one re-apply conflicts as well; only then does the rejection surface and stay actionable.
-    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: conflict }, { api_version: 1, ok: false, error: conflict });
+    // A foreign write bumps the revision to 2 before the first attempt lands, and again to 3 before the retry lands.
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...conflict, current_revision: 2 } }, { api_version: 1, ok: false, error: conflict });
+    const first = structuredClone(prefs); first.revision = 2;
     const native = structuredClone(prefs); native.revision = 3;
     native.global.notification_watermark = demo.updated_at;
     native.global.window = { x: 100, y: 100, width: 1000, height: 700, monitor_id: 'main' };
-    read(transport, native); read(transport, native);
+    read(transport, first); read(transport, native);
     expect(await store.navigate({ kind: 'all_sessions' })).toBe(false);
     expect(store.getSnapshot().error).toMatchObject({ error: conflict });
     expect(store.getSnapshot().preferences).toEqual(native); expect(store.getSnapshot().pendingOperationId).toBeNull();

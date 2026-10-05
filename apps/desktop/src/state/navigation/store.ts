@@ -222,8 +222,11 @@ export class NavigationStore {
     const request: OwnerMutationRequest = { session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(),
       params: { expected_preferences_revision: preferences.revision, entries } } };
     // One re-apply per owner action; the second attempt never retries again.
+    const intent = this.navigationIntent;
     const retry = retryable ? () => {
       const current = this.state.preferences;
+      // A newer owner navigation was dropped while this write was pending; do not let stale intent win.
+      if (this.navigationIntent !== intent) return null;
       if (!current || current.revision <= preferences.revision) return null;
       const fresh = structuredClone(current) as PreferencesSnapshot;
       return this.patchMutation(fresh, rebaseEntries(entries, preferences, fresh), confirmed, false);
