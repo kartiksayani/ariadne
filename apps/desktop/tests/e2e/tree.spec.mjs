@@ -183,7 +183,22 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
   return browser.execute(() => { const result = window.__ariadneTreeMeasurement.elapsed; delete window.__ariadneTreeMeasurement; return result; });
 }
 async function choose(group, name, pressed) {
-  const button = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`); await button.waitForEnabled(); await button.click();
+  const button = await browser.$(`[aria-label="${group}"]`).$(`button=${name}`);
+  await button.scrollIntoView({ block: 'center' }); await button.waitForClickable();
+  await browser.execute((button, expectedPressed) => {
+    const bounds = button.getBoundingClientRect();
+    const sample = { text: button.textContent, expectedPressed, priorPressed: button.getAttribute('aria-pressed'), disabled: button.disabled,
+      bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
+      centreTarget: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.outerHTML.slice(0, 1000), click: null };
+    window.__ariadneTreeFilterAction = sample;
+    const observe = event => {
+      if (!button.contains(event.target)) return;
+      sample.click = { trusted: event.isTrusted, target: event.target.outerHTML.slice(0, 1000) };
+      document.removeEventListener('click', observe, true);
+    };
+    document.addEventListener('click', observe, true);
+  }, button, pressed);
+  await button.click();
   await wait(async () => await button.getAttribute('aria-pressed') === String(pressed) && await button.isEnabled(), 'Native filter write was not confirmed');
 }
 async function anchor() {
@@ -240,6 +255,40 @@ async function isolated(configuration, original, journal, demoBytes) {
 }
 
 export async function runTreeAcceptance(configuration) {
+  try { await treeAcceptance(configuration); }
+  catch (error) {
+    // Observe the original failure once, without changing or replaying an
+    // owner action. Later filter/reveal/anchor failures need the same evidence
+    // as the measured opening, before the existing teardown removes the App.
+    try {
+      const observed = await browser.execute(() => ({
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        measurement: window.__ariadneTreeMeasurement, filterAction: window.__ariadneTreeFilterAction,
+        rows: [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].slice(0, 2000)
+          .map(element => ({ id: element.dataset.itemId, tabIndex: element.tabIndex })),
+        active: document.activeElement?.outerHTML.slice(0, 1000),
+        alerts: [...document.querySelectorAll('[role="alert"],.nav-banner')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
+        statuses: [...document.querySelectorAll('[role="status"]')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
+        current: [...document.querySelectorAll('[aria-current]')].slice(0, 12).map(element => element.outerHTML.slice(0, 1000)),
+        controls: [...document.querySelectorAll('.sentence-filters button,.sentence-search input,button[data-session-id]')].slice(0, 40).map(element => {
+          const bounds = element.getBoundingClientRect();
+          return { text: element.textContent.slice(0, 200), sessionId: element.dataset.sessionId, disabled: element.disabled,
+            pressed: element.getAttribute('aria-pressed'), bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
+            centreTarget: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.outerHTML.slice(0, 1000) };
+        }) }));
+      const path = join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-journey-failure.json');
+      await writeFile(path, JSON.stringify({ error: error.message, observed }, null, 2));
+      await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-journey-failure.png'));
+      const saved = await cliRequest(configuration.cli, ['preferences', 'get', '--json-stdin'],
+        { session: null, request: { command: 'preferences_get', params: {} } });
+      await writeFile(path, JSON.stringify({ error: error.message, observed, preferences: saved }, null, 2));
+    } catch (observationError) { console.error('Tree failure observation failed:', observationError.message); }
+    throw error;
+  }
+}
+async function treeAcceptance(configuration) {
+  const viewport = await browser.execute(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  assert.ok(viewport.width >= 1000 && viewport.height >= 700, 'Native tree acceptance must use the supported minimum window size');
   const original = await snapshot(configuration), journal = await admissions(configuration), demoBytes = await readFile(configuration.demo.sessionPath);
   const { tree, publication, initialSession } = await seedTree(configuration);
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-publication.json'), JSON.stringify({ tree, publication, initialSession }, null, 2));
@@ -260,6 +309,8 @@ export async function runTreeAcceptance(configuration) {
   for (const id of measuredIds) {
     searchMs.push(await measureAction('input', '.sentence-search input', [id.split('.')[0], id], async () => { const input = await search(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree));
   }
+  await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-performance-samples.json'), JSON.stringify({ rows: 2000,
+    messages: initialSession.messages.length, viewport, firstUsableMs: usableMs, localSearchSamplesMs: searchMs }, null, 2));
   await (await search()).setValue('ＮＡＴＩＶＥ café needle');
   await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'NFKC/lowercase AND-token search did not retain the contextual ancestor');
   assert.equal((await snapshot(tree)).items['1.1'].question, initialSession.items['1.1'].question, 'Search normalization must not rewrite stored text');
