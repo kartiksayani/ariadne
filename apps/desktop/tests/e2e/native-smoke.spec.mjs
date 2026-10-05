@@ -9,6 +9,7 @@ import { runHistoryActionsAcceptance } from './history-actions.spec.mjs';
 import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
 import { runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
 import { runGraphAcceptance } from './graph.spec.mjs';
+import { runRecoveryAcceptance } from './recovery.spec.mjs';
 import { sendDetailReply } from './owner-reply.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
@@ -246,7 +247,7 @@ describe('native owner FIFO and real process restoration', () => {
       await runHistoryActionsAcceptance(configuration);
       await runAccessibilityAcceptance(configuration);
     }
-    else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); await restoreTreeAcceptance(configuration); await runGraphAcceptance(configuration); await restoreHistoryAcceptance(configuration); }
+    else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); await restoreTreeAcceptance(configuration); await runGraphAcceptance(configuration); await restoreHistoryAcceptance(configuration); await runRecoveryAcceptance(configuration); }
 
     const payload = `native-domain-${nonce}`, ping = await invoke('native_ping', { nonce, payload }); assert.equal(ping.ok, true);
     const bytes = await readFile(receiptPath), disk = JSON.parse(bytes); assert.deepEqual(ping.data, disk);
