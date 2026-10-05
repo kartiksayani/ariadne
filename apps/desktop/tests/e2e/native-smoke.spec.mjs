@@ -17,16 +17,36 @@ const invoke = (command, request) => browser.execute(async (command, request) =>
   catch (error) { return { ok: false, rejection: error }; }
 }, command, request);
 
+let navigationRecovered = false;
+const revisionConflict = 'Preferences revision changed; reload before applying this new patch';
+async function navigationRejection() {
+  const message = await browser.$('.nav-banner[role="alert"] p');
+  return await message.isExisting() && await message.getText() === revisionConflict;
+}
 async function openSession(sessionId, itemId) {
   const before = await readJson(join(process.env.ARIADNE_HOME, 'ui.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   try {
     const catalogue = await browser.$('button[title="All sessions"]');
     await catalogue.waitForDisplayed(); await catalogue.waitForEnabled();
     await catalogue.click();
-    await wait(async () => {
+    const selectedCatalogue = async () => {
       const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
       return selected.kind === 'all_sessions' && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
-    }, 'All sessions navigation did not finish its saved preference update');
+    };
+    await wait(async () => await selectedCatalogue() || await navigationRejection(), 'All sessions navigation neither completed nor showed a definitive rejection');
+    if (await navigationRejection()) {
+      assert.equal(navigationRecovered, false, 'Only one explicit visible navigation recovery is allowed per native launch');
+      navigationRecovered = true;
+      const rejected = { sessionId, message: revisionConflict, preferences: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
+        body: await browser.$('body').getText() };
+      const refresh = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
+      await refresh.waitForDisplayed(); await refresh.waitForEnabled(); await refresh.click();
+      // This is a deliberate new owner choice after the visible typed rejection.
+      // Unknown completion and other errors cannot enter this recovery path.
+      await catalogue.waitForEnabled(); await catalogue.click();
+      await wait(selectedCatalogue, 'Explicit refreshed All sessions choice did not persist');
+      await json(join(evidence, 'navigation-recovery.json'), { rejected, recovered: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')) });
+    }
     const session = await browser.$(`[data-session-id="${sessionId}"]`);
     await session.waitForDisplayed();
     await session.waitForEnabled();
