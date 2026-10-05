@@ -117,6 +117,9 @@ export async function proveQuit(root, binary, nonce, owned, home, bindingId, por
   await portFree(port);
   return { request, pidExited: true, portFree: true, leases: await releasedLeases(home, bindingId) };
 }
+export function isSameBirthZombie(owned, current, state) {
+  return current.pid === owned.pid && current.birth === owned.birth && state?.startsWith('Z') === true;
+}
 export async function waitForQuitExit(binary, owned) {
   const end = Date.now() + 10000;
   while (alive(owned.pid) && Date.now() < end) {
@@ -126,14 +129,14 @@ export async function waitForQuitExit(binary, owned) {
     if (current.exe !== binary || current.birth !== owned.birth) {
       if (!alive(owned.pid)) break;
       let state;
-      if (current.birth === owned.birth && current.exe === '<defunct>') {
+      if (current.birth === owned.birth) {
         try { state = execFileSync('/bin/ps', ['-p', String(owned.pid), '-o', 'stat='], { encoding: 'utf8' }).trim(); }
         catch (error) { if (!alive(owned.pid)) break; throw error; }
       }
       // macOS temporarily retains the same exited process until its parent
       // reaps it. A zombie is not sufficient Quit proof: keep waiting for
       // actual disappearance, and reject every live or reused identity.
-      if (!state?.startsWith('Z')) throw new Error(`Quit PID identity changed: ${JSON.stringify({ owned, current, state })}`);
+      if (!isSameBirthZombie(owned, current, state)) throw new Error(`Quit PID identity changed: ${JSON.stringify({ owned, current, state })}`);
     }
     await delay(25);
   }
