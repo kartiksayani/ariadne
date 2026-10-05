@@ -15,5 +15,7 @@ export default defineConfig({
     { name: `${theme}-1600x960`, use: { viewport: { width: 1600, height: 960 } } },
     { name: `${theme}-1000x700`, use: { viewport: { width: 1000, height: 700 } } },
   ]), { name: 'graph-2000', testDir: resolve('tests/e2e/graph'), testMatch: '*.spec.mts',
+    use: { viewport: { width: 1000, height: 700 } } },
+  { name: 'owner-input-layout', testDir: resolve('tests/e2e/owner-input'), testMatch: '*.spec.mts',
     use: { viewport: { width: 1000, height: 700 } } }],
 });
