@@ -292,13 +292,29 @@ async function rail(history, saved, paged) {
   await closeHistoryRailReferences(parentMessage);
   await toggle.waitForEnabled(); await toggle.click();
   await wait(async () => (await browser.$$('.rail-messages [data-message-id]')).length === saved.messages.length, 'Reopened rail did not reload the complete canonical history');
-  card = await browser.$(`.rail-messages [data-message-id="${parentMessage.id}"]`);
   // WebDriver scrollIntoView performs an actual nested WebView scroll. This is
   // programmatic DOM scrolling, not an injected physical wheel gesture.
   const latest = await browser.$(`.rail-messages [data-message-id="${saved.messages.at(-1).id}"]`); await latest.scrollIntoView({ block: 'end' });
-  const beforeUp = await railState();
-  await card.scrollIntoView({ block: 'start' });
-  await wait(async () => (await railState()).top < beforeUp.top - 100, 'Older-message navigation did not actually scroll the nested rail upward');
+  // Wait for the rail to settle, then scroll up; a late refresh that re-pins the rail is retried.
+  let previous = null, beforeUp = null, lastState = null;
+  await failureEvidence('rail-older-navigation', async () => {
+    try {
+      await wait(async () => {
+        const state = lastState = await railState();
+        const stable = previous && previous.top === state.top && previous.height === state.height;
+        previous = state;
+        if (!stable) { beforeUp = null; return false; }
+        if (!beforeUp) beforeUp = state;
+        const target = await browser.$(`.rail-messages [data-message-id="${parentMessage.id}"]`);
+        await target.scrollIntoView({ block: 'start' });
+        const after = lastState = await railState();
+        if (after.top < beforeUp.top - 100) return true;
+        beforeUp = null; previous = null; return false;
+      }, 'Older-message navigation did not actually scroll the nested rail upward');
+    } catch (error) {
+      error.message += ` railState=${JSON.stringify(lastState)}`; throw error;
+    }
+  });
   const reply = await browser.$('[aria-label="Owner actions"]').$('button=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const another = await browser.$('.owner-input').$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }

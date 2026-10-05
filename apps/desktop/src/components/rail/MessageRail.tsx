@@ -39,7 +39,10 @@ export function MessageRail({ service, store, routes, selectedItemId = null, hov
   useLayoutEffect(() => {
     if (!messages || !scroller.current) return;
     const latest = messages.at(-1)?.number ?? 0;
-    if (!initialized.current || following) {
+    // A scroll event is dispatched asynchronously, so an update can land after the reader moved
+    // up but before `following` cleared; the live position is authoritative.
+    const scrolledUp = initialized.current && following && scroller.current.scrollTop < lastScroll.current;
+    if (scrolledUp) setFollowing(false);    if (!initialized.current || (following && !scrolledUp)) {
       scroller.current.scrollTop = scroller.current.scrollHeight;
       lastScroll.current = scroller.current.scrollTop;
       seenThrough.current = latest; initialized.current = true; setUnseen(0);

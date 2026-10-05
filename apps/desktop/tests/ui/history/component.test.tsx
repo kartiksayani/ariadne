@@ -174,6 +174,19 @@ describe('complete message rail', () => {
     expect(highlight).toHaveBeenLastCalledWith(new Set(), new Set());
     rendered.unmount(); expect(highlight).toHaveBeenLastCalledWith(new Set(), new Set());
   });
+  it('an update landing before the scroll event is delivered does not yank a reader scrolled up', async () => {
+    const value = await ready();
+    render(<MessageRail {...value} onHighlight={vi.fn()} onReveal={vi.fn()} />);
+    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(15));
+    Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
+    log.scrollTop = 800; fireEvent.scroll(log);
+    log.scrollTop = 250; // programmatic scroll whose scroll event has not been dispatched yet
+    value.transport.session.messages.push(extraMessage(value.transport.session, 16));
+    value.transport.session.revision = 22;
+    await act(() => value.store.refresh());
+    await screen.findByRole('button', { name: '1 new messages · Jump to latest' });
+    expect(log.scrollTop).toBe(250);
+  });
   it('upward scrolling pauses follow; new messages count without changing focus/scroll until an explicit jump', async () => {
     const value = await ready();
     render(<><input aria-label="Unsent draft" defaultValue="exact draft  " /><MessageRail {...value} onHighlight={vi.fn()} onReveal={vi.fn()} /></>);
