@@ -11,7 +11,11 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
 const search = () => browser.$('.sentence-search input');
-async function setSearch(value) { const input = await search(); await input.waitForEnabled(); await input.setValue(value); }
+// Types the text, then waits until the debounced preference write has made it durable.
+async function setSearch(tree, value) {
+  const input = await search(); await input.waitForEnabled(); await input.setValue(value);
+  await wait(async () => (await preferences(tree)).view.filters.search === value, 'Search text was not durably saved');
+}
 const applyRequest = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
 async function apply(configuration, operations, expectedItemRevisions = {}, summary = '', setup = false) {
@@ -452,10 +456,10 @@ async function treeAcceptance(configuration) {
   if (searchFailure) throw searchFailure;
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-performance-samples.json'), JSON.stringify({ rows: 2000,
     messages: initialSession.messages.length, viewport, firstUsableMs: usableMs, localSearchSamplesMs: searchMs }, null, 2));
-  await setSearch('ＮＡＴＩＶＥ café needle');
+  await setSearch(tree, 'ＮＡＴＩＶＥ café needle');
   await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'NFKC/lowercase AND-token search did not retain the contextual ancestor');
   assert.equal((await snapshot(tree)).items['1.1'].question, initialSession.items['1.1'].question, 'Search normalization must not rewrite stored text');
-  await setSearch(''); await wait(async () => (await visibleIds()).length === 2000, 'Clear search did not restore the complete tree');
+  await setSearch(tree, ''); await wait(async () => (await visibleIds()).length === 2000, 'Clear search did not restore the complete tree');
   await choose('Item status', 'Open', true); await wait(async () => (await browser.$('.sentence-tree footer').getText()).includes('1320 matching'), 'Open status count differs from the canonical fixture');
   await choose('Item status', 'Done', true); await wait(async () => (await browser.$('.sentence-tree footer').getText()).includes('2000 matching'), 'Within-category status OR did not restore all items');
   await choose('Item owner', 'Me', true); await wait(async () => (await browser.$('.sentence-tree footer').getText()).includes('1000 matching'), 'Owner AND filtering did not retain exactly the Me items');
@@ -467,7 +471,7 @@ async function treeAcceptance(configuration) {
   const firstToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
   await firstToggle.waitForEnabled(); await firstToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('1'), 'Explicit collapse was not persisted');
-  await setSearch('ＮＡＴＩＶＥ café needle');
+  await setSearch(tree, 'ＮＡＴＩＶＥ café needle');
   await wait(async () => (await visibleIds()).includes('1.1'), 'Filtered context must temporarily expose its ancestry');
   await (await search()).waitForEnabled();
   const beforeReveal = (await preferences(tree)).view;
@@ -489,7 +493,7 @@ async function treeAcceptance(configuration) {
   await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'The explicit selection must finish before the separate Later key');
   await (await search()).waitForEnabled(); await browser.keys('z');
   await wait(async () => (await preferences(tree)).snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'), 'Later keyboard action did not persist canonical local preferences');
-  await setSearch('No canonical native tree question matches this phrase');
+  await setSearch(tree, 'No canonical native tree question matches this phrase');
   await wait(async () => await browser.$('button=Dismiss temporary reveal').isExisting(), 'A selected item outside new filters must offer explicit dismissal');
   await browser.$('button=Dismiss temporary reveal').click();
   await wait(async () => (await browser.$('.sentence-tree').getText()).includes('No sentences match these filters.'), 'No-result state did not provide explicit clear');
