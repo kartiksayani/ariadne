@@ -8,7 +8,71 @@ import { tmpdir } from 'node:os';
 import { activateOwned, command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit, isSameBirthZombie } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
+import { waitForDiscoveredCandidate } from '../../../apps/desktop/tests/e2e/discovery.spec.mjs';
+import { JSDOM } from 'jsdom';
 import WebSocket from 'ws';
+
+test('discovery failure retains scoped view facts and an App screenshot without changing the candidate wait', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-discovery-evidence-'));
+  const previousBrowser = globalThis.browser, previousDocument = globalThis.document, previousEvidence = process.env.ARIADNE_E2E_EVIDENCE;
+  const dom = new JSDOM(`<div class="ref-page-heading"><h1>Projects</h1></div><p role="alert">Unrelated owner error</p>
+    <section aria-label="Discover host sessions"><button aria-expanded="true">Discover host sessions</button>
+      <p role="status">Reading host sessions…</p><p role="alert">Discovery could not refresh.</p>
+      <article data-discovery-id="exact-thread"></article></section><article data-discovery-id="unrelated-thread"></article>`);
+  t.after(async () => {
+    globalThis.browser = previousBrowser; globalThis.document = previousDocument;
+    if (previousEvidence === undefined) delete process.env.ARIADNE_E2E_EVIDENCE; else process.env.ARIADNE_E2E_EVIDENCE = previousEvidence;
+    dom.window.close(); await rm(root, { recursive: true, force: true });
+  });
+  process.env.ARIADNE_E2E_EVIDENCE = root; globalThis.document = dom.window.document;
+  const captures = [];
+  globalThis.browser = {
+    async execute(read) { captures.push('view'); return read(); },
+    async saveScreenshot(path) { captures.push('screenshot'); assert.equal(path, join(root, 'discovery-failure.png')); await writeFile(path, 'App-only screenshot fixture'); },
+  };
+  await waitForDiscoveredCandidate({ async waitForDisplayed(options) { assert.deepEqual(options, { timeout: 20000 }); } });
+  assert.deepEqual(captures, []); assert.deepEqual(await readdir(root), []);
+  const failure = new Error('original candidate visibility assertion');
+  let waits = 0;
+  await assert.rejects(waitForDiscoveredCandidate({ async waitForDisplayed(options) {
+    ++waits; assert.deepEqual(options, { timeout: 20000 }); throw failure;
+  } }), error => error === failure);
+  assert.equal(waits, 1); assert.deepEqual(captures, ['view', 'screenshot']);
+  const facts = JSON.parse(await readFile(join(root, 'discovery-failure.json'), 'utf8'));
+  assert.deepEqual(facts, { assertion: 'discovery-candidate-visible', capture_errors: [], view: {
+    navigation_heading: 'Projects', section_present: true, section_hidden: false, expanded: 'true',
+    status: ['Reading host sessions…'], alerts: ['Discovery could not refresh.'], candidate_ids: ['exact-thread'],
+  } });
+  assert.equal(await readFile(join(root, 'discovery-failure.png'), 'utf8'), 'App-only screenshot fixture');
+});
+
+test('discovery view, screenshot and evidence-write failures each preserve the original assertion failure', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-discovery-capture-error-'));
+  const previousBrowser = globalThis.browser, previousEvidence = process.env.ARIADNE_E2E_EVIDENCE;
+  t.after(async () => {
+    globalThis.browser = previousBrowser;
+    if (previousEvidence === undefined) delete process.env.ARIADNE_E2E_EVIDENCE; else process.env.ARIADNE_E2E_EVIDENCE = previousEvidence;
+    await rm(root, { recursive: true, force: true });
+  });
+  for (const stage of ['view', 'screenshot', 'write']) {
+    const evidence = join(root, stage); if (stage !== 'write') await mkdir(evidence);
+    process.env.ARIADNE_E2E_EVIDENCE = evidence;
+    const captures = [], failure = new Error(`original ${stage} assertion`);
+    globalThis.browser = {
+      async execute() { captures.push('view'); if (stage === 'view') throw new Error('view unavailable'); return { section_present: false }; },
+      async saveScreenshot() { captures.push('screenshot'); if (stage === 'screenshot') throw new Error('screenshot unavailable'); },
+    };
+    await assert.rejects(waitForDiscoveredCandidate({ async waitForDisplayed() { throw failure; } }), error => error === failure);
+    assert.deepEqual(captures, ['view', 'screenshot'], 'Failed view capture must still attempt the existing App screenshot');
+    if (stage === 'write') await assert.rejects(readFile(join(evidence, 'discovery-failure.json')), { code: 'ENOENT' });
+    else {
+      const facts = JSON.parse(await readFile(join(evidence, 'discovery-failure.json'), 'utf8'));
+      assert.deepEqual(facts.capture_errors, [stage]);
+      assert.equal('view' in facts, stage !== 'view');
+    }
+  }
+});
+
 async function assertExited(pid) {
   const end = Date.now() + 1000;
   while (alive(pid) && Date.now() < end) await delay(10);
@@ -32,7 +96,7 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     assert.match((await rpc(1, 'initialize', {})).result.userAgent, /0\.160\.0/);
     const read = await rpc(2, 'thread/read', { threadId: thread });
     assert.equal(read.result.thread.id, thread); assert.equal(read.result.thread.cwd, config.project);
-    assert.deepEqual((await rpc(10, 'thread/loaded/list', {})).result.data, [thread, config.discovery.externalSessionId, config.tree.externalSessionId]);
+    assert.deepEqual((await rpc(10, 'thread/loaded/list', {})).result.data, [thread, config.discovery.externalSessionId, config.tree.externalSessionId, config.history.externalSessionId]);
     const unbound = await rpc(11, 'thread/read', { threadId: config.discovery.externalSessionId });
     assert.equal(unbound.result.thread.id, config.discovery.externalSessionId); assert.equal(unbound.result.thread.cwd, config.discovery.projectRoot);
     assert.deepEqual((await rpc(12, 'thread/turns/list', { threadId: config.discovery.externalSessionId })).result.data, []);
@@ -41,6 +105,10 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     assert.equal(treeCandidate.result.thread.id, config.tree.externalSessionId); assert.equal(treeCandidate.result.thread.cwd, config.tree.projectRoot);
     assert.deepEqual((await rpc(14, 'thread/turns/list', { threadId: config.tree.externalSessionId })).result.data, []);
     await assert.rejects(readFile(join(config.tree.projectRoot, '.ariadne/project.json')), { code: 'ENOENT' });
+    const historyCandidate = await rpc(15, 'thread/read', { threadId: config.history.externalSessionId });
+    assert.equal(historyCandidate.result.thread.id, config.history.externalSessionId); assert.equal(historyCandidate.result.thread.cwd, config.history.projectRoot);
+    assert.deepEqual((await rpc(16, 'thread/turns/list', { threadId: config.history.externalSessionId })).result.data, []);
+    await assert.rejects(readFile(join(config.history.projectRoot, '.ariadne/project.json')), { code: 'ENOENT' });
     assert.deepEqual((await rpc(3, 'thread/turns/list', { threadId: thread })).result.data, []);
     const inputId = '11111111-1111-4111-8111-111111111111', attemptId = '22222222-2222-4222-8222-222222222222';
     const body = { source_input_id: inputId, binding_id: '33333333-3333-4333-8333-333333333333', generation: '44444444-4444-4444-8444-444444444444', saved_input: { text: 'Exact owner input\nComplete second line' } };
@@ -68,6 +136,16 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     assert.equal(after[0].id, journal[1].turnId, 'Completing the first admission cannot complete the successor');
     assert.deepEqual((await admissions(config)).map(entry => entry.turnId), journal.map(entry => entry.turnId), 'History order cannot rewrite FIFO admissions');
     await assert.rejects(completeTurn(config, admitted), /occurs once/);
+    assert.deepEqual(await admissions(config.history), []);
+    const historyInput = '77777777-7777-4777-8777-777777777777', historyAttempt = '88888888-8888-4888-8888-888888888888';
+    const historyPayload = `[ARIADNE_INPUT:${historyInput}:${historyAttempt}]\n${JSON.stringify({ ...body, source_input_id: historyInput, binding_id: '99999999-9999-4999-8999-999999999999', generation: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })}`;
+    await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', config.history.externalSessionId, '--message', historyPayload]);
+    const [historyAdmission] = await admissions(config.history); assert.equal(historyAdmission.payload, historyPayload);
+    assert.deepEqual(await admissions(config), journal, 'The history candidate owns a separate admission journal');
+    await assert.rejects(completeTurn(config.history, journal[1]), /exact existing/);
+    await completeTurn(config.history, historyAdmission);
+    assert.deepEqual((await rpc(17, 'thread/turns/list', { threadId: config.history.externalSessionId })).result.data.map(turn => turn.status), ['completed']);
+    assert.deepEqual((await rpc(18, 'thread/turns/list', { threadId: thread })).result.data.map(turn => ({ id: turn.id, status: turn.status })), after.map(turn => ({ id: turn.id, status: turn.status })), 'History completion cannot change either original turn or their descending order');
   } finally { client?.terminate(); await provider?.stop(); await rm(root, { recursive: true }); }
 });
 test('selectors are explicit and default runs the complete gate', () => {
