@@ -178,6 +178,8 @@ fn desktop_handler<R: tauri::Runtime>(
         commands::item_rounds,
         commands::topic_continue_preview,
         commands::preferences_get,
+        commands::discovery_snapshot,
+        commands::discovery_ui_open,
         commands::reveal_item,
         commands::project_register,
         commands::binding_connect,

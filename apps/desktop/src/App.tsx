@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
+import { DiscoveryController } from './data/discovery';
 import { useSession, type SessionState, type SessionStore } from './data/session-store';
 import type { RevealedItem } from './data/routes';
 import type { ItemRoute, SessionPreferences, SessionRef, Theme } from './generated/core';
@@ -31,6 +32,7 @@ interface Application {
   waiting: WaitingStore;
   drafts: OwnerDraftStore;
   actions: SessionActionControllers;
+  discovery: DiscoveryController;
 }
 function bindingContext(state: SessionState | null): string {
   const session = state?.snapshot?.session;
@@ -129,7 +131,7 @@ function Workspace({ application }: { application: Application }) {
     if (store && event.key === '/') { event.preventDefault(); document.querySelector<HTMLInputElement>('.ref-search input')?.focus(); }
   }}>
     <ThemeAppearance theme={theme} />
-    <NavigationWorkspace store={navigation} adapterChoices={adapters}
+    <NavigationWorkspace store={navigation} adapterChoices={adapters} discovery={application.discovery}
       context={store ? { session: sessionState?.snapshot?.session.title ?? 'Loading session', binding: bindingContext(sessionState) } : undefined}
       chrome={{ query, views: store ? ['Tree', 'Graph'].map((label, index) => ({ label, icon: index ? 'ph ph-tree-structure' : 'ph ph-list', title: label,
         background: graph === Boolean(index) ? 'color-mix(in srgb, var(--color-text) 10%, transparent)' : 'transparent', color: 'var(--color-text)',
@@ -159,9 +161,9 @@ export function DesktopApp({ service }: { service: RendererService }) {
   useEffect(() => {
     const navigation = new NavigationStore(service);
     const next: Application = { service, navigation, waiting: new WaitingStore(service, navigation.opened),
-      drafts: new OwnerDraftStore(service), actions: new SessionActionControllers(service) };
+      drafts: new OwnerDraftStore(service), actions: new SessionActionControllers(service), discovery: new DiscoveryController(service) };
     setApplication(next);
-    return () => { next.waiting.stop(); next.navigation.stop(); };
+    return () => { next.discovery.dispose(); next.waiting.stop(); next.navigation.stop(); };
   }, [service]);
   return application ? <Workspace application={application} /> : <p role="status">Opening Ariadne…</p>;
 }

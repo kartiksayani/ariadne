@@ -3,6 +3,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { alive, delay, identity, listeners, json, proveQuit } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
+import { runDiscoveryAcceptance } from './discovery.spec.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
 const nonce = process.env.ARIADNE_E2E_NONCE;
@@ -232,7 +233,11 @@ describe('native owner FIFO and real process restoration', () => {
     const addresses = sockets.split('\n').filter(line => line.startsWith('n'));
     assert.ok(addresses.length > 0 && addresses.every(line => /^n(127\.0\.0\.1|\[::1\]):/.test(line)), 'Driver must bind only loopback');
     const configuration = await readJson(join(root, 'journey.json'));
-    if (phase === 'delivery') { await assert.rejects(stat(receiptPath), { code: 'ENOENT' }); await delivery(configuration); }
+    if (phase === 'delivery') {
+      await assert.rejects(stat(receiptPath), { code: 'ENOENT' });
+      await delivery(configuration);
+      await runDiscoveryAcceptance(configuration);
+    }
     else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); }
 
     const payload = `native-domain-${nonce}`, ping = await invoke('native_ping', { nonce, payload }); assert.equal(ping.ok, true);

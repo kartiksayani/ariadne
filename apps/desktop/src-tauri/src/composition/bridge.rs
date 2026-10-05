@@ -22,6 +22,8 @@ impl CoreBridge {
         let runtime = self.runtime.clone();
         let preferences = self.runtime.clone();
         let preferences_read = self.runtime.clone();
+        let discovery_read = self.runtime.clone();
+        let discovery_open = self.runtime.clone();
         DesktopService::from_trusted_startup_with_connect(
             Arc::new(self.clone()),
             move |route| resolver.resolve_session(route),
@@ -44,6 +46,26 @@ impl CoreBridge {
                     .upgrade()
                     .ok_or_else(super::runtime::unavailable)?
                     .native_preferences_write(request)
+            },
+        )
+        .with_native_discovery(
+            move || {
+                let runtime = discovery_read
+                    .upgrade()
+                    .ok_or_else(super::runtime::unavailable)?;
+                let owned = runtime.clone();
+                runtime.run_owned(super::runtime::unavailable(), move || {
+                    crate::commands::project_discovery(owned.discovery()?)
+                })
+            },
+            move |open| {
+                let runtime = discovery_open
+                    .upgrade()
+                    .ok_or_else(super::runtime::unavailable)?;
+                let owned = runtime.clone();
+                runtime.run_owned(super::runtime::unavailable(), move || {
+                    owned.set_connection_ui_open(open)
+                })
             },
         )
     }

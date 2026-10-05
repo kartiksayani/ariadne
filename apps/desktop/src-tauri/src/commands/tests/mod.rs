@@ -490,3 +490,106 @@ fn qualified_connect_keeps_admission_deadline_and_validation_before_native_hando
     assert_ne!(calls[1].1, ipc_thread);
     assert!(core.history().unwrap().is_empty());
 }
+
+#[test]
+fn discovery_ipc_uses_trusted_off_thread_callbacks_and_strict_visibility_request() {
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let (send, receive) = std::sync::mpsc::channel();
+    let read = send.clone();
+    let service = DesktopService::from_trusted_startup(core, resolve).with_native_discovery(
+        move || {
+            read.send((None, std::thread::current().id())).unwrap();
+            Ok(DesktopDiscoverySnapshot {
+                candidates: vec![],
+                error: None,
+            })
+        },
+        move |open| {
+            send.send((Some(open), std::thread::current().id()))
+                .unwrap();
+            Ok(())
+        },
+    );
+    let window = window(service);
+    let ipc_thread = std::thread::current().id();
+    assert_eq!(
+        invoke(&window, "discovery_snapshot", json!({})).unwrap(),
+        json!({"candidates":[],"error":null})
+    );
+    for open in [true, false] {
+        assert_eq!(
+            invoke(
+                &window,
+                "discovery_ui_open",
+                json!({"request":{"open":open}})
+            )
+            .unwrap(),
+            Value::Null
+        );
+    }
+    for expected in [None, Some(true), Some(false)] {
+        let (open, worker) = receive
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(open, expected);
+        assert_ne!(worker, ipc_thread);
+    }
+    for request in [
+        json!({"open":"true"}),
+        json!({"open":true,"root":"/tmp"}),
+        json!({}),
+    ] {
+        assert!(invoke(&window, "discovery_ui_open", json!({"request":request})).is_err());
+    }
+    assert!(receive.try_recv().is_err());
+}
+
+#[test]
+fn discovery_ipc_exposes_typed_failure_without_calling_core_or_persisting() {
+    let empty = window(DesktopService::default());
+    assert_eq!(
+        invoke(&empty, "discovery_snapshot", json!({})).unwrap_err()["code"],
+        "unsupported"
+    );
+    assert_eq!(
+        invoke(
+            &empty,
+            "discovery_ui_open",
+            json!({"request":{"open":true}})
+        )
+        .unwrap_err()["code"],
+        "unsupported"
+    );
+    let service =
+        DesktopService::from_trusted_startup(Arc::new(ScriptedCoreService::new([])), resolve)
+            .with_native_discovery(
+                || {
+                    Err(CoreError::new(
+                        CoreErrorCode::HostUnreachable,
+                        "Provider unavailable.",
+                        "Use manual connection.",
+                    ))
+                },
+                |_| {
+                    Err(CoreError::new(
+                        CoreErrorCode::HostUnreachable,
+                        "Runtime unavailable.",
+                        "Close the connection panel.",
+                    ))
+                },
+            );
+    let window = window(service);
+    assert_eq!(
+        invoke(&window, "discovery_snapshot", json!({})).unwrap_err()["code"],
+        "host_unreachable"
+    );
+    assert_eq!(
+        invoke(
+            &window,
+            "discovery_ui_open",
+            json!({"request":{"open":false}})
+        )
+        .unwrap_err()["code"],
+        "host_unreachable"
+    );
+}

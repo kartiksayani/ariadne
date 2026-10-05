@@ -215,6 +215,52 @@ unlock. A shared binding lease continues to retain the instance owner until its
 own final drop. This preserves drain order and introduces no early release or
 new dispatch authority.
 
+## Desktop discovery consumer
+
+DesktopService receives trusted composition callbacks for the existing native
+discovery snapshot and connection-panel activation. RendererService exposes
+`discovery(): Promise<DesktopDiscoverySnapshot>` and
+`setConnectionUiOpen(open: boolean): Promise<void>` through desktop-only
+`discovery_snapshot` and `discovery_ui_open` commands. CoreService, provider methods
+and durable domain state do not change. Declare the wire projection once in core
+`dto/desktop_discovery.rs`, exported by the existing core DTO generator; reuse
+domain/protocol types rather than a parallel generator or handwritten TS copy.
+
+Project candidate adapter, endpoint, external session, cwd, title, host version,
+observation time, freshness, compatibility, availability, loaded state and nullable
+binding/session identity. Keep native Instants, resource descriptors, qualification
+slots and announcement authority private. Validate at most 256 candidates and a
+1 MiB serialized response; invalid/oversized snapshots return a visible error,
+without silent truncation or replacing the last valid renderer snapshot. The open
+request is a strict boolean object. Accept no renderer-selected scan roots,
+provider configuration, timestamps or qualification. Native calls follow existing
+off-thread admission/shutdown rules; discovery never registers or binds anything.
+
+One application controller serializes activation changes and permits one snapshot
+read at a time. Either a visible BindSession dialog or the explicitly expanded
+Projects "Discover host sessions" section activates it. Poll snapshots every five
+seconds while open; the existing native poller owns immediate-on-open and thirty-
+second scans. Closing either consumer updates their combined visibility; dismissal,
+disposal and StrictMode replay must not leave scans open. Ignore obsolete reads.
+Existing native wake reconciliation remains the sole wake/probe path.
+
+Projects groups candidate cwd facts and offers explicit Register project, which
+only prefills the existing form. Registration then opens that project; Connect is
+a separate explicit action. BindSession shows candidates for its selected project,
+retains manual entry/Codex status guidance and the new/existing Ariadne-session
+choice, and only prefills on selection. Explicit Connect uses the existing canonical
+request and immutable retry identity. Candidate identity includes adapter, endpoint
+and external session. Grouping never authorizes a project or binding; native
+qualification, current binding and rebind guards remain authoritative.
+
+Loaded means daemon membership only; Unknown/Stale never imply Idle or readiness.
+Refresh preserves manually typed fields and visibly invalidates a selected candidate
+that vanished, changed identity or became stale. Failed refresh retains the last
+complete snapshot with an error/freshness indication. Tests prove projection bounds,
+actual runtime callbacks, serialized open/close, obsolete reads, explicit registration
+and connection, manual fallback and exact retry identity. Native acceptance uses the
+existing scripted provider and actual App/Core/Store; no live host or new scanner.
+
 ## Streams and owned shared files
 
 | Stream | First independent assignment | Subsequent module work |

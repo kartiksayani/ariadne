@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
-  CoreError, ItemRoute, MutationEnvelope, MutationReceipt, OpenRoute,
+  CoreError, DesktopDiscoverySnapshot, ItemRoute, MutationEnvelope, MutationReceipt, OpenRoute,
   OwnerMutationRequest, OwnerQueryRequest, PresenceChangedHint, QueryEnvelope,
   QueryRequest, QueryResult, SessionChangedHint,
 } from '../generated/core';
@@ -18,6 +18,8 @@ export interface HintPayloads {
   'ariadne://route': OpenRoute;
 }
 export interface RendererService {
+  discovery(): Promise<DesktopDiscoverySnapshot>;
+  setConnectionUiOpen(open: boolean): Promise<void>;
   query<C extends QueryCommand>(request: QueryCall<C>): Promise<QueryData<C>>;
   executeOwner(request: OwnerMutationRequest): Promise<MutationReceipt>;
   subscribe<E extends keyof HintPayloads>(event: E, receive: (hint: HintPayloads[E]) => void): Promise<Unsubscribe>;
@@ -39,10 +41,14 @@ export class ServiceFailure extends Error {
 // Transport injection is for tests and other real entrypoints; ordinary desktop
 // calls always use Tauri. There is no scripted production fallback.
 export interface DesktopTransport {
+  discovery?(): Promise<DesktopDiscoverySnapshot>;
+  setConnectionUiOpen?(open: boolean): Promise<void>;
   invoke<T>(command: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T>;
   listen<E extends keyof HintPayloads>(event: E, receive: (hint: HintPayloads[E]) => void): Promise<Unsubscribe>;
 }
 const tauriTransport: DesktopTransport = {
+  discovery: () => invoke('discovery_snapshot'),
+  setConnectionUiOpen: open => invoke('discovery_ui_open', { request: { open } }),
   invoke: (command, args) => invoke(command, args),
   async listen(event, receive) {
     const unsubscribe = await listen<HintPayloads[typeof event]>(event, (message) => receive(message.payload));
@@ -86,6 +92,21 @@ export function createDesktopService(transport: DesktopTransport = tauriTranspor
     }
   }
   return {
+    async discovery() {
+      let snapshot: DesktopDiscoverySnapshot;
+      try {
+        if (!transport.discovery) throw new Error('Discovery unavailable');
+        snapshot = await transport.discovery();
+      } catch { throw new ServiceFailure('transport'); }
+      validateDiscovery(snapshot);
+      return snapshot;
+    },
+    async setConnectionUiOpen(open) {
+      try {
+        if (!transport.setConnectionUiOpen) throw new Error('Discovery unavailable');
+        await transport.setConnectionUiOpen(open);
+      } catch { throw new ServiceFailure('transport'); }
+    },
     async query<C extends QueryCommand>(request: QueryCall<C>): Promise<QueryData<C>> {
       const envelope = await call<QueryEnvelope>(request.request.command, request);
       validEnvelope(envelope);
@@ -133,4 +154,31 @@ export function createDesktopService(transport: DesktopTransport = tauriTranspor
       }
     },
   };
+}
+
+export function validateDiscovery(snapshot: DesktopDiscoverySnapshot): void {
+  const invalid = () => { throw new ServiceFailure('invalid_response'); };
+  if (!snapshot || !Array.isArray(snapshot.candidates) || snapshot.candidates.length > 256
+      || new TextEncoder().encode(JSON.stringify(snapshot)).length > 1024 * 1024) invalid();
+  const identities = new Set<string>();
+  const bounded = (value: unknown): value is string => typeof value === 'string' && !!value.trim() && !value.includes('\0') && new TextEncoder().encode(value).length <= 4096;
+  const uuid = (value: unknown) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+  for (const candidate of snapshot.candidates) {
+    if (!candidate || !bounded(candidate.adapter_id) || !bounded(candidate.external_session_id) || !bounded(candidate.cwd)
+        || !bounded(candidate.host_version) || !candidate.endpoint
+        || !(candidate.endpoint.kind === 'unix_socket' ? bounded(candidate.endpoint.path) : candidate.endpoint.kind === 'local_bridge' && bounded(candidate.endpoint.name))
+        || (candidate.title !== null && (typeof candidate.title !== 'string' || candidate.title.includes('\0') || new TextEncoder().encode(candidate.title).length > 4096))
+        || !['fresh', 'stale', 'historical', 'unknown'].includes(candidate.freshness)
+        || !['compatible', 'incompatible', 'unknown'].includes(candidate.compatibility)
+        || !['available', 'unavailable', 'unknown'].includes(candidate.availability)
+        || typeof candidate.loaded !== 'boolean' || typeof candidate.observed_at !== 'string' || !Number.isFinite(Date.parse(candidate.observed_at))
+        || (candidate.binding_id !== null && !uuid(candidate.binding_id))
+        || (candidate.session !== null && (!candidate.session || !uuid(candidate.session.project_id) || !uuid(candidate.session.session_id)))
+        || ((candidate.binding_id === null) !== (candidate.session === null))) invalid();
+    const identity = JSON.stringify([candidate.adapter_id, candidate.endpoint.kind,
+      candidate.endpoint.kind === 'unix_socket' ? candidate.endpoint.path : candidate.endpoint.name, candidate.external_session_id]);
+    if (identities.has(identity)) invalid();
+    identities.add(identity);
+  }
+  if (snapshot.error !== null && (!snapshot.error || typeof snapshot.error.message !== 'string' || typeof snapshot.error.hint !== 'string')) invalid();
 }
