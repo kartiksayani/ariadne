@@ -94,17 +94,31 @@ export async function releasedLeases(home, bindingId) {
 export async function proveQuit(root, binary, nonce, owned, home, bindingId, port) {
   const request = JSON.parse(await readFile(join(root, 'quit-request.json'), 'utf8'));
   if (request.nonce !== nonce || request.pid !== owned.pid) throw new Error('Quit witness identity mismatch');
+  await waitForQuitExit(binary, owned);
+  await portFree(port);
+  return { request, pidExited: true, portFree: true, leases: await releasedLeases(home, bindingId) };
+}
+export async function waitForQuitExit(binary, owned) {
   const end = Date.now() + 10000;
   while (alive(owned.pid) && Date.now() < end) {
     let current;
     try { current = identity(owned.pid); }
     catch (error) { if (!alive(owned.pid)) break; throw error; }
-    if (current.exe !== binary || current.birth !== owned.birth) throw new Error('Quit PID identity changed');
+    if (current.exe !== binary || current.birth !== owned.birth) {
+      if (!alive(owned.pid)) break;
+      let state;
+      if (current.birth === owned.birth && current.exe === '<defunct>') {
+        try { state = execFileSync('/bin/ps', ['-p', String(owned.pid), '-o', 'stat='], { encoding: 'utf8' }).trim(); }
+        catch (error) { if (!alive(owned.pid)) break; throw error; }
+      }
+      // macOS temporarily retains the same exited process until its parent
+      // reaps it. A zombie is not sufficient Quit proof: keep waiting for
+      // actual disappearance, and reject every live or reused identity.
+      if (!state?.startsWith('Z')) throw new Error(`Quit PID identity changed: ${JSON.stringify({ owned, current, state })}`);
+    }
     await delay(25);
   }
   if (alive(owned.pid)) throw new Error('Requested native Quit did not exit before WDIO teardown');
-  await portFree(port);
-  return { request, pidExited: true, portFree: true, leases: await releasedLeases(home, bindingId) };
 }
 export async function stop(child, grace = 10000) {
   if (!Number.isInteger(child.pid) || child.pid < 2) return;
@@ -153,10 +167,10 @@ export async function runNative() {
   await mkdir(evidence, { recursive: true });
   const root = await mkdtemp('/private/tmp/ariadne-e2e-'); await chmod(root, 0o700);
   const nonce = randomBytes(32).toString('hex');
-  const binary = join(repo, 'target/native-e2e/debug/ariadne-desktop');
+  const binary = join(repo, 'target/native-e2e/debug/bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop');
   let failure, owned, provider;
   try {
-    const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--no-bundle', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
+    const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--bundles', 'app', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
     const runtimeCommand = [process.execPath, join(repo, 'node_modules/@wdio/cli/bin/wdio.js'), 'run', 'wdio.native.conf.mjs'];
     const details = { root, port, nonce, binary, toolchain: toolchain(), buildCommand, runtimeCommand, cwd: desktop };
     await json(join(evidence, 'run.json'), details);

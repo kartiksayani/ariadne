@@ -148,11 +148,12 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
       filters: { ...structuredClone(latest.current.view.filters), search: pendingSearch.text } } as SessionPreferences));
   }, [pendingSearch, writing, state.status, store, search, view, write]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     ++request.current; setLocalReveal(null);
     setFocusId(reveal?.store === store && reveal.kind === 'item' ? reveal.route.item_id : latest.current.view.selected_item_id);
-    // External reveal changes are handled by the layout effect; this reset is
-    // only for replacing the opened session store.
+    // Reset before the row-focus layout effect chooses a visible keyboard entry.
+    // A passive reset would overwrite that fallback when saved selection is null.
+    // External reveals are handled below; this reset only replaces the store.
   }, [store]);
   const previousFocus = useRef<string | null>(null);
   useLayoutEffect(() => {

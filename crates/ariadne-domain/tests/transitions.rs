@@ -400,6 +400,129 @@ fn counters_and_duplicate_ordinals_or_messages_are_rejected() {
 }
 
 #[test]
+fn child_counters_keep_numeric_maximum_and_stored_error_precedence() {
+    let mut s = session();
+    s.items.0.get_mut(&reference("1")).unwrap().next_child = positive(10);
+    s.items
+        .0
+        .insert(reference("1.2"), item("1.2", Some("1"), 2));
+    s.items
+        .0
+        .insert(reference("1.10"), item("1.10", Some("1"), 10));
+    assert_eq!(
+        validate_session_items(&s),
+        Err(ValidationError {
+            path: "items.1.next_child".into(),
+            kind: ValidationErrorKind::CounterNotAhead,
+        })
+    );
+    s.items.0.get_mut(&reference("1")).unwrap().next_child = positive(11);
+    validate_session_items(&s).unwrap();
+
+    // A later malformed identity still occupies its actual parent's counter.
+    let mut s = session();
+    s.items.0.insert(reference("2"), item("9", Some("1"), 2));
+    s.items.0.get_mut(&reference("1")).unwrap().question.clear();
+    assert_eq!(
+        validate_session_items(&s),
+        Err(ValidationError {
+            path: "items.1.next_child".into(),
+            kind: ValidationErrorKind::CounterNotAhead,
+        })
+    );
+    s.items.0.get_mut(&reference("1")).unwrap().next_child = positive(3);
+    assert_eq!(
+        validate_session_items(&s),
+        Err(ValidationError {
+            path: "items.1.question".into(),
+            kind: ValidationErrorKind::Blank,
+        })
+    );
+    s.items.0.get_mut(&reference("1")).unwrap().question = "Valid question".into();
+    assert_eq!(
+        validate_session_items(&s),
+        Err(ValidationError {
+            path: "items.id".into(),
+            kind: ValidationErrorKind::IdentityMismatch,
+        })
+    );
+}
+
+#[test]
+fn child_counters_use_actual_parent_even_when_id_spelling_disagrees() {
+    let mut s = session();
+    s.counters.next_root = positive(3);
+    let mut second = item("2", None, 2);
+    second.next_child = positive(2);
+    s.items.0.insert(reference("2"), second);
+    s.items
+        .0
+        .insert(reference("1.1"), item("1.1", Some("2"), 1));
+    validate_item(&s, &s.items.0[&reference("1")]).unwrap();
+    assert_eq!(
+        validate_session_items(&s),
+        Err(ValidationError {
+            path: "items.1.1.id".into(),
+            kind: ValidationErrorKind::HierarchyMismatch,
+        })
+    );
+}
+
+#[test]
+fn candidate_validation_uses_current_children_messages_and_candidate_links() {
+    let mut s = session();
+    let mut candidate = s.items.0[&reference("1")].clone();
+    candidate.next_child = positive(2);
+    s.items
+        .0
+        .insert(reference("1.1"), item("1.1", Some("1"), 1));
+    // The supplied candidate's counter replaces the stored item's counter.
+    validate_item(&s, &candidate).unwrap();
+    s.items.0.get_mut(&reference("1.1")).unwrap().ordinal = positive(2);
+    assert_eq!(
+        validate_item(&s, &candidate),
+        Err(ValidationError {
+            path: "items.1.next_child".into(),
+            kind: ValidationErrorKind::CounterNotAhead,
+        })
+    );
+    s.items.0.remove(&reference("1.1"));
+    candidate.created_message_id = uuid(99);
+    assert_eq!(
+        validate_item(&s, &candidate),
+        Err(ValidationError {
+            path: "items.1.created_message_id".into(),
+            kind: ValidationErrorKind::MissingReference,
+        })
+    );
+    s.messages.push(message(99, 2, MessageAuthor::Agent));
+    validate_item(&s, &candidate).unwrap();
+    s.messages.push(s.messages[1].clone());
+    // Standalone item checks establish membership, not message uniqueness.
+    validate_item(&s, &candidate).unwrap();
+    assert_eq!(
+        validate_session_items(&s),
+        Err(ValidationError {
+            path: "messages.id".into(),
+            kind: ValidationErrorKind::Duplicate,
+        })
+    );
+
+    s.items.0.get_mut(&reference("1")).unwrap().parent = Some(reference("2"));
+    s.items.0.insert(reference("2"), item("2", Some("1"), 1));
+    // The stored cycle is broken by the candidate's actual null parent.
+    validate_item(&s, &candidate).unwrap();
+    candidate.parent = Some(reference("2"));
+    assert_eq!(
+        validate_item(&s, &candidate),
+        Err(ValidationError {
+            path: "items.1.parent".into(),
+            kind: ValidationErrorKind::Cycle,
+        })
+    );
+}
+
+#[test]
 fn text_bounds_count_utf8_bytes_and_preserve_optional_empty_note() {
     for good in ["a".repeat(4096), "é".repeat(2048), "😀".repeat(1024)] {
         let mut s = session();
