@@ -150,7 +150,7 @@ export async function runHistoryActionsAcceptance(configuration) {
   const copiedItemId = copied.item_id_map[originalItem.id];
   await openSession(finalTarget.id);
   await click(await browser.$(`.ref-tree-row[data-item-id="${copiedItemId}"]`));
-  await click(await browser.$('[aria-label="Item history view"] button*=Timeline'));
+  await click(await browser.$('[aria-label="Item history view"]').$('button*=Timeline'));
   const copiedBodies = source.messages.filter(message => message.item_id === originalItem.id).map(message => message.body);
   await wait(async () => {
     const text = await browser.$('[aria-label="Item detail"]').getText();
@@ -159,14 +159,14 @@ export async function runHistoryActionsAcceptance(configuration) {
   const unavailableProject = `${sourceProject}.unavailable-${randomUUID()}`;
   await rename(sourceProject, unavailableProject);
   try {
-    await click(await browser.$(`.copied-provenance button=Source item ${originalItem.id}`));
+    await click(await browser.$('.copied-provenance').$(`button=Source item ${originalItem.id}`));
     await wait(async () => (await browser.$('.copied-provenance').getText()).includes('Full copied history remains here'), 'Unavailable original project did not expose copied local fallback');
     const unavailableReason = await browser.$('.copied-provenance').getText();
     assert.ok(unavailableReason.includes(sourceProject), 'The registered source failure must retain its actual project path');
     assert.ok(unavailableReason.includes('NotFound'), 'The registered source failure must retain the actual missing-directory reason');
-    await click(await browser.$(`.copied-provenance button=Open copied item ${copiedItemId}`));
+    await click(await browser.$('.copied-provenance').$(`button=Open copied item ${copiedItemId}`));
     await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(`Item ${copiedItemId}`), 'Copied provenance fallback did not use the local registered item');
-    await click(await browser.$('[aria-label="Item history view"] button*=Timeline'));
+    await click(await browser.$('[aria-label="Item history view"]').$('button*=Timeline'));
     await wait(async () => {
       const text = await browser.$('[aria-label="Item detail"]').getText();
       return copiedBodies.every(body => text.includes(body));

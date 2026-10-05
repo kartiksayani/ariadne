@@ -141,6 +141,28 @@ pub fn capture(
         .collect();
     for summary in summaries {
         let project = projects.get(&summary.project_id).ok_or_else(inconsistent)?;
+        if let Some(binding) = &summary.active_binding {
+            if binding.owner_paused
+                || binding.pause_reason.is_some()
+                || binding.connection_state != ConnectionState::Connected
+            {
+                diagnostics.push(format!(
+                    "{}: {}",
+                    summary.title,
+                    if binding.owner_paused || binding.pause_reason.is_some() {
+                        "binding paused".into()
+                    } else {
+                        format!("binding {:?}", binding.connection_state)
+                    }
+                ));
+            }
+        }
+        // The authoritative summary already proves there are no Waiting rows.
+        // Keep this session in the final inventory check so a concurrent change
+        // still rejects the capture before publishing a notification baseline.
+        if summary.counts.waiting_unanswered.value() == 0 {
+            continue;
+        }
         let route = SessionRef {
             project_id: summary.project_id.clone(),
             session_id: summary.session_id.clone(),
@@ -158,22 +180,6 @@ pub fn capture(
             || session.revision != summary.revision
         {
             return Err(inconsistent());
-        }
-        if let Some(binding) = &summary.active_binding {
-            if binding.owner_paused
-                || binding.pause_reason.is_some()
-                || binding.connection_state != ConnectionState::Connected
-            {
-                diagnostics.push(format!(
-                    "{}: {}",
-                    summary.title,
-                    if binding.owner_paused || binding.pause_reason.is_some() {
-                        "binding paused".into()
-                    } else {
-                        format!("binding {:?}", binding.connection_state)
-                    }
-                ));
-            }
         }
         for item in session.items.0.values() {
             if session

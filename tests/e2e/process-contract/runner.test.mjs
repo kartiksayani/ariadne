@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit } from '../../../scripts/run-native-e2e.mjs';
+import { command, identity, alive, selector, portFree, listeners, buildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import WebSocket from 'ws';
@@ -65,10 +65,12 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     const secondPayload = `[ARIADNE_INPUT:${secondInput}:${secondAttempt}]\n${JSON.stringify({ ...body, source_input_id: secondInput })}`;
     await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', secondPayload]);
     const journal = await admissions(config); assert.equal(journal.length, 2); assert.notEqual(journal[0].turnId, journal[1].turnId);
-    const after = (await rpc(5, 'thread/turns/list', { threadId: thread })).result.data;
-    assert.deepEqual(after.map(turn => turn.status), ['completed', 'inProgress']);
-    assert.deepEqual(after.map(turn => turn.items[0].content[0].text), [payload, secondPayload]);
-    assert.equal(after[1].id, journal[1].turnId, 'Completing the first admission cannot complete the successor');
+    const after = (await rpc(5, 'thread/turns/list', { threadId: thread, sortDirection: 'desc' })).result.data;
+    assert.deepEqual(after.map(turn => turn.id), [journal[1].turnId, journal[0].turnId], 'The newest exact original must precede the prior queue anchor');
+    assert.deepEqual(after.map(turn => turn.status), ['inProgress', 'completed']);
+    assert.deepEqual(after.map(turn => turn.items[0].content[0].text), [secondPayload, payload]);
+    assert.equal(after[0].id, journal[1].turnId, 'Completing the first admission cannot complete the successor');
+    assert.deepEqual((await admissions(config)).map(entry => entry.turnId), journal.map(entry => entry.turnId), 'History order cannot rewrite FIFO admissions');
     await assert.rejects(completeTurn(config, admitted), /occurs once/);
     assert.deepEqual(await admissions(config.history), []);
     const historyInput = '77777777-7777-4777-8777-777777777777', historyAttempt = '88888888-8888-4888-8888-888888888888';
@@ -79,7 +81,7 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     await assert.rejects(completeTurn(config.history, journal[1]), /exact existing/);
     await completeTurn(config.history, historyAdmission);
     assert.deepEqual((await rpc(17, 'thread/turns/list', { threadId: config.history.externalSessionId })).result.data.map(turn => turn.status), ['completed']);
-    assert.deepEqual((await rpc(18, 'thread/turns/list', { threadId: thread })).result.data.map(turn => turn.status), ['completed', 'inProgress'], 'History completion cannot finish the original running turn');
+    assert.deepEqual((await rpc(18, 'thread/turns/list', { threadId: thread })).result.data.map(turn => ({ id: turn.id, status: turn.status })), after.map(turn => ({ id: turn.id, status: turn.status })), 'History completion cannot change either original turn or their descending order');
   } finally { client?.terminate(); await provider?.stop(); await rm(root, { recursive: true }); }
 });
 test('selectors are explicit and default runs the complete gate', () => {
@@ -266,6 +268,28 @@ test('Quit proof requires actual owned PID exit, free port and released physical
     assert.equal(proof.pidExited, true); assert.equal(proof.portFree, true); assert.equal(proof.leases.released, true);
     assert.deepEqual(proof.leases.paths, files);
   } finally { if (child && alive(child.pid)) child.kill(); await rm(root, { recursive: true }); }
+});
+test('Quit wait rejects live identity changes and waits for a same-birth macOS zombie to disappear', async () => {
+  const child = spawn(process.execPath, ['-e', 'process.stdout.write("ready"); process.stdin.once("data",()=>process.exit(0))'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  try {
+    await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); });
+    const owned = identity(child.pid);
+    await assert.rejects(waitForQuitExit('/different-live-executable', owned), /identity changed/);
+    await assert.rejects(waitForQuitExit(owned.exe, { ...owned, birth: 'different birth' }), /identity changed/);
+    assert.ok(alive(child.pid), 'Rejected identity checks cannot signal the owned process');
+    child.stdin.end('quit');
+    // Hold this parent event loop briefly so the genuinely exited child remains
+    // observable as a zombie before libuv can reap it.
+    const end = Date.now() + 1000;
+    let state;
+    do {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      state = execFileSync('/bin/ps', ['-p', String(child.pid), '-o', 'stat='], { encoding: 'utf8' }).trim();
+    } while (!state.startsWith('Z') && Date.now() < end);
+    assert.ok(state.startsWith('Z')); assert.equal(identity(child.pid).exe, '<defunct>');
+    assert.equal(identity(child.pid).birth, owned.birth); assert.ok(alive(child.pid));
+    await waitForQuitExit(owned.exe, owned); assert.equal(alive(child.pid), false);
+  } finally { if (alive(child.pid)) child.kill(); }
 });
 test('occupied loopback port fails without touching listener, invalid ports fail', async () => {
   const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

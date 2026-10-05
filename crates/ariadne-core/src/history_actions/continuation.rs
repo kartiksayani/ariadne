@@ -5,7 +5,7 @@ use ariadne_store::session::Store;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(test)]
-#[path = "continuation_tests.rs"]
+#[path = "tests/continuation.rs"]
 mod tests;
 
 impl HistoryActionService<'_> {

@@ -12,6 +12,13 @@ const request = operations => ({ op_id: randomUUID(), source_input_id: null, att
 const detail = () => browser.$('.item-history');
 const inputs = session => Object.values(session.inputs).sort((a, b) => a.seq - b.seq);
 const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
+let navigationRecovered = false;
+const revisionConflict = 'Preferences revision changed; reload before applying this new patch';
+const preferencesSnapshot = async () => (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot;
+async function navigationRejection() {
+  const message = await browser.$('.nav-banner[role="alert"] p');
+  return await message.isExisting() && await message.getText() === revisionConflict;
+}
 const option = ordinal => ({ id: `history-choice-${ordinal}`, label: `Use round ${ordinal} choice`,
   consequence: `Keep the exact consequence for round ${ordinal}.`, recommended: true });
 export function historyAsk(bindingId, ordinal, item = { id: '1' }) {
@@ -42,13 +49,43 @@ async function apply(history, operations, revisions = {}, frozen = null) {
   return { request: value, receipt: result.value };
 }
 async function open(history, itemId = '1') {
-  const catalogue = await browser.$('button=All sessions'); await catalogue.waitForEnabled(); await catalogue.click();
-  const session = await browser.$(`[data-session-id="${history.sessionId}"]`); await session.waitForDisplayed(); await session.click();
-  const target = await row(itemId); await target.waitForDisplayed(); await target.click();
+  const catalogue = await browser.$('button=All sessions'); await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
+  const selectedCatalogue = async () => (await preferencesSnapshot()).global.selected_navigation.kind === 'all_sessions'
+    && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
+  let rejectedNavigation = false;
+  await wait(async () => {
+    rejectedNavigation ||= await navigationRejection();
+    return rejectedNavigation || await selectedCatalogue();
+  }, 'History catalogue navigation neither completed nor showed a definitive revision conflict');
+  if (rejectedNavigation) {
+    assert.equal(navigationRecovered, false, 'Only one explicit history navigation recovery is allowed per native launch');
+    navigationRecovered = true;
+    const rejected = { sessionId: history.sessionId, message: revisionConflict,
+      preferences: await preferencesSnapshot(), body: await browser.$('body').getText() };
+    const refresh = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
+    await refresh.waitForDisplayed(); await refresh.waitForEnabled(); await refresh.scrollIntoView(); await refresh.click();
+    // The actual Refresh control returns after its awaited read completes;
+    // the definitive mutation error remains visible until a fresh choice.
+    await wait(async () => {
+      const refreshed = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
+      return await refreshed.isExisting() && await refreshed.isDisplayed() && await refreshed.isEnabled() && await catalogue.isEnabled();
+    }, 'Explicit history Refresh did not finish before the fresh navigation choice');
+    assert.equal(await navigationRejection(), true, 'History Refresh must retain the exact definitive revision conflict before a fresh navigation choice');
+    // A visible definitive rejection permits one fresh owner navigation choice.
+    await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
+    await wait(selectedCatalogue, 'Fresh history catalogue navigation did not persist after Refresh');
+    await writeFile(join(evidence(), 'history-navigation-recovery.json'), JSON.stringify({ rejected, recovered: await preferencesSnapshot() }, null, 2));
+  }
+  const session = await browser.$(`[data-session-id="${history.sessionId}"]`); await session.waitForDisplayed(); await session.waitForEnabled(); await session.scrollIntoView(); await session.click();
+  await wait(async () => {
+    const selected = (await preferencesSnapshot()).global.selected_navigation;
+    return selected.kind === 'session' && selected.session.session_id === history.sessionId && await catalogue.isEnabled();
+  }, 'History session navigation did not finish its saved preference update');
+  const target = await row(itemId); await target.waitForDisplayed(); await target.scrollIntoView(); await target.click();
   await wait(async () => (await detail().getText()).includes(`Item ${itemId}`), 'Registered native history detail did not open');
 }
 async function selectParent() {
-  const parent = await row('1'); await parent.waitForDisplayed(); await parent.click();
+  const parent = await row('1'); await parent.waitForDisplayed(); await parent.scrollIntoView(); await parent.click();
   await wait(async () => (await detail().getText()).includes('Retain five complete native rounds'), 'Fork did not return to its registered parent');
 }
 async function seed(configuration) {
@@ -73,14 +110,14 @@ async function seed(configuration) {
   return { history, publication };
 }
 async function answer(history, ordinal, text) {
-  const another = await browser.$('.owner-input button=Write another input');
-  if (await another.isExisting()) { await another.waitForEnabled(); await another.click(); }
+  const another = await browser.$('.owner-input').$('button=Write another input');
+  if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
   const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForEnabled();
-  const review = await browser.$('.owner-input button=Review current target');
-  if (await review.isExisting()) { await review.waitForEnabled(); await review.click(); }
-  if (ordinal % 2) { const choice = await browser.$(`.owner-input button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.click(); }
-  await editor.setValue(text);
-  const send = await browser.$('.owner-input .ref-send-row button'); await send.waitForEnabled(); await send.click();
+  const review = await browser.$('.owner-input').$('button=Review current target');
+  if (await review.isExisting()) { await review.waitForEnabled(); await review.scrollIntoView(); await review.click(); }
+  if (ordinal % 2) { const choice = await browser.$('.owner-input').$(`button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.scrollIntoView(); await choice.click(); }
+  await editor.scrollIntoView(); await editor.setValue(text);
+  const send = await browser.$('.owner-input .ref-send-row button'); await send.waitForEnabled(); await send.scrollIntoView(); await send.click();
   await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal,
     'A genuine native round answer did not persist and reach its isolated host');
 }
@@ -108,7 +145,7 @@ async function renderedBodies(selector) {
   })), selector);
 }
 async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
-  const back = await browser.$('[aria-label="Item history view"] button=Back and forth'); await back.waitForEnabled(); await back.click();
+  const back = await browser.$('[aria-label="Item history view"]').$('button=Back and forth'); await back.waitForEnabled(); await back.scrollIntoView(); await back.click();
   await wait(async () => (await browser.$$('.history-round')).length === 5, 'Native detail did not load all five real rounds');
   const rounds = Object.values(saved.rounds).sort((a, b) => a.ordinal - b.ordinal);
   assert.equal(rounds.length, 5); assert.equal(Object.keys(saved.items).length, 3);
@@ -137,7 +174,7 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
     assert.ok((await detail().getText()).includes(saved.items[id].source_round_id));
     await selectParent();
   }
-  const timeline = await browser.$('[aria-label="Item history view"] button*=Timeline'); await timeline.waitForEnabled(); await timeline.click();
+  const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline'); await timeline.waitForEnabled(); await timeline.scrollIntoView(); await timeline.click();
   await wait(async () => (await renderedBodies('.history-timeline [data-message-id]')).length > 100, 'Native item conversation paging did not produce complete history');
   const visible = await renderedBodies('.history-timeline [data-message-id]');
   assert.equal(new Set(visible.map(value => value.id)).size, visible.length, 'Overlapping created/updated/round pages must not duplicate timeline entries');
@@ -154,7 +191,7 @@ async function railState() {
 }
 async function rail(history, saved, paged) {
   const toggle = await browser.$('button=Messages (m)');
-  if (!(await browser.$('.rail-messages').isExisting())) { await toggle.waitForEnabled(); await toggle.click(); }
+  if (!(await browser.$('.rail-messages').isExisting())) { await toggle.waitForEnabled(); await toggle.scrollIntoView(); await toggle.click(); }
   await wait(async () => (await browser.$$('.rail-messages [data-message-id]')).length === saved.messages.length, 'Rail did not load every actual canonical message page');
   const visible = await renderedBodies('.rail-messages [data-message-id]');
   assert.equal(new Set(visible.map(value => value.id)).size, saved.messages.length);
@@ -170,13 +207,13 @@ async function rail(history, saved, paged) {
   }, parentMessage.id), 'Native rail pin did not cross-highlight its real tree item and detail message');
   const childMessage = saved.messages.find(message => message.item_id === '1.1' && message.kind === 'reply'); assert.ok(childMessage);
   const parent = await row('1');
-  if (await parent.getAttribute('aria-expanded') !== 'true') await parent.$('button[aria-label="Expand or collapse"]').click();
+  if (await parent.getAttribute('aria-expanded') !== 'true') { await parent.scrollIntoView(); await parent.$('button[aria-label="Expand or collapse"]').click(); }
   const child = await row('1.1'); await child.waitForDisplayed(); await child.scrollIntoView(); await child.click();
   await wait(async () => (await detail().getText()).includes('Native history fork 1.1'), 'Registered tree selection did not reveal the genuine child');
   await wait(async () => browser.execute(id => document.querySelector(`.rail-messages [data-message-id="${id}"]`)?.classList.contains('history-highlight'), childMessage.id), 'Native tree selection did not highlight its canonical rail backlink');
   assert.ok((await card.getAttribute('class')).includes('history-pinned'));
   await selectParent();
-  const timeline = await browser.$('[aria-label="Item history view"] button*=Timeline'); await timeline.waitForEnabled(); await timeline.click();
+  const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline'); await timeline.waitForEnabled(); await timeline.scrollIntoView(); await timeline.click();
   await wait(async () => browser.execute(id => document.querySelector(`.history-timeline [data-message-id="${id}"]`)?.classList.contains('history-highlight'), parentMessage.id), 'Pinned canonical detail reference was lost after registered child navigation');
   const preferences = async () => {
     const result = await cliRequest(history.cli, ['preferences', 'get', '--json-stdin'], { session: null, request: { command: 'preferences_get', params: {} } });
@@ -197,12 +234,12 @@ async function rail(history, saved, paged) {
   const beforeUp = await railState();
   await card.scrollIntoView({ block: 'start' });
   await wait(async () => (await railState()).top < beforeUp.top - 100, 'Older-message navigation did not actually scroll the nested rail upward');
-  const reply = await browser.$('[aria-label="Owner actions"] button=Reply'); await reply.waitForEnabled(); await reply.click();
-  const another = await browser.$('.owner-input button=Write another input');
-  if (await another.isExisting()) { await another.waitForEnabled(); await another.click(); }
+  const reply = await browser.$('[aria-label="Owner actions"]').$('button=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
+  const another = await browser.$('.owner-input').$('button=Write another input');
+  if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
   const editor = await browser.$('.owner-input textarea'); await editor.waitForEnabled();
   const draft = `Unsent native history draft ${process.env.ARIADNE_E2E_NONCE}\nKeep focus and every word.`;
-  await editor.setValue(draft);
+  await editor.scrollIntoView(); await editor.setValue(draft);
   const paused = await railState(); assert.equal(paused.focused, true); assert.equal(paused.draft, draft);
   const before = await snapshot(history), revisions = { '1': before.items['1'].revision };
   const additions = [0, 1].map(index => ({ op: 'reply', ref: `history_live_${index}`, item: { id: '1' }, round_id: null,
@@ -215,7 +252,7 @@ async function rail(history, saved, paged) {
   assert.equal(inputs(live).length, 7, 'Live history publication cannot manufacture an owner submission');
   await jump.click();
   await wait(async () => { const state = await railState(); return state.height - state.viewport - state.top <= 2; }, 'Deliberate Jump to latest did not resume the actual nested rail');
-  await editor.click();
+  await editor.scrollIntoView(); await editor.click();
   const following = await railState(); assert.equal(following.focused, true); assert.equal(following.draft, draft);
   await apply(history, [{ op: 'reply', ref: 'history_followed', item: { id: '1' }, round_id: null,
     text: 'Following native rail reply\nThe genuine subsequent message remains visible.' }], { '1': live.items['1'].revision });
@@ -234,6 +271,12 @@ export async function runHistoryAcceptance(configuration) {
   const treeBytes = await readFile(treeProof.tree.sessionPath);
   const { history, publication } = await seed(configuration);
   assert.notEqual(history.bindingId, configuration.bindingId); assert.notEqual(history.generation, configuration.generation);
+  const questionRevision = (await snapshot(history)).items[history.itemId].question_revision;
+  // Observe the real App's seed-triggered preference publication before navigation.
+  await wait(async () => ((await preferencesSnapshot()).global.notification_ledger ?? []).some(episode =>
+    episode.session.session_id === history.sessionId && episode.session.project_id === history.projectId
+    && episode.item_id === history.itemId && episode.question_revision === questionRevision),
+  'History question did not reach the genuine native notification ledger');
   await open(history);
   const ownerTexts = [], resultTexts = [], paged = [], roundIds = [];
   for (let ordinal = 1; ordinal <= 5; ordinal++) {
@@ -272,12 +315,12 @@ export async function runHistoryAcceptance(configuration) {
   let saved = await snapshot(history);
   const proof = await proveRounds(history, saved, ownerTexts, resultTexts, paged);
   for (const [intent, ordinal] of [['followup', 6], ['reopen', 7]]) {
-    const control = await browser.$(`.history-actions button=${intent === 'followup' ? 'Follow up' : 'Request reopen'}`);
+    const control = await browser.$('.history-actions').$(`button=${intent === 'followup' ? 'Follow up' : 'Request reopen'}`);
     await control.scrollIntoView(); await control.waitForEnabled(); await control.click();
     const editor = await browser.$('.owner-input textarea'); await editor.waitForEnabled();
     const text = `Native ${intent} after closed history\nThe owner's deliberate request leaves the status unchanged.`;
-    await editor.setValue(text);
-    const send = await browser.$('.owner-input .ref-send-row button'); await send.waitForEnabled(); await send.click();
+    await editor.scrollIntoView(); await editor.setValue(text);
+    const send = await browser.$('.owner-input .ref-send-row button'); await send.waitForEnabled(); await send.scrollIntoView(); await send.click();
     await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal, 'Closed-item deliberate owner intent did not reach its isolated host');
     saved = await snapshot(history); assert.equal(saved.items['1'].status, 'done'); assert.equal(inputs(saved)[ordinal - 1].kind, intent);
     const extra = intent === 'reopen' ? [{ op: 'item.status', item: { id: '1' }, status: 'open', outcome: null, why: null, reason: 'The owner explicitly requested native reopening.' }] : [];

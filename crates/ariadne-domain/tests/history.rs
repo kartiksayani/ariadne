@@ -1012,6 +1012,102 @@ fn history_validator_rejects_broken_links_and_superseded_payload_rewrites() {
 }
 
 #[test]
+fn history_message_lookup_preserves_duplicate_and_item_error_precedence() {
+    let mut session = seed();
+    session.messages.push(session.messages[0].clone());
+    session.messages[0].body.clear();
+    session
+        .items
+        .0
+        .get_mut(&item("1"))
+        .unwrap()
+        .created_message_id = id(99);
+    assert_eq!(
+        validate_session_history(&session),
+        Err(HistoryError::DuplicateId)
+    );
+
+    let mut session = seed();
+    let first = session.items.0.get_mut(&item("1")).unwrap();
+    first.created_message_id = id(99);
+    first.updated_message_ids = vec![id(98), id(98)];
+    session.messages[0].items_touched = vec![item("1")];
+    // The first item's missing creation precedes duplicate updates and the
+    // later item's invalid creation provenance.
+    assert_eq!(
+        validate_session_history(&session),
+        Err(HistoryError::MissingReference)
+    );
+    session
+        .items
+        .0
+        .get_mut(&item("1"))
+        .unwrap()
+        .created_message_id = id(6);
+    assert_eq!(
+        validate_session_history(&session),
+        Err(HistoryError::DuplicateId)
+    );
+    session
+        .items
+        .0
+        .get_mut(&item("1"))
+        .unwrap()
+        .updated_message_ids = vec![id(99)];
+    session.messages[0].items_touched = vec![item("2")];
+    assert_eq!(
+        validate_session_history(&session),
+        Err(HistoryError::InvalidProvenance)
+    );
+}
+
+#[test]
+fn history_message_lookup_tracks_current_ids_and_preserves_round_checks() {
+    let mut session = seed();
+    validate_session_history(&session).unwrap();
+    session.messages[0].id = id(7);
+    assert_eq!(
+        validate_session_history(&session),
+        Err(HistoryError::MissingReference)
+    );
+    for target in session.items.0.values_mut() {
+        target.created_message_id = id(7);
+    }
+    validate_session_history(&session).unwrap();
+
+    let mut session = ask(&seed(), 1);
+    let round = session.rounds.0.get_mut(&id(201)).unwrap();
+    round.opened_message_id = id(99);
+    round.owner_message_ids = vec![id(6), id(6)];
+    assert_eq!(
+        validate_session_history(&session),
+        Err(HistoryError::MissingReference)
+    );
+    session
+        .rounds
+        .0
+        .get_mut(&id(201))
+        .unwrap()
+        .opened_message_id = id(101);
+    assert_eq!(
+        validate_session_history(&session),
+        Err(HistoryError::DuplicateId)
+    );
+    // The valid creation Activity touches the round's item but is not an
+    // owner conversation entry; that error precedes a later missing message.
+    session
+        .rounds
+        .0
+        .get_mut(&id(201))
+        .unwrap()
+        .owner_message_ids = vec![id(6), id(99)];
+    assert_eq!(
+        validate_session_history(&session),
+        Err(HistoryError::InvalidRound)
+    );
+}
+
+#[test]
 fn canonical_demo_and_source_snapshots_validate_history_without_invented_rules() {
     for fixture in [
         include_str!("../../../fixtures/domain/demo/session.json"),
