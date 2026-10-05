@@ -10,6 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sourceManifest from '../../../docs/planning/evidence/design-assets/source.json' with { type: 'json' };
 import type { ReferenceCase } from './cases';
+import { captureOrdinaryFrames, checkOrdinaryKeyboard, prepareBeforeCapture } from '../../visual/ordinary-capture';
 import { assembledRegions, frameRegions } from './assembled-regions';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -407,4 +408,11 @@ test('assembled supplemental variants', async ({ page, context, origin }, testIn
     await testInfo.attach(`${variant}-app-no-supplied-matching-frame`, { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
   }
   expect(denied).toEqual([]); expect(errors).toEqual([]);
+});
+
+for (const batch of [0, 1]) test(`ordinary DesktopApp supplied-state coverage batch ${batch + 1}`, async ({ page, origin }, testInfo) => {
+  await captureOrdinaryFrames(page, origin, testInfo, batch);
+});
+test('ordinary DesktopApp keyboard, focus return and reduced motion', async ({ page, origin }, testInfo) => {
+  await checkOrdinaryKeyboard(page, origin, testInfo, await prepareBeforeCapture(repo));
 });

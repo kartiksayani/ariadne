@@ -284,6 +284,8 @@ Keyboard navigation works when focus is outside editable controls:
 | Escape | Close top overlay/detail or leave editor without discarding draft |
 | Cmd+Enter | Submit the currently focused valid owner input |
 
+The `b` shortcut creates and submits a fresh Bring draft with the explicit text `Bring this up.` through the ordinary durable owner-input path. If that target already has a Bring draft or receipt, reveal that entry without editing, submitting or retrying it; existing text and uncertain outcomes require the normal explicit review or reconciliation action. Key repeat cannot create another input.
+
 Roving tree focus uses visible row IDs and correct `aria-level`, `aria-expanded`, and `aria-selected`. All icons have labels; status always has adjacent text. Focus-visible is a 2 px accent outline. Dialogs trap and restore focus. Announce new waiting items and resolved inputs once through a polite live region; do not announce every message delta. Respect reduced motion and system appearance changes while theme is System. Verify contrast in both themes.
 
 ## 8. Native macOS service
