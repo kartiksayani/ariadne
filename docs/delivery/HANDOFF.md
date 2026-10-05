@@ -1,83 +1,72 @@
 # Ariadne handoff
 
-Checked 2026-10-05 00:50 UTC. Continue autonomously. Delegates use Sol 6.1 High.
-This checkpoint is uncommitted; publish with the next product checkpoint.
+Checkpoint 2026-10-05, after full local native journey passed. Continue autonomously;
+delegates use Sol 6.1 High only. Owner authorizes local builds/tests whenever they
+save overall time; required CI and independent review still apply. MCP/Seezo disabled.
 
-**Main:** `20eb77d715c0aa58664dddea0232465598cf8cb1` (PR85), with
+**Main:** `20eb77d715c0aa58664dddea0232465598cf8cb1`, PR85,
 [green CI](https://github.com/kartiksayani/ariadne/actions/runs/37244941515).
-PR85 passed independent review, 89.87% coverage, native receipt/exit and release
-isolation. PRs80–82,84,89 were already merged. Full task closures still await83.
+22/49 full tasks complete. Preserve root's dirty tasks.json/roadmap.html overlay.
 
-| PR | Published head / base | Current CI and review |
+| PR | Published head | CI / independent review |
 | --- | --- | --- |
-| [83](https://github.com/kartiksayani/ariadne/pull/83) | `9d416f0` / main | Clear5408932429; [native startup abort](https://github.com/kartiksayani/ariadne/actions/runs/37246640362) |
-| [86](https://github.com/kartiksayani/ariadne/pull/86) | `d4e0c2c` /83 | Clear5408938387; [same abort](https://github.com/kartiksayani/ariadne/actions/runs/37246721384) |
-| [88](https://github.com/kartiksayani/ariadne/pull/88) | `49ba507` /86 | Clear5408938541; [same abort](https://github.com/kartiksayani/ariadne/actions/runs/37246724928) |
-| [90](https://github.com/kartiksayani/ariadne/pull/90) | `a4ac32c` / main | Required P2 review5409022282; [queued](https://github.com/kartiksayani/ariadne/actions/runs/37248155625) |
-| [91](https://github.com/kartiksayani/ariadne/pull/91) | `7a99411` /88 | Clear5408938690; [running](https://github.com/kartiksayani/ariadne/actions/runs/37246728599) |
-| [92](https://github.com/kartiksayani/ariadne/pull/92) | `68e0a54` /88 | Clear5408938803; [running](https://github.com/kartiksayani/ariadne/actions/runs/37246738589) |
-| [93](https://github.com/kartiksayani/ariadne/pull/93) | `9bfbc74` /94 | Clear5408938904; [running](https://github.com/kartiksayani/ariadne/actions/runs/37246735317) |
-| [94](https://github.com/kartiksayani/ariadne/pull/94) | `c0c2abe` /91 | Clear5408939009; [running](https://github.com/kartiksayani/ariadne/actions/runs/37246731520) |
-| [95](https://github.com/kartiksayani/ariadne/pull/95) | `4bbd6b8` /91 | Clear5408939098; [running](https://github.com/kartiksayani/ariadne/actions/runs/37246742119) |
-| [96](https://github.com/kartiksayani/ariadne/pull/96) | `9254f3b` /91 | Clear5408939186; [installed Claude fixture failure](https://github.com/kartiksayani/ariadne/actions/runs/37246745052) |
+| [83](https://github.com/kartiksayani/ariadne/pull/83) | b2fd962 | [Failed startup](https://github.com/kartiksayani/ariadne/actions/runs/37249102645); clear5409059548. Local repair below awaits push/review. |
+| [86](https://github.com/kartiksayani/ariadne/pull/86) | d4e0c2c | Failed same startup; clear5408938387. |
+| [88](https://github.com/kartiksayani/ariadne/pull/88) | 49ba507 | Failed same startup; clear5408938541. |
+| [90](https://github.com/kartiksayani/ariadne/pull/90) | 6069d9d | [Running](https://github.com/kartiksayani/ariadne/actions/runs/37249498936); clear5409080891; 56 author/53 independent focused cases pass. |
+| [91](https://github.com/kartiksayani/ariadne/pull/91) | 7a99411 | Canceled: inherited startup; clear5408938690. |
+| [92](https://github.com/kartiksayani/ariadne/pull/92) | 68e0a54 | Canceled: inherited startup; clear5408938803. |
+| [93](https://github.com/kartiksayani/ariadne/pull/93) | 9bfbc74 | Canceled: inherited startup; clear5408938904. |
+| [94](https://github.com/kartiksayani/ariadne/pull/94) | c0c2abe | Canceled: inherited startup; clear5408939009. |
+| [95](https://github.com/kartiksayani/ariadne/pull/95) | 4bbd6b8 | Canceled: inherited startup; clear5408939098. |
+| [96](https://github.com/kartiksayani/ariadne/pull/96) | 9254f3b | Failed installed SDK EPIPE fixture; clear5408939186. |
+| [97](https://github.com/kartiksayani/ariadne/pull/97) | e0292ae | [Failed captures](https://github.com/kartiksayani/ariadne/actions/runs/37249848470); required review5409105752/5409111194 being fixed. |
 
-GitHub stack87 is83 →86 →88 →91 →94 →93. Merge only a fully qualified prefix,
-using squash.90,92,95,96 remain independent siblings. Never infer acceptance from
-source review. Current main integration, exact-head review and full CI still apply.
+Stack87:83 →86 →88 →91 →94 →93;97 is based93.92/95/96 are siblings.
+Merge only a qualified squash prefix, with current main integration, exact-head
+review and full green CI. Never count canceled checks or source review as acceptance.
 
-**Current work and ownership**
-- Maintainer owns shared contracts, integration, catalogue and merges. Root main
-  has intentional dirty tasks.json/roadmap.html overlays. Purple+A means actual
-  implementation, not CI waiting. Active markers: P3.6, P4.8.
-- `.worktrees/resume-integration`, branch `maintenance/resume-integration`, has
-  unpushed `80b7f1a` (backend capture), `b13e217` (SDK EPIPE fixture), and
-  `ddd0a0b` (await control-handler cleanup). Diagnostic and SDK local reviews are
-  clear; affected-flow control review and exact published-head reviews remain. HANDOFF is
-  separately dirty. Root coordinates the next push with repairs below.
-- `audit_claude85_green` owns `.worktrees/installed-lifecycle-repair`, branch
-  `fix/installed-lifecycle-fixture`: installed-join.js plus its Rust test only.
-  The SDK lacked a stdin EPIPE handler. Deterministic old-code failure reproduced;
-  repair preserves actual child exit/stdout/stderr. Commit370ee71 is clean,
-  all six lifecycle tests pass, independently reviewed and cherry-picked as b13e217.
-  The domain-transitions warm cache is idle after independent review.
-- `repair_pr90_current_ci` owns `.worktrees/codex-native-join`, branch
-  `task/codex-native-join`. Adds deterministic in-flight Unknown conformance proof
-  after independent mutation escaped the revised activation test. Also repairs
-  ControlServer shutdown: await canceled handlers before returning ownership.
-  Deterministic old-code failure reproduced; separate commit9ef4eb0 passes all
-  18 control tests and three Codex joins and is cherry-picked as ddd0a0b on83.
-  Activation ownership investigation and Unknown regression continue.
-  Cache: native-provider-activation/target.
-  Keep shared control fix in a separate commit for83; activation compatibility is90-only.
-- `validate_product_accessibility` owns `.worktrees/product-accessibility`, branch
-  `task/product-accessibility`, based on reviewed93. P4.8 fixes actual App/dialog/
-  owner-input shortcuts and announcements, adds ordinary App captures and native
-  keyboard proof. Owns App.tsx, related accessibility/reference/input components,
-  native-smoke helper wiring, visual config and narrow capture-scope/typecheck updates.
-  Maintainer recorded fresh Bring shortcut semantics in its UI_AND_NATIVE.md; include
-  that change. Ten focused UI tests passed; implementation/capture work continues.
-- Other product worktrees remain on their published checkpoints. Check actual
-  local state before reuse; preserve all worktrees, history and ignored evidence.
-
-**Evidence and limitations**
-83/86/88 passed independently audited coverage (86.40%,86.40%,86.54%; all required
-sources present) but aborted before WebDriver readiness. No journey or release
-proof exists for these heads. Backend output was not retained.80b7f1a fixes capture;
-its real launcher regression proves stderr survives failure. Notification-center
-initialization in an unbundled executable is only a source hypothesis, not a cause.
-PR96 failed earlier: unhandled fixture stdin EPIPE killed its scripted SDK.
+**Active owners / local work** (worktrees below are under `.worktrees/`):
+- Maintainer: `resume-integration`, `maintenance/resume-integration`, unpublished
+  assembled head `dd14960` plus this documentation checkpoint. Includes runtime
+  fixture drainage, canonical Unknown proof, installed readiness deadline, required
+  checks before captures, bundled native launch and native fixture corrections.
+  Shared contracts/catalogue/merges remain maintainer-owned.
+- `repair_composed_native_startup`: `local-native-startup`, preserved branch
+  `fix/local-native-startup` at `a561be7`, detached at assembled `dd14960` for exact
+  warm native validation. Exclusive target `target/native-e2e`; private HOME/store.
+  Confirmed raw executable aborts in macOS notification initialization because
+  bundleProxyForCurrentProcess is nil. Build/launch the actual `.app` executable
+  fixes startup. Full original journey passed at `025c245` plus fixture overlay
+  committed as `a561be7`: receipt/provider handling, negative nonce, file integrity,
+  PID exit and port cleanup. Evidence `coverage/native-e2e/1e8706ad-a1f4-4d7e-abbb-2a56fe248657`.
+- `validate_product_accessibility`: `product-accessibility`, `task/product-accessibility`.
+  Uncommitted review fixes: stale async navigation guard; stale/consumed numeric
+  token protection; real light-theme contrast; empty/filter capture assertions.
+  Root authorized and updated MODULE_CONTRACTS/UI_AND_NATIVE. Navigation getter
+  plus optional pre-dispatch cancellation guard are approved. 224 focused tests
+  and 27 ordinary browser states have passed; final regression/checkpoint pending.
+  `review_product_accessibility` will independently re-review the new exact head.
+- `repair_descendant_native_selectors`: only unique native helper files in
+  native-domain-acceptance, desktop-discovery-join, native-tree-acceptance,
+  native-history-acceptance, guarded-history-actions and native-graph-acceptance.
+  Fix 27 confirmed compound CSS/text selector sites; commit without parent updates
+  or pushes. Maintainer coordinates propagation/native runs. Preserve P4.8 work.
+- PR90 branch `task/codex-native-join` is clean/pushed. Runtime/cache repairs reviewed.
+  Warm Rust targets native-provider-activation/target, domain-transitions/target,
+  owner-answer-ui/target, binding-connect-relay/target are idle; assign exclusively.
 
 **Next three steps**
-1. Finish bounded shared repairs, independent affected-flow reviews and one coherent
-   push. Run83 with retained backend diagnostics; diagnose actual abort, not guesses.
-   Coordinate parent propagation without overwriting active P4.8 work.
-2. Audit passing native/coverage/release artifacts, merge qualified stack prefixes,
-   and immediately update honest task closures in the local graph and catalogue.
-  83 can close P2.4/P3.1/P3.2 and, with85/76, P3.3/P3.8 after original proof passes.
-3. Continue P4.8 and independent siblings. Recorded Mac window/notification/tray
-   interactions, live M7 and final release remain open. No manual harness alone
-   proves those criteria; actual owner install/live paid hosts need approval.
+1. Verify assembled83 locally, push coherent repairs, independent exact-head delta
+   review, full CI. CI now checks before eight-minute captures, retaining both gates.
+2. Propagate repaired parents/selectors once; reuse warm local native cache for
+   critical86/88 journeys while CI/reviews run. Audit native/coverage/release artifacts,
+   merge qualified prefixes and immediately update honest local roadmap closures.
+   83 can close P2.4/P3.1/P3.2 plus P3.3/P3.8 with merged85/76 when proof passes.
+3. Finish97 review/browser/native acceptance and siblings. Physical Mac lifecycle,
+   notifications/tray, M7 live hosts and final release remain open; actual owner
+   installation/live paid hosts need approval. Do not invent completion.
 
-Use pinned Node22 and NPM_CONFIG_USERCONFIG=/dev/null. No warm native cache exists;
-no cold native build is authorized. Heavy browser/native checks stay in CI. MCP
-and Seezo remain disabled by owner waiver; no organization security approval claimed.
+Pinned Node22 path `/opt/homebrew/opt/node@22/bin`; NPM_CONFIG_USERCONFIG=/dev/null.
+Native beforeBuild additionally needs worktree node_modules/.bin in PATH. Preserve
+all worktrees, ignored evidence and caches; no new delivery framework or log copies.

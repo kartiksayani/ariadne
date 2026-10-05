@@ -538,6 +538,9 @@ fn claude_activation(terminal: bool) {
     );
     assert!(outcomes.lock().unwrap().iter().all(|outcome| matches!(outcome, ActivationOutcome::Stopped { exit: Ok(exit), .. } if exit.error.is_none() && exit.pending.is_none())));
     drop(activation);
+    // Async shutdown can cancel a waiter while its admitted blocking Core call
+    // retains the real lease. Drain this fixture's executor ownership first.
+    drop(rt);
     drop(owner);
     DesktopOwner::acquire(home.path()).unwrap();
     let event = ariadne_agent_protocol::NormalizedEvent {
@@ -565,6 +568,11 @@ fn claude_activation(terminal: bool) {
     if terminal {
         // Reopen real persisted Core/Store and construct a fresh activation. The
         // end receipt is authoritative before any host qualification or route.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(3)
+            .enable_all()
+            .build()
+            .unwrap();
         let allocated = facts_ids.clone();
         let reopened = Arc::new(NativeCoreService::new(
             AgentResolver::open_data_directory(home.path()).unwrap(),

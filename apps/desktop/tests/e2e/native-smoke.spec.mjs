@@ -18,7 +18,8 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const invoke = (command, request) => browser.execute(async (command, request) => {
   try { return { ok: true, data: await window.__TAURI_INTERNALS__.invoke(command, { request }) }; }
-  catch (error) { return { ok: false, error }; }
+  // WebDriver reserves top-level error in script results.
+  catch (error) { return { ok: false, rejection: error }; }
 }, command, request);
 
 async function openSession(sessionId, itemId) {
@@ -31,7 +32,7 @@ async function openSession(sessionId, itemId) {
   await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(`Item ${itemId}`), 'Selected item detail did not load');
 }
 async function showHistory(texts) {
-  const timeline = await browser.$('[aria-label="Item history view"] button*=Timeline');
+  const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline');
   await timeline.waitForDisplayed(); await timeline.click();
   await wait(async () => {
     const detail = await browser.$('[aria-label="Item detail"]').getText();
@@ -85,11 +86,11 @@ async function delivery(configuration) {
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
 
   for (const text of ownerTexts.slice(1)) {
-    const another = await browser.$('.owner-input button=Write another input');
+    const another = await browser.$('.owner-input').$('button=Write another input');
     await another.waitForDisplayed(); await another.click();
-    const reply = await browser.$('[aria-label="Owner actions"] button=Reply'); await reply.waitForDisplayed(); await reply.click();
+    const reply = await browser.$('[aria-label="Owner actions"]').$('button=Reply'); await reply.waitForDisplayed(); await reply.click();
     const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForDisplayed(); await editor.setValue(text);
-    await browser.$('[aria-label="Owner input for #1"] button=Send reply').click();
+    await browser.$('[aria-label="Owner input for #1"]').$('button=Send reply').click();
     await wait(async () => orderedInputs(await snapshot(configuration)).some(input => input.payload.text === text), 'Visible detail Reply did not save the exact owner text');
   }
   const held = await snapshot(configuration), inputs = orderedInputs(held), savedReceipts = receipts(held, inputs);
@@ -182,7 +183,7 @@ describe('native owner FIFO and real process restoration', () => {
     const bytes = await readFile(receiptPath), disk = JSON.parse(bytes); assert.deepEqual(ping.data, disk);
     assert.equal(disk.nonce, nonce); assert.equal(disk.payload, payload); assert.equal(disk.pid, witness.pid); assert.match(disk.receipt_id, /^ping-\d+-\d+$/);
     const wrongNonce = nonce === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64);
-    const rejected = await invoke('native_ping', { nonce: wrongNonce, payload }); assert.equal(rejected.ok, false); assert.equal(rejected.error.code, 'nonce_mismatch');
+    const rejected = await invoke('native_ping', { nonce: wrongNonce, payload }); assert.equal(rejected.ok, false); assert.equal(rejected.rejection.code, 'nonce_mismatch');
     for (const request of [{ nonce: wrongNonce }, {}]) {
       assert.equal((await invoke('native_e2e_quit', request)).ok, false);
       await assert.rejects(stat(join(root, 'quit-request.json')), { code: 'ENOENT' }); assert.ok(alive(witness.pid));

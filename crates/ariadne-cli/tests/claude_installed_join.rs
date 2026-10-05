@@ -8,7 +8,7 @@ use ariadne_core::{
 use ariadne_domain::models::*;
 use ariadne_runtime::{
     activation::{registered_announcement_resolver, NativeActivation},
-    control::{ControlRoutes, ControlServer},
+    control::{ControlRoutes, ControlServer, CONTROL_TIMEOUT},
     discovery::Discovery,
     leases::DesktopOwner,
     providers::{ProjectRootResolver, ProviderFactory, ProviderInstructions},
@@ -264,7 +264,10 @@ impl Fixture {
         let started = self.sdk.command(json!({"action":"start"}));
         assert_eq!(started["commands"].as_array().unwrap().len(), 3);
         assert!(started["prompts"].as_array().unwrap().is_empty());
-        let until = Instant::now() + Duration::from_secs(3);
+        // Readiness includes native qualification, route publication and an
+        // unchanged-operation retry. Its former 3s deadline was shorter than a
+        // single declared control request; bound this join by three requests.
+        let until = Instant::now() + CONTROL_TIMEOUT * 3;
         let (connected, receipt) = loop {
             let connected = self
                 .sdk
