@@ -37,7 +37,17 @@ export async function runAccessibilityAcceptance(configuration) {
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   assert.equal(await active(editor), true, 'Editor typing must not switch workspace');
   await browser.keys('Escape');
-  await wait(async () => !(await browser.$('.ref-detail')).isExisting(), 'Editor Escape did not close detail');
+  await wait(async () => !(await browser.$('.ref-detail').isExisting()), 'Editor Escape did not close detail');
+  // Draft saves patch preferences; the navigation store re-reads them only every
+  // 2 s. Let the saved file stay unchanged past one refresh so Reply is not
+  // issued with a stale preferences revision.
+  const preferencesPath = join(process.env.ARIADNE_HOME, 'ui.json');
+  let settledSince = Date.now(); let lastSaved = await readFile(preferencesPath, 'utf8');
+  await browser.waitUntil(async () => {
+    const saved = await readFile(preferencesPath, 'utf8');
+    if (saved !== lastSaved) { lastSaved = saved; settledSince = Date.now(); }
+    return Date.now() - settledSince >= 3000;
+  }, { timeout: 30000, interval: 200, timeoutMsg: 'Saved preferences did not settle after the draft edit' });
   await focus(row); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-retained-editor.png'));
@@ -51,7 +61,7 @@ export async function runAccessibilityAcceptance(configuration) {
   assert.equal(await browser.execute(() => document.activeElement?.closest('[role="dialog"]') !== null), true);
   await browser.keys('g'); assert.equal(await (await browser.$('[role="tree"]')).isExisting(), true);
   await browser.keys('Escape');
-  await wait(async () => !(await browser.$('[role="dialog"]')).isExisting(), 'Dialog Escape did not close overlay');
+  await wait(async () => !(await browser.$('[role="dialog"]').isExisting()), 'Dialog Escape did not close overlay');
   assert.equal(await (await browser.$('.ref-detail')).isExisting(), true, 'Dialog Escape must preserve selected detail');
   assert.equal(await browser.execute(() => document.activeElement?.textContent === 'Pause dispatch'), true, 'Dialog restores opener');
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-dialog-return.png'));

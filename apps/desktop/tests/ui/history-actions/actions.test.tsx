@@ -151,6 +151,7 @@ describe('explicit Continue preview and request identity', () => {
     expect(screen.getByRole('region', { name: 'Open items' })).toBeDefined();
     expect(screen.getByRole('region', { name: 'Terminal items' })).toBeDefined();
     expect(transport.mutations).toHaveLength(0);
+    expect(transport.queries.filter(query => query.request.command === 'topic_continue_preview')).toMatchObject([{ session: null }]);
     const source = structuredClone(transport.source);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Send to Target session' })); });
     expect(transport.mutations).toHaveLength(1);

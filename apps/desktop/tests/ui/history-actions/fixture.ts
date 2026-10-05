@@ -1,6 +1,6 @@
 import type { ContinuePreview, MutationEnvelope, OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
 import type { SavedReceiptData } from '../../../src/generated/domain/models';
-import { AppTransport, route, secondId } from '../app/transport';
+import { AppTransport, assertOwnerWire, route, secondId } from '../app/transport';
 
 export class HistoryTransport extends AppTransport {
   replies: (MutationEnvelope | Error | Promise<MutationEnvelope>)[] = [];
@@ -9,6 +9,7 @@ export class HistoryTransport extends AppTransport {
   get target() { return this.sessions.get(secondId)!; }
   override async invoke<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
     const { request } = args;
+    assertOwnerWire(request);
     if (!('command' in request)) {
       if (request.request.command !== 'topic_continue_preview') return super.invoke(name, args);
       this.queries.push(structuredClone(request));
