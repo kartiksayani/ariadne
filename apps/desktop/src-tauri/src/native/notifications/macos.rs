@@ -24,6 +24,25 @@ struct DelegateState {
     open: Box<dyn Fn(OpenRoute) + Send + Sync>,
 }
 
+impl DelegateState {
+    /// The OS supplies an action and payload; Ariadne owns admission and routing.
+    fn clicked(
+        &self,
+        default_action: impl FnOnce() -> bool,
+        payload: impl FnOnce() -> Option<String>,
+        completion: impl FnOnce(),
+    ) {
+        if self.active.load(Ordering::Acquire) && default_action() {
+            if let Some(value) = payload().filter(|value| value.len() <= 1024) {
+                if let Ok(route) = serde_json::from_str::<OpenRoute>(&value) {
+                    (self.open)(route);
+                }
+            }
+        }
+        completion();
+    }
+}
+
 define_class!(
     #[unsafe(super(NSObject))]
     #[name = "AriadneNotificationDelegate"]
@@ -53,24 +72,21 @@ define_class!(
             response: &UNNotificationResponse,
             completion: &DynBlock<dyn Fn()>,
         ) {
-            let state = self.ivars();
-            if state.active.load(Ordering::Acquire)
-                && &*response.actionIdentifier() == unsafe { UNNotificationDefaultActionIdentifier }
-            {
-                let dictionary = response.notification().request().content().userInfo();
-                let key = NSString::from_str("ariadne_route");
-                if let Some(value) = dictionary.objectForKey(key.as_ref()) {
-                    if let Ok(value) = value.downcast::<NSString>() {
-                        let value = value.to_string();
-                        if value.len() <= 1024 {
-                            if let Ok(route) = serde_json::from_str::<OpenRoute>(&value) {
-                                (state.open)(route);
-                            }
-                        }
-                    }
-                }
-            }
-            completion.call(());
+            self.ivars().clicked(
+                || {
+                    &*response.actionIdentifier()
+                        == unsafe { UNNotificationDefaultActionIdentifier }
+                },
+                || {
+                    let dictionary = response.notification().request().content().userInfo();
+                    let key = NSString::from_str("ariadne_route");
+                    dictionary
+                        .objectForKey(key.as_ref())
+                        .and_then(|value| value.downcast::<NSString>().ok())
+                        .map(|value| value.to_string())
+                },
+                || completion.call(()),
+            );
         }
     }
 );
@@ -294,3 +310,7 @@ impl Drop for Platform {
 #[cfg(test)]
 #[path = "tests/permission.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/click.rs"]
+mod click_tests;
