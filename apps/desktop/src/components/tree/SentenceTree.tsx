@@ -161,7 +161,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
       if (search === latest.current.view.filters.search) {
         searchEdited.current = false; setSearchPreview(null); setPendingSearch(null); return;
       }
-      setSearchPreview({ store, text: search });
+      // Coalesce durable writes; the input already projects local rows.
       if (!searchBlocked.current) setPendingSearch({ store, text: search });
     }, 100);
     return () => clearTimeout(timer);
@@ -261,8 +261,10 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     }
   }}>
     <label className="sentence-search">Search sentences<input ref={searchInput} type="search" value={search} onChange={event => {
-      searchEdited.current = true; searchBlocked.current = false;
-      setPendingSearch(null); setSearch(event.target.value);
+      const text = event.target.value;
+      searchEdited.current = text !== view.filters.search; searchBlocked.current = false;
+      setPendingSearch(null); setSearch(text);
+      setSearchPreview(searchEdited.current ? { store, text } : null);
     }} disabled={disabled} /></label>
     <div className="sentence-filters" aria-label="Sentence filters">
       <label>Topic<select value={view.filters.topic_id ?? ''} disabled={disabled} onChange={event => filter(next => { next.topic_id = event.target.value || null; })}>
@@ -287,7 +289,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     </div>
     {state.status !== 'ready' && <p role="status">{state.error?.message ?? (session ? 'This session is stale. Showing the last valid snapshot.' : 'Loading the registered session…')}</p>}
     {error && <p role="alert">{error}</p>}
-    {preview && preview.text !== view.filters.search && <p role="status">Search preview · {writing || pendingSearch ? 'save pending' : 'save not confirmed'}</p>}
+    {preview && preview.text !== view.filters.search && <p role="status">Search preview · {writing || pendingSearch || (searchEdited.current && !searchBlocked.current) ? 'save pending' : 'save not confirmed'}</p>}
     {belongs && currentReveal.kind === 'missing_item' && <p role="status">{currentReveal.banner}</p>}
     {outside && <p role="status">Item {outside.item.id} is outside the current filters. <button type="button" onClick={() => setDismissedReveal(currentReveal)}>Dismiss temporary reveal</button></p>}
     {projection && !rows.length && <p>No sentences match these filters. <button type="button" disabled={writing || state.status !== 'ready'} onClick={clearFilters}>Clear filters</button></p>}
