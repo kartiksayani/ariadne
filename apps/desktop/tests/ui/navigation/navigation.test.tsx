@@ -123,6 +123,8 @@ describe('complete registered navigation reads', () => {
     read(transport); await store.refresh();
     expect(transport.calls.filter(call => call.name === 'project_list').slice(-1)[0]?.request).toMatchObject({ request: { params: { cursor: null } } });
     expect(store.getSnapshot().status).toBe('ready');
+    expect(store.getSnapshot().error).toBeNull();
+    expect(store.getSnapshot().error).toBeNull();
   });
   it.each(['revision', 'digest', 'duplicate', 'counts', 'empty'] as const)('rejects %s changes during a page capture', async mismatch => {
     const { transport, service } = setup();
@@ -215,6 +217,10 @@ describe('canonical preference mutations', () => {
     const { transport, store } = setup(); read(transport); await store.start();
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'commit_uncertain', message: 'Preference commit is uncertain.' } }, patchReceipt());
     expect(await store.navigate({ kind: 'all_sessions' })).toBe(false);
+    expect(store.getSnapshot().pendingOperationId).toBe(operationId);
+    const failure = store.getSnapshot().error;
+    read(transport); await store.refresh();
+    expect(store.getSnapshot().error).toBe(failure);
     expect(store.getSnapshot().pendingOperationId).toBe(operationId);
     expect(await store.navigate({ kind: 'projects' })).toBe(false);
     const next = preferences(2); next.global.selected_navigation = { kind: 'all_sessions' }; read(transport, next);
@@ -406,6 +412,30 @@ describe('tree edits through canonical navigation preferences', () => {
     expect(store.getSnapshot().preferences).toEqual(newer);
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
     expect(store.getSnapshot().pendingOperationId).toBeNull();
+  });
+  it('keeps rejected navigation actionable across native preference refreshes until a new explicit attempt succeeds', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
+    read(transport, prefs); await store.start();
+    const conflict: CoreError = { ...error, code: 'revision_conflict', message: 'Preferences revision changed.', current_revision: 3 };
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: conflict });
+    const native = structuredClone(prefs); native.revision = 3;
+    native.global.notification_watermark = demo.updated_at;
+    native.global.window = { x: 100, y: 100, width: 1000, height: 700, monitor_id: 'main' };
+    read(transport, native);
+    expect(await store.navigate({ kind: 'all_sessions' })).toBe(false);
+    expect(store.getSnapshot().error).toMatchObject({ error: conflict });
+    expect(store.getSnapshot().preferences).toEqual(native); expect(store.getSnapshot().pendingOperationId).toBeNull();
+    read(transport, native); await store.refresh();
+    expect(store.getSnapshot().error).toMatchObject({ error: conflict });
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    const saved = structuredClone(native); saved.revision = 4; saved.global.selected_navigation = { kind: 'all_sessions' };
+    transport.enqueue('preferences_patch', patchReceipt(4)); read(transport, saved);
+    expect(await store.navigate({ kind: 'all_sessions' })).toBe(true);
+    expect(store.getSnapshot().error).toBeNull(); expect(store.getSnapshot().preferences).toEqual(saved);
+    const calls = transport.calls.filter(call => call.name === 'preferences_patch'); expect(calls).toHaveLength(2);
+    expect(calls[1].request).toMatchObject({ command: { params: { expected_preferences_revision: 3,
+      entries: [{ kind: 'set_global', preferences: { ...native.global, selected_navigation: { kind: 'all_sessions' } } }] } } });
+    expect(store.getSnapshot().preferences?.drafts).toEqual(prefs.drafts);
   });
   it('retains uncertain tree operations with the original revision and exact body until explicit retry', async () => {
     const { transport, store } = setup(); read(transport); await store.start();

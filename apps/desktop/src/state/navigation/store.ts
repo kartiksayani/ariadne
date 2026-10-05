@@ -43,6 +43,8 @@ export class NavigationStore {
   private preferencesFloor = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private pending: { request: OwnerMutationRequest; confirmed: (receipt: MutationReceipt) => void } | null = null;
+  // Reconciled reads recover their own errors, not the last rejected edit.
+  private mutationFailure: Failure | null = null;
   private readonly reconcile = () => { void this.refresh(); };
   private readonly visibility = () => { if (document.visibilityState === 'visible') this.reconcile(); };
 
@@ -118,7 +120,7 @@ export class NavigationStore {
           throw new ServiceFailure('invalid_response');
         }
         this.publish({ preferences: immutable(preferences), projects: immutable(projects), sessions: immutable(sessions),
-          sessionProjectId: projectId, status: 'ready', error: this.pending ? this.state.error : null });
+          sessionProjectId: projectId, status: 'ready', error: this.mutationFailure });
       } catch (error: unknown) {
         if (epoch === this.epoch) this.publish({ status: this.state.projects ? 'stale' : 'unavailable', error: fail(error) });
       }
@@ -165,8 +167,9 @@ export class NavigationStore {
     if (this.stopped || this.pending) return null;
     const preferences = this.preferences();
     if (preferences.revision === expectedRevision) return preferences;
-    this.publish({ error: new CoreFailure({ code: 'revision_conflict', message: 'These preferences changed after this view was rendered.',
-      hint: 'Reload the view before choosing this edit again.', retryable: false, field_errors: [], current_revision: preferences.revision }) });
+    this.mutationFailure = new CoreFailure({ code: 'revision_conflict', message: 'These preferences changed after this view was rendered.',
+      hint: 'Reload the view before choosing this edit again.', retryable: false, field_errors: [], current_revision: preferences.revision });
+    this.publish({ error: this.mutationFailure });
     await this.refresh();
     return null;
   }
@@ -266,6 +269,7 @@ export class NavigationStore {
   async retryMutation(): Promise<boolean> {
     const pending = this.pending;
     if (this.stopped || !pending || this.state.writing) return false;
+    this.mutationFailure = null;
     ++this.epoch;
     this.publish({ writing: true, pendingOperationId: pending.request.command.op_id, error: null });
     try {
@@ -278,6 +282,7 @@ export class NavigationStore {
       return true;
     } catch (error: unknown) {
       const failure = fail(error);
+      this.mutationFailure = failure;
       // An unknown completion retains the exact command and operation ID.
       // Definitive typed rejection permits a new, explicitly chosen action.
       if (failure instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(failure.error.code)) this.pending = null;
