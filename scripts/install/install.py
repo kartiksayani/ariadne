@@ -22,6 +22,10 @@ ROOT = Path(__file__).resolve().parents[2]
 LIMIT = 512 * 1024
 BINARIES = ("ariadne", "ariadne-mcp")
 RUST_VERSION = "1.98.1"
+# Minimums, not pins (ADR-0072): Cargo.lock/package-lock.json fix the dependencies.
+MIN_NODE = "22.23.2"
+MIN_NPM = "10.9.8"
+MIN_RUST = RUST_VERSION
 
 
 class InstallError(ValueError):
@@ -327,6 +331,49 @@ def run(args, cwd=ROOT, env=None, capture=False):
                           timeout=900 if not capture else 30).stdout
 
 
+def at_least(label, text, pattern, minimum):
+    found = re.match(pattern, text)
+    need = tuple(int(part) for part in minimum.split("."))
+    require(found and tuple(int(part) for part in found.groups()) >= need,
+            f"Ariadne needs {label.split(' ')[0]} {minimum} or newer; found {text or 'nothing'}.")
+
+
+def node_supported(text):
+    """Accept the Node lines locked dependencies support: ^22.23.2 || ^24.15.0 || >=26."""
+    found = re.match(r"v(\d+)\.(\d+)\.(\d+)", text)
+    version = tuple(int(part) for part in found.groups()) if found else None
+    ok = version is not None and (
+        (version[0] == 22 and version >= (22, 23, 2))
+        or (version[0] == 24 and version >= (24, 15, 0))
+        or version[0] >= 26)
+    require(ok, "Ariadne needs Node 22.23.2 or newer on the 22 line, 24.15.0 or newer on the 24 line, "
+                f"or 26 and later; found {text or 'nothing'}.")
+
+
+def rust_toolchain(env):
+    """Pick an installed toolchain without ever downloading one.
+
+    Prefer the checkout's pinned toolchain when it is already installed. Otherwise use
+    the owner's own default, resolved outside this checkout so that rust-toolchain.toml
+    (an exact channel that rustup would try to download) does not apply.
+    """
+    try:
+        # `rustup run` without --install only selects an already installed toolchain.
+        versions = [run(["rustup", "run", RUST_VERSION, tool, "--version"], capture=True, env=env).strip()
+                    for tool in ("rustc", "cargo")]
+        return RUST_VERSION, *versions
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        name = run(["rustup", "show", "active-toolchain"], cwd=Path.home(), capture=True, env=env).split()[0]
+        versions = [run(["rustup", "run", name, tool, "--version"], cwd=Path.home(), capture=True, env=env).strip()
+                    for tool in ("rustc", "cargo")]
+        return name, *versions
+    except (OSError, IndexError, subprocess.SubprocessError) as error:
+        raise InstallError(f"Ariadne needs Rust {MIN_RUST} or newer with rustc and cargo; install it with rustup "
+                           "before retrying. No toolchain download was attempted.") from error
+
+
 def preflight():
     require(sys.version_info >= (3, 11), "Python 3.11 or newer is required.")
     require(platform.system() == "Darwin", "Personal install requires macOS.")
@@ -334,19 +381,15 @@ def preflight():
     require(os_version and int(os_version.split(".")[0]) >= 13, "macOS 13 or newer is required.")
     arch = platform.machine()
     require(arch in ("arm64", "x86_64"), "Only arm64 and x86_64 macOS are supported.")
-    expected = {"node": "v22.23.2", "npm": "10.9.8", "rustc": f"rustc {RUST_VERSION}", "cargo": f"cargo {RUST_VERSION}"}
-    env = {**os.environ, "RUSTUP_AUTO_INSTALL": "0", "RUSTUP_TOOLCHAIN": RUST_VERSION}
+    env = {**os.environ, "RUSTUP_AUTO_INSTALL": "0"}
+    env.pop("RUSTUP_TOOLCHAIN", None)
     observed = {name: run([name, "--version"], capture=True, env=env).strip() for name in ("node", "npm")}
-    try:
-        # `rustup run` without --install only selects an already installed
-        # toolchain; invoking the rustc proxy in this checkout could install it.
-        observed["rustc"] = run(["rustup", "run", RUST_VERSION, "rustc", "--version"], capture=True, env=env).strip()
-        observed["cargo"] = run(["rustup", "run", RUST_VERSION, "cargo", "--version"], capture=True, env=env).strip()
-    except (OSError, subprocess.SubprocessError) as error:
-        raise InstallError(f"Install/select Rust {RUST_VERSION} with rustc and cargo explicitly before retrying; no toolchain download was attempted.") from error
-    for name, version in expected.items():
-        require(observed[name] == version if name in ("node", "npm") else observed[name].startswith(version + " "),
-                f"Use the pinned {name} version {version}; no toolchain was installed.")
+    node_supported(observed["node"])
+    at_least("npm", observed["npm"], r"(\d+)\.(\d+)\.(\d+)", MIN_NPM)
+    toolchain, observed["rustc"], observed["cargo"] = rust_toolchain(env)
+    at_least("Rust", observed["rustc"], r"rustc (\d+)\.(\d+)\.(\d+)", MIN_RUST)
+    at_least("Rust (cargo)", observed["cargo"], r"cargo (\d+)\.(\d+)\.(\d+)", MIN_RUST)
+    observed["rust_toolchain"] = toolchain
     observed["xcode"] = run(["xcode-select", "-p"], capture=True).strip()
     require(observed["xcode"], "Install/select Xcode command line tools explicitly.")
     run(["xcrun", "--sdk", "macosx", "--show-sdk-path"], capture=True)
@@ -363,7 +406,7 @@ def build():
         if re.match(r"^(ARIADNE_E2E_|CARGO_FEATURE_|CARGO_ENCODED_RUSTFLAGS$|RUSTFLAGS$|TAURI_CONFIG$|TAURI_WEBDRIVER_PORT$|WDIO_EMBEDDED_SERVER$|VITE_ARIADNE_E2E$)", name):
             del env[name]
     env.update(CARGO_TARGET_DIR=str(target), MACOSX_DEPLOYMENT_TARGET="13.0",
-               RUSTUP_AUTO_INSTALL="0", RUSTUP_TOOLCHAIN=RUST_VERSION)
+               RUSTUP_AUTO_INSTALL="0", RUSTUP_TOOLCHAIN=facts.get("rust_toolchain", RUST_VERSION))
     run(["npm", "ci", "--ignore-scripts", "--engine-strict"], env=env)
     for command in ("gen-contracts", "gen-rules", "gen-codex-wire"):
         arguments = ["cargo", "run", "--locked", "-p", "ariadne-xtask", "--", command]

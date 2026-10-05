@@ -282,7 +282,12 @@ owner action.
 
 ## 7. Build and personal install
 
-Use the installed Rust and Node toolchains. Commit `Cargo.lock` and
+Use the installed Rust and Node toolchains. The install preflight requires
+minimum versions (Node 22.23.2 on the 22 line, 24.15.0 on the 24 line or 26+;
+npm 10.9.8; Rust 1.98.1), accepts any newer version in those ranges, records the versions actually used in the receipt, and rejects only
+older or unparsable ones (ADR-0072). It prefers the checkout's pinned Rust
+toolchain when already installed, otherwise uses the owner's default; it never
+downloads a toolchain. CI keeps exact pins for reproducibility. Commit `Cargo.lock` and
 `package-lock.json` and use locked dependencies. Generate schemas, DTOs, and
 rules from their authored sources and check generated files for drift. Node is a
 build dependency only; production does not bundle a language runtime.
