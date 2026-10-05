@@ -10,15 +10,16 @@ const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
 const search = () => browser.$('.sentence-search input');
 const applyRequest = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
-async function apply(configuration, operations, expectedItemRevisions = {}, summary = '') {
+async function apply(configuration, operations, expectedItemRevisions = {}, summary = '', setup = false) {
   const request = { ...applyRequest(operations), expected_item_revisions: expectedItemRevisions, summary };
-  return publishTreeRequest(configuration, request);
+  return publishTreeRequest(configuration, request, setup);
 }
-export async function publishTreeRequest(configuration, request) {
+export async function publishTreeRequest(configuration, request, setup = false) {
   assert.ok(Buffer.byteLength(JSON.stringify(request)) < 512 * 1024, 'Every real CLI request remains within its protocol limit');
   const args = ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--json'];
   const before = await snapshot(configuration), rejections = [];
-  for (let retry = 0; retry <= 2; retry++) {
+  const maximumRetries = setup ? 2 : 0;
+  for (let retry = 0; retry <= maximumRetries; retry++) {
     const result = await cliRequest(configuration.cli, args, request);
     if (result.value.ok === true) {
       assert.equal(result.code, 0); assert.equal(result.value.data.session_id, configuration.sessionId);
@@ -30,7 +31,7 @@ export async function publishTreeRequest(configuration, request) {
     // callback. Only setup may repeat this exact frozen operation; uncertain
     // writes, revision conflicts and every other error remain failures.
     assert.ok(!after.operation_receipts[request.op_id], 'Rejected tree setup must have no saved receipt for this operation');
-    if (result.value.error.code !== 'store_busy' || retry === 2) assert.fail(result.output);
+    if (result.value.error.code !== 'store_busy' || retry === maximumRetries) assert.fail(result.output);
   }
   assert.fail('Bounded tree setup publication did not complete');
 }
@@ -77,16 +78,16 @@ async function seedTree(configuration) {
   const tree = { ...selected, cli: configuration.cli, projectId, sessionId: receipt.session_id,
     bindingId: receipt.data.binding_id, generation: receipt.data.generation,
     sessionPath: join(selected.projectRoot, '.ariadne/sessions', `${receipt.session_id}.json`) };
-  const publication = [await apply(tree, [{ op: 'topic.add', ref: 'native_tree_topic', name: 'Native tree acceptance' }])];
+  const publication = [await apply(tree, [{ op: 'topic.add', ref: 'native_tree_topic', name: 'Native tree acceptance' }], {}, '', true)];
   const topic = Object.values((await snapshot(tree)).topics).find(topic => topic.name === 'Native tree acceptance'); assert.ok(topic);
-  for (let branch = 1; branch <= 20; branch++) publication.push(await apply(tree, treeBatch(topic.id, branch)));
+  for (let branch = 1; branch <= 20; branch++) publication.push(await apply(tree, treeBatch(topic.id, branch), {}, '', true));
   let live = await snapshot(tree), nextMessage = 1;
   while (live.messages.length < 5000) {
     // Every nonempty apply adds one genuine activity message as well as its
     // explicit replies. The final activity-only batch closes an exact count.
     const operations = treeMessageBatch(nextMessage, Math.min(100, 5000 - live.messages.length - 1));
     const revisions = Object.fromEntries(operations.map(operation => [operation.item.id, live.items[operation.item.id].revision]));
-    publication.push(await apply(tree, operations, revisions, 'Publish complete native message history.'));
+    publication.push(await apply(tree, operations, revisions, 'Publish complete native message history.', true));
     nextMessage += operations.length; live = await snapshot(tree);
   }
   const session = await snapshot(tree); assert.equal(Object.keys(session.items).length, 2000); assert.equal(Object.keys(session.inputs).length, 0);

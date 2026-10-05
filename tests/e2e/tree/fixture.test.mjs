@@ -24,17 +24,19 @@ test('tree setup repeats only definitive Busy with the identical frozen request 
     };
     const calls = async () => JSON.parse(await readFile(journal, 'utf8'));
     await script(['store_busy', 'store_busy']);
-    assert.deepEqual(await publishTreeRequest(configuration, request), { request, receipt: { session_id: 'session' } });
+    assert.deepEqual(await publishTreeRequest(configuration, request, true), { request, receipt: { session_id: 'session' } });
     const repeated = await calls(); assert.equal(repeated.length, 3);
     assert.ok(repeated.every(call => JSON.stringify(call) === JSON.stringify(repeated[0])));
     assert.deepEqual(repeated[0].request, request); assert.ok(repeated[0].args.includes('--json'));
     for (const failure of ['revision_conflict', 'commit_uncertain', 'store_io', 'binding_mismatch', 'store_busy']) {
       await script(failure === 'store_busy' ? [failure, failure, failure] : [failure]);
-      await assert.rejects(publishTreeRequest(configuration, request), new RegExp(failure));
+      await assert.rejects(publishTreeRequest(configuration, request, true), new RegExp(failure));
       assert.equal((await calls()).length, failure === 'store_busy' ? 3 : 1);
     }
     await script(['store_busy', 'revision_conflict']);
-    await assert.rejects(publishTreeRequest(configuration, request), /revision_conflict/); assert.equal((await calls()).length, 2);
+    await assert.rejects(publishTreeRequest(configuration, request, true), /revision_conflict/); assert.equal((await calls()).length, 2);
+    await script(['store_busy']);
+    await assert.rejects(publishTreeRequest(configuration, request), /store_busy/); assert.equal((await calls()).length, 1, 'Live edit defaults to one attempt');
     assert.deepEqual(JSON.parse(await readFile(sessionPath, 'utf8')), { operation_receipts: {} });
   } finally {
     if (priorEvidence === undefined) delete process.env.ARIADNE_E2E_EVIDENCE; else process.env.ARIADNE_E2E_EVIDENCE = priorEvidence;
