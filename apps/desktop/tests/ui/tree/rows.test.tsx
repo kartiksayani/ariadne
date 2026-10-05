@@ -39,6 +39,43 @@ describe('canonical sentence tree projection', () => {
     activity.body = 'secret diagnostic'; activity.items_touched = ['1'];
     expect(sentenceRows(immutable(session), preferences, new Set()).matchingTotal).toBe(0);
   });
+  it('keeps token matching correct as queries change on the same immutable snapshot', () => {
+    const session = seed(), preferences = view(session);
+    session.items['1']!.question = 'ＯＦＦＩＣＥ café'; session.items['1']!.outcome = 'Confirmed network';
+    session.items['2']!.question = 'Separate orchard';
+    session.messages.find(message => message.kind === 'reply' && message.item_id === '1')!.body = 'Canonical receipt';
+    const activity = session.messages.find(message => message.kind === 'activity')!;
+    activity.body = 'Excluded diagnostic'; activity.items_touched = ['1'];
+    const frozen = immutable(session);
+    for (const [search, expected] of [
+      ['office CAFE\u0301 network', ['1']], ['separate orchard', ['2']],
+      ['canonical receipt', ['1']], ['office orchard', []], ['excluded diagnostic', []], ['ＯＦＦＩＣＥ', ['1']],
+    ] as const) {
+      preferences.filters.search = search;
+      expect(sentenceRows(frozen, preferences, new Set()).rows.filter(row => !row.context).map(row => row.item.id)).toEqual(expected);
+    }
+    preferences.filters.search = '  \t ';
+    expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(sentenceRows(frozen, view(session), new Set()).matchingTotal);
+  });
+  it.each(['question', 'outcome', 'why', 'topic', 'owner_input', 'reply'] as const)('refreshes searchable %s text when an immutable session snapshot is replaced', field => {
+    const session = seed(), preferences = view(session);
+    const changeText = (text: string): void => {
+      if (field === 'topic') session.topics[session.items['1']!.topic_id]!.name = text;
+      else if (field === 'owner_input' || field === 'reply') {
+        session.messages.find(message => message.kind === field && message.item_id === '1')!.body = text;
+      } else session.items['1']![field] = text;
+    };
+    changeText('BeforeToken');
+    const before = immutable(session);
+    preferences.filters.search = 'beforetoken';
+    expect(sentenceRows(before, preferences, new Set()).rows.some(row => row.item.id === '1' && !row.context)).toBe(true);
+    changeText('AfterToken'); session.revision++;
+    const after = immutable(session);
+    expect(sentenceRows(after, preferences, new Set()).matchingTotal).toBe(0);
+    preferences.filters.search = 'aftertoken';
+    expect(sentenceRows(after, preferences, new Set()).rows.some(row => row.item.id === '1' && !row.context)).toBe(true);
+    expect(sentenceRows(before, preferences, new Set()).matchingTotal).toBe(0);
+  });
   it('combines categories with AND and statuses with OR, preserving contextual ancestors', () => {
     const session = seed(), preferences = view(session);
     const child = session.items['1.1']!; child.question = 'Find the matching child'; child.status = 'open';
