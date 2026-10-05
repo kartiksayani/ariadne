@@ -40,7 +40,7 @@ async function atomicJson(path, value) {
   await writeFile(`${path}.tmp`, JSON.stringify(value)); await rename(`${path}.tmp`, path);
 }
 export async function recordAdmission(configuration, args) {
-  assert.deepEqual(args.slice(0, 6), ['queue', '--remote', `unix://${configuration.socket}`, '--thread', thread, '--message']);
+  assert.deepEqual(args.slice(0, 6), ['queue', '--remote', `unix://${configuration.socket}`, '--thread', configuration.thread ?? thread, '--message']);
   assert.equal(args.length, 7);
   const marker = args[6].match(/^\[ARIADNE_INPUT:([0-9a-f-]{36}):([0-9a-f-]{36})\]\n/);
   assert.ok(marker, 'Queue admission requires the saved input/attempt marker');
@@ -97,23 +97,26 @@ export async function startScriptedProvider(root, cli, evidence) {
   const provider = join(root, 'provider'), project = join(root, 'project');
   const discoveryProject = join(root, 'discovery-project'), discoveryThread = 'ariadne-scripted-discovery-thread';
   const treeProject = join(root, 'tree-project'), treeThread = 'ariadne-scripted-tree-thread';
-  await mkdir(provider, { recursive: true }); await mkdir(project); await mkdir(discoveryProject); await mkdir(treeProject);
+  const historyProject = join(root, 'history-project'), historyThread = 'ariadne-scripted-history-thread';
+  await mkdir(provider, { recursive: true }); await mkdir(project); await mkdir(discoveryProject); await mkdir(treeProject); await mkdir(historyProject);
   const socket = join(provider, 'daemon.sock'), executable = join(provider, 'codex');
   const queuedPath = join(provider, 'admissions.jsonl'), completePath = join(provider, 'complete.json');
   const bindingPath = join(provider, 'binding.json'), calls = [];
   const configuration = { cli, project, provider, socket, executable, queuedPath, completePath, bindingPath, thread,
     discovery: { projectRoot: discoveryProject, externalSessionId: discoveryThread, socketPath: socket },
     tree: { projectRoot: treeProject, externalSessionId: treeThread, socketPath: socket },
+    history: { projectRoot: historyProject, externalSessionId: historyThread, socketPath: socket, socket, thread: historyThread,
+      queuedPath: join(provider, 'history-admissions.jsonl'), completePath: join(provider, 'history-complete.json') },
     appArgs: ['--codex-executable', executable, '--codex-home', provider, '--codex-endpoint', socket] };
-  const executableSource = `#!${process.execPath}\nimport{appendFileSync}from'node:fs';\nimport{recordAdmission}from ${JSON.stringify(import.meta.url)};\nconst args=process.argv.slice(2);\nif(args.length===1&&args[0]==='--version'){appendFileSync(${JSON.stringify(join(provider, 'versions.jsonl'))},'version\\n');console.log('codex-cli 0.160.0');}\nelse{try{await recordAdmission(${JSON.stringify(configuration)},args);}catch{process.exitCode=3;}}\n`;
+  const executableSource = `#!${process.execPath}\nimport{appendFileSync}from'node:fs';\nimport{recordAdmission}from ${JSON.stringify(import.meta.url)};\nconst args=process.argv.slice(2);\nif(args.length===1&&args[0]==='--version'){appendFileSync(${JSON.stringify(join(provider, 'versions.jsonl'))},'version\\n');console.log('codex-cli 0.160.0');}\nelse{try{const configuration=${JSON.stringify(configuration)};await recordAdmission(args[4]===configuration.history.externalSessionId?configuration.history:configuration,args);}catch{process.exitCode=3;}}\n`;
   // The fixture executable is a module even without a .mjs extension.
   await writeFile(join(provider, 'package.json'), '{"type":"module"}');
   await writeFile(executable, executableSource); await chmod(executable, 0o700);
   const fixtures = new URL('../../../../contracts/providers/codex/0.160.0/fixtures/', import.meta.url);
   const load = async name => JSON.parse(await readFile(new URL(name, fixtures), 'utf8'));
   let failure;
-  async function turns() {
-    const queued = await admissions(configuration), completed = await optional(completePath) ?? [];
+  async function turns(control) {
+    const queued = await admissions(control), completed = await optional(control.completePath) ?? [];
     for (const control of completed) assert.deepEqual(queued.find(entry => entry.attemptId === control.attemptId), control, 'Foreign completion identity cannot affect another turn');
     const result = await load('turns-response.json');
     // Existing Codex history reads are descending: the newest turn precedes
@@ -139,19 +142,19 @@ export async function startScriptedProvider(root, cli, evidence) {
         case 'initialize': result = await load('initialize-response.json'); result.codexHome = provider; break;
         case 'thread/read': {
           const requested = request.params.threadId;
-          assert.ok([thread, discoveryThread, treeThread, 'another-explicit-thread'].includes(requested), 'Only explicit candidates and the deliberate identity-mismatch probe are readable');
+          assert.ok([thread, discoveryThread, treeThread, historyThread, 'another-explicit-thread'].includes(requested), 'Only explicit candidates and the deliberate identity-mismatch probe are readable');
           // A reachable host reports its actual existing session for the known
           // negative probe. Real qualification must reject that different ID;
           // closing the transport would test HostUnreachable instead.
           const actual = requested === 'another-explicit-thread' ? thread : requested;
           result = await load('read-response.json'); result.thread.id = actual; result.thread.sessionId = actual;
-          result.thread.cwd = actual === thread ? project : actual === discoveryThread ? discoveryProject : treeProject; break;
+          result.thread.cwd = actual === thread ? project : actual === discoveryThread ? discoveryProject : actual === treeThread ? treeProject : historyProject; break;
         }
-        case 'thread/loaded/list': result = { data: [thread, discoveryThread, treeThread], nextCursor: null }; break;
+        case 'thread/loaded/list': result = { data: [thread, discoveryThread, treeThread, historyThread], nextCursor: null }; break;
         case 'thread/queue/list': result = { data: [], nextCursor: null }; break;
         case 'thread/turns/list':
-          assert.ok([thread, discoveryThread, treeThread].includes(request.params.threadId));
-          result = request.params.threadId === thread ? await turns() : { data: [], nextCursor: null }; break;
+          assert.ok([thread, discoveryThread, treeThread, historyThread].includes(request.params.threadId));
+          result = request.params.threadId === thread ? await turns(configuration) : request.params.threadId === historyThread ? await turns(configuration.history) : { data: [], nextCursor: null }; break;
         default: throw new Error(`Unexpected provider operation ${request.method}`);
       }
       if (request.method === 'thread/turns/list') call.turns = result.data.map(turn => ({ id: turn.id, status: turn.status,

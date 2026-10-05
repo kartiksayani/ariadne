@@ -193,7 +193,9 @@ describe('canonical preference mutations', () => {
     read(transport, prefs); await store.start();
     const next = structuredClone(prefs); next.revision = 2; next.sessions[0].tab_open = false; next.global.selected_navigation = { kind: 'projects' };
     transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
+    const intent = store.getNavigationRequest();
     expect(await store.closeTab(route)).toBe(true);
+    expect(store.getNavigationRequest()).toBe(intent + 1);
     const command = transport.calls.find(call => call.name === 'preferences_patch')!.request as OwnerMutationRequest;
     expect(command).toEqual({ session: null, command: { api_version: 1, op_id: operationId, command: 'preferences_patch',
       params: { expected_preferences_revision: 1, entries: [
@@ -216,13 +218,29 @@ describe('canonical preference mutations', () => {
   it('a slow old session click cannot overwrite a newer navigation action', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
     const slow = deferred<QueryEnvelope>(); transport.enqueue('session_get', slow.promise);
+    const intent = store.getNavigationRequest();
     const older = store.navigate({ kind: 'session', session: route });
+    expect(store.getNavigationRequest()).toBe(intent + 1);
     const next = preferences(2); next.global.selected_navigation = { kind: 'all_sessions' };
     transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
     expect(await store.navigate({ kind: 'all_sessions' })).toBe(true);
+    expect(store.getNavigationRequest()).toBe(intent + 2);
     slow.resolve(loaded()); expect(await older).toBe(false);
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
     expect(store.getSnapshot().preferences?.global.selected_navigation.kind).toBe('all_sessions');
+  });
+  it('abandons a canceled owner reveal before dispatch or publication when session validation finishes', async () => {
+    const { transport, store } = setup(); read(transport); await store.start();
+    const before = store.getSnapshot(), slow = deferred<QueryEnvelope>(); let current = true;
+    transport.enqueue('session_get', slow.promise);
+    const pending = store.navigate({ kind: 'session', session: route }, null, () => current);
+    expect(store.getNavigationRequest()).toBe(1); current = false; slow.resolve(loaded());
+    expect(await pending).toBe(false);
+    expect(store.getSnapshot().preferences).toBe(before.preferences); expect(store.getSnapshot().reveal).toBe(before.reveal);
+    expect(transport.calls.some(call => call.name === 'preferences_patch')).toBe(false);
+    const reads = transport.calls.length;
+    expect(await store.navigate({ kind: 'all_sessions' }, null, () => false)).toBe(false);
+    expect(transport.calls).toHaveLength(reads); expect(store.getNavigationRequest()).toBe(1);
   });
   it('unknown mutation completion retains the exact operation, prevents another command and reconciles with the same ID', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
@@ -418,6 +436,97 @@ describe('canonical preference mutations', () => {
 const adapter: AdapterChoice = { adapter_id: 'demo.local', label: 'Installed adapter', configuration: { namespace: 'demo.local', values: {} } };
 const waiting = { count: '1', loading: true, emptyText: 'Waiting panel is supplied by its owner.', waiting: [], sent: [] };
 describe('source-backed navigation views and explicit registration', () => {
+  it.each(['projects', 'project', 'all_sessions'] as const)('blocks %s navigation during explicit Refresh until fresh preferences are published', async kind => {
+    const { transport, store } = setup(); const prefs = preferences();
+    prefs.global.selected_navigation = kind === 'project' ? { kind, project_id: projectId } : { kind };
+    read(transport, prefs);
+    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => null} />);
+    const allSessions = screen.getByRole('button', { name: 'All sessions' });
+    await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
+    const conflict: CoreError = { ...error, code: 'revision_conflict', message: 'Preferences revision changed.', current_revision: 3 };
+    const native = structuredClone(prefs); native.revision = 3;
+    native.global.window = { x: 100, y: 100, width: 1000, height: 700, monitor_id: 'main' };
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: conflict }); read(transport, native);
+    await act(async () => { fireEvent.click(allSessions); });
+    expect(store.getSnapshot().preferences).toEqual(native);
+    expect(screen.getByRole('alert').textContent).toContain(conflict.message);
+    expect((allSessions as HTMLButtonElement).disabled).toBe(false);
+
+    const fresh = structuredClone(native); fresh.revision = 4; fresh.global.notification_watermark = demo.updated_at;
+    const preferenceRead = deferred<QueryEnvelope>(); const projectRead = deferred<QueryEnvelope>();
+    transport.enqueue('preferences_get', preferenceRead.promise);
+    transport.enqueue('project_list', projectRead.promise);
+    transport.enqueue('session_list', success('session_list', sessionResult()));
+    const readCount = transport.calls.filter(call => call.name === 'preferences_get').length;
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect((screen.getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled).toBe(true);
+    const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
+    within(tabs).getAllByRole('button').forEach(button => {
+      expect((button as HTMLButtonElement).disabled).toBe(true); fireEvent.click(button);
+    });
+    expect((screen.getByRole('button', { name: 'Register project' }) as HTMLButtonElement).disabled).toBe(true);
+    if (kind === 'projects') {
+      screen.getAllByRole('button', { name: /Registered root/ }).forEach(card => {
+        expect(card.getAttribute('aria-disabled')).toBe('true'); fireEvent.click(card); fireEvent.keyDown(card, { key: 'Enter' });
+      });
+    } else {
+      expect((screen.getByRole('button', { name: 'Open' }) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+      if (kind === 'project') expect((screen.getByRole('button', { name: 'Connect existing session' }) as HTMLButtonElement).disabled).toBe(true);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Refreshing…' }));
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    expect(transport.calls.some(call => call.name === 'session_get')).toBe(false);
+    await waitFor(() => expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(readCount + 1));
+    await act(async () => { preferenceRead.resolve(success('preferences_get', fresh)); });
+    expect(store.getSnapshot().preferences).toEqual(native);
+    expect((allSessions as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Refreshing…' })).toBeTruthy();
+    await act(async () => { projectRead.resolve(success('project_list', projectResult())); });
+    expect(store.getSnapshot().preferences).toEqual(fresh);
+    expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((allSessions as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole('alert').textContent).toContain(conflict.message);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(readCount + 1);
+
+    const saved = structuredClone(fresh); saved.revision = 5; saved.global.selected_navigation = { kind: 'all_sessions' };
+    transport.enqueue('preferences_patch', patchReceipt(5)); read(transport, saved);
+    await act(async () => { fireEvent.click(allSessions); });
+    const mutations = transport.calls.filter(call => call.name === 'preferences_patch'); expect(mutations).toHaveLength(2);
+    expect(mutations[1].request).toMatchObject({ command: { params: { expected_preferences_revision: 4,
+      entries: [{ kind: 'set_global', preferences: saved.global }] } } });
+    expect(store.getSnapshot().preferences).toEqual(saved);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(await screen.findByRole('heading', { name: 'All sessions', level: 1 })).toBeTruthy();
+  });
+  it('clears explicit Refresh progress after a failed read and keeps failure visible without changing navigation', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
+    read(transport, prefs);
+    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => null} />);
+    const allSessions = screen.getByRole('button', { name: 'All sessions' });
+    await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error });
+    await act(async () => { fireEvent.click(allSessions); });
+    const before = store.getSnapshot(); const pending = deferred<QueryEnvelope>();
+    transport.enqueue('preferences_get', pending.promise);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect((screen.getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((allSessions as HTMLButtonElement).disabled).toBe(true);
+    const failure: CoreError = { ...error, message: 'Preferences read failed.', hint: 'Try refreshing again.' };
+    await act(async () => { pending.resolve({ api_version: 1, ok: false, error: failure }); });
+    expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((allSessions as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole('alert').textContent).toContain(failure.message);
+    expect(screen.getByRole('alert').textContent).toContain(failure.hint);
+    expect(screen.getByText('Showing the last complete catalogue. Refresh failed.')).toBeTruthy();
+    expect(store.getSnapshot().preferences).toBe(before.preferences);
+    expect(store.getSnapshot().projects).toBe(before.projects);
+    expect(store.getSnapshot().sessions).toBe(before.sessions);
+    expect(screen.getByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'All sessions', level: 1 })).toBeNull();
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+  });
   it('shows nullable unavailable project metadata, backend totals, grouped closed sessions and functional tabs', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'all_sessions' };
     const result = sessionResult(); result.sessions.items.push({ ...result.sessions.items[0], session_id: '00000000-0000-4000-8000-000000000003', title: 'Closed work', state: 'closed', closed_at: demo.updated_at });
@@ -512,7 +621,7 @@ describe('source-backed navigation views and explicit registration', () => {
     await screen.findByRole('heading', { name: 'Projects', level: 1 });
     const opener = screen.getByRole('button', { name: 'Register project' }); opener.focus(); fireEvent.click(opener);
     const dialog = screen.getByRole('dialog', { name: 'Register project' });
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(document.activeElement).toBe(within(dialog).getByLabelText('Project root'));
     const input = within(dialog).getByLabelText('Project root'); input.focus(); fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Register project' }));
     fireEvent.keyDown(dialog, { key: 'Escape' });
