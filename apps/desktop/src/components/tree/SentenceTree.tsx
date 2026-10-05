@@ -167,14 +167,14 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     return () => clearTimeout(timer);
   }, [search, store]);
   useEffect(() => {
-    if (!pendingSearch || writing || state.status !== 'ready') return;
+    if (!pendingSearch || writing || preferencesBusy || state.status !== 'ready') return;
     setPendingSearch(null);
     if (pendingSearch.store !== store || pendingSearch.text !== search || pendingSearch.text === view.filters.search) return;
     // Merge only the latest unsubmitted text into the newly rendered view and
     // its composition-owned revision; never retry a previously attempted edit.
     void write(() => latest.current.saveView({ ...structuredClone(latest.current.view),
       filters: { ...structuredClone(latest.current.view.filters), search: pendingSearch.text } } as SessionPreferences));
-  }, [pendingSearch, writing, state.status, store, search, view, write]);
+  }, [pendingSearch, writing, preferencesBusy, state.status, store, search, view, write]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
   // A later tree selection supersedes the last external route. A new external
   // route supersedes that local selection before rows and focus are painted.
