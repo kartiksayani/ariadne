@@ -55,6 +55,12 @@ and isolated, pinned source-runtime dependencies.
 - All ordinary controls receive the two-pixel focus outline. Reduced motion
   disables transitions/animation/animated scrolling in the product subtree.
   System appearance follows OS changes only while the saved theme is System.
+- An actual native screenshot exposed a 900×650 initial window with no minimum,
+  below UI_AND_NATIVE §2's 1000×700. Native configuration now starts at that size
+  and enforces its minimum. The keyboard journey records actual WebView inner
+  dimensions and asserts both limits before keyboard checks. Native execution of
+  this additional assertion remains pending; configuration/schema proof alone
+  does not establish the actual viewport.
 
 ## Capture coverage and proof boundaries
 
