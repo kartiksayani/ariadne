@@ -18,6 +18,12 @@ link it by hand. Uninstall removes the link only when it is still that exact
 link, and leaves `~/.agents/skills` in place. Older receipts without the link
 remain valid.
 
+When absent, the installer may create `~/.agents` and `~/.agents/skills` (mode 0700)
+to hold the link and never removes them, as it already does for `~/Applications`.
+A same-version reinstall whose link was replaced or redirected by the owner skips
+the link, prints the manual-link instruction and accepts the receipt's record of
+it, leaving the owner's path alone as uninstall does.
+
 Connecting a Codex session is unchanged: the owner selects the thread in the
 Ariadne window and pastes the setup instruction. No connect command, CLI or MCP
 contract, or rule-sheet wording changes. The skill states that an unconnected

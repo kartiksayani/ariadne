@@ -485,11 +485,14 @@ def install(home, artifacts, facts, resource_loader=resources):
                 if SKILL_LINK in owned_links and SKILL_LINK not in existing["owned_links"]:
                     # The receipt on disk cannot record a link it never owned; leave it uncreated.
                     del owned_links[SKILL_LINK]
-                    print("Skipped the Codex skill link: this version's receipt does not own it. "
+                    print("Skipped the Codex skill link: the installed receipt for this version does not "
+                          "record it, so it is neither created nor adopted. "
                           "Uninstall and install again to add it.", flush=True)
+                # A link the receipt owns but this run skipped is left alone, as uninstall does.
+                kept = {k: v for k, v in existing["owned_links"].items() if k != SKILL_LINK}
                 require(existing["owned_files"] == files and inventory(final) == files and
                         existing["owned_directories"] == directories and
-                        existing["owned_links"] == owned_links,
+                        kept == {k: v for k, v in owned_links.items() if k != SKILL_LINK},
                         "Same-version package identity differs; use a new release version.")
                 shutil.rmtree(stage.name, dir_fd=versions_fd)
             else:

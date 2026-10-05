@@ -162,6 +162,55 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(installer.uninstall(self.home), [])
         self.assertTrue((self.home / ".agents").is_symlink())
 
+    def test_redirected_agents_skills_directory_is_skipped_without_writing_through_it(self):
+        outside = self.base / "outside-skills"
+        outside.mkdir()
+        (self.home / ".agents").mkdir()
+        (self.home / ".agents/skills").symlink_to(outside)
+        self.install()
+        self.assertIn("Skipped the Codex skill link", self.output.getvalue())
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertTrue((self.home / ".agents/skills").is_symlink())
+
+    def test_same_version_reinstall_after_owner_replaced_link_skips_and_keeps_it(self):
+        final = self.install()
+        self.skill.unlink()
+        self.skill.write_bytes(b"owner replacement")
+        self.output.truncate(0)
+        self.output.seek(0)
+        self.assertEqual(self.install(), final)
+        self.assertIn("Skipped the Codex skill link", self.output.getvalue())
+        self.assertIn("link", self.output.getvalue())
+        self.assertEqual(self.skill.read_bytes(), b"owner replacement")
+        self.assertIn(str(self.skill), installer.uninstall(self.home))
+        self.assertEqual(self.skill.read_bytes(), b"owner replacement")
+
+    def test_same_version_reinstall_with_redirected_agents_skips_without_error(self):
+        final = self.install()
+        outside = self.base / "outside-agents"
+        (outside / "skills").mkdir(parents=True)
+        self.skill.unlink()
+        self.skill.parent.rmdir()
+        self.skill.parent.parent.rmdir()
+        (self.home / ".agents").symlink_to(outside)
+        self.assertEqual(self.install(), final)
+        self.assertIn("Skipped the Codex skill link", self.output.getvalue())
+        self.assertEqual(list((outside / "skills").iterdir()), [])
+
+    def test_same_version_older_receipt_without_link_does_not_create_or_fail(self):
+        final = self.install()
+        receipt = installer.json_read(final / "install.json")
+        del receipt["owned_links"][installer.SKILL_LINK]
+        (final / "install.json").write_bytes(installer.encode(receipt))
+        self.skill.unlink()
+        self.output.truncate(0)
+        self.output.seek(0)
+        self.assertEqual(self.install(), final)
+        self.assertIn("does not record it", self.output.getvalue())
+        self.assertFalse(installer.exists(self.skill))
+        self.assertEqual(installer.uninstall(self.home), [])
+
     def test_replaced_owned_codex_skill_link_survives_uninstall(self):
         self.install()
         self.skill.unlink()

@@ -296,8 +296,9 @@ otherwise print the PATH instruction. Also create the one package-owned link
 `~/.agents/skills/ariadne` to the versioned Codex skill directory
 (ADR-0070) only when that path is absent or already Ariadne's; a foreign file,
 directory or redirected `~/.agents` is skipped with a printed instruction.
-Uninstall removes it only when it is still that exact link and leaves
-`~/.agents/skills` in place. The allowed link locations are therefore
+The installer may create `~/.agents` and `~/.agents/skills` (mode 0700) when
+absent and never removes them, as it does for `~/Applications`. Uninstall removes
+the link only when it is still that exact link. The allowed link locations are therefore
 `~/Applications`, `~/.local/bin` and `~/.agents/skills/ariadne`. Do not edit shell startup files, use
 `sudo`, install toolchains, or download provider CLIs. Print the installed
 version and paths, then run `ariadne doctor`.
