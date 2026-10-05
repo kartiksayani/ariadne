@@ -47,7 +47,8 @@ export function assertRestored(before, after, rectangle, route) {
 export function assertQuit(record) {
   assert.equal(record.pidExited, true, 'Physical Quit did not exit its primary PID');
   assert.deepEqual(record.remainingPids, [], 'A private packaged process survived Quit');
-  assert.equal(record.socketAbsent, true, 'Quit retained the private control socket');
+  assert.equal(record.controlConnection?.connectionAccepted, false, 'Quit retained private control admission');
+  assert.ok(['ECONNREFUSED', 'ENOENT'].includes(record.controlConnection.errorCode), 'Control release lacks a refused or absent endpoint observation');
   assert.equal(record.leaseReleased, true, 'Quit retained its instance lease');
   assert.equal(record.sessionUnchanged, true, 'Quit mutated the canonical session');
 }

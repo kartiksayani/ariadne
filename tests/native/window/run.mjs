@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { randomUUID } from 'node:crypto';
+import { createConnection } from 'node:net';
 import { preparePackagedRoutes, packagedOwnership, packagedPids, packagedRouteSelected } from '../../../scripts/check-release-boundary.mjs';
 import { repo, command, json, digest, portFree, identity, alive, delay, stop, waitForQuitExit, sourceState } from '../../../scripts/run-native-e2e.mjs';
 import { assertReleaseArtifacts, assertContinuity, assertGeometry, assertPin, assertRestored, assertQuit } from './assertions.mjs';
@@ -127,6 +128,25 @@ export function mac2Client(trace, signal, captureTraySource) {
 
 export const checkPhysicalWindow = options => withCancellation(signal => runPhysicalWindow(options, signal));
 
+export function probeControlSocket(path, signal) {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ path, signal });
+    const finish = observation => {
+      socket.setTimeout(0); socket.destroy(); resolve(observation);
+    };
+    socket.once('connect', () => finish({ connectionAccepted: true }));
+    socket.once('error', error => {
+      socket.setTimeout(0); socket.destroy();
+      if (signal?.aborted) reject(signal.reason);
+      else resolve({ connectionAccepted: false, errorCode: error.code });
+    });
+    socket.setTimeout(1000, () => {
+      socket.destroy(); reject(new Error('Control socket release probe timed out'));
+    });
+  });
+}
+
 async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal) {
   assert.equal(process.platform, 'darwin', 'Physical window acceptance requires macOS');
   for (const path of [bundle, cli, tools, releaseEvidence]) assert.ok(path && resolve(path) === path, 'Use explicit absolute fixture/tool/evidence paths');
@@ -206,8 +226,9 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
     try { await stat(join(data, 'run/control.sock')); }
     catch (error) { if (error.code !== 'ENOENT') throw error; socketAbsent = true; }
     const result = { primary, pidExited: !alive(primary.pid), remainingPids: packagedPids(fixture.binary),
-      socketAbsent, leaseReleased: true, sessionUnchanged: (await readFile(fixture.sessionPath)).equals(fixture.before) };
-    assertQuit(result); await json(join(evidence, `${label}.json`), result);
+      socketAbsent, controlConnection: await probeControlSocket(join(data, 'run/control.sock'), signal),
+      leaseReleased: true, sessionUnchanged: (await readFile(fixture.sessionPath)).equals(fixture.before) };
+    await json(join(evidence, `${label}.json`), result); assertQuit(result);
     await client.detach();
   }
   try {

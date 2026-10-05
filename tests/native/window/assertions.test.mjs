@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:net';
+import { mkdtemp, rename, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { assertReleaseArtifacts, assertContinuity, assertGeometry, assertPin, assertRestored, assertQuit } from './assertions.mjs';
+import { probeControlSocket } from './run.mjs';
 
 const route = { project_id: 'project', session_id: 'session', item_id: '1.1' };
 const record = () => ({
@@ -78,10 +83,43 @@ test('restart must retain committed Pin and moved geometry as well as the route'
 });
 
 test('Quit proof cannot substitute forced cleanup or process exit for socket and lease release', () => {
-  const quit = { pidExited: true, remainingPids: [], socketAbsent: true, leaseReleased: true, sessionUnchanged: true };
+  const quit = { pidExited: true, remainingPids: [], socketAbsent: false,
+    controlConnection: { connectionAccepted: false, errorCode: 'ECONNREFUSED' }, leaseReleased: true, sessionUnchanged: true };
   assertQuit(quit);
-  for (const key of ['pidExited', 'socketAbsent', 'leaseReleased', 'sessionUnchanged']) {
+  assertQuit({ ...quit, socketAbsent: true, controlConnection: { connectionAccepted: false, errorCode: 'ENOENT' } });
+  for (const key of ['pidExited', 'leaseReleased', 'sessionUnchanged']) {
     assert.throws(() => assertQuit({ ...quit, [key]: false }));
   }
   assert.throws(() => assertQuit({ ...quit, remainingPids: [99] }));
+  for (const controlConnection of [undefined, { connectionAccepted: true },
+    { connectionAccepted: false }, { connectionAccepted: 'false', errorCode: 'ENOENT' },
+    ...['EACCES', 'ETIMEDOUT', 'ECONNRESET', 'ABORT_ERR'].map(errorCode => ({ connectionAccepted: false, errorCode }))]) {
+    assert.throws(() => assertQuit({ ...quit, controlConnection }));
+  }
+});
+
+test('control release probe distinguishes a live Unix listener, stale socket and absent endpoint', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-socket-'));
+  const path = join(root, 'control.sock'), stale = join(root, 'stale.sock');
+  const server = createServer(socket => socket.destroy());
+  t.after(async () => {
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    await rm(root, { recursive: true });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject); server.listen(path, resolve);
+  });
+  assert.deepEqual(await probeControlSocket(path), { connectionAccepted: true });
+  // Node unlinks its original pathname on close. Move this owned fixture socket
+  // first to retain a genuine stale socket, as Rust shutdown can do.
+  await rename(path, stale);
+  await new Promise(resolve => server.close(resolve));
+  assert.deepEqual(await probeControlSocket(stale), { connectionAccepted: false, errorCode: 'ECONNREFUSED' });
+  assert.deepEqual(await probeControlSocket(path), { connectionAccepted: false, errorCode: 'ENOENT' });
+});
+
+test('a cancelled control probe cannot be recorded as endpoint release', () => {
+  const controller = new globalThis.AbortController();
+  controller.abort(new Error('cancelled fixture'));
+  assert.throws(() => probeControlSocket('/unused-fixture.sock', controller.signal), /cancelled fixture/);
 });
