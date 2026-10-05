@@ -11,7 +11,7 @@ use ariadne_runtime::{
     discovery::*,
     leases::DesktopOwner,
     providers::*,
-    supervisor::{NativeFacts, PresenceUpdate},
+    supervisor::NativeFacts,
 };
 use std::{
     fs,
@@ -255,9 +255,8 @@ fn claude_activation(terminal: bool) {
     let routes = ControlRoutes::new();
     let outcomes = Arc::new(Mutex::new(Vec::new()));
     let reported = outcomes.clone();
-    let (observation, observed) = std::sync::mpsc::channel();
-    let stopped = observation.clone();
-    let activation = NativeActivation::new_with_presence(
+    let (stopped, observed) = std::sync::mpsc::channel();
+    let activation = NativeActivation::new(
         core.clone(),
         factory,
         owner.clone(),
@@ -265,20 +264,10 @@ fn claude_activation(terminal: bool) {
         rt.handle().clone(),
         Arc::new(move |outcome| {
             if matches!(&outcome, ActivationOutcome::Stopped { .. }) {
-                let _ = stopped.send(false);
+                let _ = stopped.send(());
             }
             reported.lock().unwrap().push(outcome);
         }),
-        Some(Arc::new(move |update| {
-            if matches!(update, PresenceUpdate::Observed { hint, .. }
-                if hint.observation.connection_state == ConnectionState::Unknown
-                && hint.observation.freshness == Freshness::Unknown
-                && hint.observation.last_seen_at.is_none()
-                && hint.observation.source.is_none())
-            {
-                let _ = observation.send(true);
-            }
-        })),
     );
     let server = ControlServer::bind_shared(owner.clone(), core.clone(), vec![])
         .unwrap()
@@ -468,9 +457,10 @@ fn claude_activation(terminal: bool) {
         CoreErrorCode::StaleGeneration
     );
     drop(qualification);
-    assert!(
-        observed.recv_timeout(Duration::from_secs(3)).unwrap(),
-        "clearing evidence during observation must report Unknown without stopping the supervisor"
+    assert_eq!(
+        observed.recv_timeout(Duration::from_secs(3)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+        "clearing evidence during observation must preserve the supervisor"
     );
     rt.block_on(call(
         home.path().into(),
@@ -481,6 +471,20 @@ fn claude_activation(terminal: bool) {
     ))
     .unwrap();
     assert_eq!(facts_ids.load(Ordering::SeqCst), ids_before);
+    // The refreshed evidence must be observed by that retained worker. Reaching
+    // another qualification proves progress past the interrupted observation;
+    // the heartbeat alone cannot prove the worker resumed its polling loop.
+    let qualification = files.pause_qualification(&rt);
+    assert!(outcomes.lock().unwrap().is_empty());
+    // Clear the evidence again before releasing the last process barrier. This
+    // also keeps later polls from starting fresh version subprocesses at Quit.
+    discovery.refresh_after_wake().unwrap();
+    drop(qualification);
+    assert_eq!(
+        observed.recv_timeout(Duration::from_secs(3)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+        "the retained worker must also survive its next observation"
+    );
     assert!(rt.block_on(call(home.path().into(), claim)).is_err());
     assert_eq!(
         rt.block_on(call(home.path().into(), control)).unwrap(),
