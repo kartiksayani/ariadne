@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
 import { useSession, type SessionState, type SessionStore } from './data/session-store';
@@ -6,10 +6,11 @@ import type { RevealedItem } from './data/routes';
 import type { ItemRoute, SessionPreferences, SessionRef, Theme } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
 import { OwnerDraftStore } from './state/drafts/store';
-import { WaitingStore } from './selectors/waiting/store';
+import { WaitingStore, useWaiting } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationSentenceTree } from './components/tree/NavigationSentenceTree';
 import { NavigationTopicGraph } from './components/graph/NavigationTopicGraph';
+import type { OwnerFocusRequest } from './components/inputs/OwnerInput';
 import { OwnerItemDetail } from './components/inputs/OwnerItemDetail';
 import { OwnerWaitingPanel } from './components/inputs/OwnerWaitingPanel';
 import { MessageRail } from './components/rail/MessageRail';
@@ -80,11 +81,13 @@ function SessionCenter({ application, view, graph, onReveal, revealItem, switchT
   </section>;
 }
 function Workspace({ application }: { application: Application }) {
-  const navigation = application.navigation, state = useNavigation(navigation);
+  const navigation = application.navigation, state = useNavigation(navigation), waiting = useWaiting(application.waiting);
   const store: SessionStore | null = navigation.selectedSession();
   const sessionState = useSyncExternalStore(store?.subscribe ?? noSubscription, store?.getSnapshot ?? noSession, store?.getSnapshot ?? noSession);
   const route = sessionState?.route, key = route ? routeKey(route) : '';
   const preferences = state.preferences, view = preferences?.sessions.find(value => route && routeKey(value.session) === key);
+  const shortcutSequence = useRef(0), bringing = useRef(new Set<string>());
+  const [ownerFocus, setOwnerFocus] = useState<(OwnerFocusRequest & { route: string; itemId: string }) | null>(null);
   const [graphModes, setGraphModes] = useState<Readonly<Record<string, boolean>>>({});
   const [detailOpen, setDetailOpen] = useState(true);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
@@ -119,7 +122,7 @@ function Workspace({ application }: { application: Application }) {
   const reveal = (result: RevealedItem) => {
     const target = result.kind === 'item' ? result.route : result.session;
     setLocalReveal(result); setDetailOpen(true);
-    void navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result);
+    return navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result);
   };
   // Tree and graph already save their own selection through navigation.
   const selected = (result: RevealedItem) => { setLocalReveal(result); setDetailOpen(true); };
@@ -127,6 +130,37 @@ function Workspace({ application }: { application: Application }) {
     setRouteError(null);
     void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
       .catch((error: unknown) => setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'));
+  };
+  const focusOwner = (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => {
+    const token = ++shortcutSequence.current;
+    void navigation.routes.revealItem(target).then(async result => {
+      if (!result || result.kind !== 'item' || shortcutSequence.current !== token) return;
+      await reveal(result);
+      if (shortcutSequence.current !== token) return;
+      setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex });
+    }).catch((error: unknown) => setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'));
+  };
+  const queueBring = async (target: ItemRoute) => {
+    const identity = JSON.stringify(target);
+    if (bringing.current.has(identity)) return;
+    bringing.current.add(identity);
+    const token = ++shortcutSequence.current;
+    try {
+      const result = await navigation.routes.revealItem(target);
+      if (!result || result.kind !== 'item') return;
+      await reveal(result); await application.drafts.load();
+      const current = result.store.getSnapshot(), session = current.snapshot?.session;
+      if (!session || current.status !== 'ready' || current.error) return;
+      const existing = application.drafts.find(target, target.item_id, 'bring');
+      if (shortcutSequence.current === token) setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent: 'bring', token });
+      // An existing draft, attempted operation or receipt always needs review.
+      if (existing) return;
+      const operation = application.drafts.begin(session, target.item_id, 'bring');
+      if (!operation) return;
+      application.drafts.edit(operation, { text: 'Bring this up.' });
+      await application.drafts.submit(operation);
+    } catch (error: unknown) { setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'); }
+    finally { bringing.current.delete(identity); }
   };
   const saveView = (change: Partial<SessionPreferences>) => {
     if (view && preferences) void navigation.saveSessionView({ ...structuredClone(view), ...change } as SessionPreferences, preferences.revision);
@@ -136,9 +170,31 @@ function Workspace({ application }: { application: Application }) {
   const switchToTree = () => setGraphModes(previous => ({ ...previous, [key]: false }));
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
   return <div className="product-app" onKeyDown={event => {
-    if (event.target instanceof HTMLElement && event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
+    if (event.defaultPrevented || event.target instanceof HTMLElement && event.target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"],[role="dialog"]')) return;
+    if (store && event.key.toLowerCase() === 'f' && event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault(); document.querySelector<HTMLInputElement>('.ref-search input')?.focus(); return;
+    }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === 'Escape') closeDetail();
+    const focusedId = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-item-id]')?.dataset.itemId : undefined;
+    const item = sessionState?.snapshot?.session.items[focusedId ?? selectedId ?? ''];
+    const target = route && item ? { ...route, item_id: item.id } : null;
+    if (event.key === 'a') {
+      const question = target && item?.status === 'waiting_on_me' ? target : waiting.waiting[0]?.route;
+      if (question) { event.preventDefault(); focusOwner({ ...question }, 'answer'); }
+    }
+    if (target && item) {
+      if (event.key === 'b') { event.preventDefault(); if (!event.repeat) void queueBring(target); }
+      const intent = event.key === 'r' ? ['done', 'decided', 'dropped', 'replaced'].includes(item.status) ? 'followup' : item.status === 'in_progress' ? 'note' : 'reply'
+        : event.key === 'd' ? 'drop' : event.key === 'o' && ['done', 'decided', 'dropped'].includes(item.status) ? 'reopen' : null;
+      if (intent) { event.preventDefault(); focusOwner(target, intent); }
+      if (/^[1-9]$/.test(event.key) && item.status === 'waiting_on_me') { event.preventDefault(); focusOwner(target, 'answer', Number(event.key) - 1); }
+      if (event.key === 'z' && preferences) { event.preventDefault(); void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === item.id), preferences.revision); }
+      if (event.key === 'e') {
+        const control = document.querySelector<HTMLButtonElement>(`[data-shortcut-archive-topic="${item.topic_id}"]`);
+        if (control && !control.disabled) { event.preventDefault(); control.focus(); control.click(); }
+      }
+    }
     if (store && event.key === 'g') { event.preventDefault(); setGraphModes(previous => ({ ...previous, [key]: !graph })); }
     if (store && event.key === 'm') { event.preventDefault(); toggleRail(); }
     if (store && event.key === '/') { event.preventDefault(); document.querySelector<HTMLInputElement>('.ref-search input')?.focus(); }
@@ -157,7 +213,7 @@ function Workspace({ application }: { application: Application }) {
       waitingContent={<div className="app-waiting">{routeError && <p role="alert">{routeError}</p>}<OwnerWaitingPanel drafts={application.drafts} store={application.waiting} revealItem={revealItem}
         openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} /></div>}
       detail={store && selectedId && detailOpen ? <><OwnerItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} service={application.service} store={store}
-        itemId={selectedId} routes={navigation.routes} onReveal={reveal} onClose={closeDetail} highlightedMessageIds={highlightedMessages} later={later}
+        itemId={selectedId} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined} routes={navigation.routes} onReveal={reveal} onClose={closeDetail} highlightedMessageIds={highlightedMessages} later={later}
         onLater={value => route && preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} />
         <CopiedProvenance key={`source:${key}:${selectedId}`} store={store} itemId={selectedId} revealItem={async target => {
           const result = await navigation.routes.revealItem(target); if (result) reveal(result);

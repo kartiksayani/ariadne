@@ -3,6 +3,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { alive, delay, identity, listeners, json, proveQuit } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
+import { runAccessibilityAcceptance } from './accessibility.spec.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
 import { runHistoryActionsAcceptance } from './history-actions.spec.mjs';
 import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
@@ -173,6 +174,7 @@ describe('native owner FIFO and real process restoration', () => {
       await runTreeAcceptance(configuration);
       await runHistoryAcceptance(configuration);
       await runHistoryActionsAcceptance(configuration);
+      await runAccessibilityAcceptance(configuration);
     }
     else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); await restoreTreeAcceptance(configuration); await restoreHistoryAcceptance(configuration); }
 
