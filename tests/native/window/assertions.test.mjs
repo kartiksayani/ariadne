@@ -46,14 +46,14 @@ test('close/minimize/Show must retain the same primary, inode ownership, selecti
   }
 });
 
-test('Pin requires a new canonical revision and agreeing physical checked state', () => {
+test('Pin requires canonical persistence, a new revision and retained ownership', () => {
   const before = record(), after = record();
-  after.preferences.revision++; after.preferences.global.pinned = true; after.menuSelected = true;
+  after.preferences.revision++; after.preferences.global.pinned = true;
   assertPin(before, after, true, route);
   for (const mutate of [
     value => { value.preferences.revision = before.preferences.revision; },
-    value => { value.menuSelected = false; },
-    value => { value.menuSelected = 'true'; },
+    value => { value.ownership.lease.ino++; },
+    value => { value.preferences.sessions[0].selected_item_id = '3'; },
     value => { value.preferences.global.pinned = false; },
   ]) {
     const broken = JSON.parse(JSON.stringify(after)); mutate(broken);

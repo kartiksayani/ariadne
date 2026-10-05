@@ -118,10 +118,16 @@ export function mac2Client(trace, signal, captureTraySource) {
       await trayItem('Show Ariadne');
     },
     async choose(title) { await click(await trayItem(title)); trayMenu = undefined; },
-    async pinSelected() {
-      const selected = await scoped('GET', `/element/${await trayItem('Pin')}/selected`);
-      assert.equal(typeof selected, 'boolean', 'Mac2 has no genuine Pin check-state observation');
-      return selected;
+    async pinScreenshot() {
+      // XCTest selected is not an established NSMenuItem checkmark contract.
+      // Capture the actual scoped menu, including Pin's left-hand mark, for
+      // required independent visual review; no pixels are asserted here.
+      await trayItem('Pin');
+      const encoded = await scoped('GET', `/element/${trayMenu}/screenshot`);
+      assert.ok(typeof encoded === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(encoded), 'Mac2 returned no native menu screenshot');
+      const png = Buffer.from(encoded, 'base64');
+      assert.ok(png.length > 8 && png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), 'Native menu screenshot is not PNG');
+      return png;
     },
   };
 }
@@ -161,6 +167,8 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
   const root = await mkdtemp('/private/tmp/ariadne-window-');
   const data = await mkdtemp('/private/tmp/ariadne-window-data-');
   const trace = [], services = [], launches = [];
+  const pinVisualReview = { required: true, status: 'pending', pixelsAutomaticallyAsserted: false, screenshots: [],
+    instruction: 'Independent review must confirm Pin has no checkmark before the click, a checkmark after its canonical commit, and the same checkmark after restart. Bind review to these screenshot hashes before claiming Pin checked-state acceptance.' };
   let trayObservation = 0;
   const client = mac2Client(trace, signal, (source, stage) => writeFile(join(evidence, `tray-${stage}-${++trayObservation}.xml`), source));
   const wait = (check, label, timeout) => until(check, label, timeout, signal);
@@ -200,6 +208,12 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
     const observed = await snapshot();
     await json(join(evidence, `${label}.json`), observed);
     return observed;
+  }
+  async function capturePin(stage, expectedChecked) {
+    const file = `pin-${stage}.png`;
+    await writeFile(join(evidence, file), await client.pinScreenshot());
+    pinVisualReview.screenshots.push({ stage, file, sha256: await digest(join(evidence, file)), expectedChecked });
+    await json(join(evidence, 'pin-visual-review.json'), pinVisualReview);
   }
   async function launchApplication(args) {
     child = launch(fixture.binary, args, fixture.env, `application-${launches.length + 1}`, launches);
@@ -242,7 +256,8 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
     const wda = launch('/usr/bin/xcodebuild', wdaArgs, { ...process.env, USE_HOST: '127.0.0.1', USE_PORT: '10100' }, 'wda', services);
     await json(join(evidence, 'run.json'), { source: sourceState(), bundle, cli, tools, root, data, bundleId, releaseEvidence, compiledSource: buildRun.toolchain?.source,
       binarySha256: await digest(fixture.binary), helperSha256: await digest(fixture.cli), wdaCommand: ['/usr/bin/xcodebuild', ...wdaArgs],
-      unproved: ['Physical monitor disconnect/clamping', 'Genuine system sleep/wake', 'Dock reopen', 'Native always-on-top overlap', 'Quit during active external host turn', 'Any new OS authorization'] });
+      requiredManualVisualReview: pinVisualReview.instruction,
+      unproved: ['Native Pin checkmark before/after click and after restart', 'Physical monitor disconnect/clamping', 'Genuine system sleep/wake', 'Dock reopen', 'Native always-on-top overlap', 'Quit during active external host turn', 'Any new OS authorization'] });
     await ready(10100, wda);
     const appium = launch(join(tools, 'appium-local'), ['--address', '127.0.0.1', '--port', '4723', '--use-drivers', 'mac2', '--log-no-colors'], process.env, 'appium', services);
     await ready(4723, appium);
@@ -275,11 +290,11 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
       assertGeometry(shown.preferences, await client.rectangle());
     }
     const beforePin = await snapshot();
-    await client.openTray(); assert.equal(await client.pinSelected(), false);
+    await client.openTray(); await capturePin('before', false);
     await client.choose('Pin');
     await wait(async () => (await snapshot()).preferences.global.pinned === true, 'Canonical Pin commit');
     await client.openTray();
-    const pinned = await capture('pinned'); pinned.menuSelected = await client.pinSelected();
+    const pinned = await capture('pinned'); await capturePin('after', true);
     assertPin(beforePin, pinned, true, fixture.coldRoute);
     // Dismiss this inspected menu through the actual Show action before reopening Quit.
     await client.choose('Show Ariadne');
@@ -292,7 +307,7 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
     }, 'Restored native window geometry');
     const restored = await capture('restart');
     assertRestored(pinned, restored, await client.rectangle(), fixture.coldRoute);
-    await client.openTray(); assert.equal(await client.pinSelected(), true);
+    await client.openTray(); await capturePin('restart', true);
     await client.choose('Show Ariadne');
     await quit('quit-restarted');
   } catch (error) {
@@ -319,10 +334,11 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
   if (cleanupFailure) throw cleanupFailure;
   if (failure) throw failure;
   signal.throwIfAborted();
-  await json(join(evidence, 'result.json'), { passed: true,
+  await json(join(evidence, 'result.json'), { passed: false, automatedJourneyPassed: true,
+    pinCheckmarkProved: false, requiredManualVisualReview: pinVisualReview,
     scope: 'Actual XCTest title drag/close/minimize, tray Show/Pin/Quit, canonical route/geometry/Pin persistence, production PID/socket/lease ownership and orderly restart.',
     heldExternalTurnProved: false, physicalMonitorChangeProved: false, genuineWakeProved: false, dockReopenProved: false, alwaysOnTopOverlapProved: false });
-  console.log(`Physical window evidence: ${evidence}`);
+  console.log(`Automated window journey completed: ${evidence}; independent visual Pin checkmark review is REQUIRED before checked-state acceptance.`);
   return evidence;
 }
 

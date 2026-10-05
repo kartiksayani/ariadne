@@ -11,9 +11,11 @@ const menuXPath = "//XCUIElementTypeMenu[XCUIElementTypeMenuItem[@title='Show Ar
 const openedSource = '<XCUIElementTypeApplication><XCUIElementTypeStatusItem title="1"/><XCUIElementTypeMenu><XCUIElementTypeMenuItem title="Show Ariadne"/></XCUIElementTypeMenu></XCUIElementTypeApplication>';
 const hoveredSource = '<XCUIElementTypeApplication><XCUIElementTypeStatusItem title="1"/></XCUIElementTypeApplication>';
 const rectangle = { x: 600, y: -27, width: 48, height: 24 };
+// Transport bytes only, deliberately not physical screenshot evidence.
+const screenshot = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
 
 async function fixture(t, { statusCount = 1, statusHittable = 'true', afterHoverHittable = statusHittable,
-  hoverFails = false, menuCount = 1, showHittable = 'true' } = {}) {
+  hoverFails = false, menuCount = 1, showHittable = 'true', pinHittable = 'true', nativeScreenshot = screenshot.toString('base64') } = {}) {
   const calls = [], captured = [];
   let clicked = false, hovered = false;
   t.mock.method(globalThis, 'fetch', async (url, options) => {
@@ -51,8 +53,8 @@ async function fixture(t, { statusCount = 1, statusHittable = 'true', afterHover
       assert.ok(['Show Ariadne', 'Pin', 'Quit Ariadne'].includes(title), 'Actions must stay within the identified tray menu');
       value = [element(title)];
     } else if (path.endsWith('/attribute/hittable')) {
-      value = path.includes('/Show%20Ariadne/') || path.includes('/Show Ariadne/') ? showHittable : 'true';
-    } else if (path.endsWith('/selected')) value = true;
+      value = path.includes('/Show%20Ariadne/') || path.includes('/Show Ariadne/') ? showHittable : path.includes('/Pin/') ? pinHittable : 'true';
+    } else if (path === '/session/private/element/tray/screenshot') value = nativeScreenshot;
     else throw new Error(`Unexpected pure-test request: ${options.method} ${path}`);
     return globalThis.Response.json({ value });
   });
@@ -130,14 +132,37 @@ test('retains post-click source but refuses a missing or ambiguous menu or hidde
   }
 });
 
-test('scopes checked Pin and physical Quit to the opened tray, never ordinary application Quit', async t => {
+test('scopes native Pin screenshot and physical Quit to the opened tray, never ordinary application Quit', async t => {
   const { client, calls } = await fixture(t);
   await assert.rejects(client.choose('Quit Ariadne'), /Open the genuine tray menu/);
   await client.openTray();
-  assert.equal(await client.pinSelected(), true);
+  assert.deepEqual(await client.pinScreenshot(), screenshot);
+  assert.equal(calls.filter(call => call.path?.endsWith('/screenshot')).length, 1);
+  assert.equal(calls.some(call => call.path?.endsWith('/selected')), false);
+  const pinCheck = calls.findIndex(call => call.path === '/session/private/element/Pin/attribute/hittable');
+  assert.ok(calls.findIndex(call => call.path === '/session/private/element/tray/screenshot') > pinCheck);
   await client.choose('Quit Ariadne');
   const clicks = calls.filter(call => call.path?.endsWith('/execute/sync'));
   assert.deepEqual(clicks.map(call => call.request.args[0].elementId), ['status', 'Quit Ariadne']);
   assert.equal(calls.some(call => call.path === '/session/private/elements' && call.request.value.includes('Quit Ariadne')), false);
   await assert.rejects(client.choose('Show Ariadne'), /Open the genuine tray menu/);
+});
+
+
+test('native Pin screenshot requires an opened menu and genuinely hittable Pin', async t => {
+  const { client, calls } = await fixture(t, { pinHittable: 'false' });
+  await assert.rejects(client.pinScreenshot(), /Open the genuine tray menu/);
+  await client.openTray();
+  await assert.rejects(client.pinScreenshot(), /Tray Pin is not hittable/);
+  assert.equal(calls.some(call => call.path?.endsWith('/screenshot')), false);
+});
+
+test('refuses missing or non-PNG native screenshots without interpreting pixels', async t => {
+  for (const nativeScreenshot of [null, '', '<fake screenshot>', Buffer.from('not PNG').toString('base64')]) {
+    await t.test(String(nativeScreenshot), async child => {
+      const { client } = await fixture(child, { nativeScreenshot });
+      await client.openTray();
+      await assert.rejects(client.pinScreenshot(), /no native menu screenshot|not PNG/);
+    });
+  }
 });
