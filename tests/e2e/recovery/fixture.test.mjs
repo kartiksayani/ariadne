@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { assertRepairAdmission, originalReplyRequest, repairResultRequest } from '../../../apps/desktop/tests/e2e/recovery.spec.mjs';
+import { assertRepairAdmission, openRecoveryReply, originalReplyRequest, repairResultRequest } from '../../../apps/desktop/tests/e2e/recovery.spec.mjs';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 
 function fixture() {
@@ -17,7 +17,7 @@ function fixture() {
     original_message_ids: [reply.id], original_domain_result: null };
   const admission = { inputId, attemptId: randomUUID(), bindingId, generation, turnId: 'repair-turn', ordinal: 2 };
   admission.payload = `[ARIADNE_INPUT:${inputId}:${admission.attemptId}]\n${JSON.stringify(body)}`;
-  const input = { id: inputId, binding_id: bindingId, message_id: randomUUID(), payload: { text: 'Original work must never be resent' },
+  const input = { id: inputId, binding_id: bindingId, message_id: randomUUID(), payload: { text: 'Original work must never be resent\nPreserve "quotes", \\backslashes and the entire second line.' },
     attempts: [{ id: admission.attemptId, binding_generation: generation, purpose: 'result_repair',
       repair_for_attempt_id: original.attemptId, formatted_payload: admission.payload }] };
   const session = { inputs: { [inputId]: input }, messages: [{ id: input.message_id, number: 7 }], items: { 1: { revision: 3 } } };
@@ -41,12 +41,64 @@ test('repair assertion rejects replayed original work, missing retained effects 
     state => { payload(state, { ...state.body, original_message_ids: [] }); },
     state => { payload(state, { ...state.body, saved_input: state.input.payload }); },
     state => { payload(state, { ...state.body, instruction: `result-only ${state.input.payload.text}` }); },
+    state => { payload(state, { ...state.body, context: [{ original_work: state.input.payload.text }] }); },
     state => { payload(state, { ...state.body, source_input_id: randomUUID() }); },
   ];
   for (const mutate of mutations) {
     const state = fixture(); mutate(state);
     assert.throws(() => assertRepairAdmission(state.configuration, state.admission, state.session, state.original, state.reply), assert.AssertionError);
   }
+});
+
+test('escaped multiline owner work injected into the decoded repair instruction is rejected', () => {
+  const state = fixture();
+  payload(state, { ...state.body, instruction: `result-only repair\n${state.input.payload.text}` });
+  assert.equal(state.admission.payload.includes(state.input.payload.text), false, 'JSON escaping defeats a raw payload substring check');
+  assert.throws(() => assertRepairAdmission(state.configuration, state.admission, state.session, state.original, state.reply), /Repair cannot repeat the original owner work/);
+});
+
+test('a known successive Reply waits for the delayed Saved acknowledgement before choosing another form', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  const calls = []; let rendered = 'original reply';
+  const another = {
+    async isExisting() { assert.fail('Successive Reply cannot decide once from a transient renderer state'); },
+    async waitForDisplayed() { assert.equal(rendered, 'original reply'); calls.push('await acknowledgement'); rendered = 'saved acknowledgement'; },
+    async waitForEnabled() { assert.equal(rendered, 'saved acknowledgement'); calls.push('acknowledgement enabled'); },
+    async scrollIntoView() {},
+    async click() { assert.equal(rendered, 'saved acknowledgement'); calls.push('write another'); rendered = 'new form'; },
+  };
+  const reply = {
+    async waitForDisplayed() { assert.equal(rendered, 'new form'); calls.push('new Reply displayed'); },
+    async waitForEnabled() { assert.equal(rendered, 'new form'); },
+    async scrollIntoView() {},
+    async click() { assert.equal(rendered, 'new form'); calls.push('choose Reply'); },
+  };
+  globalThis.browser = {
+    $(selector) {
+      if (selector === '.owner-input') return { $(selector) { assert.equal(selector, 'button=Write another input'); return another; } };
+      assert.equal(selector, '[aria-label="Owner actions"]');
+      assert.equal(rendered, 'new form', 'Original Reply cannot be reused before Saved replaces it');
+      return { $(selector) { assert.equal(selector, 'button=Reply'); return reply; } };
+    },
+  };
+  await openRecoveryReply(true);
+  assert.deepEqual(calls, ['await acknowledgement', 'acknowledgement enabled', 'write another', 'new Reply displayed', 'choose Reply']);
+});
+
+test('a missing Saved acknowledgement fails before a known successive Reply can choose any form', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  globalThis.browser = {
+    $(selector) {
+      assert.equal(selector, '.owner-input');
+      return { $(selector) {
+        assert.equal(selector, 'button=Write another input');
+        return { async waitForDisplayed() { throw new Error('Saved acknowledgement absent'); } };
+      } };
+    },
+  };
+  await assert.rejects(openRecoveryReply(true), /Saved acknowledgement absent/);
 });
 
 test('original publication deliberately omits its result; repair references the retained reply without another mutation', () => {

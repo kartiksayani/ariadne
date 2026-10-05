@@ -30,7 +30,9 @@ export function assertRepairAdmission(configuration, admission, session, origina
   assert.equal(body.source_input_id, input.id); assert.ok(body.original_message_ids.includes(reply.id), 'Repair must reference the retained original reply');
   assert.ok(body.instruction.includes('result-only')); assert.equal(body.original_domain_result, null);
   assert.equal(Object.hasOwn(body, 'saved_input'), false, 'Repair cannot include the original action payload');
-  assert.equal(admission.payload.includes(input.payload.text), false, 'Repair cannot repeat the original owner work');
+  const repeatsOriginalWork = value => typeof value === 'string' ? value.includes(input.payload.text)
+    : value !== null && typeof value === 'object' && Object.values(value).some(repeatsOriginalWork);
+  assert.equal(repeatsOriginalWork(body), false, 'Repair cannot repeat the original owner work');
   assert.notEqual(attempt.id, original.attemptId); assert.notEqual(admission.turnId, original.turnId);
   return body;
 }
@@ -69,10 +71,16 @@ async function openPrimary(configuration) {
   await wait(async () => await browser.$('.history-header strong').getText() === `Item ${configuration.itemId}`, 'Recovery selected a different item');
 }
 
-async function ownerReply(configuration, text) {
+export async function openRecoveryReply(afterSaved = false) {
   const another = await browser.$('.owner-input').$('button=Write another input');
-  if (await another.isExisting()) await click(another);
+  // A successive Reply has already saved on disk; its renderer receipt may still
+  // be arriving. Await that acknowledgement before choosing the next form.
+  if (afterSaved || await another.isExisting()) await click(another);
   await click(await browser.$('[aria-label="Owner actions"]').$('button=Reply'));
+}
+
+async function ownerReply(configuration, text, afterSaved = false) {
+  await openRecoveryReply(afterSaved);
   await sendDetailReply(configuration, text);
 }
 
@@ -97,7 +105,7 @@ export async function runRecoveryAcceptance(configuration) {
   await ownerReply(configuration, workText);
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 1, 'Recovery original input did not reach real runtime delivery');
   const original = (await admissions(configuration)).at(-1);
-  await ownerReply(configuration, successorText);
+  await ownerReply(configuration, successorText, true);
   let session = await snapshot(configuration);
   const input = session.inputs[original.inputId], successor = Object.values(session.inputs).find(input => input.payload.text === successorText);
   assert.ok(successor); assert.equal(input.payload.text, workText); assert.equal(input.attempts.length, 1);
