@@ -428,17 +428,52 @@ fn run_native(
                 let quitting = quitting.clone();
                 let service = app.state::<commands::DesktopService>().inner().clone();
                 let tray = app.try_state::<native::tray::NativeTray>().map(|tray| tray.inner().clone());
+                // Capture only the canonical read authority. Ordinary bridge
+                // admission remains fenced; this Core reference owns no helper,
+                // external host or runtime/binding lease after the drain.
+                let note_core = app.try_state::<Arc<composition::NativeRuntime>>()
+                    .map(|runtime| runtime.bridge().core().clone());
                 tauri::async_runtime::spawn(async move {
                     let result = tauri::async_runtime::spawn_blocking(move || {
                         window.join_writer(&service)?;
                         if let Some(tray) = tray {
                             tray.stop()?;
                         }
-                        lifecycle.prepare_exit()
+                        lifecycle.prepare_exit()?;
+                        Ok::<_, ariadne_core::CoreError>(note_core.map(|core| {
+                            native::window::quit_note::required(&core)
+                        }))
                     }).await;
-                    if matches!(result, Ok(Ok(()))) {
-                        exit_allowed.store(true, Ordering::Release);
-                        app.exit(code.unwrap_or(0));
+                    if let Ok(Ok(note)) = result {
+                        let show_note = match note {
+                            Some(Ok(active)) => active,
+                            Some(Err(_)) => {
+                                // A read failure is unknown remaining host work,
+                                // not a failed owning shutdown or a no-work claim.
+                                eprintln!("Ariadne could not inspect remaining host work before quitting; inspect the registered sessions after reopening.");
+                                false
+                            }
+                            None => false,
+                        };
+                        let exiting = app.clone();
+                        let allowed = exit_allowed.clone();
+                        if app.run_on_main_thread(move || {
+                            #[cfg(target_os = "macos")]
+                            if show_note {
+                                native::window::quit_note::present();
+                            }
+                            #[cfg(not(target_os = "macos"))]
+                            let _ = show_note;
+                            // The initial Quit fence stays set while the native
+                            // alert runs its event loop. Repeated Quit requests
+                            // cannot drain again or produce a second alert.
+                            allowed.store(true, Ordering::Release);
+                            exiting.exit(code.unwrap_or(0));
+                        }).is_err() {
+                            eprintln!("Ariadne could not present its native Quit note after owning shutdown.");
+                            exit_allowed.store(true, Ordering::Release);
+                            app.exit(code.unwrap_or(0));
+                        }
                     } else {
                         quitting.store(false, Ordering::Release);
                         eprintln!("Ariadne could not confirm its owning-runtime shutdown; the app remains running.");
