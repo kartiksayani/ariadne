@@ -159,28 +159,12 @@ impl Platform {
     }
 
     pub(crate) fn diagnostic(&self) -> Option<&'static str> {
-        match self.permission.load(Ordering::Acquire) {
-            1 => Some("Notifications are denied; answer questions in the Waiting queue."),
-            2 => Some("Notifications require the explicit Enable notifications action."),
-            _ => None,
-        }
+        permission_diagnostic(&self.permission)
     }
 
     pub(crate) fn permission(&self, reply: tokio::sync::oneshot::Sender<Result<bool, CoreError>>) {
-        let reply = Mutex::new(Some(reply));
-        let active = self.active.clone();
-        let permission = self.permission.clone();
-        let completion = RcBlock::new(move |granted: Bool, error: *mut NSError| {
-            if let Some(reply) = reply.lock().ok().and_then(|mut reply| reply.take()) {
-                let result = if !active.load(Ordering::Acquire) || !error.is_null() {
-                    Err(super::unavailable())
-                } else {
-                    permission.store(if granted.as_bool() { 3 } else { 1 }, Ordering::Release);
-                    Ok(granted.as_bool())
-                };
-                let _ = reply.send(result);
-            }
-        });
+        let completion =
+            authorization_completion(self.active.clone(), self.permission.clone(), reply);
         self.center
             .requestAuthorizationWithOptions_completionHandler(
                 UNAuthorizationOptions::Alert,
@@ -268,6 +252,34 @@ impl Platform {
     }
 }
 
+fn permission_diagnostic(permission: &AtomicU8) -> Option<&'static str> {
+    match permission.load(Ordering::Acquire) {
+        1 => Some("Notifications are denied; answer questions in the Waiting queue."),
+        2 => Some("Notifications require the explicit Enable notifications action."),
+        _ => None,
+    }
+}
+
+/// Keep our completion/result handling separate from the OS authorization call.
+fn authorization_completion(
+    active: Arc<AtomicBool>,
+    permission: Arc<AtomicU8>,
+    reply: tokio::sync::oneshot::Sender<Result<bool, CoreError>>,
+) -> RcBlock<dyn Fn(Bool, *mut NSError)> {
+    let reply = Mutex::new(Some(reply));
+    RcBlock::new(move |granted: Bool, error: *mut NSError| {
+        if let Some(reply) = reply.lock().ok().and_then(|mut reply| reply.take()) {
+            let result = if !active.load(Ordering::Acquire) || !error.is_null() {
+                Err(super::unavailable())
+            } else {
+                permission.store(if granted.as_bool() { 3 } else { 1 }, Ordering::Release);
+                Ok(granted.as_bool())
+            };
+            let _ = reply.send(result);
+        }
+    })
+}
+
 fn obsolete(identifier: &str, valid: &[String]) -> bool {
     let episode = identifier.strip_suffix(":burst").unwrap_or(identifier);
     identifier.starts_with("ariadne:") && !valid.iter().any(|valid| valid == episode)
@@ -278,3 +290,7 @@ impl Drop for Platform {
         self.active.store(false, Ordering::Release);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/permission.rs"]
+mod tests;
