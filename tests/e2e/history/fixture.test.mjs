@@ -4,8 +4,45 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { JSDOM } from 'jsdom';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { historyAsk, historyMessageBatch, historySeedRequest, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { historyAsk, historyMessageBatch, historySeedRequest, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+
+test('fork links and parent references cannot admit a different selected history item', async t => {
+  const child = { id: '1.1', question: 'Native history fork 1.1\nKeep its original source round.', source_round_id: 'round-one' };
+  const parent = { id: '1', question: 'Retain five complete native rounds and their forks.\nThis question remains unchanged.', source_round_id: null };
+  const dom = new JSDOM();
+  const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
+  t.after(() => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); });
+  globalThis.document = dom.window.document;
+  const view = (header, question, metadata, nested) => `<aside class="item-history"><header class="history-header"><strong>Item ${header}</strong></header>
+    <h2>${question}</h2><p class="history-meta">${metadata}</p>${nested}</aside>`;
+  const views = [
+    view(parent.id, parent.question, '', `<section aria-label="Child items">Item ${child.id} · ${child.question}</section>
+      <section aria-label="Round 1"><button class="history-fork">Fork · Item ${child.id} · ${child.question}</button></section>`),
+    view(child.id, parent.question, `Source round · ${child.source_round_id}`, ''),
+    view(child.id, child.question, 'Source round · wrong-round', ''),
+    view(child.id, child.question, '', `<section><p class="history-meta">Source round · ${child.source_round_id}</p></section>`),
+    view(child.id, child.question, `Source round · ${child.source_round_id}`, ''),
+  ];
+  const admitted = [];
+  globalThis.browser = {
+    execute: async (condition, expected) => condition(expected),
+    async waitUntil(condition, options) {
+      assert.equal(options.timeout, 20000);
+      for (const html of views) { document.body.innerHTML = html; admitted.push(await condition()); }
+      assert.equal(admitted.at(-1), true);
+    },
+  };
+  await waitForHistoryItem(child);
+  assert.deepEqual(admitted, [false, false, false, false, true]);
+  admitted.length = 0;
+  views.splice(0, views.length,
+    view(child.id, child.question, `Source round · ${child.source_round_id}`, `<button>Parent · Item ${parent.id}</button><section>${parent.question}</section>`),
+    view(parent.id, parent.question, '', ''));
+  await waitForHistoryItem(parent);
+  assert.deepEqual(admitted, [false, true]);
+});
 
 test('five existing round sections do not admit assertions before the final closed result reaches native detail', async t => {
   const round = { ordinal: 5, closed_at: '2026-10-05T11:51:57.000Z' };
