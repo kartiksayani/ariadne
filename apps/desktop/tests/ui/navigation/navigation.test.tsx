@@ -81,6 +81,16 @@ function read(transport: Transport, prefs = preferences(), projects = projectRes
   transport.enqueue('project_list', success('project_list', projects));
   transport.enqueue('session_list', success('session_list', sessions));
 }
+async function deferredStartup(transport: Transport, store: NavigationStore) {
+  const initial = preferences(); initial.global.selected_navigation = { kind: 'projects' }; initial.sessions = [];
+  const blocked = deferred<QueryEnvelope>();
+  transport.enqueue('preferences_get', blocked.promise);
+  transport.enqueue('project_list', success('project_list', projectResult()));
+  transport.enqueue('session_list', success('session_list', sessionResult()));
+  const startup = store.start();
+  await waitFor(() => expect(transport.calls.some(call => call.name === 'preferences_get')).toBe(true));
+  return { initial, blocked, startup };
+}
 const cursor = (view: 'projects' | 'sessions', revision = 21): QueryCursor => ({ schema: 1, view,
   revision, filter_digest: 'a'.repeat(64), after: view === 'projects' ? { kind: 'project', canonical_root: '/fixtures/ariadne-demo', id: projectId }
     : { kind: 'session', project_id: projectId, id: demo.id, updated_at: demo.updated_at } });
@@ -268,6 +278,133 @@ describe('canonical preference mutations', () => {
     read(transport, newer); expect(await store.retryMutation()).toBe(true);
     expect(store.getSnapshot().preferences?.revision).toBe(3);
     expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual(newer.global.selected_navigation);
+  });
+  it.each(['preferences', 'catalogue'] as const)('retains a native item route during the deferred initial %s read', async (blockedRead) => {
+    const { transport, store } = setup();
+    const initial = preferences(); initial.global.selected_navigation = { kind: 'projects' }; initial.sessions = [];
+    const blocked = deferred<QueryEnvelope>();
+    transport.enqueue('preferences_get', blockedRead === 'preferences' ? blocked.promise : success('preferences_get', initial));
+    transport.enqueue('project_list', blockedRead === 'catalogue' ? blocked.promise : success('project_list', projectResult()));
+    transport.enqueue('session_list', success('session_list', sessionResult()));
+    const startup = store.start();
+    await waitFor(() => expect(transport.calls.some(call => call.name === (blockedRead === 'preferences' ? 'preferences_get' : 'project_list'))).toBe(true));
+    transport.enqueue('reveal_item', success('reveal_item', { ...route, item_id: '1.1' }));
+    transport.enqueue('session_get', loaded(), loaded());
+    transport.enqueue('preferences_patch', patchReceipt(2));
+    const next = preferences(2); next.global.selected_navigation = { kind: 'session', session: route };
+    read(transport, next);
+    // The newly opened SessionStore also reads the ordinary presence catalogue.
+    transport.enqueue('session_list', success('session_list', sessionResult()));
+    transport.emit('ariadne://route', { ...route, item_id: '1.1' });
+    await waitFor(() => expect(store.opened.open(route).getSnapshot().status).toBe('ready'));
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(0);
+    blocked.resolve(blockedRead === 'preferences' ? success('preferences_get', initial) : success('project_list', projectResult()));
+    await startup;
+    await waitFor(() => expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'session', session: route }));
+    expect(store.getSnapshot().preferences?.sessions[0].selected_item_id).toBe('1.1');
+    expect(store.getSnapshot().reveal).toMatchObject({ kind: 'item', route: { ...route, item_id: '1.1' } });
+    expect(store.getSnapshot().error).toBeNull();
+    const patches = transport.calls.filter(call => call.name === 'preferences_patch');
+    expect(patches).toHaveLength(1);
+    expect((patches[0].request as OwnerMutationRequest).command.params).toMatchObject({ expected_preferences_revision: 1 });
+  });
+  it('applies only the latest registered item route retained before startup completes', async () => {
+    const { transport, store } = setup();
+    const { initial, blocked, startup } = await deferredStartup(transport, store);
+    transport.enqueue('reveal_item', success('reveal_item', { ...route, item_id: '1.1' }), success('reveal_item', { ...route, item_id: '3' }));
+    transport.enqueue('session_get', loaded(), loaded(), loaded());
+    transport.emit('ariadne://route', { ...route, item_id: '1.1' });
+    await waitFor(() => expect(store.opened.open(route).getSnapshot().status).toBe('ready'));
+    transport.emit('ariadne://route', { ...route, item_id: '3' });
+    await waitFor(() => expect(transport.calls.filter(call => call.name === 'session_get')).toHaveLength(2));
+    transport.enqueue('preferences_patch', patchReceipt(2));
+    const next = preferences(2); next.global.selected_navigation = { kind: 'session', session: route }; next.sessions[0].selected_item_id = '3';
+    read(transport, next);
+    transport.enqueue('session_list', success('session_list', sessionResult()), success('session_list', sessionResult()));
+    blocked.resolve(success('preferences_get', initial)); await startup;
+    await waitFor(() => expect(store.getSnapshot().preferences?.sessions[0]?.selected_item_id).toBe('3'));
+    expect(store.getSnapshot().reveal).toMatchObject({ kind: 'item', route: { ...route, item_id: '3' } });
+    const patches = transport.calls.filter(call => call.name === 'preferences_patch');
+    expect(patches).toHaveLength(1);
+    expect((patches[0].request as OwnerMutationRequest).command.params).toMatchObject({ entries: [
+      { kind: 'set_global' }, { kind: 'set_session_view', preferences: { selected_item_id: '3' } },
+    ] });
+  });
+  it('retains a later item route whose validation crosses the pending startup route write', async () => {
+    const { transport, store } = setup();
+    const { initial, blocked, startup } = await deferredStartup(transport, store);
+    const later = deferred<QueryEnvelope>(), firstWrite = deferred<MutationEnvelope>();
+    transport.enqueue('reveal_item', success('reveal_item', { ...route, item_id: '1.1' }), later.promise);
+    transport.enqueue('session_get', loaded(), loaded(), loaded(), loaded());
+    transport.enqueue('preferences_patch', firstWrite.promise, patchReceipt(3));
+    const first = preferences(2); first.global.selected_navigation = { kind: 'session', session: route };
+    const second = structuredClone(first); second.revision = 3; second.sessions[0].selected_item_id = '3';
+    read(transport, first); read(transport, second);
+    transport.enqueue('session_list', success('session_list', sessionResult()), success('session_list', sessionResult()));
+    transport.emit('ariadne://route', { ...route, item_id: '1.1' });
+    await waitFor(() => expect(store.opened.open(route).getSnapshot().status).toBe('ready'));
+    transport.emit('ariadne://route', { ...route, item_id: '3' });
+    await waitFor(() => expect(transport.calls.filter(call => call.name === 'reveal_item')).toHaveLength(2));
+    blocked.resolve(success('preferences_get', initial)); await startup;
+    await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
+    later.resolve(success('reveal_item', { ...route, item_id: '3' }));
+    await waitFor(() => expect(transport.calls.filter(call => call.name === 'session_get')).toHaveLength(3));
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    firstWrite.resolve(patchReceipt(2));
+    await waitFor(() => expect(store.getSnapshot().preferences?.revision).toBe(3));
+    expect(store.getSnapshot().preferences?.sessions[0].selected_item_id).toBe('3');
+    expect(store.getSnapshot().reveal).toMatchObject({ kind: 'item', route: { ...route, item_id: '3' } });
+    const patches = transport.calls.filter(call => call.name === 'preferences_patch');
+    expect(patches).toHaveLength(2);
+    expect(patches.map(call => (call.request as OwnerMutationRequest).command.params)).toMatchObject([
+      { expected_preferences_revision: 1, entries: [{ kind: 'set_global' }, { kind: 'set_session_view', preferences: { selected_item_id: '1.1' } }] },
+      { expected_preferences_revision: 2, entries: [{ kind: 'set_global' }, { kind: 'set_session_view', preferences: { selected_item_id: '3' } }] },
+    ]);
+  });
+  it('retains an early session route across a failed initial read and a later reconciliation', async () => {
+    const { transport, store } = setup();
+    const { initial, blocked, startup } = await deferredStartup(transport, store);
+    transport.enqueue('session_get', loaded(), loaded());
+    transport.enqueue('session_list', success('session_list', sessionResult()));
+    transport.emit('ariadne://route', { ...route, item_id: null });
+    blocked.resolve({ api_version: 1, ok: false, error }); await startup;
+    expect(store.getSnapshot().status).toBe('unavailable');
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(0);
+    // The failed preferences read did not consume the first catalogue responses.
+    transport.enqueue('preferences_get', success('preferences_get', initial));
+    transport.enqueue('preferences_patch', patchReceipt(2));
+    const next = preferences(2); next.global.selected_navigation = { kind: 'session', session: route };
+    read(transport, next); await store.refresh();
+    await waitFor(() => expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'session', session: route }));
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    expect(store.getSnapshot().error).toBeNull();
+  });
+  it('stopping during the first read discards retained routes and cannot write after read completion', async () => {
+    const { transport, store } = setup();
+    const { initial, blocked, startup } = await deferredStartup(transport, store);
+    transport.emit('ariadne://route', { ...route, item_id: null });
+    store.stop(); const calls = transport.calls.length;
+    blocked.resolve(success('preferences_get', initial)); await startup;
+    transport.emit('ariadne://route', { ...route, item_id: null }); await store.refresh();
+    expect(transport.calls).toHaveLength(calls);
+    expect(store.getSnapshot().preferences).toBeNull();
+    expect(transport.unsubscribed.sort()).toEqual(['ariadne://presence_changed', 'ariadne://route', 'ariadne://session_changed', 'ariadne://session_changed']);
+  });
+  it('replays an uncertain startup route mutation with its original operation and no second queued write', async () => {
+    const { transport, store } = setup();
+    const { initial, blocked, startup } = await deferredStartup(transport, store);
+    transport.emit('ariadne://route', { ...route, item_id: null });
+    transport.enqueue('session_get', loaded(), loaded());
+    transport.enqueue('session_list', success('session_list', sessionResult()));
+    transport.enqueue('preferences_patch', new Error('Completion unknown'), patchReceipt(2));
+    blocked.resolve(success('preferences_get', initial)); await startup;
+    await waitFor(() => expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: operationId, error: { reason: 'transport' } }));
+    const next = preferences(2); next.global.selected_navigation = { kind: 'session', session: route };
+    read(transport, next); expect(await store.retryMutation()).toBe(true);
+    const patches = transport.calls.filter(call => call.name === 'preferences_patch');
+    expect(patches).toHaveLength(2); expect(patches[1].request).toEqual(patches[0].request);
+    expect(store.getSnapshot().pendingOperationId).toBeNull();
+    expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'session', session: route });
   });
   it('registered session route hints use exact SessionRef fields without leaking nullable item routing into preferences', async () => {
     const { transport, store } = setup(); read(transport); await store.start();

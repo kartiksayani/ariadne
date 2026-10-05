@@ -270,6 +270,48 @@ describe('ordinary desktop composition', () => {
     expect(await screen.findByText(/No sentences match these filters/)).toBeTruthy();
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
+  it.each(['confirmed', 'reconciled'])('retains an unsubmitted tree search until the shared preference write is %s', async completion => {
+    const { transport } = setup();
+    transport.preferences.sessions[0].filters.owners = [{ kind: 'me' }];
+    await openSession();
+    const before = structuredClone(transport.preferences.sessions[0]);
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.theme === 'light')) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    const writes = mutations(transport, 'preferences_patch').length;
+    const search = screen.getByLabelText('Search sentences') as HTMLInputElement;
+    fireEvent.change(search, { target: { value: 'missing pending needle' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Theme: system' }));
+    await waitFor(() => expect(entered).toBe(true));
+    expect(search.disabled).toBe(true);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+    expect(screen.getByText(/No sentences match these filters/)).toBeTruthy();
+    expect(transport.preferences.sessions[0].filters.search).toBe(before.filters.search);
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
+    if (completion === 'reconciled') transport.failNext = 'preferences_patch';
+    await act(async () => { release(); await gate; });
+    if (completion === 'reconciled') {
+      const reconcile = await screen.findByRole('button', { name: 'Reconcile operation' });
+      expect(search.disabled).toBe(true);
+      expect(search.value).toBe('missing pending needle');
+      expect(mutations(transport, 'preferences_patch')).toHaveLength(writes + 1);
+      fireEvent.click(reconcile);
+    }
+    await waitFor(() => expect(transport.preferences.sessions[0].filters.search).toBe('missing pending needle'));
+    await waitFor(() => expect(search.disabled).toBe(false));
+    expect(transport.preferences.global.theme).toBe('light');
+    expect(transport.preferences.sessions[0]).toEqual({ ...before, filters: { ...before.filters, search: 'missing pending needle' } });
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(writes + (completion === 'reconciled' ? 3 : 2));
+    const searches = mutations(transport, 'preferences_patch').filter(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.filters.search === 'missing pending needle'));
+    expect(searches).toHaveLength(1);
+  });
   it('opens a native route over an earlier local selection without clearing its filters', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
@@ -282,6 +324,106 @@ describe('ordinary desktop composition', () => {
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('2'));
     expect(await screen.findByLabelText('Owner input for #2')).toBeTruthy();
     expect(transport.preferences.sessions[0].filters).toEqual(filters);
+  });
+  it('retains an enabled Reply submission while its exact draft edit is still saving', async () => {
+    const { transport } = setup(); await openSession();
+    fireEvent.click(document.querySelector('[data-item-id="1"]')!);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));
+    const editor = await screen.findByLabelText('Reply message');
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    const text = 'Retain this Reply during its pending draft save.';
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'upsert_draft' && entry.draft.text === text)) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    fireEvent.change(editor, { target: { value: text } });
+    await waitFor(() => expect(entered).toBe(true));
+    const send = within(screen.getByLabelText('Owner input for #1')).getByRole('button', { name: 'Send reply' });
+    expect(send.hasAttribute('disabled')).toBe(false); fireEvent.click(send);
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
+    await act(async () => { release(); await gate; });
+    await waitFor(() => expect(mutations(transport, 'input_submit')).toHaveLength(1));
+    expect(mutations(transport, 'input_submit')[0].command).toMatchObject({ params: { text } });
+  });
+  it.each(['confirmed', 'reconciled'])('admits parent selection only after child navigation is %s', async completion => {
+    const { transport } = setup(); await openSession();
+    fireEvent.click(document.querySelector('[data-item-id="1"]')!);
+    await screen.findByLabelText('Owner input for #1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_global')
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1')) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Item 1\.1/ }));
+    await waitFor(() => expect(entered).toBe(true));
+    const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
+    expect(parent.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByLabelText('Search sentences').hasAttribute('disabled')).toBe(true);
+    const revealReads = transport.queries.filter(query => query.request.command === 'reveal_item').length;
+    fireEvent.click(parent); fireEvent.keyDown(parent, { key: 'Enter' });
+    expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(revealReads);
+    if (completion === 'reconciled') transport.failNext = 'preferences_patch';
+    await act(async () => { release(); await gate; });
+    if (completion === 'reconciled') {
+      const reconcile = await screen.findByRole('button', { name: 'Reconcile operation' });
+      expect(parent.getAttribute('aria-disabled')).toBe('true');
+      fireEvent.click(parent); fireEvent.keyDown(parent, { key: 'Enter' });
+      expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(revealReads);
+      fireEvent.click(reconcile);
+    }
+    await screen.findByLabelText('Owner input for #1.1');
+    await waitFor(() => expect(parent.hasAttribute('aria-disabled')).toBe(false));
+    fireEvent.keyDown(parent, { key: 'Enter' });
+    await screen.findByLabelText('Owner input for #1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    expect(parent.getAttribute('aria-selected')).toBe('true');
+  });
+  it.each(['confirmed', 'reconciled'])('admits rail Close only after a shared preference write is %s', async completion => {
+    const { transport } = setup(); await openSession();
+    fireEvent.click(document.querySelector('[data-item-id="1"]')!);
+    await screen.findByLabelText('Owner input for #1');
+    fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
+    await screen.findByRole('log', { name: 'Complete session messages' });
+    await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '2')) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="2"]')!);
+    await waitFor(() => expect(entered).toBe(true));
+    const close = screen.getByRole('button', { name: 'Close message rail' });
+    expect(close.hasAttribute('disabled')).toBe(true);
+    const writes = mutations(transport, 'preferences_patch').length;
+    fireEvent.click(close); fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'm' });
+    expect(screen.getByRole('log', { name: 'Complete session messages' })).toBeTruthy();
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
+    if (completion === 'reconciled') transport.failNext = 'preferences_patch';
+    await act(async () => { release(); await gate; });
+    if (completion === 'reconciled') {
+      const reconcile = await screen.findByRole('button', { name: 'Reconcile operation' });
+      expect(close.hasAttribute('disabled')).toBe(true);
+      fireEvent.click(close); fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'm' });
+      expect(mutations(transport, 'preferences_patch')).toHaveLength(writes + 1);
+      fireEvent.click(reconcile);
+    }
+    await waitFor(() => expect(close.hasAttribute('disabled')).toBe(false)); fireEvent.click(close);
+    await waitFor(() => expect(screen.queryByRole('log', { name: 'Complete session messages' })).toBeNull());
+    expect(transport.preferences.sessions[0].rail).toBe('hidden');
   });
   it('closes detail with Escape in the owner editor and keeps its draft for reopening', async () => {
     const { transport } = setup(); await openSession();

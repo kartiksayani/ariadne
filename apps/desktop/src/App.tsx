@@ -185,7 +185,11 @@ function Workspace({ application }: { application: Application }) {
     if (view && preferences) void navigation.saveSessionView({ ...structuredClone(view), ...change } as SessionPreferences, preferences.revision);
   };
   const closeDetail = () => { invalidateOwnerRequest(); detailDismissedAt.current = navigation.getNavigationRequest(); setDetailOpen(false); };
-  const toggleRail = () => saveView({ rail: view?.rail === 'hidden' ? 'activity' : 'hidden' });
+  const toggleRail = () => {
+    const current = navigation.getSnapshot();
+    if (current.writing || current.pendingOperationId !== null) return;
+    saveView({ rail: view?.rail === 'hidden' ? 'activity' : 'hidden' });
+  };
   const switchToTree = () => setGraphModes(previous => ({ ...previous, [key]: false }));
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
   return <div className="product-app" onKeyDown={event => {
@@ -239,7 +243,7 @@ function Workspace({ application }: { application: Application }) {
         }} /></> : undefined}
       onCloseDetail={closeDetail}
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} routes={navigation.routes}
-        selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onReveal={reveal} onClose={toggleRail} /> : undefined}
+        selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onReveal={reveal} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} /> : undefined}
       renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} onReveal={selected} revealItem={revealItem} switchToTree={switchToTree} highlightedItemIds={highlightedItems} onHoverItem={hoverItem} />} />
   </div>;
 }
