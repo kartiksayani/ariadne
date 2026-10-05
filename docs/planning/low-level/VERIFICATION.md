@@ -38,9 +38,10 @@ private host transcripts in evidence files.
 
 Keep redacted protocol fixtures with provenance in the repository: source host
 version, capture/generation command, date, and SHA-256. Do not depend on an
-ephemeral planning directory. Use only the pinned Claude 2.1.287 and Codex
-0.160.0 as release-1 live baselines unless an implementation-time compatibility
-change is explicitly recorded in `DECISIONS.md` and retested.
+ephemeral planning directory. Live runs use the installed Claude Code and Codex
+versions and record them in the evidence
+([ADR-0069](../../adr/ADR-0069-release-evidence-is-proportionate.md)); the
+fixtures above were captured on Claude 2.1.287 and Codex 0.160.0.
 
 ## Required acceptance matrix
 
