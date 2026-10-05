@@ -184,7 +184,7 @@ test('embedded launcher retains backend stderr when the app exits before readine
   try {
     await assert.rejects(command(process.execPath, ['--input-type=module', '-e', fixture], {
       env: { ...buildEnv(root), ARIADNE_E2E_BINARY: process.execPath, ARIADNE_E2E_ROOT: root,
-        ARIADNE_E2E_NONCE: 'fixture', ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: root,
+        ARIADNE_E2E_NONCE: 'fixture', ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: root, ARIADNE_E2E_PHASE: 'delivery',
         ARIADNE_E2E_APP_ARGS: JSON.stringify(appArgs) },
       timeout: 10000, log: join(root, 'launcher.log'),
     }), /failed \(1\)/);
