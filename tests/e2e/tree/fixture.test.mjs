@@ -8,7 +8,7 @@ import { runInNewContext } from 'node:vm';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import { observeTreeClickReadiness, publishTreeRequest, treeBatch, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
 
-test('filter click readiness requires the same enabled hit target and stable nested geometry without clicking', () => {
+for (const target of ['filter', 'session']) test(`${target} click readiness requires the same enabled hit target and stable nested geometry without clicking`, () => {
   const frames = new Map(), listeners = new Map(), scrolls = [];
   let nextFrame = 0, rect = { top: 200, bottom: 220, left: 400, right: 440, width: 40, height: 20 };
   const parent = { scrollLeft: 0, scrollTop: 0, parentElement: null };
@@ -17,7 +17,10 @@ test('filter click readiness requires the same enabled hit target and stable nes
     getAttribute: () => 'false', contains: value => value === button };
   let named = button, hit = button;
   const document = {
-    querySelector: selector => { assert.equal(selector, '[aria-label="Item owner"]'); return { querySelectorAll: () => [named] }; },
+    querySelector: selector => {
+      assert.equal(selector, target === 'filter' ? '[aria-label="Item owner"]' : '[data-session-id="fixture"]');
+      return target === 'filter' ? { querySelectorAll: () => [named] } : named;
+    },
     elementFromPoint: () => hit,
     addEventListener: (type, listener, capture) => { assert.equal(capture, true); listeners.set(type, listener); },
     removeEventListener: (type, listener) => { assert.equal(listeners.get(type), listener); listeners.delete(type); },
@@ -26,7 +29,8 @@ test('filter click readiness requires the same enabled hit target and stable nes
     cancelAnimationFrame: id => frames.delete(id) };
   // Exercise the same self-contained callback WebDriver serializes; this proves
   // readiness admission only, not native rendering or OS input acceptance.
-  runInNewContext(`(${observeTreeClickReadiness.toString()})(button, 'Item owner', 'Me', true)`, { window, document, button });
+  runInNewContext(`(${observeTreeClickReadiness.toString()})(button, 'Item owner', 'Me', true, selector)`,
+    { window, document, button, selector: target === 'session' ? '[data-session-id="fixture"]' : null });
   const state = window.__ariadneTreeFilterAction;
   const frame = () => { const [id, callback] = frames.entries().next().value; frames.delete(id); callback(); };
   frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
