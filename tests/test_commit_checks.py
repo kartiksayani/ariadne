@@ -53,6 +53,8 @@ class ScopeTests(unittest.TestCase):
             (["Cargo.lock"], ("application", True)),
             (["package-lock.json"], ("application", True)),
             (["scripts/run-native-e2e.mjs"], ("application", True)),
+            (["scripts/install/installer.py"], ("application", True)),
+            (["tests/functional/install/check_packaged.py"], ("application", True)),
             (["quality-gates.json"], ("application", True)),
             ([".github/workflows/quality.yml"], ("application", True)),
             (["future/unknown.ts"], ("application", True)),
@@ -285,6 +287,8 @@ class CoverageTests(unittest.TestCase):
                     "--output-path", paths[2], "--fail-under-lines", "80"))
                 self.assertEqual(calls.index(exports[1]), calls.index(exports[0]) + 1)
                 self.assertIn(("npm", "run", "test:coverage"), calls)
+                self.assertIn((commit.sys.executable, "-m", "coverage", "report",
+                               "--data-file=coverage/install.coverage", "--fail-under=80"), calls)
                 self.assertIn(("npm", "run", native_command), calls)
                 other_command = "test:e2e" if native_command == "test:native" else "test:native"
                 self.assertNotIn(("npm", "run", other_command), calls)
