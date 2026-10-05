@@ -146,11 +146,21 @@ async function renderedBodies(selector) {
     id: card.dataset.messageId, body: card.querySelector('.history-body')?.textContent,
   })), selector);
 }
+export async function waitForRoundResult(round, reply, explanation) {
+  await wait(async () => {
+    const text = await browser.$(`[aria-label="Round ${round.ordinal}"]`).getText();
+    return text.includes(`Closed · ${round.closed_at}`) && text.includes(reply) && text.includes(explanation);
+  }, 'Native detail did not publish the final closed round and its complete correlated result');
+}
 async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
   const back = await browser.$('[aria-label="Item history view"]').$('button=Back and forth'); await back.waitForEnabled(); await back.scrollIntoView(); await back.click();
   await wait(async () => (await browser.$$('.history-round')).length === 5, 'Native detail did not load all five real rounds');
   const rounds = Object.values(saved.rounds).sort((a, b) => a.ordinal - b.ordinal);
   assert.equal(rounds.length, 5); assert.equal(Object.keys(saved.items).length, 3);
+  // Five sections already exist after the fifth answer. The Core completion
+  // barrier does not imply that the selected native history has refreshed yet.
+  const finalRound = rounds.at(-1);
+  await waitForRoundResult(finalRound, resultTexts.at(-1), saved.inputs[finalRound.result_input_ids[0]].attempts[0].domain_result.explanation);
   for (let index = 0; index < 5; index++) {
     const section = await browser.$(`[aria-label="Round ${index + 1}"]`);
     const text = await section.getText(), round = rounds[index];
