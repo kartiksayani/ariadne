@@ -56,7 +56,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   const [search, setSearch] = useState(view.filters.search);
   const [pendingSearch, setPendingSearch] = useState<{ store: SessionStore; text: string } | null>(null);
   const elements = useRef(new Map<string, HTMLDivElement>()), container = useRef<HTMLDivElement>(null);
-  const searchInput = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null), ownerFocus = useRef<HTMLButtonElement | null>(null);
   const request = useRef(0), mounted = useRef(true);
   const latest = useRef({ view, saveView, saveLater, onReveal, routes, later, state, writing });
   latest.current = { view, saveView, saveLater, onReveal, routes, later, state, writing };
@@ -149,12 +149,23 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   }, [pendingSearch, writing, state.status, store, search, view, write]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
   useLayoutEffect(() => {
-    ++request.current; setLocalReveal(null);
+    ++request.current; setLocalReveal(null); ownerFocus.current = null;
     setFocusId(reveal?.store === store && reveal.kind === 'item' ? reveal.route.item_id : latest.current.view.selected_item_id);
     // Reset before the row-focus layout effect chooses a visible keyboard entry.
     // A passive reset would overwrite that fallback when saved selection is null.
     // External reveals are handled below; this reset only replaces the store.
   }, [store]);
+  useLayoutEffect(() => {
+    if (writing) {
+      const moved = (event: FocusEvent) => { if (event.target !== ownerFocus.current && event.target !== document.body) ownerFocus.current = null; };
+      document.addEventListener('focusin', moved);
+      return () => document.removeEventListener('focusin', moved);
+    }
+    const button = ownerFocus.current; ownerFocus.current = null;
+    // Reordering a saved owner can move its focused DOM node and blur it.
+    // Restore only that pending control, never a deliberate new focus target.
+    if (button?.isConnected && document.activeElement === document.body) button.focus({ preventScroll: true });
+  }, [store, writing, view.filters.owners]);
   const previousFocus = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (!rows.length) return;
@@ -221,10 +232,14 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
         disabled={disabled} aria-pressed={view.filters.statuses.includes(status)} className="ref-button ref-ghost"
         onClick={() => filter(next => { next.statuses = next.statuses.includes(status) ? next.statuses.filter(value => value !== status) : [...next.statuses, status]; })}>
         {STATUS[visualStatus(status)].label}</button>)}</div>
-      <div role="group" aria-label="Item owner">{owners.map((owner, index) => <button type="button" key={index}
+      <div role="group" aria-label="Item owner">{owners.map(owner => <button type="button"
+        key={owner.kind === 'me' ? 'me' : owner.kind === 'other' ? `other:${owner.name}` : `agent:${owner.binding_id}`}
         disabled={disabled} aria-pressed={view.filters.owners.some(value => sameOwner(value, owner))} className="ref-button ref-ghost"
-        onClick={() => filter(next => { next.owners = next.owners.some(value => sameOwner(value, owner))
-          ? next.owners.filter(value => !sameOwner(value, owner)) : [...next.owners, structuredClone(owner) as ItemOwner]; })}>
+        onClick={event => {
+          ownerFocus.current = document.activeElement === event.currentTarget ? event.currentTarget : null;
+          filter(next => { next.owners = next.owners.some(value => sameOwner(value, owner))
+            ? next.owners.filter(value => !sameOwner(value, owner)) : [...next.owners, structuredClone(owner) as ItemOwner]; });
+        }}>
         {owner.kind === 'me' ? 'Me' : owner.kind === 'other' ? owner.name : `Agent · ${owner.binding_id}`}</button>)}</div>
       <label><input type="checkbox" checked={view.filters.hide_later} disabled={disabled} onChange={event => filter(next => { next.hide_later = event.target.checked; })} />Hide Later</label>
       <label><input type="checkbox" checked={view.filters.archived} disabled={disabled} onChange={event => filter(next => { next.archived = event.target.checked; })} />Archive</label>
