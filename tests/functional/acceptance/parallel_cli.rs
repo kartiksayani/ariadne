@@ -427,3 +427,292 @@ pub fn parallel_queued_isolation(binary: &str) {
         assert!(lane.claim(&registry, 2600 + index as u64).is_none());
     }
 }
+
+fn owner_call(binary: &str, home: &Path, lane: &Lane, command: &OwnerCommand) -> Value {
+    let (noun, verb) = match command {
+        OwnerCommand::InputResolve { .. } => ("input", "resolve"),
+        OwnerCommand::BindingResume { .. } => ("binding", "resume"),
+        _ => unreachable!("this fixture only resolves and resumes"),
+    };
+    let mut child = Command::new(binary)
+        .args([noun, verb, "--json-stdin"])
+        .env("ARIADNE_HOME", home.join(".ariadne"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let request = OwnerMutationRequest {
+        session: Some(SessionRef {
+            project_id: lane.project.clone(),
+            session_id: lane.session.clone(),
+        }),
+        command: command.clone(),
+    };
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(&request).unwrap())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        output.status.success(),
+        envelope["ok"] == true,
+        "{envelope}"
+    );
+    envelope
+}
+
+#[test]
+fn installed_cli_repairs_a_missing_result_without_repeating_original_work() {
+    let binary = env!("CARGO_BIN_EXE_ariadne");
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::open(home.path()).unwrap();
+    registry.register(root.path(), &id(800), || id(1)).unwrap();
+    let lane = Lane {
+        root: root.path().into(),
+        project: id(1),
+        session: id(2),
+        binding: id(3),
+        generation: id(4),
+        topic: id(5),
+        name: "repair_lane".into(),
+    };
+    let seed: Session =
+        serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap();
+    lane.store().create(&seed).unwrap();
+    let blocked_claim = |request| {
+        let before = lane.bytes();
+        let result = DeliveryService::new(&registry).claim(
+            &ValidatedDispatchContext::from_trusted_current_lease(
+                lane.route(),
+                lane.binding.clone(),
+                lane.generation.clone(),
+            ),
+            &ClaimRequest {
+                binding_id: lane.binding.clone(),
+                generation: lane.generation.clone(),
+                request_id: id(request),
+            },
+            || panic!("blocked claim must not allocate an attempt"),
+            at(),
+        );
+        assert!(
+            matches!(result, Err(ariadne_core::delivery::DeliveryError::Core(error))
+            if error.code == CoreErrorCode::InvalidTransition)
+        );
+        assert_eq!(lane.bytes(), before);
+    };
+    for number in 0..2 {
+        InputService::new(&registry)
+            .execute(
+                &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(lane.route())),
+                &OwnerCommand::InputSubmit {
+                    api_version: SchemaVersion::new(1).unwrap(),
+                    op_id: id(1000 + number),
+                    params: InputSubmitParams {
+                        binding_id: lane.binding.clone(),
+                        target: InputTarget {
+                            topic_id: lane.topic.clone(),
+                            item_id: Some(ItemRef::new("1").unwrap()),
+                        },
+                        kind: InputKind::Reply,
+                        text: format!("ORIGINAL OWNER ACTION {number}"),
+                        selected_option_id: None,
+                        expected_question_revision: None,
+                        supersedes_answer_id: None,
+                    },
+                },
+                || UuidV4::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+                at(),
+            )
+            .unwrap();
+    }
+    let work = lane.claim(&registry, 2000).unwrap();
+    let original_input = lane.saved().inputs.0[&work.input_id].clone();
+    // The original agent explicitly published a reply but omitted input_result.
+    let mut effects = lane.result(&work);
+    effects["input_result"] = Value::Null;
+    ok(call(binary, home.path(), &lane, false, &effects));
+    let original_reply = lane
+        .saved()
+        .messages
+        .iter()
+        .find(|message| message.kind == MessageKind::Reply)
+        .unwrap()
+        .clone();
+    ok(call(
+        binary,
+        home.path(),
+        &lane,
+        true,
+        &serde_json::to_value(lane.event(&work, true)).unwrap(),
+    ));
+    DeliveryService::new(&registry)
+        .expire_missing_result(
+            &AdapterContext::from_trusted_entrypoint(
+                lane.route(),
+                lane.binding.clone(),
+                lane.generation.clone(),
+                None,
+            ),
+            &work.input_id,
+            &work.attempt_id,
+            &id(2001),
+            UtcMillis::new("2026-10-04T12:00:06.000Z").unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+    let missing = lane.saved();
+    assert_eq!(
+        missing.inputs.0[&work.input_id].state,
+        InputState::NeedsAttention
+    );
+    assert_eq!(
+        missing.inputs.0[&work.input_id].attempts[0].result_state,
+        ResultState::Missing
+    );
+    assert_eq!(
+        missing.bindings.0[&lane.binding].pause_reason,
+        Some(PauseReason::ResultMissing)
+    );
+    blocked_claim(2002);
+
+    let mut resolve = OwnerCommand::InputResolve {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(2003),
+        params: InputResolveParams {
+            input_id: work.input_id.clone(),
+            attempt_id: work.attempt_id.clone(),
+            decision: ResolutionKind::RequestResultRepair,
+            reason: "Original work completed; request only its missing structured result.".into(),
+            expected_revision: missing.revision,
+            evidence: None,
+        },
+    };
+    // Successful old work is not proof that the host is currently idle.
+    let before = lane.bytes();
+    assert_eq!(
+        owner_call(binary, home.path(), &lane, &resolve)["error"]["code"],
+        "delivery_uncertain"
+    );
+    assert_eq!(lane.bytes(), before);
+    let OwnerCommand::InputResolve { params, .. } = &mut resolve else {
+        unreachable!()
+    };
+    params.evidence = Some(OwnerResolutionEvidence {
+        source: OwnerEvidenceSource::OwnerAttestation,
+        turn_state: TurnState::Unknown,
+        host_turn_id: None,
+        owner_attested_idle: true,
+        at: at(),
+    });
+    let evidence = params.evidence.clone();
+    let receipt = ok(owner_call(binary, home.path(), &lane, &resolve));
+    let prepared = lane.saved();
+    let input = &prepared.inputs.0[&work.input_id];
+    assert_eq!(input.payload, original_input.payload);
+    assert_eq!(input.seq, original_input.seq);
+    assert_eq!(input.state, InputState::Queued);
+    assert_eq!(input.resolution_history.len(), 1);
+    assert_eq!(
+        input.resolution_history[0].kind,
+        ResolutionKind::RequestResultRepair
+    );
+    assert_eq!(input.resolution_history[0].evidence, evidence);
+    assert!(input.attempts[0].sealed_at.is_some());
+    assert!(prepared.bindings.0[&lane.binding].owner_paused);
+    blocked_claim(2004);
+    let before = lane.bytes();
+    assert_eq!(
+        ok(owner_call(binary, home.path(), &lane, &resolve)),
+        receipt
+    );
+    assert_eq!(lane.bytes(), before);
+
+    ok(owner_call(
+        binary,
+        home.path(),
+        &lane,
+        &OwnerCommand::BindingResume {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: id(2005),
+            params: BindingStateParams {
+                binding_id: lane.binding.clone(),
+                expected_generation: lane.generation.clone(),
+            },
+        },
+    ));
+    let repair = lane.claim(&registry, 2006).unwrap();
+    assert_eq!(repair.input_id, work.input_id);
+    assert_ne!(repair.attempt_id, work.attempt_id);
+    let repairing = lane.saved();
+    let repair_attempt = &repairing.inputs.0[&work.input_id].attempts[1];
+    assert_eq!(repair_attempt.purpose, AttemptPurpose::ResultRepair);
+    assert_eq!(
+        repair_attempt.repair_for_attempt_id,
+        Some(work.attempt_id.clone())
+    );
+    assert!(repair.formatted_payload.contains("result-only"));
+    assert!(repair
+        .formatted_payload
+        .contains(original_reply.id.as_str()));
+    assert!(!repair
+        .formatted_payload
+        .contains(&original_input.payload.text));
+    assert!(lane.claim(&registry, 2007).is_none());
+    // Return only the structured result referencing the already committed reply.
+    let mut result = lane.result(&repair);
+    result["op_id"] = json!(id(901));
+    result["operations"] = json!([]);
+    result["expected_item_revisions"] = json!({});
+    result["input_result"]["reply_refs"] = json!([{"id": original_reply.id}]);
+    let result_receipt = ok(call(binary, home.path(), &lane, false, &result));
+    assert_eq!(
+        lane.saved().inputs.0[&work.input_id].state,
+        InputState::InFlight
+    );
+    assert!(lane.claim(&registry, 2008).is_none());
+    let before = lane.bytes();
+    assert_eq!(
+        ok(call(binary, home.path(), &lane, false, &result)),
+        result_receipt
+    );
+    assert_eq!(lane.bytes(), before);
+    let mut completion = lane.event(&repair, true);
+    completion.event_id = "repair-completed".into();
+    completion.host_turn_id = Some("repair-host-turn".into());
+    ok(call(
+        binary,
+        home.path(),
+        &lane,
+        true,
+        &serde_json::to_value(&completion).unwrap(),
+    ));
+    let done = lane.saved();
+    let input = &done.inputs.0[&work.input_id];
+    assert_eq!(input.state, InputState::Handled);
+    assert_eq!(input.attempts.len(), 2);
+    assert_eq!(input.attempts[0].result_state, ResultState::Missing);
+    assert_eq!(input.attempts[1].result_state, ResultState::Committed);
+    assert_eq!(input.attempts[1].turn_state, TurnState::Completed);
+    assert!(input.attempts[1].sealed_at.is_some());
+    let replies: Vec<_> = done
+        .messages
+        .iter()
+        .filter(|m| m.kind == MessageKind::Reply)
+        .collect();
+    assert_eq!(
+        replies,
+        vec![&original_reply],
+        "repair must retain exactly the original explicit reply"
+    );
+    let successor = lane.claim(&registry, 2009).unwrap();
+    assert_ne!(successor.input_id, work.input_id);
+    assert_eq!(lane.saved().inputs.0[&successor.input_id].seq.value(), 2);
+    assert!(lane.claim(&registry, 2010).is_none());
+}
