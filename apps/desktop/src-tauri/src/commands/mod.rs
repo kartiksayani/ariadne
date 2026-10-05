@@ -230,14 +230,14 @@ impl DesktopService {
     }
     fn owner(&self, request: OwnerMutationRequest, command_matches: bool) -> MutationEnvelope {
         self.owner_before(
-            request,
+            &request,
             command_matches,
             Instant::now() + ariadne_runtime::control::CONTROL_TIMEOUT,
         )
     }
     fn owner_before(
         &self,
-        request: OwnerMutationRequest,
+        request: &OwnerMutationRequest,
         command_matches: bool,
         deadline: Instant,
     ) -> MutationEnvelope {
@@ -368,6 +368,29 @@ queries! {
     preferences_get => QueryRequest::PreferencesGet {},
     reveal_item => QueryRequest::RevealItem { .. },
 }
+fn notify_native_preferences(
+    command: &OwnerCommand,
+    envelope: &MutationEnvelope,
+    reconcile_window: impl FnOnce(),
+    refresh_tray: impl FnOnce(),
+) {
+    // Window pin/geometry and tray notification policy consume global settings.
+    // Session views, Later and drafts are local renderer preferences.
+    let affects_native = matches!(command, OwnerCommand::PreferencesPatch { params, .. }
+        if params.entries.iter().any(|entry| matches!(entry, PreferencesPatchEntry::SetGlobal { .. })));
+    if affects_native
+        && matches!(
+            &envelope.0,
+            ApplicationEnvelope::Success(SuccessEnvelope {
+                data: MutationReceipt::PreferencesPatched(_),
+                ..
+            })
+        )
+    {
+        reconcile_window();
+        refresh_tray();
+    }
+}
 macro_rules! mutations {
     ($($name:ident => $variant:ident),+ $(,)?) => { $(
         #[tauri::command]
@@ -377,7 +400,7 @@ macro_rules! mutations {
             let service = app.state::<DesktopService>().inner().clone();
             let operation_id = request.command.operation_id().clone();
             blocking(move || {
-            let envelope = service.owner_before(request, matches, deadline);
+            let envelope = service.owner_before(&request, matches, deadline);
             if let ApplicationEnvelope::Success(SuccessEnvelope { data: MutationReceipt::Session(receipt), .. }) = &envelope.0 {
                 // Revision hints are best effort. A failed event publication must
                 // never turn an already durable receipt into a failed mutation.
@@ -388,15 +411,17 @@ macro_rules! mutations {
                     tray.refresh();
                 }
             }
-            if matches!(&envelope.0, ApplicationEnvelope::Success(SuccessEnvelope {data:MutationReceipt::PreferencesPatched(_),..})) {
-                // OS reconciliation cannot change an already saved receipt.
+            // OS reconciliation cannot change an already saved receipt. Read
+            // current global preferences rather than reapplying captured values.
+            notify_native_preferences(&request.command, &envelope, || {
                 if let Some(window) = app.try_state::<crate::native::window::NativeWindow>() {
                     window.reconcile(app.clone(), false);
                 }
+            }, || {
                 if let Some(tray) = app.try_state::<crate::native::tray::NativeTray>() {
                     tray.refresh();
                 }
-            }
+            });
             envelope
             }).await.unwrap_or_else(|()| {
                 MutationEnvelope(envelope(Err(CoreError::new(
