@@ -446,6 +446,25 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn installed_sdk_keeps_helper_exit_evidence_when_child_closes_stdin() {
+    let mut fixture = Fixture::new();
+    // Exceed the pipe capacity while the child deliberately reads no input.
+    // Closing fd 0 forces EPIPE instead of depending on helper exit timing.
+    let response = fixture.sdk.command(json!({
+        "action": "call",
+        "argv": ["node", "-e", "require('node:fs').closeSync(0); process.stdout.write('closed stdin\\n'); process.stderr.write('intentional helper failure\\n'); process.exitCode = 23;"],
+        "stdin": "x".repeat(2 * 1024 * 1024)
+    }));
+    assert_eq!(response["value"]["exitCode"], 23);
+    assert_eq!(response["value"]["stdout"], "closed stdin\n");
+    assert_eq!(response["value"]["stderr"], "intentional helper failure\n");
+    assert_eq!(response["replies"].as_array().unwrap().len(), 1);
+    assert_eq!(response["replies"][0]["result"], response["value"]);
+    let alive = fixture.sdk.command(json!({ "action": "state" }));
+    assert_eq!(alive["replies"], response["replies"]);
+}
+
+#[test]
 fn installed_existing_session_claim_callbacks_and_result_join_in_both_orders() {
     for result_first in [false, true] {
         let mut fixture = Fixture::new();
