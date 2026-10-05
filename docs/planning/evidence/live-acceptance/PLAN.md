@@ -128,8 +128,8 @@ freshness and manual fallback honestly; loaded thread/PID alone proves no livene
 ## Extra turns: completion ordering and ordinary recovery
 
 **Execution prerequisite for both missing-result cases:** implement, independently
-review and verify the production native/runtime caller of
-`DeliveryService::expire_missing_result` (the `native_result_expiry` work), then
+review and verify the production native/runtime expiry path (the
+`native_result_expiry` work), then
 qualify its merged artifact through required CI. Candidate `954ab4b` has the Core
 method but no production caller; it cannot prove automatic missing-result expiry.
 Follow the [queue contract](../../low-level/QUEUES_AND_RECOVERY.md): after actual
