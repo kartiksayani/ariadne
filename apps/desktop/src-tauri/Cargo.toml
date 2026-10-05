@@ -34,7 +34,7 @@ tauri-plugin-wdio-webdriver = { workspace = true, optional = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { version = "=0.6.2", default-features = false, features = ["std"] }
 objc2 = { version = "=0.6.4", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSAlert", "NSApplication"] }
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSNotification", "NSObject", "NSString", "NSOperation", "NSArray", "NSDictionary", "NSError", "block2"] }
 objc2-user-notifications = { version = "=0.3.2", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationRequest", "UNNotificationContent", "UNNotification", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationTrigger"] }
 

@@ -11,11 +11,11 @@ import './rail.css';
 const load = (service: RendererService, route: Parameters<typeof loadMessages>[1], revision: number, _selection: string, signal: AbortSignal) =>
   loadMessages(service, route, revision, signal);
 
-export function MessageRail({ service, store, routes, selectedItemId = null, hoveredItemId = null, onHighlight, onReveal, onClose }: {
+export function MessageRail({ service, store, routes, selectedItemId = null, hoveredItemId = null, onHighlight, onReveal, onClose, closeDisabled = false }: {
   service: RendererService; store: SessionStore; routes: RegisteredRoutes;
   selectedItemId?: string | null; hoveredItemId?: string | null;
   onHighlight: (itemIds: ReadonlySet<string>, messageIds: ReadonlySet<string>) => void;
-  onReveal: (reveal: RevealedItem) => void; onClose?: () => void;
+  onReveal: (reveal: RevealedItem) => void; onClose?: () => void; closeDisabled?: boolean;
 }) {
   const history = useHistory(service, store, 'messages', load);
   const messages = history.data?.items;
@@ -61,7 +61,7 @@ export function MessageRail({ service, store, routes, selectedItemId = null, hov
     setUnseen(0); setFollowing(true);
   };
   return <aside className="ariadne-reference message-history-rail" aria-label="Session message rail">
-    <header className="history-header"><strong>Messages</strong>{onClose && <button type="button" onClick={onClose} aria-label="Close message rail">Close</button>}</header>
+    <header className="history-header"><strong>Messages</strong>{onClose && <button type="button" disabled={closeDisabled} onClick={() => { if (!closeDisabled) onClose(); }} aria-label="Close message rail">Close</button>}</header>
     {history.loading && <p role="status">Loading complete message history…</p>}
     {history.error && <p role="alert">{history.error} {history.data && 'Showing the previous complete history.'} <button type="button" onClick={history.retry}>Retry history read</button></p>}
     {history.session.status !== 'ready' && <p role="status">{history.session.error?.message ?? 'The registered session is stale.'}</p>}
