@@ -6,7 +6,7 @@ import type { RevealedItem } from './data/routes';
 import type { ItemRoute, SessionPreferences, SessionRef, Theme } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
 import { OwnerDraftStore } from './state/drafts/store';
-import { WaitingStore, useWaiting } from './selectors/waiting/store';
+import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationSentenceTree } from './components/tree/NavigationSentenceTree';
 import { NavigationTopicGraph } from './components/graph/NavigationTopicGraph';
@@ -81,7 +81,7 @@ function SessionCenter({ application, view, graph, onReveal, revealItem, switchT
   </section>;
 }
 function Workspace({ application }: { application: Application }) {
-  const navigation = application.navigation, state = useNavigation(navigation), waiting = useWaiting(application.waiting);
+  const navigation = application.navigation, state = useNavigation(navigation);
   const store: SessionStore | null = navigation.selectedSession();
   const sessionState = useSyncExternalStore(store?.subscribe ?? noSubscription, store?.getSnapshot ?? noSession, store?.getSnapshot ?? noSession);
   const route = sessionState?.route, key = route ? routeKey(route) : '';
@@ -199,7 +199,7 @@ function Workspace({ application }: { application: Application }) {
     const item = sessionState?.snapshot?.session.items[focusedId ?? selectedId ?? ''];
     const target = route && item ? { ...route, item_id: item.id } : null;
     if (event.key === 'a') {
-      const question = target && item?.status === 'waiting_on_me' ? target : waiting.waiting[0]?.route;
+      const question = target && item?.status === 'waiting_on_me' ? target : application.waiting.getSnapshot().waiting[0]?.route;
       if (question) { event.preventDefault(); focusOwner({ ...question }, 'answer'); }
     }
     if (target && item) {

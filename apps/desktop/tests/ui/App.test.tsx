@@ -4,11 +4,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App, { DesktopApp } from '../../src/App';
 import { createDesktopService } from '../../src/data/service';
+import { WaitingStore } from '../../src/selectors/waiting/store';
+import { MessageRail } from '../../src/components/rail/MessageRail';
+import { NavigationSentenceTree } from '../../src/components/tree/NavigationSentenceTree';
 import { AppTransport, route, secondId } from './app/transport';
 
 vi.mock('react-dom/client', async importOriginal => {
   const actual = await importOriginal<typeof ReactDOM>();
   return { ...actual, createRoot: vi.fn(actual.createRoot) };
+});
+vi.mock('../../src/components/rail/MessageRail', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/components/rail/MessageRail')>();
+  return { ...actual, MessageRail: vi.fn(actual.MessageRail) };
+});
+vi.mock('../../src/components/tree/NavigationSentenceTree', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/components/tree/NavigationSentenceTree')>();
+  return { ...actual, NavigationSentenceTree: vi.fn(actual.NavigationSentenceTree) };
 });
 
 const mutations = (transport: AppTransport, command: string) => transport.mutations.filter(request => request.command.command === command);
@@ -150,6 +161,64 @@ describe('ordinary desktop composition', () => {
     expect(transport.preferences).toEqual(before); expect(transport.mutations).toHaveLength(writes);
     fireEvent.click(screen.getByRole('button', { name: 'Close message rail' }));
     await waitFor(() => expect(returned.querySelector<HTMLElement>('[data-item-id="2"] .ref-tree-mark')!.style.background).toBe('transparent'));
+  });
+  it('keeps the selected tree and complete rail idle when another session publishes presence', async () => {
+    const starts = vi.spyOn(WaitingStore.prototype, 'start');
+    const transport = new AppTransport(), second = transport.sessions.get(secondId)!;
+    const binding = second.bindings[second.active_binding_id!]!;
+    binding.id = '00000000-0000-4000-8000-000000000021';
+    second.bindings = { [binding.id]: binding }; second.active_binding_id = binding.id;
+    render(<DesktopApp service={createDesktopService(transport)} />);
+    await openSession();
+    const waiting = starts.mock.contexts[0] as WaitingStore;
+    fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
+    const log = await screen.findByRole('log', { name: 'Complete session messages' });
+    await waitFor(() => {
+      expect(waiting.getSnapshot().status).toBe('ready');
+      expect(transport.preferences.sessions[0].rail).toBe('activity');
+      expect(log.querySelectorAll('[data-message-id]')).toHaveLength(transport.sessions.get(route.session_id)!.messages.length);
+    });
+    const treeRenders = vi.mocked(NavigationSentenceTree).mock.calls.length;
+    const railRenders = vi.mocked(MessageRail).mock.calls.length;
+    const previous = waiting.getSnapshot(), observation = {
+      ...waiting.sessionState(route)!.presence[transport.sessions.get(route.session_id)!.active_binding_id!],
+      generation: binding.generation, last_seen_at: '2026-10-05T02:05:00.000Z', execution_state: 'running' as const, freshness: 'fresh' as const,
+    };
+    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation }); });
+    expect(waiting.getSnapshot()).not.toBe(previous);
+    expect(waiting.sessionState({ ...route, session_id: secondId })?.presence[binding.id]).toEqual(observation);
+    expect.soft(vi.mocked(NavigationSentenceTree).mock.calls).toHaveLength(treeRenders);
+    expect.soft(vi.mocked(MessageRail).mock.calls).toHaveLength(railRenders);
+  });
+  it('answers the latest oldest waiting question after a background capture finishes', async () => {
+    const starts = vi.spyOn(WaitingStore.prototype, 'start');
+    const { transport } = setup(); await openSession();
+    const waiting = starts.mock.contexts[0] as WaitingStore;
+    await waitFor(() => expect(waiting.getSnapshot().status).toBe('ready'));
+    expect(waiting.getSnapshot().waiting[0].route.session_id).toBe(route.session_id);
+    const first = transport.sessions.get(route.session_id)!, second = transport.sessions.get(secondId)!;
+    const question = structuredClone(first.items['2']!);
+    question.waiting_since = '2026-10-03T11:00:00.000Z'; question.current_round_id = null;
+    second.items = { [question.id]: question }; second.topics = structuredClone(first.topics);
+    second.messages = structuredClone(first.messages); ++second.revision;
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get' && args.request.session?.session_id === secondId) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    let capture!: Promise<void>;
+    await act(async () => { capture = waiting.refresh(); });
+    await waitFor(() => expect(entered).toBe(true));
+    await act(async () => { release(); await capture; });
+    expect(waiting.getSnapshot().waiting[0].route.session_id).toBe(secondId);
+    fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'a' });
+    const ownerInput = await screen.findByLabelText('Owner input for #2');
+    await waitFor(() => expect(document.activeElement?.closest('[aria-label="Owner input for #2"]')).toBe(ownerInput));
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } });
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
   it('submits a deliberate owner reply through the shared draft service and renders its real Sent and conversation text', async () => {
     const { transport } = setup(); await openSession();
