@@ -290,6 +290,7 @@ async function runPhysicalWindow({ bundle, cli, tools, releaseEvidence }, signal
       assertGeometry(shown.preferences, await client.rectangle());
     }
     const beforePin = await snapshot();
+    assert.equal(beforePin.preferences.global.pinned, false, 'Private fixture changed Pin before its physical click');
     await client.openTray(); await capturePin('before', false);
     await client.choose('Pin');
     await wait(async () => (await snapshot()).preferences.global.pinned === true, 'Canonical Pin commit');
