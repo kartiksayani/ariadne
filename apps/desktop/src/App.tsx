@@ -90,6 +90,7 @@ function Workspace({ application }: { application: Application }) {
   const [ownerFocus, setOwnerFocus] = useState<(OwnerFocusRequest & { route: string; itemId: string }) | null>(null);
   const [graphModes, setGraphModes] = useState<Readonly<Record<string, boolean>>>({});
   const [detailOpen, setDetailOpen] = useState(true);
+  const detailDismissedAt = useRef<number | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
   const [highlightedItems, setHighlightedItems] = useState<ReadonlySet<string>>(new Set());
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
@@ -102,9 +103,16 @@ function Workspace({ application }: { application: Application }) {
   const selectedId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
   const theme = preferences?.global.theme ?? 'system';
   const query = searchEdit?.route === key ? searchEdit.text : view?.filters.search ?? '';
-  useEffect(() => { setDetailOpen(true); setLocalReveal(null); }, [key]);
+  // Saved selection is authoritative, but its late receipt is not a newer
+  // presentation intent than Escape. Deliberate navigation has a new epoch.
+  useEffect(() => {
+    if (detailDismissedAt.current !== navigation.getNavigationRequest()) setDetailOpen(true);
+    setLocalReveal(null);
+  }, [key, navigation]);
   useEffect(() => { setHighlightedItems(new Set()); setHighlightedMessages(new Set()); setHoveredItem(null); }, [key, view?.rail]);
-  useEffect(() => { setDetailOpen(true); }, [view?.selected_item_id, state.reveal]);
+  useEffect(() => {
+    if (detailDismissedAt.current !== navigation.getNavigationRequest()) setDetailOpen(true);
+  }, [view?.selected_item_id, state.reveal, navigation]);
   useEffect(() => { setLocalReveal(null); }, [state.reveal]);
   // The header uses navigation's existing serialized preference writer. Keep
   // the last typed search while a write/reconciliation is pending.
@@ -127,11 +135,11 @@ function Workspace({ application }: { application: Application }) {
     const opened = navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result, ownerToken === undefined ? undefined : () => shortcutSequence.current === ownerToken);
     const request = navigation.getNavigationRequest();
     if (!await opened || navigation.getNavigationRequest() !== request || ownerToken !== undefined && shortcutSequence.current !== ownerToken) return false;
-    setLocalReveal(result); setDetailOpen(true);
+    detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true);
     return true;
   };
   // Tree and graph already save their own selection through navigation.
-  const selected = (result: RevealedItem) => { invalidateOwnerRequest(); setLocalReveal(result); setDetailOpen(true); };
+  const selected = (result: RevealedItem) => { invalidateOwnerRequest(); detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true); };
   const revealItem = (target: ItemRoute) => {
     setRouteError(null);
     void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
@@ -176,7 +184,7 @@ function Workspace({ application }: { application: Application }) {
   const saveView = (change: Partial<SessionPreferences>) => {
     if (view && preferences) void navigation.saveSessionView({ ...structuredClone(view), ...change } as SessionPreferences, preferences.revision);
   };
-  const closeDetail = () => { invalidateOwnerRequest(); setDetailOpen(false); };
+  const closeDetail = () => { invalidateOwnerRequest(); detailDismissedAt.current = navigation.getNavigationRequest(); setDetailOpen(false); };
   const toggleRail = () => saveView({ rail: view?.rail === 'hidden' ? 'activity' : 'hidden' });
   const switchToTree = () => setGraphModes(previous => ({ ...previous, [key]: false }));
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;

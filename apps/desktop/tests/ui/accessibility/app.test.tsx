@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
-import { AppTransport, route } from '../app/transport';
+import { AppTransport, route, secondId } from '../app/transport';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function setup(configure?: (transport: AppTransport) => void) {
@@ -203,7 +203,7 @@ it.each(['r', 'b'])('failed preference navigation cannot authorize %s focus or B
   expect(document.activeElement).toBe(row); expect(transport.preferences.drafts).toEqual([]);
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
 });
-it.each(['r', 'b'])('keeps a dismissed detail closed when already dispatched %s saves its preferences', async key => {
+it.each([{ key: 'r', id: '4' }, { key: 'b', id: '4' }, { key: 'r', id: '3' }, { key: 'b', id: '3' }])('keeps a dismissed detail closed when dispatched $key selects #$id', async ({ key, id }) => {
   const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Reply message');
   await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('4'));
   const invoke = transport.invoke.bind(transport); let dispatched = false, release!: () => void;
@@ -215,15 +215,16 @@ it.each(['r', 'b'])('keeps a dismissed detail closed when already dispatched %s 
     }
     return invoke(name, args);
   });
-  const beforeMutations = transport.mutations.length, row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+  const beforeMutations = transport.mutations.length, row = document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
   row.focus(); fireEvent.keyDown(row, { key }); await waitFor(() => expect(dispatched).toBe(true));
   fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
   await act(async () => { release(); await gate; await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(row);
   expect(transport.preferences.revision).toBeGreaterThan(beforeRevision);
   expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
-  expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('4');
+  expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe(id);
   expect(transport.mutations.slice(beforeMutations)).toHaveLength(1); expect(transport.preferences.drafts).toEqual([]);
+  fireEvent.click(row); expect(await screen.findByLabelText(`Owner input for #${id}`)).toBeTruthy();
 });
 it('keeps detail dismissed when shortcut navigation session read completes afterward', async () => {
   const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Reply message');
@@ -239,4 +240,31 @@ it('keeps detail dismissed when shortcut navigation session read completes after
   fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
   await act(async () => { release(); await gate; await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(row);
+});
+it('keeps detail dismissed after a dispatched oldest-waiting shortcut changes session, then opens deliberate tab navigation', async () => {
+  const transport = await setup(value => {
+    const first = value.sessions.get(route.session_id)!, second = structuredClone(first);
+    second.id = secondId; second.title = 'Separate session'; value.sessions.set(secondId, second);
+    first.items['2']!.status = 'open';
+  });
+  fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Reply message');
+  await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('4'));
+  const invoke = transport.invoke.bind(transport); let dispatched = false, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if ('command' in args.request && args.request.command.command === 'preferences_patch'
+      && args.request.command.params.entries.some(entry => entry.kind === 'set_global')) { dispatched = true; await gate; }
+    return invoke(name, args);
+  });
+  const control = screen.getByRole('button', { name: 'Theme: system' });
+  control.focus(); fireEvent.keyDown(control, { key: 'a' }); await waitFor(() => expect(dispatched).toBe(true));
+  fireEvent.keyDown(control, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
+  await act(async () => { release(); await gate; await new Promise(resolve => setTimeout(resolve, 150)); });
+  expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } });
+  expect(transport.preferences.sessions.find(view => view.session.session_id === secondId)?.selected_item_id).toBe('2');
+  expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(control);
+  expect(transport.preferences.drafts).toEqual([]);
+  const tab = screen.getByRole('button', { name: 'Payments review' });
+  await waitFor(() => expect(tab.hasAttribute('disabled')).toBe(false)); fireEvent.click(tab);
+  expect(await screen.findByLabelText('Owner input for #4')).toBeTruthy();
 });
