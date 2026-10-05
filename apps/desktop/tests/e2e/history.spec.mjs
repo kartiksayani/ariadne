@@ -227,7 +227,8 @@ export async function closeHistoryRailReferences(message) {
     const mark = document.querySelector('[role="treeitem"][data-item-id="1"] .ref-tree-mark');
     const message = document.querySelector(`.history-timeline [data-message-id="${id}"]`);
     return !document.querySelector('.message-history-rail')
-      && mark?.style.background === 'transparent' && message && !message.classList.contains('history-highlight');
+      && mark && document.defaultView.getComputedStyle(mark).backgroundColor === 'rgba(0, 0, 0, 0)'
+      && message && !message.classList.contains('history-highlight');
   }, message.id), 'Native rail Close did not clear transient tree and detail references');
 }
 async function rail(history, saved, paged) {
