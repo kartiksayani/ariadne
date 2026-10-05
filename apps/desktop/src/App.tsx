@@ -119,24 +119,31 @@ function Workspace({ application }: { application: Application }) {
     }, 250);
     return () => { clearTimeout(timer); };
   }, [navigation, searchEdit, key, view, preferences, state.writing, state.pendingOperationId]);
-  const reveal = (result: RevealedItem) => {
+  const invalidateOwnerRequest = () => { ++shortcutSequence.current; setOwnerFocus(null); };
+  const consumeOwnerRequest = (token: number) => setOwnerFocus(current => current?.token === token ? null : current);
+  const reveal = async (result: RevealedItem, ownerToken?: number) => {
+    if (ownerToken === undefined) invalidateOwnerRequest();
     const target = result.kind === 'item' ? result.route : result.session;
+    const opened = navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result, ownerToken === undefined ? undefined : () => shortcutSequence.current === ownerToken);
+    const request = navigation.getNavigationRequest();
+    if (!await opened || navigation.getNavigationRequest() !== request || ownerToken !== undefined && shortcutSequence.current !== ownerToken) return false;
     setLocalReveal(result); setDetailOpen(true);
-    return navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result);
+    return true;
   };
   // Tree and graph already save their own selection through navigation.
-  const selected = (result: RevealedItem) => { setLocalReveal(result); setDetailOpen(true); };
+  const selected = (result: RevealedItem) => { invalidateOwnerRequest(); setLocalReveal(result); setDetailOpen(true); };
   const revealItem = (target: ItemRoute) => {
     setRouteError(null);
     void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
       .catch((error: unknown) => setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'));
   };
   const focusOwner = (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => {
-    const token = ++shortcutSequence.current;
+    const token = ++shortcutSequence.current, navigationRequest = navigation.getNavigationRequest();
+    setOwnerFocus(null);
     void navigation.routes.revealItem(target).then(async result => {
-      if (!result || result.kind !== 'item' || shortcutSequence.current !== token) return;
-      await reveal(result);
-      if (shortcutSequence.current !== token) return;
+      if (!result || result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== navigationRequest) return;
+      const opened = reveal(result, token), openedRequest = navigation.getNavigationRequest();
+      if (!await opened || shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex });
     }).catch((error: unknown) => setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'));
   };
@@ -144,11 +151,15 @@ function Workspace({ application }: { application: Application }) {
     const identity = JSON.stringify(target);
     if (bringing.current.has(identity)) return;
     bringing.current.add(identity);
-    const token = ++shortcutSequence.current;
+    const token = ++shortcutSequence.current, navigationRequest = navigation.getNavigationRequest();
+    setOwnerFocus(null);
     try {
       const result = await navigation.routes.revealItem(target);
-      if (!result || result.kind !== 'item') return;
-      await reveal(result); await application.drafts.load();
+      if (!result || result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== navigationRequest) return;
+      const opened = reveal(result, token), openedRequest = navigation.getNavigationRequest();
+      if (!await opened) return;
+      await application.drafts.load();
+      if (shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       const current = result.store.getSnapshot(), session = current.snapshot?.session;
       if (!session || current.status !== 'ready' || current.error) return;
       const existing = application.drafts.find(target, target.item_id, 'bring');
@@ -165,7 +176,7 @@ function Workspace({ application }: { application: Application }) {
   const saveView = (change: Partial<SessionPreferences>) => {
     if (view && preferences) void navigation.saveSessionView({ ...structuredClone(view), ...change } as SessionPreferences, preferences.revision);
   };
-  const closeDetail = () => setDetailOpen(false);
+  const closeDetail = () => { invalidateOwnerRequest(); setDetailOpen(false); };
   const toggleRail = () => saveView({ rail: view?.rail === 'hidden' ? 'activity' : 'hidden' });
   const switchToTree = () => setGraphModes(previous => ({ ...previous, [key]: false }));
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
@@ -213,7 +224,7 @@ function Workspace({ application }: { application: Application }) {
       waitingContent={<div className="app-waiting">{routeError && <p role="alert">{routeError}</p>}<OwnerWaitingPanel drafts={application.drafts} store={application.waiting} revealItem={revealItem}
         openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} /></div>}
       detail={store && selectedId && detailOpen ? <><OwnerItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} service={application.service} store={store}
-        itemId={selectedId} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined} routes={navigation.routes} onReveal={reveal} onClose={closeDetail} highlightedMessageIds={highlightedMessages} later={later}
+        itemId={selectedId} onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined} routes={navigation.routes} onReveal={reveal} onClose={closeDetail} highlightedMessageIds={highlightedMessages} later={later}
         onLater={value => route && preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} />
         <CopiedProvenance key={`source:${key}:${selectedId}`} store={store} itemId={selectedId} revealItem={async target => {
           const result = await navigation.routes.revealItem(target); if (result) reveal(result);

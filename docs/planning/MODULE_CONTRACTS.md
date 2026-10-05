@@ -133,6 +133,18 @@ session preference. Application-lifetime routing and recovery controllers share
 one desktop service. Nonvisual session/item data attributes on the real controls
 support native acceptance without adding a separate test flow.
 
+`NavigationStore.getNavigationRequest()` exposes the existing navigation intent
+counter for cancellation checks only. It is not a persisted preference or a new
+navigation command. Async keyboard actions capture it before resolving a route
+and abandon stale work before navigating, focusing or submitting an owner input.
+The existing navigate/close-tab operations remain the only owners of the counter;
+a failed or superseded navigation cannot authorize a later shortcut effect.
+`navigate(selection, reveal, isCurrent?)` accepts an optional caller cancellation
+guard, checked on entry and after asynchronous route validation before dispatching
+the preferences mutation. A dismissed or replaced keyboard action returns false
+without publishing its route. Existing callers retain their behavior; this guard
+does not cancel or rewrite an already dispatched durable mutation.
+
 Guarded history actions reuse the application-lifetime `SessionActionControllers`
 registry and existing `SessionActions.execute(command, reviewedRevision)` /
 `retry()` methods. Topic archive/restore and session close/reopen share the same

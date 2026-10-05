@@ -24,3 +24,19 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Measured ordinary App light-theme text fell below 4.5:1. Keep each status
+   hue and its explicit label/icon, with darker product-only foregrounds. */
+html[data-theme="light"] .product-app {
+  --st-open: var(--color-neutral-700);
+  --st-waiting: var(--color-accent-800);
+  --st-progress: oklch(48% 0.11 68deg);
+  --st-decided: oklch(46% 0.08 185deg);
+  --st-done: oklch(46% 0.1 148deg);
+}
+
+html[data-theme="light"] .product-app .ref-header-context > span,
+html[data-theme="light"] .product-app .ref-tree-question[style*="color-mix"] {
+  /* These reference-derived elements set their muted foreground inline. */
+  color: color-mix(in srgb, var(--color-text) 78%, transparent) !important;
+}
