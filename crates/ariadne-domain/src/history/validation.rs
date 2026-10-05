@@ -1,11 +1,12 @@
 use super::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Validate original conversation records and their canonical cross-links.
 /// Compose with item-tree and delivery validation before store commits. Copied
 /// histories retain source identities through their existing origin records.
 pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
     distinct(session.messages.iter().map(|m| &m.id))?;
+    let messages: BTreeMap<_, _> = session.messages.iter().map(|m| (&m.id, m)).collect();
     distinct(session.messages.iter().map(|m| m.number))?;
     distinct(session.answers.iter().map(|a| &a.id))?;
     distinct(session.answers.iter().map(|a| a.seq))?;
@@ -143,10 +144,8 @@ pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
         }
     }
     for item in session.items.0.values() {
-        let created = session
-            .messages
-            .iter()
-            .find(|m| m.id == item.created_message_id)
+        let created = messages
+            .get(&item.created_message_id)
             .ok_or(HistoryError::MissingReference)?;
         require(
             created.items_touched.contains(&item.id) || created.item_id.as_ref() == Some(&item.id),
@@ -172,11 +171,7 @@ pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
         }
         distinct(item.updated_message_ids.iter())?;
         for id in &item.updated_message_ids {
-            let message = session
-                .messages
-                .iter()
-                .find(|m| &m.id == id)
-                .ok_or(HistoryError::MissingReference)?;
+            let message = messages.get(id).ok_or(HistoryError::MissingReference)?;
             require(
                 message.items_touched.contains(&item.id),
                 HistoryError::InvalidProvenance,
@@ -206,10 +201,8 @@ pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
             id == &round.id && session.items.0.contains_key(&round.item_id),
             HistoryError::InvalidRound,
         )?;
-        let opening = session
-            .messages
-            .iter()
-            .find(|m| m.id == round.opened_message_id)
+        let opening = messages
+            .get(&round.opened_message_id)
             .ok_or(HistoryError::MissingReference)?;
         require(
             opening.item_id.as_ref() == Some(&round.item_id)
@@ -228,11 +221,7 @@ pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
         ] {
             let mut previous = None;
             for id in list {
-                let m = session
-                    .messages
-                    .iter()
-                    .find(|m| &m.id == id)
-                    .ok_or(HistoryError::MissingReference)?;
+                let m = messages.get(id).ok_or(HistoryError::MissingReference)?;
                 require(
                     m.author == author
                         && m.round_id.as_ref() == Some(&round.id)
@@ -311,10 +300,8 @@ pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
             answer.supersedes_answer_id.as_ref() == previous.map(|a| &a.id),
             HistoryError::InvalidCorrection,
         )?;
-        let message = session
-            .messages
-            .iter()
-            .find(|m| m.id == answer.message_id)
+        let message = messages
+            .get(&answer.message_id)
             .ok_or(HistoryError::MissingReference)?;
         if let Some(receipt) = session
             .continuations
