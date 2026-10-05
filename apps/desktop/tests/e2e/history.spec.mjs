@@ -292,9 +292,10 @@ async function rail(history, saved, paged) {
   await closeHistoryRailReferences(parentMessage);
   await toggle.waitForEnabled(); await toggle.click();
   await wait(async () => (await browser.$$('.rail-messages [data-message-id]')).length === saved.messages.length, 'Reopened rail did not reload the complete canonical history');
-  // WebDriver scrollIntoView performs an actual nested WebView scroll. This is
-  // programmatic DOM scrolling, not an injected physical wheel gesture.
-  const latest = await browser.$(`.rail-messages [data-message-id="${saved.messages.at(-1).id}"]`); await latest.scrollIntoView({ block: 'end' });
+  // WebdriverIO's scrollIntoView injects a wheel gesture sized for the window, which may not move
+  // this nested rail on a CI runner. Scroll the DOM element directly; the rail's reaction is ours.
+  const domScroll = (element, block) => browser.execute((node, position) => node.scrollIntoView({ behavior: 'instant', block: position }), element, block);
+  const latest = await browser.$(`.rail-messages [data-message-id="${saved.messages.at(-1).id}"]`); await domScroll(latest, 'end');
   // Wait for the rail to settle, then scroll up; a late refresh that re-pins the rail is retried.
   let previous = null, beforeUp = null, lastState = null;
   await failureEvidence('rail-older-navigation', async () => {
@@ -306,7 +307,7 @@ async function rail(history, saved, paged) {
         if (!stable) { beforeUp = null; return false; }
         if (!beforeUp) beforeUp = state;
         const target = await browser.$(`.rail-messages [data-message-id="${parentMessage.id}"]`);
-        await target.scrollIntoView({ block: 'start' });
+        await domScroll(target, 'start');
         const after = lastState = await railState();
         if (after.top < beforeUp.top - 100) return true;
         beforeUp = null; previous = null; return false;
