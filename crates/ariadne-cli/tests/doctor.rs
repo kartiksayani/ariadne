@@ -105,6 +105,8 @@ fn canonical_doctor_is_strictly_read_only_and_omits_session_bodies() {
     );
     assert!(!checks(&report, "binding.recovery").is_empty());
     let recovery = checks(&report, "binding.recovery");
+    let hint = recovery[0]["hint"].as_str().unwrap();
+    assert!(hint.contains("Review recovery") && !hint.contains("ariadne recovery"));
     assert_eq!(recovery[0]["facts"]["queued"], 2);
     assert_eq!(recovery[0]["facts"]["claimed"], 1);
     assert_eq!(recovery[0]["facts"]["missing_result"], 1);
@@ -113,7 +115,7 @@ fn canonical_doctor_is_strictly_read_only_and_omits_session_bodies() {
     assert!(recovery[1]["hint"]
         .as_str()
         .unwrap()
-        .contains("recovery show"));
+        .contains("Review recovery"));
     for check in report["checks"].as_array().unwrap() {
         assert!(["ok", "warning", "error"].contains(&check["status"].as_str().unwrap()));
         assert!(!check["code"].as_str().unwrap().is_empty());
@@ -159,8 +161,16 @@ fn missing_session_and_registry_coordination_never_get_created() {
     assert!(!profile.data.join("registry.lock").exists());
     assert_eq!(snapshot(profile.home.path()), before);
     let absent = profile.home.path().join("absent");
-    inspect::collect(&absent, None, &Options::default());
+    let fresh = inspect::collect(&absent, None, &Options::default());
     assert!(!absent.exists());
+    // A brand-new install with no data directory is healthy, not a registry fault.
+    let empty = checks(&fresh, "registry.empty");
+    assert_eq!(empty[0]["status"], "ok");
+    assert_eq!(
+        empty[0]["message"],
+        "No sessions yet. Connect a session to get started."
+    );
+    assert!(checks(&fresh, "registry.unavailable").is_empty());
 }
 
 #[test]
