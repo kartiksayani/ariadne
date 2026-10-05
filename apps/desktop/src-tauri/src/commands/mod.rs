@@ -268,7 +268,7 @@ impl DesktopService {
                     request.command.clone(),
                 )?
             };
-            validate_owner_receipt(&request, &result)?;
+            validate_owner_receipt(request, &result)?;
             Ok(result)
         })()))
     }
