@@ -169,7 +169,7 @@ samples showed locked snapshot decoding/validation and waiting catalogue readers
 On identical retained 2,000-item/4,667-message bytes, repeated CLI reads took
 447/435ms in debug and 129/98ms at shipped optimization; first reads were slower
 at 1,387/989ms respectively. This diagnostic comparison does not prove native
-performance. Native acceptance retains its owner actions (latency numbers are recorded evidence, not pass/fail, per ADR-0067),
+performance. Native acceptance retains its owner actions (latency numbers are recorded evidence, not pass/fail, per ADR-0068),
 retry limits and full process-restoration requirements.
 
 ## WDIO service configuration and lifecycle

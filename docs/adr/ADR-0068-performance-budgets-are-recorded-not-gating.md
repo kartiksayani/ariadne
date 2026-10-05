@@ -1,4 +1,4 @@
-# ADR-0067: Performance budgets are recorded, not gating
+# ADR-0068: Performance budgets are recorded, not gating
 
 Status: accepted
 Supersedes: part of [ADR-0066](ADR-0066-project-local-search-before-save-confirmation.md) (the "retain the 150 ms p95 limit" clause)
