@@ -70,6 +70,7 @@ async function open(history, itemId = '1') {
       const refreshed = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
       return await refreshed.isExisting() && await refreshed.isDisplayed() && await refreshed.isEnabled() && await catalogue.isEnabled();
     }, 'Explicit history Refresh did not finish before the fresh navigation choice');
+    assert.equal(await navigationRejection(), true, 'History Refresh must retain the exact definitive revision conflict before a fresh navigation choice');
     // A visible definitive rejection permits one fresh owner navigation choice.
     await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
     await wait(selectedCatalogue, 'Fresh history catalogue navigation did not persist after Refresh');
