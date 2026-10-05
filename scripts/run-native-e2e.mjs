@@ -85,6 +85,41 @@ export async function observeOwned(root, binary, nonce, launcher, timeout = 6000
   }
   throw new Error('Startup witness deadline');
 }
+export async function releasedLeases(home, bindingId) {
+  const paths = [join(home, 'run/runtime.lock'), join(home, 'run/leases', `${bindingId}.lock`)];
+  const source = 'import fcntl,sys\nfor path in sys.argv[1:]:\n with open(path,"r+b") as lock:\n  fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)\n';
+  await command('python3', ['-c', source, ...paths], { timeout: 10000 });
+  return { paths, released: true };
+}
+export async function proveQuit(root, binary, nonce, owned, home, bindingId, port) {
+  const request = JSON.parse(await readFile(join(root, 'quit-request.json'), 'utf8'));
+  if (request.nonce !== nonce || request.pid !== owned.pid) throw new Error('Quit witness identity mismatch');
+  await waitForQuitExit(binary, owned);
+  await portFree(port);
+  return { request, pidExited: true, portFree: true, leases: await releasedLeases(home, bindingId) };
+}
+export async function waitForQuitExit(binary, owned) {
+  const end = Date.now() + 10000;
+  while (alive(owned.pid) && Date.now() < end) {
+    let current;
+    try { current = identity(owned.pid); }
+    catch (error) { if (!alive(owned.pid)) break; throw error; }
+    if (current.exe !== binary || current.birth !== owned.birth) {
+      if (!alive(owned.pid)) break;
+      let state;
+      if (current.birth === owned.birth && current.exe === '<defunct>') {
+        try { state = execFileSync('/bin/ps', ['-p', String(owned.pid), '-o', 'stat='], { encoding: 'utf8' }).trim(); }
+        catch (error) { if (!alive(owned.pid)) break; throw error; }
+      }
+      // macOS temporarily retains the same exited process until its parent
+      // reaps it. A zombie is not sufficient Quit proof: keep waiting for
+      // actual disappearance, and reject every live or reused identity.
+      if (!state?.startsWith('Z')) throw new Error(`Quit PID identity changed: ${JSON.stringify({ owned, current, state })}`);
+    }
+    await delay(25);
+  }
+  if (alive(owned.pid)) throw new Error('Requested native Quit did not exit before WDIO teardown');
+}
 export async function stop(child, grace = 10000) {
   if (!Number.isInteger(child.pid) || child.pid < 2) return;
   if (!groupAlive(child.pid) && !alive(child.pid)) return;
@@ -141,21 +176,40 @@ export async function runNative() {
     await json(join(evidence, 'run.json'), details);
     await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: buildEnv(join(repo, 'target/native-e2e'), true), log: join(evidence, 'build.log') });
     await command('cargo', ['build', '-p', 'ariadne-cli', '--locked'], { env: buildEnv(join(repo, 'target/native-e2e')), log: join(evidence, 'cli-build.log') });
+    await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs'], {
+      env: { ...process.env, ARIADNE_FIXTURE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'fixture-cli.log'),
+    });
     await json(join(evidence, 'run.json'), { ...details, binarySha256: await digest(binary) });
     const env = { ...buildEnv(join(repo, 'target/native-e2e')), ARIADNE_HOME: join(root, 'data'), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: nonce, ARIADNE_E2E_BINARY: binary, ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: evidence };
     provider = await (await import('../apps/desktop/tests/e2e/scripted-provider.mjs')).startScriptedProvider(root, join(repo, 'target/native-e2e/debug/ariadne'), evidence, env);
     env.ARIADNE_E2E_APP_ARGS = JSON.stringify(provider.configuration.appArgs);
-    let launcher;
-    const execution = command(runtimeCommand[0], runtimeCommand.slice(1), { cwd: desktop, env, timeout: 180000, log: join(evidence, 'wdio.log'), onStart: child => {
-      launcher = child; writeFileSync(join(root, 'launcher.json'), JSON.stringify({ pid: child.pid }));
-    } });
-    const controller = new globalThis.AbortController();
-    execution.then(() => controller.abort(new Error('WDIO exited before startup observation')), error => controller.abort(error));
-    try {
-      owned = await observeOwned(root, binary, nonce, launcher.pid, 60000, controller.signal);
-      await json(join(evidence, 'observed.json'), owned); await execution;
+    for (const phase of ['delivery', 'restoration']) {
+      const phaseEvidence = join(evidence, phase), phaseNonce = phase === 'delivery' ? nonce : randomBytes(32).toString('hex');
+      await mkdir(phaseEvidence);
+      if (phase === 'restoration') {
+        if (owned && alive(owned.pid)) throw new Error('First native PID is still alive');
+        await portFree(port);
+        for (const name of ['startup.json', 'observed.json', 'launcher.json', 'quit-request.json']) await rm(join(root, name), { force: true });
+      }
+      const phaseEnv = { ...env, ARIADNE_E2E_PHASE: phase, ARIADNE_E2E_NONCE: phaseNonce, ARIADNE_E2E_EVIDENCE: phaseEvidence,
+        ARIADNE_E2E_PRIOR_EVIDENCE: join(evidence, 'delivery') };
+      await json(join(phaseEvidence, 'launch.json'), { nonce: phaseNonce, phase, priorPid: owned?.pid, binary, port });
+      let launcher;
+      const execution = command(runtimeCommand[0], runtimeCommand.slice(1), { cwd: desktop, env: phaseEnv, timeout: 300000, log: join(phaseEvidence, 'wdio.log'), onStart: child => {
+        launcher = child; writeFileSync(join(root, 'launcher.json'), JSON.stringify({ pid: child.pid }));
+      } });
+      const controller = new globalThis.AbortController();
+      execution.then(() => controller.abort(new Error('WDIO exited before startup observation')), error => controller.abort(error));
+      try {
+        const previous = owned;
+        owned = await observeOwned(root, binary, phaseNonce, launcher.pid, 60000, controller.signal);
+        if (previous && owned.pid === previous.pid) throw new Error('Relaunch reused the first native PID');
+        await json(join(phaseEvidence, 'observed.json'), owned); await execution;
+        const quit = JSON.parse(await readFile(join(phaseEvidence, 'quit.json'), 'utf8'));
+        if (!quit.pidExited || !quit.leases?.released || quit.request.pid !== owned.pid || quit.request.nonce !== phaseNonce) throw new Error('Missing independently verified native Quit before teardown');
+        await portFree(port);
+      } catch (error) { await stop(launcher); await execution.catch(() => {}); throw error; }
     }
-    catch (error) { await stop(launcher); await execution.catch(() => {}); throw error; }
   } catch (error) { failure = error; }
   try { await provider?.stop(); } catch (error) { failure ||= error; }
   try {
