@@ -62,7 +62,7 @@ async function sample() {
       }), edges: [...section.querySelectorAll('[data-edge]')].map(element => ({ id: element.dataset.edge, path: element.querySelector('path').getAttribute('d') })) };
   });
 }
-async function click(selector, parent = browser) { const button = await parent.$(selector); await button.waitForEnabled(); await button.click(); }
+async function click(selector, parent = browser) { const button = await parent.$(selector); await button.waitForEnabled(); await button.scrollIntoView(); await button.click(); }
 async function fit() {
   await click('button=Fit', browser.$('.topic-graph-controls'));
   await wait(async () => {
