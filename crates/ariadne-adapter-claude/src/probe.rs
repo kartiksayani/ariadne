@@ -129,7 +129,7 @@ pub(crate) fn qualify(
         return Err(error(
             AdapterErrorCode::UnsupportedHostVersion,
             &format!(
-                "Claude executable and loaded SDK must be the same version, {}; observed CLI {cli} and SDK {}",
+                "Claude executable and loaded SDK must be the same version, and Ariadne requires Claude Code {}; observed CLI {cli} and SDK {}",
                 accepted_range(SUPPORTED_HOST_VERSION),
                 evidence.identity.engine_version
             ),

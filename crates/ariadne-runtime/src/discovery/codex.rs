@@ -170,7 +170,7 @@ async fn run(
                     }
                     Ok((page, observed)) => {
                         // Rejected versions never open a reader, so only accepted
-                        // versions reach here: a newer patch is surfaced as
+                        // versions reach here: a newer version is surfaced as
                         // `Untested`; the baseline keeps the unqualified `Unknown`.
                         let (observed_version, compatibility) = match observed {
                             Some((version, HostVersionStatus::Untested)) => {

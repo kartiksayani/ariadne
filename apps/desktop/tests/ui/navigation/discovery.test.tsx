@@ -89,11 +89,11 @@ describe('explicit discovery registration and binding', () => {
   });
   it('disables Use host session for an incompatible row and says why', async () => {
     const context = setup(); await context.store.start();
-    context.reads.mockResolvedValue({ candidates: [{ ...candidate(), adapter_id: 'claude-mod', host_version: '2.2.0', compatibility: 'incompatible' }], error: null });
+    context.reads.mockResolvedValue({ candidates: [{ ...candidate(), adapter_id: 'claude-mod', host_version: '2.1.286', compatibility: 'incompatible' }], error: null });
     bind(context);
     await screen.findByText('Discovered conversation');
     expect(screen.getByRole('button', { name: 'Use host session' })).toBeDisabled();
-    expect(screen.getByRole('note')).toHaveTextContent('This Claude Code version is not supported by this Ariadne build.');
+    expect(screen.getByRole('note')).toHaveTextContent('This Claude Code version is older than Ariadne requires.');
   });
   it('selection preserves the explicit existing Ariadne UUID and Connect retry retains its immutable request', async () => {
     const context = setup(); await context.store.start(); context.loseNextConnect(); bind(context);

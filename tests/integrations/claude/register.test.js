@@ -68,7 +68,7 @@ describe('supported Mod entry convention', () => {
     }
   });
   it('can announce an unqualified engine without admitting claims, and heartbeat failure cannot fabricate connection', async () => {
-    const h = host({version:'2.2.0'}), hooks = callbacks(descriptor);
+    const h = host({version:'2.1.286'}), hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);
     expect(h.calls.map(call => call.argv[2])).toEqual(['announce']);
     expect(h.timer()).toBe(null);expect(h.events).toEqual([]);expect(h.prompts).toEqual([]);

@@ -90,7 +90,10 @@ impl State {
         configuration(&request.endpoint, &request.configuration)?;
         let version = probe::version(&self.options, deadline)?;
         let Some(status) = classify_host_version(SUPPORTED_HOST_VERSION, &version) else {
-            let step = format!("Claude Code {version} is outside the accepted range ({}); other versions require conformance and live existing-session qualification.", accepted_range(SUPPORTED_HOST_VERSION));
+            let step = format!(
+                "Claude Code {version} is not supported; Ariadne requires Claude Code {}.",
+                accepted_range(SUPPORTED_HOST_VERSION)
+            );
             return Ok(ProbeResult {
                 host_version: Some(version),
                 compatibility: Compatibility::Incompatible,

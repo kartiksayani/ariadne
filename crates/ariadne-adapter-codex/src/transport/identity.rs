@@ -4,7 +4,7 @@ use ariadne_agent_protocol::{
     AdapterError, AdapterErrorCode as Code, EndpointFingerprint,
 };
 
-/// Qualified Codex baseline; a newer same-minor patch is accepted as untested.
+/// Qualified Codex baseline and minimum required version; newer versions are accepted as untested.
 pub const SUPPORTED_CODEX_VERSION: &str = "0.160.0";
 use std::{
     fs,
@@ -262,7 +262,7 @@ impl ExecutableIdentity {
             None => Err(error(
                 Code::UnsupportedHostVersion,
                 &format!(
-                    "Codex CLI {version} is outside the accepted range ({}).",
+                    "Codex CLI {version} is not supported; Ariadne requires Codex {}.",
                     accepted_range(SUPPORTED_CODEX_VERSION)
                 ),
             )),

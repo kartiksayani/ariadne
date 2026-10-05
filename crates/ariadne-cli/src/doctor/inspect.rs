@@ -282,8 +282,8 @@ fn providers(report: &mut Report, data: &Path, version_root: Option<&Path>, opti
                     _=>"Read the explicit Claude CLI version; version alone does not qualify its SDK/Mod.".to_owned(),
                 };
                 let next=match status {
-                    Some(_)=>"Claude Code 2.1.287 is the qualified baseline; a newer 2.1.x patch is accepted but untested.".to_owned(),
-                    None=>format!("Only Claude Code {} is accepted; other versions require conformance and live existing-session acceptance.",accepted_range(SUPPORTED_HOST_VERSION)),
+                    Some(_)=>"Claude Code 2.1.287 is the qualified baseline and the minimum required version; newer versions are accepted but untested.".to_owned(),
+                    None=>format!("Ariadne requires Claude Code {}; update Claude Code.",accepted_range(SUPPORTED_HOST_VERSION)),
                 };
                 report.add(if status==Some(HostVersionStatus::Qualified) {"ok"} else {"warning"},"claude.version",&message,&next,json!({"detected_version":version,"supported_baseline":SUPPORTED_HOST_VERSION,"host_version_status":host_version_state(status),"adapter_gate":"unknown","dispatch_ready":false}));
             }
@@ -311,8 +311,8 @@ fn providers(report: &mut Report, data: &Path, version_root: Option<&Path>, opti
                             _=>"Read the explicit Codex CLI version; version alone does not qualify its daemon/thread.".to_owned(),
                         };
                         let next=match status {
-                            Some(_)=>"Codex 0.160.0 is the qualified baseline; a newer 0.160.x patch is accepted but untested.".to_owned(),
-                            None=>format!("Only Codex {} is accepted; keep other versions unavailable until conformance/live acceptance.",accepted_range(SUPPORTED_CODEX_VERSION)),
+                            Some(_)=>"Codex 0.160.0 is the qualified baseline and the minimum required version; newer versions are accepted but untested.".to_owned(),
+                            None=>format!("Ariadne requires Codex {}; update Codex.",accepted_range(SUPPORTED_CODEX_VERSION)),
                         };
                         report.add(if status==Some(HostVersionStatus::Qualified) {"ok"} else {"warning"},"codex.version",&message,&next,json!({"detected_version":version,"supported_baseline":SUPPORTED_CODEX_VERSION,"host_version_status":host_version_state(status),"dispatch_ready":false}));
                         if supported {

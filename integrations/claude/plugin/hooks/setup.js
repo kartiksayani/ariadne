@@ -5,7 +5,7 @@ export async function qualify($, descriptor) {
     throw new ModError('Install the matching Ariadne app and Mod; the installed helper descriptor is missing or incompatible.');
   }
   if (hostVersionStatus((await $.session.version()).version) === null) {
-    throw new ModError(`This Mod supports Claude Code ${HOST_VERSION} or a newer 2.1.x patch; use a supported version or wait for an explicit compatibility probe.`);
+    throw new ModError(`This Mod requires Claude Code ${HOST_VERSION} or newer; update Claude Code.`);
   }
   const result = await $.process.run([descriptor.helperPath,'--version'],{timeoutMs:5000});
   if (result.exitCode !== 0 || result.isStdoutTruncated || result.isStderrTruncated

@@ -536,8 +536,24 @@ fn newer_cli_never_inherits_an_older_sdk_baseline() {
     );
 }
 #[test]
-fn older_patch_other_minor_or_other_major_cli_is_rejected_with_the_accepted_range() {
-    for version in ["2.1.286", "2.2.287", "2.0.999", "3.1.287"] {
+fn newer_minor_or_major_cli_and_matching_sdk_is_accepted_and_marked_untested() {
+    for version in ["2.2.0", "3.0.0"] {
+        let fixture = Fixture::new(version);
+        fixture.publish_engine(version);
+        let adapter = fixture.adapter();
+        let result = wait(adapter.probe(probe_request())).unwrap();
+        assert_eq!(result.compatibility, Compatibility::Untested, "{version}");
+        assert_eq!(result.host_version.as_deref(), Some(version));
+        assert_eq!(
+            result.setup_steps,
+            vec![format!("Claude Code {version} is newer than the tested 2.1.287; it should work, but has not been verified.")]
+        );
+        wait(adapter.connect(connect())).unwrap();
+    }
+}
+#[test]
+fn older_patch_minor_or_major_cli_is_rejected_with_the_minimum_requirement() {
+    for version in ["2.1.286", "2.0.999", "1.99.999"] {
         let fixture = Fixture::new(version);
         fixture.publish_engine(version);
         let adapter = fixture.adapter();
@@ -547,14 +563,16 @@ fn older_patch_other_minor_or_other_major_cli_is_rejected_with_the_accepted_rang
             Compatibility::Incompatible,
             "{version}"
         );
-        assert!(result.setup_steps[0].contains("2.1.287 or a newer 2.1.x patch"));
+        assert!(result.setup_steps[0].contains("requires Claude Code 2.1.287 or newer"));
         let error = wait(adapter.connect(connect())).unwrap_err();
         assert_eq!(
             error.code,
             AdapterErrorCode::UnsupportedHostVersion,
             "{version}"
         );
-        assert!(error.message.contains("2.1.287 or a newer 2.1.x patch"));
+        assert!(error
+            .message
+            .contains("requires Claude Code 2.1.287 or newer"));
     }
 }
 #[test]

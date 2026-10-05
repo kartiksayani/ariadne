@@ -96,7 +96,7 @@
           ]
         },
         {
-          "description": "Same major.minor as the qualified baseline with a newer patch: accepted, not verified.",
+          "description": "Newer than the minimum (qualified baseline) version: accepted, not verified.",
           "type": "string",
           "const": "untested"
         }

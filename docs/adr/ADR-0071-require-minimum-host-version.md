@@ -1,8 +1,9 @@
-# ADR-0071: Accept newer host patch versions as untested
+# ADR-0071: Require a minimum host version; accept newer versions as untested
 
-Status: accepted by the maintainer under the owner's standing ruling that a
-personal-use app must not be blocked by disproportionate gates; the owner may veto
-before publication.
+Status: accepted. Revised 2026-10-06 on the owner's decision: "not a good idea
+pinning exact version; minimum required version is fine". The first revision
+accepted only a newer patch of the same major.minor; this revision accepts any
+version at or above the baseline.
 Supersedes: the exact-equality host-version clauses of
 [ADR-0035](ADR-0035-captured-claude-mod-lifecycle.md),
 [ADR-0037](ADR-0037-claude-native-compatibility-and-normalization.md) and the Compatibility row of
@@ -22,13 +23,16 @@ vendored 0.160.0 schema.
 
 One shared rule per host, implemented once in Rust
 (`ariadne_agent_protocol::host_version`) and once in the Claude plugin
-(`hostVersionStatus` in `hooks/contracts.js`). The qualified baselines stay 2.1.287
-and 0.160.0.
+(`hostVersionStatus` in `hooks/contracts.js`). The qualified baselines, 2.1.287
+and 0.160.0, are the minimum required versions.
 
-- Same major.minor and a patch at or above the baseline is accepted; a patch above
-  the baseline is `untested` (`Compatibility::Untested`).
-- A different major or minor, an older patch or an unparsable version is rejected
-  with the existing error codes, the message stating the accepted range.
+- Components compare numerically (major, minor, patch). Exactly the baseline is
+  qualified. Any version above it, including a newer minor or major (2.2.0, 3.0.0,
+  0.161.0, 1.0.0), is accepted and `untested` (`Compatibility::Untested`). The
+  untested notice is informational and blocks nothing.
+- A version below the minimum or an unparsable version is rejected with the
+  existing error codes, the message stating "requires Claude Code 2.1.287 or
+  newer" or "requires Codex 0.160.0 or newer".
 - Claude requires the SDK engine version to equal the CLI version. Codex applies the
   rule to the CLI version and to the daemon `userAgent` independently; either being
   above the baseline makes the pair untested.
@@ -37,9 +41,11 @@ and 0.160.0.
   `02.1.287` are rejected).
 - The untested state is surfaced where each path can observe it:
   - Discovery candidate rows: Codex rows carry `Compatibility::Untested` when the CLI
-    or daemon is a newer patch; Claude rows carry it when the announced host version
-    is a newer patch. Baseline rows stay `Unknown` (unqualified until bound). A Claude
-    row with a rejected version (other major/minor, older patch, unparsable) carries
+    or daemon is newer than the minimum; Claude rows carry it when the announced host
+    version is newer. Baseline rows stay `Unknown` (unqualified until bound). A failed
+    bind attempt re-derives the row's compatibility from its host version with the
+    same rule, so a rejected row stays `Incompatible`. A Claude
+    row with a rejected version (older than the minimum, unparsable) carries
     `Compatibility::Incompatible` and the desktop app disables "Use host session" for
     it. Codex rejected versions never open a reader, so they produce no row.
   - Qualified bindings and `ProbeResult.compatibility` carry `Untested`.
@@ -58,8 +64,13 @@ and 0.160.0.
 
 `Compatibility` gains `untested`; core binding admission accepts `compatible` and
 `untested`. Raising a baseline still needs conformance and live existing-session
-evidence. A newer patch that changes a wire shape fails at runtime, not at the
+evidence. A newer version that changes a wire shape fails at runtime, not at the
 version gate.
+
+Risk accepted: a future host release may change undocumented surfaces (the Claude
+Mod SDK, the private Codex app-server wire). Ariadne does not block on that at the
+version gate. Delivery then stops in the existing visible blocked or uncertain
+states, because wire and parse mismatches still fail closed.
 
 ## Spec references
 

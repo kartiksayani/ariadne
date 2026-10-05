@@ -76,7 +76,7 @@ impl CodexDaemonReader {
                 error(
                     Code::UnsupportedHostVersion,
                     &format!(
-                        "Initialized Codex daemon must be a unix codex-tui {}.",
+                        "Initialized Codex daemon must be a unix codex-tui, and Ariadne requires Codex {}.",
                         accepted_range(SUPPORTED_CODEX_VERSION)
                     ),
                 )

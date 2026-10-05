@@ -727,10 +727,12 @@ fn changed_configured_executable_symlink_is_detected() {
 }
 
 #[test]
-fn newer_patch_cli_or_daemon_is_accepted_and_marked_untested() {
+fn newer_cli_or_daemon_is_accepted_and_marked_untested() {
     use ariadne_agent_protocol::host_version::HostVersionStatus::{Qualified, Untested};
     for (cli, daemon, expected) in [
         ("0.160.0", "0.160.0", Qualified),
+        ("0.161.0", "0.161.0", Untested),
+        ("1.0.0", "1.0.0", Untested),
         ("0.160.1", "0.160.1", Untested),
         ("0.160.1", "0.160.0", Untested),
         ("0.160.0", "0.160.2", Untested),
@@ -761,6 +763,8 @@ fn newer_patch_cli_or_daemon_is_accepted_and_marked_untested() {
             ("0.160.0", "0.160.0") => vec![],
             ("0.160.1", "0.160.1") => vec![notice("Codex", "0.160.1")],
             ("0.160.1", "0.160.0") => vec![notice("Codex", "0.160.1")],
+            ("0.161.0", "0.161.0") => vec![notice("Codex", "0.161.0")],
+            ("1.0.0", "1.0.0") => vec![notice("Codex", "1.0.0")],
             ("0.160.0", "0.160.2") => vec![notice("Codex daemon", "0.160.2")],
             ("0.160.1", "0.160.2") => vec![
                 notice("Codex", "0.160.1"),
@@ -777,15 +781,8 @@ fn newer_patch_cli_or_daemon_is_accepted_and_marked_untested() {
 }
 
 #[test]
-fn cli_and_daemon_outside_the_accepted_range_never_enable_dispatch() {
-    for version in [
-        "0.159.0",
-        "0.159.9",
-        "0.161.0",
-        "1.160.0",
-        "0.160",
-        "not-a-version",
-    ] {
+fn cli_and_daemon_below_the_minimum_never_enable_dispatch() {
+    for version in ["0.159.0", "0.159.9", "0.159.99", "0.160", "not-a-version"] {
         let harness = Harness::standard();
         fs::write(
             &harness.executable,
@@ -798,14 +795,13 @@ fn cli_and_daemon_outside_the_accepted_range_never_enable_dispatch() {
                 .unwrap();
         assert_eq!(error.code, Code::UnsupportedHostVersion);
         if version != "not-a-version" {
-            assert!(error.message.contains("0.160.0 or a newer 0.160.x patch"));
+            assert!(error.message.contains("requires Codex 0.160.0 or newer"));
         }
         assert!(harness.methods().is_empty());
     }
     for agent in [
-        "codex-tui/0.161.0 (Mac OS)",
         "codex-tui/0.159.9 (Mac OS)",
-        "codex-tui/1.160.0 (Mac OS)",
+        "codex-tui/0.159.99 (Mac OS)",
         "codex-tui/garbage (Mac OS)",
         "other/0.160.0 (Mac OS)",
     ] {

@@ -746,8 +746,41 @@ fn codex_row_compatibility(version: &str) -> Compatibility {
 }
 
 #[test]
+fn failed_bind_attempt_keeps_the_rule_derived_row_compatibility() {
+    for (version, expected) in [
+        ("2.1.286", Compatibility::Incompatible),
+        ("2.1.287", Compatibility::Unknown),
+        ("2.2.0", Compatibility::Untested),
+    ] {
+        let files = ClaudeFiles::new();
+        let home = home();
+        let rt = runtime();
+        let d = Discovery::new(Arc::new(time), None);
+        let core = Arc::new(ScriptedCoreService::new([]));
+        let server = Running::start(&rt, home.path(), core, Some(d.clone()));
+        let mut a = files.announcement();
+        a.host_version = version.into();
+        rt.block_on(call(home.path().into(), request(a))).unwrap();
+        let selected = d.snapshot().unwrap().candidates.remove(0);
+        // Break the installed bytes so the bind attempt fails for a reason unrelated to version.
+        fs::write(files.loaded.join("hooks/discovery.js"), "// changed").unwrap();
+        assert!(rt
+            .block_on(d.qualify_claude(selected, files.options.clone(), ModEvidenceSlot::default()))
+            .is_err());
+        assert_eq!(
+            d.snapshot().unwrap().candidates[0].compatibility,
+            expected,
+            "{version}"
+        );
+        server.stop(&rt);
+    }
+}
+
+#[test]
 fn codex_discovery_rows_surface_untested_for_a_newer_patch_only() {
     assert_eq!(codex_row_compatibility("0.160.1"), Compatibility::Untested);
+    assert_eq!(codex_row_compatibility("0.161.0"), Compatibility::Untested);
+    assert_eq!(codex_row_compatibility("1.0.0"), Compatibility::Untested);
     assert_ne!(codex_row_compatibility("0.160.0"), Compatibility::Untested);
     assert_eq!(codex_row_compatibility("0.160.0"), Compatibility::Unknown);
 }
@@ -757,8 +790,11 @@ fn claude_announcement_rows_surface_untested_for_a_newer_patch_and_incompatible_
     for (version, expected) in [
         ("2.1.287", Compatibility::Unknown),
         ("2.1.289", Compatibility::Untested),
-        ("2.2.0", Compatibility::Incompatible),
+        ("2.2.0", Compatibility::Untested),
+        ("3.0.0", Compatibility::Untested),
         ("2.1.286", Compatibility::Incompatible),
+        ("2.0.999", Compatibility::Incompatible),
+        ("02.1.287", Compatibility::Incompatible),
     ] {
         let home = home();
         let root = tempfile::tempdir().unwrap();

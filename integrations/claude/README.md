@@ -3,9 +3,10 @@
 This plugin uses the Claude Code **2.1.287** SDK proven by the preserved
 [POC](https://github.com/kartiksayani/ariadne/tree/a5e306f/poc/claude-mods).
 A read-only installed CLI observation returned **2.1.289** during implementation.
-Per [ADR-0071](../../docs/adr/ADR-0071-accept-newer-host-patch-versions-as-untested.md),
-2.1.287 is the qualified baseline and a newer 2.1.x patch (such as 2.1.289) is
-accepted but marked untested; other minors, majors and older patches are rejected.
+Per [ADR-0071](../../docs/adr/ADR-0071-require-minimum-host-version.md),
+2.1.287 is the qualified baseline and the minimum required version; any newer
+version (such as 2.1.289 or 2.2.0) is accepted but marked untested; only older or
+unparsable versions are rejected.
 
 The entry is `plugin/hooks/hooks.json` → `register.js`. Static plugin-local ESM
 imports are supported by the captured SDK. The production source imports no Node

@@ -146,17 +146,7 @@ impl Discovery {
             host_version: announcement.host_version.clone(),
             observed_at,
             freshness: Freshness::Fresh,
-            // A newer same-minor patch is surfaced as `Untested` before binding;
-            // the baseline stays unqualified, and a rejected version (other
-            // major/minor, older patch, unparsable) is surfaced as `Incompatible`.
-            compatibility: match classify_host_version(
-                SUPPORTED_HOST_VERSION,
-                &announcement.host_version,
-            ) {
-                Some(HostVersionStatus::Untested) => Compatibility::Untested,
-                Some(HostVersionStatus::Qualified) => Compatibility::Unknown,
-                None => Compatibility::Incompatible,
-            },
+            compatibility: unbound_compatibility(&announcement.host_version),
             availability: Availability::Unknown,
             binding,
             loaded: false,
@@ -300,7 +290,7 @@ impl Discovery {
                     slot.clear().map_err(CoreError::from)?;
                 }
                 if let Some(current) = state.candidates.get_mut(&key) {
-                    current.compatibility = Compatibility::Unknown;
+                    current.compatibility = unbound_compatibility(&current.host_version);
                     current.availability = Availability::Unknown;
                 }
             }
@@ -484,6 +474,16 @@ impl Discovery {
                 "Refresh discovery; retained candidates never authorize a send.",
             )
         })
+    }
+}
+/// Compatibility of a Claude row before (or after a failed) bind: a version
+/// newer than the minimum is `Untested`, the minimum itself stays unqualified
+/// (`Unknown`), and a version below the minimum or unparsable is `Incompatible`.
+fn unbound_compatibility(host_version: &str) -> Compatibility {
+    match classify_host_version(SUPPORTED_HOST_VERSION, host_version) {
+        Some(HostVersionStatus::Untested) => Compatibility::Untested,
+        Some(HostVersionStatus::Qualified) => Compatibility::Unknown,
+        None => Compatibility::Incompatible,
     }
 }
 fn expire(state: &mut State) {

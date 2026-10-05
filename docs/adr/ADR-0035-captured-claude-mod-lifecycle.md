@@ -20,8 +20,8 @@ process/crypto/timer calls. An installer-rendered immutable JS descriptor suppli
 the absolute installed helper path, matching app/plugin version and API version1.
 The source descriptor is absent; there is no PATH, environment, filesystem, Node,
 cache-root or checkout fallback. Exact host2.1.287 equality is superseded by
-[ADR-0071](ADR-0071-accept-newer-host-patch-versions-as-untested.md) (2.1.287 or a
-newer 2.1.x patch, marked untested); helper/Mod version equality remains required
+[ADR-0071](ADR-0071-require-minimum-host-version.md) (2.1.287 is the minimum
+required version; anything newer is accepted and marked untested); helper/Mod version equality remains required
 before polling or connection. P6 owns rendering/version substitution;
 P3.4 owns any new host compatibility proof.
 
