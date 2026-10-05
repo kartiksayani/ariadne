@@ -36,18 +36,21 @@ async function setup(session: Session = structuredClone(demo) as Session, view =
   const service = createDesktopService(transport), sessions = new OpenSessions(service); opened.push(sessions);
   const store = sessions.open(route); await store.refresh();
   const routes = new RegisteredRoutes(service, sessions), saved: SessionPreferences[] = [], laterWrites: [string, boolean][] = [], reveals: RevealedItem[] = [];
-  let rejectWrite = false;
+  let rejectWrite = false, canonical = view;
   function Composition({ externalReveal = null }: { externalReveal?: RevealedItem | null }) {
     const [current, setCurrent] = useState(view), [later, setLater] = useState(new Set<string>());
+    canonical = current;
     return <SentenceTree store={store} routes={routes} view={immutable(current)} later={later} reveal={externalReveal}
       saveView={async next => { saved.push(structuredClone(next)); if (saveCompletion) await saveCompletion; if (rejectWrite) return false; setCurrent(next); return true; }}
       saveLater={async (id, value) => { laterWrites.push([id, value]); setLater(previous => { const next = new Set(previous); if (value) next.add(id); else next.delete(id); return next; }); return true; }}
       onReveal={result => { reveals.push(result); }} />;
   }
   return { Composition, session, store, calls, routes, saved, laterWrites, reveals,
+    canonical: () => canonical,
     unavailable: () => { readError = true; }, missing: () => { missing = true; }, rejectWrite: () => { rejectWrite = true; } };
 }
 const rows = () => screen.getAllByRole('treeitem');
+const rowIds = () => screen.queryAllByRole('treeitem').map(row => row.querySelector('.ref-tree-id')?.textContent);
 describe('registered variable-height sentence tree', () => {
   it('offers one keyboard entry row in a newly opened session without a saved selection', async () => {
     const view = preferences(); view.selected_item_id = null;
@@ -126,7 +129,96 @@ describe('registered variable-height sentence tree', () => {
     expect(value.saved[0].filters.search).toBe('ＮＡＴＩＶＥ queue'); expect(value.saved[0].expanded_item_ids).toEqual(['1']);
     expect(value.saved[0].tab_open).toBe(true);
   });
-  it('saves only the latest unsubmitted search after a confirmed write using the new view', async () => {
+  it('projects actual matching rows at 100ms without waiting for the canonical save receipt', async () => {
+    const session = structuredClone(demo) as Session, base = session.items['1']!;
+    session.items = {
+      '1': { ...base, question: 'First retained sentence' },
+      '2': { ...base, id: '2', ordinal: 2, question: 'Second searchable needle' },
+    };
+    let finish!: () => void;
+    const completion = new Promise<void>(resolve => { finish = resolve; });
+    const value = await setup(session, preferences(), completion); render(<value.Composition />); vi.useFakeTimers();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'needle' } });
+    await act(async () => { vi.advanceTimersByTime(99); });
+    expect(rowIds()).toEqual(['1', '2']); expect(value.saved).toHaveLength(0);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(rowIds()).toEqual(['2']); expect(value.saved).toHaveLength(1);
+    expect(value.canonical()).toEqual(preferences());
+    expect(screen.getByRole('status').textContent).toBe('Search preview · save pending');
+    await act(async () => { finish(); });
+    expect(rowIds()).toEqual(['2']); expect(value.canonical().filters.search).toBe('needle');
+    expect(screen.queryByRole('status')).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(500); }); expect(value.saved).toHaveLength(1);
+  });
+  it.each(['rejected', 'uncertain'] as const)('retains a %s search preview without resending and adopts explicit reconciliation', async failure => {
+    const value = await setup(), saved: SessionPreferences[] = [];
+    let finish!: () => void;
+    const completion = new Promise<void>(resolve => { finish = resolve; });
+    const props = { store: value.store, routes: value.routes, later: new Set<string>(), onReveal: () => {}, saveLater: async () => true,
+      saveView: async (next: SessionPreferences) => { saved.push(next); await completion;
+        if (failure === 'uncertain') throw new Error('Reconcile the original operation.');
+        return false;
+      } };
+    const view = preferences(), rendered = render(<SentenceTree {...props} view={view} />); vi.useFakeTimers();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'unmatched preview' } });
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(rowIds()).toEqual([]); expect(view.filters.search).toBe('');
+    await act(async () => { finish(); vi.advanceTimersByTime(500); });
+    expect(rowIds()).toEqual([]); expect(saved).toHaveLength(1);
+    expect(screen.getByRole('status').textContent).toBe('Search preview · save not confirmed');
+    expect(screen.getByRole('alert')).toBeTruthy();
+    const unrelated = { ...view, selected_item_id: '1.1', filters: { ...view.filters, search: 'canonical replacement', statuses: ['open'] as const } };
+    rendered.rerender(<SentenceTree {...props} view={unrelated} />);
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('unmatched preview');
+    expect(rowIds()).toEqual([]); expect(saved).toHaveLength(1);
+    rendered.rerender(<SentenceTree {...props} view={saved[0]} />);
+    expect(screen.queryByRole('status')).toBeNull(); expect(rowIds()).toEqual([]);
+    await act(async () => { vi.advanceTimersByTime(500); }); expect(saved).toHaveLength(1);
+  });
+  it('discards an unconfirmed preview on explicit reset and reopening from canonical preferences', async () => {
+    const value = await setup(); value.rejectWrite(); const rendered = render(<value.Composition />); vi.useFakeTimers();
+    const canonicalRows = rowIds();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'unmatched preview' } });
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(rowIds()).toEqual([]); expect(value.canonical().filters.search).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(rowIds()).toEqual(canonicalRows); expect(screen.queryByRole('status')).toBeNull();
+    expect(value.saved).toHaveLength(2);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'another unmatched preview' } });
+    await act(async () => { vi.advanceTimersByTime(100); }); expect(rowIds()).toEqual([]);
+    rendered.unmount(); render(<value.Composition />);
+    expect(rowIds()).toEqual(canonicalRows); expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    await act(async () => { vi.advanceTimersByTime(500); }); expect(value.saved).toHaveLength(3);
+  });
+  it('adopts a later canonical search after the newest local search is confirmed', async () => {
+    const value = await setup(), saved: SessionPreferences[] = [];
+    const props = { store: value.store, routes: value.routes, later: new Set<string>(), onReveal: () => {}, saveLater: async () => true,
+      saveView: async (next: SessionPreferences) => { saved.push(next); return true; } };
+    const view = preferences(), rendered = render(<SentenceTree {...props} view={view} />); vi.useFakeTimers();
+    const canonicalRows = rowIds();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'unmatched preview' } });
+    await act(async () => { vi.advanceTimersByTime(100); }); expect(rowIds()).toEqual([]);
+    rendered.rerender(<SentenceTree {...props} view={saved[0]} />);
+    expect(screen.queryByRole('status')).toBeNull();
+    rendered.rerender(<SentenceTree {...props} view={view} />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect(rowIds()).toEqual(canonicalRows);
+    await act(async () => { vi.advanceTimersByTime(500); }); expect(saved).toHaveLength(1);
+  });
+  it('debounces returning to canonical search and discards the preview without another write', async () => {
+    const value = await setup(); value.rejectWrite(); render(<value.Composition />); vi.useFakeTimers();
+    const canonicalRows = rowIds();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'unmatched preview' } });
+    await act(async () => { vi.advanceTimersByTime(100); }); expect(rowIds()).toEqual([]);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
+    await act(async () => { vi.advanceTimersByTime(99); }); expect(rowIds()).toEqual([]);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(rowIds()).toEqual(canonicalRows); expect(screen.queryByRole('status')).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(500); }); expect(value.saved).toHaveLength(1);
+  });
+  it.each([50, 100])('keeps the latest search across an unrelated confirmation after %sms of its debounce', async elapsed => {
     const value = await setup(), saved: SessionPreferences[] = [];
     let finish!: (confirmed: boolean) => void;
     function Composition() {
@@ -136,7 +228,7 @@ describe('registered variable-height sentence tree', () => {
         saveLater={async () => {
           const confirmed = await new Promise<boolean>(resolve => { finish = resolve; });
           if (confirmed) setView(previous => ({ ...previous, selected_item_id: '1.1',
-            filters: { ...previous.filters, statuses: ['open'] } }));
+            filters: { ...previous.filters, search: 'older canonical search', statuses: ['open'] } }));
           return confirmed;
         }} onReveal={() => {}} />;
     }
@@ -145,9 +237,14 @@ describe('registered variable-height sentence tree', () => {
     await act(async () => { vi.advanceTimersByTime(99); });
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'latest exact text' } });
     fireEvent.keyDown(rows()[0], { key: 'z' });
-    await act(async () => { vi.advanceTimersByTime(100); });
+    await act(async () => { vi.advanceTimersByTime(elapsed); });
     expect(saved).toHaveLength(0);
     await act(async () => { finish(true); });
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('latest exact text');
+    if (elapsed < 100) {
+      expect(saved).toHaveLength(0);
+      await act(async () => { vi.advanceTimersByTime(100 - elapsed); });
+    }
     expect(saved).toHaveLength(1);
     expect(saved[0].filters.search).toBe('latest exact text');
     expect(saved[0].filters.statuses).toEqual(['open']);
@@ -183,10 +280,13 @@ describe('registered variable-height sentence tree', () => {
       saveView: async (next: SessionPreferences) => { saved.push(next); return true; },
       saveLater: async () => new Promise<boolean>(resolve => { finish = resolve; }) };
     const rendered = render(<SentenceTree {...props} store={first.store} view={preferences()} />);
+    const canonicalRows = rowIds();
     vi.useFakeTimers(); fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'old session text' } });
     fireEvent.keyDown(rows()[0], { key: 'z' });
     await act(async () => { vi.advanceTimersByTime(100); });
+    expect(rowIds()).toEqual([]);
     rendered.rerender(<SentenceTree {...props} store={second.store} view={nextView} />);
+    expect(rowIds()).toEqual(canonicalRows); expect(screen.queryByRole('status')).toBeNull();
     await act(async () => { finish(true); vi.advanceTimersByTime(500); });
     expect(saved).toHaveLength(0); expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
   });
