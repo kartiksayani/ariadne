@@ -1,6 +1,7 @@
 """Execute CI orchestration without claiming command doubles prove app checks."""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,7 +18,7 @@ with open(os.environ["COMMAND_LOG"], "a") as output:
 if name in ("rustup", "cargo", "rustc"):
     toolchain_home = Path(os.environ["RUSTUP_HOME"]).resolve()
     assert toolchain_home.parent == Path(os.environ["RUNNER_TEMP"]).resolve()
-    assert toolchain_home.is_dir() and toolchain_home.name.startswith("ariadne-rustup.")
+    assert toolchain_home.is_dir() and toolchain_home.name == "ariadne-rustup"
 if name == "rustup":
     sys.exit(int(os.environ["SETUP_EXIT"]))
 if name == "python" and sys.argv[1:3] == ["-m", "venv"]:
@@ -46,10 +47,41 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertNotIn("paths:", workflow)
         self.assertIn("group: quality-${{ github.ref }}\n  cancel-in-progress: true", workflow)
         self.assertIn("github.event.before || 'origin/main'", workflow)
+        self.assertIn("matrix:\n        stage: [static, coverage, native]", workflow)
+        self.assertIn("fail-fast: false", workflow)
+        self.assertIn("  quality:\n    name: quality\n    needs: [stage]\n    if: ${{ !cancelled() }}\n    runs-on: ubuntu-latest", workflow)
         self.assertIn("- name: Record result\n        if: always()", workflow)
-        step = workflow.split("      - name: Check the pushed branch head\n", 1)[1]
-        script = "\n".join(line.removeprefix("          ") for line in
-                           step.split("        run: |\n", 1)[1].split("      - name:", 1)[0].splitlines())
+        self.assertIn('[[ "$STAGE_RESULT" == "success" ]]', workflow)
+        self.assertIn("-${{ matrix.stage }}\n", workflow)
+        self.assertIn("package-manager-cache: true", workflow)
+        self.assertIn("uses: Swatinem/rust-cache@", workflow)
+        self.assertIn('key: ${{ matrix.stage }}\n          workspaces: ". -> target/native-e2e"\n'
+                      "          cache-on-failure: true", workflow)
+        self.assertNotIn("save-if", workflow)
+        self.assertIn("path: ~/.cargo/bin/cargo-llvm-cov\n          key: ${{ runner.os }}-cargo-llvm-cov-0.9.1", workflow)
+        self.assertIn("steps.llvm-cov-cache.outputs.cache-hit != 'true'", workflow)
+        self.assertEqual(workflow.count("&& matrix.stage != 'static'"), 2)
+        self.assertIn("      - name: Check the pushed branch head\n"
+                      "        if: contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static'\n", workflow)
+        self.assertIn("      - name: Preserve native and coverage evidence\n"
+                      "        if: always() && (contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static')\n",
+                      workflow)
+        order = [workflow.index(f"      - name: {name}\n") for name in (
+            "Resolve the check scope", "Install the Rust toolchain", "Restore cargo-llvm-cov",
+            "Install cargo-llvm-cov", "Cache the Rust build", "Check the pushed branch head")]
+        self.assertEqual(order, sorted(order))
+
+        def step_script(name):
+            step = workflow.split(f"      - name: {name}\n", 1)[1]
+            body = step.split("        run: |\n", 1)[1]
+            body = re.split(r"      - (?:name|uses):", body, maxsplit=1)[0]
+            return "\n".join(line.removeprefix("          ") for line in body.splitlines())
+
+        steps = [("Resolve the check scope", lambda application, stage: True),
+                 ("Install the Rust toolchain", lambda application, stage: application),
+                 ("Install cargo-llvm-cov", lambda application, stage: application and stage != "static"),
+                 ("Check the pushed branch head", lambda application, stage: application or stage == "static")]
+        scripts = [(step_script(name), condition) for name, condition in steps]
         with tempfile.TemporaryDirectory(prefix="ariadne-ci-orchestration-") as folder:
             root = Path(folder)
             commands = root / "commands"
@@ -81,8 +113,9 @@ class QualityWorkflowTests(unittest.TestCase):
             cases = [(*case, 0) for case in cases] + [
                 ("application release=true reference=true", 0, "push", "refs/heads/feature", 0, 0, 42),
             ]
-            for index, (scope, status, event, ref, provision_status, capture_status, setup_status) in enumerate(cases):
-                with self.subTest(scope=scope, status=status, event=event, ref=ref, setup_status=setup_status):
+            cases = [(stage, *case) for stage in ("static", "coverage", "native") for case in cases]
+            for index, (stage, scope, status, event, ref, provision_status, capture_status, setup_status) in enumerate(cases):
+                with self.subTest(stage=stage, scope=scope, status=status, event=event, ref=ref, setup_status=setup_status):
                     checkout = root / str(index)
                     checkout.mkdir()
                     runner_temp = checkout / "runner-temp"
@@ -93,12 +126,32 @@ class QualityWorkflowTests(unittest.TestCase):
                            "GITHUB_REF": ref, "GITHUB_WORKSPACE": str(checkout),
                            "RUNNER_TEMP": str(runner_temp), "SETUP_EXIT": str(setup_status),
                            "PROVISION_EXIT": str(provision_status), "CAPTURE_EXIT": str(capture_status),
-                           "COMMAND_LOG": str(log), "SCOPE": scope, "GATE_EXIT": str(status)}
-                    result = subprocess.run(["bash", "-c", script], cwd=checkout, env=env,
-                                            text=True, capture_output=True)
+                           "COMMAND_LOG": str(log), "SCOPE": scope, "GATE_EXIT": str(status),
+                           "STAGE": stage}
                     application = scope.startswith("application")
-                    reference = "reference=true" in scope
+                    github_env = checkout / "github-env"
+                    github_output = checkout / "github-output"
+                    env.update(GITHUB_ENV=str(github_env), GITHUB_OUTPUT=str(github_output))
+                    for script, condition in scripts:
+                        github_env.touch()
+                        github_output.touch()
+                        for line in github_env.read_text().splitlines():
+                            key, _, value = line.partition("=")
+                            env[key] = value
+                        for line in github_output.read_text().splitlines():
+                            key, _, value = line.partition("=")
+                            env[key.upper()] = value
+                        if not condition(application, stage):
+                            continue
+                        result = subprocess.run(["bash", "-c", script], cwd=checkout, env=env,
+                                                text=True, capture_output=True)
+                        if result.returncode:
+                            break
+                    reference = "reference=true" in scope and stage == "static"
+                    runs_gate = application or stage == "static"
                     expected_status = setup_status or status or ((provision_status or capture_status) if reference else 0)
+                    if not runs_gate:
+                        expected_status = 0
                     self.assertEqual(result.returncode, expected_status, result.stderr)
                     calls = [json.loads(line) for line in log.read_text().splitlines()]
                     gate = ["python", "scripts/check-commit.py", "--ci", "--base", "whole-pr-base"]
@@ -106,8 +159,9 @@ class QualityWorkflowTests(unittest.TestCase):
                         gate += ["--merge-base"]
                     if event == "workflow_dispatch":
                         gate += ["--full"]
+                    gate += ["--stage", stage]
                     gate_ok = not (setup_status or status)
-                    self.assertEqual(calls.count(gate), int(not setup_status))
+                    self.assertEqual(calls.count(gate), int(runs_gate and not setup_status))
                     provisioning = ["node", "node_modules/playwright/cli.js", "install", "chromium"]
                     capture = ["npm", "run", "capture:reference"]
                     self.assertEqual(calls.count(provisioning), int(reference and gate_ok))
@@ -125,12 +179,14 @@ class QualityWorkflowTests(unittest.TestCase):
                         for version in version_checks:
                             self.assertLess(calls.index(installs[0]), calls.index(version))
                         self.assertLess(calls.index(version_checks[-1]), calls.index(gate))
+                    llvm_cov = ["cargo", "install", "cargo-llvm-cov", "--version", "0.9.1", "--locked"]
+                    self.assertEqual(calls.count(llvm_cov), int(application and stage != "static" and not setup_status))
                     self.assertFalse(any(call[0] == "rtk" for call in calls))
 
     def test_captures_before_gate_are_rejected(self):
         workflow_path = ROOT / ".github/workflows/quality.yml"
         workflow = workflow_path.read_text()
-        gate = '          .venv-quality/bin/python scripts/check-commit.py "${args[@]}"\n'
+        gate = '          .venv-quality/bin/python scripts/check-commit.py "${args[@]}" --stage "$STAGE"\n'
         self.assertEqual(workflow.count(gate), 1)
         next_step = "      - name: Preserve native and coverage evidence\n"
         mutation = workflow.replace(gate, "").replace(next_step, gate + next_step)

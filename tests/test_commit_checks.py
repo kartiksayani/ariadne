@@ -318,6 +318,19 @@ class CoverageTests(unittest.TestCase):
                                "tools/xtask/src/generated/wire.rs", "tools/xtask/vendor/source.rs"):
                     self.assertIsNotNone(re.search(pattern, source))
 
+    def test_split_stages_fetch_crates_once_and_all_or_static_never(self):
+        for stage, fetches in (("all", 0), ("static", 0), ("coverage", 1), ("native", 1)):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                (root / "quality-gates.json").write_text('{"minimum_line_coverage":80,"coverage_exclusions":[]}')
+                with mock.patch.object(commit, "ROOT", root), mock.patch.object(
+                        commit, "changed_paths", return_value=["crates/ariadne-core/src/service.rs"]), mock.patch.object(
+                        commit, "lint"), mock.patch.object(commit, "run") as run, mock.patch.object(
+                        commit, "coverage_counts", return_value=(8, 10)):
+                    commit.main(["--ci", "--base", "main", "--stage", stage])
+                calls = [list(call.args) for call in run.call_args_list]
+                self.assertEqual(calls.count(["cargo", "fetch", "--locked"]), fetches)
+
     def test_weighted_counts_include_uncovered_lines_and_merge_duplicates(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
