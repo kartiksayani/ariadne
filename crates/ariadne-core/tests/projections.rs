@@ -9,6 +9,10 @@ use std::{
 };
 use tempfile::TempDir;
 
+/// Project store directory under a data-root home, as `Registry::project_dir` derives it.
+fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
+    home.join(".ariadne/projects").join(id(project).as_str())
+}
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -53,7 +57,7 @@ fn error(error: QueryError) -> CoreError {
 }
 struct Setup {
     _home: TempDir,
-    root: TempDir,
+    _root: TempDir,
     registry: Registry,
     next: AtomicU64,
 }
@@ -63,21 +67,19 @@ impl Setup {
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::open(home.path()).unwrap();
         registry.register(root.path(), &id(99), || id(1)).unwrap();
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&store_dir(home.path(), 1), id(1))
             .unwrap()
             .create(session)
             .unwrap();
         Self {
             _home: home,
-            root,
+            _root: root,
             registry,
             next: AtomicU64::new(1000),
         }
     }
     fn path(&self) -> std::path::PathBuf {
-        self.root
-            .path()
-            .join(format!(".ariadne/sessions/{}.json", id(2).as_str()))
+        store_dir(self._home.path(), 1).join(format!("sessions/{}.json", id(2).as_str()))
     }
     fn query(
         &self,
@@ -87,7 +89,7 @@ impl Setup {
         QueryService::new(&self.registry).query(context, request)
     }
     fn saved(&self) -> Session {
-        Store::read_registered(&self.root.path().canonicalize().unwrap(), &id(1), &id(2)).unwrap()
+        Store::read_registered(&self.registry.project_dir(&id(1)), &id(1), &id(2)).unwrap()
     }
     fn replace(&self, session: &Session) {
         fs::write(self.path(), serde_json::to_vec_pretty(session).unwrap()).unwrap();
@@ -194,7 +196,7 @@ fn aggregate_cursor_detects_session_only_changes_and_changed_filter() {
     let setup = Setup::new(&seed());
     let mut second = seed();
     second.id = id(20);
-    Store::open_registered(setup.root.path(), id(1))
+    Store::open_registered(&store_dir(setup._home.path(), 1), id(1))
         .unwrap()
         .create(&second)
         .unwrap();
@@ -270,7 +272,7 @@ fn unavailable_metadata_and_known_bad_session_are_truthful_partial_rows() {
     assert_eq!(result.counts.completeness, Completeness::Partial);
     assert_eq!(result.counts.unavailable_session_ids, vec![id(2)]);
     assert_eq!(fs::read(setup.path()).unwrap(), bytes);
-    let metadata = setup.root.path().join(".ariadne/project.json");
+    let metadata = store_dir(setup._home.path(), 1).join("project.json");
     fs::write(&metadata, b"unreadable canonical metadata").unwrap();
     let result = projects(setup.query(&registry_owner(), &request).unwrap());
     assert_eq!(result.projects.items[0].project_id, id(1));
@@ -302,10 +304,10 @@ fn genuinely_absent_session_catalogue_is_empty_without_directory_creation() {
     );
     assert_eq!(result.counts.completeness, Completeness::Complete);
     assert_eq!(result.counts.items_by_status.open.value(), 0);
-    assert!(!root.path().join(".ariadne/sessions").exists());
-    assert!(!root.path().join(".ariadne/backups").exists());
+    assert!(!store_dir(home.path(), 1).join("sessions").exists());
+    assert!(!store_dir(home.path(), 1).join("backups").exists());
     fs::write(
-        root.path().join(".ariadne/sessions"),
+        store_dir(home.path(), 1).join("sessions"),
         b"directory replaced by ordinary file",
     )
     .unwrap();
@@ -1288,7 +1290,7 @@ fn state_filtered_session_page_keeps_unfiltered_scope_counts_and_both_totals() {
     binding.owner_paused = true;
     binding.dispatch_state = DispatchState::Paused;
     binding.pause_reason = None;
-    Store::open_registered(setup.root.path(), id(1))
+    Store::open_registered(&store_dir(setup._home.path(), 1), id(1))
         .unwrap()
         .create(&closed)
         .unwrap();

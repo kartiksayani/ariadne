@@ -9,11 +9,9 @@ fn id(n: u64) -> UuidV4 {
 fn locked_replay_wins_over_stale_owned_source_after_initial_replay_miss() {
     let root = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
-    ariadne_store::registry::Registry::open(home.path())
-        .unwrap()
-        .register(root.path(), &id(99), || id(1))
-        .unwrap();
-    let store = Store::open_registered(root.path(), id(1)).unwrap();
+    let registry = ariadne_store::registry::Registry::open(home.path()).unwrap();
+    registry.register(root.path(), &id(99), || id(1)).unwrap();
+    let store = Store::open_registered(&registry.project_dir(&id(1)), id(1)).unwrap();
     let source: Session = serde_json::from_str(include_str!(
         "../../../../../fixtures/domain/history/seed.json"
     ))
@@ -62,12 +60,12 @@ fn locked_replay_wins_over_stale_owned_source_after_initial_replay_miss() {
         &at,
     )
     .unwrap();
-    let source_path = root
-        .path()
-        .join(format!(".ariadne/sessions/{}.json", id(2).as_str()));
-    let target_path = root
-        .path()
-        .join(format!(".ariadne/sessions/{}.json", id(20).as_str()));
+    let source_path = registry
+        .project_dir(&id(1))
+        .join(format!("sessions/{}.json", id(2).as_str()));
+    let target_path = registry
+        .project_dir(&id(1))
+        .join(format!("sessions/{}.json", id(20).as_str()));
     let source_bytes = fs::read(&source_path).unwrap();
     let target_bytes = fs::read(&target_path).unwrap();
     // The retry then captures stale source state. Its transaction must replay

@@ -35,8 +35,8 @@ fn write_private(path: &Path, bytes: &[u8]) {
 
 fn project() -> TempDir {
     let root = tempfile::tempdir_in(fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
-    let data = root.path().join(".ariadne");
-    fs::create_dir(&data).unwrap();
+    // The tempdir is the project's store directory (`<data root>/projects/<id>`).
+    let data = root.path().to_path_buf();
     fs::set_permissions(&data, fs::Permissions::from_mode(0o700)).unwrap();
     let project = Project {
         schema_version: SchemaVersion::new(1).unwrap(),
@@ -92,7 +92,7 @@ impl ReadPath {
 }
 
 fn live(root: &Path) -> PathBuf {
-    root.join(format!(".ariadne/sessions/{}.json", id(2).as_str()))
+    root.join(format!("sessions/{}.json", id(2).as_str()))
 }
 
 #[test]
@@ -118,10 +118,7 @@ fn captured_reads_release_project_and_session_guards_before_validation() {
         let writer = std::thread::spawn(move || {
             // Acquire both real coordination paths. A retained process mutex or
             // flock on either project or session prevents this commit.
-            let data = Directory::root(&writer_root)
-                .unwrap()
-                .child(".ariadne", false)
-                .unwrap();
+            let data = Directory::root(&writer_root).unwrap();
             let saved = lock::with_lock(&data, "project.lock", || {
                 let store = Store::open_registered(&writer_root, id(1))?;
                 store
@@ -202,7 +199,7 @@ fn captured_reads_keep_schema_identity_and_semantic_failures_closed() {
 #[test]
 fn catalogue_preserves_partial_failures_and_strict_diagnostic_authority() {
     let root = project();
-    let sessions = root.path().join(".ariadne/sessions");
+    let sessions = root.path().join("sessions");
     write_private(&sessions.join("not-a-session.json"), b"{}");
     write_private(
         &sessions.join(format!("{}.json", id(90).as_str())),
@@ -226,9 +223,7 @@ fn catalogue_preserves_partial_failures_and_strict_diagnostic_authority() {
         .any(|entry| entry.session_id == Some(id(90))
             && matches!(&entry.result, Err(StoreError::FutureSchema))));
 
-    let missing_lock = root
-        .path()
-        .join(format!(".ariadne/locks/{}.lock", id(90).as_str()));
+    let missing_lock = root.path().join(format!("locks/{}.lock", id(90).as_str()));
     fs::remove_file(&missing_lock).unwrap();
     let diagnosed = Store::diagnose_registered(root.path(), &id(1)).unwrap();
     let diagnosed = diagnosed.sessions.unwrap();
@@ -256,7 +251,7 @@ fn catalogue_preserves_partial_failures_and_strict_diagnostic_authority() {
 #[test]
 fn project_identity_gate_precedes_session_coordination_creation() {
     let root = project();
-    let locks = root.path().join(".ariadne/locks");
+    let locks = root.path().join("locks");
     fs::remove_dir_all(&locks).unwrap();
     let wrong_project = Project {
         schema_version: SchemaVersion::new(1).unwrap(),
@@ -264,7 +259,7 @@ fn project_identity_gate_precedes_session_coordination_creation() {
         display_name: "Different project".into(),
     };
     write_private(
-        &root.path().join(".ariadne/project.json"),
+        &root.path().join("project.json"),
         &encode(&wrong_project).unwrap(),
     );
     assert!(matches!(

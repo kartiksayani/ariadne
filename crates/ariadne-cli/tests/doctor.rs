@@ -63,7 +63,7 @@ impl Profile {
         let project = tempfile::tempdir().unwrap();
         let data = home.path().join(".ariadne");
         let registry = Registry::create_data_directory(&data).unwrap();
-        ariadne_cli::demo::prepare(project.path())
+        ariadne_cli::demo::prepare(project.path(), &data)
             .unwrap()
             .publish(&registry, &id(900))
             .unwrap();
@@ -81,10 +81,12 @@ impl Profile {
     fn report(&self) -> Value {
         inspect::collect(&self.data, Some(&self.version), &Options::default())
     }
+    fn store(&self) -> PathBuf {
+        self.data.join("projects").join(id(1).as_str())
+    }
     fn live(&self) -> PathBuf {
-        self.project
-            .path()
-            .join(".ariadne/sessions/00000000-0000-4000-8000-000000000002.json")
+        self.store()
+            .join("sessions/00000000-0000-4000-8000-000000000002.json")
     }
 }
 
@@ -139,9 +141,9 @@ fn canonical_doctor_is_strictly_read_only_and_omits_session_bodies() {
 #[test]
 fn missing_session_and_registry_coordination_never_get_created() {
     let profile = Profile::new();
-    let locks = profile.project.path().join(".ariadne/locks");
+    let locks = profile.store().join("locks");
     fs::remove_dir_all(&locks).unwrap();
-    let before = snapshot(profile.project.path());
+    let before = snapshot(profile.home.path());
     let report = profile.report();
     assert_eq!(
         checks(&report, "session_catalogue.missing_coordination_or_data")[0]["status"],
@@ -152,7 +154,7 @@ fn missing_session_and_registry_coordination_never_get_created() {
         "unknown"
     );
     assert!(!locks.exists());
-    assert_eq!(snapshot(profile.project.path()), before);
+    assert_eq!(snapshot(profile.home.path()), before);
     fs::remove_file(profile.data.join("registry.lock")).unwrap();
     let before = snapshot(profile.home.path());
     assert_eq!(
@@ -253,9 +255,8 @@ fn index_states_compare_only_complete_authoritative_observations_without_rebuild
 fn previous_snapshot_health_reuses_canonical_validation_without_restore() {
     let profile = Profile::new();
     let backup = profile
-        .project
-        .path()
-        .join(".ariadne/backups/00000000-0000-4000-8000-000000000002.previous.json");
+        .store()
+        .join("backups/00000000-0000-4000-8000-000000000002.previous.json");
     fs::copy(profile.live(), &backup).unwrap();
     fs::set_permissions(&backup, fs::Permissions::from_mode(0o600)).unwrap();
     assert_eq!(

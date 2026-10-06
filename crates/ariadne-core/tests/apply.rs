@@ -15,6 +15,10 @@ use std::{
 };
 use tempfile::TempDir;
 
+/// Project store directory under a data-root home, as `Registry::project_dir` derives it.
+fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
+    home.join(".ariadne/projects").join(id(project).as_str())
+}
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -117,7 +121,7 @@ fn core_error(error: ApplyError) -> CoreError {
 }
 struct Setup {
     _home: TempDir,
-    root: TempDir,
+    _root: TempDir,
     registry: Registry,
     next: AtomicU64,
 }
@@ -127,28 +131,27 @@ impl Setup {
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::open(home.path()).unwrap();
         registry.register(root.path(), &id(99), || id(1)).unwrap();
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&store_dir(home.path(), 1), id(1))
             .unwrap()
             .create(session)
             .unwrap();
         Self {
             _home: home,
-            root,
+            _root: root,
             registry,
             next: AtomicU64::new(10000),
         }
     }
     fn store(&self) -> Store {
-        Store::open_registered(self.root.path(), id(1)).unwrap()
+        Store::open_registered(&store_dir(self._home.path(), 1), id(1)).unwrap()
     }
     fn saved(&self) -> Session {
         self.store().read(&id(2)).unwrap()
     }
     fn bytes(&self) -> Vec<u8> {
         fs::read(
-            self.root
-                .path()
-                .join(".ariadne/sessions")
+            store_dir(self._home.path(), 1)
+                .join("sessions")
                 .join(format!("{}.json", id(2).as_str())),
         )
         .unwrap()

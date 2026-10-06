@@ -16,6 +16,24 @@ fn registration(registry: &Registry, project: &std::path::Path, number: u64) {
         .register(project, &id(number + 1000), || id(number))
         .unwrap();
 }
+/// Legacy in-project store (pre-P8.7 layout) holding only `project.json`.
+fn write_legacy_project(root: &std::path::Path, project: u64) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let data = root.join(".ariadne");
+    fs::create_dir(&data).unwrap();
+    fs::set_permissions(&data, fs::Permissions::from_mode(0o700)).unwrap();
+    let metadata = data.join("project.json");
+    write_private(
+        &metadata,
+        &serde_json::to_vec(&Project {
+            schema_version: SchemaVersion::new(1).unwrap(),
+            id: id(project),
+            display_name: "Legacy project".into(),
+        })
+        .unwrap(),
+    );
+    metadata
+}
 fn blank(project: u64, session: u64, binding: u64, host: &str) -> Session {
     let mut value = seed();
     value.project_id = id(project);
@@ -61,9 +79,12 @@ fn registration_canonicalizes_roots_preserves_receipts_and_never_persists_zero_r
     assert_eq!(projects[0].root, root.path().canonicalize().unwrap());
     assert_eq!(registry.resolve_project(&id(1)).unwrap(), projects[0]);
     let bytes = fs::read(home.path().join(".ariadne/projects.json")).unwrap();
+    // Nothing was created inside the registered folder; only the data root grew.
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    assert!(registry.project_dir(&id(1)).join("project.json").is_file());
     fs::rename(
-        root.path().join(".ariadne"),
-        root.path().join("temporarily-unavailable"),
+        registry.project_dir(&id(1)),
+        home.path().join("temporarily-unavailable"),
     )
     .unwrap();
     assert_eq!(
@@ -108,8 +129,8 @@ fn fixed_registration_replay_binds_mode_and_exact_expected_identity_before_prefl
     assert_eq!(first.project_id, id(1));
     let before = fs::read(home.path().join(".ariadne/projects.json")).unwrap();
     fs::rename(
-        root.path().join(".ariadne"),
-        root.path().join("unavailable"),
+        registry.project_dir(&id(1)),
+        home.path().join("unavailable"),
     )
     .unwrap();
     assert_eq!(
@@ -141,8 +162,8 @@ fn fixed_registration_replay_binds_mode_and_exact_expected_identity_before_prefl
     let ordinary = tempfile::tempdir().unwrap();
     // Restore the registered root before a valid new ordinary registration.
     fs::rename(
-        root.path().join("unavailable"),
-        root.path().join(".ariadne"),
+        home.path().join("unavailable"),
+        registry.project_dir(&id(1)),
     )
     .unwrap();
     registry
@@ -157,11 +178,10 @@ fn fixed_registration_replay_binds_mode_and_exact_expected_identity_before_prefl
 #[test]
 fn fixed_registration_rejects_existing_metadata_without_a_registry_receipt_or_write() {
     let home = tempfile::tempdir().unwrap();
-    let other_home = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();
-    let other = Registry::open(other_home.path()).unwrap();
-    registration(&other, root.path(), 2);
-    let metadata = root.path().join(".ariadne/project.json");
+    // A legacy in-project store naming another identity is never migrated or
+    // overwritten by a fixed registration that expects a different one.
+    let metadata = write_legacy_project(root.path(), 2);
     let before = fs::read(&metadata).unwrap();
     let registry = Registry::open(home.path()).unwrap();
     let error = registry
@@ -198,7 +218,8 @@ fn restored_project_metadata_after_absence_keeps_bytes_and_cannot_publish_wrong_
     let registry_before = fs::read(&registry_path).unwrap();
     let index_before = fs::read(&index_path).unwrap();
     let projects_before = registry.registered_projects().unwrap();
-    let metadata_path = root.path().join(".ariadne/project.json");
+    let store_dir = registry.project_dir(&id(1));
+    let metadata_path = store_dir.join("project.json");
     let restored = serde_json::to_vec(&Project {
         schema_version: SchemaVersion::new(1).unwrap(),
         id: id(2),
@@ -208,11 +229,17 @@ fn restored_project_metadata_after_absence_keeps_bytes_and_cannot_publish_wrong_
     assert!(!metadata_path.exists());
     assert!(matches!(
         registry.register(root.path(), &id(1001), || {
-            // Ordinary external restoration after the locked absence decision.
+            // Ordinary external restoration of a store under the allocated id,
+            // naming a different project: the directory name is the identity.
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::create_dir(&store_dir).unwrap();
+                fs::set_permissions(&store_dir, fs::Permissions::from_mode(0o700)).unwrap();
+            }
             write_private(&metadata_path, &restored);
             id(1)
         }),
-        Err(RegistryError::Store(StoreError::AlreadyExists))
+        Err(RegistryError::Conflict { .. })
     ));
     assert_eq!(fs::read(&metadata_path).unwrap(), restored);
     assert_eq!(fs::read(&registry_path).unwrap(), registry_before);
@@ -227,15 +254,15 @@ fn restored_project_metadata_after_absence_keeps_bytes_and_cannot_publish_wrong_
             .unwrap()
             .contains(".tmp-")));
 
-    // The failed publication left no receipt: retry reads the restored identity.
-    let result = registry
-        .register(root.path(), &id(1001), || panic!("existing metadata"))
-        .unwrap();
-    assert_eq!(result.project_id, id(2));
+    // The failed publication left no receipt: a retry allocates a clean identity
+    // and the foreign bytes stay where they were.
+    let result = registry.register(root.path(), &id(1001), || id(3)).unwrap();
+    assert_eq!(result.project_id, id(3));
     assert_eq!(
-        registry.resolve_project(&id(2)).unwrap().root,
+        registry.resolve_project(&id(3)).unwrap().root,
         root.path().canonicalize().unwrap()
     );
+    assert_eq!(fs::read(&metadata_path).unwrap(), restored);
 }
 
 #[test]
@@ -272,8 +299,12 @@ fn duplicate_metadata_identity_and_unavailable_registered_roots_stop_new_registr
         registry.register(two.path(), &id(1002), || id(1)),
         Err(RegistryError::Conflict { .. })
     ));
-    assert!(!two.path().join(".ariadne/project.json").exists());
-    fs::rename(one.path().join(".ariadne"), one.path().join("unavailable")).unwrap();
+    assert_eq!(fs::read_dir(two.path()).unwrap().count(), 0);
+    fs::rename(
+        registry.project_dir(&id(1)),
+        home.path().join("unavailable"),
+    )
+    .unwrap();
     assert!(matches!(
         registry.register(two.path(), &id(1002), || id(2)),
         Err(RegistryError::Unavailable { .. })
@@ -291,11 +322,11 @@ fn changed_registered_metadata_and_noncanonical_session_files_stop_routing_witho
     let root = tempfile::tempdir().unwrap();
     let registry = Registry::open(home.path()).unwrap();
     registration(&registry, root.path(), 1);
-    let store = Store::open_registered(root.path(), id(1)).unwrap();
+    let store = Store::open_registered(&registry.project_dir(&id(1)), id(1)).unwrap();
     store.create(&blank(1, 2, 3, "host")).unwrap();
     registry.rebuild().unwrap();
     let index = fs::read(home.path().join(".ariadne/bindings.json")).unwrap();
-    let metadata = root.path().join(".ariadne/project.json");
+    let metadata = registry.project_dir(&id(1)).join("project.json");
     let before = fs::read(&metadata).unwrap();
     let mut changed: Project = serde_json::from_slice(&before).unwrap();
     changed.id = id(9);
@@ -309,7 +340,9 @@ fn changed_registered_metadata_and_noncanonical_session_files_stop_routing_witho
         index
     );
     write_private(&metadata, &before);
-    let invalid = root.path().join(".ariadne/sessions/not-a-uuid.json");
+    let invalid = registry
+        .project_dir(&id(1))
+        .join("sessions/not-a-uuid.json");
     write_private(&invalid, b"not a canonical session");
     assert!(registry.rebuild().is_err());
     assert_eq!(
@@ -327,11 +360,15 @@ fn registered_project_session_scan_is_local_but_global_uniqueness_requires_every
     let registry = Registry::open(home.path()).unwrap();
     registration(&registry, one.path(), 1);
     registration(&registry, two.path(), 10);
-    Store::open_registered(one.path(), id(1))
+    Store::open_registered(&registry.project_dir(&id(1)), id(1))
         .unwrap()
         .create(&blank(1, 2, 3, "one"))
         .unwrap();
-    fs::rename(two.path().join(".ariadne"), two.path().join("unavailable")).unwrap();
+    fs::rename(
+        registry.project_dir(&id(10)),
+        home.path().join("unavailable"),
+    )
+    .unwrap();
     registry
         .with_binding_setup(|setup| {
             assert_eq!(setup.project_sessions(&id(1))?.len(), 1);
@@ -400,7 +437,7 @@ fn rebuild_uses_only_registered_selected_bindings_and_preserves_unavailable_know
     session.state = SessionState::Closed;
     session.closed_at = Some(session.updated_at.clone());
     session.bindings.0.get_mut(&id(3)).unwrap().dispatch_state = DispatchState::Paused;
-    Store::open_registered(root.path(), id(1))
+    Store::open_registered(&registry.project_dir(&id(1)), id(1))
         .unwrap()
         .create(&session)
         .unwrap();
@@ -417,8 +454,8 @@ fn rebuild_uses_only_registered_selected_bindings_and_preserves_unavailable_know
     let registrations = fs::read(home.path().join(".ariadne/projects.json")).unwrap();
     let index = fs::read(home.path().join(".ariadne/bindings.json")).unwrap();
     fs::rename(
-        root.path().join(".ariadne"),
-        root.path().join("unavailable"),
+        registry.project_dir(&id(1)),
+        home.path().join("unavailable"),
     )
     .unwrap();
     assert!(matches!(
@@ -445,7 +482,7 @@ fn duplicate_selected_identity_stops_with_both_paths_and_opaque_tuple_delimiters
     let root = tempfile::tempdir().unwrap();
     let registry = Registry::open(home.path()).unwrap();
     registration(&registry, root.path(), 1);
-    let store = Store::open_registered(root.path(), id(1)).unwrap();
+    let store = Store::open_registered(&registry.project_dir(&id(1)), id(1)).unwrap();
     store.create(&blank(1, 2, 3, "same host")).unwrap();
     store.create(&blank(1, 20, 30, "same host")).unwrap();
     assert!(
@@ -537,7 +574,7 @@ fn receipt_creation_is_first_commit_replayable_and_index_failure_is_uncertain_wi
         capabilities: session.bindings.0[&id(3)].capabilities.clone(),
         setup_instruction: "Explicit binding instruction".into(),
     };
-    let store = Store::open_registered(root.path(), id(1)).unwrap();
+    let store = Store::open_registered(&registry.project_dir(&id(1)), id(1)).unwrap();
     let receipt = store
         .create_with_receipt(
             &session,
@@ -548,13 +585,14 @@ fn receipt_creation_is_first_commit_replayable_and_index_failure_is_uncertain_wi
         )
         .unwrap();
     assert_eq!(receipt.revision.value(), 1);
-    assert!(!root
-        .path()
-        .join(format!(".ariadne/backups/{}.previous.json", id(2).as_str()))
+    assert!(!registry
+        .project_dir(&id(1))
+        .join(format!("backups/{}.previous.json", id(2).as_str()))
         .exists());
     let bytes = fs::read(
-        root.path()
-            .join(format!(".ariadne/sessions/{}.json", id(2).as_str())),
+        registry
+            .project_dir(&id(1))
+            .join(format!("sessions/{}.json", id(2).as_str())),
     )
     .unwrap();
     write_private(
@@ -591,8 +629,9 @@ fn receipt_creation_is_first_commit_replayable_and_index_failure_is_uncertain_wi
         .unwrap();
     assert_eq!(
         fs::read(
-            root.path()
-                .join(format!(".ariadne/sessions/{}.json", id(2).as_str()))
+            registry
+                .project_dir(&id(1))
+                .join(format!("sessions/{}.json", id(2).as_str()))
         )
         .unwrap(),
         bytes
@@ -615,7 +654,7 @@ fn guarded_creation_checks_final_lock_admission_and_exact_replay_precedes_guard(
         capabilities: session.bindings.0[&id(3)].capabilities.clone(),
         setup_instruction: "Explicit binding instruction".into(),
     };
-    let store = Store::open_registered(root.path(), id(1)).unwrap();
+    let store = Store::open_registered(&registry.project_dir(&id(1)), id(1)).unwrap();
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -623,8 +662,9 @@ fn guarded_creation_checks_final_lock_admission_and_exact_replay_precedes_guard(
         .truncate(false)
         .mode(0o600)
         .open(
-            root.path()
-                .join(format!(".ariadne/locks/{}.lock", session.id.as_str())),
+            registry
+                .project_dir(&id(1))
+                .join(format!("locks/{}.lock", session.id.as_str())),
         )
         .unwrap();
     file.try_lock().unwrap();
@@ -654,11 +694,11 @@ fn guarded_creation_checks_final_lock_admission_and_exact_replay_precedes_guard(
         result,
         Err(TransactionError::Command("expired admission"))
     ));
-    assert!(fs::read_dir(root.path().join(".ariadne/sessions"))
+    assert!(fs::read_dir(registry.project_dir(&id(1)).join("sessions"))
         .unwrap()
         .next()
         .is_none());
-    assert!(fs::read_dir(root.path().join(".ariadne/backups"))
+    assert!(fs::read_dir(registry.project_dir(&id(1)).join("backups"))
         .unwrap()
         .next()
         .is_none());
@@ -798,4 +838,40 @@ fn explicit_data_setup_creates_only_missing_private_final_component_and_never_re
     let nested = parent.path().join("missing-parent/data");
     assert!(Registry::create_data_directory(&nested).is_err());
     assert!(!nested.parent().unwrap().exists());
+}
+
+#[test]
+fn fresh_registration_creates_only_under_the_data_root_projects_directory() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::open(home.path()).unwrap();
+    registration(&registry, root.path(), 1);
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    let store = home.path().join(".ariadne/projects").join(id(1).as_str());
+    assert_eq!(registry.project_dir(&id(1)), store.canonicalize().unwrap());
+    assert!(store.join("project.json").is_file());
+    for directory in ["projects", "projects/00000000-0000-4000-8000-000000000001"] {
+        let mode = fs::metadata(home.path().join(".ariadne").join(directory))
+            .unwrap()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700, "{directory}");
+    }
+    assert_eq!(
+        fs::metadata(store.join("project.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    // Opening and writing a session still leaves the project folder untouched.
+    Store::open_registered(&registry.project_dir(&id(1)), id(1))
+        .unwrap()
+        .create(&blank(1, 2, 3, "host"))
+        .unwrap();
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    for directory in ["sessions", "locks", "backups"] {
+        assert!(store.join(directory).is_dir(), "{directory}");
+    }
 }

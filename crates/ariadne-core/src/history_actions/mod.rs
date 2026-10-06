@@ -71,7 +71,10 @@ impl<'a> HistoryActionService<'a> {
             }
         };
         let project = self.registry.resolve_project(route.project_id())?;
-        let store = Store::open_registered(&project.root, project.project_id)?;
+        let store = Store::open_registered(
+            &self.registry.project_dir(&project.project_id),
+            project.project_id,
+        )?;
         let receipt = store.transact(
             route.session_id(),
             &ReceiptActorScope::Owner {},

@@ -21,7 +21,7 @@ fn route() -> RegisteredSession {
 }
 struct Setup {
     home: tempfile::TempDir,
-    root: tempfile::TempDir,
+    _root: tempfile::TempDir,
     registry: Registry,
 }
 impl Setup {
@@ -33,13 +33,13 @@ impl Setup {
         let session: Session =
             serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json"))
                 .unwrap();
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&registry.project_dir(&id(1)), id(1))
             .unwrap()
             .create(&session)
             .unwrap();
         Self {
             home,
-            root,
+            _root: root,
             registry,
         }
     }
@@ -47,16 +47,16 @@ impl Setup {
         self.home.path().join(".ariadne")
     }
     fn store(&self) -> Store {
-        Store::open_registered(self.root.path(), id(1)).unwrap()
+        Store::open_registered(&self.registry.project_dir(&id(1)), id(1)).unwrap()
     }
     fn saved(&self) -> Session {
         self.store().read(&id(2)).unwrap()
     }
     fn bytes(&self) -> Vec<u8> {
         fs::read(
-            self.root
-                .path()
-                .join(format!(".ariadne/sessions/{}.json", id(2).as_str())),
+            self.registry
+                .project_dir(&id(1))
+                .join(format!("sessions/{}.json", id(2).as_str())),
         )
         .unwrap()
     }
@@ -343,9 +343,9 @@ fn retained_binding_in_another_session_cannot_report_the_original_attempt() {
     .unwrap();
     setup.store().create(&other).unwrap();
     let path = setup
-        .root
-        .path()
-        .join(format!(".ariadne/sessions/{}.json", id(12).as_str()));
+        .registry
+        .project_dir(&id(1))
+        .join(format!("sessions/{}.json", id(12).as_str()));
     let original = setup.bytes();
     let sibling = fs::read(&path).unwrap();
     event.binding_id = id(13);

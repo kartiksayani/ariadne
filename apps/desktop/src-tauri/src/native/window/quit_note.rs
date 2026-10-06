@@ -277,12 +277,17 @@ mod tests {
             required(&core).is_err(),
             "Unreadable roots are not quiet work"
         );
-        Store::open_registered(&project, session.project_id.clone())
-            .unwrap()
-            .create(&session)
-            .unwrap();
-        let path = project
-            .join(".ariadne/sessions")
+        Store::open_registered(
+            &core.registry().project_dir(&session.project_id),
+            session.project_id.clone(),
+        )
+        .unwrap()
+        .create(&session)
+        .unwrap();
+        let path = core
+            .registry()
+            .project_dir(&session.project_id)
+            .join("sessions")
             .join(format!("{}.json", session.id.as_str()));
         let before = std::fs::read(&path).unwrap();
         assert!(required(&core).unwrap());

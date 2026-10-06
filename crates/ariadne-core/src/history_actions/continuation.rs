@@ -33,7 +33,10 @@ impl HistoryActionService<'_> {
         command.validate_wire()?;
         let normalized = crate::receipts::normalized("topic_continue", params)?;
         let project = self.registry.resolve_project(&params.target.project_id)?;
-        let store = Store::open_registered(&project.root, project.project_id)?;
+        let store = Store::open_registered(
+            &self.registry.project_dir(&project.project_id),
+            project.project_id,
+        )?;
         if let Some(saved) = store.replay(
             &params.target.session_id,
             &ReceiptActorScope::Owner {},

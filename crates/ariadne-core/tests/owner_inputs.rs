@@ -11,6 +11,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
+/// Project store directory under a data-root home, as `Registry::project_dir` derives it.
+fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
+    home.join(".ariadne/projects").join(id(project).as_str())
+}
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -96,7 +100,7 @@ impl Setup {
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::open(home.path()).unwrap();
         registry.register(root.path(), &id(99), || id(1)).unwrap();
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&store_dir(home.path(), 1), id(1))
             .unwrap()
             .create(session)
             .unwrap();
@@ -108,15 +112,13 @@ impl Setup {
         }
     }
     fn store(&self) -> Store {
-        Store::open_registered(self.root.path(), id(1)).unwrap()
+        Store::open_registered(&store_dir(self.home.path(), 1), id(1)).unwrap()
     }
     fn saved(&self) -> Session {
         self.store().read(&id(2)).unwrap()
     }
     fn path(&self) -> std::path::PathBuf {
-        self.root
-            .path()
-            .join(format!(".ariadne/sessions/{}.json", id(2).as_str()))
+        store_dir(self.home.path(), 1).join(format!("sessions/{}.json", id(2).as_str()))
     }
     fn execute(&self, command: &OwnerCommand) -> Result<SavedReceipt, InputError> {
         InputService::new(&self.registry)
@@ -242,10 +244,8 @@ fn submission_atomically_saves_full_history_frozen_context_fifo_and_receipt() {
     }
     let backup: Session = serde_json::from_slice(
         &fs::read(
-            setup
-                .root
-                .path()
-                .join(format!(".ariadne/backups/{}.previous.json", id(2).as_str())),
+            store_dir(setup.home.path(), 1)
+                .join(format!("backups/{}.previous.json", id(2).as_str())),
         )
         .unwrap(),
     )

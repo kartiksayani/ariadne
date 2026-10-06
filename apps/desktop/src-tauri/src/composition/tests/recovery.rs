@@ -24,6 +24,7 @@ impl Setup {
         fs::set_permissions(&config.home, fs::Permissions::from_mode(0o700)).unwrap();
         let registry = Registry::open_data_directory(&config.home).unwrap();
         registry.register(&root, &id(99), || id(1)).unwrap();
+        let root = registry.project_dir(&id(1));
         let seed: Session = serde_json::from_str(include_str!(
             "../../../../../../fixtures/domain/history/seed.json"
         ))
@@ -91,7 +92,7 @@ impl Setup {
     fn bytes(&self) -> Vec<u8> {
         fs::read(
             self.root
-                .join(".ariadne/sessions")
+                .join("sessions")
                 .join(format!("{}.json", id(2).as_str())),
         )
         .unwrap()

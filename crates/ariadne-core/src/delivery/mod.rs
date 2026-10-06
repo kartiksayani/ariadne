@@ -18,6 +18,9 @@ impl<'a> DeliveryService<'a> {
     }
     fn store(&self, route: &RegisteredSession) -> Result<Store, DeliveryError> {
         let project = self.registry.resolve_project(route.project_id())?;
-        Ok(Store::open_registered(&project.root, project.project_id)?)
+        Ok(Store::open_registered(
+            &self.registry.project_dir(&project.project_id),
+            project.project_id,
+        )?)
     }
 }

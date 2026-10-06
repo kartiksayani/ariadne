@@ -27,7 +27,7 @@ fn store_code(error: &StoreError) -> CoreErrorCode {
             ..
         }
         | StoreError::UnsafePath { .. } => CoreErrorCode::PermissionDenied,
-        StoreError::Io { .. } => CoreErrorCode::IoError,
+        StoreError::Io { .. } | StoreError::Migration { .. } => CoreErrorCode::IoError,
         StoreError::SessionFile { source, .. } => store_code(source),
         StoreError::FutureSchema => CoreErrorCode::FutureSchema,
         StoreError::Busy => CoreErrorCode::StoreBusy,

@@ -260,10 +260,13 @@ fn registered_core() -> (
             || session.project_id.clone(),
         )
         .unwrap();
-    Store::open_registered(root.path(), session.project_id.clone())
-        .unwrap()
-        .create(&session)
-        .unwrap();
+    Store::open_registered(
+        &registry.project_dir(&session.project_id),
+        session.project_id.clone(),
+    )
+    .unwrap()
+    .create(&session)
+    .unwrap();
     let core = ariadne_core::native::NativeCoreService::new(
         registry,
         || UuidV4::new("00000000-0000-4000-8000-000000000098").unwrap(),
@@ -281,7 +284,10 @@ fn registered_core() -> (
 
 #[test]
 fn actual_registered_membership_precedes_launch_and_missing_item_uses_same_session() {
-    let (_home, root, core) = registered_core();
+    let (home, _root, core) = registered_core();
+    let live = home.path().join(format!(
+        ".ariadne/projects/{PROJECT}/sessions/{SESSION}.json"
+    ));
     let package = Package::new();
     let route = open::parse(&[
         "open",
@@ -293,11 +299,7 @@ fn actual_registered_membership_precedes_launch_and_missing_item_uses_same_sessi
         "999",
     ])
     .unwrap();
-    let before = fs::read(
-        root.path()
-            .join(format!(".ariadne/sessions/{SESSION}.json")),
-    )
-    .unwrap();
+    let before = fs::read(&live).unwrap();
     let opened = open::open_with(
         route.clone(),
         &package.path,
@@ -314,14 +316,7 @@ fn actual_registered_membership_precedes_launch_and_missing_item_uses_same_sessi
     )
     .unwrap();
     assert_eq!(opened, route);
-    assert_eq!(
-        fs::read(
-            root.path()
-                .join(format!(".ariadne/sessions/{SESSION}.json"))
-        )
-        .unwrap(),
-        before
-    );
+    assert_eq!(fs::read(&live).unwrap(), before);
     let mut wrong = route;
     wrong.project_id =
         ariadne_domain::models::UuidV4::new("00000000-0000-4000-8000-000000000088").unwrap();

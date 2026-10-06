@@ -41,7 +41,7 @@ export async function preparePackagedRoutes(cli, bundle, root, applicationData, 
   const project = join(root, 'project with spaces'); await mkdir(project);
   const demo = JSON.parse((await command(installedCli, ['demo', '--root', project, '--json'], { env: childEnv, timeout: 10000 })).stdout);
   assert.equal(demo.ok, true, 'Actual installed CLI did not publish the canonical demo');
-  const sessionPath = join(project, '.ariadne/sessions', `${demo.data.session_id}.json`), before = await readFile(sessionPath);
+  const sessionPath = join(applicationData, 'projects', demo.data.project_id, 'sessions', `${demo.data.session_id}.json`), before = await readFile(sessionPath);
   const session = JSON.parse(before);
   assert.equal(session.project_id, demo.data.project_id); assert.equal(session.id, demo.data.session_id);
   for (const item of ['1.1', '3']) assert.ok(session.items[item], 'Canonical route item is absent');

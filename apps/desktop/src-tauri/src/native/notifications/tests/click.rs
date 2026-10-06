@@ -81,7 +81,11 @@ fn notification_click_routes_registered_item_and_loads_current_detail_after_answ
     registry
         .register(root.path(), &id(900), || session.project_id.clone())
         .unwrap();
-    let store = Store::open_registered(root.path(), session.project_id.clone()).unwrap();
+    let store = Store::open_registered(
+        &registry.project_dir(&session.project_id),
+        session.project_id.clone(),
+    )
+    .unwrap();
     store.create(&session).unwrap();
     let core = Arc::new(NativeCoreService::new(
         registry,

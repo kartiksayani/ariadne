@@ -189,7 +189,7 @@ fn sweep_keeps_current_entries_but_fresh_session_reads_reject_disconnect_and_reb
         "../../../../../../fixtures/domain/history/seed.json"
     ))
     .unwrap();
-    let store = Store::open_registered(root, id(1)).unwrap();
+    let store = Store::open_registered(&registry.project_dir(&id(1)), id(1)).unwrap();
     store.create(&seed).unwrap();
     let ids = AtomicU64::new(100);
     let capabilities = seed.bindings.0[&id(3)].capabilities.clone();
