@@ -108,7 +108,7 @@ async function connectTransition(state, $, requestedSessionId) {
   if (state.sessionEnded) await state.loop.stop(host($),true);
   const guidance = requestedSessionId === null ? '' : `\nResume structured Ariadne context for project ${result.binding.session.project_id}, session ${result.binding.session.session_id}: read its topics, items, questions, answers and results; summarize completed work, remaining work and missing context; reuse existing items and respect cancelled work. This does not transfer the old host transcript or dispatch an input.`;
   const {binding,status} = result;
-  const summary = `Ariadne connected: session ${binding.session.session_id} in project ${binding.session.project_id}; binding ${binding.binding_id}, generation ${binding.generation}; dispatch ${status.dispatch_state}, connection ${status.connection_state}. Owner inputs arrive as messages starting with [ARIADNE_INPUT:<input>:<attempt>]; handle them with the ariadne skill, which holds the rules and CLI shapes. Do nothing in Ariadne until an input arrives.`;
+  const summary = `Ariadne connected: session ${binding.session.session_id} in project ${binding.session.project_id}; binding ${binding.binding_id}, generation ${binding.generation}; dispatch ${status.dispatch_state}, connection ${status.connection_state}. Owner inputs arrive as messages starting with [ARIADNE_INPUT:<input>:<attempt>]; handle them with the ariadne skill, which holds the rules and CLI shapes. Wait for a dispatched input before input-specific mutations or an input result.`;
   return {text:summary + guidance};
 }
 function connectRun(state, $, event) {

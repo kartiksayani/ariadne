@@ -168,7 +168,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
       <p>Connecting sent nothing to the model. {state.setupAdapterId === 'codex'
         ? 'Paste this setup instruction into the selected Codex thread once per binding so the agent has the Ariadne rules. Installation also adds an Ariadne skill for Codex unless its link was skipped.'
         : state.setupAdapterId === 'claude_code_mod'
-          ? 'Run /ariadne-connect in the selected Claude conversation, then paste this setup instruction into it once per binding so the agent has the Ariadne rules.'
+          ? 'Run /ariadne-connect in the selected Claude conversation. Nothing to paste: the Mod reports the binding and the installed Ariadne skill holds the rules.'
           : 'Paste this setup instruction into the selected host conversation once per binding so the agent has the Ariadne rules.'}</p>
       <pre>{state.setup.data.setup_instruction}</pre><p>Session {state.setup.session_id}</p>
       <ul>{Object.entries(state.setup.data.capabilities).filter(([, value]) => typeof value === 'object').map(([name, value]) =>
