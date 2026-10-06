@@ -8,10 +8,10 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 6a0adec (#114). Roadmap: 47/50 on main, 48/50 once this docs PR merges (P7.3).** Remaining: P8.1, then P8.2 (UX review and theme refresh).
+**Main: 6a0adec (#114). Roadmap: 46/49 on main, 48/50 once this docs PR merges (P7.2, P7.3, task P8.2 added).** Remaining: P8.1, then P8.2 (UX review and theme refresh).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-No open PRs besides this docs PR (branch `docs/p71-evidence`). Duplicate and
+Open PRs: this docs PR (#115, branch `docs/live-evidence`) and the Codex onboarding PR (branch `fix/codex-onboarding`, in progress). Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.
@@ -81,8 +81,8 @@ join orders, missing-result/uncertain recovery, same-project/cross-project isola
 Follow-ups the run surfaced:
 
 - D1-D6 (fresh-thread connect, RPC error text, setup instruction path and
-  `ARIADNE_HOME`, connect card, `question_changed` message, discovery dialog) are fixed
-  in the fix/codex-onboarding PR.
+  `ARIADNE_HOME`, connect card, `question_changed` message, discovery dialog) are tracked
+  for the fix/codex-onboarding PR (branch in progress).
 - D7 (UX: font, alignment, button contrast, scrollbars, raw UUIDs): task P8.2, UX review
   and theme refresh, runs after P8.1.
 - D8: Ariadne should send the setup instruction through `codex queue` itself instead of
