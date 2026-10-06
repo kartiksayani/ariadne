@@ -111,6 +111,16 @@ fn submit(
             "The target item does not belong to the requested topic",
         ));
     }
+    if params.kind == InputKind::Answer
+        && item.status == ItemStatus::Open
+        && item.current_round_id.is_none()
+    {
+        // Distinct from a revision mismatch: the agent never asked this item.
+        return Err(core(
+            CoreErrorCode::InvalidArgument,
+            "The question is not waiting on you; the agent has not asked it yet.",
+        ));
+    }
     if params.kind != InputKind::Answer {
         if params.supersedes_answer_id.is_some() {
             return Err(core(

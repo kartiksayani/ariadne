@@ -22,6 +22,10 @@ pub struct VerifiedHost {
     /// Unknown. Neither observation grants a runtime dispatch lease.
     pub connection_state: ConnectionState,
     pub setup_instruction: String,
+    /// Exact shell prefix that runs the Ariadne CLI from the agent's tool shell
+    /// (absolute helper path, plus `ARIADNE_HOME=<root> ` for a non-default root);
+    /// `ariadne` when the composition knows no helper path.
+    pub cli_invocation: String,
 }
 impl VerifiedHost {
     pub(super) fn validate(&self, request: &BindingConnectParams) -> Result<(), CoreError> {
@@ -61,6 +65,8 @@ impl VerifiedHost {
         if !valid(&self.endpoint_fingerprint.0, 4096)
             || !valid(&self.adapter_version, 4096)
             || !valid(&self.setup_instruction, 64 * 1024)
+            || !valid(&self.cli_invocation, 4096)
+            || self.cli_invocation.contains('\n')
             || !matches!(
                 self.connection_state,
                 ConnectionState::Connected | ConnectionState::Unknown

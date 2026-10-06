@@ -114,6 +114,7 @@ impl Setup {
             ProviderInstructions {
                 claude: "unused".into(),
                 codex: "Publish full item replies and one explicit result for every input.".into(),
+                cli_invocation: "ariadne".into(),
             },
         );
         let mut qualified = None;

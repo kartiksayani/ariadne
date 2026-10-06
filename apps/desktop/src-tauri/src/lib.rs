@@ -180,6 +180,7 @@ fn desktop_handler<R: tauri::Runtime>(
         commands::preferences_get,
         commands::discovery_snapshot,
         commands::discovery_ui_open,
+        commands::codex_default_endpoint,
         commands::reveal_item,
         commands::project_register,
         commands::binding_connect,

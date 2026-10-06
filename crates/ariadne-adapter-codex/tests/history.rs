@@ -501,6 +501,110 @@ fn pre_id_verification_preserves_required_wire_checks_and_original_deadline() {
     assert_eq!(h.methods(), ["initialize", "initialized"]);
 }
 
+fn turns_error(code: i64, message: &'static str, root: PathBuf) -> Harness {
+    Harness::new(move |request, _| {
+        if request["method"] == "thread/turns/list" {
+            return Some(Action::Raw(
+                json!({"id":request["id"],"error":{"code":code,"message":message}}),
+            ));
+        }
+        let mut value = default_result(request);
+        if request["method"] == "thread/read" {
+            value["thread"]["cwd"] = json!(root);
+        }
+        Some(Action::Result(value))
+    })
+}
+
+#[test]
+fn fresh_unmaterialized_thread_connects_with_an_empty_turn_list() {
+    let project = tempfile::tempdir().unwrap();
+    let h = turns_error(
+        -32600,
+        "thread 01a0 is not materialized yet; thread/turns/list is unavailable before first user message",
+        project.path().to_owned(),
+    );
+    let reader = CodexDaemonReader::open(h.options(), h.request().endpoint).unwrap();
+    let selected = reader
+        .qualify_selected_thread(
+            THREAD,
+            project.path(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+    assert_eq!(selected.facts().external_session_id, THREAD);
+}
+
+#[test]
+fn not_materialized_error_on_a_cursor_page_still_fails() {
+    let harness = Harness::new(|request, count| {
+        if request["method"] == "thread/turns/list" && count > 1 {
+            if request["params"]["cursor"].is_null() {
+                let mut value = fixture("turns-response.json");
+                value["nextCursor"] = json!("page-2");
+                return Some(Action::Result(value));
+            }
+            return Some(Action::Raw(json!({"id":request["id"],"error":{
+                "code":-32600,
+                "message":"thread 01a0 is not materialized yet; thread/turns/list is unavailable before first user message"
+            }})));
+        }
+        None
+    });
+    let (mut client, _) = harness.connect();
+    let mut scan = client
+        .begin_scan(Some("not-seen-anchor".to_owned()))
+        .unwrap();
+    let error = client
+        .read_history(reconcile(vec![attempt(2)]), &mut scan, at())
+        .unwrap_err();
+    assert_eq!(error.code, Code::HostUnreachable);
+}
+
+#[test]
+fn other_turn_list_errors_fail_with_the_bounded_server_code_and_message() {
+    let project = tempfile::tempdir().unwrap();
+    let h = turns_error(
+        -32600,
+        "rollout exploded\u{1b}[31m\nbadly",
+        project.path().to_owned(),
+    );
+    let reader = CodexDaemonReader::open(h.options(), h.request().endpoint).unwrap();
+    let error = reader
+        .qualify_selected_thread(
+            THREAD,
+            project.path(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(error.code, Code::HostUnreachable);
+    assert!(
+        error
+            .message
+            .contains("(-32600: rollout exploded[31mbadly)"),
+        "{}",
+        error.message
+    );
+    let long = turns_error(
+        -32000,
+        Box::leak("x".repeat(500).into_boxed_str()),
+        project.path().to_owned(),
+    );
+    let reader = CodexDaemonReader::open(long.options(), long.request().endpoint).unwrap();
+    let error = reader
+        .qualify_selected_thread(
+            THREAD,
+            project.path(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .err()
+        .unwrap();
+    assert!(error
+        .message
+        .contains(&format!("(-32000: {})", "x".repeat(200))));
+}
+
 fn attempt(index: usize) -> AttemptEvidenceRequest {
     let exercise = fixture("poc-live-exercise.json");
     let input = &exercise["inputs"][index];
@@ -1410,7 +1514,8 @@ fn transient_read_errors_are_not_classified_as_unsupported_discovery() {
     let (mut client, _) = harness.connect();
     let error = client.discover(None).unwrap_err();
     assert_eq!(error.code, Code::HostUnreachable);
-    assert!(!error.message.contains("PRIVATE_SERVER_FAILURE"));
+    // The bounded daemon code and message are diagnostic text, not a secret.
+    assert!(error.message.contains("(-32000: PRIVATE_SERVER_FAILURE)"));
     assert!(client.presence(at()).is_err());
 }
 

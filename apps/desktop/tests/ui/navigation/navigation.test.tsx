@@ -674,6 +674,57 @@ describe('source-backed navigation views and explicit registration', () => {
     if (showsInstruction) expect(within(banner).getByText('Saved Ariadne rules.')).toBeTruthy();
     else expect(within(banner).queryByText('Saved Ariadne rules.')).toBeNull();
   });
+  it('shows the connect card under the project header with Copy and only unavailable capabilities', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
+    read(transport, prefs);
+    const binding = Object.values((demo as Session).bindings)[0]!;
+    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
+      data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
+        setup_instruction: 'Run /opt/ariadne read --binding B.' } } }); read(transport, prefs);
+    await act(async () => { await store.bind({ project_id: projectId, adapter_id: 'codex', configuration: adapter.configuration,
+      external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
+    const card = await screen.findByLabelText('Session setup');
+    const active = await screen.findByRole('heading', { name: 'Active', level: 3 });
+    expect(card.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(card).queryByRole('list')).toBeNull();
+    expect(within(card).getByText('Unavailable capabilities: domain mcp, streaming output.')).toBeTruthy();
+    await act(async () => { fireEvent.click(within(card).getByRole('button', { name: 'Copy instruction' })); });
+    expect(writeText).toHaveBeenCalledWith('Run /opt/ariadne read --binding B.');
+    expect(within(card).getByText('Copied')).toBeTruthy();
+  });
+  it('omits the unavailable line when every capability is supported and keeps the Claude Mod variant free of an instruction', async () => {
+    const { transport, store } = setup(); read(transport);
+    const binding = Object.values((demo as Session).bindings)[0]!;
+    const capabilities = structuredClone(binding.capabilities);
+    for (const value of Object.values(capabilities)) if (typeof value === 'object') value.supported = true;
+    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
+      data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities,
+        setup_instruction: 'Saved Ariadne rules.' } } }); read(transport);
+    await act(async () => { await store.bind({ project_id: projectId, adapter_id: 'claude_code_mod', configuration: adapter.configuration,
+      external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
+    const card = await screen.findByLabelText('Session setup');
+    expect(within(card).queryByText(/Unavailable capabilities/)).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Copy instruction' })).toBeNull();
+    expect(card.querySelector('pre')).toBeNull();
+  });
+  it('prefills the Codex socket path from the adapter default without overwriting an edited path', () => {
+    const { store } = setup();
+    const codex: AdapterChoice = { adapter_id: 'codex', label: 'Codex', configuration: { namespace: 'codex', values: {} }, default_socket_path: '/home/u/.codex/app-server-control/app-server-control.sock' };
+    render(<BindSession store={store} project={projectsFixture.items[0] as ProjectSummary} sessions={[]} adapters={[adapter, codex]} disabled={false} close={() => {}} />);
+    const socket = () => (screen.getByLabelText('Socket path') as HTMLInputElement).value;
+    expect(socket()).toBe('');
+    fireEvent.change(screen.getByLabelText('Adapter'), { target: { value: 'codex' } });
+    expect(socket()).toBe(codex.default_socket_path);
+    fireEvent.change(screen.getByLabelText('Socket path'), { target: { value: '/custom.sock' } });
+    fireEvent.change(screen.getByLabelText('Adapter'), { target: { value: 'demo.local' } });
+    expect(socket()).toBe('/custom.sock');
+  });
   it('retains actionable rebind guard errors without showing setup or changing session data', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
     transport.enqueue('binding_connect', { api_version: 1, ok: false, error: { ...error, code: 'invalid_transition', message: 'Old binding has queued inputs.', hint: 'Resolve its queued inputs before rebinding.' } });

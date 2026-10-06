@@ -486,21 +486,25 @@ fn read_capabilities() -> Capabilities {
             accepted_range(SUPPORTED_CODEX_VERSION)
         )],
     };
-    let no = || Capability {
+    let no = |why: &str| Capability {
         supported: false,
-        conditions: vec![
-            "Submission and domain commands require the later Codex queue adapter.".to_owned(),
-        ],
+        conditions: vec![why.to_owned()],
     };
+    let not_offered = "Not offered by the Codex adapter.";
     Capabilities {
         existing_session: yes(),
-        deferred_delivery: no(),
+        // The queue adapter upgrades this to supported when it qualifies the thread.
+        deferred_delivery: no("Requires the Codex queue adapter."),
         turn_correlation: yes(),
         turn_completion: yes(),
-        domain_cli: no(),
-        domain_mcp: no(),
+        // The agent runs the helper from its own shell, which Ariadne cannot probe;
+        // the setup instruction names the exact invocation.
+        domain_cli: no(
+            "Not probed by Ariadne; the agent runs the helper CLI named in the setup instruction.",
+        ),
+        domain_mcp: no(not_offered),
         history_reconcile: yes(),
-        streaming_output: no(),
+        streaming_output: no(not_offered),
         final_text_read: yes(),
         discover_sessions: yes(),
         delivery_mode: DeliveryMode::Push,

@@ -14,8 +14,9 @@ pub use runtime::{NativeConfiguration, NativeRuntime};
 
 use ariadne_runtime::providers::ProviderInstructions;
 
-fn instructions() -> ProviderInstructions {
+fn instructions(cli_invocation: &str) -> ProviderInstructions {
     ProviderInstructions {
+        cli_invocation: cli_invocation.into(),
         claude: include_str!("../../../../../integrations/rules/claude.md").into(),
         codex: include_str!("../../../../../integrations/rules/codex.md").into(),
     }

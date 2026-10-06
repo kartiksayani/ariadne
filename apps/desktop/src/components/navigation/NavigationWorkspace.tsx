@@ -12,7 +12,9 @@ import { DiscoverProjects } from './Discovery';
 import type { DiscoveryController } from '../../data/discovery';
 import '../../styles/navigation.css';
 
-export interface AdapterChoice { readonly adapter_id: string; readonly label: string; readonly configuration: AdapterConfig }
+export interface AdapterChoice { readonly adapter_id: string; readonly label: string; readonly configuration: AdapterConfig;
+  /** Socket path prefilled in the connect dialog for this adapter, when the app knows one. */
+  readonly default_socket_path?: string }
 export interface OpenedSessionView {
   readonly store: SessionStore;
   readonly preferences: Immutable<SessionPreferences> | null;
@@ -60,6 +62,40 @@ export function bindingLabel(session: Immutable<SessionSummary>): string {
 
 function countsText(counts: Immutable<SummaryCounts>): string {
   return `${counts.waiting_unanswered} waiting · ${counts.sent_inputs.queued} queued · ${counts.sent_inputs.in_flight} in flight · ${counts.sent_inputs.needs_attention} need attention${partial(counts) ? ' · incomplete' : ''}`;
+}
+
+/** Saved binding-connect receipt: what to give the host, plus capabilities the owner cannot rely on. */
+function SetupCard({ setup, adapterId }: { setup: NonNullable<NavigationState['setup']>; adapterId: string | null }) {
+  const [copied, setCopied] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (copied === 'idle') return undefined;
+    const timer = setTimeout(() => setCopied('idle'), 3000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  if (setup.data.kind !== 'binding_connect') return null;
+  const instruction = setup.data.setup_instruction;
+  const unavailable = Object.entries(setup.data.capabilities)
+    .filter(([, value]) => typeof value === 'object' && !value.supported).map(([name]) => name.replace(/_/g, ' '));
+  const copy = () => {
+    try {
+      void navigator.clipboard.writeText(instruction).then(() => setCopied('copied'), () => setCopied('failed'));
+    } catch {
+      setCopied('failed');
+    }
+  };
+  return <section className="nav-banner" aria-label="Session setup"><h2>Session connected</h2>
+    <p>Connecting sent nothing to the model. {adapterId === 'codex'
+      ? 'Paste this setup instruction into the selected Codex thread once per binding so the agent has the Ariadne rules. Installation also adds an Ariadne skill for Codex unless its link was skipped.'
+      : adapterId === 'claude_code_mod'
+        ? 'Run /ariadne-connect in the selected Claude conversation. Nothing to paste: the Mod reports the binding and the installed Ariadne skill holds the rules.'
+        : 'Paste this setup instruction into the selected host conversation once per binding so the agent has the Ariadne rules.'}</p>
+    {adapterId !== 'claude_code_mod' && <>
+      <button type="button" className="ref-button ref-secondary" onClick={copy}>Copy instruction</button>
+      <span role="status" className="nav-copied">{copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : ''}</span>
+      <pre>{instruction}</pre></>}
+    <p>Session {setup.session_id}</p>
+    {unavailable.length > 0 && <p>Unavailable capabilities: {unavailable.join(', ')}.</p>}
+  </section>;
 }
 
 function SelectedSession({ navigation, renderSession }: { navigation: NavigationStore; renderSession: NavigationWorkspaceProps['renderSession'] }) {
@@ -131,6 +167,9 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
     topics={[]} actions={[{ label: 'Open', icon: 'ph ph-arrow-square-out', kind: 'secondary',
       disabled, sessionId: session.session_id, onClick: () => select({ kind: 'session', session: { project_id: session.project_id, session_id: session.session_id } }) }]} />;
   const counts = selection.kind === 'projects' ? state.projects?.counts : matchingSessions?.counts;
+  // The connect card sits directly under the project header; other views keep it at the end.
+  const setupCard = state.setup?.data.kind === 'binding_connect' ? <SetupCard setup={state.setup} adapterId={state.setupAdapterId} /> : null;
+  const setupInGroup = selection.kind === 'project' && groups.length === 1;
   const center = <div className={`nav-content${selection.kind === 'session' ? ' nav-session-content' : ''}`}>
     {state.error && <div className="nav-banner" role="alert"><p>{state.error.message}</p>
       {state.error instanceof CoreFailure && <p>{state.error.error.hint}</p>}
@@ -159,21 +198,13 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
       {showSessions && groups.map(project => <section className="ref-session-group" key={project.project_id} aria-label={projectName(project)}>
         <div className="nav-group-heading"><div><h2>{projectName(project)}</h2><p>{project.canonical_root}</p></div>
           {selection.kind === 'project' && <button type="button" className="ref-button ref-primary" disabled={disabled || project.availability !== 'available' || adapterChoices.length === 0} onClick={() => setBinding(project)}>Connect existing session</button>}</div>
+        {setupInGroup && setupCard}
         {project.availability === 'unavailable' && <p className="nav-banner">This registered project is unavailable. Check local access and refresh.</p>}
         <h3>Active</h3>{sessions.filter(session => session.project_id === project.project_id && session.state === 'active').map(sessionCard)}
         <h3>Closed</h3>{sessions.filter(session => session.project_id === project.project_id && session.state === 'closed').map(sessionCard)}
       </section>)}
     </>}
-    {state.setup?.data.kind === 'binding_connect' && <section className="nav-banner" aria-label="Session setup"><h2>Session connected</h2>
-      <p>Connecting sent nothing to the model. {state.setupAdapterId === 'codex'
-        ? 'Paste this setup instruction into the selected Codex thread once per binding so the agent has the Ariadne rules. Installation also adds an Ariadne skill for Codex unless its link was skipped.'
-        : state.setupAdapterId === 'claude_code_mod'
-          ? 'Run /ariadne-connect in the selected Claude conversation. Nothing to paste: the Mod reports the binding and the installed Ariadne skill holds the rules.'
-          : 'Paste this setup instruction into the selected host conversation once per binding so the agent has the Ariadne rules.'}</p>
-      {state.setupAdapterId !== 'claude_code_mod' && <pre>{state.setup.data.setup_instruction}</pre>}<p>Session {state.setup.session_id}</p>
-      <ul>{Object.entries(state.setup.data.capabilities).filter(([, value]) => typeof value === 'object').map(([name, value]) =>
-        typeof value === 'object' && <li key={name}>{name.replace(/_/g, ' ')}: {value.supported ? 'supported' : 'unavailable'}{value.conditions.length > 0 && ` · ${value.conditions.join('; ')}`}</li>)}</ul>
-    </section>}
+    {!setupInGroup && setupCard}
   </div>;
   return <ReferenceWorkspace header={{ session: context?.session ?? selectedSession?.title ?? (selection.kind === 'session' ? `Session ${selection.session.session_id}` : selectedProject ? projectName(selectedProject) : 'Projects'),
     binding: context?.binding ?? (selectedSession ? bindingLabel(selectedSession) : 'Registered navigation'), bindingColor: muted, bindingGlow: 'none',
