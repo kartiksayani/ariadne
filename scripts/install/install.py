@@ -374,13 +374,20 @@ def rust_toolchain(env):
                            "before retrying. No toolchain download was attempted.") from error
 
 
-def preflight():
+def host_facts():
+    """Checks every install needs, whether it builds or uses a prebuilt package."""
     require(sys.version_info >= (3, 11), "Python 3.11 or newer is required.")
     require(platform.system() == "Darwin", "Personal install requires macOS.")
     os_version = platform.mac_ver()[0]
     require(os_version and int(os_version.split(".")[0]) >= 13, "macOS 13 or newer is required.")
     arch = platform.machine()
     require(arch in ("arm64", "x86_64"), "Only arm64 and x86_64 macOS are supported.")
+    return {"os": "macOS", "os_version": os_version, "architecture": arch,
+            "python": platform.python_version()}
+
+
+def preflight():
+    base = host_facts()
     env = {**os.environ, "RUSTUP_AUTO_INSTALL": "0"}
     env.pop("RUSTUP_TOOLCHAIN", None)
     observed = {name: run([name, "--version"], capture=True, env=env).strip() for name in ("node", "npm")}
@@ -393,8 +400,7 @@ def preflight():
     observed["xcode"] = run(["xcode-select", "-p"], capture=True).strip()
     require(observed["xcode"], "Install/select Xcode command line tools explicitly.")
     run(["xcrun", "--sdk", "macosx", "--show-sdk-path"], capture=True)
-    return {"os": "macOS", "os_version": os_version, "architecture": arch,
-            "python": platform.python_version(), **observed}
+    return {**base, **observed}
 
 
 def build():
@@ -573,6 +579,79 @@ def install(home, artifacts, facts, resource_loader=resources):
         return final
 
 
+PACKAGE_KEYS = ("os", "os_version", "architecture", "python", "app_version", "source_sha", "built_at")
+
+
+def app_version(artifacts):
+    info = artifacts / "bundle/macos/Ariadne.app/Contents/Info.plist"
+    require(not info.is_symlink() and info.is_file() and info.stat().st_size <= LIMIT,
+            "App Info.plist is not a bounded regular file.")
+    with info.open("rb") as source:
+        return component(plistlib.load(source)["CFBundleShortVersionString"])
+
+
+def assemble(artifacts, facts, dist, source_sha, built_at):
+    """Turn a finished build into dist/ariadne-<version>-macos-<arch>.tar.gz."""
+    version = app_version(artifacts)
+    name = f"ariadne-{version}"
+    stage = dist / name
+    dist.mkdir(exist_ok=True)
+    if exists(stage):
+        shutil.rmtree(stage)
+    (stage / "bundle/macos").mkdir(parents=True)
+    shutil.copytree(artifacts / "bundle/macos/Ariadne.app", stage / "bundle/macos/Ariadne.app", symlinks=True)
+    for binary in BINARIES:
+        shutil.copyfile(artifacts / binary, stage / binary)
+        (stage / binary).chmod(0o755)
+    shutil.copyfile(Path(__file__).resolve(), stage / "install.py")
+    shutil.copyfile(Path(__file__).resolve().parent / "install.sh", stage / "install.sh")
+    (stage / "install.py").chmod(0o644)
+    (stage / "install.sh").chmod(0o755)
+    (stage / "package.json").write_bytes(encode({**facts, "app_version": version,
+                                                 "source_sha": source_sha, "built_at": built_at}))
+    tarball = dist / f"{name}-macos-{facts['architecture']}.tar.gz"
+    if exists(tarball):
+        tarball.unlink()
+    # tar keeps symlinks and permissions; COPYFILE_DISABLE stops macOS adding ._ metadata files.
+    run(["tar", "-czf", tarball.name, name], cwd=dist, env={**os.environ, "COPYFILE_DISABLE": "1"})
+    shutil.rmtree(stage)
+    return tarball
+
+
+def package():
+    artifacts, facts = build()
+    sha = run(["git", "rev-parse", "HEAD"], capture=True).strip()
+    built_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    tarball = assemble(artifacts, facts, ROOT / "dist", sha, built_at)
+    print(f"Package: {tarball}", flush=True)
+    return tarball
+
+
+def install_package(home, package_dir):
+    """Install a prebuilt package directory; it is read-only input and nothing is built."""
+    package_dir = Path(package_dir).resolve()
+    facts = host_facts()
+    for name in ("install.py", "install.sh", "package.json", "ariadne", "ariadne-mcp"):
+        path = package_dir / name
+        require(not path.is_symlink() and path.is_file(), f"Package is incomplete; missing {name}.")
+    require(not (package_dir / "bundle/macos/Ariadne.app").is_symlink() and
+            (package_dir / "bundle/macos/Ariadne.app").is_dir(), "Package is incomplete; missing Ariadne.app.")
+    try:
+        built = json_read(package_dir / "package.json")
+    except (OSError, ValueError) as error:
+        raise InstallError(f"Package description package.json is unreadable: {error}") from error
+    require(isinstance(built, dict) and set(built) >= set(PACKAGE_KEYS) and
+            all(isinstance(built[key], str) and built[key] for key in PACKAGE_KEYS),
+            "Package description package.json is malformed.")
+    require(all(len(built[key]) <= 200 for key in PACKAGE_KEYS),
+            "Package description package.json has a value longer than 200 characters.")
+    built = {key: built[key] for key in PACKAGE_KEYS}
+    require(built["architecture"] == facts["architecture"],
+            f"This package is for {built['architecture']} Macs; this Mac is {facts['architecture']}.")
+    require(built["app_version"] == app_version(package_dir), "Package description does not match its app.")
+    return install(home, package_dir, {**facts, "built": built})
+
+
 def uninstall(home):
     root_path = home / ".local/share/ariadne"
     if not exists(root_path):
@@ -637,12 +716,21 @@ def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, sel
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("install", "uninstall"))
+    parser.add_argument("action", choices=("install", "uninstall", "package"))
+    parser.add_argument("--package", type=Path, help="install from a prebuilt package directory instead of building")
     args = parser.parse_args(argv)
+    if args.action == "package":
+        require(args.package is None, "--package applies to install only.")
+        package()
+        return
+    require(args.package is None or args.action == "install", "--package applies to install only.")
     home = Path(os.environ.get("HOME", ""))
     require(home.is_absolute(), "An absolute HOME is required.")
     if args.action == "uninstall":
         uninstall(home)
+    elif args.package is not None:
+        installed = install_package(home, args.package)
+        run([installed / "bin/ariadne", "doctor"])
     else:
         artifacts, facts = build()
         installed = install(home, artifacts, facts)
