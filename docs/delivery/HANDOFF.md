@@ -8,7 +8,7 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: MAIN_SHA_PENDING (#114). Roadmap: 47/50 on main, 48/50 once this docs PR merges (P7.3).** Remaining: P8.1, then P8.2 (UX review and theme refresh).
+**Main: 6a0adec (#114). Roadmap: 47/50 on main, 48/50 once this docs PR merges (P7.3).** Remaining: P8.1, then P8.2 (UX review and theme refresh).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
 No open PRs besides this docs PR (branch `docs/p71-evidence`). Duplicate and
