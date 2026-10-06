@@ -170,7 +170,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
         : state.setupAdapterId === 'claude_code_mod'
           ? 'Run /ariadne-connect in the selected Claude conversation. Nothing to paste: the Mod reports the binding and the installed Ariadne skill holds the rules.'
           : 'Paste this setup instruction into the selected host conversation once per binding so the agent has the Ariadne rules.'}</p>
-      <pre>{state.setup.data.setup_instruction}</pre><p>Session {state.setup.session_id}</p>
+      {state.setupAdapterId !== 'claude_code_mod' && <pre>{state.setup.data.setup_instruction}</pre>}<p>Session {state.setup.session_id}</p>
       <ul>{Object.entries(state.setup.data.capabilities).filter(([, value]) => typeof value === 'object').map(([name, value]) =>
         typeof value === 'object' && <li key={name}>{name.replace(/_/g, ' ')}: {value.supported ? 'supported' : 'unavailable'}{value.conditions.length > 0 && ` · ${value.conditions.join('; ')}`}</li>)}</ul>
     </section>}

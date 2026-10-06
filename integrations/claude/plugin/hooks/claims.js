@@ -5,10 +5,12 @@ import { bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, prep
 function carried(text, captured) {
   const payload = captured.formatted_payload;
   if (text === payload) return 'exact';
-  const at = text.indexOf(captured.wire_marker);
-  if (at === -1 || (at !== 0 && text[at - 1] !== '\n') || !text.startsWith(payload, at)) return null;
-  const end = at + payload.length;
-  return end === text.length || text[end] === '\n' ? 'framed' : null;
+  for (let at = text.indexOf(captured.wire_marker); at !== -1; at = text.indexOf(captured.wire_marker, at + 1)) {
+    if ((at !== 0 && text[at - 1] !== '\n') || !text.startsWith(payload, at)) continue;
+    const end = at + payload.length;
+    if (end === text.length || text[end] === '\n') return 'framed';
+  }
+  return null;
 }
 
 // One captured claim and one serialized reporter. Core remains the sole queue authority.
@@ -87,7 +89,9 @@ export function claimLoop(helperPath, binding) {
   }
   async function runPoll($) {
     try {
+      const hadPending = pending.length > 0;
       await flush($);
+      if (hadPending) blocked = null;
       if (!admissionOpen || stopped || paused || active || (capturedSubmission && !capturedSubmission.settled)) return;
       if (await $.session.id() !== binding.external_session_id) {
         paused = true;
@@ -97,9 +101,9 @@ export function claimLoop(helperPath, binding) {
       if (!admissionOpen || stopped) return;
       claimId ??= globalThis.crypto.randomUUID();
       const result = envelope(await $.process.run([helperPath,'bridge','claim',...route,'--request-id',claimId],{timeoutMs:5000}));
-      blocked = null;
-      if (result === null) { claimId = null; return; }
+      if (result === null) { blocked = null; claimId = null; return; }
       const value = await prepared(result,binding);
+      blocked = null;
       const captured = {...value,turnId:null,accepted:false,settled:false,terminalSnapshots:[],terminalGap:false,uncertainReasons:new Set()};
       active = captured;
       capturedSubmission = captured;
@@ -124,7 +128,7 @@ export function claimLoop(helperPath, binding) {
     } catch (error) {
       const once = (key, message) => { if (blocked !== key) { blocked = key; log($,message); } };
       if (error?.code === 'invalid_transition') {
-        const reason = typeof error.details?.reason === 'string' ? error.details.reason : 'blocked';
+        const reason = ['owner_paused','recovery_required'].includes(error.details?.reason) ? error.details.reason : 'blocked';
         once(reason,`Dispatch is withheld by the app (${reason}); claims resume when the owner resumes or recovers.`);
         return;
       }

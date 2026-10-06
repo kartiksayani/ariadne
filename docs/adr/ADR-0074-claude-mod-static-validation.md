@@ -25,8 +25,10 @@ The rules it enforced, one error at a time:
 ## Decision
 
 - `hooks/register.js` exports `register` as `export const register = on =>
-  registerModule(installed, on)`. `createRegister(descriptor)` stays exported for
-  tests as `on => registerModule(descriptor, on)`.
+  registerModule(installed, on)`. `createRegister(descriptor, publish)` stays exported for
+  tests as `on => registerModule(descriptor, on, publish)`. `publish` is optional
+  wait options `{waitMs, pollMs}` (defaults 15000 and 250) that tests use to shorten
+  the publish wait.
 - Module state lives in one `state` object created in the top-level
   `registerModule`. Former inner functions are top-level declarations taking
   `(state, $, ...)`.

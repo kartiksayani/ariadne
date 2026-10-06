@@ -92,6 +92,27 @@ describe('captured Claude claim lifecycle', () => {
     expect(loop.status().paused).toBe(false);
     expect(h.prompts).toHaveLength(0);
   });
+  it('logs the generic blocked form for an unexpected invalid_transition reason, never the raw string', async () => {
+    const h = host({handler:argv => argv[2] === 'claim' ? failure('invalid_transition',{reason:'evil\nreason $(x)'}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);
+    expect(h.logs).toEqual(['Ariadne paused: Dispatch is withheld by the app (blocked); claims resume when the owner resumes or recovers.']);
+    expect(h.logs.join('')).not.toContain('evil');
+  });
+  it('logs a malformed claim once across three polls', async () => {
+    const h = host({handler:argv => argv[2] === 'claim' ? success({input_id:'not-a-claim'}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    for (let index=0;index<3;index++) await loop.poll(h.$);
+    expect(h.logs).toHaveLength(1);
+    expect(h.prompts).toHaveLength(0);
+  });
+  it('correlates a framed turn.start when the marker also appears mid-line before the payload line', async () => {
+    const value = await prepared(); const h = host({claim:value});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await h.reported('accepted');
+    await loop.start(h.$,{text:`Note: ${value.wire_marker} is quoted here\n${value.formatted_payload}\nrest`,turnId:'later'});
+    expect(loop.status().active.host_turn_id).toBe('later');
+  });
   it('logs a blocked claim again after an empty queue resets the reason', async () => {
     let mode = 'blocked';
     const h = host({handler:argv => argv[2] === 'claim' && mode === 'blocked' ? failure('invalid_transition',{reason:'owner_paused'}) : undefined});
