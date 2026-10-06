@@ -19,6 +19,7 @@ class LayoutTransport extends AppTransport {
     if (new URL(window.location.href).searchParams.has('largeTree')) {
       const template = structuredClone(session.items['1']!);
       session.items = {};
+      session.inputs = {}; session.operation_receipts = {};
       for (let root = 1; root <= 20; ++root) {
         for (let child = 0; child < 100; ++child) {
           const id = child ? `${root}.${child}` : String(root);
@@ -29,6 +30,7 @@ class LayoutTransport extends AppTransport {
         }
       }
       this.preferences.sessions[0]!.expanded_item_ids = Array.from({ length: 20 }, (_, index) => String(index + 1));
+      this.preferences.sessions[0]!.rail = 'activity';
       this.preferences.global.selected_navigation = { kind: 'project', project_id: route.project_id };
     }
   }

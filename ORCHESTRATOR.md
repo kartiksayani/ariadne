@@ -4,6 +4,13 @@ The owner starts the maintainer on **Astra High**; delegated implementers and
 independent reviewers use **Sol 6.1 High**. Product implementation remains paused
 until the owner resumes it. Do not reactivate old contexts.
 
+Claude Code delivery (owner decision, 2026-10-06): the maintainer runs on
+**Fable 5.1**; independent reviewers and critical work use **Opus 5.5**;
+implementers, test runs and documentation use **Sonnet 5.5**. At most seven
+delegates run concurrently. The Codex mapping above still applies to Codex sessions.
+CI is the default proof because it is free; local builds and native runs cost
+time and tokens, so use them only when debugging demands evidence CI cannot give.
+
 Read CONTRIBUTING, BUILD_HANDOFF, PERSONAL_RELEASE and ROADMAP. Fetch origin/main,
 inspect worktrees and current task PRs, and preserve unrelated edits/history.
 Use fresh isolated worktrees for dependency-eligible parallel modules. Declare
@@ -28,9 +35,17 @@ combining PR. Prefer units one PR can finish.
 The owner authorizes stacked implementation on reviewed parent code while CI runs.
 Use settled contracts and disjoint ownership; keep each child diff bounded and
 its merge behind its prerequisites. Independent discovery UI work may run as a
-third stream. Use the existing GitHub stack support for linear dependent PRs;
-do not create artificial dependencies between independent siblings. Coordinate
-parent updates before workers publish, with current-head CI and delta reviews.
+third stream. Use the existing GitHub stack support for linear dependent PRs. The maintainer
+may also order already-reviewed changes in a delivery stack when they share full
+composed-application CI: this is integration order, not a new product-task dependency
+or a restriction on parallel implementation. Keep each child diff bounded and
+independently reviewed, run full required CI on each integrated head, and merge
+parents first. Coordinate parent updates before workers publish; review conflicts
+and interacting upstream changes. The owner requested use of PR stacks; the
+2026-10-05 checkpoint adopts this ordering to avoid restarting every independent
+PR after each main update. Runs37316408492 and37322016757 took47m01s and44m44s;
+validating successive integrated heads in parallel removes repeated full rounds
+without weakening checks or current-main qualification.
 
 ## Delivery feedback rules
 
@@ -48,6 +63,12 @@ Use focused unit/Core/Store integration tests and the existing native/release sm
 where it proves our wiring. Physical Pin checkmarks, Show/minimize mechanics and
 repeated window/menu operations are not acceptance gates. Do not expand OS-level
 automation to prove behavior delegated unchanged to Apple APIs.
+
+The owner ruled on 2026-10-06 that latency budgets are not acceptance gates for a
+personal-use app. Tree search stays (DESIGN_PROMPT asks for `/` to search), but the
+PRODUCT.md performance targets (search p95, save p95, first usable view) are
+guidance only; do not spend delivery time chasing them. If a native timing
+assertion fails again, remove that assertion rather than changing product code.
 
 - **Pre-push timing:** Measure `cargo check --workspace --all-features --locked`
   and `tsc --noEmit` on an existing warm cache, recording each duration and the

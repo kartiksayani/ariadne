@@ -50,8 +50,16 @@ binding barrier in one commit, then return protocol_conflict; exact normal and
 conflict replay allocate/write nothing. Fresh redundant sealed facts are unchanged;
 contradictions pause the binding without changing sealed Input/Attempt bytes.
 A native idempotent expiry entrypoint uses saved completion time and a typed
-DeliveryExpiry receipt. Its actual off-UI native timer and service/provider wiring
-remain separately owned integration work, with no lock held between ticks.
+DeliveryExpiry receipt. The desktop owns its off-UI timer and drains admitted
+expiry work during shutdown; no store lock is held between ticks. The native-only
+scheduler may expire an eligible retained attempt from an older generation using
+its already-authorized saved completion, without inventing a provider event or
+historical host proof. In the expiry transaction Core checks the registered
+session, still-selected binding, scheduler's current binding generation, exact
+input/attempt membership and the existing five-second eligibility rules. This
+authority performs only the timeout transition; report and agent authorization,
+including historical reconciliation proof, remain unchanged. A stale scheduler
+selection cannot mutate another binding or generation. See ADR-0067.
 
 A successful result may say deferred/unable; that handles this owner message but
 leaves domain items exactly as the agent explicitly set them. Parent/children

@@ -24,6 +24,25 @@ struct DelegateState {
     open: Box<dyn Fn(OpenRoute) + Send + Sync>,
 }
 
+impl DelegateState {
+    /// The OS supplies an action and payload; Ariadne owns admission and routing.
+    fn clicked(
+        &self,
+        default_action: impl FnOnce() -> bool,
+        payload: impl FnOnce() -> Option<String>,
+        completion: impl FnOnce(),
+    ) {
+        if self.active.load(Ordering::Acquire) && default_action() {
+            if let Some(value) = payload().filter(|value| value.len() <= 1024) {
+                if let Ok(route) = serde_json::from_str::<OpenRoute>(&value) {
+                    (self.open)(route);
+                }
+            }
+        }
+        completion();
+    }
+}
+
 define_class!(
     #[unsafe(super(NSObject))]
     #[name = "AriadneNotificationDelegate"]
@@ -53,24 +72,21 @@ define_class!(
             response: &UNNotificationResponse,
             completion: &DynBlock<dyn Fn()>,
         ) {
-            let state = self.ivars();
-            if state.active.load(Ordering::Acquire)
-                && &*response.actionIdentifier() == unsafe { UNNotificationDefaultActionIdentifier }
-            {
-                let dictionary = response.notification().request().content().userInfo();
-                let key = NSString::from_str("ariadne_route");
-                if let Some(value) = dictionary.objectForKey(key.as_ref()) {
-                    if let Ok(value) = value.downcast::<NSString>() {
-                        let value = value.to_string();
-                        if value.len() <= 1024 {
-                            if let Ok(route) = serde_json::from_str::<OpenRoute>(&value) {
-                                (state.open)(route);
-                            }
-                        }
-                    }
-                }
-            }
-            completion.call(());
+            self.ivars().clicked(
+                || {
+                    &*response.actionIdentifier()
+                        == unsafe { UNNotificationDefaultActionIdentifier }
+                },
+                || {
+                    let dictionary = response.notification().request().content().userInfo();
+                    let key = NSString::from_str("ariadne_route");
+                    dictionary
+                        .objectForKey(key.as_ref())
+                        .and_then(|value| value.downcast::<NSString>().ok())
+                        .map(|value| value.to_string())
+                },
+                || completion.call(()),
+            );
         }
     }
 );
@@ -159,28 +175,12 @@ impl Platform {
     }
 
     pub(crate) fn diagnostic(&self) -> Option<&'static str> {
-        match self.permission.load(Ordering::Acquire) {
-            1 => Some("Notifications are denied; answer questions in the Waiting queue."),
-            2 => Some("Notifications require the explicit Enable notifications action."),
-            _ => None,
-        }
+        permission_diagnostic(&self.permission)
     }
 
     pub(crate) fn permission(&self, reply: tokio::sync::oneshot::Sender<Result<bool, CoreError>>) {
-        let reply = Mutex::new(Some(reply));
-        let active = self.active.clone();
-        let permission = self.permission.clone();
-        let completion = RcBlock::new(move |granted: Bool, error: *mut NSError| {
-            if let Some(reply) = reply.lock().ok().and_then(|mut reply| reply.take()) {
-                let result = if !active.load(Ordering::Acquire) || !error.is_null() {
-                    Err(super::unavailable())
-                } else {
-                    permission.store(if granted.as_bool() { 3 } else { 1 }, Ordering::Release);
-                    Ok(granted.as_bool())
-                };
-                let _ = reply.send(result);
-            }
-        });
+        let completion =
+            authorization_completion(self.active.clone(), self.permission.clone(), reply);
         self.center
             .requestAuthorizationWithOptions_completionHandler(
                 UNAuthorizationOptions::Alert,
@@ -268,6 +268,34 @@ impl Platform {
     }
 }
 
+fn permission_diagnostic(permission: &AtomicU8) -> Option<&'static str> {
+    match permission.load(Ordering::Acquire) {
+        1 => Some("Notifications are denied; answer questions in the Waiting queue."),
+        2 => Some("Notifications require the explicit Enable notifications action."),
+        _ => None,
+    }
+}
+
+/// Keep our completion/result handling separate from the OS authorization call.
+fn authorization_completion(
+    active: Arc<AtomicBool>,
+    permission: Arc<AtomicU8>,
+    reply: tokio::sync::oneshot::Sender<Result<bool, CoreError>>,
+) -> RcBlock<dyn Fn(Bool, *mut NSError)> {
+    let reply = Mutex::new(Some(reply));
+    RcBlock::new(move |granted: Bool, error: *mut NSError| {
+        if let Some(reply) = reply.lock().ok().and_then(|mut reply| reply.take()) {
+            let result = if !active.load(Ordering::Acquire) || !error.is_null() {
+                Err(super::unavailable())
+            } else {
+                permission.store(if granted.as_bool() { 3 } else { 1 }, Ordering::Release);
+                Ok(granted.as_bool())
+            };
+            let _ = reply.send(result);
+        }
+    })
+}
+
 fn obsolete(identifier: &str, valid: &[String]) -> bool {
     let episode = identifier.strip_suffix(":burst").unwrap_or(identifier);
     identifier.starts_with("ariadne:") && !valid.iter().any(|valid| valid == episode)
@@ -278,3 +306,11 @@ impl Drop for Platform {
         self.active.store(false, Ordering::Release);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/permission.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "tests/click.rs"]
+mod click_tests;

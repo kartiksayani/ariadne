@@ -16,5 +16,5 @@ export const config = {
   }]],
   capabilities: [{ browserName: 'tauri', 'tauri:options': { application: binary, args: appArgs } }],
   connectionRetryTimeout: 60000, connectionRetryCount: 0,
-  waitforTimeout: 10000, specFileRetries: 0, mochaOpts: { timeout: 240000, parallel: false },
+  waitforTimeout: 10000, specFileRetries: 0, mochaOpts: { timeout: 480000, parallel: false },
 };

@@ -54,6 +54,10 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
             "claude-mod/plugin/skills/ariadne/SKILL.md",
             resource!("claude/plugin/skills/ariadne/SKILL.md").as_slice(),
         ),
+        (
+            "codex-skills/ariadne/SKILL.md",
+            resource!("codex/skills/ariadne/SKILL.md").as_slice(),
+        ),
         ("rules/claude.md", resource!("rules/claude.md").as_slice()),
         ("rules/codex.md", resource!("rules/codex.md").as_slice()),
     ] {
@@ -78,12 +82,8 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
 }
 
 pub fn selected(name: &str, agent: &str) -> bool {
-    agent == "both"
-        || if agent == "claude" {
-            name != "rules/codex.md"
-        } else {
-            name == "rules/codex.md"
-        }
+    let codex = name == "rules/codex.md" || name.starts_with("codex-skills/");
+    agent == "both" || if agent == "claude" { !codex } else { codex }
 }
 
 pub fn host_commands(stable_integrations: &Path, agent: &str) -> Vec<String> {

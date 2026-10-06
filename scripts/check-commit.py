@@ -81,7 +81,7 @@ def scope_for(paths):
 
 
 def reference_capture_for(paths, full=False):
-    """Skip known backend/docs and modules outside the current reference gallery."""
+    """Skip known backend/docs and modules outside the current visual captures."""
     if full or paths is None:
         return True
     for name in paths:
@@ -94,12 +94,6 @@ def reference_capture_for(paths, full=False):
             continue
         if name.startswith(("crates/", "apps/desktop/src-tauri/")) and (
                 path.suffix == ".rs" or path.name == "Cargo.toml"):
-            continue
-        # The gallery imports components/reference and its own styles, never
-        # history/rail. Remove this exception if that import closure changes.
-        if name.startswith(("apps/desktop/src/components/history/", "apps/desktop/src/components/rail/")) and path.suffix in {".ts", ".tsx", ".css"} and "config" not in path.name:
-            continue
-        if name.startswith("apps/desktop/tests/ui/history/") and path.suffix in {".ts", ".tsx"} and "config" not in path.name:
             continue
         return True
     return False

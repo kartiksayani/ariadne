@@ -8,6 +8,21 @@ import type { DesktopTransport, HintPayloads } from '../../../src/data/service';
 export const secondId = '00000000-0000-4000-8000-000000000003';
 const page = <T,>(items: T[], revision: number): Page<T> => ({ items, next_cursor: null, snapshot_revision: revision });
 export const route = { project_id: demo.project_id, session_id: demo.id };
+const queriesWithSession = ['session_get', 'session_read', 'item_messages', 'item_rounds', 'reveal_item'];
+const mutationsWithoutSession = ['project_register', 'binding_connect', 'preferences_patch'];
+/**
+ * Mirrors OwnerQueryRequest/OwnerMutationRequest::validate_wire in
+ * crates/ariadne-core/src/service/validation.rs: a session route must be present
+ * exactly for the commands that declare one. The real command rejects violations
+ * with invalid_argument, so fakes must too. Keep the lists in sync with that file.
+ */
+export function assertOwnerWire(request: OwnerQueryRequest | OwnerMutationRequest): void {
+  const reject = (): never => { throw Object.assign(new Error('invalid_argument: owner request session route mismatch'), { code: 'invalid_argument' }); };
+  if ('command' in request) {
+    if (mutationsWithoutSession.includes(request.command.command) === (request.session != null)) reject();
+    if (request.command.command === 'topic_continue' && (request.session?.project_id !== request.command.params.target.project_id || request.session?.session_id !== request.command.params.target.session_id)) reject();
+  } else if (queriesWithSession.includes(request.request.command) !== (request.session != null)) reject();
+}
 export class AppTransport implements DesktopTransport {
   readonly sessions = new Map<string, Session>();
   readonly mutations: OwnerMutationRequest[] = [];
@@ -37,6 +52,7 @@ export class AppTransport implements DesktopTransport {
   }
   emit<E extends keyof HintPayloads>(event: E, hint: HintPayloads[E]) { this.listeners.get(event)?.forEach(callback => callback(hint as never)); }
   async invoke<T>(name: string, { request }: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
+    assertOwnerWire(request);
     if ('command' in request) {
       this.mutations.push(structuredClone(request));
       if (name === this.failNext) { this.failNext = null; throw new Error('Lost response'); }

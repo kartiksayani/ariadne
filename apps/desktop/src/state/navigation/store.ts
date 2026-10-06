@@ -9,6 +9,10 @@ import { initialExpansion } from '../../selectors/tree/rows';
 import * as catalogue from './catalogue';
 
 type Failure = CoreFailure | ServiceFailure;
+// `retry` exists only for navigation-only preference patches. It rebuilds the same owner
+// action against the refreshed snapshot with a new operation id, after a definite revision_conflict.
+type PendingMutation = { request: OwnerMutationRequest; confirmed: (receipt: MutationReceipt) => void;
+  retry?: () => PendingMutation | null };
 type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' }>;
 export interface NavigationState {
   readonly preferences: Immutable<PreferencesSnapshot> | null;
@@ -27,6 +31,27 @@ const sameRoute = (a: SessionRef, b: SessionRef) => a.project_id === b.project_i
 const fail = (error: unknown): Failure => error instanceof CoreFailure || error instanceof ServiceFailure
   ? error : new ServiceFailure('transport');
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+// Patch semantics for a retry: apply only the fields the owner's action changed (`base` -> `desired`)
+// onto the refreshed value, so a foreign change to a different field survives.
+function replayFields<T extends object>(base: T, desired: T, current: T): T {
+  const merged = structuredClone(current) as Record<string, unknown>;
+  const before = base as Record<string, unknown>, after = desired as Record<string, unknown>;
+  for (const key of Object.keys(after)) if (!equal(before[key], after[key])) merged[key] = structuredClone(after[key]);
+  return merged as T;
+}
+function rebaseEntries(entries: NavigationPatch[], base: PreferencesSnapshot, current: PreferencesSnapshot): NavigationPatch[] {
+  return entries.map((entry): NavigationPatch => {
+    if (entry.kind === 'set_global') {
+      return { kind: 'set_global', preferences: replayFields(base.global, entry.preferences, current.global) };
+    }
+    if (entry.kind === 'set_session_view') {
+      const was = base.sessions.find(view => sameRoute(view.session, entry.preferences.session));
+      const now = current.sessions.find(view => sameRoute(view.session, entry.preferences.session));
+      return was && now ? { kind: 'set_session_view', preferences: replayFields(was, entry.preferences, now) } : structuredClone(entry);
+    }
+    return structuredClone(entry);
+  });
+}
 
 export class NavigationStore {
   readonly opened: OpenSessions;
@@ -41,14 +66,19 @@ export class NavigationStore {
   private stopped = false;
   private epoch = 0;
   private navigationRequest = 0;
+  private navigationIntent = 0;
   private preferencesFloor = 0;
   private startupRoute: { selection: NavigationSelection; reveal: RevealedItem | null } | null = null;
   private startupRoutes = false;
   private startupRouteFlight = false;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private pending: { request: OwnerMutationRequest; confirmed: (receipt: MutationReceipt) => void } | null = null;
+  private pending: PendingMutation | null = null;
+  private activeMutation: Promise<boolean> | null = null;
   // Reconciled reads recover their own errors, not the last rejected edit.
   private mutationFailure: Failure | null = null;
+  // Write operations that settled with a definite revision_conflict (already cleared and refreshed).
+  // Keyed to the failure so a later, different rejection is not mistaken for it.
+  private readonly conflicted = new WeakMap<Promise<boolean>, Failure>();
   private readonly reconcile = () => { void this.refresh(); };
   private readonly visibility = () => { if (document.visibilityState === 'visible') this.reconcile(); };
 
@@ -57,6 +87,20 @@ export class NavigationStore {
     this.routes = new RegisteredRoutes(service, this.opened);
   }
   readonly getSnapshot = () => this.state;
+  readonly getNavigationRequest = () => this.navigationRequest;
+  // A current navigation attempt cancels older unsubmitted UI intent even when
+  // the canonical writer cannot admit it. Dispatch/startup ordering is separate.
+  readonly getNavigationIntent = () => this.stopped ? null : this.navigationIntent;
+  // Observe only the already executing write; uncertain operations still need
+  // explicit reconciliation. This neither schedules nor retries a mutation.
+  readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
+  // True only when this exact write operation settled with a definite revision_conflict, which
+  // the store has already cleared and refreshed. Uncertain and other rejections are never reported.
+  readonly settledAsConflict = (completion: Promise<boolean>) => {
+    const failure = this.conflicted.get(completion);
+    // A newer write clears the failure on start; only a different, newer failure disqualifies it.
+    return failure !== undefined && (this.mutationFailure === null || this.mutationFailure === failure);
+  };
   readonly subscribe = (receive: () => void): Unsubscribe => {
     this.listeners.add(receive);
     return () => { this.listeners.delete(receive); };
@@ -81,6 +125,12 @@ export class NavigationStore {
     this.setup = (async () => {
       const results = await Promise.allSettled([
         this.service.subscribe('ariadne://session_changed', () => { this.requested = true; this.reconcile(); }),
+        // A native writer (window geometry, pin/notification settings) saved preferences this
+        // store did not write. Learn the new revision now instead of at the next 2 s poll.
+        this.service.subscribe('ariadne://preferences_changed', hint => {
+          if (this.state.preferences && hint.revision <= Math.max(this.state.preferences.revision, this.preferencesFloor)) return;
+          this.requested = true; this.reconcile();
+        }),
         this.routes.subscribe((route, reveal) => {
           const selection: NavigationSelection = { kind: 'session', session: {
             project_id: route.project_id, session_id: route.session_id,
@@ -165,8 +215,23 @@ export class NavigationStore {
     return structuredClone(this.state.preferences) as PreferencesSnapshot;
   }
   private patch(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void = () => {}): Promise<boolean> {
-    return this.execute({ session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(),
-      params: { expected_preferences_revision: preferences.revision, entries } } }, receipt => {
+    const mutation = this.patchMutation(preferences, entries, confirmed, true);
+    return this.execute(mutation.request, mutation.confirmed, mutation.retry);
+  }
+  private patchMutation(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void, retryable: boolean): PendingMutation {
+    const request: OwnerMutationRequest = { session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(),
+      params: { expected_preferences_revision: preferences.revision, entries } } };
+    // One re-apply per owner action; the second attempt never retries again.
+    const intent = this.navigationIntent;
+    const retry = retryable ? () => {
+      const current = this.state.preferences;
+      // A newer owner navigation was dropped while this write was pending; do not let stale intent win.
+      if (this.navigationIntent !== intent) return null;
+      if (!current || current.revision <= preferences.revision) return null;
+      const fresh = structuredClone(current) as PreferencesSnapshot;
+      return this.patchMutation(fresh, rebaseEntries(entries, preferences, fresh), confirmed, false);
+    } : undefined;
+    return { request, retry, confirmed: receipt => {
       if (!('preferences_revision' in receipt) || receipt.preferences_revision < preferences.revision) {
         throw new ServiceFailure('invalid_response');
       }
@@ -191,7 +256,7 @@ export class NavigationStore {
         this.publish({ preferences: immutable(saved) });
       }
       confirmed();
-    });
+    } };
   }
   private async editingPreferences(expectedRevision: number): Promise<PreferencesSnapshot | null> {
     if (this.stopped || this.pending) return null;
@@ -230,8 +295,10 @@ export class NavigationStore {
       return await this.patch(preferences, [{ kind: 'set_later', item: structuredClone(item), later }]);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
-  async navigate(selection: NavigationSelection, reveal: RevealedItem | null = null): Promise<boolean> {
-    if (this.stopped || this.pending) return false;
+  async navigate(selection: NavigationSelection, reveal: RevealedItem | null = null, isCurrent: () => boolean = () => true): Promise<boolean> {
+    if (this.stopped || !isCurrent()) return false;
+    ++this.navigationIntent;
+    if (this.pending) return false;
     this.startupRoute = null;
     const request = ++this.navigationRequest;
     try {
@@ -239,7 +306,7 @@ export class NavigationStore {
       const entries: NavigationPatch[] = [{ kind: 'set_global', preferences: { ...preferences.global, selected_navigation: selection } }];
       if (selection.kind === 'session') {
         const snapshot = await this.service.query({ session: selection.session, request: { command: 'session_get', params: {} } });
-        if (this.stopped || this.pending || request !== this.navigationRequest) return false;
+        if (this.stopped || this.pending || request !== this.navigationRequest || !isCurrent()) return false;
         if (!sameRoute(selection.session, { project_id: snapshot.session.project_id, session_id: snapshot.session.id })) {
           throw new ServiceFailure('invalid_response');
         }
@@ -251,15 +318,18 @@ export class NavigationStore {
           selected_item_id: reveal?.kind === 'item' ? reveal.route.item_id : view.selected_item_id } });
         if (equal(preferences.global.selected_navigation, selection) && existing?.tab_open && !reveal) {
           await this.opened.open(selection.session).refresh();
-          return true;
+          return isCurrent() && request === this.navigationRequest;
         }
       } else if (selection.kind === 'project' && !this.state.projects?.projects.items.some(project => project.project_id === selection.project_id)) {
         throw new ServiceFailure('invalid_response');
       }
-      return await this.patch(preferences, entries, () => {
+      if (!isCurrent() || request !== this.navigationRequest) return false;
+      const saved = await this.patch(preferences, entries, () => {
+        if (!isCurrent() || request !== this.navigationRequest) return;
         this.publish({ reveal });
         if (selection.kind === 'session') this.opened.open(selection.session);
       });
+      return saved && isCurrent() && request === this.navigationRequest;
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   async closeTab(route: SessionRef): Promise<boolean> {
@@ -292,17 +362,26 @@ export class NavigationStore {
       this.publish({ setup: immutable(receipt), setupAdapterId: params.adapter_id });
     });
   }
-  private async execute(request: OwnerMutationRequest, confirmed: (receipt: MutationReceipt) => void): Promise<boolean> {
+  private async execute(request: OwnerMutationRequest, confirmed: (receipt: MutationReceipt) => void,
+    retry?: () => PendingMutation | null): Promise<boolean> {
     if (this.stopped || this.pending) return false;
-    this.pending = { request: structuredClone(request), confirmed };
+    this.pending = { request: structuredClone(request), confirmed, retry };
     return this.retryMutation();
   }
-  async retryMutation(): Promise<boolean> {
+  retryMutation(): Promise<boolean> {
     const pending = this.pending;
-    if (this.stopped || !pending || this.state.writing) return false;
+    if (this.stopped || !pending || this.state.writing) return Promise.resolve(false);
     this.mutationFailure = null;
     ++this.epoch;
+    const operation: Promise<boolean> = Promise.resolve().then(() => this.completeMutation(pending, () => operation));
+    this.activeMutation = operation;
     this.publish({ writing: true, pendingOperationId: pending.request.command.op_id, error: null });
+    const clear = () => { if (this.activeMutation === operation) this.activeMutation = null; };
+    void operation.then(clear, clear);
+    return operation;
+  }
+  private async completeMutation(pending: PendingMutation, operation: () => Promise<boolean>): Promise<boolean> {
+    if (this.stopped) return false;
     try {
       const receipt = await this.service.executeOwner(pending.request);
       if (this.stopped) return false;
@@ -321,12 +400,26 @@ export class NavigationStore {
       return true;
     } catch (error: unknown) {
       const failure = fail(error);
+      // Only a definite revision_conflict on a navigation-only patch is re-applied, once, against the
+      // refreshed revision with a new operation id. Uncertain and every other rejection fall through.
+      if (pending.retry && failure instanceof CoreFailure && failure.error.code === 'revision_conflict') {
+        await this.refresh();
+        const next = this.stopped ? null : pending.retry();
+        if (next) {
+          this.pending = next;
+          this.publish({ pendingOperationId: next.request.command.op_id });
+          return this.completeMutation(next, operation);
+        }
+      }
       this.mutationFailure = failure;
       // An unknown completion retains the exact command and operation ID.
       // Definitive typed rejection permits a new, explicitly chosen action.
       if (failure instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(failure.error.code)) this.pending = null;
       this.publish({ writing: false, pendingOperationId: this.pending?.request.command.op_id ?? null, error: failure });
-      if (failure instanceof CoreFailure && failure.error.code === 'revision_conflict') await this.refresh();
+      if (failure instanceof CoreFailure && failure.error.code === 'revision_conflict') {
+        this.conflicted.set(operation(), failure);
+        await this.refresh();
+      }
       return false;
     }
   }

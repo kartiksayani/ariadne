@@ -11,11 +11,11 @@ import './rail.css';
 const load = (service: RendererService, route: Parameters<typeof loadMessages>[1], revision: number, _selection: string, signal: AbortSignal) =>
   loadMessages(service, route, revision, signal);
 
-export function MessageRail({ service, store, routes, selectedItemId = null, hoveredItemId = null, onHighlight, onReveal, onClose }: {
+export function MessageRail({ service, store, routes, selectedItemId = null, hoveredItemId = null, onHighlight, onReveal, onClose, closeDisabled = false }: {
   service: RendererService; store: SessionStore; routes: RegisteredRoutes;
   selectedItemId?: string | null; hoveredItemId?: string | null;
   onHighlight: (itemIds: ReadonlySet<string>, messageIds: ReadonlySet<string>) => void;
-  onReveal: (reveal: RevealedItem) => void; onClose?: () => void;
+  onReveal: (reveal: RevealedItem) => void; onClose?: () => void; closeDisabled?: boolean;
 }) {
   const history = useHistory(service, store, 'messages', load);
   const messages = history.data?.items;
@@ -39,10 +39,19 @@ export function MessageRail({ service, store, routes, selectedItemId = null, hov
   useLayoutEffect(() => {
     if (!messages || !scroller.current) return;
     const latest = messages.at(-1)?.number ?? 0;
-    if (!initialized.current || following) {
+    // A scroll event is dispatched asynchronously, so an update can land after the reader moved
+    // up but before `following` cleared; the live position is authoritative.
+    // A scrollTop that merely shrank because the viewport grew (still at the bottom) is not the reader scrolling up.
+    const el = scroller.current;
+    const awayFromBottom = el.scrollHeight - el.clientHeight - el.scrollTop > 8;
+    const scrolledUp = initialized.current && following && el.scrollTop < lastScroll.current && awayFromBottom;
+    if (scrolledUp) setFollowing(false);
+    if (!initialized.current || (following && !scrolledUp)) {
       scroller.current.scrollTop = scroller.current.scrollHeight;
       lastScroll.current = scroller.current.scrollTop;
-      seenThrough.current = latest; initialized.current = true; setUnseen(0);
+      seenThrough.current = latest;
+      initialized.current = true;
+      setUnseen(0);
     } else {
       setUnseen(messages.filter(message => message.number > seenThrough.current).length);
     }
@@ -61,7 +70,7 @@ export function MessageRail({ service, store, routes, selectedItemId = null, hov
     setUnseen(0); setFollowing(true);
   };
   return <aside className="ariadne-reference message-history-rail" aria-label="Session message rail">
-    <header className="history-header"><strong>Messages</strong>{onClose && <button type="button" onClick={onClose} aria-label="Close message rail">Close</button>}</header>
+    <header className="history-header"><strong>Messages</strong>{onClose && <button type="button" disabled={closeDisabled} onClick={() => { if (!closeDisabled) onClose(); }} aria-label="Close message rail">Close</button>}</header>
     {history.loading && <p role="status">Loading complete message history…</p>}
     {history.error && <p role="alert">{history.error} {history.data && 'Showing the previous complete history.'} <button type="button" onClick={history.retry}>Retry history read</button></p>}
     {history.session.status !== 'ready' && <p role="status">{history.session.error?.message ?? 'The registered session is stale.'}</p>}

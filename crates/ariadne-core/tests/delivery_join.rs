@@ -695,6 +695,126 @@ fn trusted_historical_scope_records_old_facts_but_current_claim_cannot_repeat_ol
         .is_err());
 }
 #[test]
+fn native_clock_expires_saved_prior_generation_completion_without_historical_report_authority() {
+    let t = Setup::new();
+    t.queue(100);
+    let p = t.claim(200);
+    t.report(&t.event(&p, "completed-before-reconnect", completed()))
+        .unwrap();
+    t.write(|session| {
+        let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+        binding.generation = id(777);
+        binding.dispatch_state = DispatchState::RecoveryRequired;
+    });
+    let context = t.context();
+    assert!(context.historical_scope().is_none());
+    let before = t.bytes();
+    assert_eq!(
+        code(t.expire(&p, 400, at("06")).unwrap_err()),
+        CoreErrorCode::StaleGeneration
+    );
+    assert_eq!(t.bytes(), before);
+    let service = DeliveryService::new(&t.registry);
+    assert!(service
+        .expire_missing_result_native(&context, &p.input_id, &p.attempt_id, &id(401), at("05"))
+        .unwrap()
+        .is_none());
+    assert_eq!(t.bytes(), before);
+    let receipt = service
+        .expire_missing_result_native(&context, &p.input_id, &p.attempt_id, &id(401), at("06"))
+        .unwrap()
+        .unwrap();
+    let saved = t.saved();
+    assert_eq!(
+        saved.inputs.0[&p.input_id].state,
+        InputState::NeedsAttention
+    );
+    assert_eq!(
+        saved.inputs.0[&p.input_id].attempts[0].result_state,
+        ResultState::Missing
+    );
+    assert_eq!(
+        saved.inputs.0[&p.input_id].attempts[0].binding_generation,
+        p.binding_generation
+    );
+    assert!(saved.inputs.0[&p.input_id].attempts[0].sealed_at.is_none());
+    let expired = t.bytes();
+    assert_eq!(
+        service
+            .expire_missing_result_native(&context, &p.input_id, &p.attempt_id, &id(401), at("09"))
+            .unwrap(),
+        Some(receipt)
+    );
+    assert!(service
+        .expire_missing_result_native(&context, &p.input_id, &p.attempt_id, &id(402), at("09"))
+        .unwrap()
+        .is_none());
+    assert_eq!(t.bytes(), expired);
+    assert_eq!(
+        code(
+            t.report(&t.event(
+                &p,
+                "unauthorized-old-generation-start",
+                EventPayload::TurnStarted {}
+            ))
+            .unwrap_err()
+        ),
+        CoreErrorCode::StaleGeneration
+    );
+    assert_eq!(t.bytes(), expired);
+}
+
+#[test]
+fn native_clock_rejects_stale_selection_generation_and_cross_binding_without_writes() {
+    for changed in ["generation", "selection", "binding"] {
+        let t = Setup::new();
+        t.queue(100);
+        let p = t.claim(200);
+        t.report(&t.event(&p, "completed", completed())).unwrap();
+        let context = t.context();
+        t.write(|session| {
+            let mut other = session.bindings.0[&id(3)].clone();
+            other.id = id(888);
+            other.active_input_id = None;
+            other.owner_paused = true;
+            other.dispatch_state = DispatchState::Paused;
+            session.bindings.0.insert(id(888), other);
+            match changed {
+                "generation" => session.bindings.0.get_mut(&id(3)).unwrap().generation = id(777),
+                "selection" => session.active_binding_id = Some(id(888)),
+                "binding" => {
+                    session.active_binding_id = Some(id(888));
+                }
+                _ => unreachable!(),
+            }
+        });
+        let context = if changed == "binding" {
+            AdapterContext::from_trusted_entrypoint(
+                route(),
+                id(888),
+                context.current_generation().clone(),
+                None,
+            )
+        } else {
+            context
+        };
+        let before = t.bytes();
+        let error = DeliveryService::new(&t.registry)
+            .expire_missing_result_native(&context, &p.input_id, &p.attempt_id, &id(400), at("06"))
+            .unwrap_err();
+        assert_eq!(
+            code(error),
+            if changed == "generation" {
+                CoreErrorCode::StaleGeneration
+            } else {
+                CoreErrorCode::BindingMismatch
+            }
+        );
+        assert_eq!(t.bytes(), before);
+    }
+}
+
+#[test]
 fn stale_scope_and_malformed_facts_have_no_effects_or_uuid_allocations() {
     let t = Setup::new();
     t.queue(100);

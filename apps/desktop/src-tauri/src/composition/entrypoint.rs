@@ -97,7 +97,19 @@ pub(crate) fn establish<R: tauri::Runtime>(
             }
         }),
     )?;
-    app.manage(runtime.bridge().desktop_service());
+    let preferences = app.clone();
+    app.manage(
+        runtime
+            .bridge()
+            .desktop_service()
+            .with_preferences_changed(move |revision| {
+                // Best effort: the renderer's periodic reconciliation covers a missed hint.
+                let _ = preferences.emit(
+                    "ariadne://preferences_changed",
+                    crate::commands::PreferencesChangedHint { revision },
+                );
+            }),
+    );
     app.manage(handoffs);
     app.manage(runtime.clone());
     let startup = runtime.clone();

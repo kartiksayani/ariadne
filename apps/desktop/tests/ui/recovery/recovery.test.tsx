@@ -321,3 +321,63 @@ describe('edge states preserve mounted content', () => {
     expect(recoveryTargets(session)).toHaveLength(0);
   });
 });
+
+describe('binding lifecycle surface (P4.7 acceptance gaps)', () => {
+  it('Resume is blocked by a recovery pause reason, then sends a generation-fenced binding_resume once cleared', async () => {
+    const { actions, transport, store } = await setup(); render(<BindingControls actions={actions} />);
+    const resume = () => screen.getByRole('button', { name: 'Resume dispatch' }) as HTMLButtonElement;
+    expect(resume().disabled).toBe(true);
+    currentBinding(transport.session).pause_reason = null; currentBinding(transport.session).owner_paused = true;
+    currentInput(transport.session).state = 'queued'; transport.session.revision += 1;
+    await act(async () => { await store.refresh(); });
+    expect(resume().disabled).toBe(false);
+    fireEvent.click(resume()); expect(transport.mutations).toHaveLength(0);
+    transport.replies.push(transport.receipt('binding_state'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm resume' })); });
+    const binding = currentBinding(transport.session);
+    expect(transport.mutations).toEqual([{ session: route, command: { command: 'binding_resume', api_version: 1, op_id: opId,
+      params: { binding_id: binding.id, expected_generation: binding.generation } } }]);
+  });
+  it('Disconnect sends a generation-fenced binding_disconnect only after confirmation', async () => {
+    const { actions, transport } = await setup(); render(<BindingControls actions={actions} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' })); expect(transport.mutations).toHaveLength(0);
+    transport.replies.push(transport.receipt('binding_state'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm disconnect' })); });
+    const binding = currentBinding(transport.session);
+    expect(transport.mutations).toEqual([{ session: route, command: { command: 'binding_disconnect', api_version: 1, op_id: opId,
+      params: { binding_id: binding.id, expected_generation: binding.generation } } }]);
+  });
+  it('shows the binding generation and qualified host freshness, and downgrades unqualified observations', async () => {
+    const { actions, transport } = await setup(); const binding = currentBinding(transport.session);
+    const view = render(<BindingControls actions={actions} />);
+    expect(view.container.querySelector('.lifecycle-muted code')?.textContent).toBe(binding.generation);
+    expect(screen.getByText('Host state unknown')).toBeDefined();
+    act(() => { transport.presence(); });
+    expect(screen.getByText('Host idle · fresh host poll')).toBeDefined();
+    act(() => { transport.presence({ freshness: 'stale' }); });
+    expect(screen.getByText('Host state stale · unqualified')).toBeDefined();
+    act(() => { transport.presence({ generation: opId }); });
+    expect(screen.queryByText('Host idle · fresh host poll')).toBeNull();
+  });
+  it('shows a distinct Reconnecting state only while a Connect write is in flight', async () => {
+    const { actions, transport } = await setup(); render(<BindingControls actions={actions} />);
+    expect(document.querySelector('[data-edge-state="reconnecting"]')).toBeNull();
+    let release!: (value: MutationEnvelope) => void;
+    transport.replies.push(new Promise<MutationEnvelope>(resolve => { release = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm connect' })); });
+    expect(document.querySelector('[data-edge-state="reconnecting"]')).not.toBeNull();
+    expect(screen.getByText('Reconnecting')).toBeDefined();
+    await act(async () => { release(transport.receipt('binding_connect')); });
+    expect(document.querySelector('[data-edge-state="reconnecting"]')).toBeNull();
+  });
+  it('maps each non-ready session status to its own edge state and renders nothing when ready', async () => {
+    const { store } = await setup(); const base = store.getSnapshot();
+    const kind = (status: typeof base.status) => {
+      const view = render(<SessionNotice state={{ ...base, status, error: null }} refresh={() => {}} />);
+      const found = view.container.querySelector('[data-edge-state]')?.getAttribute('data-edge-state') ?? null; view.unmount(); return found;
+    };
+    expect(kind('loading')).toBe('loading'); expect(kind('stale')).toBe('stale');
+    expect(kind('inaccessible')).toBe('unavailable'); expect(kind('closed')).toBe('unavailable'); expect(kind('ready')).toBeNull();
+  });
+});
