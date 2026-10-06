@@ -10,7 +10,7 @@ use ariadne_store::registry::Registry;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-pub const HELP: &str = "Integration setup: ariadne setup --agent claude|codex|both [--project /absolute/project] [--claude-bin /absolute/claude] [--codex-bin /absolute/codex] [--json]\nIntegration removal: ariadne uninstall [--agent claude|codex|both] [--json]\nInstall the matching personal app/helpers first. Setup prints host commands; run them explicitly in the original host. Setup also records where Claude/Codex live (found on PATH, or the --claude-bin/--codex-bin you give) in providers.json so the app can find them. All project sessions/backups and foreign settings survive uninstall.\n";
+pub const HELP: &str = "Integration setup: ariadne setup --agent claude|codex|both [--project /absolute/project] [--codex-bin /absolute/codex] [--json]\nIntegration removal: ariadne uninstall [--agent claude|codex|both] [--json]\nInstall the matching personal app/helpers first. Setup prints host commands; run them explicitly in the original host. For Codex, setup also records where `codex` lives (found on PATH, or the --codex-bin you give) in providers.json so the app can find it. All project sessions/backups and foreign settings survive uninstall.\n";
 
 #[derive(Debug)]
 pub(crate) struct Request {
@@ -51,17 +51,12 @@ pub(crate) fn parse(args: &[&str], uninstall: bool) -> Result<Request, CoreError
                 }
                 project = Some(path);
             }
-            flag @ ("--claude-bin" | "--codex-bin") if !uninstall => {
-                let slot = if flag == "--claude-bin" {
-                    &mut explicit.claude
-                } else {
-                    &mut explicit.codex
-                };
-                if slot.is_some() {
-                    return Err(invalid("Unknown or repeated setup/uninstall flag."));
-                }
+            "--codex-bin" if explicit.codex.is_none() && !uninstall => {
                 i += 1;
-                *slot = Some(providers::explicit_path(flag, args.get(i).copied())?);
+                explicit.codex = Some(providers::explicit_path(
+                    "--codex-bin",
+                    args.get(i).copied(),
+                )?);
             }
             "--json" if !json => json = true,
             _ => return Err(invalid("Unknown or repeated setup/uninstall flag.")),
@@ -71,12 +66,8 @@ pub(crate) fn parse(args: &[&str], uninstall: bool) -> Result<Request, CoreError
     let agent: String = agent
         .or_else(|| uninstall.then(|| "both".into()))
         .ok_or_else(|| invalid("Setup requires --agent."))?;
-    if (explicit.claude.is_some() && agent == "codex")
-        || (explicit.codex.is_some() && agent == "claude")
-    {
-        return Err(invalid(
-            "--claude-bin needs --agent claude or both; --codex-bin needs --agent codex or both.",
-        ));
+    if explicit.codex.is_some() && agent == "claude" {
+        return Err(invalid("--codex-bin needs --agent codex or both."));
     }
     Ok(Request {
         agent,
@@ -148,13 +139,8 @@ pub fn execute_with_environment(
     }
     if !request.uninstall {
         // Resources were applied; a failure here is safe to retry (idempotent).
-        result["providers"] = providers::record(
-            data,
-            stable_integrations,
-            &request.agent,
-            &request.explicit,
-            environment,
-        )?;
+        result["providers"] =
+            providers::record(data, &request.agent, &request.explicit, environment)?;
     }
     result["host_commands"] = json!(if request.uninstall {
         Vec::<String>::new()
@@ -215,14 +201,9 @@ pub(crate) fn write(
         if !data["providers"].is_null() {
             let providers = &data["providers"];
             for entry in providers["recorded"].as_array().expect("recorded") {
-                let label = if entry["agent"] == "claude" {
-                    "Claude"
-                } else {
-                    "Codex"
-                };
                 writeln!(
                     output,
-                    "Recorded {label} at {}",
+                    "Recorded Codex at {}",
                     entry["executable"].as_str().expect("executable")
                 )?;
             }

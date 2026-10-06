@@ -116,9 +116,6 @@ impl Fixture {
         )
         .unwrap();
         let plugin = version.join("integrations/claude-mod/plugin");
-        let claude = install.path().join("claude");
-        fs::write(&claude, "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '2.1.287 (Claude Code)\\n'\n").unwrap();
-        private(&claude);
         let ids = Arc::new(AtomicU64::new(1000));
         let allocated = ids.clone();
         let core = Arc::new(NativeCoreService::new(
@@ -141,7 +138,6 @@ impl Fixture {
             roots,
             discovery.clone(),
             Some(ClaudeOptions {
-                executable: claude,
                 installed_plugin: plugin.clone(),
                 helper: helper.clone(),
                 project_root: root.path().canonicalize().unwrap(),

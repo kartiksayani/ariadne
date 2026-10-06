@@ -118,9 +118,11 @@ Follow-ups the run surfaced:
   the old symlink layout.
 - P8.5 App finds Claude and Codex when opened normally (ADR-0081, PR pending): the owner
   found with `v0.1.0-alpha.1` that the app opened from Finder has no provider flags, so
-  `binding connect` answered "Selected native provider is not configured". `ariadne setup`
-  now records the Claude/Codex paths in `~/.ariadne/providers.json`; the app reads it at
-  start (flags win); `doctor` checks it. The live acceptance only ever passed with flags.
+  `binding connect` answered "Selected native provider is not configured". Claude now needs
+  no executable (the adapter trusts the Mod's version report; the app finds its installed
+  package); `ariadne setup` records the Codex path in `~/.ariadne/providers.json`, which
+  the app reads at start (flags win) and `doctor` checks. The live acceptance only ever
+  passed with flags. Claude bindings qualified before this must reconnect once.
 
 ## Next steps
 

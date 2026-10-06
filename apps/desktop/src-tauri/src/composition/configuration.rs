@@ -54,41 +54,45 @@ impl NativeConfiguration {
                 .or_else(|| environment("HOME").map(|home| home.join(".ariadne")))
                 .ok_or_else(invalid)?,
         )?;
-        // Flags win. Only when a provider's flags are absent is the file that
-        // `ariadne setup` wrote consulted; nothing is searched on PATH.
-        let flag_claude = match (
-            flags.get("--claude-executable"),
-            flags.get("--claude-plugin"),
-            flags.get("--ariadne-helper"),
-        ) {
-            (Some(executable), Some(installed_plugin), Some(helper)) => {
-                Some((executable.clone(), installed_plugin.clone(), helper.clone()))
-            }
-            _ => None,
+        // Claude is trusted for its own version report, so it needs no executable:
+        // the installed Mod and helper come from the app's own package. The flags
+        // override that for isolated runs. Nothing is searched on PATH.
+        if flags.contains_key("--claude-executable") {
+            eprintln!(
+                "Ariadne ignores --claude-executable; Claude's version comes from the loaded Mod."
+            );
+        }
+        let package = environment("HOME")
+            .map(|home| home.join(".local/share/ariadne"))
+            .filter(|root| root.is_absolute() && root.join("current").is_dir());
+        let packaged = |relative: &str| {
+            package
+                .as_ref()
+                .map(|root| root.join("current").join(relative))
         };
+        let installed_plugin = flags
+            .get("--claude-plugin")
+            .cloned()
+            .or_else(|| packaged("integrations/claude-mod/plugin"));
+        let helper = flags
+            .get("--ariadne-helper")
+            .cloned()
+            .or_else(|| packaged("bin/ariadne"));
+        let claude = installed_plugin
+            .zip(helper.clone())
+            .map(|(installed_plugin, helper)| ClaudeOptions {
+                installed_plugin,
+                helper,
+                project_root: home.clone(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
+            });
+        // Codex: flags win; otherwise the path `ariadne setup` recorded.
         let flag_codex = flags.get("--codex-executable");
-        let recorded = if flag_claude.is_some() && flag_codex.is_some() {
+        let recorded = if flag_codex.is_some() {
             None
         } else {
             read_provider_file(&home)
         };
-        let recorded_claude = match flag_claude {
-            Some(_) => None,
-            None => recorded.as_ref().and_then(|file| file.claude.clone()),
-        };
-        let claude_paths = flag_claude
-            .or_else(|| recorded_claude.map(|c| (c.executable, c.installed_plugin, c.helper)));
-        let helper = flags
-            .get("--ariadne-helper")
-            .cloned()
-            .or_else(|| claude_paths.as_ref().map(|(_, _, helper)| helper.clone()));
-        let claude = claude_paths.map(|(executable, installed_plugin, helper)| ClaudeOptions {
-            executable,
-            installed_plugin,
-            helper,
-            project_root: home.clone(),
-            app_version: env!("CARGO_PKG_VERSION").into(),
-        });
         let codex = match flag_codex {
             Some(executable) => {
                 let codex_home = flags
@@ -144,13 +148,6 @@ const PROVIDER_FILE_LIMIT: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RecordedClaude {
-    executable: PathBuf,
-    installed_plugin: PathBuf,
-    helper: PathBuf,
-}
-#[derive(Clone, Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RecordedCodex {
     executable: PathBuf,
     home: PathBuf,
@@ -159,7 +156,6 @@ struct RecordedCodex {
 #[serde(deny_unknown_fields)]
 struct ProviderFile {
     schema_version: u32,
-    claude: Option<RecordedClaude>,
     codex: Option<RecordedCodex>,
 }
 
@@ -198,17 +194,12 @@ fn read_provider_file(home: &std::path::Path) -> Option<ProviderFile> {
             return Err("it is larger than 64 KiB");
         }
         let parsed: ProviderFile = serde_json::from_slice(&bytes).map_err(|_| "it is malformed")?;
-        let claude_ok = parsed.claude.as_ref().is_none_or(|c| {
-            [&c.executable, &c.installed_plugin, &c.helper]
-                .into_iter()
-                .all(|p| absolute(p.clone()).is_ok())
-        });
         let codex_ok = parsed.codex.as_ref().is_none_or(|c| {
             [&c.executable, &c.home]
                 .into_iter()
                 .all(|p| absolute(p.clone()).is_ok())
         });
-        if parsed.schema_version != 1 || !claude_ok || !codex_ok {
+        if parsed.schema_version != 1 || !codex_ok {
             return Err("it has an unsupported version or a non-absolute path");
         }
         Ok(Some(parsed))
@@ -345,7 +336,6 @@ mod tests {
         );
     }
     const RECORDED: &str = r#"{"schema_version":1,
-        "claude":{"executable":"/rec/claude","installed_plugin":"/pkg/current/integrations/claude-mod/plugin","helper":"/pkg/current/bin/ariadne"},
         "codex":{"executable":"/rec/codex","home":"/rec/.codex"}}"#;
     fn home_with(contents: Option<&str>, mode: u32) -> tempfile::TempDir {
         use std::os::unix::fs::PermissionsExt;
@@ -357,121 +347,161 @@ mod tests {
         }
         dir
     }
-    fn parse_in(dir: &tempfile::TempDir, extra: &[&str]) -> NativeConfiguration {
+    /// `user` is the HOME holding the installed package; `dir` is ARIADNE_HOME.
+    fn parse_with(
+        dir: &tempfile::TempDir,
+        user: &std::path::Path,
+        extra: &[&str],
+    ) -> NativeConfiguration {
         let home = dir.path().to_path_buf();
+        let user = user.to_path_buf();
         NativeConfiguration::parse(&args(extra), move |name| match name {
             "ARIADNE_HOME" => Some(home.clone()),
-            "HOME" => Some(PathBuf::from("/absent/user")),
+            "HOME" => Some(user.clone()),
             _ => None,
         })
         .unwrap()
     }
-    #[test]
-    fn recorded_providers_fill_in_when_no_flags_are_given() {
-        let dir = home_with(Some(RECORDED), 0o600);
-        let config = parse_in(&dir, &[]);
-        let claude = config.claude.unwrap();
-        assert_eq!(claude.executable, PathBuf::from("/rec/claude"));
-        assert_eq!(claude.helper, PathBuf::from("/pkg/current/bin/ariadne"));
-        assert_eq!(
-            claude.installed_plugin,
-            PathBuf::from("/pkg/current/integrations/claude-mod/plugin")
-        );
-        let codex = config.codex.unwrap();
-        assert_eq!(codex.executable, PathBuf::from("/rec/codex"));
-        assert_eq!(codex.codex_home, PathBuf::from("/rec/.codex"));
-        assert_eq!(config.discovery_endpoints.len(), 1);
-        assert!(config.cli_invocation.ends_with("/pkg/current/bin/ariadne"));
+    fn parse_in(dir: &tempfile::TempDir, extra: &[&str]) -> NativeConfiguration {
+        parse_with(dir, std::path::Path::new("/absent/user"), extra)
+    }
+    fn installed_package() -> tempfile::TempDir {
+        let user = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(user.path().join(".local/share/ariadne/current")).unwrap();
+        user
     }
     #[test]
-    fn flags_override_recorded_providers_per_provider() {
-        let dir = home_with(Some(RECORDED), 0o600);
-        let config = parse_in(
+    fn claude_is_composed_from_the_installed_package_without_any_flag() {
+        let user = installed_package();
+        let dir = home_with(None, 0);
+        let config = parse_with(&dir, user.path(), &[]);
+        let current = user.path().join(".local/share/ariadne/current");
+        let claude = config.claude.unwrap();
+        assert_eq!(
+            claude.installed_plugin,
+            current.join("integrations/claude-mod/plugin")
+        );
+        assert_eq!(claude.helper, current.join("bin/ariadne"));
+        assert_eq!(claude.project_root, dir.path());
+        assert!(config
+            .cli_invocation
+            .ends_with(&format!("{}/bin/ariadne", current.display())));
+    }
+    #[test]
+    fn claude_is_none_without_an_installed_package_and_flags_override_it() {
+        let user = tempfile::tempdir().unwrap();
+        let dir = home_with(None, 0);
+        assert!(parse_with(&dir, user.path(), &[]).claude.is_none());
+        let installed = installed_package();
+        let config = parse_with(
             &dir,
+            installed.path(),
             &[
-                "--claude-executable",
-                "/flag/claude",
                 "--claude-plugin",
                 "/flag/plugin",
                 "--ariadne-helper",
                 "/flag/ariadne",
+            ],
+        );
+        let claude = config.claude.unwrap();
+        assert_eq!(claude.installed_plugin, PathBuf::from("/flag/plugin"));
+        assert_eq!(claude.helper, PathBuf::from("/flag/ariadne"));
+        // Flags alone also work in a dev run with no installed package.
+        let config = parse_with(
+            &dir,
+            user.path(),
+            &[
+                "--claude-plugin",
+                "/flag/plugin",
+                "--ariadne-helper",
+                "/flag/ariadne",
+            ],
+        );
+        assert!(config.claude.is_some());
+        // The retired --claude-executable flag is still validated but ignored.
+        let config = parse_with(
+            &dir,
+            installed.path(),
+            &["--claude-executable", "/flag/claude"],
+        );
+        assert!(config.claude.is_some());
+    }
+    #[test]
+    fn recorded_codex_fills_in_when_no_flags_are_given() {
+        let dir = home_with(Some(RECORDED), 0o600);
+        let config = parse_in(&dir, &[]);
+        let codex = config.codex.unwrap();
+        assert_eq!(codex.executable, PathBuf::from("/rec/codex"));
+        assert_eq!(codex.codex_home, PathBuf::from("/rec/.codex"));
+        assert_eq!(config.discovery_endpoints.len(), 1);
+        assert!(config.claude.is_none());
+    }
+    #[test]
+    fn codex_flags_override_the_recorded_path() {
+        let dir = home_with(Some(RECORDED), 0o600);
+        let config = parse_in(
+            &dir,
+            &[
                 "--codex-executable",
                 "/flag/codex",
                 "--codex-home",
                 "/flag/.codex",
             ],
         );
-        let claude = config.claude.unwrap();
-        assert_eq!(claude.executable, PathBuf::from("/flag/claude"));
-        assert_eq!(claude.installed_plugin, PathBuf::from("/flag/plugin"));
         let codex = config.codex.unwrap();
         assert_eq!(codex.executable, PathBuf::from("/flag/codex"));
         assert_eq!(codex.codex_home, PathBuf::from("/flag/.codex"));
-        // Only the Codex flag given: Claude still comes from the file.
-        let config = parse_in(&dir, &["--codex-executable", "/flag/codex"]);
-        assert_eq!(
-            config.claude.unwrap().executable,
-            PathBuf::from("/rec/claude")
-        );
-        assert_eq!(
-            config.codex.unwrap().executable,
-            PathBuf::from("/flag/codex")
-        );
         // --codex-home still overrides the recorded home for a recorded executable.
         let config = parse_in(&dir, &["--codex-home", "/flag/.codex"]);
-        assert_eq!(
-            config.codex.unwrap().codex_home,
-            PathBuf::from("/flag/.codex")
-        );
+        let codex = config.codex.unwrap();
+        assert_eq!(codex.executable, PathBuf::from("/rec/codex"));
+        assert_eq!(codex.codex_home, PathBuf::from("/flag/.codex"));
     }
     #[test]
     fn unsafe_oversize_malformed_or_relative_provider_files_are_ignored() {
         let oversize = format!("{RECORDED}{}", " ".repeat(70 * 1024));
-        let cases: Vec<(String, TempHome)> = vec![
-            (RECORDED.into(), TempHome(0o620)),
-            (RECORDED.into(), TempHome(0o602)),
-            (oversize, TempHome(0o600)),
-            ("{not json".into(), TempHome(0o600)),
+        let cases: Vec<(String, u32)> = vec![
+            (RECORDED.into(), 0o620),
+            (RECORDED.into(), 0o602),
+            (oversize, 0o600),
+            ("{not json".into(), 0o600),
             (
                 RECORDED.replace("\"schema_version\":1", "\"schema_version\":2"),
-                TempHome(0o600),
+                0o600,
             ),
-            (RECORDED.replace("/rec/claude", "claude"), TempHome(0o600)),
+            (RECORDED.replace("/rec/codex", "codex"), 0o600),
+            (RECORDED.replace("\"home\"", "\"extra\":1,\"home\""), 0o600),
             (
-                RECORDED.replace("\"home\"", "\"extra\":1,\"home\""),
-                TempHome(0o600),
+                r#"{"schema_version":1,"claude":{"executable":"/c","installed_plugin":"/p","helper":"/h"}}"#
+                    .into(),
+                0o600,
             ),
         ];
-        for (contents, TempHome(mode)) in cases {
+        for (contents, mode) in cases {
             let dir = home_with(Some(&contents), mode);
-            let config = parse_in(&dir, &[]);
-            assert!(
-                config.claude.is_none() && config.codex.is_none(),
-                "{contents:.40}"
-            );
+            assert!(parse_in(&dir, &[]).codex.is_none(), "{contents:.40}");
         }
     }
-    struct TempHome(u32);
     #[test]
     fn a_symlinked_or_missing_provider_file_is_ignored() {
         let dir = home_with(None, 0);
-        assert!(parse_in(&dir, &[]).claude.is_none());
+        assert!(parse_in(&dir, &[]).codex.is_none());
         let target = home_with(Some(RECORDED), 0o600);
         std::os::unix::fs::symlink(
             target.path().join("providers.json"),
             dir.path().join("providers.json"),
         )
         .unwrap();
-        let config = parse_in(&dir, &[]);
-        assert!(config.claude.is_none() && config.codex.is_none());
+        assert!(parse_in(&dir, &[]).codex.is_none());
     }
     #[test]
     fn ordinary_startup_consumes_argv_after_the_executable() {
-        let configuration = NativeConfiguration::from_startup_args(&args(&[
+        // The first argument is the executable, never a flag. Providers depend on the
+        // real HOME here, so only argument handling is asserted.
+        NativeConfiguration::from_startup_args(&args(&[
             "/Applications/Ariadne.app/Contents/MacOS/ariadne-desktop",
         ]))
         .unwrap();
-        assert!(configuration.claude.is_none() && configuration.codex.is_none());
         assert!(NativeConfiguration::from_startup_args(&[]).is_err());
     }
 }

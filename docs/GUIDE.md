@@ -152,11 +152,14 @@ folders the terminal searches for commands) in `~/.zshrc`.
 never edits Claude Code or Codex settings. It prints the commands you run
 yourself in the host. Running setup again is safe.
 
-Setup also records where Claude and Codex live in `~/.ariadne/providers.json`.
-It looks for `claude` and `codex` on the PATH of your terminal and prints each path
-it recorded. If one is not found, run setup again with `--claude-bin
-/absolute/path/to/claude` or `--codex-bin /absolute/path/to/codex`. The app reads
-that file when it opens, so quit and reopen Ariadne after running setup.
+Claude needs nothing beyond the plugin files: the app finds its own installed
+plugin and reads Claude's version from the plugin once it is loaded.
+
+For Codex, setup also records where `codex` lives in `~/.ariadne/providers.json`.
+It looks for `codex` on the PATH of your terminal and prints the path it recorded.
+If it is not found, run setup again with `--codex-bin /absolute/path/to/codex`.
+The app reads that file when it opens, so quit and reopen Ariadne after running
+`ariadne setup --agent codex` or `both`.
 
 Check the result at any time:
 
@@ -166,13 +169,14 @@ Check the result at any time:
 ```
 
 Doctor only reads. It repairs nothing, resends nothing and starts no session.
-It uses the paths setup recorded, and warns if none are recorded or a recorded
-program has moved. You can point it at specific programs with `--claude-bin` and
-`--codex-bin` (absolute paths). Add `--json` for machine-readable output.
+It uses the Codex path setup recorded, and warns if none is recorded or Codex has
+moved. You can point it at specific programs with `--claude-bin` and `--codex-bin`
+(absolute paths). Add `--json` for machine-readable output.
 
 ## Connect Claude Code
 
-1. Run `~/.local/bin/ariadne setup --agent claude`.
+1. Run `~/.local/bin/ariadne setup --agent claude`. This is all the setup Claude
+   needs; open Ariadne normally from Finder.
 2. In your Claude Code session, run the commands setup prints. They look like:
    - `/plugin marketplace add <path>/claude-mod`
    - `/plugin install ariadne@ariadne-local`
@@ -189,7 +193,9 @@ Claude Code will ask you to trust the plugin. That choice stays yours.
 
 ## Connect Codex
 
-1. Run `~/.local/bin/ariadne setup --agent codex`.
+1. Run `~/.local/bin/ariadne setup --agent codex`. If it cannot find `codex` on
+   your PATH, add `--codex-bin /absolute/path/to/codex`. Then quit and reopen
+   Ariadne so it reads the recorded path.
 2. In the already-running Codex terminal, run `/status`. It shows the thread you
    will pick in step 4.
 3. In Ariadne, open the Projects page and click **Register project**. Type the
@@ -295,8 +301,10 @@ A small lock file under `~/.local/share/ariadne` can remain.
 ## Known limits
 
 - Claude Code and Codex only. There is no plugin system for further agents yet.
-- After `ariadne setup` (or after moving Claude or Codex), quit and reopen the
-  app. It reads the recorded program paths only when it starts.
+- After `ariadne setup --agent codex` (or after moving Codex), quit and reopen the
+  app. It reads the recorded Codex path only when it starts.
+- Ariadne trusts the Claude version that the loaded plugin reports. It does not run
+  `claude --version`, so a replaced `claude` program is not detected.
 - Codex: you paste the setup instruction once per thread. Ariadne cannot yet
   send it for you.
 - Codex: a thread with no messages yet may not appear in the connect dialog's

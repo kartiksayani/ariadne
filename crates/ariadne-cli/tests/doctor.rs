@@ -1,3 +1,4 @@
+use ariadne_adapter_claude::read_cli_version;
 use ariadne_cli::{
     doctor::inspect::{self, Options},
     setup::owned,
@@ -275,19 +276,13 @@ fn executable(path: &Path, output: &str) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
 }
 
-fn record(profile: &Profile, claude: Option<&Path>, codex: Option<&Path>) {
-    use ariadne_cli::setup::providers::{write, ClaudeEntry, CodexEntry, ProviderUpdate};
-    let current = profile.home.path().join("current");
+fn record(profile: &Profile, codex: &Path) {
+    use ariadne_cli::setup::providers::{write, CodexEntry, ProviderUpdate};
     write(
         &profile.data,
         ProviderUpdate {
-            claude: claude.map(|executable| ClaudeEntry {
-                executable: executable.into(),
-                installed_plugin: current.join("integrations/claude-mod/plugin"),
-                helper: current.join("bin/ariadne"),
-            }),
-            codex: codex.map(|executable| CodexEntry {
-                executable: executable.into(),
+            codex: Some(CodexEntry {
+                executable: codex.into(),
                 home: profile.home.path().join(".codex"),
             }),
         },
@@ -296,76 +291,69 @@ fn record(profile: &Profile, claude: Option<&Path>, codex: Option<&Path>) {
 }
 
 #[test]
-fn doctor_warns_when_no_provider_paths_are_recorded_and_stays_read_only() {
+fn doctor_warns_when_no_codex_path_is_recorded_and_stays_read_only() {
     let profile = Profile::new();
     let before = snapshot(profile.home.path());
     let report = profile.report();
     let check = &checks(&report, "providers.config")[0];
     assert_eq!(check["status"], "warning");
     assert_eq!(check["facts"]["state"], "missing");
-    assert!(check["hint"].as_str().unwrap().contains(
-        "Run `ariadne setup --agent claude` (or codex/both) so the app can find the host."
-    ));
+    assert!(check["hint"]
+        .as_str()
+        .unwrap()
+        .contains("Run `ariadne setup --agent codex` (or both) so the app can find Codex."));
     assert_eq!(snapshot(profile.home.path()), before);
 }
 
 #[test]
-fn doctor_uses_recorded_paths_for_version_checks_and_flags_override_them() {
+fn doctor_uses_the_recorded_codex_path_and_flags_override_it() {
     let profile = Profile::new();
-    let claude = profile.home.path().join("claude");
     let codex = profile.home.path().join("codex");
-    executable(&claude, "2.1.289 (Claude Code)");
     executable(&codex, "codex-cli 0.159.0");
-    record(&profile, Some(&claude), Some(&codex));
+    record(&profile, &codex);
     let before = snapshot(profile.home.path());
     let report = profile.report();
     let check = &checks(&report, "providers.config")[0];
     assert_eq!(check["status"], "ok");
-    assert_eq!(check["facts"]["configured"]["claude"], true);
-    assert_eq!(check["facts"]["claude"]["executable"], true);
+    assert_eq!(check["facts"]["configured"]["codex"], true);
     assert_eq!(check["facts"]["codex"]["exists"], true);
-    assert_eq!(
-        checks(&report, "claude.version")[0]["facts"]["detected_version"],
-        "2.1.289"
-    );
     assert_eq!(
         checks(&report, "codex.version")[0]["facts"]["detected_version"],
         "0.159.0"
     );
     assert_eq!(snapshot(profile.home.path()), before);
-    let other = profile.home.path().join("other-claude");
-    executable(&other, "2.1.290 (Claude Code)");
+    let other = profile.home.path().join("other-codex");
+    executable(&other, "codex-cli 0.160.0");
     let report = inspect::collect(
         &profile.data,
         Some(&profile.version),
         &Options {
-            claude_bin: Some(other),
+            codex_bin: Some(other),
             ..Options::default()
         },
     );
     assert_eq!(
-        checks(&report, "claude.version")[0]["facts"]["detected_version"],
-        "2.1.290"
+        checks(&report, "codex.version")[0]["facts"]["detected_version"],
+        "0.160.0"
     );
 }
 
 #[test]
-fn doctor_reports_a_moved_recorded_binary_and_an_unsafe_providers_file() {
+fn doctor_reports_a_moved_recorded_codex_and_an_unsafe_providers_file() {
     let profile = Profile::new();
-    let claude = profile.home.path().join("moved-claude");
-    record(&profile, Some(&claude), None);
+    let codex = profile.home.path().join("moved-codex");
+    record(&profile, &codex);
     let report = profile.report();
     let check = &checks(&report, "providers.config")[0];
     assert_eq!(check["status"], "warning");
-    assert_eq!(check["facts"]["claude"]["exists"], false);
-    assert_eq!(check["facts"]["configured"]["codex"], false);
+    assert_eq!(check["facts"]["codex"]["exists"], false);
     let file = profile.data.join("providers.json");
     fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
     let report = profile.report();
     let check = &checks(&report, "providers.config")[0];
     assert_eq!(check["status"], "warning");
     assert_eq!(check["facts"]["state"], "invalid");
-    assert!(!checks(&report, "claude.version_unknown").is_empty());
+    assert!(!checks(&report, "codex.version_unknown").is_empty());
 }
 
 fn accept_fixture(listener: &std::os::unix::net::UnixListener) -> std::os::unix::net::UnixStream {
@@ -463,19 +451,10 @@ fn public_provider_reads_preserve_deadlines_and_strict_parsing() {
     let codex = root.path().join("codex");
     executable(&claude, "2.1.287 (Claude Code)");
     executable(&codex, "codex-cli 0.160.0");
-    let options = ariadne_adapter_claude::ClaudeOptions {
-        executable: claude.clone(),
-        installed_plugin: root.path().into(),
-        helper: root.path().into(),
-        project_root: root.path().into(),
-        app_version: "0.1.0".into(),
-    };
     let codex_options =
         ariadne_adapter_codex::CodexOptions::new(codex.clone(), root.path().into()).unwrap();
     assert_eq!(
-        options
-            .read_host_version(Instant::now() + Duration::from_secs(5))
-            .unwrap(),
+        read_cli_version(&claude, Instant::now() + Duration::from_secs(5)).unwrap(),
         "2.1.287"
     );
     assert_eq!(
@@ -485,7 +464,7 @@ fn public_provider_reads_preserve_deadlines_and_strict_parsing() {
         "0.160.0"
     );
     let expired = Instant::now() - Duration::from_millis(1);
-    assert!(options.read_host_version(expired).is_err());
+    assert!(read_cli_version(&claude, expired).is_err());
     assert!(codex_options.read_host_version(expired).is_err());
     executable(&codex, "codex-cli 0.160.0 extra");
     assert!(codex_options
@@ -497,13 +476,6 @@ fn public_provider_reads_preserve_deadlines_and_strict_parsing() {
 fn version_readers_reject_changed_executable_identity_and_reap_only_their_bounded_child() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("provider");
-    let claude = ariadne_adapter_claude::ClaudeOptions {
-        executable: path.clone(),
-        installed_plugin: root.path().into(),
-        helper: root.path().into(),
-        project_root: root.path().into(),
-        app_version: "0.1.0".into(),
-    };
     let codex = ariadne_adapter_codex::CodexOptions::new(path.clone(), root.path().into()).unwrap();
     for output in ["2.1.287 (Claude Code)", "codex-cli 0.160.0"] {
         let replacement = root.path().join("replacement");
@@ -519,7 +491,7 @@ fn version_readers_reject_changed_executable_identity_and_reap_only_their_bounde
         .unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         let result = if output.contains("Claude") {
-            claude.read_host_version(Instant::now() + Duration::from_secs(5))
+            read_cli_version(&path, Instant::now() + Duration::from_secs(5))
         } else {
             codex.read_host_version(Instant::now() + Duration::from_secs(5))
         };
@@ -527,9 +499,7 @@ fn version_readers_reject_changed_executable_identity_and_reap_only_their_bounde
     }
     fs::write(&path, "#!/bin/sh\nwhile :; do :; done\n").unwrap();
     let start = Instant::now();
-    assert!(claude
-        .read_host_version(Instant::now() + Duration::from_millis(30))
-        .is_err());
+    assert!(read_cli_version(&path, Instant::now() + Duration::from_millis(30)).is_err());
     assert!(start.elapsed() < Duration::from_secs(1));
     let start = Instant::now();
     assert!(codex

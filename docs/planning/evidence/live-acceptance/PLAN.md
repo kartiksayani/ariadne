@@ -131,11 +131,12 @@ env ARIADNE_HOME="$DATA" "$CLI" doctor --project "$PROJECT" \
   --claude-bin "$CLAUDE_BIN" --codex-bin "$CODEX_BIN" --json
 ```
 
-Since ADR-0081 (P8.5), `ariadne setup` records the Claude and Codex paths in
-`$DATA/providers.json`, and the app reads them at start. The acceptance path is
-therefore the plain launch: run setup, then `open` the installed app (or run
-`$APP_BIN` with only `ARIADNE_HOME`). The provider flags above remain for isolated
-runs and override the file.
+Since ADR-0081 (P8.5), the app finds its installed Claude Mod itself and `ariadne
+setup --agent codex` records the Codex path in `$DATA/providers.json`; the app reads
+it at start. The acceptance path is therefore the plain launch: run setup, then
+`open` the installed app (or run `$APP_BIN` with only `ARIADNE_HOME`). The provider
+flags above remain for isolated runs and override these (`--claude-executable` is
+ignored).
 
 Setup resolves its package under process `HOME`; use the installation handoff's
 validated process environment, not an invented `--install-root` flag or an

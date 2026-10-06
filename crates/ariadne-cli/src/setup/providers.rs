@@ -16,14 +16,6 @@ const LIMIT: usize = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ClaudeEntry {
-    pub executable: PathBuf,
-    pub installed_plugin: PathBuf,
-    pub helper: PathBuf,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct CodexEntry {
     pub executable: PathBuf,
     pub home: PathBuf,
@@ -33,8 +25,6 @@ pub struct CodexEntry {
 #[serde(deny_unknown_fields)]
 pub struct ProviderFile {
     schema_version: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude: Option<ClaudeEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex: Option<CodexEntry>,
 }
@@ -115,10 +105,7 @@ pub fn read(data: &Path) -> Read {
 
 fn valid(file: &ProviderFile) -> bool {
     let absolute = |path: &Path| path.is_absolute();
-    file.claude.as_ref().is_none_or(|c| {
-        absolute(&c.executable) && absolute(&c.installed_plugin) && absolute(&c.helper)
-    }) && file
-        .codex
+    file.codex
         .as_ref()
         .is_none_or(|c| absolute(&c.executable) && absolute(&c.home))
 }
@@ -152,9 +139,6 @@ pub fn write(data: &Path, update: ProviderUpdate) -> Result<PathBuf, CoreError> 
         Read::Invalid => return Err(unsafe_file()),
     };
     file.schema_version = 1;
-    if update.claude.is_some() {
-        file.claude = update.claude;
-    }
     if update.codex.is_some() {
         file.codex = update.codex;
     }
@@ -174,14 +158,13 @@ pub fn write(data: &Path, update: ProviderUpdate) -> Result<PathBuf, CoreError> 
 
 #[derive(Debug, Default)]
 pub struct ProviderUpdate {
-    pub claude: Option<ClaudeEntry>,
     pub codex: Option<CodexEntry>,
 }
 
-/// Explicit `--claude-bin`/`--codex-bin` flags from the setup request.
+/// Explicit `--codex-bin` flag from the setup request. Claude needs no recorded path:
+/// the app locates the installed Mod itself and trusts the Mod's version report.
 #[derive(Debug, Default)]
 pub struct Explicit {
-    pub claude: Option<PathBuf>,
     pub codex: Option<PathBuf>,
 }
 
@@ -195,51 +178,36 @@ pub(crate) fn explicit_path(flag: &str, value: Option<&str>) -> Result<PathBuf, 
     Ok(path)
 }
 
-/// Resolve and record the selected agents. A missing host is reported, not fatal.
+/// Resolve and record the Codex host. A missing host is reported, not fatal.
+/// Returns null for `--agent claude`, which records nothing.
 pub(crate) fn record(
     data: &Path,
-    stable_integrations: &Path,
     agent: &str,
     explicit: &Explicit,
     environment: &Environment,
 ) -> Result<Value, CoreError> {
-    // `current/` is the stable indirection, so an upgrade never stales these paths.
-    let package_current = stable_integrations.parent().unwrap_or(stable_integrations);
+    if agent == "claude" {
+        return Ok(Value::Null);
+    }
     let mut update = ProviderUpdate::default();
     let mut recorded = Vec::new();
     let mut not_recorded = Vec::new();
-    let resolve = |name: &str, flag: &Option<PathBuf>| {
-        flag.clone()
-            .or_else(|| find_on_path(name, environment.path.as_ref()))
-    };
-    let missing = |name: &str| json!({"agent":name,"reason":format!("No `{name}` on PATH; run setup again with --{name}-bin /absolute/path")});
-    if agent != "codex" {
-        match resolve("claude", &explicit.claude) {
-            Some(executable) => {
-                recorded.push(json!({"agent":"claude","executable":executable}));
-                update.claude = Some(ClaudeEntry {
-                    executable,
-                    installed_plugin: package_current.join("integrations/claude-mod/plugin"),
-                    helper: package_current.join("bin/ariadne"),
-                });
-            }
-            None => not_recorded.push(missing("claude")),
+    let found = explicit
+        .codex
+        .clone()
+        .or_else(|| find_on_path("codex", environment.path.as_ref()));
+    match (found, &environment.codex_home) {
+        (Some(executable), Some(home)) => {
+            recorded.push(json!({"agent":"codex","executable":executable,"home":home}));
+            update.codex = Some(CodexEntry {
+                executable,
+                home: home.clone(),
+            });
         }
+        (Some(_), None) => not_recorded.push(json!({"agent":"codex","reason":"No absolute CODEX_HOME or HOME to locate the Codex home; set one and run setup again"})),
+        (None, _) => not_recorded.push(json!({"agent":"codex","reason":"No `codex` on PATH; run setup again with --codex-bin /absolute/path"})),
     }
-    if agent != "claude" {
-        match (resolve("codex", &explicit.codex), &environment.codex_home) {
-            (Some(executable), Some(home)) => {
-                recorded.push(json!({"agent":"codex","executable":executable,"home":home}));
-                update.codex = Some(CodexEntry {
-                    executable,
-                    home: home.clone(),
-                });
-            }
-            (Some(_), None) => not_recorded.push(json!({"agent":"codex","reason":"No absolute CODEX_HOME or HOME to locate the Codex home; set one and run setup again"})),
-            (None, _) => not_recorded.push(missing("codex")),
-        }
-    }
-    let file = if update.claude.is_some() || update.codex.is_some() {
+    let file = if update.codex.is_some() {
         Some(write(data, update)?)
     } else {
         None

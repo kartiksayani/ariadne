@@ -2096,6 +2096,7 @@
         "crates/ariadne-cli/src/setup/mod.rs",
         "crates/ariadne-cli/src/setup/providers.rs",
         "crates/ariadne-cli/src/doctor/inspect.rs",
+        "crates/ariadne-adapter-claude/*",
         "apps/desktop/src-tauri/src/composition/configuration.rs",
         "crates/ariadne-cli/tests/setup.rs",
         "crates/ariadne-cli/tests/doctor.rs",
@@ -2107,9 +2108,10 @@
         "docs/adr/ADR-0081-provider-paths-from-setup.md"
       ],
       "acceptance": [
-        "`ariadne setup --agent claude|codex|both` records the explicit Claude/Codex paths (from PATH or --claude-bin/--codex-bin) in `<ARIADNE_HOME>/providers.json`, owner-only and atomic; a partial setup keeps the other agent's entry.",
-        "The desktop app opened without flags reads that file at start and configures the providers; flags still win; an unsafe, oversize, symlinked or malformed file is ignored without stopping startup.",
-        "`ariadne doctor` uses the recorded paths when no flags are given and its `providers.config` check warns when the file is missing or a recorded path is gone."
+        "The Claude adapter needs no executable: its probe takes the host version from the Mod announcement (minimum 2.1.287 unchanged), the fingerprint drops the executable identity (claude-mod-v2), and resource parity and descriptor checks are unchanged.",
+        "The desktop app opened without flags composes Claude from the installed package (`current/integrations/claude-mod/plugin`, `current/bin/ariadne`); `--claude-plugin` and `--ariadne-helper` override; no package means no Claude.",
+        "`ariadne setup --agent codex|both` records the Codex path (from PATH or --codex-bin) in `<ARIADNE_HOME>/providers.json`, owner-only and atomic; the app reads it at start, flags win, and an unsafe, oversize, symlinked or malformed file is ignored without stopping startup.",
+        "`ariadne doctor` uses the recorded Codex path when no flag is given and its `providers.config` check warns when the file is missing or the path is gone."
       ],
       "checks": [
         "rtk proxy cargo test -p ariadne-cli -p ariadne-desktop --locked",

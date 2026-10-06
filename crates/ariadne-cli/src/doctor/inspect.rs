@@ -1,6 +1,6 @@
 use super::Report;
 use crate::setup::providers;
-use ariadne_adapter_claude::{ClaudeOptions, SUPPORTED_HOST_VERSION};
+use ariadne_adapter_claude::{read_cli_version, SUPPORTED_HOST_VERSION};
 use ariadne_adapter_codex::{CodexDaemonReader, CodexOptions, SUPPORTED_CODEX_VERSION};
 use ariadne_agent_protocol::host_version::{
     accepted_range, classify_host_version, untested_notice, HostVersionStatus,
@@ -37,16 +37,13 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
     let mut report = Report::new();
     // Flags win; otherwise the paths setup recorded in providers.json are used.
     let recorded = providers::read(data);
-    let (recorded_claude, recorded_codex) = match &recorded {
-        providers::Read::Present(file) => (
-            file.claude.as_ref().map(|c| c.executable.clone()),
-            file.codex.as_ref().map(|c| c.executable.clone()),
-        ),
-        _ => (None, None),
+    let recorded_codex = match &recorded {
+        providers::Read::Present(file) => file.codex.as_ref().map(|c| c.executable.clone()),
+        _ => None,
     };
     let options = &Options {
         project: options.project.clone(),
-        claude_bin: options.claude_bin.clone().or(recorded_claude),
+        claude_bin: options.claude_bin.clone(),
         codex_bin: options.codex_bin.clone().or(recorded_codex),
     };
     if let Some(version_root) = version_root {
@@ -181,35 +178,49 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
         }
     }
     providers_config(&mut report, &recorded);
-    providers(&mut report, data, version_root, options);
+    providers(&mut report, options);
     report.value()
 }
 
 fn providers_config(report: &mut Report, recorded: &providers::Read) {
-    let hint = "Run `ariadne setup --agent claude` (or codex/both) so the app can find the host.";
+    // Claude needs no recorded path; only Codex's executable is recorded at setup.
+    let hint = "Run `ariadne setup --agent codex` (or both) so the app can find Codex.";
     let file = match recorded {
         providers::Read::Present(file) => file,
         providers::Read::Missing => {
-            report.add("warning", "providers.config", "No Claude/Codex paths are recorded, so the app cannot find the host when opened normally.", hint, json!({"state":"missing"}));
+            report.add(
+                "warning",
+                "providers.config",
+                "No Codex path is recorded, so the app cannot find Codex when opened normally.",
+                hint,
+                json!({"state":"missing"}),
+            );
             return;
         }
         providers::Read::Invalid => {
-            report.add("warning", "providers.config", "The providers file is unsafe or malformed and was ignored.", "It must be a private regular file under 64 KiB. Remove it yourself, then run `ariadne setup --agent claude` (or codex/both).", json!({"state":"invalid"}));
+            report.add("warning", "providers.config", "The providers file is unsafe or malformed and was ignored.", "It must be a private regular file under 64 KiB. Remove it yourself, then run `ariadne setup --agent codex` (or both).", json!({"state":"invalid"}));
             return;
         }
     };
     let probe = |path: &Path| json!({"path":path,"exists":path.exists(),"executable":providers::is_executable_file(path)});
-    let claude = file.claude.as_ref().map(|c| probe(&c.executable));
     let codex = file.codex.as_ref().map(|c| probe(&c.executable));
-    let healthy = |value: &Option<Value>| value.as_ref().is_none_or(|v| v["executable"] == true);
-    let any = claude.is_some() || codex.is_some();
-    let ok = any && healthy(&claude) && healthy(&codex);
+    let ok = codex.as_ref().is_some_and(|v| v["executable"] == true);
     report.add(
         if ok { "ok" } else { "warning" },
         "providers.config",
-        if ok { "Recorded host paths exist and are executable." } else if any { "A recorded host path is missing or not executable." } else { "The providers file records no agent." },
-        if ok { "The app reads these paths when it starts; reopen it after changing them." } else { hint },
-        json!({"state":"present","configured":{"claude":claude.is_some(),"codex":codex.is_some()},"claude":claude,"codex":codex}),
+        if ok {
+            "The recorded Codex path exists and is executable."
+        } else if codex.is_some() {
+            "The recorded Codex path is missing or not executable."
+        } else {
+            "The providers file records no agent."
+        },
+        if ok {
+            "The app reads this path when it starts; reopen it after changing it."
+        } else {
+            hint
+        },
+        json!({"state":"present","configured":{"codex":codex.is_some()},"codex":codex}),
     );
 }
 
@@ -323,18 +334,9 @@ fn binding_check(
     }
 }
 
-fn providers(report: &mut Report, data: &Path, version_root: Option<&Path>, options: &Options) {
+fn providers(report: &mut Report, options: &Options) {
     if let Some(executable) = &options.claude_bin {
-        let options = ClaudeOptions {
-            executable: executable.clone(),
-            installed_plugin: version_root
-                .unwrap_or(data)
-                .join("integrations/claude-mod/plugin"),
-            helper: version_root.unwrap_or(data).join("bin/ariadne"),
-            project_root: data.into(),
-            app_version: crate::setup::resources::VERSION.into(),
-        };
-        match options.read_host_version(Instant::now()+Duration::from_secs(5)) {
+        match read_cli_version(executable, Instant::now()+Duration::from_secs(5)) {
             Ok(version)=>{
                 let status=classify_host_version(SUPPORTED_HOST_VERSION,&version);
                 let message=match status {
