@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": {
     "updated_at": "2026-10-05T19:34:00Z",
-    "headline": "37/49 merged. All remaining non-live work is in review/CI: PRs #94–#106. Shared native e2e failure root-caused; fixes in progress.",
+    "headline": "39/49 merged. Remaining: P4.5, P4.6, P4.7, P5.3, P6.1, P6.4, P7.1, P7.2, P7.3, P8.1.",
     "notes": [
       "main 7dbecfb is green. Nine stacked draft PRs #94, #93, #97, #101, #104, #99, #105, #98, #103 plus draft #106 on top.",
       "All nine failed the same native e2e test on 2026-10-05.",
@@ -1454,10 +1454,8 @@
         "P4.7"
       ],
       "active": true,
-      "progress": {
-        "state": "fixing_ci",
-        "prs": [97],
-        "note": "Keyboard/accessibility and 27-state theme capture; CI failing on the shared native e2e test."
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/106"
       }
     },
     {
@@ -1597,7 +1595,8 @@
       ],
       "acceptance": [
         "Single-instance registers before plugins and queues ID routes until webview ready; actual packaged CLI open handles paths with spaces and same revealItem route.",
-        "Ariadne persists Pin and geometry, clamps stored geometry to supplied monitor bounds, reconciles on wake (wake triggers Ariadne's window reconcile: observer registered, reconcile invoked off the posting thread; physical-monitor behaviour is delegated to macOS and not a gate), and distinguishes hide from Quit. Focused tests prove our state/routing/lifecycle logic; Quit stops only Ariadne dispatch and preserves active external host work. Standard macOS window/menu behavior is delegated to Apple APIs, not a physical acceptance gate (owner clarification 2026-10-05)."
+        "Ariadne persists Pin and geometry, clamps stored geometry to supplied monitor bounds, reconciles on wake (wake triggers Ariadne's window reconcile: observer registered, reconcile invoked off the posting thread; physical-monitor behaviour is delegated to macOS and not a gate), and distinguishes hide from Quit. Focused tests prove our state/routing/lifecycle logic; Quit stops only Ariadne dispatch and preserves active external host work. Standard macOS window/menu behavior is delegated to Apple APIs, not a physical acceptance gate (owner clarification 2026-10-05).",
+        "Quit note text and trigger are proved by unit tests; the native journey asserts the Quit request, PID exit and lease release."
       ],
       "checks": [
         "rtk proxy npm run test:native -- --suite routes",
@@ -1637,7 +1636,7 @@
       "acceptance": [
         "Tray waiting_unanswered count/oldest ten rows/partial-root marker match global queue, with 250ms coalescing and separate lifecycle diagnostics.",
         "One long-lived objc2 UserNotifications delegate owns permission/schedule/click; bounded waiting-episode watermark dedupes/burst groups and generic text is default.",
-        "Ariadne notification callback admission and shared registered routing open current detail, including already-answered items; permission denial leaves in-app answering usable (D13). Prove our delegate-to-Core/Store flow and retain packaged cold/second-instance routing evidence. Standard macOS notification presentation and permission UI are delegated to Apple APIs, not physical acceptance gates (owner clarification 2026-10-05)."
+        "Ariadne notification callback admission and shared registered routing open current detail, including already-answered items; permission denial leaves in-app answering usable (D13). Prove our delegate-to-Core/Store flow; packaged cold/second-instance routing is proved by the release-boundary CI step (routes.json in the run artifact). Standard macOS notification presentation and permission UI are delegated to Apple APIs, not physical acceptance gates (owner clarification 2026-10-05)."
       ],
       "checks": [
         "rtk proxy npm run test:native -- --suite notifications",
@@ -1649,10 +1648,8 @@
         "P4.3"
       ],
       "active": true,
-      "progress": {
-        "state": "fixing_ci",
-        "prs": [99, 105],
-        "note": "Notification denial and click-routing regressions; CI failing on the shared native e2e test. Completion also waits for P6.1."
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/106"
       }
     },
     {
