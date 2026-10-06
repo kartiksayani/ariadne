@@ -21,6 +21,12 @@ type NativeConnect =
 type NativePreferencesWrite =
     dyn Fn(&OwnerMutationRequest) -> Result<PreferencesPatchedReceipt, CoreError> + Send + Sync;
 type NativePreferencesRead = dyn Fn() -> Result<PreferencesSnapshot, CoreError> + Send + Sync;
+type PreferencesChanged = dyn Fn(u64) + Send + Sync;
+/// Payload of `ariadne://preferences_changed`: the revision a native writer saved.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct PreferencesChangedHint {
+    pub(crate) revision: u64,
+}
 type NativeDiscovery = dyn Fn() -> Result<DesktopDiscoverySnapshot, CoreError> + Send + Sync;
 type NativeDiscoveryOpen = dyn Fn(bool) -> Result<(), CoreError> + Send + Sync;
 
@@ -35,6 +41,7 @@ struct Composition {
     connect: Option<Arc<NativeConnect>>,
     native_preferences_write: Option<Arc<NativePreferencesWrite>>,
     native_preferences_read: Option<Arc<NativePreferencesRead>>,
+    preferences_changed: Option<Arc<PreferencesChanged>>,
     discovery: Option<Arc<NativeDiscovery>>,
     discovery_open: Option<Arc<NativeDiscoveryOpen>>,
 }
@@ -78,6 +85,19 @@ impl DesktopService {
         {
             return Err(mismatched_command());
         }
+        let receipt = self.native_preferences_write_unannounced(request)?;
+        // Native writers are the foreign writers the renderer cannot observe
+        // from its own receipts. The hint is best effort; the poll still covers
+        // a missed one, so a failed publication never fails a saved write.
+        if let Some(changed) = &self.composition()?.preferences_changed {
+            changed(receipt.preferences_revision.value());
+        }
+        Ok(receipt)
+    }
+    fn native_preferences_write_unannounced(
+        &self,
+        request: &OwnerMutationRequest,
+    ) -> Result<PreferencesPatchedReceipt, CoreError> {
         if let Some(write) = &self.composition()?.native_preferences_write {
             let receipt = write(request)?;
             validate_owner_receipt(
@@ -123,6 +143,7 @@ impl DesktopService {
                 connect: None,
                 native_preferences_write: None,
                 native_preferences_read: None,
+                preferences_changed: None,
                 discovery: None,
                 discovery_open: None,
             }),
@@ -159,6 +180,16 @@ impl DesktopService {
         let composition = self.composition.as_mut().expect("trusted composition");
         composition.native_preferences_write = Some(Arc::new(write));
         composition.native_preferences_read = Some(Arc::new(read));
+        self
+    }
+    /// Called after each successful native preference write (window geometry,
+    /// pin/notification settings) with the saved revision.
+    pub(crate) fn with_preferences_changed(
+        mut self,
+        changed: impl Fn(u64) + Send + Sync + 'static,
+    ) -> Self {
+        let composition = self.composition.as_mut().expect("trusted composition");
+        composition.preferences_changed = Some(Arc::new(changed));
         self
     }
     fn composition(&self) -> Result<&Composition, CoreError> {
