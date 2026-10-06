@@ -28,3 +28,13 @@ preference patch; a conflicted patch committed nothing.
 Not changed: a second click while a write is in flight is still refused. Waiting
 and applying it would need the caller's stale whole-view object rebased onto the
 first write, which is not a small change.
+
+## Addendum: draft bookkeeping writes
+
+`OwnerDraftStore.writePreferences` (`apps/desktop/src/state/drafts/store.ts`)
+now re-reads preferences and re-issues the same `upsert_draft`/`delete_draft`
+entries under a fresh patch `op_id` after a definite `revision_conflict`, at
+most three attempts in total. Draft entries are keyed by the draft `op_id`, so
+replay is safe. `commit_uncertain` and every other error are never retried. This
+covers draft bookkeeping only; the owner `input_submit` is never resent, so
+ADR-0054 ("no automatic resend") is unchanged.
