@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-06 04:55 UTC
+# Ariadne handoff — 2026-10-06 06:20 UTC
 
 Claude Code session is the maintainer (Fable 5.1); reviewers Opus 5.5, implementers
 Sonnet 5.5, at most seven delegates. The owner approved autonomous delivery, pushes
@@ -8,9 +8,13 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 1906583. Roadmap: 44/49 on main, 45/49 once this docs PR merges (P6.4).**
-#109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163.
-No open PRs besides this docs PR (branch `docs/followups`).
+**Main: a2cfa9d (#110). Roadmap: 45/49 on main, 46/49 once this docs PR merges (P7.1).**
+#109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
+(docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
+No open PRs besides this docs PR (branch `docs/p71-evidence`). Duplicate and
+out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
+(`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
+rather than the native journey.
 
 ## Local native journey is the fast loop
 
@@ -31,9 +35,10 @@ synthetic keys do not move focus.
 
 - P6.4: the isolated install, doctor and uninstall trial passed on the ed56f7d tree.
   Evidence: [install-trial.md](../planning/evidence/release/install-trial.md).
-- P7.1: evidence is main's `quality` run
-  [37415365326](https://github.com/kartiksayani/ariadne/actions/runs/37415365326),
-  still in progress when this was written. Link it once it is green.
+- P7.1: evidence is the green full-scope `quality` run on main a2cfa9d,
+  [37418522364](https://github.com/kartiksayani/ariadne/actions/runs/37418522364)
+  (dispatched by hand because the push of #110 cancelled the run on 1906583; pushes
+  to main cancel the previous main run, and a docs-only push runs the docs scope).
 - #109 run 2 failed only on the reference-capture first-load wait (fixed in ed56f7d).
   If it recurs as a ~31 s failure, set `optimizeDeps.entries` on the test's Vite server
   in `tests/ui/reference/capture.spec.mts`.
@@ -57,13 +62,12 @@ synthetic keys do not move focus.
 
 ## Next steps
 
-1. P7.1: when run 37415365326 is green, record the link in tasks.json and here.
-2. Owner approval for P7.2/P7.3 live host runs and owner-home install (writes under
+1. Owner approval for P7.2/P7.3 live host runs and owner-home install (writes under
    the real home: Claude plugin registration, `~/.agents/skills/ariadne`, scratch
    histories, Codex daemon restart). The owner summary is at the top of
    [PLAN.md](../planning/evidence/live-acceptance/PLAN.md).
-3. P8.1.
-4. README screenshot is a real capture of the demo session (`docs/planning/assets/
+2. P8.1.
+3. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
    `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,
    `apps/desktop/wdio.screenshot.conf.mjs`, `apps/desktop/tests/e2e/screenshot.spec.mjs`):
