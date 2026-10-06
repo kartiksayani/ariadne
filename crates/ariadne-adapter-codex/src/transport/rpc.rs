@@ -11,9 +11,49 @@ use tungstenite::{client::client_with_config, protocol::WebSocketConfig, Message
 
 pub(crate) const MAX_FRAME: usize = 8 * 1024 * 1024;
 
+/// Longest server message copied into an adapter error.
+const MAX_SERVER_MESSAGE: usize = 200;
+
+/// Unicode format and bidirectional-control characters that can disguise text.
+fn is_format_or_bidi(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
+}
+
+/// JSON-RPC error object returned by the daemon for the most recent request.
+/// The message is control-character-stripped and bounded, never raw wire text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ServerError {
+    pub code: i64,
+    pub message: String,
+}
+impl ServerError {
+    fn new(code: i64, message: &str) -> Self {
+        Self {
+            code,
+            message: message
+                .chars()
+                .filter(|c| !c.is_control() && !is_format_or_bidi(*c))
+                .take(MAX_SERVER_MESSAGE)
+                .collect(),
+        }
+    }
+    /// A `thread/turns/list` before the first user message exists is not a failure.
+    pub fn is_thread_not_materialized(&self) -> bool {
+        self.code == -32600 && self.message.contains("is not materialized yet")
+    }
+}
+
 pub(crate) struct RpcClient {
     socket: WebSocket<DeadlineStream>,
     next_id: u64,
+    last_server_error: Option<ServerError>,
 }
 impl RpcClient {
     pub fn open(stream: UnixStream, deadline: Instant) -> Result<Self, AdapterError> {
@@ -35,7 +75,16 @@ impl RpcClient {
             Some(config),
         )
         .map_err(|_| error(Code::HostUnreachable, "Codex WebSocket handshake failed."))?;
-        Ok(Self { socket, next_id: 1 })
+        Ok(Self {
+            socket,
+            next_id: 1,
+            last_server_error: None,
+        })
+    }
+    /// The daemon error behind the `Err` returned by the latest `request`, if the
+    /// failure was a JSON-RPC server error rather than a transport or wire fault.
+    pub fn last_server_error(&self) -> Option<&ServerError> {
+        self.last_server_error.as_ref()
     }
     pub fn notify_initialized(&mut self) -> Result<(), AdapterError> {
         self.socket
@@ -50,6 +99,7 @@ impl RpcClient {
         params: &P,
         deadline: Instant,
     ) -> Result<R, AdapterError> {
+        self.last_server_error = None;
         let id = self.next_id;
         self.next_id = self.next_id.checked_add(1).ok_or_else(|| {
             error(
@@ -123,11 +173,26 @@ impl RpcClient {
                             .ok_or_else(|| {
                                 error(Code::IncompatibleAdapter, "Codex RPC error is malformed.")
                             })?;
-                        return Err(if code == -32601 {
+                        let detail = ServerError::new(
+                            code,
+                            server_error
+                                .get("message")
+                                .and_then(Value::as_str)
+                                .unwrap_or(""),
+                        );
+                        let failure = if code == -32601 {
                             error(Code::Unsupported, "Codex read API is unsupported; manual binding may remain available.")
                         } else {
-                            error(Code::HostUnreachable, "Codex read API failed; reconnect and initialize before further reads.")
-                        });
+                            error(
+                                Code::HostUnreachable,
+                                &format!(
+                                    "Codex read API failed ({}: {}); reconnect and initialize before further reads.",
+                                    detail.code, detail.message
+                                ),
+                            )
+                        };
+                        self.last_server_error = Some(detail);
+                        return Err(failure);
                     }
                     let result = object.get("result").ok_or_else(|| {
                         error(

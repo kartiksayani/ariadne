@@ -35,7 +35,8 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
   const [adapterId, setAdapterId] = useState(adapters[0]?.adapter_id ?? '');
   const [externalId, setExternalId] = useState('');
   const [kind, setKind] = useState<EndpointRef['kind']>('unix_socket');
-  const [endpoint, setEndpoint] = useState('');
+  const defaultSocket = (id: string) => adapters.find(choice => choice.adapter_id === id)?.default_socket_path ?? '';
+  const [endpoint, setEndpoint] = useState(() => defaultSocket(adapters[0]?.adapter_id ?? ''));
   const [existingSession, setExistingSession] = useState('');
   const [sessionChoice, setSessionChoice] = useState<'new' | 'existing'>('new');
   const [selected, setSelected] = useState<string | null>(null);
@@ -66,7 +67,12 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
     <p>Manual connection remains available. For Codex, use the configured app-server socket and an existing thread ID.</p>
     <RegistrationFailure store={store} />
     <form onSubmit={event => { void submit(event); }}><fieldset disabled={disabled}>
-      <label>Adapter<select tabIndex={0} required value={adapterId} onChange={event => { setSelected(null); setAdapterId(event.target.value); }}>{adapters.map(adapter => <option key={adapter.adapter_id} value={adapter.adapter_id}>{adapter.label}</option>)}</select></label>
+      <label>Adapter<select tabIndex={0} required value={adapterId} onChange={event => {
+        const next = event.target.value;
+        setSelected(null); setAdapterId(next);
+        // Replace only an untouched field: empty or still the previous adapter's default.
+        if (kind === 'unix_socket') setEndpoint(current => current === '' || current === defaultSocket(adapterId) ? defaultSocket(next) : current);
+      }}>{adapters.map(adapter => <option key={adapter.adapter_id} value={adapter.adapter_id}>{adapter.label}</option>)}</select></label>
       <label>External session ID<input required value={externalId} onChange={event => { setSelected(null); setExternalId(event.target.value); }} /></label>
       <label>Endpoint<select tabIndex={0} value={kind} onChange={event => { setSelected(null); setKind(event.target.value as EndpointRef['kind']); }}><option value="unix_socket">Unix socket</option><option value="local_bridge">Local bridge</option></select></label>
       <label>{kind === 'unix_socket' ? 'Socket path' : 'Bridge name'}<input required value={endpoint} onChange={event => { setSelected(null); setEndpoint(event.target.value); }} /></label>

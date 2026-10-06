@@ -33,6 +33,12 @@ fn readiness_wait_and_partial_messages_share_one_absolute_deadline() {
     producer.join().unwrap();
 }
 #[test]
+fn server_error_message_drops_control_and_bidi_characters() {
+    let raw = "a\u{1b}b\u{202E}c\u{200B}d\u{2066}e\u{FEFF}f\u{2060}g\u{200F}h";
+    let detail = super::ServerError::new(-1, raw);
+    assert_eq!(detail.message, "abcdefgh");
+}
+#[test]
 fn http_upgrade_rejects_invalid_websocket_accept() {
     let (stream, mut peer) = UnixStream::pair().unwrap();
     let server = thread::spawn(move || {

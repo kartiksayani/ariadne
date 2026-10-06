@@ -732,6 +732,27 @@ fn discovery_ipc_uses_trusted_off_thread_callbacks_and_strict_visibility_request
 }
 
 #[test]
+fn codex_default_endpoint_ipc_returns_the_configured_socket_or_null() {
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let window = window(
+        DesktopService::from_trusted_startup(core.clone(), resolve).with_codex_default_endpoint(
+            || Some("/home/u/.codex/app-server-control/app-server-control.sock".into()),
+        ),
+    );
+    assert_eq!(
+        invoke(&window, "codex_default_endpoint", json!({})).unwrap(),
+        json!("/home/u/.codex/app-server-control/app-server-control.sock")
+    );
+    let window = self::window(
+        DesktopService::from_trusted_startup(core, resolve).with_codex_default_endpoint(|| None),
+    );
+    assert_eq!(
+        invoke(&window, "codex_default_endpoint", json!({})).unwrap(),
+        Value::Null
+    );
+}
+
+#[test]
 fn discovery_ipc_exposes_typed_failure_without_calling_core_or_persisting() {
     let empty = window(DesktopService::default());
     assert_eq!(

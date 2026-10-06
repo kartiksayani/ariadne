@@ -142,7 +142,12 @@ or selects a binding and returns its `binding_id`, external session ID, project
 identity, current connection state, and a short usage line. It does not
 send a model prompt. The full rules are in the plugin's `ariadne` skill, loaded
 on demand; the Mod does not print them. Codex owners paste the setup instruction
-into the existing thread; this is explicit and never an automatic boot prompt. Each Ariadne-dispatched
+into the existing thread; this is explicit and never an automatic boot prompt. The
+instruction names the exact CLI invocation, because an agent's tool shell neither
+inherits `ARIADNE_HOME` nor finds the helper on PATH: the absolute helper path,
+prefixed with `ARIADNE_HOME=<data root> ` when the data root is not `$HOME/.ariadne`
+([ADR-0077](../../adr/ADR-0077-setup-instruction-names-the-exact-cli-invocation.md)).
+The desktop shows it under the project header with a Copy button. Each Ariadne-dispatched
 prompt includes the binding ID, input ID and attempt ID in its correlation marker.
 The Mod polls the bridge CLI for claims. One input per binding may be in flight;
 the next Ariadne input waits for the correlated turn to finish successfully and

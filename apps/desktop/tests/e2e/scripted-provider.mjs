@@ -205,14 +205,17 @@ export async function seedJourney(configuration, env = process.env) {
   const wrong = await cliRequest(configuration.cli, ['binding', 'connect', '--json-stdin'], wrongIdentity, env);
   assert.notEqual(wrong.code, 0); assert.equal(wrong.value.error.code, 'binding_mismatch');
   assert.deepEqual(await readFile(sessionPath), before, 'Wrong selected identity cannot alter the canonical session');
-  const read = receipt.data.setup_instruction.split('\n').find(line => line.startsWith('Use ariadne read '));
+  // The instruction names the exact CLI invocation (ADR-0077: the installed
+  // helper path, optionally prefixed with ARIADNE_HOME=); the arguments after
+  // `read` are what must be pasteable.
+  const read = receipt.data.setup_instruction.split('\n').find(line => line.startsWith('Use ') && line.includes(' read --binding '));
   assert.ok(read, 'Saved setup contains pasteable canonical read arguments');
-  const readArgs = read.slice('Use ariadne '.length).replace(/\.$/, '').split(/\s+/);
+  const readArgs = read.slice(read.indexOf(' read --binding ') + 1).replace(/\.$/, '').split(/\s+/);
   assert.equal((await cliRequest(configuration.cli, readArgs, undefined, env)).code, 0);
   const { question, ask, options, request: seed } = journeySeedRequest(bindingId);
-  const apply = receipt.data.setup_instruction.split('\n').find(line => line.startsWith('Publish full item replies with ariadne apply '));
+  const apply = receipt.data.setup_instruction.split('\n').find(line => line.startsWith('Publish full item replies with ') && line.includes(' apply --binding '));
   assert.ok(apply, 'Saved setup contains pasteable canonical apply arguments');
-  const applyArgs = apply.slice('Publish full item replies with ariadne '.length).split('. Use explicit')[0].split(/\s+/);
+  const applyArgs = apply.slice(apply.indexOf(' apply --binding ') + 1).split('. Use explicit')[0].split(/\s+/);
   const seeded = await cliRequest(configuration.cli, applyArgs, seed, env);
   assert.equal(seeded.code, 0);
   const demoProject = join(configuration.project, '..', 'canonical-demo'); await mkdir(demoProject);

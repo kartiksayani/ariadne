@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
 import { useSession, type SessionState, type SessionStore } from './data/session-store';
@@ -82,6 +82,14 @@ function SessionCenter({ application, view, graph, onReveal, revealItem, switchT
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
+  // The configured Codex socket becomes the connect dialog's default; absent when Codex is unconfigured.
+  const [codexSocket, setCodexSocket] = useState<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    application.service.codexDefaultEndpoint?.().then(path => { if (current) setCodexSocket(path); }, () => {});
+    return () => { current = false; };
+  }, [application.service]);
+  const adapterChoices = useMemo(() => adapters.map(choice => choice.adapter_id === 'codex' && codexSocket ? { ...choice, default_socket_path: codexSocket } : choice), [codexSocket]);
   const store: SessionStore | null = navigation.selectedSession();
   const sessionState = useSyncExternalStore(store?.subscribe ?? noSubscription, store?.getSnapshot ?? noSession, store?.getSnapshot ?? noSession);
   const route = sessionState?.route, key = route ? routeKey(route) : '';
@@ -239,7 +247,7 @@ function Workspace({ application }: { application: Application }) {
     if (store && event.key === '/') { event.preventDefault(); document.querySelector<HTMLInputElement>('.ref-search input')?.focus(); }
   }}>
     <ThemeAppearance theme={theme} />
-    <NavigationWorkspace store={navigation} adapterChoices={adapters} discovery={application.discovery}
+    <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery}
       context={store ? { session: sessionState?.snapshot?.session.title ?? 'Loading session', binding: bindingContext(sessionState) } : undefined}
       chrome={{ query, views: store ? ['Tree', 'Graph'].map((label, index) => ({ label, icon: index ? 'ph ph-tree-structure' : 'ph ph-list', title: label,
         background: graph === Boolean(index) ? 'color-mix(in srgb, var(--color-text) 10%, transparent)' : 'transparent', color: 'var(--color-text)',

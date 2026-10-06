@@ -1134,6 +1134,7 @@ fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay()
                 compatibility: Compatibility::Compatible,
                 availability: Availability::Available,
                 connection_state: ConnectionState::Unknown,
+                cli_invocation: "ariadne".into(),
                 setup_instruction: "Explicit owner resume guidance.".into(),
             })
         },
