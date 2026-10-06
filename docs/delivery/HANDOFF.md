@@ -86,7 +86,7 @@ Follow-ups the run surfaced:
 - D7 (UX: font, alignment, button contrast, scrollbars, raw UUIDs): task P8.3, UX review
   and theme refresh, runs after P8.1.
 - D6 discovery: a Codex thread with no messages yet may not appear in the discovery
-  list until "Refresh host sessions" (documented in README Known limits); find out
+  list until "Refresh host sessions" (documented in docs/GUIDE.md Known limits); find out
   whether the daemon lists such threads at all.
 - D8: Ariadne should send the setup instruction through `codex queue` itself instead of
   the owner pasting it.
