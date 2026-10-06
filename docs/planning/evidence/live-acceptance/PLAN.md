@@ -11,19 +11,22 @@ There is no runnable `npm run test:live` or `tests/live` suite.
 
 ## Before you approve (plain language, for the owner)
 
-**What will run.** Two scratch sessions in disposable projects: one Claude
-conversation (P7.2) and one Codex thread (P7.3). Both run on **paid host sessions**
+**What will run.** Two scratch projects per host, each with its own conversation
+(Claude, P7.2) or thread (Codex, P7.3): four scratch sessions in all. Both hosts run on **paid host sessions**
 (your Claude and Codex accounts are billed or drawn against their usage limits). At
 most **24 short paid turns in total, 12 per host**, with no retries. If a turn fails,
-it still counts and the run stops for that host instead of resending.
+it still counts and the run stops for that host instead of resending. The setup
+paste for the second project's connection is also a paid turn and counts against
+that host's 12-turn cap.
 
 **What you do by hand.**
-- Create the scratch Claude conversation and scratch Codex thread yourself, and log
-  in if the host asks. Nothing is created or resumed for you.
+- Create both scratch projects per host yourself, each with its own Claude
+  conversation or Codex thread (four in all), and log in if the host asks. Nothing is
+  created or resumed for you.
 - Approve any host trust or plugin prompt Claude shows.
 - Confirm, at the moment asked, that the named conversation or thread is idle before
   the repair step. Nobody else may stand in for this confirmation.
-- Quit and relaunch the Ariadne app when asked (twice per host).
+- Quit and relaunch the Ariadne app when asked (once per host: one quit, one relaunch).
 - For Codex, if a Codex background service is already running, decide whether it may
   be stopped and restarted so it carries the scratch Ariadne data location (see
   host prerequisites below). Stopping it can interrupt other Codex work.
@@ -35,8 +38,9 @@ approving means you allow these changes under your real home folder:
 - A link `~/.agents/skills/ariadne` (Codex skill), only if you want the skill
   observed.
 - Scratch histories: Ariadne's test sessions, items and history go in the approved
-  data folder, by default under `~/.local/share/ariadne`; the scratch Claude and Codex
-  conversations also leave history in those tools' own folders.
+  `ARIADNE_HOME` folder (default `~/.ariadne`) and in the scratch projects' own
+  `.ariadne` folders; the scratch Claude and Codex conversations also leave history
+  in those tools' own folders.
 - A restart of the Codex background service (daemon), if one is running, so it
   carries the scratch data location. This can interrupt other Codex work.
 
@@ -78,8 +82,9 @@ writing the installed hosts are Claude Code 2.1.289 and codex-cli 0.160.1; recor
 actual `--version` output and `codex app-server daemon version` JSON at run time.
 Stop before any paid turn if the final main artifact refuses an installed host
 version or shows anything other than the informational note. Approval must
-explicitly allow creation of two dedicated scratch hosts, then identify the
-newly owned Claude conversation and Codex thread before binding or paid prompts.
+explicitly allow creation of two scratch projects per host, each with its own
+conversation (Claude) or thread (Codex), then identify those newly owned
+conversations and threads before binding or paid prompts.
 Record their real IDs from the approved creation and host UI; never infer the
 owner's current conversation. IDs cannot be filled in during this preparation.
 Use **two disposable projects per host, both required**: the baseline queues,
@@ -210,8 +215,8 @@ The owner removes row 1 (`/plugin` uninstall/marketplace remove) and row 3 (remo
 the link only if it is still Ariadne's) after the run. Without an installer run
 under real `HOME` there is no write to `~/Applications` or `~/.local/bin`, and the
 Ariadne package is not placed in `~/.local/share/ariadne`; Ariadne's scratch data
-root `DATA` is written only where the approval names it (the owner may name a folder
-under `~/.local/share/ariadne`). If instead the owner approves a real-home install,
+root `DATA` is written only where the approval names it (code default `~/.ariadne`;
+each scratch project's sessions and items live in its own `.ariadne` folder). If instead the owner approves a real-home install,
 all three locations are also written (`SETUP_AND_DELIVERY.md:284-302`) and must be
 added.
 

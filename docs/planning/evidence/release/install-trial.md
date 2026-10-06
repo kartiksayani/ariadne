@@ -17,8 +17,7 @@ owner's Mac. Raw logs were not retained (ADR-0069); the lines quoted below are t
 
 - `HOME=/tmp/ariadne-install-trial.FjEw` failed: `Unsafe directory: /tmp/ariadne-install-trial.FjEw`.
 - Cause: `/tmp` is a symlink to `private/tmp` on macOS and the installer walks HOME with `O_NOFOLLOW`.
-- Retried with the `/private/tmp/...` path. Log: `install0-symlink-tmp-refusal.log`.
-
+- Retried with the `/private/tmp/...` path.
 ## Stage 1: `make install`
 
 - Preflight line: `{"preflight": {"os": "macOS", "os_version": "26.7", "architecture": "arm64", ... "rust_toolchain": "1.98.1", ...}}`.
@@ -54,7 +53,7 @@ owner's Mac. Raw logs were not retained (ADR-0069); the lines quoted below are t
 
 - rc 0, 71 s, same `Installed Ariadne 0.1.0` line and same doctor output.
 - `find` listing diffed against stage 1: identical (`FS-IDENTICAL`).
-- No "unchanged"/"nothing changes" message is printed (see README mismatches).
+- No "unchanged"/"nothing changes" message is printed (see "Observations, not blocking" below).
 
 ## Stage 5: `make uninstall`
 

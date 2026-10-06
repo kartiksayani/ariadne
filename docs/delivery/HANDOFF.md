@@ -40,8 +40,8 @@ synthetic keys do not move focus.
 - `docs/live-acceptance-plan` is published by this PR.
 - Worktrees under `.worktrees/` (preference-conflicts, host-version-tolerance,
   toolchain-minimums, doctor-first-run, release-handoff, codex-skill, readme-for-users)
-  are contained in main; keep them. Superseded stack PRs #93–#105 are closed,
-  branches kept.
+  are contained in main; keep them. Superseded stack PRs #93, #94, #97, #98, #99,
+  #101, #103, #104 and #105 are closed, branches kept.
 
 ## Known gaps, not blocking
 
