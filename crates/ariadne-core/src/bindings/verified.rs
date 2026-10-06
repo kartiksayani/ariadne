@@ -36,8 +36,10 @@ impl VerifiedHost {
                 "Verify the selected endpoint, host session and configuration.",
             ));
         }
-        if self.compatibility != Compatibility::Compatible
-            || self.protocol_major.value() != 1
+        if !matches!(
+            self.compatibility,
+            Compatibility::Compatible | Compatibility::Untested
+        ) || self.protocol_major.value() != 1
             || !self.capabilities.existing_session.supported
         {
             return Err(CoreError::new(

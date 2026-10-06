@@ -4,6 +4,7 @@
     doc = "The default library exposes no scripted fake:\n```compile_fail\nuse ariadne_agent_protocol::fake::ScriptedAdapter;\n```"
 )]
 mod dto;
+pub mod host_version;
 mod validation;
 
 #[cfg(any(test, feature = "test-support"))]

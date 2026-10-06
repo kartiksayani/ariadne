@@ -727,8 +727,62 @@ fn changed_configured_executable_symlink_is_detected() {
 }
 
 #[test]
-fn cli_and_daemon_versions_are_exact_and_never_enable_dispatch_on_mismatch() {
-    for version in ["0.160.1", "0.159.0", "not-a-version"] {
+fn newer_cli_or_daemon_is_accepted_and_marked_untested() {
+    use ariadne_agent_protocol::host_version::HostVersionStatus::{Qualified, Untested};
+    for (cli, daemon, expected) in [
+        ("0.160.0", "0.160.0", Qualified),
+        ("0.161.0", "0.161.0", Untested),
+        ("1.0.0", "1.0.0", Untested),
+        ("0.160.1", "0.160.1", Untested),
+        ("0.160.1", "0.160.0", Untested),
+        ("0.160.0", "0.160.2", Untested),
+        ("0.160.1", "0.160.2", Untested),
+    ] {
+        let user_agent = format!("codex-tui/{daemon} (Mac OS)");
+        let harness = Harness::new(move |request, _| {
+            if request["method"] == "initialize" {
+                let mut result = fixture("initialize-response.json");
+                result["userAgent"] = json!(user_agent);
+                Some(Action::Result(result))
+            } else {
+                None
+            }
+        });
+        fs::write(
+            &harness.executable,
+            format!("#!/bin/sh\nprintf 'codex-cli {cli}\\n'\n"),
+        )
+        .unwrap();
+        let reader =
+            CodexDaemonReader::open(harness.options(), harness.request().endpoint).unwrap();
+        assert_eq!(reader.host_version(), (cli, expected), "{cli}/{daemon}");
+        let notice = |product: &str, version: &str| {
+            format!("{product} {version} is newer than the tested 0.160.0; it should work, but has not been verified.")
+        };
+        let expected_notices: Vec<String> = match (cli, daemon) {
+            ("0.160.0", "0.160.0") => vec![],
+            ("0.160.1", "0.160.1") => vec![notice("Codex", "0.160.1")],
+            ("0.160.1", "0.160.0") => vec![notice("Codex", "0.160.1")],
+            ("0.161.0", "0.161.0") => vec![notice("Codex", "0.161.0")],
+            ("1.0.0", "1.0.0") => vec![notice("Codex", "1.0.0")],
+            ("0.160.0", "0.160.2") => vec![notice("Codex daemon", "0.160.2")],
+            ("0.160.1", "0.160.2") => vec![
+                notice("Codex", "0.160.1"),
+                notice("Codex daemon", "0.160.2"),
+            ],
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            reader.untested_notices(),
+            expected_notices.as_slice(),
+            "{cli}/{daemon}"
+        );
+    }
+}
+
+#[test]
+fn cli_and_daemon_below_the_minimum_never_enable_dispatch() {
+    for version in ["0.159.0", "0.159.9", "0.159.99", "0.160", "not-a-version"] {
         let harness = Harness::standard();
         fs::write(
             &harness.executable,
@@ -740,23 +794,33 @@ fn cli_and_daemon_versions_are_exact_and_never_enable_dispatch_on_mismatch() {
                 .err()
                 .unwrap();
         assert_eq!(error.code, Code::UnsupportedHostVersion);
+        if version != "not-a-version" {
+            assert!(error.message.contains("requires Codex 0.160.0 or newer"));
+        }
         assert!(harness.methods().is_empty());
     }
-    let harness = Harness::new(|request, _| {
-        if request["method"] == "initialize" {
-            let mut result = fixture("initialize-response.json");
-            result["userAgent"] = json!("codex-tui/0.161.0 (Mac OS)");
-            Some(Action::Result(result))
-        } else {
-            None
-        }
-    });
-    let error =
-        CodexHistoryClient::connect(harness.options(), harness.request(), id(BINDING), at())
-            .err()
-            .unwrap();
-    assert_eq!(error.code, Code::UnsupportedHostVersion);
-    assert_eq!(harness.methods(), ["initialize"]);
+    for agent in [
+        "codex-tui/0.159.9 (Mac OS)",
+        "codex-tui/0.159.99 (Mac OS)",
+        "codex-tui/garbage (Mac OS)",
+        "other/0.160.0 (Mac OS)",
+    ] {
+        let harness = Harness::new(move |request, _| {
+            if request["method"] == "initialize" {
+                let mut result = fixture("initialize-response.json");
+                result["userAgent"] = json!(agent);
+                Some(Action::Result(result))
+            } else {
+                None
+            }
+        });
+        let error =
+            CodexHistoryClient::connect(harness.options(), harness.request(), id(BINDING), at())
+                .err()
+                .unwrap();
+        assert_eq!(error.code, Code::UnsupportedHostVersion, "{agent}");
+        assert_eq!(harness.methods(), ["initialize"]);
+    }
 }
 
 #[test]

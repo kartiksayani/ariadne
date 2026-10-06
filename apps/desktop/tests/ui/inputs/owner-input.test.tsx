@@ -31,7 +31,7 @@ async function setup(saved: OwnerDraft[] = []) {
   session.items['2']!.options = [{ id: 'yes', label: 'Keep the design', consequence: 'Retain the current contract.', recommended: true },
     { id: 'no', label: 'Change the design', consequence: 'Review a new contract.', recommended: false }];
   const calls: OwnerMutationRequest[] = [], writes: OwnerMutationRequest[] = [];
-  let outcome: 'ok' | 'uncertain' | 'malformed' | 'error' | 'question_changed' | 'operation_reused' = 'ok', preferenceOutcome: 'ok' | 'uncertain' = 'ok', readError = false;
+  let outcome: 'ok' | 'uncertain' | 'malformed' | 'error' | 'question_changed' | 'operation_reused' = 'ok', preferenceOutcome: 'ok' | 'uncertain' = 'ok', readError = false, deleteConflicts = 0;
   let submitGate: Promise<void> | null = null;
   const transport: DesktopTransport = {
     async invoke<T>(command: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
@@ -62,6 +62,7 @@ async function setup(saved: OwnerDraft[] = []) {
       const request = structuredClone(args.request); writes.push(request);
       if (request.command.command === 'preferences_patch') {
         if (preferenceOutcome === 'uncertain') return error('commit_uncertain');
+        if (deleteConflicts > 0 && request.command.params.entries.some(entry => entry.kind === 'delete_draft')) { deleteConflicts--; prefs.revision++; return error('revision_conflict'); }
         for (const entry of request.command.params.entries) {
           if (entry.kind === 'upsert_draft') prefs.drafts = [...prefs.drafts.filter(draft => draft.op_id !== entry.draft.op_id), structuredClone(entry.draft)];
           if (entry.kind === 'delete_draft') prefs.drafts = prefs.drafts.filter(draft => draft.op_id !== entry.operation_id);
@@ -87,7 +88,7 @@ async function setup(saved: OwnerDraft[] = []) {
   const service = createDesktopService(transport), drafts = new OwnerDraftStore(service, () => uuid(++counter)), sessions = new OpenSessions(service);
   opened.push(sessions); const store = sessions.open(route); await Promise.all([store.refresh(), drafts.load()]);
   return { session, prefs, calls, writes, drafts, store, service, sessions, outcome: (value: typeof outcome) => { outcome = value; },
-    preferenceOutcome: (value: typeof preferenceOutcome) => { preferenceOutcome = value; }, unavailable: () => { readError = true; },
+    preferenceOutcome: (value: typeof preferenceOutcome) => { preferenceOutcome = value; }, unavailable: () => { readError = true; }, conflictDeletes: (count: number) => { deleteConflicts = count; },
     gate: () => { let resolve!: () => void; submitGate = new Promise<void>(done => { resolve = done; }); return resolve; },
     render: (itemId = '2', props: Partial<Parameters<typeof OwnerInput>[0]> = {}) => render(<OwnerInput drafts={drafts} session={store} itemId={itemId} {...props} />),
     restart: async () => { const restored = new OwnerDraftStore(service, () => uuid(++counter)); await restored.load(); return restored; } };
@@ -322,6 +323,33 @@ describe('owner input component and durable draft controller', () => {
     expect(value.prefs.drafts[0]?.submission_attempted).toBe(true); expect(value.calls).toHaveLength(1);
     value.preferenceOutcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Retry saving draft preferences' }));
     await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls).toHaveLength(1);
+  });
+  it('retries draft cleanup after a saved input when an interleaved navigation patch bumped the revision', async () => {
+    const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
+    fireEvent.change(editor(), { target: { value: 'Saved then conflicted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    await waitFor(() => expect(value.calls).toHaveLength(1)); value.conflictDeletes(1); await act(async () => { finish(); });
+    await screen.findByText('Saved · Queue position #4');
+    await waitFor(() => expect(value.prefs.drafts).toEqual([]));
+    expect(value.calls).toHaveLength(1); expect(value.drafts.getSnapshot().preferenceUncertain).toBe(false); expect(value.drafts.getSnapshot().error).toBeNull();
+    expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(2);
+    expect(Object.values((await value.restart()).getSnapshot().entries)).toEqual([]);
+  });
+  it('surfaces draft cleanup failure after three revision conflicts without further retries', async () => {
+    const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
+    fireEvent.change(editor(), { target: { value: 'Conflicted thrice' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    await waitFor(() => expect(value.calls).toHaveLength(1)); value.conflictDeletes(5); await act(async () => { finish(); });
+    await screen.findByText('Saved · Queue position #4');
+    await waitFor(() => expect(value.drafts.getSnapshot().error).not.toBeNull());
+    expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(3);
+    expect(value.prefs.drafts[0]?.submission_attempted).toBe(true); expect(value.calls).toHaveLength(1);
+  });
+  it('never retries cleanup on commit_uncertain and keeps the draft recoverable as uncertain', async () => {
+    const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
+    fireEvent.change(editor(), { target: { value: 'Uncertain cleanup' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    await waitFor(() => expect(value.calls).toHaveLength(1)); value.preferenceOutcome('uncertain'); await act(async () => { finish(); });
+    await screen.findByRole('button', { name: 'Retry saving draft preferences' });
+    expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(1);
+    expect(value.drafts.getSnapshot().preferenceUncertain).toBe(true); expect((await value.restart()).find(route, '2', 'answer')?.uncertain).toBe(true);
   });
   it('connects actual terminal history actions to the owner editor without replacing the retained outcome', async () => {
     const value = await setup(), routes = new RegisteredRoutes(value.service, value.sessions);

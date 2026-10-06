@@ -1,9 +1,12 @@
 //! Native provider qualification, with owned pre-ID facts and no host launch.
 use crate::{discovery::Discovery, supervisor::NativeFacts};
-use ariadne_adapter_claude::{ClaudeAdapter, ClaudeOptions, ModEvidenceSlot};
+use ariadne_adapter_claude::{
+    ClaudeAdapter, ClaudeOptions, ModEvidenceSlot, SUPPORTED_HOST_VERSION,
+};
 use ariadne_adapter_codex::{CodexAdapter, CodexDaemonReader, CodexOptions, QualifiedCodexThread};
 use ariadne_agent_protocol::{
-    Adapter, AdapterFuture, Availability, Compatibility, ConnectRequest, ConnectResult,
+    host_version::classify_host_version, Adapter, AdapterFuture, Availability, Compatibility,
+    ConnectRequest, ConnectResult,
 };
 use ariadne_core::{bindings::VerifiedHost, BindingConnectParams, CoreError, CoreErrorCode};
 use ariadne_domain::models::*;
@@ -253,7 +256,11 @@ impl ProviderFactory {
             endpoint_fingerprint: qualified.endpoint_fingerprint().clone(),
             configuration: params.configuration.clone(),
             capabilities: qualified.capabilities(),
-            compatibility: Compatibility::Compatible,
+            compatibility: classify_host_version(
+                SUPPORTED_HOST_VERSION,
+                &qualified.identity().engine_version,
+            )
+            .map_or(Compatibility::Incompatible, |status| status.compatibility()),
             availability: Availability::Available,
             connection_state: ConnectionState::Unknown,
             setup_instruction: self.instructions.claude.clone(),

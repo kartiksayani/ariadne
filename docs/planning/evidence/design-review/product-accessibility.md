@@ -124,7 +124,7 @@ number requests, remount and old/new token acknowledgment.
 Normal type/lint/CSS checks passed. Local real-browser keyboard checks passed at
 dark 1000×700, light 1600×960 and light 1000×700. Light/System samples have a
 measured minimum 4.949:1. Existing warm Chrome was used; final CI still uses the
-package-pinned Chromium. Exact pushed-head evidence will be appended.
+package-pinned Chromium. Exact pushed-head evidence is in "Final CI evidence" below.
 
 The reviewed native-parent repair `cc11095` is merged with the composed journey
 and accessibility helper preserved. Its launcher-fixture integration requires the
@@ -135,8 +135,15 @@ the full composed P4.8 native acceptance.
 Required pushed-head checks: `npm run capture:reference` (both themes/sizes,
 immutable source gallery + ordinary captures), application tests/weighted coverage,
 and the existing real native smoke/release checks selected by CI. Results and
-artifact URLs will be appended when available. P4.8 is not claimed complete until
-all original criteria and independent review are proved.
+artifact URLs are in "Final CI evidence" below.
 
 MCP/Seezo remained disabled under the explicit owner waiver. Organization security
 guidance was not fetched; no organization approval is claimed.
+
+## Final CI evidence (2026-10-06)
+
+Merged head `87aa6b4`; squash-merge commit `f020bbe` (PR #106). CI run:
+https://github.com/kartiksayani/ariadne/actions/runs/37396006826
+(artifact `quality-evidence-37396006826-1`). The native accessibility journey
+(`apps/desktop/tests/e2e/accessibility.spec.mjs`) and the reference captures
+passed in that run.

@@ -1,9 +1,12 @@
 use super::{bounded, capacity, invalid, AnnouncementAck, SessionAnnouncement};
 use crate::control::BindingScope;
 use ariadne_adapter_claude::{
-    ClaudeOptions, LoadedModIdentity, ModEvidenceSlot, QualifiedClaudeHost,
+    ClaudeOptions, LoadedModIdentity, ModEvidenceSlot, QualifiedClaudeHost, SUPPORTED_HOST_VERSION,
 };
-use ariadne_agent_protocol::{Availability, Compatibility, EndpointRef};
+use ariadne_agent_protocol::{
+    host_version::{classify_host_version, HostVersionStatus},
+    Availability, Compatibility, EndpointRef,
+};
 use ariadne_core::{CoreError, CoreErrorCode, SessionRef};
 use ariadne_domain::models::{Freshness, UtcMillis};
 use std::{
@@ -143,7 +146,7 @@ impl Discovery {
             host_version: announcement.host_version.clone(),
             observed_at,
             freshness: Freshness::Fresh,
-            compatibility: Compatibility::Unknown,
+            compatibility: unbound_compatibility(&announcement.host_version),
             availability: Availability::Unknown,
             binding,
             loaded: false,
@@ -287,7 +290,7 @@ impl Discovery {
                     slot.clear().map_err(CoreError::from)?;
                 }
                 if let Some(current) = state.candidates.get_mut(&key) {
-                    current.compatibility = Compatibility::Unknown;
+                    current.compatibility = unbound_compatibility(&current.host_version);
                     current.availability = Availability::Unknown;
                 }
             }
@@ -380,7 +383,9 @@ impl Discovery {
             .candidates
             .get_mut(&key)
             .expect("checked candidate under the same lock");
-        current.compatibility = Compatibility::Compatible;
+        current.compatibility =
+            classify_host_version(SUPPORTED_HOST_VERSION, &current.host_version)
+                .map_or(Compatibility::Incompatible, |status| status.compatibility());
         current.availability = Availability::Available;
         Ok(qualified)
     }
@@ -456,7 +461,11 @@ impl Discovery {
         state.slots.clear();
         for candidate in state.candidates.values_mut() {
             candidate.freshness = Freshness::Unknown;
-            candidate.compatibility = Compatibility::Unknown;
+            candidate.compatibility = if candidate.adapter_id == "codex" {
+                Compatibility::Unknown
+            } else {
+                unbound_compatibility(&candidate.host_version)
+            };
             candidate.availability = Availability::Unknown;
         }
         Ok(())
@@ -469,6 +478,16 @@ impl Discovery {
                 "Refresh discovery; retained candidates never authorize a send.",
             )
         })
+    }
+}
+/// Compatibility of a Claude row before (or after a failed) bind: a version
+/// newer than the minimum is `Untested`, the minimum itself stays unqualified
+/// (`Unknown`), and a version below the minimum or unparsable is `Incompatible`.
+fn unbound_compatibility(host_version: &str) -> Compatibility {
+    match classify_host_version(SUPPORTED_HOST_VERSION, host_version) {
+        Some(HostVersionStatus::Untested) => Compatibility::Untested,
+        Some(HostVersionStatus::Qualified) => Compatibility::Unknown,
+        None => Compatibility::Incompatible,
     }
 }
 fn expire(state: &mut State) {
@@ -758,6 +777,30 @@ mod tests {
         let snap = d.snapshot().unwrap();
         assert_eq!(snap.candidates[0].freshness, Freshness::Unknown);
         assert_eq!(snap.candidates[0].observed_at, time());
+    }
+    #[test]
+    fn wake_rederives_claude_compatibility_from_the_host_version() {
+        let root = tempfile::tempdir().unwrap();
+        let d = discovery();
+        for (id, version, expected) in [
+            ("newer", "2.1.290", Compatibility::Untested),
+            ("older", "2.1.286", Compatibility::Incompatible),
+            ("garbled", "dev-build", Compatibility::Incompatible),
+        ] {
+            let mut a = announcement(root.path());
+            a.external_session_id = id.into();
+            a.host_version = version.into();
+            let _ = admit(&d, a);
+            d.refresh_after_wake().unwrap();
+            let snap = d.snapshot().unwrap();
+            let row = snap
+                .candidates
+                .iter()
+                .find(|c| c.external_session_id == id)
+                .unwrap();
+            assert_eq!(row.compatibility, expected, "{version}");
+            assert_eq!(row.availability, Availability::Unknown);
+        }
     }
     #[test]
     fn expired_candidates_release_only_the_tracked_slot_reference() {

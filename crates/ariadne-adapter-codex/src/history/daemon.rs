@@ -7,9 +7,20 @@ pub struct CodexDaemonReader {
     pub(super) configured_socket: PathBuf,
     pub(super) executable: ExecutableIdentity,
     pub(super) options: CodexOptions,
+    pub(super) host_version: String,
+    pub(super) host_status: HostVersionStatus,
+    untested_notices: Vec<String>,
     usable: bool,
 }
 impl CodexDaemonReader {
+    /// One owner-visible notice per side (CLI or daemon) that is newer than the baseline.
+    pub fn untested_notices(&self) -> &[String] {
+        &self.untested_notices
+    }
+    /// Observed CLI version and whether it (and the daemon) is the qualified baseline.
+    pub fn host_version(&self) -> (&str, HostVersionStatus) {
+        (&self.host_version, self.host_status)
+    }
     pub(crate) fn has_executable_identity(&self, expected: &ExecutableIdentity) -> bool {
         &self.executable == expected
     }
@@ -29,7 +40,7 @@ impl CodexDaemonReader {
     ) -> Result<Self, AdapterError> {
         let configured_socket = options.endpoint_path(&endpoint)?;
         let executable = ExecutableIdentity::read(&options.executable)?;
-        executable.version_before(deadline)?;
+        let (host_version, cli_status) = executable.version_before(deadline)?;
         let socket = SocketIdentity::read(&configured_socket)?;
         let stream = socket.connect(deadline)?;
         socket.verify_peer(&stream)?;
@@ -59,10 +70,39 @@ impl CodexDaemonReader {
             },
             deadline,
         )?;
-        if !supported_daemon(&initialized.user_agent) || initialized.platform_family != "unix" {
-            return Err(error(
-                Code::UnsupportedHostVersion,
-                "Initialized Codex daemon must match the supported CLI 0.160.0 pair.",
+        let (daemon_version, daemon_status) = daemon_version_status(&initialized.user_agent)
+            .filter(|_| initialized.platform_family == "unix")
+            .ok_or_else(|| {
+                error(
+                    Code::UnsupportedHostVersion,
+                    &format!(
+                        "Initialized Codex daemon must be a unix codex-tui, and Ariadne requires Codex {}.",
+                        accepted_range(SUPPORTED_CODEX_VERSION)
+                    ),
+                )
+            })?;
+        let host_status = if cli_status == HostVersionStatus::Qualified
+            && daemon_status == HostVersionStatus::Qualified
+        {
+            HostVersionStatus::Qualified
+        } else {
+            HostVersionStatus::Untested
+        };
+        let mut untested_notices = Vec::new();
+        if cli_status == HostVersionStatus::Untested {
+            untested_notices.push(untested_notice(
+                "Codex",
+                &host_version,
+                SUPPORTED_CODEX_VERSION,
+            ));
+        }
+        if daemon_status == HostVersionStatus::Untested
+            && !(cli_status == HostVersionStatus::Untested && daemon_version == host_version)
+        {
+            untested_notices.push(untested_notice(
+                "Codex daemon",
+                &daemon_version,
+                SUPPORTED_CODEX_VERSION,
             ));
         }
         rpc.notify_initialized()?;
@@ -72,6 +112,9 @@ impl CodexDaemonReader {
             configured_socket,
             executable,
             options,
+            host_version,
+            host_status,
+            untested_notices,
             usable: true,
         };
         reader.verify_identity()?;

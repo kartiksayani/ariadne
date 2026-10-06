@@ -132,10 +132,15 @@ impl Fixture {
         }
     }
     fn publish(&self) {
+        self.publish_engine(SUPPORTED_HOST_VERSION);
+    }
+    fn publish_engine(&self, engine_version: &str) {
+        let mut identity = self.identity();
+        identity.engine_version = engine_version.into();
         self.slot
             .publish(
                 ModEvidence::received(
-                    self.identity(),
+                    identity,
                     UtcMillis::new("2026-10-04T00:00:00.123Z").unwrap(),
                 )
                 .unwrap(),
@@ -238,7 +243,7 @@ fn clearing_retained_evidence_during_qualification_emits_unknown_without_renewin
 
 #[test]
 fn original_expired_connect_deadline_starts_no_resource_probe() {
-    let fixture = Fixture::new("2.1.287 (Claude Code)");
+    let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
     fixture.publish();
     let marker = fixture._root.path().join("inspected");
     executable_file(
@@ -488,22 +493,87 @@ fn fresh_actual_sdk_identity_and_exact_resources_qualify_pull_presence_without_e
     assert!(observation.source.is_none());
     assert_ne!(cleared.events[0].event_id, first.events[0].event_id);
 }
+fn probe_request() -> ProbeRequest {
+    ProbeRequest {
+        endpoint: endpoint(),
+        configuration: config(),
+    }
+}
 #[test]
-fn observed_newer_cli_is_incompatible_and_never_inherits_the_old_sdk_baseline() {
+fn newer_patch_cli_and_matching_sdk_is_accepted_and_marked_untested() {
+    let fixture = Fixture::new("2.1.289");
+    fixture.publish_engine("2.1.289");
+    let adapter = fixture.adapter();
+    let result = wait(adapter.probe(probe_request())).unwrap();
+    assert_eq!(result.compatibility, Compatibility::Untested);
+    assert_eq!(result.availability, Availability::Available);
+    assert_eq!(result.host_version.as_deref(), Some("2.1.289"));
+    assert_eq!(
+        result.setup_steps,
+        vec!["Claude Code 2.1.289 is newer than the tested 2.1.287; it should work, but has not been verified."]
+    );
+    wait(adapter.connect(connect())).unwrap();
+}
+#[test]
+fn baseline_cli_probes_compatible_with_no_untested_notice() {
+    let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+    fixture.publish();
+    let result = wait(fixture.adapter().probe(probe_request())).unwrap();
+    assert_eq!(result.compatibility, Compatibility::Compatible);
+    assert!(result.setup_steps.is_empty());
+}
+#[test]
+fn newer_cli_never_inherits_an_older_sdk_baseline() {
     let fixture = Fixture::new("2.1.289");
     fixture.publish();
     let adapter = fixture.adapter();
-    let result = wait(adapter.probe(ProbeRequest {
-        endpoint: endpoint(),
-        configuration: config(),
-    }))
-    .unwrap();
+    let result = wait(adapter.probe(probe_request())).unwrap();
     assert_eq!(result.compatibility, Compatibility::Incompatible);
     assert_eq!(result.host_version.as_deref(), Some("2.1.289"));
     assert_eq!(
         wait(adapter.connect(connect())).unwrap_err().code,
         AdapterErrorCode::UnsupportedHostVersion
     );
+}
+#[test]
+fn newer_minor_or_major_cli_and_matching_sdk_is_accepted_and_marked_untested() {
+    for version in ["2.2.0", "3.0.0"] {
+        let fixture = Fixture::new(version);
+        fixture.publish_engine(version);
+        let adapter = fixture.adapter();
+        let result = wait(adapter.probe(probe_request())).unwrap();
+        assert_eq!(result.compatibility, Compatibility::Untested, "{version}");
+        assert_eq!(result.host_version.as_deref(), Some(version));
+        assert_eq!(
+            result.setup_steps,
+            vec![format!("Claude Code {version} is newer than the tested 2.1.287; it should work, but has not been verified.")]
+        );
+        wait(adapter.connect(connect())).unwrap();
+    }
+}
+#[test]
+fn older_patch_minor_or_major_cli_is_rejected_with_the_minimum_requirement() {
+    for version in ["2.1.286", "2.0.999", "1.99.999"] {
+        let fixture = Fixture::new(version);
+        fixture.publish_engine(version);
+        let adapter = fixture.adapter();
+        let result = wait(adapter.probe(probe_request())).unwrap();
+        assert_eq!(
+            result.compatibility,
+            Compatibility::Incompatible,
+            "{version}"
+        );
+        assert!(result.setup_steps[0].contains("requires Claude Code 2.1.287 or newer"));
+        let error = wait(adapter.connect(connect())).unwrap_err();
+        assert_eq!(
+            error.code,
+            AdapterErrorCode::UnsupportedHostVersion,
+            "{version}"
+        );
+        assert!(error
+            .message
+            .contains("requires Claude Code 2.1.287 or newer"));
+    }
 }
 #[test]
 fn manifest_descriptor_resource_or_sdk_version_mismatch_requires_reload_not_connected() {

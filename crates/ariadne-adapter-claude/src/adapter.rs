@@ -6,7 +6,10 @@ use crate::{
     probe::{self, ClaudeOptions, SUPPORTED_HOST_VERSION},
     worker::Worker,
 };
-use ariadne_agent_protocol::*;
+use ariadne_agent_protocol::{
+    host_version::{accepted_range, classify_host_version, untested_notice, HostVersionStatus},
+    *,
+};
 use ariadne_domain::models::{ConnectionState, ExecutionState, Freshness, PresenceSource};
 use sha2::{Digest, Sha256 as Hasher};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -86,9 +89,20 @@ impl State {
     fn probe(&self, request: ProbeRequest, deadline: Instant) -> Result<ProbeResult, AdapterError> {
         configuration(&request.endpoint, &request.configuration)?;
         let version = probe::version(&self.options, deadline)?;
-        if version != SUPPORTED_HOST_VERSION {
-            return Ok(ProbeResult { host_version: Some(version), compatibility: Compatibility::Incompatible, availability: Availability::Unknown, setup_steps: vec!["Use the qualified Claude Code 2.1.287 baseline; other versions require conformance and live existing-session qualification.".into()] });
-        }
+        let Some(status) = classify_host_version(SUPPORTED_HOST_VERSION, &version) else {
+            let step = format!(
+                "Claude Code {version} is not supported; Ariadne requires Claude Code {}.",
+                accepted_range(SUPPORTED_HOST_VERSION)
+            );
+            return Ok(ProbeResult {
+                host_version: Some(version),
+                compatibility: Compatibility::Incompatible,
+                availability: Availability::Unknown,
+                setup_steps: vec![step],
+            });
+        };
+        let notice = (status == HostVersionStatus::Untested)
+            .then(|| untested_notice("Claude Code", &version, SUPPORTED_HOST_VERSION));
         let Some(evidence) = self.evidence.snapshot()? else {
             return Ok(unknown(version, "Load/reload the installed Ariadne Mod in the selected conversation; a fresh native-validated SDK identity announcement is required."));
         };
@@ -105,9 +119,9 @@ impl State {
                 }
                 Ok(ProbeResult {
                     host_version: Some(version),
-                    compatibility: Compatibility::Compatible,
+                    compatibility: status.compatibility(),
                     availability: Availability::Available,
-                    setup_steps: vec![],
+                    setup_steps: notice.into_iter().collect(),
                 })
             }
             Err(cause) if cause.code == AdapterErrorCode::IncompatibleAdapter => Ok(ProbeResult {
