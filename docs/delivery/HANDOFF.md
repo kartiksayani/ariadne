@@ -63,4 +63,12 @@ synthetic keys do not move focus.
    histories, Codex daemon restart). The owner summary is at the top of
    [PLAN.md](../planning/evidence/live-acceptance/PLAN.md).
 3. P8.1.
-4. README screenshot: replace the mockup with a real capture once installed.
+4. README screenshot is a real capture of the demo session (`docs/planning/assets/
+   screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
+   `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,
+   `apps/desktop/wdio.screenshot.conf.mjs`, `apps/desktop/tests/e2e/screenshot.spec.mjs`):
+   it reuses the native e2e build, moves the window onto the larger display through
+   the Accessibility API (the driver clamps `setWindowSize` to the built-in screen) and
+   runs in about 10 s. Commit it if a second capture is ever needed. The demo data shows
+   a raw agent id in the filter chips and "host unavailable" banners; polish the demo
+   data if that bothers users.
