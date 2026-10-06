@@ -8,8 +8,10 @@ Claude Code delivery (owner decision, 2026-10-06): the maintainer runs on
 **Fable 5.1**; independent reviewers and critical work use **Opus 5.5**;
 implementers, test runs and documentation use **Sonnet 5.5**. At most seven
 delegates run concurrently. The Codex mapping above still applies to Codex sessions.
-CI is the default proof because it is free; local builds and native runs cost
-time and tokens, so use them only when debugging demands evidence CI cannot give.
+Owner ruling, 2026-10-06: run the local native journey
+(`env -u NODE_USE_ENV_PROXY node scripts/run-native-e2e.mjs`, about 8 minutes) and
+the relevant local checks first, fix everything, then push once so CI (35–55
+minutes) runs once per head.
 
 Read CONTRIBUTING, BUILD_HANDOFF, PERSONAL_RELEASE and ROADMAP. Fetch origin/main,
 inspect worktrees and current task PRs, and preserve unrelated edits/history.
@@ -43,7 +45,7 @@ independently reviewed, run full required CI on each integrated head, and merge
 parents first. Coordinate parent updates before workers publish; review conflicts
 and interacting upstream changes. The owner requested use of PR stacks; the
 2026-10-05 checkpoint adopts this ordering to avoid restarting every independent
-PR after each main update. Runs37316408492 and37322016757 took47m01s and44m44s;
+PR after each main update. Runs 37316408492 and 37322016757 took 47m01s and 44m44s;
 validating successive integrated heads in parallel removes repeated full rounds
 without weakening checks or current-main qualification.
 
