@@ -622,3 +622,191 @@ fn codex_polling_starts_closed_and_wake_reuses_owned_runtime_without_signalling_
     UnixStream::connect(&path).unwrap();
     server.join().unwrap();
 }
+
+fn codex_row_compatibility(version: &str) -> Compatibility {
+    let root = home();
+    let project = tempfile::tempdir().unwrap();
+    let executable = root.path().join("codex");
+    fs::write(
+        &executable,
+        format!("#!/bin/sh\nprintf 'codex-cli {version}\\n'\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = root.path().join("daemon.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stop_server = stopped.clone();
+    let cwd = project.path().to_str().unwrap().to_owned();
+    let user_agent = format!("codex-tui/{version} (Mac OS 26.7.0; arm64)");
+    let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../contracts/providers/codex/0.160.0/fixtures");
+    let fixture = move |name: &str| -> serde_json::Value {
+        serde_json::from_slice(&fs::read(fixtures.join(name)).unwrap()).unwrap()
+    };
+    let server = std::thread::spawn(move || {
+        let mut connections = vec![];
+        while !stop_server.load(Ordering::SeqCst) {
+            let stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(2));
+                    continue;
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            let (stop, user_agent, cwd, fixture) = (
+                stop_server.clone(),
+                user_agent.clone(),
+                cwd.clone(),
+                fixture.clone(),
+            );
+            connections.push(std::thread::spawn(move || {
+                let Ok(mut ws) = tungstenite::accept(stream) else {
+                    return;
+                };
+                while !stop.load(Ordering::SeqCst) {
+                    let text = match ws.read() {
+                        Ok(tungstenite::Message::Text(text)) => text,
+                        Ok(_) => continue,
+                        Err(tungstenite::Error::Io(e))
+                            if matches!(
+                                e.kind(),
+                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                            ) =>
+                        {
+                            continue
+                        }
+                        Err(_) => break,
+                    };
+                    let request: serde_json::Value = serde_json::from_str(text.as_str()).unwrap();
+                    let result = match request["method"].as_str().unwrap() {
+                        "initialized" => continue,
+                        "initialize" => {
+                            let mut result = fixture("initialize-response.json");
+                            result["userAgent"] = user_agent.clone().into();
+                            result
+                        }
+                        "thread/loaded/list" => fixture("loaded-response.json"),
+                        "thread/read" => {
+                            let mut result = fixture("read-response.json");
+                            result["thread"]["cwd"] = cwd.clone().into();
+                            result
+                        }
+                        other => panic!("unexpected provider call: {other}"),
+                    };
+                    let reply = serde_json::json!({"id": request["id"], "result": result});
+                    if ws
+                        .send(tungstenite::Message::Text(reply.to_string().into()))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }));
+        }
+        for connection in connections {
+            connection.join().unwrap();
+        }
+    });
+    let rt = runtime();
+    let d = Discovery::new(Arc::new(time), None);
+    let poller = rt.block_on(async {
+        DiscoveryPoller::start(
+            d.clone(),
+            vec![CodexEndpoint {
+                options: CodexOptions::new(executable, root.path().into()).unwrap(),
+                endpoint: EndpointRef::UnixSocket {
+                    path: path.to_str().unwrap().into(),
+                },
+            }],
+        )
+        .unwrap()
+    });
+    poller.set_connection_ui_open(true);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let compatibility = loop {
+        if let Some(candidate) = d.snapshot().unwrap().candidates.first() {
+            assert_eq!(candidate.host_version, version);
+            break candidate.compatibility;
+        }
+        assert!(std::time::Instant::now() < deadline, "no discovery row");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    rt.block_on(async { tokio::time::timeout(Duration::from_secs(2), poller.stop()).await })
+        .unwrap()
+        .unwrap();
+    stopped.store(true, Ordering::SeqCst);
+    server.join().unwrap();
+    compatibility
+}
+
+#[test]
+fn failed_bind_attempt_keeps_the_rule_derived_row_compatibility() {
+    for (version, expected) in [
+        ("2.1.286", Compatibility::Incompatible),
+        ("2.1.287", Compatibility::Unknown),
+        ("2.2.0", Compatibility::Untested),
+    ] {
+        let files = ClaudeFiles::new();
+        let home = home();
+        let rt = runtime();
+        let d = Discovery::new(Arc::new(time), None);
+        let core = Arc::new(ScriptedCoreService::new([]));
+        let server = Running::start(&rt, home.path(), core, Some(d.clone()));
+        let mut a = files.announcement();
+        a.host_version = version.into();
+        rt.block_on(call(home.path().into(), request(a))).unwrap();
+        let selected = d.snapshot().unwrap().candidates.remove(0);
+        // Break the installed bytes so the bind attempt fails for a reason unrelated to version.
+        fs::write(files.loaded.join("hooks/discovery.js"), "// changed").unwrap();
+        assert!(rt
+            .block_on(d.qualify_claude(selected, files.options.clone(), ModEvidenceSlot::default()))
+            .is_err());
+        assert_eq!(
+            d.snapshot().unwrap().candidates[0].compatibility,
+            expected,
+            "{version}"
+        );
+        server.stop(&rt);
+    }
+}
+
+#[test]
+fn codex_discovery_rows_surface_untested_for_a_newer_patch_only() {
+    assert_eq!(codex_row_compatibility("0.160.1"), Compatibility::Untested);
+    assert_eq!(codex_row_compatibility("0.161.0"), Compatibility::Untested);
+    assert_eq!(codex_row_compatibility("1.0.0"), Compatibility::Untested);
+    assert_ne!(codex_row_compatibility("0.160.0"), Compatibility::Untested);
+    assert_eq!(codex_row_compatibility("0.160.0"), Compatibility::Unknown);
+}
+
+#[test]
+fn claude_announcement_rows_surface_untested_for_a_newer_patch_and_incompatible_for_rejected() {
+    for (version, expected) in [
+        ("2.1.287", Compatibility::Unknown),
+        ("2.1.289", Compatibility::Untested),
+        ("2.2.0", Compatibility::Untested),
+        ("3.0.0", Compatibility::Untested),
+        ("2.1.286", Compatibility::Incompatible),
+        ("2.0.999", Compatibility::Incompatible),
+        ("02.1.287", Compatibility::Incompatible),
+    ] {
+        let home = home();
+        let root = tempfile::tempdir().unwrap();
+        let d = Discovery::new(Arc::new(time), None);
+        let core = Arc::new(ScriptedCoreService::new([]));
+        let rt = runtime();
+        let server = Running::start(&rt, home.path(), core, Some(d.clone()));
+        let mut a = announcement(root.path());
+        a.host_version = version.into();
+        rt.block_on(call(home.path().into(), request(a))).unwrap();
+        let snapshot = d.snapshot().unwrap();
+        assert_eq!(snapshot.candidates[0].compatibility, expected, "{version}");
+        server.stop(&rt);
+    }
+}

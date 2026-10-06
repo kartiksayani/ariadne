@@ -154,12 +154,21 @@ export class OwnerDraftStore {
     return saved;
   }
   private async writePreferences(entries: PreferencesPatchEntry[]): Promise<boolean> {
-    try {
-      const preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
-      this.pendingPreference = { session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(), params: { expected_preferences_revision: preferences.revision, entries: structuredClone(entries) } } };
-      this.pendingPreferenceEntries = entries;
-      return await this.commitPreferences();
-    } catch (error: unknown) { this.publish({ error: failure(error) }); return false; }
+    // A definite revision_conflict means the patch was not applied (an interleaved
+    // navigation patch bumped the revision). Re-read and re-issue the same draft
+    // bookkeeping entries under a fresh patch op_id, at most three attempts. Draft
+    // entries are keyed by draft op_id, so replay is idempotent. input_submit is
+    // never involved and commit_uncertain is never retried.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
+        this.pendingPreference = { session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(), params: { expected_preferences_revision: preferences.revision, entries: structuredClone(entries) } } };
+        this.pendingPreferenceEntries = entries;
+        if (await this.commitPreferences()) return true;
+        const reason = this.state.error;
+        if (attempt >= 3 || this.pendingPreference || !(reason instanceof CoreFailure) || reason.error.code !== 'revision_conflict') return false;
+      } catch (error: unknown) { this.publish({ error: failure(error) }); return false; }
+    }
   }
   private async commitPreferences(): Promise<boolean> {
     if (!this.pendingPreference) return true;

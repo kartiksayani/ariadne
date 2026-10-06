@@ -50,6 +50,8 @@ pub struct ProbeResult {
 #[serde(rename_all = "snake_case")]
 pub enum Compatibility {
     Compatible,
+    /// Newer than the minimum (qualified baseline) version: accepted, not verified.
+    Untested,
     Incompatible,
     Unknown,
 }

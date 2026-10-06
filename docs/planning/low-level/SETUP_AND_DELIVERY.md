@@ -160,8 +160,9 @@ P6 renders plugin/hooks/installed.js as a static ESM export of
 The source artifact exports null. The Mod uses supported plugin-local static
 imports and SDK argv/stdin calls, with no Node/filesystem/environment/PATH/cache
 fallback. Missing or mismatched resources give actionable local status and no
-connect/poll. Exact supported SDK engine2.1.287 remains required; observed CLI
-2.1.289 remains unqualified until new-version conformance and live existing-session proof.
+connect/poll. The SDK engine must equal the CLI version, 2.1.287 or newer; a
+newer version such as 2.1.289 or 2.2.0 is accepted and shown as untested until
+conformance and live existing-session proof exist (ADR-0071).
 
 Connect uses canonical owner receipts plus scoped BindingSummary to show the
 actual connection state. It does not invent canonical Connected from receipts
@@ -282,7 +283,12 @@ owner action.
 
 ## 7. Build and personal install
 
-Use the installed Rust and Node toolchains. Commit `Cargo.lock` and
+Use the installed Rust and Node toolchains. The install preflight requires
+minimum versions (Node 22.23.2 on the 22 line, 24.15.0 on the 24 line or 26+;
+npm 10.9.8; Rust 1.98.1), accepts any newer version in those ranges, records the versions actually used in the receipt, and rejects only
+older or unparsable ones (ADR-0072). It prefers the checkout's pinned Rust
+toolchain when already installed, otherwise uses the owner's default; it never
+downloads a toolchain. CI keeps exact pins for reproducibility. Commit `Cargo.lock` and
 `package-lock.json` and use locked dependencies. Generate schemas, DTOs, and
 rules from their authored sources and check generated files for drift. Node is a
 build dependency only; production does not bundle a language runtime.

@@ -636,6 +636,24 @@ fn retained_capacity_is_simultaneous_and_never_discards_attempt_certainty() {
 }
 
 #[test]
+fn newer_patch_cli_probes_untested_with_owner_visible_notice() {
+    let h = Harness::new("success");
+    fs::write(&h.executable, "#!/bin/sh\nprintf 'codex-cli 0.160.1\\n'\n").unwrap();
+    let adapter = h.adapter();
+    let probe = block_on(adapter.probe(ProbeRequest {
+        endpoint: h.connect().endpoint,
+        configuration: h.connect().configuration,
+    }))
+    .unwrap();
+    assert_eq!(probe.compatibility, Compatibility::Untested);
+    assert_eq!(probe.host_version.as_deref(), Some("0.160.1"));
+    assert_eq!(
+        probe.setup_steps,
+        vec!["Codex 0.160.1 is newer than the tested 0.160.0; it should work, but has not been verified."]
+    );
+}
+
+#[test]
 fn idle_disconnect_probe_and_same_identity_reconnect_are_usable() {
     let h = Harness::new("success");
     let adapter = h.adapter();

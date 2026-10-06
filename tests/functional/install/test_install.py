@@ -594,29 +594,64 @@ def shutil_error():
 
 
 class BuildTests(unittest.TestCase):
-    def test_preflight_records_exact_supported_tools_and_rejects_unsupported(self):
-        answers = {"node": "v22.23.2", "npm": "10.9.8", "rustc": "rustc 1.98.1 (fixture)", "cargo": "cargo 1.98.1 (fixture)",
-                   "xcode-select": "/Xcode", "xcrun": "/SDK"}
+    def preflight_with(self, answers, pinned_installed=True):
+        def fake(args, **kwargs):
+            if args[0] == "rustup":
+                if args[1:3] == ["run", installer.RUST_VERSION] and not pinned_installed:
+                    raise subprocess.CalledProcessError(1, args)
+                if args[1] == "show":
+                    return "stable-aarch64-apple-darwin (default)\n"
+                return answers[args[-2]]
+            return answers[args[0]]
         with patch.object(installer.platform, "system", return_value="Darwin"), \
                 patch.object(installer.platform, "mac_ver", return_value=("13.7", (), "")), \
                 patch.object(installer.platform, "machine", return_value="arm64"), \
-                patch.object(installer, "run", side_effect=lambda args, **kwargs: answers[args[3] if args[0] == "rustup" else args[0]]):
-            self.assertEqual(installer.preflight()["architecture"], "arm64")
-            answers["npm"] = "wrong"
-            with self.assertRaisesRegex(installer.InstallError, "pinned npm"):
-                installer.preflight()
+                patch.object(installer, "run", side_effect=fake):
+            return installer.preflight()
+
+    def test_preflight_accepts_minimums_and_newer_and_records_actual_versions(self):
+        base = {"node": "v22.23.2", "npm": "10.9.8", "rustc": "rustc 1.98.1 (fixture)", "cargo": "cargo 1.98.1 (fixture)",
+                "xcode-select": "/Xcode", "xcrun": "/SDK"}
+        facts = self.preflight_with(base)
+        self.assertEqual((facts["architecture"], facts["rust_toolchain"]), ("arm64", "1.98.1"))
+        newer = {**base, "node": "v24.15.1", "npm": "11.0.0", "rustc": "rustc 1.99.0 (fixture)", "cargo": "cargo 1.99.0 (fixture)"}
+        facts = self.preflight_with(newer, pinned_installed=False)
+        self.assertEqual((facts["node"], facts["npm"], facts["rustc"], facts["cargo"]),
+                         ("v24.15.1", "11.0.0", "rustc 1.99.0 (fixture)", "cargo 1.99.0 (fixture)"))
+        self.assertEqual(facts["rust_toolchain"], "stable-aarch64-apple-darwin")
+        patch_newer = {**base, "node": "v22.24.0", "npm": "10.9.9"}
+        self.assertEqual(self.preflight_with(patch_newer)["node"], "v22.24.0")
+        for node in ("v22.23.2", "v22.30.0", "v24.15.0", "v26.0.0"):
+            self.assertEqual(self.preflight_with({**base, "node": node})["node"], node)
+
+    def test_preflight_rejects_older_or_unparsable_tools_plainly(self):
+        base = {"node": "v22.23.2", "npm": "10.9.8", "rustc": "rustc 1.98.1 (fixture)", "cargo": "cargo 1.98.1 (fixture)",
+                "xcode-select": "/Xcode", "xcrun": "/SDK"}
+        node_msg = "Ariadne needs Node 22.23.2 or newer on the 22 line, 24.15.0 or newer on the 24 line, or 26 and later"
+        cases = [("node", "v22.23.1", node_msg + "; found v22.23.1"),
+                 ("node", "v20.0.0", node_msg),
+                 ("node", "v23.5.0", node_msg),
+                 ("node", "v24.14.0", node_msg),
+                 ("node", "v25.1.0", node_msg),
+                 ("npm", "wrong", "Ariadne needs npm 10.9.8 or newer; found wrong"),
+                 ("npm", "10.9.7", "Ariadne needs npm 10.9.8 or newer"),
+                 ("rustc", "rustc 1.97.0 (fixture)", "Ariadne needs Rust 1.98.1 or newer"),
+                 ("cargo", "garbage", "Ariadne needs Rust 1.98.1 or newer")]
+        for name, value, message in cases:
+            with self.subTest(name=name, value=value), self.assertRaisesRegex(installer.InstallError, message):
+                self.preflight_with({**base, name: value})
         with patch.object(installer.platform, "system", return_value="Linux"):
             with self.assertRaisesRegex(installer.InstallError, "requires macOS"):
                 installer.preflight()
 
     def test_build_uses_locks_generation_checks_and_clean_production_environment(self):
-        with patch.object(installer, "preflight", return_value={"architecture": "arm64"}), \
+        with patch.object(installer, "preflight", return_value={"architecture": "arm64", "rust_toolchain": "stable-test"}), \
                 patch.object(installer, "run") as run, \
                 patch.dict(os.environ, {"VITE_ARIADNE_E2E": "1", "RUSTFLAGS": "--bad", "TAURI_CONFIG": "bad"}), \
                 contextlib.redirect_stdout(io.StringIO()):
             artifacts, facts = installer.build()
         self.assertEqual(artifacts, installer.ROOT / "target/personal-install/release")
-        self.assertEqual(facts, {"architecture": "arm64"})
+        self.assertEqual(facts["architecture"], "arm64")
         calls = run.call_args_list
         self.assertEqual(calls[0].args[0], ["npm", "ci", "--ignore-scripts", "--engine-strict"])
         self.assertEqual(len(calls), 6)
@@ -625,7 +660,7 @@ class BuildTests(unittest.TestCase):
             self.assertNotIn("RUSTFLAGS", call.kwargs["env"])
             self.assertNotIn("VITE_ARIADNE_E2E", call.kwargs["env"])
             self.assertEqual(call.kwargs["env"]["RUSTUP_AUTO_INSTALL"], "0")
-            self.assertEqual(call.kwargs["env"]["RUSTUP_TOOLCHAIN"], "1.98.1")
+            self.assertEqual(call.kwargs["env"]["RUSTUP_TOOLCHAIN"], "stable-test")
         self.assertIn("--no-default-features", calls[-1].args[0])
         self.assertEqual(calls[-1].kwargs["env"]["MACOSX_DEPLOYMENT_TARGET"], "13.0")
 
@@ -650,10 +685,11 @@ class BuildTests(unittest.TestCase):
                     patch.object(installer.platform, "mac_ver", return_value=("13.7", (), "")), \
                     patch.object(installer.platform, "machine", return_value="arm64"), \
                     patch.object(installer, "run", side_effect=probe):
-                with self.assertRaisesRegex(installer.InstallError, "Install/select Rust 1.98.1"):
+                with self.assertRaisesRegex(installer.InstallError, "Ariadne needs Rust 1.98.1 or newer"):
                     installer.preflight()
-            self.assertEqual(probes[-1], ["rustup", "run", "1.98.1", "rustc", "--version"])
-            self.assertNotIn("--install", probes[-1])
+            self.assertEqual(probes[2], ["rustup", "run", "1.98.1", "rustc", "--version"])
+            for probe_args in probes:
+                self.assertNotIn("--install", probe_args)
             self.assertIn("not installed", "".join(errors))
             self.assertNotIn("syncing channel", "".join(errors))
             self.assertNotIn("downloading", "".join(errors))

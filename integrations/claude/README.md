@@ -2,8 +2,11 @@
 
 This plugin uses the Claude Code **2.1.287** SDK proven by the preserved
 [POC](https://github.com/kartiksayani/ariadne/tree/a5e306f/poc/claude-mods).
-A read-only installed CLI observation returned **2.1.289** during implementation;
-that version has no compatibility proof here and remains rejected.
+A read-only installed CLI observation returned **2.1.289** during implementation.
+Per [ADR-0071](../../docs/adr/ADR-0071-require-minimum-host-version.md),
+2.1.287 is the qualified baseline and the minimum required version; any newer
+version (such as 2.1.289 or 2.2.0) is accepted but marked untested; only older or
+unparsable versions are rejected.
 
 The entry is `plugin/hooks/hooks.json` → `register.js`. Static plugin-local ESM
 imports are supported by the captured SDK. The production source imports no Node
@@ -56,6 +59,6 @@ Native compatibility/normalization follows ADR0037: actual SDK plugin{name,root}
 immutable imported descriptor and exact-root native resource/version checks. There is
 no SDK plugin.version property. Lifecycle timestamps are canonical ISO UTC milliseconds;
 the same source-backed fixtures are consumed by Rust. Missing fresh native announcement
-is Unknown/unavailable;2.1.289 remains unqualified. P3.7 intake/P6 installation and the
+is Unknown/unavailable; 2.1.289 is accepted as untested (ADR-0071). P3.7 intake/P6 installation and the
 production owner/report/Core join remain pending. PR54/ADR0038 tracks the optional
 existing-session selector and structured context handoff; it does not transfer host memory.
