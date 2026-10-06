@@ -114,7 +114,7 @@ export function setup(helperPath, savedBinding = async () => {}) {
     binding = selected;
     connectRequest = null;
     disconnectRequest = null;
-    return {binding,instruction:data.setup_instruction,status:projection};
+    return {binding,status:projection};
   }
   async function disconnect($) {
     if (!binding) throw new ModError('No registered Ariadne binding is connected locally.');

@@ -18,7 +18,7 @@ describe('installed owner helper setup', () => {
     const result = await owner.connect(h.$,ids.session);
     expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
     expect(result.binding.session).toEqual({project_id:ids.project,session_id:ids.session});
-    expect(result.instruction).toBe('Use published Ariadne domain commands.');
+    expect(result).not.toHaveProperty('instruction');
     expect(h.prompts).toEqual([]);
   });
   it('accepts the shipped setup instruction and refuses one past the core limit', async () => {
@@ -31,7 +31,7 @@ describe('installed owner helper setup', () => {
           capabilities:capabilities(),setup_instruction:instruction}}) : undefined});
       return setup(descriptor.helperPath).connect(h.$);
     };
-    expect((await connectWith(shipped)).instruction).toBe(shipped);
+    expect((await connectWith(shipped)).binding.binding_id).toBe(ids.binding);
     await expect(connectWith('x'.repeat(64 * 1024 + 1))).rejects.toThrow('exact canonical saved receipt');
   });
   it('rejects an explicit-target receipt mismatch before status, preserving the pending body', async () => {

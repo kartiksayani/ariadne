@@ -9,6 +9,8 @@ referenced items and revisions through the installed `ariadne` CLI (`ariadne rea
 exist only if the owner configured them. Use explicit item references and preserve full substantive replies.
 
 <!-- only:claude -->
+`/ariadne-connect` prints the binding and generation for this session; the rules
+and request shapes are in this skill, below.
 After an explicit `/ariadne-connect <session-id>`, use the validated registered
 project/session tuple to read that session's structured topics, items, questions,
 answers and results. Summarize completed work, remaining work and missing context;

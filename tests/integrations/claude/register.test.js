@@ -61,7 +61,7 @@ describe('supported Mod entry convention', () => {
       expect(bound.at(-1)).toEqual(bound[0]);
       published = true;
       const retried = await hooks.get('ariadne-connect')(h.$,{args:ids.session});
-      expect(JSON.parse(retried.text.split('\n')[0]).status).toMatchObject({connection_state:'connected'});
+      expect(retried.text).toContain('connection connected');
       expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
       expect(h.calls.filter(call => call.argv[2] === 'report')).toEqual([]);
       expect(h.prompts).toEqual([]);
@@ -171,8 +171,12 @@ describe('supported Mod entry convention', () => {
     const h = host();const hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);
     const result = await hooks.get('ariadne-connect')(h.$,{args:` ${ids.session} `});
-    const [encoded,...guidance] = result.text.split('\n');
-    expect(JSON.parse(encoded).instruction).toBe('Use published Ariadne domain commands.');
+    const [summary,...guidance] = result.text.split('\n');
+    expect(summary).toContain(`session ${ids.session} in project ${ids.project}`);
+    expect(summary).toContain(`binding ${ids.binding}, generation ${ids.generation}`);
+    expect(summary).toContain('[ARIADNE_INPUT:');
+    expect(result.text).not.toContain('Use published Ariadne domain commands.');
+    expect(result.text).not.toContain('"instruction"');
     expect(guidance.join('\n')).toContain(`project ${ids.project}, session ${ids.session}`);
     expect(guidance.join('\n')).toContain('respect cancelled work');
     expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => JSON.parse(call.options.stdin).command.params.existing_session_id)).toEqual([ids.session]);
@@ -197,7 +201,8 @@ describe('supported Mod entry convention', () => {
     expect(h.commands[0].argumentHint).toBe('[session-id]');
     expect(h.timer().ms).toBe(1000);
     const result = await hooks.get('ariadne-connect')(h.$);
-    expect(JSON.parse(result.text).binding.external_session_id).toBe('original-host-session');
+    expect(result.text).toMatch(/^Ariadne connected: session /);
+    expect(result.text).not.toContain('{');
     expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.connection_state).toBe('connected');
     h.timer().callback();
     // Explicit shutdown drains the in-flight bounded helper operation.
