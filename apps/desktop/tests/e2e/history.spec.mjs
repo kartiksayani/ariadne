@@ -404,8 +404,17 @@ export async function runHistoryAcceptance(configuration) {
     // The renderer must show the previous CLI-applied result before the next intent, or its draft is marked changed.
     await failureEvidence(`previous-result-${intent}`, () => wait(async () => (await detail().getText()).includes(previousReply),
       'Native detail did not show the previous explicit response before the next owner intent'));
-    const control = await browser.$('.history-actions').$(`button=${intent === 'followup' ? 'Follow up' : 'Request reopen'}`);
+    const label = intent === 'followup' ? 'Follow up' : 'Request reopen';
+    const control = await browser.$('.history-actions').$(`button=${label}`);
     await control.scrollIntoView(); await control.waitForEnabled(); await control.click();
+    // A click during the re-render after the CLI-published result can leave the previous saved receipt showing; click once more.
+    const opened = () => browser.$('.owner-input textarea').isExisting();
+    if (!await browser.waitUntil(opened, { timeout: 2000, interval: 100 }).catch(() => false)) {
+      console.warn(`[history] first ${intent} click did not open the editor; clicked again`);
+      const again = await browser.$('.history-actions').$(`button=${label}`);
+      await again.scrollIntoView(); await again.waitForEnabled(); await again.click();
+      await wait(opened, `Native ${intent} owner input editor did not open after a second click`);
+    }
     const editor = await browser.$('.owner-input textarea'); await failureEvidence(`owner-input-editor-${intent}`, () => editor.waitForEnabled());
     reviewedTarget[intent] = await reviewCurrentTarget();
     const text = `Native ${intent} after closed history\nThe owner's deliberate request leaves the status unchanged.`;

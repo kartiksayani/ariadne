@@ -23,6 +23,9 @@ independent review. Historical ADRs and delivery records remain preserved.
 sequencing, restoring foundation/dependency intent and contract-ready parallel
 modules while retaining its tooling, quality and review decisions.
 
+[ADR-0078](ADR-0078-parallel-quality-stages.md) splits the `quality` workflow into
+parallel `static`, `coverage` and `native` jobs behind the same required `quality` check.
+
 [ADR-0060](ADR-0060-own-desktop-integration-seams.md) names desktop integration and
 shared-file owners and keeps remaining delivery vertical on the assembled app.
 

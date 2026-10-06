@@ -13,15 +13,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: quality
+  stage:
+    name: quality / ${{ matrix.stage }}
     runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [static, coverage, native]
     env:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       CARGO_TARGET_DIR: "${{ github.workspace }}/target/native-e2e"
       BASE_SHA: ${{ github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
+      STAGE: ${{ matrix.stage }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,8 +37,9 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22.23.2"
-          package-manager-cache: false
-      - name: Check the pushed branch head
+          package-manager-cache: true
+      - name: Resolve the check scope
+        id: scope
         shell: bash
         run: |
           set -euo pipefail
@@ -41,35 +47,77 @@ jobs:
           if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then args+=(--merge-base); fi
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then args+=(--full); fi
           scope=$(python scripts/check-commit.py "${args[@]}" --print-scope)
-          if [[ "$scope" == application* ]]; then
-            # Isolate partial runner state; fail before expensive reference captures.
-            RUSTUP_HOME=$(mktemp -d "$RUNNER_TEMP/ariadne-rustup.XXXXXX")
-            export RUSTUP_HOME
-            rustup toolchain install 1.98.1 --profile minimal --component cargo --component rustc --component rust-std --component rustfmt --component clippy --component llvm-tools-preview
-            cargo --version
-            rustc --version
-            cargo install cargo-llvm-cov --version 0.9.1 --locked
-          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "CHECK_ARGS=${args[*]}" >> "$GITHUB_ENV"
+      - name: Install the Rust toolchain
+        if: contains(steps.scope.outputs.scope, 'application')
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Isolate partial runner state; the path must be stable because rust-cache hashes RUST*/CARGO* env values into its key.
+          RUSTUP_HOME="$RUNNER_TEMP/ariadne-rustup"
+          mkdir -p "$RUSTUP_HOME"
+          export RUSTUP_HOME
+          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
+          rustup toolchain install 1.98.1 --profile minimal --component cargo --component rustc --component rust-std --component rustfmt --component clippy --component llvm-tools-preview
+          cargo --version
+          rustc --version
+      - name: Restore cargo-llvm-cov
+        id: llvm-cov-cache
+        if: contains(steps.scope.outputs.scope, 'application') && matrix.stage != 'static'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: ${{ runner.os }}-cargo-llvm-cov-0.9.1
+      - name: Install cargo-llvm-cov
+        if: contains(steps.scope.outputs.scope, 'application') && matrix.stage != 'static' && steps.llvm-cov-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Cache the Rust build
+        if: contains(steps.scope.outputs.scope, 'application')
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.stage }}
+          workspaces: ". -> target/native-e2e"
+          cache-on-failure: true
+      - name: Check the pushed branch head
+        if: contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static'
+        shell: bash
+        env:
+          SCOPE: ${{ steps.scope.outputs.scope }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$CHECK_ARGS"
           npm install --global npm@10.9.8
           python -m venv .venv-quality
           .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
           npm ci --ignore-scripts --engine-strict
-          .venv-quality/bin/python scripts/check-commit.py "${args[@]}"
-          if [[ "$scope" == *" reference=true" ]]; then
+          .venv-quality/bin/python scripts/check-commit.py "${args[@]}" --stage "$STAGE"
+          if [[ "$STAGE" == "static" && "$SCOPE" == *" reference=true" ]]; then
             export PLAYWRIGHT_BROWSERS_PATH="$GITHUB_WORKSPACE/target/reference-browser"
             node node_modules/playwright/cli.js install chromium
             npm run capture:reference
           fi
       - name: Preserve native and coverage evidence
-        if: always()
+        if: always() && (contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stage }}
           path: coverage/
           retention-days: 14
           if-no-files-found: ignore
+  quality:
+    name: quality
+    needs: [stage]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Record result
         if: always()
         env:
-          JOB_STATUS: ${{ job.status }}
-        run: echo "Quality result for $GITHUB_SHA — $JOB_STATUS. Pushed branch head must pass." >> "$GITHUB_STEP_SUMMARY"
+          STAGE_RESULT: ${{ needs.stage.result }}
+        run: |
+          echo "Quality result for $GITHUB_SHA — $STAGE_RESULT. Pushed branch head must pass." >> "$GITHUB_STEP_SUMMARY"
+          [[ "$STAGE_RESULT" == "success" ]]
