@@ -1,5 +1,16 @@
 import { bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, prepared, reportReceipt } from './contracts.js';
 
+// 'exact' when text is the payload, 'framed' when the payload sits intact as whole
+// lines inside host framing text, otherwise null.
+function carried(text, captured) {
+  const payload = captured.formatted_payload;
+  if (text === payload) return 'exact';
+  const at = text.indexOf(captured.wire_marker);
+  if (at === -1 || (at !== 0 && text[at - 1] !== '\n') || !text.startsWith(payload, at)) return null;
+  const end = at + payload.length;
+  return end === text.length || text[end] === '\n' ? 'framed' : null;
+}
+
 // One captured claim and one serialized reporter. Core remains the sole queue authority.
 export function claimLoop(helperPath, binding) {
   let active = null;
@@ -13,6 +24,7 @@ export function claimLoop(helperPath, binding) {
   let blocked = null;
   let capturedSubmission = null;
   let disconnected = false;
+  let observedForm = false;
   const pending = [];
   const route = ['--binding',binding.binding_id,'--generation',binding.generation];
   function log($, message) { $.ui.log(`Ariadne paused: ${message}`); }
@@ -101,7 +113,7 @@ export function claimLoop(helperPath, binding) {
       // Do not await: the SDK promise can settle before or after turn.start.
       // All callbacks close over this original binding and captured attempt.
       try {
-        void $.prompt.submit({text:captured.formatted_payload})
+        void $.prompt.submit({text:captured.formatted_payload,asUser:true})
           .then(result => settled($,captured,result))
           .catch(() => uncertain($,captured,'Prompt submission failed with unknown delivery; reconcile the original attempt.'))
           .finally(() => { captured.settled = true; });
@@ -129,16 +141,21 @@ export function claimLoop(helperPath, binding) {
   function complete($, event) { return observe(() => observeComplete($,event)); }
   async function observeStart($, event) {
     const captured = active;
+    // The payload digest was verified by prepared() at claim time; the host may
+    // frame the text, so a whole-text digest is not meaningful here.
     if (!captured || captured.turnId !== null || !bounded(event.turnId)
-      || typeof event.text !== 'string'
-      || !event.text.startsWith(`${captured.wire_marker}\n`)
-      || event.text !== captured.formatted_payload
-      || await hash(event.text) !== captured.payload_sha256) return;
+      || typeof event.text !== 'string') return;
+    const form = carried(event.text,captured);
+    if (form === null) return;
     if (await $.session.id() !== binding.external_session_id) {
       await uncertain($,captured,'Session identity changed before matching turn.start; recover the original attempt.');
       return;
     }
     captured.turnId = event.turnId;
+    if (!observedForm) {
+      observedForm = true;
+      $.ui.log(`Ariadne: turn.start carried the ${form} payload (${event.text.length} chars).`);
+    }
     captured.startReporting = (async () => {
       if (!captured.accepted) {
         captured.accepted = true;

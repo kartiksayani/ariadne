@@ -506,7 +506,9 @@ fn installed_existing_session_claim_callbacks_and_result_join_in_both_orders() {
         let issued = fixture.read_messages(&binding, &generation).to_string();
         assert!(issued.contains("First explicit installed owner input"));
         assert!(!issued.contains("Later unissued secret owner input"));
-        fixture.sdk.command(json!({"action":"event","name":"turn.start","event":{"turnId":"original-installed-turn","text":payload}}));
+        // Claude Code frames a plugin-submitted prompt; correlation must survive the frame.
+        let framed = format!("The ariadne plugin sent a message:\n{payload}\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.");
+        fixture.sdk.command(json!({"action":"event","name":"turn.start","event":{"turnId":"original-installed-turn","text":framed}}));
         fixture.sdk.command(json!({"action":"settle","index":0}));
         let finish = json!({"action":"event","name":"turn.complete","event":{"turnId":"original-installed-turn","reason":"answer","isAborted":false,"answer":"Visible diagnostics only"}});
         if result_first {
