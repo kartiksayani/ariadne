@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-06
+# Ariadne handoff — 2026-10-07
 
 Claude Code session is the maintainer (Fable 5.1); reviewers Opus 5.5, implementers
 Sonnet 5.5, at most seven delegates. The owner approved autonomous delivery, pushes
@@ -8,10 +8,10 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 6a0adec (#114). Roadmap: 46/49 on main, 48/50 once this docs PR merges (P7.2, P7.3, task P8.2 added).** Remaining: P8.1, then P8.2 (UX review and theme refresh).
+**Main: dbd8dfc (#117). Roadmap: 49/51 on main once #118 lands.** Open tasks: P8.1 (release evidence, done in #118), P8.2 (prebuilt alpha release package, merged in #117; tag v0.1.0-alpha.1 pushed, release workflow in progress), P8.3 (UX review and theme refresh, held for the owner).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-Open PRs: this docs PR (#115, branch `docs/live-evidence`) and the Codex onboarding PR (branch `fix/codex-onboarding`, in progress). Duplicate and
+Open PRs: #118 (`docs/release-evidence`, P8.1) and #119 (`ci/parallel-quality`, CI stages split and reopen flake fix). The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.
@@ -81,12 +81,23 @@ join orders, missing-result/uncertain recovery, same-project/cross-project isola
 Follow-ups the run surfaced:
 
 - D1-D6 (fresh-thread connect, RPC error text, setup instruction path and
-  `ARIADNE_HOME`, connect card, `question_changed` message, discovery dialog) are tracked
-  for the fix/codex-onboarding PR (branch in progress).
-- D7 (UX: font, alignment, button contrast, scrollbars, raw UUIDs): task P8.2, UX review
+  `ARIADNE_HOME`, connect card, `question_changed` message, discovery dialog) were fixed
+  and merged in #116; docs/GUIDE.md documents the fixed behaviour.
+- D7 (UX: font, alignment, button contrast, scrollbars, raw UUIDs): task P8.3, UX review
   and theme refresh, runs after P8.1.
+- D6 discovery: a Codex thread with no messages yet may not appear in the discovery
+  list until "Refresh host sessions" (documented in docs/GUIDE.md Known limits); find out
+  whether the daemon lists such threads at all.
 - D8: Ariadne should send the setup instruction through `codex queue` itself instead of
   the owner pasting it.
+- Release: `release.yml` tag pattern should match `v<version>` or `v<version>-*`
+  exactly.
+- Release: `.github/workflows/release.yml` release-notes text still says "right-click
+  the app and choose Open"; fix it to the "System Settings → Privacy & Security → Open
+  Anyway" wording in the next application-scope PR, and edit the published
+  v0.1.0-alpha.1 notes to match.
+- Install: `install.sh`'s same-version guard also blocks an identical re-install;
+  uninstall first.
 
 ## Known gaps, not blocking
 
@@ -102,12 +113,10 @@ Follow-ups the run surfaced:
 
 ## Next steps
 
-1. P8.1 (owner-home install, if wanted, writes under the real home: Claude plugin
-   registration, `~/.agents/skills/ariadne`, scratch histories, Codex daemon restart;
-   see the owner summary at the top of
-   [PLAN.md](../planning/evidence/live-acceptance/PLAN.md)).
-2. P8.2 UX review and theme refresh (owner ruling 2026-10-06; see tasks.json).
-3. README screenshot is a real capture of the demo session (`docs/planning/assets/
+1. P8.2 prebuilt alpha release package (merged as #117); the remaining step is marking
+   it done once the release workflow has published. P8.3 UX review and theme refresh
+   (held for the owner; owner ruling 2026-10-06; see tasks.json).
+2. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
    `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,
    `apps/desktop/wdio.screenshot.conf.mjs`, `apps/desktop/tests/e2e/screenshot.spec.mjs`):

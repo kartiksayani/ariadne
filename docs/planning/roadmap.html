@@ -110,10 +110,10 @@
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-06T15:00:00Z",
-    "headline": "46/49 merged on main; 48/50 once PR #115 lands (it closes P7.2 and P7.3 and adds P8.2). Both live core loops were proven on 2026-10-06 (Claude and Codex); remaining coverage rows are deferred by owner ruling. Remaining: P8.1 release evidence, then P8.2 UX review and theme refresh.",
+    "updated_at": "2026-10-07T00:00:00Z",
+    "headline": "49/51 merged on main once #118 lands; P8.2 alpha package merged in #117, release workflow in progress; P8.3 UX review held for the owner.",
     "notes": [
-      "P7.3 live Codex run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md). Codex onboarding defects D1-D6 are tracked for the fix/codex-onboarding PR (branch in progress); D7 is task P8.2; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
+      "P7.3 live Codex run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md). Codex onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7), and docs/GUIDE.md documents the fixed behaviour; D7 is task P8.3; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
       "P7.2 live Claude run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md, ADR-0076, PR #114); remaining coverage rows deferred by owner ruling 2026-10-06. Follow-ups: queued inputs stay bound to a retired binding after rebind; no confirm-completed resolution for committed-result/unknown-turn attempts; a session with a Disconnected binding cannot be closed; delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill; rules source.md should say option consequence is required; Claude Mod uses undocumented $.plugin.root.",
       "PR #107 (agent rule sheet) merged to main as db352e5. It is not a roadmap item.",
       "PR #106 carried the whole former stack (#94-#103) plus the Codex skill and the preferences-conflict fix; squash-merged as f020bbe at head 87aa6b4.",
@@ -1936,7 +1936,7 @@
         "prs": [
           "https://github.com/kartiksayani/ariadne/pull/115"
         ],
-        "note": "Core loop proved live on 2026-10-06 through the Codex native queue (pause, two queued inputs, resume, FIFO delivery via codex queue, turn correlation, explicit results committed, item statuses updated; 5 Codex turns). Deferred: five inputs (two were run), closed-item message, disconnect/relaunch, duplicates, both join orders, missing-result/uncertain recovery, same-project/cross-project isolation, npm run test:live (script does not exist); reason: owner ruling 2026-10-06: no further paid host turns; core loops proven. Onboarding defects D1-D6 are tracked for the fix/codex-onboarding PR (branch in progress). Evidence: docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md."
+        "note": "Core loop proved live on 2026-10-06 through the Codex native queue (pause, two queued inputs, resume, FIFO delivery via codex queue, turn correlation, explicit results committed, item statuses updated; 5 Codex turns). Deferred: five inputs (two were run), closed-item message, disconnect/relaunch, duplicates, both join orders, missing-result/uncertain recovery, same-project/cross-project isolation, npm run test:live (script does not exist); reason: owner ruling 2026-10-06: no further paid host turns; core loops proven. Onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7); docs/GUIDE.md documents the fixed behaviour. Evidence: docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md."
       },
       "completion": {
         "pr_url": "https://github.com/kartiksayani/ariadne/pull/115"
@@ -1972,14 +1972,58 @@
         "Clean-checkout make install, packaged offline/live/native acceptance and make uninstall; record exact version/platform/source/artifact evidence."
       ],
       "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/118"
+      },
       "progress": {
-        "state": "queued",
-        "prs": [],
-        "note": "P7.2 and P7.3 live acceptance are done (core loops proven 2026-10-06); this task is next."
+        "state": "done",
+        "prs": [
+          118
+        ],
+        "note": "Evidence: MATRIX rows, manual checklist (owner fills date/tester), clean install at 1e8d9e7, visitor README + docs/GUIDE.md."
       }
     },
     {
       "id": "P8.2",
+      "title": "Prebuilt alpha release package",
+      "phase": "M8",
+      "depends_on": [],
+      "paths": [
+        "scripts/install/install.py",
+        "Makefile",
+        ".github/workflows/release.yml",
+        "README.md",
+        "docs/planning/PERSONAL_RELEASE.md",
+        "tests/functional/install/test_install.py"
+      ],
+      "spec": [
+        "docs/planning/PERSONAL_RELEASE.md"
+      ],
+      "acceptance": [
+        "`make package` builds the same artifacts as `make install` and assembles a tarball holding Ariadne.app, both helpers, the build facts, install.py and install.sh.",
+        "`install.py install --package <dir>` installs a prebuilt package without Node, Rust or Xcode, keeps every ownership and uninstall guarantee, and `make install` from source is unchanged.",
+        "A `v*` tag publishes the tarball as a GitHub pre-release after an isolated install, doctor and uninstall proof on the runner.",
+        "README offers the download first and the source build second, states the build is unsigned, and does not promise signing."
+      ],
+      "checks": [
+        "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree",
+        "rtk proxy make test-install",
+        "Isolated: extract the tarball under /private/tmp, HOME=<fresh> ./install.sh, ariadne doctor --json, install.py uninstall"
+      ],
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": null
+      },
+      "progress": {
+        "state": "in_progress",
+        "prs": [
+          117
+        ],
+        "note": "PR #117 merged (main dbd8dfc); tag v0.1.0-alpha.1 pushed, release workflow run in progress"
+      }
+    },
+    {
+      "id": "P8.3",
       "title": "UX review and theme refresh",
       "phase": "M8",
       "depends_on": [
@@ -2003,7 +2047,7 @@
       "progress": {
         "state": "queued",
         "prs": [],
-        "note": "Runs after P8.1 per owner ruling 2026-10-06."
+        "note": "Held: the owner will steer the UX review and brainstorm; runs after P8.1 per owner ruling 2026-10-06."
       }
     }
   ]
