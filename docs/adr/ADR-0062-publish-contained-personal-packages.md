@@ -6,7 +6,8 @@ Status: Accepted
 
 P6.4 stages the release app, CLI, MCP and canonical integration bundle together
 under `~/.local/share/ariadne/versions/<version>`. The real app lives there;
-`~/Applications/Ariadne.app` is an owned relative symlink through `current`.
+`~/Applications/Ariadne.app` is an owned relative symlink through `current`
+(superseded by [ADR-0080](ADR-0080-app-bundle-in-applications.md): it is now a real copy).
 The existing v1 `install.json` still supplies its stable absolute app path,
 matching version and schema. Atomically replacing the exact contained `current`
 symlink switches the app and helpers together. Different same-version bytes,

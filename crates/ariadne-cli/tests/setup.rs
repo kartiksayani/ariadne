@@ -357,3 +357,237 @@ fn setup_text_prints_literal_host_commands_and_json_uses_canonical_envelope() {
     );
     assert!(String::from_utf8(output).unwrap().contains("--project"));
 }
+
+mod providers_file {
+    use super::*;
+    use ariadne_cli::setup::providers::Environment;
+    use serde_json::{json, Value};
+    use std::path::PathBuf;
+
+    struct Fixture {
+        profile: tempfile::TempDir,
+        version: PathBuf,
+        data: PathBuf,
+        stable: PathBuf,
+        bin: PathBuf,
+    }
+    fn fixture() -> Fixture {
+        let profile = tempfile::tempdir().unwrap();
+        let version = super::version(profile.path());
+        let bin = profile.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        Fixture {
+            data: profile.path().join(".ariadne"),
+            stable: profile.path().join("current/integrations"),
+            version,
+            bin,
+            profile,
+        }
+    }
+    fn tool(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+    impl Fixture {
+        fn environment(&self) -> Environment {
+            Environment {
+                path: Some(self.bin.clone().into_os_string()),
+                codex_home: Some(self.profile.path().join(".codex")),
+            }
+        }
+        fn run(&self, args: &[&str]) -> Result<Value, ariadne_core::CoreError> {
+            ariadne_cli::setup::execute_with_environment(
+                args,
+                false,
+                &self.data,
+                &self.version,
+                &self.stable,
+                &self.environment(),
+            )
+        }
+        fn text(&self, args: &[&str]) -> (i32, String) {
+            let mut output = Vec::new();
+            let mut errors = Vec::new();
+            let code = ariadne_cli::setup::run_with_environment(
+                args,
+                false,
+                &self.data,
+                &self.version,
+                &self.stable,
+                &self.environment(),
+                &mut output,
+                &mut errors,
+            );
+            (code, String::from_utf8(output).unwrap())
+        }
+        fn file(&self) -> Value {
+            serde_json::from_slice(&fs::read(self.data.join("providers.json")).unwrap()).unwrap()
+        }
+    }
+
+    #[test]
+    fn setup_resolves_codex_on_path_and_writes_a_private_atomic_file() {
+        let f = fixture();
+        let codex = tool(&f.bin, "codex");
+        let result = f.run(&["--agent", "codex"]).unwrap();
+        let path = f.data.join("providers.json");
+        assert_eq!(result["providers"]["file"], json!(path));
+        assert_eq!(
+            result["providers"]["recorded"][0]["executable"],
+            json!(codex)
+        );
+        assert_eq!(
+            f.file(),
+            json!({"schema_version":1,"codex":{
+                "executable":codex,
+                "home":f.profile.path().join(".codex")}})
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&f.data).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let leftovers: Vec<_> = fs::read_dir(&f.data)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(leftovers, ["providers.json"]);
+    }
+
+    #[test]
+    fn claude_setup_records_nothing_and_both_records_only_codex() {
+        let f = fixture();
+        tool(&f.bin, "claude");
+        let result = f.run(&["--agent", "claude"]).unwrap();
+        assert!(result["providers"].is_null());
+        assert!(!f.data.exists());
+        let (code, text) = f.text(&["--agent", "claude"]);
+        assert_eq!(code, 0);
+        assert!(!text.contains("Recorded") && !text.contains("Quit and reopen"));
+        let codex = tool(&f.bin, "codex");
+        f.run(&["--agent", "both"]).unwrap();
+        let file = f.file();
+        assert_eq!(file["codex"]["executable"], json!(codex));
+        assert!(file.get("claude").is_none());
+    }
+
+    #[test]
+    fn claude_bin_is_no_longer_a_setup_flag() {
+        let f = fixture();
+        let claude = tool(&f.bin, "claude");
+        assert!(f
+            .run(&[
+                "--agent",
+                "claude",
+                "--claude-bin",
+                claude.to_str().unwrap()
+            ])
+            .is_err());
+    }
+
+    #[test]
+    fn explicit_codex_bin_wins_over_path_updates_in_place_and_is_validated() {
+        let f = fixture();
+        tool(&f.bin, "codex");
+        let other = f.profile.path().join("other");
+        fs::create_dir(&other).unwrap();
+        let explicit = tool(&other, "codex");
+        f.run(&[
+            "--agent",
+            "codex",
+            "--codex-bin",
+            explicit.to_str().unwrap(),
+        ])
+        .unwrap();
+        assert_eq!(f.file()["codex"]["executable"], json!(explicit));
+        f.run(&["--agent", "codex"]).unwrap();
+        assert_eq!(f.file()["codex"]["executable"], json!(f.bin.join("codex")));
+        for args in [
+            vec!["--agent", "codex", "--codex-bin", "relative/codex"],
+            vec!["--agent", "codex", "--codex-bin", "/absent/codex"],
+            vec![
+                "--agent",
+                "claude",
+                "--codex-bin",
+                explicit.to_str().unwrap(),
+            ],
+            vec!["--agent", "codex", "--codex-bin"],
+        ] {
+            assert!(f.run(&args).is_err(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn a_path_symlink_is_recorded_as_found_not_canonicalized() {
+        let f = fixture();
+        let real = f.profile.path().join("real");
+        fs::create_dir(&real).unwrap();
+        let target = tool(&real, "codex-real");
+        symlink(&target, f.bin.join("codex")).unwrap();
+        f.run(&["--agent", "codex"]).unwrap();
+        assert_eq!(f.file()["codex"]["executable"], json!(f.bin.join("codex")));
+    }
+
+    #[test]
+    fn a_missing_codex_is_reported_without_writing_and_setup_still_succeeds() {
+        let f = fixture();
+        let result = f.run(&["--agent", "codex"]).unwrap();
+        assert_eq!(result["providers"]["written"], false);
+        assert_eq!(
+            result["providers"]["not_recorded"][0]["reason"],
+            "No `codex` on PATH; run setup again with --codex-bin /absolute/path"
+        );
+        assert!(!f.data.exists());
+        assert!(!result["host_commands"].as_array().unwrap().is_empty());
+        let (code, text) = f.text(&["--agent", "codex"]);
+        assert_eq!(code, 0);
+        assert!(
+            text.contains("No `codex` on PATH; run setup again with --codex-bin /absolute/path\n")
+        );
+        assert!(text
+            .lines()
+            .last()
+            .unwrap()
+            .starts_with("Quit and reopen Ariadne"));
+    }
+
+    #[test]
+    fn text_output_names_the_recorded_path_and_the_file() {
+        let f = fixture();
+        let codex = tool(&f.bin, "codex");
+        let (code, text) = f.text(&["--agent", "codex"]);
+        assert_eq!(code, 0);
+        assert!(text.contains(&format!("Recorded Codex at {}\n", codex.display())));
+        assert!(text.contains(&format!(
+            "Provider paths file: {}\n",
+            f.data.join("providers.json").display()
+        )));
+        assert!(text.lines().last().unwrap().contains("reopen Ariadne"));
+    }
+
+    #[test]
+    fn a_symlinked_unsafe_or_malformed_existing_file_is_refused_and_preserved() {
+        let f = fixture();
+        tool(&f.bin, "codex");
+        f.run(&["--agent", "codex"]).unwrap();
+        let file = f.data.join("providers.json");
+        let original = fs::read(&file).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(f.run(&["--agent", "codex"]).is_err());
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&file, b"{broken").unwrap();
+        assert!(f.run(&["--agent", "codex"]).is_err());
+        assert_eq!(fs::read(&file).unwrap(), b"{broken");
+        fs::remove_file(&file).unwrap();
+        let elsewhere = f.profile.path().join("elsewhere.json");
+        fs::write(&elsewhere, &original).unwrap();
+        symlink(&elsewhere, &file).unwrap();
+        assert!(f.run(&["--agent", "codex"]).is_err());
+        assert_eq!(fs::read(&elsewhere).unwrap(), original);
+    }
+}

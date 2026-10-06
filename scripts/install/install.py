@@ -207,9 +207,108 @@ SKILL_LINK = ".agents/skills/ariadne"
 INTEGRATION_ROOTS = ("rules", "claude-mod", "codex-skills")
 
 
+APP_PATH = "Applications/Ariadne.app"
+# ADR-0062 layout (inventory_version 1): a symlink through `current`. Finder, Spotlight and
+# Launchpad ignore it (ADR-0080), so it is only recognised to migrate or uninstall it.
+LEGACY_APP_TARGET = "../.local/share/ariadne/current/Ariadne.app"
+
+
+def app_inventory(app):
+    """Inventory of an app copy, keyed like the `Ariadne.app/` subset of a package inventory."""
+    result = {}
+    def visit(path):
+        for child in sorted(path.iterdir()):
+            if child.is_dir() and not child.is_symlink():
+                visit(child)
+            else:
+                result[f"Ariadne.app/{child.relative_to(app)}"] = record(child, app)
+    visit(app)
+    return result
+
+
+def bundle_files(files):
+    return {name: item for name, item in files.items() if name.startswith("Ariadne.app/")}
+
+
+def receipts(root, home, versions_fd):
+    """Every valid package receipt; unverifiable versions are skipped, never trusted."""
+    found = []
+    for name in sorted(os.listdir(versions_fd)):
+        if name.startswith("."):
+            continue
+        try:
+            found.append(descriptor(root / "versions" / name, home))
+        except (InstallError, OSError, ValueError):
+            continue
+    return found
+
+
+def app_state(home, known):
+    """Classify ~/Applications/Ariadne.app: absent, link (old layout), copy (ours) or None (not provably ours)."""
+    path = home / APP_PATH
+    if not exists(path):
+        return "absent"
+    if path.is_symlink():
+        owned = os.readlink(path) == LEGACY_APP_TARGET and any(
+            item["owned_links"].get(APP_PATH) == LEGACY_APP_TARGET for item in known)
+        return "link" if owned else None
+    if not path.is_dir():
+        return None
+    try:
+        seen = app_inventory(path)
+    except (InstallError, OSError):
+        return None
+    # Receipts of inventory_version 1 predate owned_app; the bytes are the proof for them.
+    claims = (item for item in known if item.get("owned_app", True))
+    return "copy" if any(bundle_files(item["owned_files"]) == seen for item in claims) else None
+
+
+def discard(parent_fd, name):
+    """Remove a path this run created inside an anchored directory, without following symlinks."""
+    if not exists_at(parent_fd, name):
+        return
+    if stat.S_ISDIR(os.stat(name, dir_fd=parent_fd, follow_symlinks=False).st_mode):
+        shutil.rmtree(name, dir_fd=parent_fd)
+    else:
+        os.unlink(name, dir_fd=parent_fd)
+
+
+def place_app(home, final, state):
+    """Copy the versioned bundle to ~/Applications/Ariadne.app, replacing an owned old one."""
+    apps = directory(home / "Applications", True)
+    stage = f".Ariadne.app.stage-{uuid.uuid4()}"
+    old = f".Ariadne.app.old-{uuid.uuid4()}"
+    with anchored_directory(apps) as apps_fd:
+        try:
+            shutil.copytree(final / "Ariadne.app", apps / stage, symlinks=True)
+            if state != "absent":
+                os.rename("Ariadne.app", old, src_dir_fd=apps_fd, dst_dir_fd=apps_fd)
+            try:
+                os.rename(stage, "Ariadne.app", src_dir_fd=apps_fd, dst_dir_fd=apps_fd)
+            except BaseException:
+                if exists_at(apps_fd, old):
+                    os.rename(old, "Ariadne.app", src_dir_fd=apps_fd, dst_dir_fd=apps_fd)
+                raise
+        finally:
+            discard(apps_fd, stage)
+            discard(apps_fd, old)
+
+
+def remove_app_copy(home, known):
+    """Uninstall the app copy when its bytes are proven ours; otherwise leave it and say so."""
+    path = home / APP_PATH
+    if not exists(path) or path.is_symlink():
+        return
+    if app_state(home, known) == "copy":
+        with anchored_directory(home / "Applications") as apps_fd:
+            shutil.rmtree("Ariadne.app", dir_fd=apps_fd)
+    elif any(item.get("owned_app") for item in known):
+        print(f"{path} was edited after install, so it was left in place. Delete it yourself if you no longer want it.",
+              flush=True)
+
+
 def links(home):
     return {
-        "Applications/Ariadne.app": "../.local/share/ariadne/current/Ariadne.app",
         **{f".local/bin/{name}": f"../share/ariadne/current/bin/{name}" for name in BINARIES},
         # Codex discovers personal skills in ~/.agents/skills/<name>/SKILL.md (ADR-0070).
         SKILL_LINK: "../../.local/share/ariadne/current/integrations/codex-skills/ariadne",
@@ -230,19 +329,24 @@ def skill_link_conflict(home, before, target):
 
 def manifest(root, home, version, files, directories, owned_links, preflight):
     return {"schema_version": 1, "version": version,
-            "app_path": str(home / "Applications/Ariadne.app"), "inventory_version": 1,
+            "app_path": str(home / APP_PATH), "inventory_version": 2, "owned_app": True,
             "owned_files": files, "owned_directories": directories,
             "owned_links": owned_links, "preflight": preflight}
 
 
 def descriptor(root, home):
     value = json_read(root / "install.json")
-    require(set(value) == {"schema_version", "version", "app_path", "inventory_version",
-                           "owned_files", "owned_directories", "owned_links", "preflight"}, "Unknown install inventory format.")
+    keys = {"schema_version", "version", "app_path", "inventory_version",
+            "owned_files", "owned_directories", "owned_links", "preflight"}
+    require(isinstance(value, dict) and set(value) in (keys, keys | {"owned_app"}), "Unknown install inventory format.")
+    # Version 1 (ADR-0062) linked the app through `current` and has no owned_app; version 2 owns a copy.
     require(type(value["schema_version"]) is int and value["schema_version"] == 1 and
-            type(value["inventory_version"]) is int and value["inventory_version"] == 1,
+            type(value["inventory_version"]) is int and
+            (value["inventory_version"], "owned_app" in value) in ((1, False), (2, True)) and
+            (value["inventory_version"] == 1 or type(value["owned_app"]) is bool),
             "Unsupported install inventory version.")
-    require(component(value["version"]) == root.name and value["app_path"] == str(home / "Applications/Ariadne.app"),
+    allowed = links(home) if value["inventory_version"] == 2 else {**links(home), APP_PATH: LEGACY_APP_TARGET}
+    require(component(value["version"]) == root.name and value["app_path"] == str(home / APP_PATH),
             "Descriptor package identity does not match its version directory.")
     require(isinstance(value["owned_files"], dict) and value["owned_files"], "Missing owned inventory.")
     for name, item in value["owned_files"].items():
@@ -262,7 +366,7 @@ def descriptor(root, home):
                     parts[0] == "Ariadne.app" and isinstance(item["target"], str) and
                     not Path(item["target"]).is_absolute(), "Invalid owned symlink.")
     require(isinstance(value["owned_links"], dict) and
-            all(name in links(home) and links(home)[name] == target for name, target in value["owned_links"].items()),
+            all(name in allowed and allowed[name] == target for name, target in value["owned_links"].items()),
             "Unknown external link inventory.")
     require(encode(value) == (root / "install.json").read_bytes(), "Edited or noncanonical install descriptor.")
     require(isinstance(value["owned_directories"], dict), "Missing directory ownership inventory.")
@@ -465,6 +569,11 @@ def install(home, artifacts, facts, resource_loader=resources):
     with locked(home) as (root, home_fd, root_fd, versions_fd):
         before = current(root, home)
         require(not exists(root / ".current-next"), "Unexpected pointer staging path.")
+        if exists(home / "Applications"):
+            directory(home / "Applications")
+        # The app copy is replaced only when a receipt proves we made it (ADR-0080).
+        state = app_state(home, receipts(root, home, versions_fd) if exists(home / APP_PATH) else [])
+        require(state is not None, f"Foreign or edited install path: {home / APP_PATH}")
         expected_links = links(home)
         owned_links = {}
         for name, target in expected_links.items():
@@ -538,7 +647,8 @@ def install(home, artifacts, facts, resource_loader=resources):
                           "record it, so it is neither created nor adopted. "
                           "Uninstall and install again to add it.", flush=True)
                 # A link the receipt owns but this run skipped is left alone, as uninstall does.
-                kept = {k: v for k, v in existing["owned_links"].items() if k != SKILL_LINK}
+                # A version-1 receipt also records the old app symlink; the app copy is handled separately.
+                kept = {k: v for k, v in existing["owned_links"].items() if k not in (SKILL_LINK, APP_PATH)}
                 require(existing["owned_files"] == files and inventory(final) == files and
                         existing["owned_directories"] == directories and
                         kept == {k: v for k, v in owned_links.items() if k != SKILL_LINK},
@@ -558,6 +668,9 @@ def install(home, artifacts, facts, resource_loader=resources):
             require(not exists(temporary), f"Unexpected pointer staging path: {temporary}")
             os.symlink(f"versions/{version}", ".current-next", dir_fd=root_fd)
             os.replace(".current-next", "current", src_dir_fd=root_fd, dst_dir_fd=root_fd)
+            # After the pointer flip: a crash here leaves the old copy, and `app_path` still opens.
+            if not (state == "copy" and app_inventory(home / APP_PATH) == bundle_files(files)):
+                place_app(home, final, state)
         except BaseException:
             for path in reversed(created_links):
                 if path.is_symlink() and os.readlink(path) == owned_links[str(path.relative_to(home))]:
@@ -573,7 +686,7 @@ def install(home, artifacts, facts, resource_loader=resources):
         finally:
             if exists_at(versions_fd, stage.name):
                 shutil.rmtree(stage.name, dir_fd=versions_fd)
-        print(f"Installed Ariadne {version}: {home / 'Applications/Ariadne.app'}\nHelpers: {final / 'bin'}", flush=True)
+        print(f"Installed Ariadne {version}: {home / APP_PATH}\nHelpers: {final / 'bin'}", flush=True)
         if not exists(home / ".local/bin"):
             print(f"PATH directory is absent. Add {root / 'current/bin'} to PATH explicitly; shell startup files were not edited.")
         return final
@@ -678,6 +791,10 @@ def uninstall(home):
 
 
 def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained):
+    try:
+        remove_app_copy(home, [receipt for _, receipt, _ in packages])
+    except (InstallError, OSError):
+        retained.append(str(home / APP_PATH))
     for package, receipt, package_fd in packages:
         for name, expected in receipt["owned_files"].items():
             try:
@@ -689,6 +806,8 @@ def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, sel
                 retained.append(str(package / name))
         for name, target in receipt["owned_links"].items():
             path = home / name
+            if name == APP_PATH and not path.is_symlink():
+                continue  # a real app copy is settled by remove_app_copy
             if exists(path):
                 if path.is_symlink() and os.readlink(path) == target:
                     if not remove_owned(home_fd, name, {"kind": "symlink", "target": target}):

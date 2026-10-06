@@ -53,7 +53,6 @@ pub(super) struct Fixture {
     root: PathBuf,
     plugin: PathBuf,
     helper: PathBuf,
-    executable: PathBuf,
 }
 impl Fixture {
     pub(super) fn new() -> Self {
@@ -85,21 +84,14 @@ impl Fixture {
             fs::write(file, body).unwrap();
         }
         let helper = base.join("ariadne");
-        let executable = base.join("claude");
-        for (path, version) in [
-            (&helper, "ariadne 0.1.0"),
-            (&executable, "2.1.287 (Claude Code)"),
-        ] {
-            fs::write(path, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' '{version}'\n")).unwrap();
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
-        }
+        fs::write(&helper, "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' 'ariadne 0.1.0'\n").unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
         Self {
             _home: home,
             home: base.join("data"),
             root,
             plugin,
             helper,
-            executable,
         }
     }
     pub(super) fn configuration(&self) -> NativeConfiguration {
@@ -109,7 +101,6 @@ impl Fixture {
             discovery_endpoints: vec![],
             cli_invocation: "ariadne".into(),
             claude: Some(ClaudeOptions {
-                executable: self.executable.clone(),
                 helper: self.helper.clone(),
                 installed_plugin: self.plugin.clone(),
                 project_root: self.root.clone(),
@@ -526,9 +517,9 @@ fn admitted_connect_drains_before_wake_and_quit_wins_without_losing_the_receipt(
     // Only the scripted provider is delayed; actual Core/Store and native
     // bootstrap receive the one original admission Instant.
     fs::write(
-        &fixture.executable,
+        &fixture.helper,
         format!(
-            "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nprintf '2.1.287 (Claude Code)\\n'\n",
+            "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nprintf 'ariadne 0.1.0\\n'\n",
             began.display(), release.display()
         ),
     )

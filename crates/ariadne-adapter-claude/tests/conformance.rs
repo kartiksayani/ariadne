@@ -72,6 +72,8 @@ fn wait<T>(mut future: AdapterFuture<'_, T>) -> Result<T, AdapterError> {
     }
 }
 struct Fixture {
+    /// The host version the loaded Mod reports in its announcement.
+    version: String,
     _root: tempfile::TempDir,
     options: ClaudeOptions,
     loaded: std::path::PathBuf,
@@ -93,8 +95,6 @@ impl Fixture {
                 ("skills/ariadne/SKILL.md","# Structured Ariadne context"),
             ] { let path = dir.join(name); fs::create_dir_all(path.parent().unwrap()).unwrap(); fs::write(path,bytes).unwrap(); }
         }
-        let executable = root.path().join("claude");
-        executable_file(&executable,&format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' '{version} (Claude Code)'\n"));
         let helper = root.path().join("ariadne");
         executable_file(&helper, "#!/bin/sh\nprintf 'ariadne 0.1.0\\n'\n");
         let descriptor = json!({"helperPath":helper,"appVersion":"0.1.0","apiVersion":1});
@@ -107,12 +107,12 @@ impl Fixture {
         }
         Self {
             options: ClaudeOptions {
-                executable,
                 installed_plugin: installed,
                 helper,
                 project_root: project,
                 app_version: "0.1.0".into(),
             },
+            version: version.into(),
             _root: root,
             loaded,
             slot: ModEvidenceSlot::default(),
@@ -125,14 +125,14 @@ impl Fixture {
             helper_path: self.options.helper.clone(),
             app_version: "0.1.0".into(),
             api_version: 1,
-            engine_version: SUPPORTED_HOST_VERSION.into(),
+            engine_version: self.version.clone(),
             external_session_id: "original-host-session".into(),
             project_root: self.options.project_root.clone(),
             binding_scope: Some((binding(), generation())),
         }
     }
     fn publish(&self) {
-        self.publish_engine(SUPPORTED_HOST_VERSION);
+        self.publish_engine(&self.version);
     }
     fn publish_engine(&self, engine_version: &str) {
         let mut identity = self.identity();
@@ -247,7 +247,7 @@ fn original_expired_connect_deadline_starts_no_resource_probe() {
     fixture.publish();
     let marker = fixture._root.path().join("inspected");
     executable_file(
-        &fixture.options.executable,
+        &fixture.options.helper,
         &format!("#!/bin/sh\ntouch '{}'\nexit 7\n", marker.display()),
     );
     let error = wait(
@@ -403,10 +403,7 @@ fn unknown_matching_installed_release_does_not_advertise_domain_command_support(
 fn native_qualifier_caps_a_longer_caller_deadline_at_five_seconds() {
     let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
     // exec makes sleep the owned --version child itself, with no orphan subprocess.
-    executable_file(
-        &fixture.options.executable,
-        "#!/bin/sh\nexec /bin/sleep 30\n",
-    );
+    executable_file(&fixture.options.helper, "#!/bin/sh\nexec /bin/sleep 30\n");
     let started = Instant::now();
     let error = fixture
         .options
@@ -433,7 +430,8 @@ fn installed_files_and_version_alone_never_prove_loaded_mod_or_availability() {
         configuration: config(),
     }))
     .unwrap();
-    assert_eq!(result.host_version.as_deref(), Some(SUPPORTED_HOST_VERSION));
+    // No loaded Mod has announced yet, so there is no host version to report.
+    assert_eq!(result.host_version, None);
     assert_eq!(result.compatibility, Compatibility::Unknown);
     assert_eq!(result.availability, Availability::Unavailable);
     assert!(!result.setup_steps.is_empty());
@@ -500,9 +498,9 @@ fn probe_request() -> ProbeRequest {
     }
 }
 #[test]
-fn newer_patch_cli_and_matching_sdk_is_accepted_and_marked_untested() {
+fn newer_patch_reported_version_is_accepted_and_marked_untested() {
     let fixture = Fixture::new("2.1.289");
-    fixture.publish_engine("2.1.289");
+    fixture.publish();
     let adapter = fixture.adapter();
     let result = wait(adapter.probe(probe_request())).unwrap();
     assert_eq!(result.compatibility, Compatibility::Untested);
@@ -523,23 +521,10 @@ fn baseline_cli_probes_compatible_with_no_untested_notice() {
     assert!(result.setup_steps.is_empty());
 }
 #[test]
-fn newer_cli_never_inherits_an_older_sdk_baseline() {
-    let fixture = Fixture::new("2.1.289");
-    fixture.publish();
-    let adapter = fixture.adapter();
-    let result = wait(adapter.probe(probe_request())).unwrap();
-    assert_eq!(result.compatibility, Compatibility::Incompatible);
-    assert_eq!(result.host_version.as_deref(), Some("2.1.289"));
-    assert_eq!(
-        wait(adapter.connect(connect())).unwrap_err().code,
-        AdapterErrorCode::UnsupportedHostVersion
-    );
-}
-#[test]
-fn newer_minor_or_major_cli_and_matching_sdk_is_accepted_and_marked_untested() {
+fn newer_minor_or_major_reported_version_is_accepted_and_marked_untested() {
     for version in ["2.2.0", "3.0.0"] {
         let fixture = Fixture::new(version);
-        fixture.publish_engine(version);
+        fixture.publish();
         let adapter = fixture.adapter();
         let result = wait(adapter.probe(probe_request())).unwrap();
         assert_eq!(result.compatibility, Compatibility::Untested, "{version}");
@@ -552,10 +537,10 @@ fn newer_minor_or_major_cli_and_matching_sdk_is_accepted_and_marked_untested() {
     }
 }
 #[test]
-fn older_patch_minor_or_major_cli_is_rejected_with_the_minimum_requirement() {
+fn older_patch_minor_or_major_reported_version_is_rejected_with_the_minimum_requirement() {
     for version in ["2.1.286", "2.0.999", "1.99.999"] {
         let fixture = Fixture::new(version);
-        fixture.publish_engine(version);
+        fixture.publish();
         let adapter = fixture.adapter();
         let result = wait(adapter.probe(probe_request())).unwrap();
         assert_eq!(
@@ -576,15 +561,14 @@ fn older_patch_minor_or_major_cli_is_rejected_with_the_minimum_requirement() {
     }
 }
 #[test]
-fn manifest_descriptor_resource_or_sdk_version_mismatch_requires_reload_not_connected() {
-    for case in 0..5 {
+fn manifest_descriptor_or_resource_mismatch_requires_reload_not_connected() {
+    for case in 0..4 {
         let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
         let mut identity = fixture.identity();
         match case {
             0 => identity.app_version = "0.2.0".into(),
             1 => identity.api_version = 2,
-            2 => identity.engine_version = "2.1.289".into(),
-            3 => fs::write(fixture.loaded.join("hooks/claims.js"), "changed bytes").unwrap(),
+            2 => fs::write(fixture.loaded.join("hooks/claims.js"), "changed bytes").unwrap(),
             _ => fs::write(
                 fixture.loaded.join(".claude-plugin/plugin.json"),
                 r#"{"name":"ariadne","version":"0.2.0"}"#,
@@ -803,9 +787,10 @@ fn malformed_oversized_uncorrelated_facts_fail_without_raw_text_in_errors() {
 #[test]
 fn bounded_native_version_timeout_is_async_and_reaps_only_the_owned_version_child() {
     let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+    fixture.publish();
     let pidfile = fixture._root.path().join("version.pid");
     executable_file(
-        &fixture.options.executable,
+        &fixture.options.helper,
         &format!(
             "#!/bin/sh\necho $$ > '{}'\nwhile :; do :; done\n",
             pidfile.display()
@@ -819,9 +804,10 @@ fn bounded_native_version_timeout_is_async_and_reaps_only_the_owned_version_chil
     let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
     let mut context = Context::from_waker(&waker);
     assert!(future.as_mut().poll(&mut context).is_pending());
+    // A helper that never answers leaves the host unqualified, not an error.
     assert_eq!(
-        wait(future).unwrap_err().code,
-        AdapterErrorCode::HostUnreachable
+        wait(future).unwrap().availability,
+        Availability::Unavailable
     );
     let pid: i32 = fs::read_to_string(pidfile).unwrap().trim().parse().unwrap();
     assert_eq!(unsafe { libc::kill(pid, 0) }, -1);

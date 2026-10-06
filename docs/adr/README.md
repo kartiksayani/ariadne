@@ -39,3 +39,13 @@ instruction names the exact CLI invocation).
 [ADR-0079](ADR-0079-prebuilt-alpha-package.md) adds a prebuilt alpha package
 (`make package`, `install.py install --package`, tag-triggered release workflow)
 beside the source install.
+
+[ADR-0080](ADR-0080-app-bundle-in-applications.md) installs `~/Applications/Ariadne.app`
+as a real owned copy of the bundle, because Finder, Spotlight and Launchpad ignore a
+symlink into a hidden folder. It supersedes the symlink sentence of ADR-0062.
+
+[ADR-0081](ADR-0081-provider-paths-from-setup.md) trusts Claude's own version report
+(the Claude adapter no longer needs an executable and the app locates its installed
+Mod itself) and makes `ariadne setup` record the Codex path in `providers.json`, so
+the app finds both when opened normally. Flags still override; the app never searches
+PATH or launches a host.

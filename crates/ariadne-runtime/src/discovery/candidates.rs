@@ -854,7 +854,6 @@ mod tests {
             .build()
             .unwrap();
         let options = ClaudeOptions {
-            executable: "/absent/claude".into(),
             installed_plugin: "/absent/plugin".into(),
             helper: "/absent/ariadne".into(),
             project_root: "/absent/project".into(),

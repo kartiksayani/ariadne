@@ -88,7 +88,16 @@ pub(crate) struct State {
 impl State {
     fn probe(&self, request: ProbeRequest, deadline: Instant) -> Result<ProbeResult, AdapterError> {
         configuration(&request.endpoint, &request.configuration)?;
-        let version = probe::version(&self.options, deadline)?;
+        // The host version is the one the loaded Mod reports; no executable is run.
+        let Some(evidence) = self.evidence.snapshot()? else {
+            return Ok(ProbeResult {
+                host_version: None,
+                compatibility: Compatibility::Unknown,
+                availability: Availability::Unavailable,
+                setup_steps: vec!["Load/reload the installed Ariadne Mod in the selected conversation; a fresh native-validated SDK identity announcement is required.".into()],
+            });
+        };
+        let version = evidence.identity.engine_version.clone();
         let Some(status) = classify_host_version(SUPPORTED_HOST_VERSION, &version) else {
             let step = format!(
                 "Claude Code {version} is not supported; Ariadne requires Claude Code {}.",
@@ -103,14 +112,8 @@ impl State {
         };
         let notice = (status == HostVersionStatus::Untested)
             .then(|| untested_notice("Claude Code", &version, SUPPORTED_HOST_VERSION));
-        let Some(evidence) = self.evidence.snapshot()? else {
-            return Ok(unknown(version, "Load/reload the installed Ariadne Mod in the selected conversation; a fresh native-validated SDK identity announcement is required."));
-        };
         if !fresh(&evidence) {
             return Ok(unknown(version, "The Mod announcement is stale; refresh its native heartbeat or reload the plugin. Stale presence does not mean the host exited."));
-        }
-        if evidence.identity.engine_version != version {
-            return Ok(ProbeResult { host_version: Some(version), compatibility: Compatibility::Incompatible, availability: Availability::Unknown, setup_steps: vec!["Loaded Claude SDK engine and selected executable versions differ; reload and requalify the original conversation.".into()] });
         }
         match probe::resource_identity(&self.options, &evidence, deadline) {
             Ok(_) => {
@@ -212,7 +215,7 @@ impl State {
             if probe::qualify(&self.options, snapshot, deadline)? != *identity {
                 return Err(error(
                     AdapterErrorCode::BindingMismatch,
-                    "Claude qualified resource/executable identity changed; recover explicitly",
+                    "Claude qualified resource identity changed; recover explicitly",
                 ));
             }
             // Wake can clear the slot while the owned snapshot is inspected.
@@ -456,7 +459,6 @@ mod tests {
         .unwrap();
         let state = State {
             options: ClaudeOptions {
-                executable: "/absent".into(),
                 installed_plugin: "/installed".into(),
                 helper: "/helper".into(),
                 project_root: "/project".into(),

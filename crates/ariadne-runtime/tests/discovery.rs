@@ -62,15 +62,9 @@ impl ClaudeFiles {
         let loaded = root.path().join("loaded");
         let project = root.path().join("project");
         fs::create_dir(&project).unwrap();
-        let executable = root.path().join("claude");
         let helper = root.path().join("ariadne");
-        for (path, text) in [
-            (&executable, "2.1.287 (Claude Code)"),
-            (&helper, "ariadne 0.1.0"),
-        ] {
-            fs::write(path, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' '{text}'\n")).unwrap();
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
-        }
+        fs::write(&helper, "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' 'ariadne 0.1.0'\n").unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
         for root in [&installed, &loaded] {
             for (name, bytes) in [
                 (
@@ -94,7 +88,6 @@ impl ClaudeFiles {
         Self {
             _root: root,
             options: ClaudeOptions {
-                executable,
                 installed_plugin: installed,
                 helper,
                 project_root: project,
@@ -297,7 +290,7 @@ fn blocking_pre_id_qualification_preserves_short_original_deadline_without_a_run
     rt.block_on(call(home.path().into(), request(files.announcement())))
         .unwrap();
     let selected = d.snapshot().unwrap().candidates.remove(0);
-    fs::write(&files.options.executable, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+    fs::write(&files.options.helper, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
     let slot = ModEvidenceSlot::default();
     let started = std::time::Instant::now();
     let error = d

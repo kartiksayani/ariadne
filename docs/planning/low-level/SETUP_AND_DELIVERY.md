@@ -17,7 +17,7 @@ for the end-to-end user flow and [POC results](../INTEGRATIONS.md#live-evidence-
   current -> versions/<version>        # atomically replaced install pointer
 ~/.local/bin/ariadne -> ../share/ariadne/current/bin/ariadne
 ~/.local/bin/ariadne-mcp -> ../share/ariadne/current/bin/ariadne-mcp
-~/Applications/Ariadne.app              # personal app install
+~/Applications/Ariadne.app              # real installer-owned copy of the bundle (ADR-0080)
 ~/.agents/skills/ariadne -> ../../.local/share/ariadne/current/integrations/codex-skills/ariadne
 ~/.ariadne/
   projects.json                        # explicit canonical roots + setup receipts
@@ -301,7 +301,8 @@ build dependency only; production does not bundle a language runtime.
 `make install` builds the Tauri app, Rust CLI, MCP binary, and Claude Mod from
 this checkout, then installs them for the current user. Keep versioned helper
 files under `~/.local/share/ariadne/versions/<version>/`, update the `current`
-symlink, and install the app at `~/Applications/Ariadne.app`. Create
+symlink, and install the app as a real copy at `~/Applications/Ariadne.app`
+(ADR-0080; a symlink there is invisible to Finder and Spotlight). Create
 `~/.local/bin/ariadne` and `ariadne-mcp` symlinks when that directory exists;
 otherwise print the PATH instruction. Also create the one package-owned link
 `~/.agents/skills/ariadne` to the versioned Codex skill directory
@@ -348,6 +349,8 @@ Select trusted provider executables with additive `--claude-bin /absolute/claude
 and `--codex-bin /absolute/codex` options; without them, provider version/capability
 checks report unknown and the required option. Existing `CODEX_HOME`/default
 semantics select the endpoint without provider configuration or credential reads.
+Doctor also uses the Codex path recorded by `ariadne setup` when no flag is given and
+reports a `providers.config` check; see [ADR-0081](../../adr/ADR-0081-provider-paths-from-setup.md).
 Doctor opens only existing coordination files, using bounded lock admission;
 missing/busy coordination stays unknown. Index comparison needs complete validated
 authoritative observations and never rebuilds it. These timestamped diagnostics

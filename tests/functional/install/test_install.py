@@ -77,7 +77,12 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(receipt["app_path"], str(self.home / "Applications/Ariadne.app"))
         self.assertEqual(receipt["owned_files"], installer.inventory(final))
         self.assertEqual(os.readlink(self.root / "current"), "versions/0.1.0")
-        self.assertEqual((self.home / "Applications/Ariadne.app").resolve(), final / "Ariadne.app")
+        app = self.home / "Applications/Ariadne.app"
+        self.assertTrue(app.is_dir() and not app.is_symlink())
+        self.assertEqual(receipt["owned_app"], True)
+        self.assertEqual(installer.app_inventory(app),
+                         {k: v for k, v in installer.inventory(final).items() if k.startswith("Ariadne.app/")})
+        self.assertEqual(sorted(p.name for p in app.parent.iterdir()), ["Ariadne.app"])
         self.assertEqual((self.home / ".local/bin/ariadne").resolve(), final / "bin/ariadne")
         self.assertEqual((final / "integrations/claude-mod/plugin/hooks/installed.js").read_text(), str(final / "bin/ariadne"))
         self.assertEqual(stat.S_IMODE((final / "bin/ariadne").stat().st_mode), 0o700)
@@ -98,7 +103,7 @@ class InstallationTests(unittest.TestCase):
         self.assertFalse((self.home / ".local/bin").exists())
         self.assertIn("PATH directory is absent", self.output.getvalue())
         self.assertEqual(set(installer.json_read(final / "install.json")["owned_links"]),
-                         {"Applications/Ariadne.app", installer.SKILL_LINK})
+                         {installer.SKILL_LINK})
 
     @property
     def skill(self):
@@ -269,11 +274,146 @@ class InstallationTests(unittest.TestCase):
             if kind == "file":
                 app.write_bytes(b"foreign application")
             else:
-                app.symlink_to(installer.links(self.home)["Applications/Ariadne.app"])
+                app.symlink_to(installer.LEGACY_APP_TARGET)
             with self.assertRaisesRegex(installer.InstallError, "Foreign or edited"):
                 self.install()
             self.assertTrue(installer.exists(app))
             app.unlink()
+
+    @property
+    def app(self):
+        return self.home / "Applications/Ariadne.app"
+
+    def make_legacy(self, final):
+        """Rewrite a fresh install as the ADR-0062 layout: version-1 receipt and an app symlink."""
+        shutil.rmtree(self.app)
+        self.app.symlink_to(installer.LEGACY_APP_TARGET)
+        receipt = installer.json_read(final / "install.json")
+        del receipt["owned_app"]
+        receipt["inventory_version"] = 1
+        receipt["owned_links"][installer.APP_PATH] = installer.LEGACY_APP_TARGET
+        (final / "install.json").write_bytes(installer.encode(receipt))
+
+    def leftovers(self):
+        return [p.name for p in self.app.parent.iterdir() if p.name != "Ariadne.app"]
+
+    def test_old_symlink_layout_is_migrated_by_same_version_install_and_removed_by_uninstall(self):
+        final = self.install()
+        self.make_legacy(final)
+        self.assertEqual(self.install(), final)
+        self.assertTrue(self.app.is_dir() and not self.app.is_symlink())
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(installer.json_read(final / "install.json")["inventory_version"], 1)
+        self.assertEqual(self.install(), final)
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(installer.exists(self.app))
+        self.assertFalse(final.exists())
+
+    def test_old_symlink_layout_is_migrated_by_upgrade_and_both_versions_uninstall(self):
+        self.make_legacy(self.install())
+        self.make_artifacts("0.2.0")
+        second = self.install()
+        self.assertTrue(self.app.is_dir() and not self.app.is_symlink())
+        self.assertEqual(installer.app_inventory(self.app), installer.bundle_files(installer.inventory(second)))
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(installer.exists(self.app))
+        self.assertEqual(os.listdir(self.root / "versions"), [])
+
+    def test_uninstall_removes_the_owned_old_layout_symlink(self):
+        self.make_legacy(self.install())
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(installer.exists(self.app))
+        self.assertEqual(os.listdir(self.root / "versions"), [])
+
+    def test_foreign_app_directory_refuses_install_and_survives_uninstall(self):
+        self.app.mkdir(parents=True)
+        (self.app / "owner.txt").write_bytes(b"owner bundle")
+        with self.assertRaisesRegex(installer.InstallError, "Foreign or edited"):
+            self.install()
+        self.assertEqual((self.app / "owner.txt").read_bytes(), b"owner bundle")
+        self.assertFalse(installer.exists(self.root / "current"))
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertEqual((self.app / "owner.txt").read_bytes(), b"owner bundle")
+        # A receipt that owns an app, with a foreign directory now in its place, leaves it too.
+        shutil.rmtree(self.app)
+        final = self.install()
+        shutil.rmtree(self.app)
+        self.app.mkdir()
+        (self.app / "owner.txt").write_bytes(b"owner bundle")
+        installer.uninstall(self.home)
+        self.assertEqual((self.app / "owner.txt").read_bytes(), b"owner bundle")
+        self.assertFalse((final / "bin").exists())
+
+    def test_edited_app_copy_is_left_by_uninstall_with_a_plain_message(self):
+        final = self.install()
+        edited = self.app / "Contents/MacOS/ariadne-desktop"
+        edited.write_bytes(b"owner patched executable")
+        with self.assertRaisesRegex(installer.InstallError, "Foreign or edited"):
+            self.install()
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertEqual(edited.read_bytes(), b"owner patched executable")
+        self.assertIn("was edited after install, so it was left in place", self.output.getvalue())
+        self.assertFalse(final.exists())
+
+    def test_failure_mid_copy_leaves_no_stage_and_keeps_the_previous_copy(self):
+        first = self.install()
+        previous = installer.app_inventory(self.app)
+        self.make_artifacts("0.2.0")
+        real = shutil.copytree
+
+        def partial(source, destination, *args, **options):
+            if ".Ariadne.app.stage-" in str(destination):
+                Path(destination).mkdir()
+                (Path(destination) / "half").write_bytes(b"x")
+                raise OSError("copy failure")
+            return real(source, destination, *args, **options)
+
+        with patch.object(installer.shutil, "copytree", side_effect=partial):
+            with self.assertRaisesRegex(OSError, "copy failure"):
+                self.install()
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(installer.app_inventory(self.app), previous)
+        # The pointer already moved; the old copy is still provably ours, so a retry completes.
+        second = self.install()
+        self.assertEqual(installer.app_inventory(self.app), installer.bundle_files(installer.inventory(second)))
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertTrue(first.name not in os.listdir(self.root / "versions"))
+
+    def test_failed_swap_restores_the_previous_copy(self):
+        self.install()
+        self.make_artifacts("0.2.0")
+        previous = installer.app_inventory(self.app)
+        real = installer.os.rename
+
+        def rename(source, destination, **options):
+            if str(source).startswith(".Ariadne.app.stage-"):
+                raise OSError("swap failure")
+            return real(source, destination, **options)
+
+        with patch.object(installer.os, "rename", side_effect=rename):
+            with self.assertRaisesRegex(OSError, "swap failure"):
+                self.install()
+        self.assertEqual(installer.app_inventory(self.app), previous)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_owned_app_must_be_a_boolean_in_version_two_receipts(self):
+        final = self.install()
+        receipt = installer.json_read(final / "install.json")
+        receipt["owned_app"] = "yes"
+        (final / "install.json").write_bytes(installer.encode(receipt))
+        with self.assertRaisesRegex(installer.InstallError, "Unsupported install inventory"):
+            installer.descriptor(final, self.home)
+        receipt["owned_app"] = False
+        (final / "install.json").write_bytes(installer.encode(receipt))
+        self.assertEqual(installer.descriptor(final, self.home)["owned_app"], False)
+        with self.assertRaisesRegex(installer.InstallError, "Foreign or edited"):
+            self.install()
+
+    def test_install_creates_a_missing_applications_directory_privately(self):
+        self.assertFalse((self.home / "Applications").exists())
+        self.install()
+        self.assertEqual(stat.S_IMODE((self.home / "Applications").stat().st_mode), 0o700)
 
     def test_redirected_directories_and_current_pointer_are_rejected(self):
         for target in (".local", ".local/share", ".local/share/ariadne/versions", "Applications"):
@@ -325,7 +465,8 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual((first / "install.json").read_bytes(), before)
         self.assertFalse((self.root / "versions/0.2.0").exists())
         self.assertFalse(installer.exists(self.root / ".current-next"))
-        self.assertEqual((self.home / "Applications/Ariadne.app").resolve(), first / "Ariadne.app")
+        self.assertEqual(installer.app_inventory(self.home / "Applications/Ariadne.app"),
+                         installer.bundle_files(installer.inventory(first)))
 
     def test_failed_first_publication_does_not_leave_owned_links(self):
         with patch.object(installer.os, "replace", side_effect=OSError("publication failure")):
