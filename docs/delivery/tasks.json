@@ -2026,6 +2026,7 @@
         "integrations/rules/codex.md",
         "integrations/claude/plugin/skills/ariadne/SKILL.md",
         "integrations/codex/skills/ariadne/SKILL.md",
+        "integrations/claude/plugin/hooks/register.js",
         "tools/xtask/src/rules.rs",
         "docs/GUIDE.md"
       ],

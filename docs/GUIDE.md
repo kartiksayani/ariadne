@@ -194,7 +194,7 @@ Claude Code will ask you to trust the plugin. That choice stays yours.
 ### Working with a connected session
 
 Once the session is connected you only need to give Claude the task, for example
-"review this PR". You may add "use Ariadne" if you want to be explicit. You never
+"fix this bug", "plan this migration" or "review this PR". You may add "use Ariadne" if you want to be explicit. You never
 name topics or items: Claude reads what is already in the session, picks the
 topics it needs, files each finding, decision and question as an item with its full
 reasoning as it works, and puts anything you must decide under "Waiting on me".
@@ -230,6 +230,10 @@ setup.
 
 Codex has no command inside the thread to connect, so connecting is always done
 from the app. Codex approvals stay yours. Ariadne does not turn them on or off.
+
+Once the thread is connected, give Codex the task as in
+[Working with a connected session](#working-with-a-connected-session); it
+organises topics and items itself.
 
 ## A 60-second tour
 

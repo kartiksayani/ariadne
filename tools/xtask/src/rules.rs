@@ -3,7 +3,7 @@
 use std::{fs, path::Path};
 
 const CLAUDE_DESCRIPTION: &str = "Use when the session is connected to Ariadne, when the owner says 'use Ariadne', when a message starts with an [ARIADNE_INPUT:<input>:<attempt>] marker (a dispatched Ariadne owner input), or when publishing findings to Ariadne. Organise the work into topics and items, publish item replies and finish the claimed input with an explicit result.";
-const CODEX_DESCRIPTION: &str = "Use when an input starts with an [ARIADNE_INPUT:<input>:<attempt>] marker (a dispatched Ariadne owner input), when the owner mentions Ariadne, or when publishing findings, questions or results to Ariadne. Explains what Ariadne is and how to read items, publish replies and finish a claimed input with the installed ariadne CLI.";
+const CODEX_DESCRIPTION: &str = "Use when an input starts with an [ARIADNE_INPUT:<input>:<attempt>] marker (a dispatched Ariadne owner input), when the owner mentions Ariadne, or when publishing findings, questions or results to Ariadne. Organise the work into topics and items, and explains what Ariadne is and how to read items, publish replies and finish a claimed input with the installed ariadne CLI.";
 
 /// Keep `only:<agent>` blocks for `agent`; drop the others. Marker lines vanish.
 fn select(body: &str, agent: &str) -> Result<String, String> {
