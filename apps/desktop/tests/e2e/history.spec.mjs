@@ -182,14 +182,16 @@ export async function waitForRoundResult(round, reply, explanation) {
   }, 'Native detail did not publish the final closed round and its complete correlated result');
 }
 async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
-  const back = await browser.$('[aria-label="Item history view"]').$('button=Back and forth'); await back.waitForEnabled(); await back.scrollIntoView(); await back.click();
-  await wait(async () => (await browser.$$('.history-round')).length === 5, 'Native detail did not load all five real rounds');
-  const rounds = Object.values(saved.rounds).sort((a, b) => a.ordinal - b.ordinal);
+  const back = await browser.$('[aria-label="Item history view"]').$('button=Back and forth'); await failureEvidence('history-back-and-forth', () => back.waitForEnabled()); await back.scrollIntoView(); await back.click();
+  // Restoration runs against the final session, whose open sixth round (no result) is also rendered.
+  const every = Object.keys(saved.rounds).length;
+  await failureEvidence('history-rounds', () => wait(async () => (await browser.$$('.history-round')).length === every, `Native detail did not load all ${every} real rounds`));
+  const rounds = Object.values(saved.rounds).filter(round => round.closed_at).sort((a, b) => a.ordinal - b.ordinal);
   assert.equal(rounds.length, 5); assert.equal(Object.keys(saved.items).length, 3);
   // Five sections already exist after the fifth answer. The Core completion
   // barrier does not imply that the selected native history has refreshed yet.
   const finalRound = rounds.at(-1);
-  await waitForRoundResult(finalRound, resultTexts.at(-1), saved.inputs[finalRound.result_input_ids[0]].attempts[0].domain_result.explanation);
+  await failureEvidence('history-final-round-result', () => waitForRoundResult(finalRound, resultTexts.at(-1), saved.inputs[finalRound.result_input_ids[0]].attempts[0].domain_result.explanation));
   for (let index = 0; index < 5; index++) {
     const section = await browser.$(`[aria-label="Round ${index + 1}"]`);
     const text = await section.getText(), round = rounds[index];
@@ -216,7 +218,7 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
     await selectParent(saved.items['1']);
   }
   const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline'); await timeline.waitForEnabled(); await timeline.scrollIntoView(); await timeline.click();
-  await wait(async () => (await renderedBodies('.history-timeline [data-message-id]')).length > 100, 'Native item conversation paging did not produce complete history');
+  await failureEvidence('history-timeline-paging', () => wait(async () => (await renderedBodies('.history-timeline [data-message-id]')).length > 100, 'Native item conversation paging did not produce complete history'));
   const visible = await renderedBodies('.history-timeline [data-message-id]');
   assert.equal(new Set(visible.map(value => value.id)).size, visible.length, 'Overlapping created/updated/round pages must not duplicate timeline entries');
   for (const operation of paged) assert.equal(visible.filter(value => value.body === operation.text).length, 1);
@@ -447,7 +449,7 @@ export async function restoreHistoryAcceptance(configuration) {
   assert.deepEqual(await snapshot(history), finalSession); assert.deepEqual(await admissions(history), prior.queued);
   await open(history);
   await proveRounds(history, finalSession, prior.ownerTexts, prior.resultTexts, prior.paged);
-  const editor = await browser.$('.owner-input textarea'); await editor.waitForDisplayed();
+  const editor = await browser.$('.owner-input textarea'); await failureEvidence('restored-owner-draft', () => editor.waitForDisplayed());
   assert.equal(await editor.getValue(), prior.railProof.draft, 'Actual process relaunch must retain the unsent owner draft without creating a new input');
   assert.ok((await detail().getText()).includes('Full native completed outcome\nKeep the former outcome after reopening.'));
   assert.ok((await detail().getText()).includes('Full native completion reason\nEvery round was answered explicitly.'));
