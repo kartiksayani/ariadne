@@ -8,10 +8,10 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: a2cfa9d (#110). Roadmap: 45/49 on main, 46/49 once this docs PR merges (P7.1).**
+**Main: 6a0adec (#114). Roadmap: 46/49 on main, 48/50 once this docs PR merges (P7.2, P7.3, task P8.2 added).** Remaining: P8.1, then P8.2 (UX review and theme refresh).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-No open PRs besides this docs PR (branch `docs/p71-evidence`). Duplicate and
+Open PRs: this docs PR (#115, branch `docs/live-evidence`) and the Codex onboarding PR (branch `fix/codex-onboarding`, in progress). Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.
@@ -51,9 +51,10 @@ synthetic keys do not move focus.
 ## P7.2 live Claude run (2026-10-06, PR #114)
 
 The core owner-input to Claude turn to committed-result loop is proved live on Claude
-Code 2.1.291. P7.2 stays `in_progress`: completion-before-result order, result repair,
-resend, second session, second project isolation and Ariadne app quit/relaunch are not
-yet exercised, and `npm run test:live` does not exist. Evidence:
+Code 2.1.291. P7.2 is done by owner ruling 2026-10-06 (no further paid host turns; core
+loops proven). Deferred rows: completion-before-result order, result repair, resend,
+second session, second project isolation and Ariadne app quit/relaunch;
+`npm run test:live` does not exist. Evidence:
 [CLAUDE-2026-10-06.md](../planning/evidence/live-acceptance/CLAUDE-2026-10-06.md);
 decision [ADR-0076](../adr/ADR-0076-claude-framed-plugin-prompts-and-turn-correlation.md).
 Follow-ups the run surfaced:
@@ -67,6 +68,25 @@ Follow-ups the run surfaced:
 - Delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill.
 - Rules: `source.md` should say option `consequence` is required.
 - Claude Mod: `$.plugin.root` is used but undocumented.
+
+## P7.3 live Codex run (2026-10-06, this PR)
+
+The core loop is proved live through the Codex native queue: pause, two queued inputs,
+resume, FIFO delivery via `codex queue`, turn correlation, explicit results committed.
+P7.3 is done by owner ruling 2026-10-06 (no further paid host turns). Deferred rows:
+five inputs (two were run), closed-item message, disconnect/relaunch, duplicates, both
+join orders, missing-result/uncertain recovery, same-project/cross-project isolation,
+`npm run test:live` (does not exist). Evidence:
+[CODEX-2026-10-06.md](../planning/evidence/live-acceptance/CODEX-2026-10-06.md).
+Follow-ups the run surfaced:
+
+- D1-D6 (fresh-thread connect, RPC error text, setup instruction path and
+  `ARIADNE_HOME`, connect card, `question_changed` message, discovery dialog) are tracked
+  for the fix/codex-onboarding PR (branch in progress).
+- D7 (UX: font, alignment, button contrast, scrollbars, raw UUIDs): task P8.2, UX review
+  and theme refresh, runs after P8.1.
+- D8: Ariadne should send the setup instruction through `codex queue` itself instead of
+  the owner pasting it.
 
 ## Known gaps, not blocking
 
@@ -82,11 +102,11 @@ Follow-ups the run surfaced:
 
 ## Next steps
 
-1. Finish the P7.2 coverage gaps; owner approval for the P7.3 live Codex run and owner-home install (writes under
-   the real home: Claude plugin registration, `~/.agents/skills/ariadne`, scratch
-   histories, Codex daemon restart). The owner summary is at the top of
-   [PLAN.md](../planning/evidence/live-acceptance/PLAN.md).
-2. P8.1.
+1. P8.1 (owner-home install, if wanted, writes under the real home: Claude plugin
+   registration, `~/.agents/skills/ariadne`, scratch histories, Codex daemon restart;
+   see the owner summary at the top of
+   [PLAN.md](../planning/evidence/live-acceptance/PLAN.md)).
+2. P8.2 UX review and theme refresh (owner ruling 2026-10-06; see tasks.json).
 3. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
    `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,
