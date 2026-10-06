@@ -9,7 +9,7 @@ owner's Mac. Raw logs were not retained (ADR-0069); the lines quoted below are t
 - macOS 26.7 (25G229), arm64.
 - node v22.23.2, npm 10.9.8, rustc 1.98.1, cargo 1.98.1, Python 3.14.6, Xcode CLT `/Applications/Xcode.app/Contents/Developer`.
 - Isolation: `HOME=/private/tmp/ariadne-install-trial.FjEw`, `CARGO_HOME=/tmp/ariadne-install-trial/cargo-home`,
-  `RUSTUP_HOME=/Users/kartik.sayani/.rustup` (read-only use, so the installed toolchain was found; no download).
+  `RUSTUP_HOME=~/.rustup` (read-only use, so the installed toolchain was found; no download).
 - Every destination in `scripts/install/install.py` derives from `HOME`. Real-home mtimes of
   `~/.rustup`, `~/.cargo`, `~/.npm` were unchanged after the run.
 
