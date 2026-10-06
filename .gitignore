@@ -35,3 +35,7 @@ target/
 .worktrees/
 .delivery/
 .vitest/
+
+# Claude Code writes Mod typings into a loaded plugin directory
+integrations/claude/plugin/.claude-plugin/types/
+integrations/claude/plugin/tsconfig.json
