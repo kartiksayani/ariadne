@@ -43,6 +43,32 @@ describe('captured Claude claim lifecycle', () => {
     expect(h.prompts).toHaveLength(1);
     await h.reported('accepted');
   });
+  it('logs an owner-paused claim block once, keeps polling, and never pauses or submits', async () => {
+    const h = host({handler:argv => argv[2] === 'claim' ? failure('invalid_transition',{reason:'owner_paused'}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    for (let index=0;index<3;index++) await loop.poll(h.$);
+    expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(3);
+    expect(h.logs).toEqual(['Ariadne paused: Dispatch is withheld by the app (owner_paused); claims resume when the owner resumes or recovers.']);
+    expect(loop.status().paused).toBe(false);
+    expect(h.prompts).toHaveLength(0);
+  });
+  it('logs a blocked claim again after an empty queue resets the reason', async () => {
+    let mode = 'blocked';
+    const h = host({handler:argv => argv[2] === 'claim' && mode === 'blocked' ? failure('invalid_transition',{reason:'owner_paused'}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await loop.poll(h.$);
+    mode = 'empty';await loop.poll(h.$);
+    mode = 'blocked';await loop.poll(h.$);await loop.poll(h.$);
+    expect(h.logs).toHaveLength(2);
+    expect(h.logs.every(text => text.includes('(owner_paused)'))).toBe(true);
+  });
+  it('still logs other claim failures on every poll', async () => {
+    const h = host({handler:argv => argv[2] === 'claim' ? failure('host_unreachable') : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    for (let index=0;index<3;index++) await loop.poll(h.$);
+    expect(h.logs).toHaveLength(3);
+    expect(h.logs.every(text => text.includes('Claim/report helper failed'))).toBe(true);
+  });
   it('serializes concurrent poll callbacks and retains lifecycle exactly across desktop/helper failure', async () => {
     const value = await prepared();const response = deferred();const admitted = deferred();const submission = deferred();let failing = true;
     const attempts = [];

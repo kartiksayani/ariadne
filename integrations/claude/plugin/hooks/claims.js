@@ -10,6 +10,7 @@ export function claimLoop(helperPath, binding) {
   let stopped = false;
   let paused = false;
   let claimId = null;
+  let blocked = null;
   let capturedSubmission = null;
   let disconnected = false;
   const pending = [];
@@ -84,6 +85,7 @@ export function claimLoop(helperPath, binding) {
       if (!admissionOpen || stopped) return;
       claimId ??= globalThis.crypto.randomUUID();
       const result = envelope(await $.process.run([helperPath,'bridge','claim',...route,'--request-id',claimId],{timeoutMs:5000}));
+      blocked = null;
       if (result === null) { claimId = null; return; }
       const value = await prepared(result,binding);
       const captured = {...value,turnId:null,accepted:false,settled:false,terminalSnapshots:[],terminalGap:false,uncertainReasons:new Set()};
@@ -107,7 +109,15 @@ export function claimLoop(helperPath, binding) {
         await uncertain($,captured,'Prompt submission threw with unknown delivery; reconcile the original attempt.');
         captured.settled = true;
       }
-    } catch {
+    } catch (error) {
+      if (error?.code === 'invalid_transition') {
+        const reason = typeof error.details?.reason === 'string' ? error.details.reason : 'blocked';
+        if (blocked !== reason) {
+          blocked = reason;
+          log($,`Dispatch is withheld by the app (${reason}); claims resume when the owner resumes or recovers.`);
+        }
+        return;
+      }
       log($,'Claim/report helper failed. The same claim request/event IDs are retained; no prompt was resent.');
     }
   }

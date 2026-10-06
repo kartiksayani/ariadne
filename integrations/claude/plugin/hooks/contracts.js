@@ -71,6 +71,7 @@ export function envelope(result) {
     const label = known.includes(error.code) ? ` (${error.code})` : '';
     const failure = new ModError(`Ariadne helper failed${label}; retain original IDs and inspect the app.`);
     failure.code = error.code;
+    failure.details = error.details && typeof error.details === 'object' && !Array.isArray(error.details) ? error.details : null;
     throw failure;
   }
   if (result.exitCode !== 0 || !fields(value, ['api_version','ok','data'])) {
