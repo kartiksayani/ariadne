@@ -32,3 +32,7 @@ static validation), [ADR-0075](ADR-0075-claude-connect-output-and-skill-rules.md
 [ADR-0076](ADR-0076-claude-framed-plugin-prompts-and-turn-correlation.md) (framed
 plugin prompts and turn correlation) and [ADR-0077](ADR-0077-setup-instruction-names-the-exact-cli-invocation.md) (setup
 instruction names the exact CLI invocation).
+
+[ADR-0079](ADR-0079-prebuilt-alpha-package.md) adds a prebuilt alpha package
+(`make package`, `install.py install --package`, tag-triggered release workflow)
+beside the source install.

@@ -593,6 +593,174 @@ def shutil_error():
     return shutil.Error
 
 
+class PackageTests(unittest.TestCase):
+    """Prebuilt package assembly and `install --package`; reuses scripted artifacts."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="ariadne package fixtures ")
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name).resolve()
+        self.home = self.base / "home"
+        self.home.mkdir(mode=0o700)
+        (self.home / ".local/bin").mkdir(parents=True)
+        self.artifacts = self.base / "release"
+        self.facts = {"os": "macOS", "os_version": "14.0", "architecture": "arm64", "python": "3.12.0"}
+        self.make_artifacts()
+        (self.artifacts / "bundle/macos/Ariadne.app/Contents/current-info").symlink_to("Info.plist")
+        self.output = io.StringIO()
+        self.capture = contextlib.redirect_stdout(self.output)
+        self.capture.__enter__()
+        self.addCleanup(self.capture.__exit__, None, None, None)
+        host = (patch.object(installer.platform, "system", return_value="Darwin"),
+                patch.object(installer.platform, "mac_ver", return_value=("14.0", (), "")),
+                patch.object(installer.platform, "machine", return_value="arm64"))
+        for item in host:
+            item.start()
+            self.addCleanup(item.stop)
+
+    version = "0.1.0"
+    make_artifacts = InstallationTests.make_artifacts
+    root = InstallationTests.root
+
+    def assemble(self):
+        return installer.assemble(self.artifacts, self.facts, self.base / "dist", "a" * 40, "2026-10-06T00:00:00Z")
+
+    def extract(self):
+        tarball = self.assemble()
+        target = self.base / "extracted"
+        target.mkdir()
+        subprocess.run(["tar", "-xzf", str(tarball), "-C", str(target)], check=True)
+        return tarball, target / "ariadne-0.1.0"
+
+    def test_assembly_produces_expected_tree_description_and_symlinks(self):
+        tarball, package = self.extract()
+        self.assertEqual(tarball.name, "ariadne-0.1.0-macos-arm64.tar.gz")
+        self.assertEqual(sorted(path.name for path in (self.base / "dist").iterdir()), [tarball.name])
+        self.assertEqual(sorted(path.name for path in package.iterdir()),
+                         ["ariadne", "ariadne-mcp", "bundle", "install.py", "install.sh", "package.json"])
+        self.assertTrue(os.access(package / "install.sh", os.X_OK))
+        self.assertTrue(os.access(package / "ariadne", os.X_OK))
+        self.assertEqual((package / "install.py").read_bytes(), SOURCE.read_bytes())
+        self.assertEqual(os.readlink(package / "bundle/macos/Ariadne.app/Contents/current-info"), "Info.plist")
+        self.assertTrue(os.access(package / "bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop", os.X_OK))
+        description = json.loads((package / "package.json").read_text())
+        self.assertEqual(description, {**self.facts, "app_version": "0.1.0",
+                                       "source_sha": "a" * 40, "built_at": "2026-10-06T00:00:00Z"})
+        self.assertEqual(self.assemble(), tarball)
+
+    def test_package_script_is_shipped_executable_and_checks_python(self):
+        script = SOURCE.parent / "install.sh"
+        text = script.read_text()
+        self.assertTrue(os.access(script, os.X_OK))
+        self.assertTrue(text.startswith("#!/bin/bash\n"))
+        self.assertIn("set -euo pipefail", text)
+        self.assertIn("3, 11", text)
+        self.assertIn('install.py install --package "$PWD"', text)
+
+    def test_package_installs_without_building_and_uninstalls(self):
+        _, package = self.extract()
+        before = {path: path.stat().st_mtime_ns for path in package.rglob("*") if not path.is_symlink()}
+        with patch.object(installer, "build", side_effect=AssertionError("must not build")), \
+                patch.object(installer, "preflight", side_effect=AssertionError("no toolchain preflight")):
+            final = installer.install_package(self.home, package)
+        receipt = installer.json_read(final / "install.json")
+        self.assertEqual(receipt["preflight"]["built"]["source_sha"], "a" * 40)
+        self.assertEqual(receipt["preflight"]["architecture"], "arm64")
+        self.assertEqual((self.home / ".local/bin/ariadne").resolve(), final / "bin/ariadne")
+        self.assertEqual(before, {path: path.stat().st_mtime_ns for path in package.rglob("*") if not path.is_symlink()})
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(final.exists())
+
+    def test_main_package_mode_skips_build_and_runs_doctor(self):
+        _, package = self.extract()
+        with patch.dict(os.environ, {"HOME": str(self.home)}), \
+                patch.object(installer, "build") as build, \
+                patch.object(installer, "install_package", return_value=Path("/fixture/version")) as install_package, \
+                patch.object(installer, "run") as run:
+            installer.main(["install", "--package", str(package)])
+        build.assert_not_called()
+        install_package.assert_called_once_with(self.home, package)
+        run.assert_called_once_with([Path("/fixture/version/bin/ariadne"), "doctor"])
+        with self.assertRaisesRegex(installer.InstallError, "install only"):
+            installer.main(["package", "--package", str(package)])
+        with patch.dict(os.environ, {"HOME": str(self.home)}), \
+                self.assertRaisesRegex(installer.InstallError, "install only"):
+            installer.main(["uninstall", "--package", str(package)])
+
+    def test_main_package_action_builds_then_assembles(self):
+        with patch.object(installer, "build", return_value=(self.artifacts, self.facts)) as build, \
+                patch.object(installer, "run", return_value="b" * 40 + "\n"), \
+                patch.object(installer, "assemble", return_value=Path("/fixture/x.tar.gz")) as assemble:
+            installer.main(["package"])
+        build.assert_called_once()
+        self.assertEqual(assemble.call_args.args[:3], (self.artifacts, self.facts, installer.ROOT / "dist"))
+        self.assertEqual(assemble.call_args.args[3], "b" * 40)
+        self.assertIn("Package: /fixture/x.tar.gz", self.output.getvalue())
+
+    def test_missing_file_bad_description_and_architecture_mismatch_are_refused(self):
+        _, package = self.extract()
+        description = (package / "package.json").read_text()
+        for name in ("install.sh", "ariadne-mcp"):
+            moved = package / (name + ".moved")
+            (package / name).rename(moved)
+            with self.assertRaisesRegex(installer.InstallError, "missing " + name):
+                installer.install_package(self.home, package)
+            moved.rename(package / name)
+        shutil.rmtree(package / "bundle")
+        with self.assertRaisesRegex(installer.InstallError, "missing Ariadne.app"):
+            installer.install_package(self.home, package)
+        _, package = self.extract_again()
+        for bad, message in (("not json", "unreadable"), ('{"architecture": "arm64"}', "malformed"),
+                             ('["list"]', "malformed"),
+                             (json.dumps({**json.loads(description), "app_version": "9.9.9"}), "does not match")):
+            (package / "package.json").write_text(bad)
+            with self.assertRaisesRegex(installer.InstallError, message):
+                installer.install_package(self.home, package)
+        (package / "package.json").write_text(json.dumps({**json.loads(description), "architecture": "x86_64"}))
+        with self.assertRaisesRegex(installer.InstallError, "x86_64 Macs; this Mac is arm64"):
+            installer.install_package(self.home, package)
+        self.assertFalse(installer.exists(self.root / "current"))
+
+    def test_symlinked_package_members_are_refused(self):
+        _, package = self.extract()
+        for name in ("ariadne", "ariadne-mcp", "package.json"):
+            real = package / (name + ".real")
+            (package / name).rename(real)
+            (package / name).symlink_to(real)
+            with self.assertRaisesRegex(installer.InstallError, "missing " + name):
+                installer.install_package(self.home, package)
+            (package / name).unlink()
+            real.rename(package / name)
+        app = package / "bundle/macos/Ariadne.app"
+        app.rename(package / "bundle/macos/Real.app")
+        app.symlink_to("Real.app")
+        with self.assertRaisesRegex(installer.InstallError, "missing Ariadne.app"):
+            installer.install_package(self.home, package)
+
+    def test_package_description_keeps_only_known_short_values(self):
+        _, package = self.extract()
+        description = json.loads((package / "package.json").read_text())
+        (package / "package.json").write_text(json.dumps({**description, "source_sha": "a" * 201}))
+        with self.assertRaisesRegex(installer.InstallError, "longer than 200"):
+            installer.install_package(self.home, package)
+        (package / "package.json").write_text(json.dumps({**description, "extra": "x" * 400000}))
+        final = installer.install_package(self.home, package)
+        built = installer.json_read(final / "install.json")["preflight"]["built"]
+        self.assertEqual(sorted(built), sorted(installer.PACKAGE_KEYS))
+
+    def extract_again(self):
+        shutil.rmtree(self.base / "extracted")
+        return self.extract()
+
+    def test_package_still_enforces_host_checks_but_not_toolchains(self):
+        _, package = self.extract()
+        with patch.object(installer.platform, "system", return_value="Linux"):
+            with self.assertRaisesRegex(installer.InstallError, "requires macOS"):
+                installer.install_package(self.home, package)
+        with patch.object(installer.platform, "mac_ver", return_value=("12.6", (), "")):
+            with self.assertRaisesRegex(installer.InstallError, "macOS 13 or newer"):
+                installer.install_package(self.home, package)
+
+
 class BuildTests(unittest.TestCase):
     def preflight_with(self, answers, pinned_installed=True):
         def fake(args, **kwargs):
