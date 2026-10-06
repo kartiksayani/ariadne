@@ -46,7 +46,9 @@ def check(artifacts, evidence):
                 ) from error
         descriptor = installer.json_read(installed / "install.json")
         assert installer.inventory(installed) == descriptor["owned_files"]
-        assert (home / "Applications/Ariadne.app").resolve() == installed / "Ariadne.app"
+        app_copy = home / "Applications/Ariadne.app"
+        assert app_copy.is_dir() and not app_copy.is_symlink()
+        assert installer.app_inventory(app_copy) == installer.bundle_files(descriptor["owned_files"])
         app_relative = "Ariadne.app/Contents/MacOS/ariadne-desktop"
         source = artifacts / "bundle/macos" / app_relative
         copied = installed / app_relative

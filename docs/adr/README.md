@@ -39,3 +39,7 @@ instruction names the exact CLI invocation).
 [ADR-0079](ADR-0079-prebuilt-alpha-package.md) adds a prebuilt alpha package
 (`make package`, `install.py install --package`, tag-triggered release workflow)
 beside the source install.
+
+[ADR-0080](ADR-0080-app-bundle-in-applications.md) installs `~/Applications/Ariadne.app`
+as a real owned copy of the bundle, because Finder, Spotlight and Launchpad ignore a
+symlink into a hidden folder. It supersedes the symlink sentence of ADR-0062.

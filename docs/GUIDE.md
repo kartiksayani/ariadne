@@ -114,7 +114,9 @@ stops with a clear message if something is missing. Then it builds the app, the
 to Ariadne).
 
 It puts everything under `~/.local/share/ariadne/versions/<version>` and points
-`current` at it. It adds links at `~/Applications/Ariadne.app`,
+`current` at it. It puts a real copy of the app at `~/Applications/Ariadne.app`,
+so Finder, Spotlight and Launchpad can find it; the command-line helpers stay in
+the versioned folder. It adds links at
 `~/.local/bin/ariadne` and `~/.local/bin/ariadne-mcp`. It also adds a link at
 `~/.agents/skills/ariadne`, the Ariadne skill that Codex reads. It does not edit
 your shell startup files. The two `~/.local/bin` links are made only if that
@@ -272,10 +274,11 @@ sending is a separate click.
 make uninstall                    # removes the installed app and command-line tools
 ```
 
-Removed: the files Ariadne installed itself, and the links
-`~/Applications/Ariadne.app`, `~/.local/bin/ariadne`, `~/.local/bin/ariadne-mcp`
+Removed: the files Ariadne installed itself, the app at `~/Applications/Ariadne.app`,
+and the links `~/.local/bin/ariadne`, `~/.local/bin/ariadne-mcp`
 and `~/.agents/skills/ariadne` (the last only if the installer created it).
-Only unchanged files that Ariadne owns are removed. Anything you edited or
+Only unchanged files that Ariadne owns are removed. If you edited the app, it is
+left in place with a message. Anything you edited or
 anything that is not Ariadne's is left in place and listed.
 
 Kept: all project history, sessions and backups, and every Claude Code and Codex

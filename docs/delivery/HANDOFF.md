@@ -106,11 +106,21 @@ Follow-ups the run surfaced:
   proved by unit tests.
 - Quit note OK is pressed through macOS Accessibility (osascript) in CI; the
   hosted image grants it. Unit tests prove the trigger.
+- `seedJourney` in `apps/desktop/tests/e2e/scripted-provider.mjs` (~line 199-232) is the
+  third connect-then-apply site without `awaitConnected`; close it when next touching the
+  e2e files.
+
+## In flight
+
+- P8.4 App bundle visible in Finder and Spotlight (ADR-0080, PR pending): the owner found
+  with `v0.1.0-alpha.1` that the `~/Applications/Ariadne.app` symlink is invisible to
+  Finder, Spotlight and Launchpad. The installer now owns a real copy there and migrates
+  the old symlink layout.
 
 ## Next steps
 
-1. P8.3 UX review and theme refresh (held for the owner; owner ruling 2026-10-06;
-   see tasks.json). Nothing else is open.
+1. P8.4 (in flight, above), then P8.3 UX review and theme refresh (held for the owner;
+   owner ruling 2026-10-06; see tasks.json).
 2. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
    `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,
