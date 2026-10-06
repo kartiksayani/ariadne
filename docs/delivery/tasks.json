@@ -1860,9 +1860,9 @@
       ],
       "estimate_days": 1,
       "progress": {
-        "state": "queued",
+        "state": "in_progress",
         "prs": [],
-        "note": "P7.2 and P7.3 live acceptance are done (core loops proven 2026-10-06); this task is next."
+        "note": "Docs and matrix in PR_NUMBER_PENDING; install trial at MAIN_SHA_PENDING pending #116 merge."
       }
     },
     {

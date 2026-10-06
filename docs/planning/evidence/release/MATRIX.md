@@ -4,44 +4,62 @@ One row per [VERIFICATION](../../low-level/VERIFICATION.md) acceptance row, V01�
 as pruned by [ADR-0069](../../../adr/ADR-0069-release-evidence-is-proportionate.md).
 Evidence kinds: `test` (an automated test in this repository), `CI run` (a passing
 required CI run on main), `live run` (real Claude Code / Codex session), `manual
-check` (short owner checklist). Test paths are listed only where the test file was
-opened and its tests cover the row. Everything else says "to confirm".
+check` (short owner checklist). Every test path below was opened and exists on main.
+Where a row is only partly covered, the Status column names the gap. "No automated
+test" means exactly that: the row rests on a live run or a manual check, and the gap
+is named.
 
 Release evidence for all `test` rows is one link to a passing required CI run on
-main: **pending merge**. Live rows are **pending live run**; the installed host
-version is recorded there.
+main: **CI run MAIN_RUN_PENDING** (release source SHA `MAIN_SHA_PENDING`; both are
+filled in after the Codex onboarding PR #116 merges and the `quality` run on main is
+green).
+
+Live evidence (2026-10-06, core loops proven; remaining rows deferred by owner ruling
+2026-10-06, no further paid host turns):
+[Claude](../live-acceptance/CLAUDE-2026-10-06.md) (Claude Code 2.1.291) and
+[Codex](../live-acceptance/CODEX-2026-10-06.md). Manual rows use the
+[manual checklist](manual-checklist.md). The clean-checkout install trial for the
+release SHA is recorded in [install-trial.md](install-trial.md).
 
 | ID | Meaning | Evidence kind | Evidence link/path | Status |
 |---|---|---|---|---|
-| V01 | Schema, IDs, transitions and bounded content | test | `crates/ariadne-domain/tests/schema.rs`, `crates/ariadne-domain/tests/transitions.rs` | Test present; CI run pending merge |
-| V02 | Concurrent app and CLI/MCP writes | test | `crates/ariadne-store/tests/transactions.rs` (separate-process writers, stale same-item conflict) | Test present; CI run pending merge |
-| V03 | Ordinary atomic storage behaviour | test | `crates/ariadne-store/tests/transactions.rs` (unwritable directory returns save error, previous snapshot) | Test present; CI run pending merge |
-| V04 | Project registry and binding | test | `crates/ariadne-store/tests/registry.rs`, `crates/ariadne-core/tests/bindings.rs` | Test present; CI run pending merge |
-| V05 | Item conversation history | test | to confirm | To confirm |
-| V06 | Idempotent domain batch | test | `crates/ariadne-core/tests/apply.rs` | Test present; CI run pending merge |
-| V07 | Input result/completion join | test | `crates/ariadne-core/tests/delivery_join.rs` | Test present; CI run pending merge |
-| V08 | Five-message FIFO per binding | test, live run | to confirm (test); pending live run | To confirm |
-| V09 | Same-project parallel bindings | test, live run | `crates/ariadne-cli/tests/parallel_acceptance.rs` (test); pending live run | Test present; live run pending |
-| V10 | Adapter event replay and day-to-day recovery | test | to confirm | To confirm |
-| V11 | App lifecycle with external host | test, manual check | to confirm | To confirm |
-| V12 | Agent domain choices | test, live run | to confirm (test); pending live run | To confirm |
-| V13 | Missing result recovery | test | `crates/ariadne-core/tests/recovery.rs`, `crates/ariadne-core/tests/delivery_join.rs` (missing-result grace and barrier) | Test present; CI run pending merge |
-| V14 | CLI/MCP contract and bootstrap | test | `crates/ariadne-cli/tests/agent_cli.rs`, `crates/ariadne-cli/tests/owner_cli.rs` | Test present; CI run pending merge |
-| V15 | Full mockup and owner actions | test | to confirm | To confirm (row unchanged by ADR-0069) |
-| V16 | Graph and guarded session actions | test | `crates/ariadne-core/tests/history_actions.rs` (archive/close guards, continuation) | Test present; graph/tree selection agreement to confirm |
-| V17 | Claude first-party adapter | live run | pending live run | Pending live run |
-| V18 | Codex first-party adapter | live run | pending live run | Pending live run |
+| V01 | Schema, IDs, transitions and bounded content | test | `crates/ariadne-domain/tests/schema.rs`, `crates/ariadne-domain/tests/transitions.rs` | Covered; CI run MAIN_RUN_PENDING |
+| V02 | Concurrent app and CLI/MCP writes | test | `crates/ariadne-store/tests/transactions.rs` (separate-process writers, stale same-item conflict) | Covered; CI run MAIN_RUN_PENDING |
+| V03 | Ordinary atomic storage behaviour | test | `crates/ariadne-store/tests/transactions.rs` (unwritable directory returns save error, previous snapshot) | Covered; CI run MAIN_RUN_PENDING |
+| V04 | Project registry and binding | test | `crates/ariadne-store/tests/registry.rs`, `crates/ariadne-core/tests/bindings.rs` | Covered; CI run MAIN_RUN_PENDING |
+| V05 | Item conversation history | test | `crates/ariadne-core/tests/projections.rs` (every message and item history page reachable and scoped; keyset pages keep exact text), `crates/ariadne-core/tests/owner_inputs.rs` (submission saves full history, frozen context, FIFO and receipt; closed/archived guards) | Partial; CI run MAIN_RUN_PENDING. Gaps: no test asserts private provider transcript is absent; closed-item message is inferred from the guard test only |
+| V06 | Idempotent domain batch | test | `crates/ariadne-core/tests/apply.rs` | Covered; CI run MAIN_RUN_PENDING |
+| V07 | Input result/completion join | test | `crates/ariadne-core/tests/delivery_join.rs` | Covered; CI run MAIN_RUN_PENDING |
+| V08 | Five-message FIFO per binding | test, live run | `crates/ariadne-runtime/tests/supervisor_native_fifo.rs` (three bindings, five FIFO turns, both join orders, independent pause), `crates/ariadne-core/tests/delivery_join.rs`; live: [Claude](../live-acceptance/CLAUDE-2026-10-06.md), [Codex](../live-acceptance/CODEX-2026-10-06.md) | Test covers; CI run MAIN_RUN_PENDING. Live proven: FIFO delivery of queued inputs on both hosts (Claude 4 inputs, Codex 2 inputs after pause/resume). Deferred live: five inputs on Codex (two were run) |
+| V09 | Same-project parallel bindings | test, live run | `crates/ariadne-cli/tests/parallel_acceptance.rs` (test) | Test covers; CI run MAIN_RUN_PENDING. Live: deferred (second session and same/cross-project isolation not run on either host) |
+| V10 | Adapter event replay and day-to-day recovery | test | `crates/ariadne-adapter-codex/tests/queue.rs` (checkpoint replay, retained facts after endpoint loss, duplicate/dropped receipt), `crates/ariadne-core/tests/recovery.rs`, `crates/ariadne-core/tests/native_recovery.rs`, `crates/ariadne-runtime/tests/supervisor_native_fifo.rs` (restart reconciles before claiming, no resend), `crates/ariadne-agent-protocol/tests/contract.rs` | Covers Codex; partial for Claude (no Claude-adapter checkpoint/dedup test found by name); CI run MAIN_RUN_PENDING |
+| V11 | App lifecycle with external host | test, manual check | `crates/ariadne-runtime/tests/supervisor_native_fifo.rs` (quit and restart), `crates/ariadne-runtime/tests/activation.rs`, `crates/ariadne-runtime/tests/codex_native_join.rs`, `tests/e2e/process-contract/native-quit-note.test.mjs`, `tests/native/window/held_turn.rs`; manual: [checklist V11](manual-checklist.md#v11-app-lifecycle-with-external-host) | Partial; CI run MAIN_RUN_PENDING. Gap: CLI/MCP read/write after app quit has no named test; covered by manual check (result pending) |
+| V12 | Agent domain choices | test, live run | `crates/ariadne-cli/tests/agent_cli.rs`, `crates/ariadne-cli/tests/bridge_cli.rs`, `crates/ariadne-cli/tests/claude_installed_join.rs`, `crates/ariadne-mcp/tests/stdio_contract.rs`, `crates/ariadne-adapter-claude/tests/conformance.rs`; live: [Claude](../live-acceptance/CLAUDE-2026-10-06.md), [Codex](../live-acceptance/CODEX-2026-10-06.md) | Partial; CI run MAIN_RUN_PENDING. Live proven: agents recorded topic and items and committed explicit results on both hosts. Gap: no test asserts bridge lifecycle alone causes no item change |
+| V13 | Missing result recovery | test | `crates/ariadne-core/tests/recovery.rs`, `crates/ariadne-core/tests/delivery_join.rs` (missing-result grace and barrier) | Covered; CI run MAIN_RUN_PENDING. Live missing-result recovery deferred on both hosts |
+| V14 | CLI/MCP contract and bootstrap | test | `crates/ariadne-cli/tests/agent_cli.rs`, `crates/ariadne-cli/tests/owner_cli.rs` | Covered; CI run MAIN_RUN_PENDING |
+| V15 | Full mockup and owner actions | test | `apps/desktop/tests/ui/waiting/waiting.test.tsx`, `apps/desktop/tests/ui/navigation/navigation.test.tsx`, `apps/desktop/tests/ui/accessibility/app.test.tsx`, `apps/desktop/tests/e2e/history.spec.mjs`, `apps/desktop/tests/e2e/accessibility.spec.mjs`, `apps/desktop/tests/e2e/history-actions.spec.mjs`, `tests/ui/reference/capture.spec.mts`, `tests/ui/reference/assets.test.ts`, `crates/ariadne-core/tests/owner_inputs.rs` | Partial; CI run MAIN_RUN_PENDING. Gap: not tied to the mockup inventory; themes, keyboard and "five rounds" are not individually confirmed. Visual refresh is task P8.2 |
+| V16 | Graph and guarded session actions | test | `crates/ariadne-core/tests/history_actions.rs` (archive/close guards, continuation), `apps/desktop/tests/e2e/graph.spec.mjs` (selected item carries between tree and graph), `tests/e2e/graph/culling.spec.mts`, `apps/desktop/tests/ui/navigation/navigation.test.tsx` | Partial; CI run MAIN_RUN_PENDING. Gap: tree/graph selection agreement is asserted inside e2e scripts only |
+| V17 | Claude first-party adapter | live run | [CLAUDE-2026-10-06.md](../live-acceptance/CLAUDE-2026-10-06.md) | Live proven (Claude Code 2.1.291): connect, bootstrap, owner input to Claude turn to committed result, FIFO. Deferred: completion-before-result order, result repair, resend, second session, second-project isolation, app quit/relaunch (owner ruling 2026-10-06) |
+| V18 | Codex first-party adapter | live run | [CODEX-2026-10-06.md](../live-acceptance/CODEX-2026-10-06.md) | Live proven: pause, two queued inputs, resume, FIFO delivery through `codex queue`, turn correlation, explicit results. Deferred: five inputs, closed-item message, disconnect/relaunch, duplicates, both join orders, missing-result/uncertain recovery, same/cross-project isolation (owner ruling 2026-10-06) |
 | V19 | Third executable adapter | none | none | Deferred (outside this personal release) |
-| V20 | Known-metadata discovery and liveness | test | to confirm (`crates/ariadne-runtime/tests/discovery.rs` exists; not confirmed against the PID-alone rule) | To confirm |
-| V21 | Native macOS app (manual checklist: notification click opens item, tray count matches, second launch routes to running app, quit keeps external sessions; project path with spaces; cold-start notification click) | manual check | pending manual check (checklist) | Pending manual check |
-| V22 | Simple setup, install and uninstall | test | `crates/ariadne-cli/tests/setup.rs`, `tests/functional/install/test_install.py` | Test present; CI run pending merge |
-| V23 | Offline and release boundary | CI run | to confirm | To confirm |
-| V24 | Full release journey | manual check | to confirm | To confirm; after V17/V18 |
-| V25 | Waiting episode and counts | test | to confirm | To confirm |
-| V26 | Provider compatibility and generated wire DTOs | test | to confirm | To confirm |
-| V27 | SVG viewport culling | test | `apps/desktop/tests/ui/graph-culling/index.test.tsx`, `apps/desktop/tests/ui/graph-culling/component.test.tsx` | Test present; CI run pending merge (row unchanged by ADR-0069) |
-| V28 | Thin entry points | test | `crates/ariadne-cli/tests/mcp_alias.rs` (alias and CLI share receipts), `crates/ariadne-mcp/tests/native_process.rs` | Test present; install of all entry points covered by V22 |
-| V29 | Quality gate | CI run | pending merge | Pending merge: one link to a passing required CI run on main |
+| V20 | Known-metadata discovery and liveness | test | `crates/ariadne-runtime/tests/discovery.rs`, `crates/ariadne-adapter-codex/tests/history.rs`, `crates/ariadne-adapter-claude/tests/conformance.rs`, `crates/ariadne-core/tests/recovery.rs`, `apps/desktop/tests/e2e/discovery.spec.mjs` | Covers; CI run MAIN_RUN_PENDING. The PID-alone rule is covered through qualification and presence tests, not by name |
+| V21 | Native macOS app | manual check | [checklist V21](manual-checklist.md#v21-native-macos-app) | No automated test; covered by manual check (result pending) |
+| V22 | Simple setup, install and uninstall | test | `crates/ariadne-cli/tests/setup.rs`, `tests/functional/install/test_install.py`; clean-checkout trial: [install-trial.md](install-trial.md) | Covered; CI run MAIN_RUN_PENDING; install trial at MAIN_SHA_PENDING pending |
+| V23 | Offline and release boundary | CI run | `tests/ui/reference/assets.test.ts` (immutable design source and offline assets), `tests/functional/install/test_install.py`, `tests/functional/install/check_packaged.py`, `crates/ariadne-core/tests/native_connection.rs`, `crates/ariadne-core/tests/native_routing.rs`; README "What Ariadne does not do" | Partial; CI run MAIN_RUN_PENDING. Gap: no test or CI step asserts no telemetry, updater or TCP listener (checked by reading config and source); offline demo browsing is covered by the V24 manual check |
+| V24 | Full release journey | manual check | [checklist V24](manual-checklist.md#v24-full-release-journey); live basis V17/V18 | No automated test; covered by manual check (result pending) and the live runs above |
+| V25 | Waiting episode and counts | test | `crates/ariadne-core/tests/apply.rs`, `crates/ariadne-core/tests/projections.rs`, `apps/desktop/tests/ui/waiting/waiting.test.tsx` | Covers; CI run MAIN_RUN_PENDING. Gap: "unrelated replies do not corrupt counts" not checked by name |
+| V26 | Provider compatibility and generated wire DTOs | test | `crates/ariadne-adapter-claude/tests/conformance.rs` (version mismatch, minimum requirement), `crates/ariadne-adapter-codex/tests/history.rs`, `crates/ariadne-adapter-codex/tests/queue.rs`, `crates/ariadne-agent-protocol/tests/contract.rs` | Partial; CI run MAIN_RUN_PENDING. Gap: no vendored schema-hash drift test found by name; wire DTO drift is checked by `cargo xtask gen-codex-wire` in the commit checks |
+| V27 | SVG viewport culling | test | `apps/desktop/tests/ui/graph-culling/index.test.tsx`, `apps/desktop/tests/ui/graph-culling/component.test.tsx` | Covered; CI run MAIN_RUN_PENDING (row unchanged by ADR-0069) |
+| V28 | Thin entry points | test | `crates/ariadne-cli/tests/mcp_alias.rs` (alias and CLI share receipts), `crates/ariadne-mcp/tests/native_process.rs` | Covered; install of all entry points covered by V22; CI run MAIN_RUN_PENDING |
+| V29 | Quality gate | CI run | CI run MAIN_RUN_PENDING (green `quality` run on main at `MAIN_SHA_PENDING`) | Pending: one link to a passing required CI run on main |
 
-Counts: 13 rows with a confirmed test path (V01–V04, V06, V07, V09, V13, V14, V16,
-V22, V27, V28), 1 deferred (V19), 15 "to confirm" or pending live/manual evidence.
+Counts (29 rows):
+
+- 15 covered by named tests: V01–V04, V06–V09, V13, V14, V20, V22, V25, V27, V28.
+- 8 partial, gap named: V05, V10, V11, V12, V15, V16, V23, V26.
+- 2 live-run rows, core loops proven and the rest deferred: V17, V18.
+- 2 with no automated test, covered by manual check (result pending): V21, V24.
+- 1 quality-gate row pending the CI link: V29.
+- 1 deferred: V19.
+
+All CI links are pending: MAIN_RUN_PENDING.

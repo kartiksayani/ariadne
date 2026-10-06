@@ -25,3 +25,10 @@ modules while retaining its tooling, quality and review decisions.
 
 [ADR-0060](ADR-0060-own-desktop-integration-seams.md) names desktop integration and
 shared-file owners and keeps remaining delivery vertical on the assembled app.
+
+Recent decisions: [ADR-0074](ADR-0074-claude-mod-static-validation.md) (Claude Mod
+static validation), [ADR-0075](ADR-0075-claude-connect-output-and-skill-rules.md)
+(short Claude connect result, rules in the skill),
+[ADR-0076](ADR-0076-claude-framed-plugin-prompts-and-turn-correlation.md) (framed
+plugin prompts and turn correlation) and ADR-0077 (setup instruction names the exact
+CLI invocation; lands with the Codex onboarding PR #116).

@@ -50,9 +50,15 @@ Early preview. macOS 13 or newer, built from source.
   [First launch](#first-launch-unsigned-app)).
 - **Host versions:** needs Claude Code 2.1.287 or newer and Codex CLI 0.160.0
   or newer. Newer versions work and show a "newer than tested" note.
-- **Testing:** the automated test suite runs in CI without the real tools. Live
-  end-to-end runs against real Claude Code and Codex sessions are still in
-  progress.
+- **Testing:** the automated test suite runs in CI without the real tools.
+  On 2026-10-06 the core loop was also run live against real Claude Code
+  2.1.291 and Codex: connect, queue answers, deliver them in order, and get an
+  explicit result back from the agent. Not yet run live: recovery paths,
+  several sessions at once and quit/relaunch of the app. Evidence:
+  [Claude](docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md),
+  [Codex](docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md).
+- **Looks:** the interface works but the visual design is a preview; a
+  polish pass is planned.
 - **Moving targets:** Ariadne relies on integration surfaces of Claude Code and
   Codex. If they change, parts of Ariadne may break.
 
@@ -155,9 +161,9 @@ You can point it at specific programs with `--claude-bin` and `--codex-bin`
    - `/plugin install ariadne@ariadne-local`
    - `/reload-plugins`
    - `/ariadne-connect`
-3. `/ariadne-connect` prints a setup instruction. Connecting sends nothing to
-   the model, so paste that instruction into the same conversation, once per
-   connection. The agent gets the Ariadne rules from it.
+3. `/ariadne-connect` prints a one-line report of the connection (session,
+   project, binding and state). There is nothing to paste: Claude gets the
+   Ariadne rules from the Ariadne skill inside the plugin, loaded on demand.
 4. To attach a fresh Claude conversation to an Ariadne session you already have,
    use `/ariadne-connect <session-id>`. The new conversation reads the saved
    items and history. It does not receive the old terminal transcript.
@@ -167,18 +173,27 @@ Claude Code will ask you to trust the plugin. That choice stays yours.
 ## Connect Codex
 
 1. Run `~/.local/bin/ariadne setup --agent codex`.
-2. In the already-running Codex terminal, run `/status`.
-3. In Ariadne, open the Projects page and click **Register project**. Type the
-   project folder and click **Register project** again. (On the Projects page,
-   **Discover host sessions** can also list running sessions and fill in their
-   project folder.)
-4. Open that project and click **Connect existing session**. In the dialog, pick
-   the thread from `/status`, then click **Connect existing session** again.
-5. Ariadne shows a setup instruction. Paste it into that Codex thread, once per
-   connection. Connecting sends nothing to the model, so the agent gets the
-   Ariadne rules only from this paste.
+2. In Ariadne, open the Projects page and click **Register project**. Type the
+   project folder and click **Register project** again. (**Discover host
+   sessions** on the Projects page can also list running sessions and fill in
+   their project folder.)
+3. Open that project and click **Connect existing session**. The dialog lists
+   the Codex threads that are loaded and fills in the socket path from your
+   Codex home. Pick the thread, then click **Connect existing session** again.
+   A fresh thread works: it does not need a first message.
+4. Under the project header, a **Session connected** card shows the setup
+   instruction and a **Copy instruction** button. It lists only the
+   capabilities that are unavailable. Click **Copy instruction** and paste it
+   into that Codex thread, once per thread. Connecting sends nothing to the
+   model, so the agent gets the Ariadne rules only from this paste.
 
-Codex approvals stay yours. Ariadne does not turn them on or off.
+The instruction names the exact command to run: the full path of the `ariadne`
+helper, with an `ARIADNE_HOME=` prefix only when your data folder is not
+`~/.ariadne`. That is why the paste works in Codex's shell without any PATH
+setup.
+
+Codex has no command inside the thread to connect, so connecting is always done
+from the app. Codex approvals stay yours. Ariadne does not turn them on or off.
 
 ## A 60-second tour
 
@@ -205,10 +220,10 @@ closed.
 
 ## What the agents are told
 
-Connecting a session sends nothing to the model. Agents get the rules from the
-setup instruction you paste into the session (Codex and Claude Code), and from
-the Ariadne skill: a Codex skill linked by the installer, and a skill inside the
-Claude Code plugin. In one paragraph: record
+Connecting a session sends nothing to the model. Codex agents get the rules from
+the setup instruction you paste into the thread, and from the Ariadne skill the
+installer links. Claude Code agents get them from the skill inside the plugin.
+In one paragraph: record
 findings as structured items through `ariadne apply`, write full replies on the
 item rather than only in the terminal, choose item statuses deliberately, and
 finish every input Ariadne sends them with exactly one explicit result. Agents
@@ -257,6 +272,10 @@ A small lock file under `~/.local/share/ariadne` can remain.
 ## Known limits
 
 - Claude Code and Codex only. There is no plugin system for further agents yet.
+- Codex: you paste the setup instruction once per thread. Ariadne cannot yet
+  send it for you.
+- Codex: a thread with no messages yet may not appear in the connect dialog's
+  list. Click **Refresh host sessions** on the Projects page and look again.
 - No automatic repair for corrupted data, full disks or power loss.
 - Speed targets are recorded, not guaranteed.
 - Everything under [Status](#status) also applies.

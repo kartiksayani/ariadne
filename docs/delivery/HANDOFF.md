@@ -11,7 +11,7 @@ closed-source freemium product: never add an open-source licence (Cargo.toml is
 **Main: 6a0adec (#114). Roadmap: 46/49 on main, 48/50 once this docs PR merges (P7.2, P7.3, task P8.2 added).** Remaining: P8.1, then P8.2 (UX review and theme refresh).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-Open PRs: this docs PR (#115, branch `docs/live-evidence`) and the Codex onboarding PR (branch `fix/codex-onboarding`, in progress). Duplicate and
+Open PRs: the Codex onboarding PR (#116, branch `fix/codex-onboarding`) and the P8.1 release-evidence docs PR (PR_NUMBER_PENDING, branch `docs/release-evidence`). Main SHA for the release install trial: MAIN_SHA_PENDING (the commit after #116 merges; its green `quality` run is MAIN_RUN_PENDING). P8.1 is in progress: docs and matrix are done in the docs PR; the clean-checkout install trial and the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)) remain. Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.
@@ -85,6 +85,9 @@ Follow-ups the run surfaced:
   for the fix/codex-onboarding PR (branch in progress).
 - D7 (UX: font, alignment, button contrast, scrollbars, raw UUIDs): task P8.2, UX review
   and theme refresh, runs after P8.1.
+- D6 discovery: a Codex thread with no messages yet may not appear in the discovery
+  list until "Refresh host sessions" (documented in README Known limits); find out
+  whether the daemon lists such threads at all.
 - D8: Ariadne should send the setup instruction through `codex queue` itself instead of
   the owner pasting it.
 
