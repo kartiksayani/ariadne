@@ -8,7 +8,7 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 85518a0 (#119: parallel quality stages and caches). Roadmap: 50/53 on main.** The only open task is P8.3 (UX review and theme refresh, held for the owner). P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
+**Main: 4ff2bd9 (#122: Mod rules working method). Roadmap: 53/55 with this branch's P8.7 pending; main alone is 52/54.** The open tasks are P8.7 (in flight) and P8.3 (UX review and theme refresh, held for the owner). P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
 No open PRs. The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
@@ -127,6 +127,11 @@ Follow-ups the run surfaced:
   package); `ariadne setup` records the Codex path in `~/.ariadne/providers.json`, which
   the app reads at start (flags win) and `doctor` checks. The live acceptance only ever
   passed with flags. Claude bindings qualified before this must reconnect once.
+- P8.6 Ariadne working method in the Mod rules (PR pending): the owner found the shipped
+  rules only documented the wire protocol. They now tell Claude and Codex to choose their own topics,
+  file typed items with full replies as they work and route decisions through `item.ask`, so
+  "use Ariadne" is enough. Source is `integrations/rules/source.md`; run `cargo xtask gen-rules`.
+  Follow-up: `integrations/rules/codex.md` still mentions `/ariadne-connect`, which Codex does not have.
 - P8.7 Project store under the data root (ADR-0082, PR pending): the per-project store moves
   from `<project>/.ariadne/` to `~/.ariadne/projects/<project-id>/`. Opening or registering a
   project migrates a legacy store (copy, verify byte-for-byte, remove; both kept on failure).
@@ -135,7 +140,7 @@ Follow-ups the run surfaced:
 
 ## Next steps
 
-1. P8.4, P8.5 and P8.7 (in flight, above), then P8.3 UX review and theme refresh (held for the owner;
+1. P8.7 (in flight, above), then P8.3 UX review and theme refresh (held for the owner;
    owner ruling 2026-10-06; see tasks.json).
 2. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
