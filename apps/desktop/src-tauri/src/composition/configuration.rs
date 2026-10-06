@@ -93,12 +93,50 @@ impl NativeConfiguration {
         } else {
             vec![]
         };
+        let default_home = environment("HOME").map(|home| home.join(".ariadne"));
+        let cli_invocation = cli_invocation(
+            flags.get("--ariadne-helper"),
+            &home,
+            default_home.as_deref(),
+        );
         Ok(Self {
             home,
             claude,
             codex,
             discovery_endpoints,
+            cli_invocation,
         })
+    }
+}
+/// The agent's tool shell inherits neither `ARIADNE_HOME` nor a PATH entry for
+/// the helper, so the setup instruction must name both explicitly.
+fn cli_invocation(
+    helper: Option<&PathBuf>,
+    home: &std::path::Path,
+    default_home: Option<&std::path::Path>,
+) -> String {
+    let helper = match helper {
+        Some(helper) => shell_word(&helper.to_string_lossy()),
+        None => "ariadne".into(),
+    };
+    if default_home == Some(home) {
+        helper
+    } else {
+        format!(
+            "ARIADNE_HOME={} {helper}",
+            shell_word(&home.to_string_lossy())
+        )
+    }
+}
+fn shell_word(value: &str) -> String {
+    let plain = !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-+=:,@%".contains(c));
+    if plain {
+        value.into()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
 fn absolute(path: PathBuf) -> Result<PathBuf, CoreError> {
@@ -161,6 +199,33 @@ mod tests {
         )
         .is_err());
         assert!(NativeConfiguration::parse(&args(&["--codex-home"]), environment).is_err());
+    }
+    #[test]
+    fn cli_invocation_names_helper_and_non_default_data_root() {
+        let environment = |name: &str| (name == "HOME").then(|| PathBuf::from("/absent/user"));
+        let invocation = |extra: &[&str], env: &dyn Fn(&str) -> Option<PathBuf>| {
+            NativeConfiguration::parse(&args(extra), env)
+                .unwrap()
+                .cli_invocation
+        };
+        assert_eq!(invocation(&[], &environment), "ariadne");
+        assert_eq!(
+            invocation(&["--ariadne-helper", "/opt/bin/ariadne"], &environment),
+            "/opt/bin/ariadne"
+        );
+        let custom = |name: &str| match name {
+            "HOME" => Some(PathBuf::from("/absent/user")),
+            "ARIADNE_HOME" => Some(PathBuf::from("/data/my root")),
+            _ => None,
+        };
+        assert_eq!(
+            invocation(&["--ariadne-helper", "/opt/bin/ariadne"], &custom),
+            "ARIADNE_HOME='/data/my root' /opt/bin/ariadne"
+        );
+        assert_eq!(
+            invocation(&[], &custom),
+            "ARIADNE_HOME='/data/my root' ariadne"
+        );
     }
     #[test]
     fn ordinary_startup_consumes_argv_after_the_executable() {

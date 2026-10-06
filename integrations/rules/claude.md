@@ -7,6 +7,11 @@ that state. Read bounded canonical projections using the explicit binding and
 generation supplied by setup or the dispatched input. Never infer a session from
 cwd, filenames, a previous conversation or a foreign item reference.
 
+Below, `ariadne` stands for the exact CLI invocation named in the setup
+instruction. Run it verbatim: your tool shell may not inherit environment
+variables or find the helper on PATH, so keep any `ARIADNE_HOME=...` prefix and
+the absolute helper path.
+
 Read with `ariadne read --binding B --generation G --view items|topics|messages|inputs --json`
 and `ariadne item messages|rounds --binding B --generation G --item ID --json`.
 Publish with `ariadne apply --binding B --generation G --json-stdin --json`,

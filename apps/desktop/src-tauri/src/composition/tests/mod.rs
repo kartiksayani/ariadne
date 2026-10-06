@@ -107,6 +107,7 @@ impl Fixture {
             home: self.home.clone(),
             codex: None,
             discovery_endpoints: vec![],
+            cli_invocation: "ariadne".into(),
             claude: Some(ClaudeOptions {
                 executable: self.executable.clone(),
                 helper: self.helper.clone(),

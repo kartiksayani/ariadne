@@ -249,6 +249,7 @@ fn claude_activation(terminal: bool) {
         ProviderInstructions {
             claude: "Fixture canonical agent guidance.".into(),
             codex: "Fixture canonical agent guidance.".into(),
+            cli_invocation: "ariadne".into(),
         },
     );
     let owner = Arc::new(DesktopOwner::acquire(home.path()).unwrap());
@@ -616,6 +617,7 @@ fn claude_activation(terminal: bool) {
             ProviderInstructions {
                 claude: "Retain terminal scope.".into(),
                 codex: "Unused".into(),
+                cli_invocation: "ariadne".into(),
             },
         );
         let routes = ControlRoutes::new();
@@ -846,6 +848,7 @@ fn codex_activation(case: CodexCase) {
         ProviderInstructions {
             claude: "Fixture agent guidance.".into(),
             codex: "Fixture agent guidance.".into(),
+            cli_invocation: "ariadne".into(),
         },
     );
     let owner = Arc::new(DesktopOwner::acquire(home.path()).unwrap());

@@ -104,6 +104,15 @@ pub async fn discovery_snapshot<R: tauri::Runtime>(
         .map_err(|()| invalid())?
 }
 #[tauri::command]
+pub async fn codex_default_endpoint<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Option<String>, CoreError> {
+    let service = app.state::<DesktopService>().inner().clone();
+    blocking(move || service.codex_default_endpoint())
+        .await
+        .map_err(|()| invalid())?
+}
+#[tauri::command]
 pub async fn discovery_ui_open<R: tauri::Runtime>(
     request: DiscoveryUiOpenRequest,
     app: tauri::AppHandle<R>,

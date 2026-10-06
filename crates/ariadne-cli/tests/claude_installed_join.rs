@@ -157,6 +157,7 @@ impl Fixture {
                     "Use the installed helper for structured Ariadne context and explicit results."
                         .into(),
                 codex: "Unused".into(),
+                cli_invocation: "ariadne".into(),
             },
         );
         let rt = tokio::runtime::Builder::new_multi_thread()

@@ -243,6 +243,7 @@ impl Setup {
                     compatibility: Compatibility::Compatible,
                     availability: Availability::Available,
                     connection_state: ConnectionState::Connected,
+                    cli_invocation: "ariadne".into(),
                     setup_instruction: "Fixture qualified host; no live process.".into(),
                 })
             },

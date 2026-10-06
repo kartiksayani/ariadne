@@ -24,6 +24,7 @@ impl CoreBridge {
         let preferences_read = self.runtime.clone();
         let discovery_read = self.runtime.clone();
         let discovery_open = self.runtime.clone();
+        let codex_socket = self.runtime.clone();
         DesktopService::from_trusted_startup_with_connect(
             Arc::new(self.clone()),
             move |route| resolver.resolve_session(route),
@@ -68,6 +69,11 @@ impl CoreBridge {
                 })
             },
         )
+        .with_codex_default_endpoint(move || {
+            codex_socket
+                .upgrade()
+                .and_then(|runtime| runtime.codex_default_socket())
+        })
     }
 }
 impl CoreService for CoreBridge {

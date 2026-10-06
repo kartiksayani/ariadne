@@ -400,7 +400,7 @@ fn connect_receipt(
     operation_id: &UuidV4,
     revision: PositiveSafeInteger,
 ) -> Result<SavedReceiptData, BindingError> {
-    let setup_instruction = format!("{}\n\nUse these routing IDs for Ariadne commands: binding {}, generation {}.\nUse ariadne read --binding {} --generation {} --view items --json.\nPublish full item replies with ariadne apply --binding {} --generation {} --json-stdin. Use explicit item references; ordinary terminal prose does not update Ariadne.", host.setup_instruction, binding_id.as_str(), generation.as_str(), binding_id.as_str(), generation.as_str(), binding_id.as_str(), generation.as_str());
+    let setup_instruction = format!("{}\n\nUse these routing IDs for Ariadne commands: binding {}, generation {}.\nUse {cli} read --binding {} --generation {} --view items --json.\nPublish full item replies with {cli} apply --binding {} --generation {} --json-stdin. Use explicit item references; ordinary terminal prose does not update Ariadne.", host.setup_instruction, binding_id.as_str(), generation.as_str(), binding_id.as_str(), generation.as_str(), binding_id.as_str(), generation.as_str(), cli = host.cli_invocation);
     if setup_instruction.trim().is_empty()
         || setup_instruction.contains('\0')
         || setup_instruction.len() > 64 * 1024

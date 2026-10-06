@@ -237,6 +237,7 @@ fn saved_connect_instruction_routes_real_read_and_apply_processes() {
                     compatibility: Compatibility::Compatible,
                     availability: Availability::Available,
                     connection_state: ConnectionState::Connected,
+                    cli_invocation: "ariadne".into(),
                     setup_instruction: "Exact verified prefix; no live provider is contacted."
                         .into(),
                 })
@@ -359,6 +360,7 @@ fn saved_connect_instruction_routes_real_read_and_apply_processes() {
                         compatibility: Compatibility::Compatible,
                         availability: Availability::Available,
                         connection_state: ConnectionState::Connected,
+                        cli_invocation: "ariadne".into(),
                         setup_instruction: "Qualified test provider seam".into(),
                     })
                 },

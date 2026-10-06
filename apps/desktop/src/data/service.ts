@@ -23,6 +23,8 @@ export interface HintPayloads {
 export interface RendererService {
   discovery(): Promise<DesktopDiscoverySnapshot>;
   setConnectionUiOpen(open: boolean): Promise<void>;
+  /** Configured Codex app-server socket path, or null when Codex is not configured. */
+  codexDefaultEndpoint?(): Promise<string | null>;
   query<C extends QueryCommand>(request: QueryCall<C>): Promise<QueryData<C>>;
   executeOwner(request: OwnerMutationRequest): Promise<MutationReceipt>;
   subscribe<E extends keyof HintPayloads>(event: E, receive: (hint: HintPayloads[E]) => void): Promise<Unsubscribe>;
@@ -46,12 +48,14 @@ export class ServiceFailure extends Error {
 export interface DesktopTransport {
   discovery?(): Promise<DesktopDiscoverySnapshot>;
   setConnectionUiOpen?(open: boolean): Promise<void>;
+  codexDefaultEndpoint?(): Promise<string | null>;
   invoke<T>(command: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T>;
   listen<E extends keyof HintPayloads>(event: E, receive: (hint: HintPayloads[E]) => void): Promise<Unsubscribe>;
 }
 const tauriTransport: DesktopTransport = {
   discovery: () => invoke('discovery_snapshot'),
   setConnectionUiOpen: open => invoke('discovery_ui_open', { request: { open } }),
+  codexDefaultEndpoint: () => invoke('codex_default_endpoint'),
   invoke: (command, args) => invoke(command, args),
   async listen(event, receive) {
     const unsubscribe = await listen<HintPayloads[typeof event]>(event, (message) => receive(message.payload));
@@ -103,6 +107,13 @@ export function createDesktopService(transport: DesktopTransport = tauriTranspor
       } catch { throw new ServiceFailure('transport'); }
       validateDiscovery(snapshot);
       return snapshot;
+    },
+    async codexDefaultEndpoint() {
+      if (!transport.codexDefaultEndpoint) return null;
+      try {
+        const path = await transport.codexDefaultEndpoint();
+        return typeof path === 'string' && path !== '' ? path : null;
+      } catch { throw new ServiceFailure('transport'); }
     },
     async setConnectionUiOpen(open) {
       try {

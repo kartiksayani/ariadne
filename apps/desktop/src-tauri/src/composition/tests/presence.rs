@@ -217,6 +217,7 @@ fn sweep_keeps_current_entries_but_fresh_session_reads_reject_disconnect_and_reb
                 compatibility: ariadne_agent_protocol::Compatibility::Compatible,
                 availability: ariadne_agent_protocol::Availability::Available,
                 connection_state: ConnectionState::Connected,
+                cli_invocation: "ariadne".into(),
                 setup_instruction: "Read the retained history before continuing.".into(),
             })
         },

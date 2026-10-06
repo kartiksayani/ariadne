@@ -93,6 +93,7 @@ fn host(params: &BindingConnectParams) -> VerifiedHost {
         compatibility: Compatibility::Compatible,
         availability: Availability::Available,
         connection_state: ConnectionState::Unknown,
+        cli_invocation: "ariadne".into(),
         setup_instruction: "fixture instructions".into(),
     }
 }

@@ -581,7 +581,21 @@ fn cancellation_refuses_prepared_history_active_attempt_and_every_nonqueued_stat
 #[test]
 fn closed_archived_and_nonwaiting_answer_guards_preserve_existing_bytes() {
     let setup = Setup::new(&seed());
-    setup.rejected(&answer(10), CoreErrorCode::QuestionChanged);
+    // An item the agent never asked is not a stale revision: distinct message.
+    let not_asked = setup.rejected(&answer(10), CoreErrorCode::InvalidArgument);
+    assert_eq!(
+        not_asked.message,
+        "The question is not waiting on you; the agent has not asked it yet."
+    );
+    // A stale answer to an item that was asked and then decided stays `question_changed`.
+    let decided = Setup::new(&seed());
+    decided.edit(80, |s| {
+        let item = s.items.0.get_mut(&item("1")).unwrap();
+        item.status = ItemStatus::Decided;
+        item.outcome = Some("Decided.".into());
+        item.why = Some("Because.".into());
+    });
+    decided.rejected(&answer(13), CoreErrorCode::QuestionChanged);
     setup.edit(80, |s| {
         s.state = SessionState::Closed;
         s.closed_at = Some(at());

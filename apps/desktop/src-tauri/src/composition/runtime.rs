@@ -36,6 +36,8 @@ pub struct NativeConfiguration {
     pub claude: Option<ClaudeOptions>,
     pub codex: Option<CodexOptions>,
     pub discovery_endpoints: Vec<CodexEndpoint>,
+    /// Exact shell prefix for the Ariadne CLI named in saved setup instructions.
+    pub cli_invocation: String,
 }
 struct Workers {
     executor: tokio::runtime::Runtime,
@@ -62,8 +64,13 @@ pub struct NativeRuntime {
     presence: Arc<PresenceCache>,
     expiry: Arc<ResultExpiry>,
     reconciliation_errors: Mutex<Vec<CoreError>>,
+    /// Configured Codex app-server socket, offered as the connect dialog default.
+    codex_socket: Option<String>,
 }
 impl NativeRuntime {
+    pub fn codex_default_socket(&self) -> Option<String> {
+        self.codex_socket.clone()
+    }
     /// Blocking startup, after single-instance interception and off the UI thread.
     /// The one actual owner is acquired before any Core/provider worker starts.
     pub fn start(
@@ -101,6 +108,13 @@ impl NativeRuntime {
         presence_emit: Arc<dyn Fn(PresenceChangedHint) -> bool + Send + Sync>,
         reconciled: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Arc<Self>, CoreError> {
+        let codex_socket = config.discovery_endpoints.first().and_then(|configured| {
+            let path = configured
+                .options
+                .endpoint_path(&configured.endpoint)
+                .ok()?;
+            path.to_str().map(str::to_owned)
+        });
         let owner = Arc::new(DesktopOwner::acquire(&config.home)?);
         let core = Arc::new(NativeCoreService::new(
             Registry::create_data_directory(&config.home)?,
@@ -123,6 +137,7 @@ impl NativeRuntime {
                 roots.clone(),
             )),
         );
+        let instructions = instructions(&config.cli_invocation);
         let providers = ProviderFactory::new(
             roots,
             discovery.clone(),
@@ -132,7 +147,7 @@ impl NativeRuntime {
                 next_id: Arc::new(next_id),
                 now: Arc::new(now),
             },
-            instructions(),
+            instructions,
         );
         let executor = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -160,6 +175,7 @@ impl NativeRuntime {
             presence: presence.clone(),
             expiry: expiry.clone(),
             reconciliation_errors: Mutex::new(Vec::new()),
+            codex_socket,
         });
         let connect_runtime = Arc::downgrade(&runtime);
         let announcement_runtime = Arc::downgrade(&runtime);
