@@ -184,6 +184,7 @@ impl CodexDaemonReader {
         limit: u32,
         deadline: Instant,
     ) -> Result<wire::thread_turns_list_response::ThreadTurnsListResponse, AdapterError> {
+        let first_page = cursor.is_none();
         let page = self.rpc.request(
             "thread/turns/list",
             &wire::thread_turns_list_params::ThreadTurnsListParams {
@@ -198,11 +199,13 @@ impl CodexDaemonReader {
         let page: wire::thread_turns_list_response::ThreadTurnsListResponse = match page {
             Ok(page) => page,
             // A fresh thread has no rollout until its first user message: no turns yet.
+            // Only the first, cursor-less page may be empty this way.
             Err(_)
-                if self
-                    .rpc
-                    .last_server_error()
-                    .is_some_and(|detail| detail.is_thread_not_materialized()) =>
+                if first_page
+                    && self
+                        .rpc
+                        .last_server_error()
+                        .is_some_and(|detail| detail.is_thread_not_materialized()) =>
             {
                 wire::thread_turns_list_response::ThreadTurnsListResponse {
                     backwards_cursor: None,

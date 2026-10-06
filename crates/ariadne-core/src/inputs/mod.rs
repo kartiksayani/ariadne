@@ -111,7 +111,10 @@ fn submit(
             "The target item does not belong to the requested topic",
         ));
     }
-    if params.kind == InputKind::Answer && item.status != ItemStatus::WaitingOnMe {
+    if params.kind == InputKind::Answer
+        && item.status == ItemStatus::Open
+        && item.current_round_id.is_none()
+    {
         // Distinct from a revision mismatch: the agent never asked this item.
         return Err(core(
             CoreErrorCode::InvalidArgument,

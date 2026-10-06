@@ -66,10 +66,10 @@ function countsText(counts: Immutable<SummaryCounts>): string {
 
 /** Saved binding-connect receipt: what to give the host, plus capabilities the owner cannot rely on. */
 function SetupCard({ setup, adapterId }: { setup: NonNullable<NavigationState['setup']>; adapterId: string | null }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<'idle' | 'copied' | 'failed'>('idle');
   useEffect(() => {
-    if (!copied) return undefined;
-    const timer = setTimeout(() => setCopied(false), 3000);
+    if (copied === 'idle') return undefined;
+    const timer = setTimeout(() => setCopied('idle'), 3000);
     return () => clearTimeout(timer);
   }, [copied]);
   if (setup.data.kind !== 'binding_connect') return null;
@@ -77,7 +77,11 @@ function SetupCard({ setup, adapterId }: { setup: NonNullable<NavigationState['s
   const unavailable = Object.entries(setup.data.capabilities)
     .filter(([, value]) => typeof value === 'object' && !value.supported).map(([name]) => name.replace(/_/g, ' '));
   const copy = () => {
-    void navigator.clipboard.writeText(instruction).then(() => setCopied(true), () => setCopied(false));
+    try {
+      void navigator.clipboard.writeText(instruction).then(() => setCopied('copied'), () => setCopied('failed'));
+    } catch {
+      setCopied('failed');
+    }
   };
   return <section className="nav-banner" aria-label="Session setup"><h2>Session connected</h2>
     <p>Connecting sent nothing to the model. {adapterId === 'codex'
@@ -87,7 +91,7 @@ function SetupCard({ setup, adapterId }: { setup: NonNullable<NavigationState['s
         : 'Paste this setup instruction into the selected host conversation once per binding so the agent has the Ariadne rules.'}</p>
     {adapterId !== 'claude_code_mod' && <>
       <button type="button" className="ref-button ref-secondary" onClick={copy}>Copy instruction</button>
-      <span role="status" className="nav-copied">{copied ? 'Copied' : ''}</span>
+      <span role="status" className="nav-copied">{copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : ''}</span>
       <pre>{instruction}</pre></>}
     <p>Session {setup.session_id}</p>
     {unavailable.length > 0 && <p>Unavailable capabilities: {unavailable.join(', ')}.</p>}

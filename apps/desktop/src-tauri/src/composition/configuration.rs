@@ -115,10 +115,10 @@ fn cli_invocation(
     home: &std::path::Path,
     default_home: Option<&std::path::Path>,
 ) -> String {
-    let Some(helper) = helper else {
-        return "ariadne".into();
+    let helper = match helper {
+        Some(helper) => shell_word(&helper.to_string_lossy()),
+        None => "ariadne".into(),
     };
-    let helper = shell_word(&helper.to_string_lossy());
     if default_home == Some(home) {
         helper
     } else {
@@ -221,6 +221,10 @@ mod tests {
         assert_eq!(
             invocation(&["--ariadne-helper", "/opt/bin/ariadne"], &custom),
             "ARIADNE_HOME='/data/my root' /opt/bin/ariadne"
+        );
+        assert_eq!(
+            invocation(&[], &custom),
+            "ARIADNE_HOME='/data/my root' ariadne"
         );
     }
     #[test]

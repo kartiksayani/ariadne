@@ -14,6 +14,18 @@ pub(crate) const MAX_FRAME: usize = 8 * 1024 * 1024;
 /// Longest server message copied into an adapter error.
 const MAX_SERVER_MESSAGE: usize = 200;
 
+/// Unicode format and bidirectional-control characters that can disguise text.
+fn is_format_or_bidi(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
+}
+
 /// JSON-RPC error object returned by the daemon for the most recent request.
 /// The message is control-character-stripped and bounded, never raw wire text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +39,7 @@ impl ServerError {
             code,
             message: message
                 .chars()
-                .filter(|c| !c.is_control())
+                .filter(|c| !c.is_control() && !is_format_or_bidi(*c))
                 .take(MAX_SERVER_MESSAGE)
                 .collect(),
         }

@@ -536,6 +536,32 @@ fn fresh_unmaterialized_thread_connects_with_an_empty_turn_list() {
 }
 
 #[test]
+fn not_materialized_error_on_a_cursor_page_still_fails() {
+    let harness = Harness::new(|request, count| {
+        if request["method"] == "thread/turns/list" && count > 1 {
+            if request["params"]["cursor"].is_null() {
+                let mut value = fixture("turns-response.json");
+                value["nextCursor"] = json!("page-2");
+                return Some(Action::Result(value));
+            }
+            return Some(Action::Raw(json!({"id":request["id"],"error":{
+                "code":-32600,
+                "message":"thread 01a0 is not materialized yet; thread/turns/list is unavailable before first user message"
+            }})));
+        }
+        None
+    });
+    let (mut client, _) = harness.connect();
+    let mut scan = client
+        .begin_scan(Some("not-seen-anchor".to_owned()))
+        .unwrap();
+    let error = client
+        .read_history(reconcile(vec![attempt(2)]), &mut scan, at())
+        .unwrap_err();
+    assert_eq!(error.code, Code::HostUnreachable);
+}
+
+#[test]
 fn other_turn_list_errors_fail_with_the_bounded_server_code_and_message() {
     let project = tempfile::tempdir().unwrap();
     let h = turns_error(

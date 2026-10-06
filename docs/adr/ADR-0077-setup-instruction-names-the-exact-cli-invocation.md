@@ -25,7 +25,9 @@ prefix by hand. No Ariadne mutation happened before the fix.
 - The desktop composes the invocation at startup (`NativeConfiguration`): the
   absolute `--ariadne-helper` path, prefixed with `ARIADNE_HOME=<data root> ` only
   when the data root is not `$HOME/.ariadne`. Values with shell-special
-  characters are single-quoted. With no helper path configured it stays `ariadne`.
+  characters are single-quoted. With no helper path configured the command is bare
+  `ariadne`, still prefixed with `ARIADNE_HOME=<data root> ` when the data root is
+  not the default.
 - `ProviderInstructions` hands the same invocation to the Codex and the Claude
   instruction, since both go through the one connect receipt path. The Claude Mod
   itself is unchanged.
