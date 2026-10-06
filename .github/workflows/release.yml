@@ -94,11 +94,12 @@ jobs:
           fi
           cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
           Alpha build, not signed or notarized. The first time you open Ariadne, macOS
-          will refuse; right-click the app and choose Open (or use Open Anyway in
-          System Settings, Privacy & Security). To install: download the `.tar.gz`,
-          run `tar xzf` on it, then `./install.sh` inside the folder it creates. It
-          needs only python3 3.11 or newer. Building from source with `make install`
-          remains supported.
+          will refuse. `install.sh` removes the macOS download quarantine mark from the
+          package folder and says so; if macOS still refuses to open the app, go to
+          System Settings → Privacy & Security and choose Open Anyway. To install:
+          download the `.tar.gz`, run `tar xzf` on it, then `./install.sh` inside the
+          folder it creates. It needs only python3 3.11 or newer. Building from
+          source with `make install` remains supported.
           NOTES
           gh release create "$GITHUB_REF_NAME" --prerelease --title "Ariadne $GITHUB_REF_NAME" \
             --notes-file "$RUNNER_TEMP/notes.md" dist/*.tar.gz
