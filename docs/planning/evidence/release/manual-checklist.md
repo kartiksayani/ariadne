@@ -9,11 +9,11 @@ Leave a Result cell blank until the step has been done; write `pass`, `fail` or
 
 | Item | Value |
 |---|---|
-| Mac model | MAC_MODEL_PENDING |
-| macOS version | MACOS_VERSION_PENDING |
-| Claude Code version | CLAUDE_VERSION_PENDING |
-| Codex CLI version | CODEX_VERSION_PENDING |
-| Ariadne version | ARIADNE_VERSION_PENDING |
+| Mac model | MacBookPro17,1 |
+| macOS version | 26.7 (25G229) |
+| Claude Code version | 2.1.291 (Claude Code) |
+| Codex CLI version | codex-cli 0.160.1 |
+| Ariadne version | 0.1.0 |
 | Source SHA | MAIN_SHA_PENDING |
 | Date and tester | DATE_TESTER_PENDING |
 

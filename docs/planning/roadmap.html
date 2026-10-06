@@ -111,9 +111,9 @@
   "schema_version": 1,
   "status": {
     "updated_at": "2026-10-06T15:00:00Z",
-    "headline": "46/49 merged on main; 48/50 once PR #115 lands (it closes P7.2 and P7.3 and adds P8.2). Both live core loops were proven on 2026-10-06 (Claude and Codex); remaining coverage rows are deferred by owner ruling. Remaining: P8.1 release evidence, then P8.2 UX review and theme refresh.",
+    "headline": "48/51 merged on main. Both live core loops were proven on 2026-10-06 (Claude and Codex); remaining coverage rows are deferred by owner ruling. Open: P8.1 release evidence, P8.2 prebuilt alpha release package, P8.3 UX review and theme refresh.",
     "notes": [
-      "P7.3 live Codex run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md). Codex onboarding defects D1-D6 are tracked for the fix/codex-onboarding PR (branch in progress); D7 is task P8.2; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
+      "P7.3 live Codex run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md). Codex onboarding defects D1-D6 are tracked for the fix/codex-onboarding PR (branch in progress); D7 is task P8.3; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
       "P7.2 live Claude run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md, ADR-0076, PR #114); remaining coverage rows deferred by owner ruling 2026-10-06. Follow-ups: queued inputs stay bound to a retired binding after rebind; no confirm-completed resolution for committed-result/unknown-turn attempts; a session with a Disconnected binding cannot be closed; delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill; rules source.md should say option consequence is required; Claude Mod uses undocumented $.plugin.root.",
       "PR #107 (agent rule sheet) merged to main as db352e5. It is not a roadmap item.",
       "PR #106 carried the whole former stack (#94-#103) plus the Codex skill and the preferences-conflict fix; squash-merged as f020bbe at head 87aa6b4.",
@@ -1980,6 +1980,43 @@
     },
     {
       "id": "P8.2",
+      "title": "Prebuilt alpha release package",
+      "phase": "M8",
+      "depends_on": [],
+      "paths": [
+        "scripts/install/install.py",
+        "Makefile",
+        ".github/workflows/release.yml",
+        "README.md",
+        "docs/planning/PERSONAL_RELEASE.md",
+        "tests/functional/install/test_install.py"
+      ],
+      "spec": [
+        "docs/planning/PERSONAL_RELEASE.md"
+      ],
+      "acceptance": [
+        "`make package` builds the same artifacts as `make install` and assembles a tarball holding Ariadne.app, both helpers, the build facts, install.py and install.sh.",
+        "`install.py install --package <dir>` installs a prebuilt package without Node, Rust or Xcode, keeps every ownership and uninstall guarantee, and `make install` from source is unchanged.",
+        "A `v*` tag publishes the tarball as a GitHub pre-release after an isolated install, doctor and uninstall proof on the runner.",
+        "README offers the download first and the source build second, states the build is unsigned, and does not promise signing."
+      ],
+      "checks": [
+        "rtk proxy .venv-quality/bin/python scripts/check-commit.py --working-tree",
+        "rtk proxy make test-install",
+        "Isolated: extract the tarball under /private/tmp, HOME=<fresh> ./install.sh, ariadne doctor --json, install.py uninstall"
+      ],
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": null
+      },
+      "progress": {
+        "state": "in_progress",
+        "prs": [],
+        "note": "Owner ruling 2026-10-06: installer package is P8.2, UX review is P8.3. Branch task/alpha-package in progress."
+      }
+    },
+    {
+      "id": "P8.3",
       "title": "UX review and theme refresh",
       "phase": "M8",
       "depends_on": [
@@ -2003,7 +2040,7 @@
       "progress": {
         "state": "queued",
         "prs": [],
-        "note": "Runs after P8.1 per owner ruling 2026-10-06."
+        "note": "Held: the owner will steer the UX review and brainstorm; runs after P8.1 per owner ruling 2026-10-06."
       }
     }
   ]

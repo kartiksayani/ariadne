@@ -8,10 +8,10 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 6a0adec (#114). Roadmap: 46/49 on main, 48/50 once this docs PR merges (P7.2, P7.3, task P8.2 added).** Remaining: P8.1, then P8.2 (UX review and theme refresh).
+**Main: 6a0adec (#114). Roadmap: 48/51 on main.** Open tasks: P8.1 (release evidence, this PR), P8.2 (prebuilt alpha release package, branch `task/alpha-package`), P8.3 (UX review and theme refresh, held for the owner).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-Open PRs: the Codex onboarding PR (#116, branch `fix/codex-onboarding`) and the P8.1 release-evidence docs PR (PR_NUMBER_PENDING, branch `docs/release-evidence`). Main SHA for the release install trial: MAIN_SHA_PENDING (the commit after #116 merges; its green `quality` run is MAIN_RUN_PENDING). P8.1 is in progress: docs and matrix are done in the docs PR; the clean-checkout install trial and the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)) remain. Duplicate and
+Open PRs and branches: #116 (`fix/codex-onboarding`, awaiting CI rerun), `ci/parallel-quality` (CI stages split and reopen flake fix, in progress), `task/alpha-package` (P8.2, in progress) and the P8.1 release-evidence docs PR (PR_NUMBER_PENDING, branch `docs/release-evidence`). Main SHA for the release install trial: MAIN_SHA_PENDING (the commit after #116 merges; its green `quality` run is MAIN_RUN_PENDING). P8.1 is in progress: docs and matrix are done in the docs PR; the clean-checkout install trial and the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)) remain. Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.
@@ -83,7 +83,7 @@ Follow-ups the run surfaced:
 - D1-D6 (fresh-thread connect, RPC error text, setup instruction path and
   `ARIADNE_HOME`, connect card, `question_changed` message, discovery dialog) are tracked
   for the fix/codex-onboarding PR (branch in progress).
-- D7 (UX: font, alignment, button contrast, scrollbars, raw UUIDs): task P8.2, UX review
+- D7 (UX: font, alignment, button contrast, scrollbars, raw UUIDs): task P8.3, UX review
   and theme refresh, runs after P8.1.
 - D6 discovery: a Codex thread with no messages yet may not appear in the discovery
   list until "Refresh host sessions" (documented in README Known limits); find out
@@ -109,7 +109,8 @@ Follow-ups the run surfaced:
    registration, `~/.agents/skills/ariadne`, scratch histories, Codex daemon restart;
    see the owner summary at the top of
    [PLAN.md](../planning/evidence/live-acceptance/PLAN.md)).
-2. P8.2 UX review and theme refresh (owner ruling 2026-10-06; see tasks.json).
+2. P8.2 prebuilt alpha release package (branch `task/alpha-package`); P8.3 UX review
+   and theme refresh (held for the owner; owner ruling 2026-10-06; see tasks.json).
 3. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
    `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,
