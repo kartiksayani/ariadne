@@ -309,6 +309,18 @@ fn bursts_dedupe_with_a_fixed_deadline_and_group_only_more_than_three() {
 }
 
 #[test]
+fn fresh_preferences_default_to_generic_notification_text() {
+    let (_home, core) = native_preferences();
+    let snapshot = native::PreferencesService::new(core.registry())
+        .get(&preference_owner())
+        .unwrap();
+    assert!(!snapshot.global.notification_preview);
+    let notices = burst::announcements(&[row(1, 1)], snapshot.global.notification_preview);
+    assert_eq!(notices[0].body, "A question is waiting for your answer.");
+    assert!(!notices[0].body.contains("Private"));
+}
+
+#[test]
 fn complete_capture_removes_resolved_pending_bursts_but_partial_does_not_infer_absence() {
     let now = std::time::Instant::now();
     let mut pending = burst::Burst::default();

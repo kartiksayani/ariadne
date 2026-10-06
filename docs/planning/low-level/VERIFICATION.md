@@ -3,8 +3,10 @@
 This ledger distinguishes transport evidence from product behavior. The
 existing-session transports have passed bounded live proofs: Claude Mods on
 Claude Code **2.1.287** and the native queue/history adapter on Codex **0.160.0**.
-Neither proof implements Ariadne's store, CLI/MCP, result join, UI, recovery, or
-release packaging. No application implementation has started.
+Neither transport proof establishes Ariadne's store, CLI/MCP, result join, UI,
+recovery, or release packaging acceptance. Production implementation and qualified
+merge evidence are recorded in the [task catalogue](../../delivery/tasks.json);
+current delivery state is in the [handoff](../../delivery/HANDOFF.md).
 
 Organization security guidance was not checked under the owner's explicit
 waiver. This ledger records project evidence only.
@@ -42,7 +44,9 @@ change is explicitly recorded in `DECISIONS.md` and retested.
 
 ## Required acceptance matrix
 
-Rows below remain `specified` until implementation evidence is linked here.
+Rows below define the required acceptance; source implementation alone does not
+prove them. Consult the task catalogue's completion evidence and exact qualifying
+CI/native/live records before marking a row proved.
 Rows marked **deferred** are explicitly outside this personal release and do
 not block acceptance. Row owners and implementation stages are in the
 [roadmap](../ROADMAP.md).
@@ -75,7 +79,7 @@ not block acceptance. Row owners and implementation stages are in the
 | V24 | Full release journey | Clean checkout installs on the recorded Mac; acceptance flow works for Claude and Codex; every non-deferred row has evidence or a concrete external blocker; README instructions match packaged app | M8 |
 | V25 | Waiting episode and counts | An unanswered waiting episode contributes once to Waiting; after answer it appears in Sent and not Waiting while status remains waiting; a new agent ask increments the episode and returns it to Waiting; corrections and unrelated replies do not corrupt counts | M1, M4 |
 | V26 | Provider compatibility and generated wire DTOs | Vendored exact-version schema hashes and regenerated Rust have no drift; recorded payloads decode; unknown variants, CLI/daemon version mismatch and replaced binaries disable dispatch without losing saved inputs | M0, M3 |
-| V27 | SVG viewport culling | On a 2,000-node fixture, off-screen elements are culled, crossing edges remain visible, focus/selection survive pan/zoom and Fit uses full layout bounds; graph/tree counts and selection agree | M5 |
+| V27 | SVG viewport culling | On a large fixture (render timing recorded as evidence, not a pass condition), off-screen elements are culled, crossing edges remain visible, focus/selection survive pan/zoom and Fit uses full layout bounds; graph/tree counts and selection agree | M5 |
 | V28 | Thin entry points | Desktop, CLI and standalone MCP share core/store; standalone MCP and CLI alias expose identical tools and outcomes; diagnostics stay off MCP stdout; simple install provides all entry points | M2, M6 |
 | V29 | Per-commit quality gate | Every code commit passes all maintained-code lint and test checks, including functional and E2E checks, and at least 80% overall coverage. Coverage is N/A only while there is no application code; the first application commit including scaffold source must meet 80%, and absent tooling/results fail closed. Live/billable host runs are reserved for M7. | Every code milestone |
 

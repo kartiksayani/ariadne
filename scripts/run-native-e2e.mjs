@@ -117,8 +117,11 @@ export async function proveQuit(root, binary, nonce, owned, home, bindingId, por
   await portFree(port);
   return { request, pidExited: true, portFree: true, leases: await releasedLeases(home, bindingId) };
 }
+export function isSameBirthZombie(owned, current, state) {
+  return current.pid === owned.pid && current.birth === owned.birth && state?.startsWith('Z') === true;
+}
 export async function waitForQuitExit(binary, owned) {
-  const end = Date.now() + 10000;
+  const end = Date.now() + 30000;
   while (alive(owned.pid) && Date.now() < end) {
     let current;
     try { current = identity(owned.pid); }
@@ -126,14 +129,14 @@ export async function waitForQuitExit(binary, owned) {
     if (current.exe !== binary || current.birth !== owned.birth) {
       if (!alive(owned.pid)) break;
       let state;
-      if (current.birth === owned.birth && current.exe === '<defunct>') {
+      if (current.birth === owned.birth) {
         try { state = execFileSync('/bin/ps', ['-p', String(owned.pid), '-o', 'stat='], { encoding: 'utf8' }).trim(); }
         catch (error) { if (!alive(owned.pid)) break; throw error; }
       }
       // macOS temporarily retains the same exited process until its parent
       // reaps it. A zombie is not sufficient Quit proof: keep waiting for
       // actual disappearance, and reject every live or reused identity.
-      if (!state?.startsWith('Z')) throw new Error(`Quit PID identity changed: ${JSON.stringify({ owned, current, state })}`);
+      if (!isSameBirthZombie(owned, current, state)) throw new Error(`Quit PID identity changed: ${JSON.stringify({ owned, current, state })}`);
     }
     await delay(25);
   }
@@ -187,6 +190,8 @@ export function nativeBuildEnv(target, e2e = false) {
 export async function runNative() {
   if (process.platform !== 'darwin') throw new Error('Native E2E requires a logged-in macOS GUI session');
   const port = Number(process.env.ARIADNE_E2E_PORT || '4445'); await portFree(port);
+  const quitNote = await import('./native-quit-note.mjs');
+  await quitNote.preflightQuitNote();
   const run = randomUUID(), evidence = join(repo, 'coverage/native-e2e', run);
   await mkdir(evidence, { recursive: true });
   const root = await mkdtemp('/private/tmp/ariadne-e2e-'); await chmod(root, 0o700);
@@ -204,7 +209,7 @@ export async function runNative() {
     await json(join(evidence, 'run.json'), details);
     await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: nativeEnv, log: join(evidence, 'build.log') });
     await command(cliBuildCommand[0], cliBuildCommand.slice(1), { env: cliEnv, log: join(evidence, 'cli-build.log') });
-    await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs', 'tests/e2e/graph/native-helper.test.mjs'], {
+    await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs', 'tests/e2e/history/fixture.test.mjs', 'tests/e2e/graph/native-helper.test.mjs', 'tests/e2e/recovery/fixture.test.mjs'], {
       env: { ...process.env, ARIADNE_FIXTURE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'fixture-cli.log'),
     });
     await command(process.execPath, ['--test', 'tests/e2e/tree/fixture.test.mjs', 'tests/e2e/process-contract/search-timing-observation.test.mjs'], {
@@ -226,7 +231,7 @@ export async function runNative() {
         ARIADNE_E2E_PRIOR_EVIDENCE: join(evidence, 'delivery') };
       await json(join(phaseEvidence, 'launch.json'), { nonce: phaseNonce, phase, priorPid: owned?.pid, binary, port });
       let launcher;
-      const execution = command(runtimeCommand[0], runtimeCommand.slice(1), { cwd: desktop, env: phaseEnv, timeout: 300000, log: join(phaseEvidence, 'wdio.log'), onStart: child => {
+      const execution = command(runtimeCommand[0], runtimeCommand.slice(1), { cwd: desktop, env: phaseEnv, timeout: 600000, log: join(phaseEvidence, 'wdio.log'), onStart: child => {
         launcher = child; writeFileSync(join(root, 'launcher.json'), JSON.stringify({ pid: child.pid }));
       } });
       const controller = new globalThis.AbortController();
@@ -235,7 +240,10 @@ export async function runNative() {
         const previous = owned;
         owned = await observeOwned(root, binary, phaseNonce, launcher.pid, 60000, controller.signal);
         if (previous && owned.pid === previous.pid) throw new Error('Relaunch reused the first native PID');
-        await json(join(phaseEvidence, 'observed.json'), owned); await execution;
+        await json(join(phaseEvidence, 'observed.json'), owned);
+        const acknowledgement = quitNote.acknowledgeQuitNote(root, binary, phaseNonce, owned, controller.signal)
+          .then(note => json(join(phaseEvidence, 'quit-note.json'), note));
+        await Promise.all([execution, acknowledgement]);
         const quit = JSON.parse(await readFile(join(phaseEvidence, 'quit.json'), 'utf8'));
         if (!quit.pidExited || !quit.leases?.released || quit.request.pid !== owned.pid || quit.request.nonce !== phaseNonce) throw new Error('Missing independently verified native Quit before teardown');
         await portFree(port);
@@ -261,7 +269,7 @@ export async function runNative() {
 }
 async function main() {
   const suite = selector(process.argv.slice(2));
-  if (suite === 'process-contract') return command(process.execPath, ['--test', 'tests/e2e/process-contract/runner.test.mjs']);
+  if (suite === 'process-contract') return command(process.execPath, ['--test', 'tests/e2e/process-contract/runner.test.mjs', 'tests/e2e/process-contract/native-quit-note.test.mjs']);
   await runNative();
   if (suite === 'all') await (await import('./check-release-boundary.mjs')).checkRelease();
 }

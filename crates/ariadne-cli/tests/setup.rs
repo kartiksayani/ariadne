@@ -49,14 +49,14 @@ fn setup_is_idempotent_and_agent_selection_merges_only_owned_resources() {
             .as_array()
             .unwrap()
             .len(),
-        1
+        2
     );
     assert_eq!(
         owned::apply(&version, "codex", true).unwrap()["changes"]
             .as_array()
             .unwrap()
             .len(),
-        1
+        2
     );
     assert!(version
         .join("integrations/claude-mod/plugin/hooks/register.js")
@@ -90,12 +90,12 @@ fn matching_foreign_files_remain_unowned_and_edited_owned_files_survive() {
     let backup = profile.path().join("previous.json");
     fs::write(&backup, b"backup").unwrap();
     let installed = owned::apply(&version, "both", false).unwrap();
-    assert_eq!(installed["changes"].as_array().unwrap().len(), 11);
+    assert_eq!(installed["changes"].as_array().unwrap().len(), 12);
     assert_eq!(installed["already_present"][0]["owned"], false);
     let edited = version.join("integrations/claude-mod/plugin/hooks/register.js");
     put(&edited, b"owner edited bytes");
     let removed = owned::apply(&version, "both", true).unwrap();
-    assert_eq!(removed["changes"].as_array().unwrap().len(), 10);
+    assert_eq!(removed["changes"].as_array().unwrap().len(), 11);
     assert_eq!(removed["retained"].as_array().unwrap().len(), 1);
     assert_eq!(fs::read(edited).unwrap(), b"owner edited bytes");
     assert_eq!(fs::read(foreign).unwrap(), bundle["rules/codex.md"]);
@@ -153,7 +153,8 @@ fn packaged_inventory_renders_only_static_immutable_helper_identity() {
     let manifest: serde_json::Value =
         serde_json::from_slice(&files["claude-mod/plugin/.claude-plugin/plugin.json"]).unwrap();
     assert_eq!(manifest["version"], resources::VERSION);
-    assert_eq!(files.len(), 12);
+    assert_eq!(files.len(), 13);
+    assert!(files["codex-skills/ariadne/SKILL.md"].starts_with(b"---\nname: ariadne\n"));
     assert!(files.contains_key("claude-mod/plugin/hooks/discovery.js"));
     assert_eq!(files.values().filter(|bytes| bytes.is_empty()).count(), 0);
     assert_eq!(
@@ -168,14 +169,14 @@ fn packaged_inventory_renders_only_static_immutable_helper_identity() {
             .keys()
             .filter(|name| resources::selected(name, "codex"))
             .count(),
-        1
+        2
     );
     assert_eq!(
         files
             .keys()
             .filter(|name| resources::selected(name, "both"))
             .count(),
-        12
+        13
     );
 }
 
@@ -222,7 +223,7 @@ fn global_setup_does_not_infer_or_register_a_project_and_explicit_registration_r
     let result =
         ariadne_cli::setup::execute_in_installation(&args, false, &data, &version, &stable)
             .unwrap();
-    assert_eq!(result["changes"].as_array().unwrap().len(), 1);
+    assert_eq!(result["changes"].as_array().unwrap().len(), 2);
     assert!(!data.exists());
     assert_eq!(
         ariadne_cli::setup::execute_in_installation(&args, false, &data, &version, &stable)

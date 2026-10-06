@@ -46,6 +46,9 @@ versioned under `~/.local/share/ariadne/versions/<version>/`; an atomically
 updated `current` pointer and optional `~/.local/bin/ariadne` PATH symlink provide
 stable invocation paths. The app bundle carries a helper of the same version.
 The Claude Mod is installed at a stable path under the current version pointer.
+A generated Codex skill is installed beside it and linked once at
+`~/.agents/skills/ariadne` so every Codex session knows what Ariadne is
+(ADR-0070); connecting a Codex thread is unchanged.
 Provider CLIs remain user-installed and retain their own authentication and
 settings.
 

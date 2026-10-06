@@ -21,7 +21,7 @@ replay, snapshots and compaction; simple append does not solve those problems.
 Do not add a parallel authoritative log that can diverge from the snapshot.
 
 SQLite is the preferred alternative if the file-format requirement is later
-relaxed or measured write latency/capacity fails the stated targets. It would
+relaxed or recorded write latency/capacity evidence shows a real problem. It would
 replace storage behind the core command/query boundary, with a separately
 specified and tested migration; JSON export could retain human-readable sharing.
 It is not silently introduced by this plan. SQLite WAL permits readers alongside

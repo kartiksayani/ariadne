@@ -199,11 +199,29 @@ def inventory(root):
     return result
 
 
+SKILL_LINK = ".agents/skills/ariadne"
+INTEGRATION_ROOTS = ("rules", "claude-mod", "codex-skills")
+
+
 def links(home):
     return {
         "Applications/Ariadne.app": "../.local/share/ariadne/current/Ariadne.app",
         **{f".local/bin/{name}": f"../share/ariadne/current/bin/{name}" for name in BINARIES},
+        # Codex discovers personal skills in ~/.agents/skills/<name>/SKILL.md (ADR-0070).
+        SKILL_LINK: "../../.local/share/ariadne/current/integrations/codex-skills/ariadne",
     }
+
+
+def skill_link_conflict(home, before, target):
+    """Return why the Codex skill link must be skipped, or None when it is ours or absent."""
+    path = home / SKILL_LINK
+    for parent in (home / ".agents", path.parent):
+        if exists(parent) and (parent.is_symlink() or not parent.is_dir()):
+            return f"{parent} is not a plain directory"
+    if exists(path) and not (before and before[1]["owned_links"].get(SKILL_LINK) == target and
+                             path.is_symlink() and os.readlink(path) == target):
+        return f"{path} already exists and is not Ariadne's link"
+    return None
 
 
 def manifest(root, home, version, files, directories, owned_links, preflight):
@@ -227,7 +245,7 @@ def descriptor(root, home):
         parts = safe_name(name).parts
         require(name in ("bin/ariadne", "bin/ariadne-mcp", "integrations/setup.lock") or
                 (len(parts) > 2 and parts[:2] == ("Ariadne.app", "Contents")) or
-                (len(parts) > 2 and parts[0] == "integrations" and parts[1] in ("rules", "claude-mod")),
+                (len(parts) > 2 and parts[0] == "integrations" and parts[1] in INTEGRATION_ROOTS),
                 f"Unknown owned package path: {name}")
         require(isinstance(item, dict), "Invalid inventory record.")
         if item.get("kind") == "file":
@@ -248,7 +266,7 @@ def descriptor(root, home):
         parts = safe_name(name).parts
         require(type(mode) is int and mode == 0o700 and (name in ("bin", "Ariadne.app", "integrations") or
                 (len(parts) >= 2 and parts[:2] == ("Ariadne.app", "Contents")) or
-                (len(parts) >= 2 and parts[0] == "integrations" and parts[1] in ("rules", "claude-mod"))),
+                (len(parts) >= 2 and parts[0] == "integrations" and parts[1] in INTEGRATION_ROOTS)),
                 "Unknown owned directory.")
     # The canonical compiled inventory authorizes integration names. Check the
     # helper before executing its read-only exporter; edited/missing helpers
@@ -389,7 +407,7 @@ def resources(helper, final_helper):
             isinstance(value["files"], dict) and value["files"], "Invalid integration resource export.")
     for name, text in value["files"].items():
         path = safe_name(name)
-        require(path.parts[0] in ("rules", "claude-mod") and len(path.parts) > 1 and isinstance(text, str),
+        require(path.parts[0] in INTEGRATION_ROOTS and len(path.parts) > 1 and isinstance(text, str),
                 "Unknown package resource path.")
     return value["files"]
 
@@ -404,6 +422,13 @@ def install(home, artifacts, facts, resource_loader=resources):
             path = home / name
             if name.startswith(".local/bin/") and not exists(path.parent):
                 continue
+            if name == SKILL_LINK:
+                conflict = skill_link_conflict(home, before, target)
+                if conflict:
+                    print(f"Skipped the Codex skill link: {conflict}. Codex will not see the Ariadne skill. "
+                          f"Move that path aside and run make install again, or link {path} to "
+                          f"{root / 'current/integrations/codex-skills/ariadne'} yourself.", flush=True)
+                    continue
             if exists(path):
                 require(before and before[1]["owned_links"].get(name) == target and
                         path.is_symlink() and os.readlink(path) == target, f"Foreign or edited install path: {path}")
@@ -457,9 +482,17 @@ def install(home, artifacts, facts, resource_loader=resources):
             if exists(final):
                 directory(final)
                 existing = descriptor(final, home)
+                if SKILL_LINK in owned_links and SKILL_LINK not in existing["owned_links"]:
+                    # The receipt on disk cannot record a link it never owned; leave it uncreated.
+                    del owned_links[SKILL_LINK]
+                    print("Skipped the Codex skill link: the installed receipt for this version does not "
+                          "record it, so it is neither created nor adopted. "
+                          "Uninstall and install again to add it.", flush=True)
+                # A link the receipt owns but this run skipped is left alone, as uninstall does.
+                kept = {k: v for k, v in existing["owned_links"].items() if k != SKILL_LINK}
                 require(existing["owned_files"] == files and inventory(final) == files and
                         existing["owned_directories"] == directories and
-                        existing["owned_links"] == owned_links,
+                        kept == {k: v for k, v in owned_links.items() if k != SKILL_LINK},
                         "Same-version package identity differs; use a new release version.")
                 shutil.rmtree(stage.name, dir_fd=versions_fd)
             else:

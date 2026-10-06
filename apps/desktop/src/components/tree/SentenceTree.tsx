@@ -14,6 +14,9 @@ export interface SentenceTreeProps {
   readonly view: Immutable<SessionPreferences>;
   readonly later: ReadonlySet<string>;
   readonly reveal?: RevealedItem | null;
+  readonly highlightedItemIds?: ReadonlySet<string>;
+  readonly onHoverItem?: (itemId: string | null) => void;
+  readonly preferencesBusy?: boolean;
   // Composition persists these through the canonical preferences command.
   readonly saveView: (view: SessionPreferences) => Promise<boolean>;
   readonly saveLater: (itemId: string, later: boolean) => Promise<boolean>;
@@ -23,16 +26,18 @@ const visualStatus = (status: Item['status']): Status => status === 'waiting_on_
 const statuses: readonly ItemStatus[] = ['open', 'waiting_on_me', 'in_progress', 'decided', 'done', 'dropped', 'replaced'];
 const editable = (target: EventTarget | null) => target instanceof HTMLElement
   && !!target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"]');
-type RowProps = { row: SentenceRow; selected: boolean; focused: boolean; later: boolean; toggleDisabled: boolean;
+type RowProps = { row: SentenceRow; selected: boolean; focused: boolean; later: boolean; highlighted: boolean; toggleDisabled: boolean; selectionDisabled: boolean;
+  onHoverItem?: (itemId: string | null) => void;
   remember: (id: string, element: HTMLDivElement | null) => void; focus: (id: string) => void;
   select: (id: string) => void; toggle: (id: string) => void; keyboard: (event: KeyboardEvent<HTMLDivElement>, id: string) => void };
 
-const SentenceItem = memo(function SentenceItem({ row, selected, focused, later, toggleDisabled, remember, focus, select, toggle, keyboard }: RowProps) {
+const SentenceItem = memo(function SentenceItem({ row, selected, focused, later, highlighted, toggleDisabled, selectionDisabled, onHoverItem, remember, focus, select, toggle, keyboard }: RowProps) {
   const item = row.item;
   return <TreeRow item={{ id: item.id, question: item.question, status: visualStatus(item.status),
     explanation: item.type === 'explanation', ask: item.ask ?? undefined, note: item.note ?? undefined,
     outcome: item.outcome ?? undefined, later }}
-  depth={row.depth} selected={selected} focused={focused} context={row.context}
+  depth={row.depth} selected={selected} selectionDisabled={selectionDisabled} focused={focused} context={row.context} touched={highlighted ? 'strong' : undefined}
+  onEnter={() => onHoverItem?.(item.id)} onLeave={() => onHoverItem?.(null)}
   tabIndex={focused ? 0 : -1} rowRef={element => remember(item.id, element)} onFocus={() => focus(item.id)}
   onKeyDown={event => keyboard(event, item.id)} onSelect={() => select(item.id)} onToggle={() => toggle(item.id)}
   hasChildren={row.childCount > 0} expanded={row.expanded} toggleDisabled={toggleDisabled}
@@ -43,11 +48,13 @@ const SentenceItem = memo(function SentenceItem({ row, selected, focused, later,
   && a.row.depth === b.row.depth && a.row.context === b.row.context && a.row.expanded === b.row.expanded
   && a.row.childCount === b.row.childCount && a.row.activeDescendants === b.row.activeDescendants
   && a.row.replacement?.id === b.row.replacement?.id && a.row.replacement?.revision === b.row.replacement?.revision
-  && a.selected === b.selected && a.focused === b.focused && a.later === b.later && a.toggleDisabled === b.toggleDisabled
+  && a.selected === b.selected && a.focused === b.focused && a.later === b.later && a.toggleDisabled === b.toggleDisabled && a.selectionDisabled === b.selectionDisabled
+  && a.highlighted === b.highlighted && a.onHoverItem === b.onHoverItem
   && a.remember === b.remember && a.focus === b.focus && a.select === b.select && a.toggle === b.toggle && a.keyboard === b.keyboard);
 
-export function SentenceTree({ store, routes, view, later, reveal, saveView, saveLater, onReveal }: SentenceTreeProps) {
+export function SentenceTree({ store, routes, view, later, reveal, saveView, saveLater, onReveal, highlightedItemIds, onHoverItem, preferencesBusy = false }: SentenceTreeProps) {
   const state = useSession(store), session = state.snapshot?.session;
+  useEffect(() => () => onHoverItem?.(null), [store, onHoverItem]);
   const [focusId, setFocusId] = useState<string | null>(view.selected_item_id);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
@@ -61,8 +68,8 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   const elements = useRef(new Map<string, HTMLDivElement>()), container = useRef<HTMLDivElement>(null);
   const searchInput = useRef<HTMLInputElement>(null), ownerFocus = useRef<HTMLButtonElement | null>(null);
   const request = useRef(0), mounted = useRef(true);
-  const latest = useRef({ view, saveView, saveLater, onReveal, routes, later, state, writing, search });
-  latest.current = { view, saveView, saveLater, onReveal, routes, later, state, writing, search };
+  const latest = useRef({ view, saveView, saveLater, onReveal, routes, later, state, writing, search, preferencesBusy });
+  latest.current = { view, saveView, saveLater, onReveal, routes, later, state, writing, search, preferencesBusy };
   const offeredReveal = localReveal ?? reveal ?? null;
   const currentReveal = offeredReveal === dismissedReveal ? null : offeredReveal;
   const belongs = currentReveal?.store === store;
@@ -79,7 +86,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   }, []);
   const focus = useCallback((id: string) => setFocusId(id), []);
   const write = useCallback(async (operation: () => Promise<boolean>) => {
-    if (!mounted.current || latest.current.writing || latest.current.state.status !== 'ready') return;
+    if (!mounted.current || latest.current.writing || latest.current.preferencesBusy || latest.current.state.status !== 'ready') return;
     // A ref closes the gap before React paints the pending state.
     latest.current.writing = true; setWriting(true); setError(null);
     let confirmed = false;
@@ -95,10 +102,11 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     } }
   }, []);
   const select = useCallback((id: string) => {
+    if (latest.current.writing || latest.current.preferencesBusy || latest.current.state.status !== 'ready') return;
     const call = ++request.current, value = latest.current;
     const route = { ...value.view.session, item_id: id };
     void value.routes.revealItem(route).then(result => {
-      if (!mounted.current || call !== request.current || !result
+      if (!mounted.current || call !== request.current || !result || latest.current.writing || latest.current.preferencesBusy
         || latest.current.view.session.project_id !== route.project_id || latest.current.view.session.session_id !== route.session_id) return;
       setLocalReveal(result); value.onReveal(result);
       if (result.kind === 'item') {
@@ -153,20 +161,20 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
       if (search === latest.current.view.filters.search) {
         searchEdited.current = false; setSearchPreview(null); setPendingSearch(null); return;
       }
-      setSearchPreview({ store, text: search });
+      // Coalesce durable writes; the input already projects local rows.
       if (!searchBlocked.current) setPendingSearch({ store, text: search });
     }, 100);
     return () => clearTimeout(timer);
   }, [search, store]);
   useEffect(() => {
-    if (!pendingSearch || writing || state.status !== 'ready') return;
+    if (!pendingSearch || writing || preferencesBusy || state.status !== 'ready') return;
     setPendingSearch(null);
     if (pendingSearch.store !== store || pendingSearch.text !== search || pendingSearch.text === view.filters.search) return;
     // Merge only the latest unsubmitted text into the newly rendered view and
     // its composition-owned revision; never retry a previously attempted edit.
     void write(() => latest.current.saveView({ ...structuredClone(latest.current.view),
       filters: { ...structuredClone(latest.current.view.filters), search: pendingSearch.text } } as SessionPreferences));
-  }, [pendingSearch, writing, state.status, store, search, view, write]);
+  }, [pendingSearch, writing, preferencesBusy, state.status, store, search, view, write]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
   // A later tree selection supersedes the last external route. A new external
   // route supersedes that local selection before rows and focus are painted.
@@ -243,7 +251,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     const next = structuredClone(view) as SessionPreferences;
     change(next.filters); void write(() => latest.current.saveView(next));
   };
-  const disabled = state.status !== 'ready' || writing;
+  const disabled = state.status !== 'ready' || writing || preferencesBusy;
   const outside = rows.find(row => row.outsideFilters);
   const owners: Immutable<ItemOwner>[] = [...view.filters.owners];
   for (const item of Object.values(session?.items ?? {})) if (item && !owners.some(owner => sameOwner(owner, item.owner))) owners.push(item.owner);
@@ -253,8 +261,10 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     }
   }}>
     <label className="sentence-search">Search sentences<input ref={searchInput} type="search" value={search} onChange={event => {
-      searchEdited.current = true; searchBlocked.current = false;
-      setPendingSearch(null); setSearch(event.target.value);
+      const text = event.target.value;
+      searchEdited.current = text !== view.filters.search; searchBlocked.current = false;
+      setPendingSearch(null); setSearch(text);
+      setSearchPreview(searchEdited.current ? { store, text } : null);
     }} disabled={disabled} /></label>
     <div className="sentence-filters" aria-label="Sentence filters">
       <label>Topic<select value={view.filters.topic_id ?? ''} disabled={disabled} onChange={event => filter(next => { next.topic_id = event.target.value || null; })}>
@@ -279,7 +289,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
     </div>
     {state.status !== 'ready' && <p role="status">{state.error?.message ?? (session ? 'This session is stale. Showing the last valid snapshot.' : 'Loading the registered session…')}</p>}
     {error && <p role="alert">{error}</p>}
-    {preview && preview.text !== view.filters.search && <p role="status">Search preview · {writing || pendingSearch ? 'save pending' : 'save not confirmed'}</p>}
+    {preview && preview.text !== view.filters.search && <p role="status">Search preview · {writing || pendingSearch || (searchEdited.current && !searchBlocked.current) ? 'save pending' : 'save not confirmed'}</p>}
     {belongs && currentReveal.kind === 'missing_item' && <p role="status">{currentReveal.banner}</p>}
     {outside && <p role="status">Item {outside.item.id} is outside the current filters. <button type="button" onClick={() => setDismissedReveal(currentReveal)}>Dismiss temporary reveal</button></p>}
     {projection && !rows.length && <p>No sentences match these filters. <button type="button" disabled={writing || state.status !== 'ready'} onClick={clearFilters}>Clear filters</button></p>}
@@ -291,7 +301,8 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
         }
       }}>
       {rows.map(row => <SentenceItem key={row.item.id} row={row} selected={view.selected_item_id === row.item.id} focused={focusId === row.item.id}
-        later={later.has(row.item.id)} toggleDisabled={row.childCount > 0 && disabled} remember={remember} focus={focus} select={select} toggle={toggle} keyboard={keyboard} />)}
+        later={later.has(row.item.id)} highlighted={highlightedItemIds?.has(row.item.id) ?? false} onHoverItem={onHoverItem}
+        toggleDisabled={row.childCount > 0 && disabled} selectionDisabled={disabled} remember={remember} focus={focus} select={select} toggle={toggle} keyboard={keyboard} />)}
     </div>
     {projection && <footer>{rows.length} visible · {projection.matchingTotal} matching · {projection.scopeTotal} in this scope · ↑/↓ or j/k to move · Enter to open · z for Later</footer>}
   </section>;

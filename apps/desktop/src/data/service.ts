@@ -12,8 +12,11 @@ export type QueryCall<C extends QueryCommand> = OwnerQueryRequest & {
   request: Extract<QueryRequest, { command: C }>;
 };
 export type Unsubscribe = () => void;
+// Native-only hint: a native writer (window geometry, pin/notification settings) saved this revision.
+export interface PreferencesChangedHint { revision: number }
 export interface HintPayloads {
   'ariadne://session_changed': SessionChangedHint;
+  'ariadne://preferences_changed': PreferencesChangedHint;
   'ariadne://presence_changed': PresenceChangedHint;
   'ariadne://route': OpenRoute;
 }

@@ -124,10 +124,10 @@ Item detail renders full item history in two linked forms:
 
 The rail uses the same stored history, newest at bottom. Hovering a message highlights touched items; clicking pins that highlight. Selecting/hovering an item highlights its messages. Scrolling upward pauses follow; show `N new messages · Jump to latest`. Live updates never steal keyboard focus or scroll an owner away from older content.
 
-Search normalizes NFKC and locale-independent lowercase for indexing only; stored text is unchanged. Every whitespace token must match the combined question, outcome, why, topic name, or message excerpt. It excludes transient provider activity, raw tool input/result, and credentials. Debounce 100ms. Status/topic/owner filters combine with AND; choices within one filter combine with OR. Include matching items and labelled contextual ancestors. No-results offers Clear search/filters.
+Search normalizes NFKC and locale-independent lowercase for indexing only; stored text is unchanged. Every whitespace token must match the combined question, outcome, why, topic name, or message excerpt. It excludes transient provider activity, raw tool input/result, and credentials. Preview typed search on the next normal renderer update; debounce its durable preference write by 100ms. Status/topic/owner filters combine with AND; choices within one filter combine with OR. Include matching items and labelled contextual ancestors. No-results offers Clear search/filters.
 
-After that debounce, sentence-tree results may use transient search text while
-the canonical preference save is pending. Override only search in the current
+Sentence-tree results may use transient search text before the durable-write
+debounce expires and while the canonical preference save is pending. Override only search in the current
 canonical filter projection; do not publish a speculative preference revision or
 change selection, expansion, Later or other filters. Indicate pending or
 unconfirmed persistence without claiming the preview is saved. Failed or uncertain
@@ -139,7 +139,7 @@ See [ADR-0066](../../adr/ADR-0066-project-local-search-before-save-confirmation.
 
 Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, scroll nearest, and open detail. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
 
-Start with variable-height DOM rows memoized by item revision. Add virtualization only if the documented 2,000-item performance target is missed; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
+Start with variable-height DOM rows memoized by item revision. Add virtualization only if the recorded large-fixture performance evidence shows a real problem; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
 
 The early P4.4 module publishes `SentenceTree`, `NavigationSentenceTree` and the
 canonical snapshot projection. It preserves complete sentence/outcome text,
@@ -147,7 +147,7 @@ contextual ancestors, exact owner filters, roving focus, saved collapse/Later an
 scroll anchors. It reuses the registered reveal route and NavigationStore's typed
 revision-checked preference writes; no renderer-local persistence is added.
 Active branches initialize expanded only for a newly created session view, and
-explicit collapse remains saved across later snapshots. A focused 2,000-row
+explicit collapse remains saved across later snapshots. A focused large-fixture
 jsdom measurement records complete initial DOM rendering before any virtualization
 choice. Native layout/scroll performance, App composition and the original native
 P4.4 acceptance remain pending; these reusable module tests do not complete them.
@@ -178,7 +178,7 @@ bounds cross the viewport even if both endpoints are off screen. Deduplicate IDs
 from buckets. Update transform and visible IDs once per animation frame; Fit uses
 full layout bounds, never culled bounds. A remote selection first centers/reveals
 the node, then focuses it. Culling affects rendering only, not counts, search,
-ancestry or stored data. Test 2,000-node topics at multiple zoom levels, crossing
+ancestry or stored data. Test a large-fixture topic at multiple zoom levels, crossing
 edges, selection off screen and tree/graph parity before accepting M5.
 
 ## 5. Owner input and delivery UI
@@ -283,6 +283,8 @@ Keyboard navigation works when focus is outside editable controls:
 | `m` | Toggle message rail |
 | Escape | Close top overlay/detail or leave editor without discarding draft |
 | Cmd+Enter | Submit the currently focused valid owner input |
+
+The `b` shortcut creates and submits a fresh Bring draft with the explicit text `Bring this up.` through the ordinary durable owner-input path. If that target already has a Bring draft or receipt, reveal that entry without editing, submitting or retrying it; existing text and uncertain outcomes require the normal explicit review or reconciliation action. Key repeat cannot create another input.
 
 Roving tree focus uses visible row IDs and correct `aria-level`, `aria-expanded`, and `aria-selected`. All icons have labels; status always has adjacent text. Focus-visible is a 2 px accent outline. Dialogs trap and restore focus. Announce new waiting items and resolved inputs once through a polite live region; do not announce every message delta. Respect reduced motion and system appearance changes while theme is System. Verify contrast in both themes.
 

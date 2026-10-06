@@ -89,6 +89,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
   const [registering, setRegistering] = useState(false);
   const [registrationRoot, setRegistrationRoot] = useState('');
   const [binding, setBinding] = useState<Immutable<ProjectSummary> | null>(null);
+  const [refreshPending, setRefreshPending] = useState(false);
   // The composition that owns this injected store disposes it. A view mount
   // must not permanently stop a shared store during React's effect replay.
   useEffect(() => { void store.start(); }, [store]);
@@ -99,7 +100,14 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
   const sessions = matchingSessions?.sessions.items ?? [];
   const selectedProject = selection.kind === 'project' ? projects.find(project => project.project_id === selection.project_id) : null;
   const selectedSession = selection.kind === 'session' ? sessions.find(session => key(session) === key(selection.session)) : null;
-  const disabled = state.writing || state.pendingOperationId !== null || !state.preferences;
+  const mutationDisabled = refreshPending || state.writing || state.pendingOperationId !== null;
+  const disabled = mutationDisabled || !state.preferences;
+  const refresh = async () => {
+    if (refreshPending) return;
+    setRefreshPending(true);
+    try { await store.refresh(); }
+    finally { setRefreshPending(false); }
+  };
   const select = (next: NavigationSelection) => { void store.navigate(next); };
   const tab = (id: string, label: string, selected: boolean, onSelect: () => void,
     session?: Immutable<SessionPreferences>): ReferenceWorkspaceProps['tabs'][number] => ({
@@ -128,7 +136,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
       {state.error instanceof CoreFailure && <p>{state.error.error.hint}</p>}
       {state.pendingOperationId ? <><p>Completion is unknown. Reconcile operation {state.pendingOperationId} with its original request.</p>
         <button type="button" className="ref-button ref-secondary" disabled={state.writing} onClick={() => { void store.retryMutation(); }}>Reconcile operation</button></>
-        : <button type="button" className="ref-button ref-secondary" onClick={() => { void store.refresh(); }}>Refresh</button>}
+        : <button type="button" className="ref-button ref-secondary" disabled={mutationDisabled} onClick={() => { void refresh(); }}>{refreshPending ? 'Refreshing…' : 'Refresh'}</button>}
     </div>}
     {state.status === 'loading' && <p role="status">Loading registered projects and sessions…</p>}
     {state.status === 'stale' && <p className="nav-banner" role="status">Showing the last complete catalogue. Refresh failed.</p>}
@@ -136,7 +144,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
     {selection.kind === 'session' ? <SelectedSession navigation={store} renderSession={renderSession} /> : <>
       <div className="ref-page-heading"><div><h1>{selection.kind === 'projects' ? 'Projects' : selection.kind === 'all_sessions' ? 'All sessions' : selectedProject ? projectName(selectedProject) : 'Unavailable project'}</h1>
         <p>{selection.kind === 'projects' ? 'Register a local root, then explicitly connect an existing host session.' : selection.kind === 'project' ? selectedProject?.canonical_root : 'Registered sessions, grouped by project.'}</p></div>
-        <button type="button" className="ref-button ref-secondary" disabled={state.writing || state.pendingOperationId !== null} onClick={() => { setRegistrationRoot(''); setRegistering(true); }}>Register project</button>
+        <button type="button" className="ref-button ref-secondary" disabled={mutationDisabled} onClick={() => { setRegistrationRoot(''); setRegistering(true); }}>Register project</button>
       </div>
       {counts && <p className="nav-counts">{countsText(counts)}</p>}
       {discovery && <DiscoverProjects controller={discovery} visible={selection.kind === 'projects'} register={root => { setRegistrationRoot(root); setRegistering(true); }} />}
@@ -158,7 +166,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
     </>}
     {state.setup?.data.kind === 'binding_connect' && <section className="nav-banner" aria-label="Session setup"><h2>Session connected</h2>
       <p>Connecting sent nothing to the model. {state.setupAdapterId === 'codex'
-        ? 'Paste this setup instruction into the selected Codex thread once per binding so the agent has the Ariadne rules.'
+        ? 'Paste this setup instruction into the selected Codex thread once per binding so the agent has the Ariadne rules. Installation also adds an Ariadne skill for Codex unless its link was skipped.'
         : state.setupAdapterId === 'claude_code_mod'
           ? 'Run /ariadne-connect in the selected Claude conversation, then paste this setup instruction into it once per binding so the agent has the Ariadne rules.'
           : 'Paste this setup instruction into the selected host conversation once per binding so the agent has the Ariadne rules.'}</p>
@@ -172,7 +180,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
     query: '', views: [], railColor: muted, themeIcon: 'ph ph-moon', themeTitle: 'Theme', ...chrome }} tabs={tabs} waiting={waiting ?? { count: '—', emptyText: 'Reading registered sessions…', waiting: [], sent: [] }} waitingContent={waitingContent} detail={detail} railContent={railContent}
     onQueryChange={onQueryChange} onToggleRail={onToggleRail} onThemeChange={onThemeChange} onCloseDetail={onCloseDetail} chromeDisabled={disabled}
     center={center} summary={counts ? countsText(counts) : 'Catalogue unavailable'} overlay={registering
-      ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={state.writing || state.pendingOperationId !== null} close={() => setRegistering(false)} />
+      ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={mutationDisabled} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}
-        adapters={adapterChoices} discovery={discovery} disabled={state.writing || state.pendingOperationId !== null} close={() => setBinding(null)} /> : undefined} />;
+        adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined} />;
 }

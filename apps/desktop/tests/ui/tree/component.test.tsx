@@ -121,7 +121,7 @@ describe('registered variable-height sentence tree', () => {
     await waitFor(() => expect(value.laterWrites).toEqual([['1', true]]));
     fireEvent.keyDown(rows()[0], { key: 'z' }); await waitFor(() => expect(value.laterWrites.at(-1)).toEqual(['1', false]));
   });
-  it('debounces search by 100ms while preserving all other canonical preferences', async () => {
+  it('debounces durable search writes by 100ms while preserving all other canonical preferences', async () => {
     const value = await setup(); render(<value.Composition />); vi.useFakeTimers();
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ＮＡＴＩＶＥ queue' } });
     await act(async () => { vi.advanceTimersByTime(99); }); expect(value.saved).toHaveLength(0);
@@ -129,7 +129,7 @@ describe('registered variable-height sentence tree', () => {
     expect(value.saved[0].filters.search).toBe('ＮＡＴＩＶＥ queue'); expect(value.saved[0].expanded_item_ids).toEqual(['1']);
     expect(value.saved[0].tab_open).toBe(true);
   });
-  it('projects actual matching rows at 100ms without waiting for the canonical save receipt', async () => {
+  it('projects actual matching rows immediately and debounces the canonical save by 100ms', async () => {
     const session = structuredClone(demo) as Session, base = session.items['1']!;
     session.items = {
       '1': { ...base, question: 'First retained sentence' },
@@ -139,8 +139,11 @@ describe('registered variable-height sentence tree', () => {
     const completion = new Promise<void>(resolve => { finish = resolve; });
     const value = await setup(session, preferences(), completion); render(<value.Composition />); vi.useFakeTimers();
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'needle' } });
+    expect(rowIds()).toEqual(['2']); expect(value.saved).toHaveLength(0);
+    expect(value.canonical()).toEqual(preferences());
+    expect(screen.getByRole('status').textContent).toBe('Search preview · save pending');
     await act(async () => { vi.advanceTimersByTime(99); });
-    expect(rowIds()).toEqual(['1', '2']); expect(value.saved).toHaveLength(0);
+    expect(rowIds()).toEqual(['2']); expect(value.saved).toHaveLength(0);
     await act(async () => { vi.advanceTimersByTime(1); });
     expect(rowIds()).toEqual(['2']); expect(value.saved).toHaveLength(1);
     expect(value.canonical()).toEqual(preferences());
@@ -149,6 +152,38 @@ describe('registered variable-height sentence tree', () => {
     expect(rowIds()).toEqual(['2']); expect(value.canonical().filters.search).toBe('needle');
     expect(screen.queryByRole('status')).toBeNull();
     await act(async () => { vi.advanceTimersByTime(500); }); expect(value.saved).toHaveLength(1);
+  });
+  it('projects the latest query immediately while coalescing rapid edits into one durable write', async () => {
+    const session = structuredClone(demo) as Session, base = session.items['1']!;
+    session.items = {
+      '1': { ...base, question: 'First retained sentence' },
+      '2': { ...base, id: '2', ordinal: 2, question: 'Second searchable needle' },
+      '3': { ...base, id: '3', ordinal: 3, question: 'Third distinct match' },
+    };
+    const value = await setup(session); render(<value.Composition />); vi.useFakeTimers();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'needle' } });
+    expect(rowIds()).toEqual(['2']);
+    await act(async () => { vi.advanceTimersByTime(75); });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'third' } });
+    expect(rowIds()).toEqual(['3']); expect(value.canonical()).toEqual(preferences());
+    await act(async () => { vi.advanceTimersByTime(25); });
+    expect(rowIds()).toEqual(['3']); expect(value.saved).toHaveLength(0);
+    await act(async () => { vi.advanceTimersByTime(74); }); expect(value.saved).toHaveLength(0);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(value.saved).toHaveLength(1); expect(value.saved[0].filters.search).toBe('third');
+    expect(rowIds()).toEqual(['3']); expect(value.canonical().filters.search).toBe('third');
+    await act(async () => { vi.advanceTimersByTime(500); }); expect(value.saved).toHaveLength(1);
+  });
+  it('cancels an unsubmitted preview when the query returns to canonical text', async () => {
+    const value = await setup(); render(<value.Composition />); vi.useFakeTimers();
+    const canonicalRows = rowIds();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'unmatched preview' } });
+    expect(rowIds()).toEqual([]);
+    await act(async () => { vi.advanceTimersByTime(75); });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
+    expect(rowIds()).toEqual(canonicalRows); expect(screen.queryByRole('status')).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(value.saved).toHaveLength(0); expect(value.canonical()).toEqual(preferences());
   });
   it.each(['rejected', 'uncertain'] as const)('retains a %s search preview without resending and adopts explicit reconciliation', async failure => {
     const value = await setup(), saved: SessionPreferences[] = [];
@@ -207,14 +242,12 @@ describe('registered variable-height sentence tree', () => {
     expect(rowIds()).toEqual(canonicalRows);
     await act(async () => { vi.advanceTimersByTime(500); }); expect(saved).toHaveLength(1);
   });
-  it('debounces returning to canonical search and discards the preview without another write', async () => {
+  it('immediately returns to canonical search and discards the preview without another write', async () => {
     const value = await setup(); value.rejectWrite(); render(<value.Composition />); vi.useFakeTimers();
     const canonicalRows = rowIds();
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'unmatched preview' } });
     await act(async () => { vi.advanceTimersByTime(100); }); expect(rowIds()).toEqual([]);
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
-    await act(async () => { vi.advanceTimersByTime(99); }); expect(rowIds()).toEqual([]);
-    await act(async () => { vi.advanceTimersByTime(1); });
     expect(rowIds()).toEqual(canonicalRows); expect(screen.queryByRole('status')).toBeNull();
     await act(async () => { vi.advanceTimersByTime(500); }); expect(value.saved).toHaveLength(1);
   });
@@ -233,20 +266,20 @@ describe('registered variable-height sentence tree', () => {
         }} onReveal={() => {}} />;
     }
     render(<Composition />); vi.useFakeTimers();
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'superseded text' } });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Keep' } });
     await act(async () => { vi.advanceTimersByTime(99); });
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'latest exact text' } });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'full' } });
     fireEvent.keyDown(rows()[0], { key: 'z' });
     await act(async () => { vi.advanceTimersByTime(elapsed); });
     expect(saved).toHaveLength(0);
     await act(async () => { finish(true); });
-    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('latest exact text');
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('full');
     if (elapsed < 100) {
       expect(saved).toHaveLength(0);
       await act(async () => { vi.advanceTimersByTime(100 - elapsed); });
     }
     expect(saved).toHaveLength(1);
-    expect(saved[0].filters.search).toBe('latest exact text');
+    expect(saved[0].filters.search).toBe('full');
     expect(saved[0].filters.statuses).toEqual(['open']);
     expect(saved[0].selected_item_id).toBe('1.1');
     await act(async () => { vi.advanceTimersByTime(500); });
@@ -262,7 +295,7 @@ describe('registered variable-height sentence tree', () => {
         return false;
       }} onReveal={() => {}} />);
     vi.useFakeTimers();
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'unsubmitted search' } });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Keep' } });
     fireEvent.keyDown(rows()[0], { key: 'z' });
     await act(async () => { vi.advanceTimersByTime(100); });
     await act(async () => { finish(); });
@@ -281,10 +314,10 @@ describe('registered variable-height sentence tree', () => {
       saveLater: async () => new Promise<boolean>(resolve => { finish = resolve; }) };
     const rendered = render(<SentenceTree {...props} store={first.store} view={preferences()} />);
     const canonicalRows = rowIds();
-    vi.useFakeTimers(); fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'old session text' } });
+    vi.useFakeTimers(); fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Keep' } });
     fireEvent.keyDown(rows()[0], { key: 'z' });
     await act(async () => { vi.advanceTimersByTime(100); });
-    expect(rowIds()).toEqual([]);
+    expect(rowIds()).not.toEqual(canonicalRows);
     rendered.rerender(<SentenceTree {...props} store={second.store} view={nextView} />);
     expect(rowIds()).toEqual(canonicalRows); expect(screen.queryByRole('status')).toBeNull();
     await act(async () => { finish(true); vi.advanceTimersByTime(500); });

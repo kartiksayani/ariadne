@@ -1,4 +1,4 @@
-use super::{instructions, presence::PresenceCache, CoreBridge};
+use super::{expiry::ResultExpiry, instructions, presence::PresenceCache, CoreBridge};
 use crate::watchers::RegisteredWatcher;
 use ariadne_adapter_claude::ClaudeOptions;
 use ariadne_adapter_codex::CodexOptions;
@@ -48,8 +48,8 @@ struct Workers {
     routes: ControlRoutes,
     outcomes: Arc<dyn Fn(ActivationOutcome) + Send + Sync>,
     watcher: RegisteredWatcher,
-    presence_stop: tokio::sync::oneshot::Sender<()>,
-    presence_task: tokio::task::JoinHandle<()>,
+    presence_stop: Option<tokio::sync::oneshot::Sender<()>>,
+    presence_task: Option<tokio::task::JoinHandle<()>>,
     admitted: Vec<tokio::task::JoinHandle<()>>,
 }
 pub struct NativeRuntime {
@@ -60,6 +60,7 @@ pub struct NativeRuntime {
     stopping: AtomicBool,
     replacing: AtomicBool,
     presence: Arc<PresenceCache>,
+    expiry: Arc<ResultExpiry>,
     reconciliation_errors: Mutex<Vec<CoreError>>,
 }
 impl NativeRuntime {
@@ -139,6 +140,7 @@ impl NativeRuntime {
             .map_err(|_| unavailable())?;
         let routes = ControlRoutes::new();
         let presence = PresenceCache::new(core.clone(), presence_emit);
+        let expiry = ResultExpiry::new(core.clone());
         let activation = NativeActivation::new_with_presence(
             core.clone(),
             providers.clone(),
@@ -156,6 +158,7 @@ impl NativeRuntime {
             stopping: AtomicBool::new(false),
             replacing: AtomicBool::new(false),
             presence: presence.clone(),
+            expiry: expiry.clone(),
             reconciliation_errors: Mutex::new(Vec::new()),
         });
         let connect_runtime = Arc::downgrade(&runtime);
@@ -179,31 +182,20 @@ impl NativeRuntime {
             let _entered = executor.enter();
             DiscoveryPoller::start(discovery.clone(), config.discovery_endpoints)?
         };
+        let changed = expiry.clone();
         let watcher = RegisteredWatcher::start_with_reconciled(
             Registry::open_data_directory(&config.home)?,
             config.home,
-            move |hint| emit(hint),
+            move |hint| {
+                changed.changed(hint.session_id.clone());
+                emit(hint)
+            },
             reconciled,
         )
         .map_err(|_| unavailable())?;
         let (control_stop, stopped) = tokio::sync::oneshot::channel();
         let control = executor.spawn(server.serve(stopped));
-        let (presence_stop, mut stopped) = tokio::sync::oneshot::channel();
-        let presence_task = executor.spawn(async move {
-            let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = &mut stopped => break,
-                    _ = tick.tick() => {
-                        let cache = presence.clone();
-                        // Store qualification and timer work remain off UI and
-                        // are awaited before this owned timer can finish.
-                        let _ = tokio::task::spawn_blocking(move || cache.sweep()).await;
-                    }
-                }
-            }
-        });
+        let (presence_stop, presence_task) = start_timer(&executor, presence, expiry);
         *runtime.workers.lock().map_err(|_| unavailable())? = Some(Workers {
             executor,
             activation,
@@ -401,6 +393,10 @@ impl NativeRuntime {
             .collect()
     }
     #[cfg(test)]
+    pub(super) fn expiry_for_test(&self) -> &Arc<ResultExpiry> {
+        &self.expiry
+    }
+    #[cfg(test)]
     pub(super) fn executor_for_test(&self) -> tokio::runtime::Handle {
         self.workers
             .lock()
@@ -578,11 +574,18 @@ impl NativeRuntime {
                         .take()
                         .ok_or_else(unavailable)?;
                     self.presence.fence();
+                    self.expiry.fence();
                     // No admission can join this set after the fence. Actual
                     // started work must return before its activation is replaced.
                     // Neither the workers mutex nor any cache lock spans IO/wait.
                     let result = (|| {
                         workers.executor.block_on(async {
+                            if let Some(stop) = workers.presence_stop.take() {
+                                let _ = stop.send(());
+                            }
+                            if let Some(task) = workers.presence_task.take() {
+                                task.await.map_err(|_| unavailable())?;
+                            }
                             let mut result = Ok(());
                             for task in std::mem::take(&mut workers.admitted) {
                                 result = result.and(task.await.map_err(|_| unavailable()));
@@ -610,6 +613,12 @@ impl NativeRuntime {
                             Some(self.presence.observer()),
                         );
                         self.presence.reopen();
+                        self.expiry.reopen();
+                        (workers.presence_stop, workers.presence_task) = start_timer(
+                            &workers.executor,
+                            self.presence.clone(),
+                            self.expiry.clone(),
+                        );
                     }
                     // Even a failed refresh retains the owner and stopped
                     // activation for a subsequent explicit lifecycle action.
@@ -647,6 +656,7 @@ impl NativeRuntime {
         // wake publication are serialized by the short admission lock.
         let workers = self.workers.lock().map_err(|_| unavailable())?;
         self.stopping.store(true, Ordering::Release);
+        self.expiry.fence();
         if let Some(workers) = workers.as_ref() {
             workers.activation.stop_admission()?;
         }
@@ -696,8 +706,12 @@ impl Workers {
             .map_err(|_| unavailable())
             .and_then(|result| result);
         let poller_result = executor.block_on(poller.stop());
-        let _ = presence_stop.send(());
-        let presence_result = executor.block_on(presence_task).map_err(|_| unavailable());
+        if let Some(stop) = presence_stop {
+            let _ = stop.send(());
+        }
+        let presence_result = presence_task.map_or(Ok(()), |task| {
+            executor.block_on(task).map_err(|_| unavailable())
+        });
         drop(watcher);
         drop(activation);
         drop(executor);
@@ -720,8 +734,39 @@ pub(super) fn uncertain() -> CoreError {
         "The admitted desktop worker stopped before returning its authoritative receipt.",
         "Retain the original operation ID and contents; reconcile its saved receipt before any new operation.")
 }
-fn next_id() -> UuidV4 {
+pub(super) fn next_id() -> UuidV4 {
     UuidV4::new(uuid::Uuid::new_v4().to_string()).expect("native UUIDv4")
+}
+
+fn start_timer(
+    executor: &tokio::runtime::Runtime,
+    presence: Arc<PresenceCache>,
+    expiry: Arc<ResultExpiry>,
+) -> (
+    Option<tokio::sync::oneshot::Sender<()>>,
+    Option<tokio::task::JoinHandle<()>>,
+) {
+    let (stop, mut stopped) = tokio::sync::oneshot::channel();
+    let task = executor.spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
+        loop {
+            tokio::select! {
+                biased;
+                _ = &mut stopped => break,
+                _ = tick.tick() => {
+                    let cache = presence.clone();
+                    let expiry = expiry.clone();
+                    // Both sweeps stay off UI; actual blocking work is awaited
+                    // before wake replacement or shutdown can finish the timer.
+                    let _ = tokio::task::spawn_blocking(move || {
+                        cache.sweep();
+                        expiry.sweep();
+                    }).await;
+                }
+            }
+        }
+    });
+    (Some(stop), Some(task))
 }
 pub(super) fn now() -> UtcMillis {
     UtcMillis::new(
