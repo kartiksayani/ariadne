@@ -31,7 +31,9 @@ input d4fd3962, attempt 32e50360, result committed 11:28:22Z, `turn_state: unkno
 - The whole-text digest check is dropped. `prepared()` already verifies the payload
   digest at claim time, so the turn check only needs to find the payload.
 
-Observed form on 2.1.291: <pending owner paste>
+Observed form on 2.1.291: not yet recorded. The Mod logs one terminal-only line
+`Ariadne: turn.start carried the exact|framed payload (N chars)` per loop; the owner
+has not pasted it. Both forms correlate, so the decision does not depend on it.
 
 ## Consequences
 
