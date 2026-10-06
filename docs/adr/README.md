@@ -25,3 +25,7 @@ modules while retaining its tooling, quality and review decisions.
 
 [ADR-0060](ADR-0060-own-desktop-integration-seams.md) names desktop integration and
 shared-file owners and keeps remaining delivery vertical on the assembled app.
+
+[ADR-0079](ADR-0079-prebuilt-alpha-package.md) adds a prebuilt alpha package
+(`make package`, `install.py install --package`, tag-triggered release workflow)
+beside the source install.

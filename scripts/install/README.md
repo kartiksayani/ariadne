@@ -30,6 +30,31 @@ an edited/missing helper prevents ownership validation and preserves the entire
 package. Foreign files, edited resources, project history and backups survive.
 The stable installation coordination lock can remain after uninstall.
 
+## Prebuilt package
+
+`make package` runs the same preflight and build as `make install`, then writes
+`dist/ariadne-<app version>-macos-<arch>.tar.gz`. Its single top-level directory
+`ariadne-<app version>/` holds:
+
+| Path | Content |
+|---|---|
+| `bundle/macos/Ariadne.app` | the built app, symlinks and permissions kept |
+| `ariadne`, `ariadne-mcp` | the release helpers |
+| `package.json` | build machine facts, `app_version`, `source_sha`, `built_at` (UTC) |
+| `install.py` | a copy of this installer |
+| `install.sh` | checks `python3` is 3.11 or newer, then runs `install.py install --package "$PWD"` |
+
+`install.py install --package <dir>` installs from that directory without
+building. It keeps the macOS 13+, arm64/x86_64 and Python 3.11+ checks and skips
+the Node, Rust and Xcode checks. It refuses a directory with a missing file, an
+unreadable or malformed `package.json`, an `app_version` that differs from the
+app, or an `architecture` that differs from this Mac. It then calls the same
+`install()` with the package directory as read-only input and records the
+installing Mac's facts plus the package's `built` facts in `install.json`.
+Uninstall is unchanged: `python3 install.py uninstall` from the package directory.
+The tag-triggered release workflow builds the package, installs and uninstalls it
+under a temporary HOME, and attaches it to a GitHub pre-release.
+
 `npm run test:install` uses temporary homes and scripted artifacts. Release CI
 separately reuses the real production bundle and release helpers for the
 temporary-home installed-artifact check; it does not install in the owner's home.

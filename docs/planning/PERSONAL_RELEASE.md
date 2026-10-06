@@ -17,6 +17,18 @@ code organization and an easy path to adding agents.
 | Reliability | Correct binding, FIFO/result join, operation deduplication, file locking and atomic saves, ordinary quit/reopen and connection-loss handling | Corruption repair, disk-exhaustion recovery, machine/power-crash recovery, lost-data recovery, capacity reservations and exhaustive fault injection |
 | Testing | Cheap changed-language commit checks; application CI tests, native WebView smoke and >=80% weighted application coverage; release isolation on sensitive changes/milestones | Broad OS/architecture matrices, exotic failure scenarios and exhaustive native automation |
 
+## Prebuilt alpha package
+
+Besides `make install` (build from source), the owner can install a prebuilt
+package from a GitHub pre-release ([ADR-0079](../adr/ADR-0079-prebuilt-alpha-package.md)).
+`make package` writes `dist/ariadne-<version>-macos-<arch>.tar.gz` containing the
+app, the `ariadne` and `ariadne-mcp` helpers, `package.json`, `install.py` and
+`install.sh`. `./install.sh` runs `install.py install --package <dir>`: no build,
+no Node/Rust/Xcode check, same owned inventory and `doctor`. Pushing a tag such as
+`v0.1.0-alpha.1` runs `.github/workflows/release.yml`, which builds the package,
+verifies install and uninstall under a temporary HOME and creates the pre-release.
+Layout and guards: [scripts/install/README.md](../../scripts/install/README.md).
+
 ## What the smaller scope does not remove
 
 Both existing-session integrations, full item conversations and rounds, explicit

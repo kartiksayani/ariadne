@@ -45,7 +45,8 @@ Messages rail on the right](docs/planning/assets/screenshot-dark-tree.png)
 Early preview. macOS 13 or newer, built from source.
 
 - **macOS only:** macOS 13 or newer, Apple Silicon or Intel.
-- **Build from source.** There is no downloadable release. The app is not signed
+- **Alpha download or build from source.** A pre-release tarball is on the
+  Releases page, or you can build from source. The app is not signed
   or notarized, so macOS asks you to approve it once (see
   [First launch](#first-launch-unsigned-app)).
 - **Host versions:** needs Claude Code 2.1.287 or newer and Codex CLI 0.160.0
@@ -84,6 +85,15 @@ Follow [Connect Claude Code](#connect-claude-code) or
 ```sh
 ~/.local/bin/ariadne demo --root /absolute/path/to/an/empty/folder
 ```
+
+## Download the alpha
+
+Needs macOS 13 or newer and Python 3.11 or newer, nothing else. Download the
+`.tar.gz` for your chip from the Releases page (pre-release), then run
+`tar xzf ariadne-*.tar.gz`, `cd ariadne-*/` and `./install.sh`. Open
+`~/Applications/Ariadne.app`; the first time, right-click it and choose Open
+(it is unsigned, see [First launch](#first-launch-unsigned-app)). Building from
+source below is the other way; managed Macs may block either.
 
 ## Install in detail
 
