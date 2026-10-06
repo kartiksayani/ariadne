@@ -31,8 +31,8 @@ function selectedSession(event) {
   return argument;
 }
 
-export function createRegister(descriptor) {
-  return on => registerModule(descriptor, on);
+export function createRegister(descriptor, publish) {
+  return on => registerModule(descriptor, on, publish);
 }
 
 function failure($, error) {
@@ -153,7 +153,7 @@ async function sessionEnd(state, $, event, next) {
   return next(event);
 }
 
-function registerModule(descriptor, on) {
+function registerModule(descriptor, on, publish) {
   const state = {
     descriptor,
     timer: null,
@@ -168,7 +168,7 @@ function registerModule(descriptor, on) {
     discovery: announcements(descriptor),
     owner: null,
   };
-  state.owner = descriptor ? setup(descriptor.helperPath,(h,binding) => savedBinding(state,h,binding)) : null;
+  state.owner = descriptor ? setup(descriptor.helperPath,(h,binding) => savedBinding(state,h,binding),publish) : null;
   on('session.start',($,event,next) => sessionStart(state,$,event,next));
   on('command.run',{command:'ariadne-connect'},($,event) => connectRun(state,$,event));
   on('command.run',{command:'ariadne-status'},($) => checked($,() => statusAction(state,$)));

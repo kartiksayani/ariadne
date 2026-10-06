@@ -67,9 +67,11 @@ export function envelope(result) {
       throw new ModError('Ariadne helper returned an invalid error; retain original IDs and check app/helper versions.');
     }
     // Do not reflect raw helper diagnostics, provider text or a retry suggestion.
-    const known = ['delivery_uncertain','commit_uncertain','host_unreachable','unsupported','protocol_conflict','stale_generation','permission_denied','invalid_argument'];
+    const known = ['delivery_uncertain','commit_uncertain','host_unreachable','unsupported','protocol_conflict','stale_generation','permission_denied','invalid_argument','not_found'];
     const label = known.includes(error.code) ? ` (${error.code})` : '';
-    throw new ModError(`Ariadne helper failed${label}; retain original IDs and inspect the app.`);
+    const failure = new ModError(`Ariadne helper failed${label}; retain original IDs and inspect the app.`);
+    failure.code = error.code;
+    throw failure;
   }
   if (result.exitCode !== 0 || !fields(value, ['api_version','ok','data'])) {
     throw new ModError('Ariadne helper success envelope/exit status disagrees; retain original IDs.');

@@ -38,7 +38,7 @@ export function bindingStatus(value, binding) {
   }
   return value;
 }
-export function setup(helperPath, savedBinding = async () => {}) {
+export function setup(helperPath, savedBinding = async () => {}, publish = {waitMs:15000,pollMs:250}) {
   let projectRequest = null;
   let projectId = null;
   let connectRequest = null;
@@ -54,6 +54,18 @@ export function setup(helperPath, savedBinding = async () => {}) {
       '--binding',selected.binding_id,'--generation',selected.generation,
       '--request-id',globalThis.crypto.randomUUID()],{timeoutMs:5000}));
     return bindingStatus(value,selected);
+  }
+  // The app publishes the route only after the bound announcement and history
+  // reconciliation finish; until then status reports not_found. Wait, bounded.
+  async function published($, selected) {
+    const until = Date.now() + publish.waitMs;
+    for (;;) {
+      try { return await status($,selected); }
+      catch (error) {
+        if (error?.code !== 'not_found' || Date.now() >= until) throw error;
+        await new Promise(resolve => setTimeout(resolve,publish.pollMs));
+      }
+    }
   }
   async function connect($, requestedSessionId = null) {
     if (requestedSessionId !== null && !uuid(requestedSessionId)) {
@@ -107,7 +119,7 @@ export function setup(helperPath, savedBinding = async () => {}) {
       // Publish only the exact validated saved IDs. Native qualification and
       // reconciliation must finish before route-dependent status can succeed.
       await savedBinding($,selected);
-      projection = await status($,selected);
+      projection = await published($,selected);
     } catch (error) {
       throw new ModError(`Ariadne binding ${selected.binding_id} was saved; connection status remains pending. Retry /ariadne-connect with the same session selector when the app is ready; the original operation ID is retained.${error instanceof ModError ? ` ${error.message}` : ''}`);
     }

@@ -3,7 +3,8 @@ import { createRegister } from '../../../integrations/claude/plugin/hooks/regist
 import { capabilities, deferred, descriptor, failure, host, ids, prepared, success } from './fixtures.js';
 function callbacks(descriptor) {
   const hooks = new Map();
-  createRegister(descriptor)((name, pattern, handler) => {
+  // Connect gives up on the first not_found so retained-operation retry stays observable.
+  createRegister(descriptor,{waitMs:0,pollMs:0})((name, pattern, handler) => {
     if (typeof pattern === 'function') {handler=pattern;pattern=null;}
     hooks.set(pattern?.command ?? name,pattern?.command ? ($,event = {args:''}) => handler($,event) : handler);
   });
