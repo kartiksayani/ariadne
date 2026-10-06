@@ -8,10 +8,10 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 1e8d9e7 (#116). Roadmap: 49/51 on main once #118 lands.** Open tasks: P8.1 (release evidence, done in #118), P8.2 (prebuilt alpha release package, branch `task/alpha-package`), P8.3 (UX review and theme refresh, held for the owner).
+**Main: dbd8dfc (#117). Roadmap: 49/51 on main once #118 lands.** Open tasks: P8.1 (release evidence, done in #118), P8.2 (prebuilt alpha release package, merged in #117; tag v0.1.0-alpha.1 pushed, release workflow in progress), P8.3 (UX review and theme refresh, held for the owner).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-Open PRs and branches: #117 (`task/alpha-package`, P8.2, Opus-approved, awaiting CI), #118 (`docs/release-evidence`, P8.1) and `ci/parallel-quality` (CI stages split and reopen flake fix, no PR number yet). The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
+Open PRs: #118 (`docs/release-evidence`, P8.1) and #119 (`ci/parallel-quality`, CI stages split and reopen flake fix). The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.

@@ -50,13 +50,19 @@ cd ariadne-*/
 ./install.sh
 ```
 
-`install.sh` prints "This download is unsigned; removing macOS's download
-quarantine mark from this folder so it can run. Only install packages you trust."
-and clears the quarantine mark from the package folder. It stops if this version
-is already installed (the app stays 0.1.0 across alphas, so uninstall first;
-project history is kept).
+`install.sh` does these steps in order:
 
-The app is not signed, so the first time, right-click it and choose Open (see
+1. It checks that `python3` is 3.11 or newer, and stops with a message if not.
+2. It stops if this version is already installed (the app stays 0.1.0 across
+   alphas). Uninstall the existing install first with
+   `python3 install.py uninstall`; your project history is kept.
+3. It prints "This download is unsigned; removing macOS's download quarantine
+   mark from this folder so it can run. Only install packages you trust." and
+   clears the quarantine mark from the package folder.
+4. It runs `python3 install.py install --package "$PWD"`.
+
+The app is not signed. If macOS still refuses to open it, go to System Settings →
+Privacy & Security and choose Open Anyway (see
 [First launch](#first-launch-unsigned-app)). A managed company Mac may block an
 unsigned app either way. To uninstall, run `python3 install.py uninstall` from the
 package folder.
@@ -172,15 +178,17 @@ Claude Code will ask you to trust the plugin. That choice stays yours.
 ## Connect Codex
 
 1. Run `~/.local/bin/ariadne setup --agent codex`.
-2. In Ariadne, open the Projects page and click **Register project**. Type the
+2. In the already-running Codex terminal, run `/status`. It shows the thread you
+   will pick in step 4.
+3. In Ariadne, open the Projects page and click **Register project**. Type the
    project folder and click **Register project** again. (**Discover host
    sessions** on the Projects page can also list running sessions and fill in
    their project folder.)
-3. Open that project and click **Connect existing session**. The dialog lists
+4. Open that project and click **Connect existing session**. The dialog lists
    the Codex threads that are loaded and fills in the socket path from your
-   Codex home. Pick the thread, then click **Connect existing session** again.
-   A fresh thread works: it does not need a first message.
-4. Under the project header, a **Session connected** card shows the setup
+   Codex home. Pick the thread from `/status`, then click **Connect existing
+   session** again. A fresh thread works: it does not need a first message.
+5. Under the project header, a **Session connected** card shows the setup
    instruction and a **Copy instruction** button. It lists only the
    capabilities that are unavailable. Click **Copy instruction** and paste it
    into that Codex thread, once per thread. Connecting sends nothing to the
@@ -202,7 +210,8 @@ from the app. Codex approvals stay yours. Ariadne does not turn them on or off.
   The tree is a list of items. The graph is the same items drawn as a map; use
   the `+` and `-` buttons to zoom.
 - **Item detail.** Shows the question, its options and the full replies. Type
-  your answer in your own words or pick an option, then send.
+  your answer in your own words or pick an option, then send. Ariadne saves your
+  answer at once. The agent replies on the item and the history is kept.
 - **Message rail.** The side column with the conversation history. Toggle it from
   the top bar.
 - **Search box** in the top bar filters items. The sun/moon button cycles the

@@ -41,7 +41,7 @@ Download the `.tar.gz` from the [Releases page](https://github.com/kartiksayani/
 The alpha is for Apple Silicon Macs (on Intel, build from source). Run `tar xzf`
 on it, then `./install.sh`; it needs python3 3.11 or newer. The download is
 unsigned, and `install.sh` removes the macOS download quarantine mark from the
-package folder and says so. The first time, right-click the app and choose Open.
+package folder and says so. If macOS still refuses to open it, go to System Settings → Privacy & Security and choose Open Anyway.
 
 Full steps: [user guide](docs/GUIDE.md#install-from-a-release-download).
 
@@ -55,7 +55,7 @@ make install
 ```
 
 It needs macOS 13 or newer, Xcode command line tools, Python 3.11 or newer,
-Node 22.23.2 or newer (on the 22 line), and Rust 1.98.1 or newer.
+Node 22 (22.23.2 or newer), and Rust 1.98.1 or newer.
 
 Full steps: [user guide](docs/GUIDE.md#quick-start-build-from-source).
 

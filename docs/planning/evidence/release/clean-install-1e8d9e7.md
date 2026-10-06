@@ -11,7 +11,7 @@ below are the evidence.
 - node v22.23.2, npm 10.9.8, rustc 1.98.1, cargo 1.98.1, Python 3.14.6.
 - Isolation: clone at `/private/tmp/ariadne-clean-1e8d9e7`, `HOME=/private/tmp/ariadne-clean-home`,
   `CARGO_HOME=/private/tmp/ariadne-clean-cargo` (fresh, empty before the run),
-  `RUSTUP_HOME=/Users/kartik.sayani/.rustup` (read-only use; no toolchain download).
+  `RUSTUP_HOME=~/.rustup` (read-only use; no toolchain download).
   `$HOME/.local/bin` was created first, as the README asks. The real HOME was not used.
 - `git rev-parse --short HEAD` in the clone: `1e8d9e7`.
 
