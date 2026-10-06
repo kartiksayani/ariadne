@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-06 06:20 UTC
+# Ariadne handoff — 2026-10-06
 
 Claude Code session is the maintainer (Fable 5.1); reviewers Opus 5.5, implementers
 Sonnet 5.5, at most seven delegates. The owner approved autonomous delivery, pushes
@@ -48,6 +48,26 @@ synthetic keys do not move focus.
   are contained in main; keep them. Superseded stack PRs #93, #94, #97, #98, #99,
   #101, #103, #104 and #105 are closed, branches kept.
 
+## P7.2 live Claude run (2026-10-06, PR #114)
+
+The core owner-input to Claude turn to committed-result loop is proved live on Claude
+Code 2.1.291. P7.2 stays `in_progress`: completion-before-result order, result repair,
+resend, second session, second project isolation and Ariadne app quit/relaunch are not
+yet exercised, and `npm run test:live` does not exist. Evidence:
+[CLAUDE-2026-10-06.md](../planning/evidence/live-acceptance/CLAUDE-2026-10-06.md);
+decision [ADR-0076](../adr/ADR-0076-claude-framed-plugin-prompts-and-turn-correlation.md).
+Follow-ups the run surfaced:
+
+- Core: queued never-prepared inputs stay bound to a retired binding after an explicit
+  rebind (`delivery/claim.rs` filters by `binding_id`); re-target or let the owner move them.
+- Recovery: a committed result with unknown turn state can only be sealed by `skip` or
+  `resend`; add a "confirm completed" resolution.
+- Lifecycle: a session whose active binding is Disconnected cannot be closed
+  (`history_actions/lifecycle.rs:127-132` only waives Paused).
+- Delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill.
+- Rules: `source.md` should say option `consequence` is required.
+- Claude Mod: `$.plugin.root` is used but undocumented.
+
 ## Known gaps, not blocking
 
 - Navigation-only preference writes retry once on conflict and draft bookkeeping writes
@@ -62,7 +82,7 @@ synthetic keys do not move focus.
 
 ## Next steps
 
-1. Owner approval for P7.2/P7.3 live host runs and owner-home install (writes under
+1. Finish the P7.2 coverage gaps; owner approval for the P7.3 live Codex run and owner-home install (writes under
    the real home: Claude plugin registration, `~/.agents/skills/ariadne`, scratch
    histories, Codex daemon restart). The owner summary is at the top of
    [PLAN.md](../planning/evidence/live-acceptance/PLAN.md).

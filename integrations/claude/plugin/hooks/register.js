@@ -31,8 +31,8 @@ function selectedSession(event) {
   return argument;
 }
 
-export function createRegister(descriptor) {
-  return on => registerModule(descriptor, on);
+export function createRegister(descriptor, publish) {
+  return on => registerModule(descriptor, on, publish);
 }
 
 function failure($, error) {
@@ -107,7 +107,9 @@ async function connectTransition(state, $, requestedSessionId) {
   state.announcementScope = {binding_id:result.binding.binding_id,generation:result.binding.generation};
   if (state.sessionEnded) await state.loop.stop(host($),true);
   const guidance = requestedSessionId === null ? '' : `\nResume structured Ariadne context for project ${result.binding.session.project_id}, session ${result.binding.session.session_id}: read its topics, items, questions, answers and results; summarize completed work, remaining work and missing context; reuse existing items and respect cancelled work. This does not transfer the old host transcript or dispatch an input.`;
-  return {text:JSON.stringify(result) + guidance};
+  const {binding,status} = result;
+  const summary = `Ariadne connected: session ${binding.session.session_id} in project ${binding.session.project_id}; binding ${binding.binding_id}, generation ${binding.generation}; dispatch ${status.dispatch_state}, connection ${status.connection_state}. Owner inputs arrive as messages starting with [ARIADNE_INPUT:<input>:<attempt>]; handle them with the ariadne skill, which holds the rules and CLI shapes. Wait for a dispatched input before input-specific mutations or an input result.`;
+  return {text:summary + guidance};
 }
 function connectRun(state, $, event) {
   return checked($,() => {
@@ -151,7 +153,7 @@ async function sessionEnd(state, $, event, next) {
   return next(event);
 }
 
-function registerModule(descriptor, on) {
+function registerModule(descriptor, on, publish) {
   const state = {
     descriptor,
     timer: null,
@@ -166,7 +168,7 @@ function registerModule(descriptor, on) {
     discovery: announcements(descriptor),
     owner: null,
   };
-  state.owner = descriptor ? setup(descriptor.helperPath,(h,binding) => savedBinding(state,h,binding)) : null;
+  state.owner = descriptor ? setup(descriptor.helperPath,(h,binding) => savedBinding(state,h,binding),publish) : null;
   on('session.start',($,event,next) => sessionStart(state,$,event,next));
   on('command.run',{command:'ariadne-connect'},($,event) => connectRun(state,$,event));
   on('command.run',{command:'ariadne-status'},($) => checked($,() => statusAction(state,$)));
