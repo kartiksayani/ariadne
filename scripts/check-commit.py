@@ -4,6 +4,7 @@ import argparse
 import fnmatch
 import json
 import re
+import shutil
 import subprocess
 import sys
 from html.parser import HTMLParser
@@ -206,6 +207,9 @@ def lint(paths, full=False):
     # npm check already runs the same repository-wide ESLint before types/CSS.
     if not check_frontend and any(path.suffix in js for path in existing):
         run("node", ROOT / "node_modules/eslint/bin/eslint.js", ".", "--max-warnings=0")
+    # Claude Code's static module validator (ADR-0074); skipped when the CLI is absent.
+    if shutil.which("claude") and (full or any(name.startswith("integrations/claude/plugin/") for name in paths)):
+        run("claude", "plugin", "validate", "integrations/claude/plugin")
     html = sorted((ROOT / "docs").rglob("*.html")) if full else [p for p in existing if p.suffix == ".html"]
     for path in html:
         parser = InlineScripts()
