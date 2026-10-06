@@ -410,6 +410,7 @@ export async function runHistoryAcceptance(configuration) {
     // A click during the re-render after the CLI-published result can leave the previous saved receipt showing; click once more.
     const opened = () => browser.$('.owner-input textarea').isExisting();
     if (!await browser.waitUntil(opened, { timeout: 2000, interval: 100 }).catch(() => false)) {
+      console.warn(`[history] first ${intent} click did not open the editor; clicked again`);
       const again = await browser.$('.history-actions').$(`button=${label}`);
       await again.scrollIntoView(); await again.waitForEnabled(); await again.click();
       await wait(opened, `Native ${intent} owner input editor did not open after a second click`);

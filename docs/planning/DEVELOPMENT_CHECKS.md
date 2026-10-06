@@ -42,6 +42,8 @@ Docs/tooling scopes run their cheap checks in `static`; `coverage` and `native`
 report that nothing applies. A final `quality` job (the required status check) needs
 all three and fails unless every one succeeded. Each job uploads `coverage/` as
 `quality-evidence-<run>-<attempt>-<stage>`; rerunning a failed job reruns only that stage.
+The coverage and native stages start with `cargo fetch --locked`, and docs-scope pushes
+skip the setup of those two no-op stages.
 
 CI caches the Rust build and npm between runs (owner ruling 2026-10-06, reversing
 PR #23's no-cache choice for wall-clock): `Swatinem/rust-cache` per stage (key

@@ -22,7 +22,7 @@ full run and a rerun repeated every stage.
 - The workflow runs the stages as a matrix job `stage` (`fail-fast: false`), shown as
   `quality / <stage>`. Each job uploads `coverage/` as
   `quality-evidence-<run>-<attempt>-<stage>`.
-- A final job named `quality` (`needs: [stage]`, `if: always()`) fails unless every
+- A final job named `quality` (`needs: [stage]`, `if: ${{ !cancelled() }}`) fails unless every
   stage succeeded. It keeps the status check name the branch ruleset requires.
 - Caching (owner ruling 2026-10-06) reverses PR #23's deliberate no-cache choice; the
   reason is CI wall-clock. Application-scope runs use `Swatinem/rust-cache` on `.` and
@@ -47,6 +47,17 @@ full run and a rerun repeated every stage.
   from the caches.
 - A cache cannot change inputs, because every build is `--locked` and `npm ci` is exact.
   A corrupted cache is cleared by changing the key or from the Actions → Caches page.
+- The `coverage` and `native` stages run `cargo fetch --locked` first because they
+  start cold; `--stage all` is fetched by its earlier `cargo build`, so it skips this.
+- `native` no longer runs after the coverage gate; only `--stage all` keeps the old
+  "coverage before native" order.
+- `RUSTUP_HOME` is the stable path `$RUNNER_TEMP/ariadne-rustup`, because
+  `Swatinem/rust-cache` hashes `RUST*`/`CARGO*` environment values into its cache key.
+- The three stage caches share GitHub's 10 GB per-repository quota; eviction only makes
+  a build cold, never wrong.
+- Docs and tooling scope skip the setup, check and evidence steps of `coverage` and
+  `native`; the aggregate `quality` job uses `if: ${{ !cancelled() }}` so a superseded
+  run does not report a red status.
 - Test content, coverage floors and order inside a stage are unchanged; no retry
   policy is added.
 

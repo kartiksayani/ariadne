@@ -18,7 +18,7 @@ with open(os.environ["COMMAND_LOG"], "a") as output:
 if name in ("rustup", "cargo", "rustc"):
     toolchain_home = Path(os.environ["RUSTUP_HOME"]).resolve()
     assert toolchain_home.parent == Path(os.environ["RUNNER_TEMP"]).resolve()
-    assert toolchain_home.is_dir() and toolchain_home.name.startswith("ariadne-rustup.")
+    assert toolchain_home.is_dir() and toolchain_home.name == "ariadne-rustup"
 if name == "rustup":
     sys.exit(int(os.environ["SETUP_EXIT"]))
 if name == "python" and sys.argv[1:3] == ["-m", "venv"]:
@@ -49,7 +49,7 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertIn("github.event.before || 'origin/main'", workflow)
         self.assertIn("matrix:\n        stage: [static, coverage, native]", workflow)
         self.assertIn("fail-fast: false", workflow)
-        self.assertIn("  quality:\n    name: quality\n    needs: [stage]\n    if: always()\n    runs-on: ubuntu-latest", workflow)
+        self.assertIn("  quality:\n    name: quality\n    needs: [stage]\n    if: ${{ !cancelled() }}\n    runs-on: ubuntu-latest", workflow)
         self.assertIn("- name: Record result\n        if: always()", workflow)
         self.assertIn('[[ "$STAGE_RESULT" == "success" ]]', workflow)
         self.assertIn("-${{ matrix.stage }}\n", workflow)
@@ -60,6 +60,12 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertNotIn("save-if", workflow)
         self.assertIn("path: ~/.cargo/bin/cargo-llvm-cov\n          key: ${{ runner.os }}-cargo-llvm-cov-0.9.1", workflow)
         self.assertIn("steps.llvm-cov-cache.outputs.cache-hit != 'true'", workflow)
+        self.assertEqual(workflow.count("&& matrix.stage != 'static'"), 2)
+        self.assertIn("      - name: Check the pushed branch head\n"
+                      "        if: contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static'\n", workflow)
+        self.assertIn("      - name: Preserve native and coverage evidence\n"
+                      "        if: always() && (contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static')\n",
+                      workflow)
         order = [workflow.index(f"      - name: {name}\n") for name in (
             "Resolve the check scope", "Install the Rust toolchain", "Restore cargo-llvm-cov",
             "Install cargo-llvm-cov", "Cache the Rust build", "Check the pushed branch head")]
@@ -73,8 +79,8 @@ class QualityWorkflowTests(unittest.TestCase):
 
         steps = [("Resolve the check scope", lambda application, stage: True),
                  ("Install the Rust toolchain", lambda application, stage: application),
-                 ("Install cargo-llvm-cov", lambda application, stage: application and stage == "coverage"),
-                 ("Check the pushed branch head", lambda application, stage: True)]
+                 ("Install cargo-llvm-cov", lambda application, stage: application and stage != "static"),
+                 ("Check the pushed branch head", lambda application, stage: application or stage == "static")]
         scripts = [(step_script(name), condition) for name, condition in steps]
         with tempfile.TemporaryDirectory(prefix="ariadne-ci-orchestration-") as folder:
             root = Path(folder)
@@ -142,7 +148,10 @@ class QualityWorkflowTests(unittest.TestCase):
                         if result.returncode:
                             break
                     reference = "reference=true" in scope and stage == "static"
+                    runs_gate = application or stage == "static"
                     expected_status = setup_status or status or ((provision_status or capture_status) if reference else 0)
+                    if not runs_gate:
+                        expected_status = 0
                     self.assertEqual(result.returncode, expected_status, result.stderr)
                     calls = [json.loads(line) for line in log.read_text().splitlines()]
                     gate = ["python", "scripts/check-commit.py", "--ci", "--base", "whole-pr-base"]
@@ -152,7 +161,7 @@ class QualityWorkflowTests(unittest.TestCase):
                         gate += ["--full"]
                     gate += ["--stage", stage]
                     gate_ok = not (setup_status or status)
-                    self.assertEqual(calls.count(gate), int(not setup_status))
+                    self.assertEqual(calls.count(gate), int(runs_gate and not setup_status))
                     provisioning = ["node", "node_modules/playwright/cli.js", "install", "chromium"]
                     capture = ["npm", "run", "capture:reference"]
                     self.assertEqual(calls.count(provisioning), int(reference and gate_ok))
@@ -171,7 +180,7 @@ class QualityWorkflowTests(unittest.TestCase):
                             self.assertLess(calls.index(installs[0]), calls.index(version))
                         self.assertLess(calls.index(version_checks[-1]), calls.index(gate))
                     llvm_cov = ["cargo", "install", "cargo-llvm-cov", "--version", "0.9.1", "--locked"]
-                    self.assertEqual(calls.count(llvm_cov), int(application and stage == "coverage" and not setup_status))
+                    self.assertEqual(calls.count(llvm_cov), int(application and stage != "static" and not setup_status))
                     self.assertFalse(any(call[0] == "rtk" for call in calls))
 
     def test_captures_before_gate_are_rejected(self):

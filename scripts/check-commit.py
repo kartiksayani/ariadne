@@ -284,6 +284,9 @@ def main(argv=None):
             # exercise their actual dispatcher as well as the native Home/End journey.
             run("cargo", "test", "-p", "ariadne-desktop", "-p", "tauri-plugin-wdio-webdriver",
                 "--features", "ariadne-desktop/e2e", "--lib", "key_event_tests", "--locked", "--offline")
+        if stage in ("coverage", "native"):
+            # Split stages start cold; --stage all already fetched crates via the earlier cargo build.
+            run("cargo", "fetch", "--locked")
         if in_coverage:
             run("env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean", "--workspace", "--locked", "--offline")
             ignored = "(^|/)(tools|generated|vendor|tests|__tests__)/|" + "|".join(

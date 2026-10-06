@@ -15,7 +15,7 @@ npm run capture:reference -- --project graph-2000
 
 The browser project runs once at 1000×700 in the existing reference capture
 command. Relevant pushed-head CI provisions the pinned Chromium package and runs
-it; the existing `quality-evidence-<run>-<attempt>` artifact retains:
+it; the existing `quality-evidence-<run>-<attempt>-static` artifact retains:
 
 - `coverage/graph-performance/measurements.json`: actual source commit, browser
   version, platform, viewport, initial rendered node/edge counts, layout/index

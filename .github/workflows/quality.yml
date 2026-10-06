@@ -54,8 +54,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Isolate partial runner state; fail before expensive reference captures.
-          RUSTUP_HOME=$(mktemp -d "$RUNNER_TEMP/ariadne-rustup.XXXXXX")
+          # Isolate partial runner state; the path must be stable because rust-cache hashes RUST*/CARGO* env values into its key.
+          RUSTUP_HOME="$RUNNER_TEMP/ariadne-rustup"
+          mkdir -p "$RUSTUP_HOME"
           export RUSTUP_HOME
           echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
           rustup toolchain install 1.98.1 --profile minimal --component cargo --component rustc --component rust-std --component rustfmt --component clippy --component llvm-tools-preview
@@ -63,13 +64,13 @@ jobs:
           rustc --version
       - name: Restore cargo-llvm-cov
         id: llvm-cov-cache
-        if: contains(steps.scope.outputs.scope, 'application') && matrix.stage == 'coverage'
+        if: contains(steps.scope.outputs.scope, 'application') && matrix.stage != 'static'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-llvm-cov
           key: ${{ runner.os }}-cargo-llvm-cov-0.9.1
       - name: Install cargo-llvm-cov
-        if: contains(steps.scope.outputs.scope, 'application') && matrix.stage == 'coverage' && steps.llvm-cov-cache.outputs.cache-hit != 'true'
+        if: contains(steps.scope.outputs.scope, 'application') && matrix.stage != 'static' && steps.llvm-cov-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -82,6 +83,7 @@ jobs:
           workspaces: ". -> target/native-e2e"
           cache-on-failure: true
       - name: Check the pushed branch head
+        if: contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static'
         shell: bash
         env:
           SCOPE: ${{ steps.scope.outputs.scope }}
@@ -99,7 +101,7 @@ jobs:
             npm run capture:reference
           fi
       - name: Preserve native and coverage evidence
-        if: always()
+        if: always() && (contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stage }}
@@ -109,7 +111,7 @@ jobs:
   quality:
     name: quality
     needs: [stage]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Record result
