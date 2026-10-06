@@ -11,7 +11,10 @@ closed-source freemium product: never add an open-source licence (Cargo.toml is
 **Main: a2cfa9d (#110). Roadmap: 45/49 on main, 46/49 once this docs PR merges (P7.1).**
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-No open PRs besides this docs PR (branch `docs/followups`).
+No open PRs besides this docs PR (branch `docs/p71-evidence`). Duplicate and
+out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
+(`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
+rather than the native journey.
 
 ## Local native journey is the fast loop
 
