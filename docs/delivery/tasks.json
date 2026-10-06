@@ -1,14 +1,12 @@
 {
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-05T19:34:00Z",
-    "headline": "39/49 merged. Remaining: P4.5, P4.6, P4.7, P5.3, P6.1, P6.4, P7.1, P7.2, P7.3, P8.1.",
+    "updated_at": "2026-10-06T01:55:00Z",
+    "headline": "44/49 merged. #106 (seven items) merged as f020bbe after the full native journey passed locally and on CI; README rewrite merged as 9075ea7. Remaining: P6.4 install trial on final main, P7.1 CI link, P7.2/P7.3 live host runs (owner approval), P8.1.",
     "notes": [
-      "main 7dbecfb is green. Nine stacked draft PRs #94, #93, #97, #101, #104, #99, #105, #98, #103 plus draft #106 on top.",
-      "All nine failed the same native e2e test on 2026-10-05.",
-      "Root causes found 2026-10-06 from CI artifacts: (A) tree-search p95 193 ms vs 150 ms target, fix reviewed clear; (B) history spec selected the icon-only Messages (m) button by visible text, test bug, proved; (C) follow-up/reopen spec step raced the previous result, test sequencing, likely; (D) a Fork click dropped when the awaited preference write hit a revision conflict, minor product bug, likely.",
-      "Fixes are being pushed to #106, then get independent review, then propagate down the stack so all PRs re-run CI in parallel. Merges go top-down from #94.",
-      "P7.2 and P7.3 live runs need owner approval."
+      "PR #107 (agent rule sheet) merged to main as db352e5. It is not a roadmap item.",
+      "PR #106 carried the whole former stack (#94-#103) plus the Codex skill and the preferences-conflict fix; squash-merged as f020bbe at head 87aa6b4.",
+      "Superseded stack PRs #94, #93, #97, #101, #104, #99, #105, #98, #103 are closed; their branches are kept."
     ]
   },
   "tasks": [
@@ -1315,10 +1313,8 @@
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/73",
       "active": true,
-      "progress": {
-        "state": "fixing_ci",
-        "prs": [94],
-        "note": "Native complete-history journey with rail cross-highlights; CI failing on the shared native e2e test."
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/106"
       }
     },
     {
@@ -1360,10 +1356,8 @@
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/80",
       "active": true,
-      "progress": {
-        "state": "fixing_ci",
-        "prs": [94],
-        "note": "Answer/action paths exercised in the #94 native history journey; CI failing on the shared native e2e test."
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/106"
       }
     },
     {
@@ -1404,10 +1398,8 @@
         "P0.6"
       ],
       "active": true,
-      "progress": {
-        "state": "fixing_ci",
-        "prs": [94, 106],
-        "note": "Missing-result recovery journey and native result expiry in #106; #94 lists P4.7 as still open. Native e2e failing."
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/106"
       }
     },
     {
@@ -1568,10 +1560,8 @@
         "P4.7"
       ],
       "active": true,
-      "progress": {
-        "state": "fixing_ci",
-        "prs": [93],
-        "note": "Guarded archive/close/Continue native journey; CI failing on the shared native e2e test. Also needs P4.7."
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/106"
       }
     },
     {
@@ -1609,10 +1599,8 @@
       ],
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/75",
       "active": true,
-      "progress": {
-        "state": "fixing_ci",
-        "prs": [101, 104],
-        "note": "Quit-preserves-external-turn and quit-warning acceptance; CI failing on the shared native e2e test."
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/106"
       }
     },
     {
@@ -1769,7 +1757,10 @@
       "active": true,
       "progress": {
         "state": "fixing_ci",
-        "prs": [98, 103],
+        "prs": [
+          98,
+          103
+        ],
         "note": "Parallel-lane and missing-result repair acceptance tests are in the stack; waiting on the shared native e2e fix."
       }
     },
