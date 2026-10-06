@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
+import { admissions, awaitConnected, cliRequest, snapshot } from './scripted-provider.mjs';
 import { installSearchTimingObservation, takeSearchTimingObservation } from './search-timing-observation.mjs';
 import { activateOwned, identity } from '../../../../scripts/run-native-e2e.mjs';
 
@@ -109,6 +109,7 @@ async function seedTree(configuration) {
   const tree = { ...selected, cli: configuration.cli, projectId, sessionId: receipt.session_id,
     bindingId: receipt.data.binding_id, generation: receipt.data.generation,
     sessionPath: join(selected.projectRoot, '.ariadne/sessions', `${receipt.session_id}.json`) };
+  await awaitConnected(tree);
   const publication = [await apply(tree, [{ op: 'topic.add', ref: 'native_tree_topic', name: 'Native tree acceptance' }], {}, '', true)];
   const topic = Object.values((await snapshot(tree)).topics).find(topic => topic.name === 'Native tree acceptance'); assert.ok(topic);
   for (let branch = 1; branch <= 20; branch++) publication.push(await apply(tree, treeBatch(topic.id, branch), {}, '', true));

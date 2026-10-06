@@ -25,6 +25,18 @@ export async function cliRequest(cli, args, request, env = process.env) {
 export async function snapshot(configuration) {
   return JSON.parse(await readFile(configuration.sessionPath, 'utf8'));
 }
+// The connect receipt returns before the supervisor worker commits its Connected
+// report; an apply that races it is rejected as binding_mismatch. Wait for the route.
+export async function awaitConnected(configuration, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  let binding;
+  do {
+    binding = (await snapshot(configuration)).bindings?.[configuration.bindingId];
+    if (binding?.connection_state === 'connected' && binding?.dispatch_state === 'enabled') return binding;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  assert.fail(`Binding ${configuration.bindingId} never became the connected route: ${JSON.stringify(binding)}`);
+}
 async function optional(path) {
   try { return JSON.parse(await readFile(path, 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
