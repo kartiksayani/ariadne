@@ -42,7 +42,7 @@ Messages rail on the right](docs/planning/assets/screenshot-dark-tree.png)
 
 ## Status
 
-Early preview. macOS 13 or newer, built from source.
+Early preview. macOS 13 or newer; alpha download or built from source.
 
 - **macOS only:** macOS 13 or newer, Apple Silicon or Intel.
 - **Alpha download or build from source.** A pre-release tarball is on the
@@ -89,11 +89,15 @@ Follow [Connect Claude Code](#connect-claude-code) or
 ## Download the alpha
 
 Needs macOS 13 or newer and Python 3.11 or newer, nothing else. Download the
-`.tar.gz` for your chip from the Releases page (pre-release), then run
-`tar xzf ariadne-*.tar.gz`, `cd ariadne-*/` and `./install.sh`. Open
-`~/Applications/Ariadne.app`; the first time, right-click it and choose Open
-(it is unsigned, see [First launch](#first-launch-unsigned-app)). Building from
-source below is the other way; managed Macs may block either.
+`.tar.gz` from the Releases page (pre-release); it is for Apple Silicon Macs,
+and Intel Macs build from source. Run `tar xzf ariadne-*.tar.gz`,
+`cd ariadne-*/` and `./install.sh`, which says: "This download is unsigned;
+removing macOS's download quarantine mark from this folder so it can run. Only
+install packages you trust." It also stops if this version is already installed.
+Open `~/Applications/Ariadne.app`; the first time, right-click it and
+choose Open (see [First launch](#first-launch-unsigned-app)). To uninstall, run
+`python3 install.py uninstall` from the package folder. Building from source
+below is the other way; managed Macs may block either.
 
 ## Install in detail
 

@@ -52,6 +52,15 @@ app, or an `architecture` that differs from this Mac. It then calls the same
 `install()` with the package directory as read-only input and records the
 installing Mac's facts plus the package's `built` facts in `install.json`.
 Uninstall is unchanged: `python3 install.py uninstall` from the package directory.
+`install.sh` first stops with a message if `~/.local/share/ariadne/versions/<app
+version>` already exists (the app stays 0.1.0 across alphas, so uninstall first;
+project history is kept). If `xattr` exists it then prints "This download is
+unsigned; removing macOS's download quarantine mark from this folder so it can
+run. Only install packages you trust." and runs `xattr -dr com.apple.quarantine`
+on the package folder, because `tar` copies the browser's quarantine mark onto
+every file and Gatekeeper would block the unsigned `ariadne`. The release
+workflow refuses a tag that does not start with `v` plus the app version, does not
+publish on manual dispatch, and will not overwrite an existing release.
 The tag-triggered release workflow builds the package, installs and uninstalls it
 under a temporary HOME, and attaches it to a GitHub pre-release.
 

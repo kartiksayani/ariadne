@@ -36,7 +36,20 @@ exports, `install.json` and owned links under `$HOME`.
   runs `doctor --json` and uninstalls from the extracted tarball under a temporary
   HOME, then creates a GitHub pre-release with `gh`. A manual run without a tag
   keeps the tarball as a workflow artifact only.
-- The app version stays 0.1.0; release tags look like `v0.1.0-alpha.1`.
+- The app version stays 0.1.0; release tags look like `v0.1.0-alpha.1`. The
+  workflow fails unless the tag starts with `v` plus the app version, and
+  `install.sh` stops with a message when `versions/<app version>` already exists,
+  because `install()` refuses a different package with the same version.
+- Publishing only happens on a tag push, never on manual dispatch, and never over
+  an existing release. The checkout keeps no credentials, and the verify step
+  asserts that uninstall left nothing behind.
+- `install.sh` prints "This download is unsigned; removing macOS's download
+  quarantine mark from this folder so it can run. Only install packages you
+  trust." and runs `xattr -dr com.apple.quarantine "$PWD"`, because `tar` copies
+  the browser's quarantine mark onto every file and Gatekeeper would otherwise
+  block the unsigned `ariadne` that `install()` runs.
+- `install_package()` copies only the known `package.json` keys, each at most 200
+  characters, into the receipt.
 
 ## Consequences
 
@@ -44,8 +57,15 @@ exports, `install.json` and owned links under `$HOME`.
   python3 3.11 or newer.
 - The app is unsigned in both install paths, so macOS asks for right-click Open on
   first launch, and a managed Mac may block it.
-- A package is for one architecture; the other chip needs its own package or a
-  source build.
+- A package is for one architecture; only Apple Silicon (arm64) is built, so
+  Intel Macs build from source.
+- The installer removes the quarantine mark from the package folder, so the owner
+  must trust what they downloaded.
+
+## Not verified
+
+- Gatekeeper behaviour with a real browser-downloaded, quarantined tarball. No
+  automated test can cover it; it needs a manual download on a Mac.
 - Each tag build is verified end to end in isolation before it is published.
 
 ## Spec references

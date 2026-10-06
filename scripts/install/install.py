@@ -643,6 +643,9 @@ def install_package(home, package_dir):
     require(isinstance(built, dict) and set(built) >= set(PACKAGE_KEYS) and
             all(isinstance(built[key], str) and built[key] for key in PACKAGE_KEYS),
             "Package description package.json is malformed.")
+    require(all(len(built[key]) <= 200 for key in PACKAGE_KEYS),
+            "Package description package.json has a value longer than 200 characters.")
+    built = {key: built[key] for key in PACKAGE_KEYS}
     require(built["architecture"] == facts["architecture"],
             f"This package is for {built['architecture']} Macs; this Mac is {facts['architecture']}.")
     require(built["app_version"] == app_version(package_dir), "Package description does not match its app.")

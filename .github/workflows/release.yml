@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -40,6 +41,16 @@ jobs:
           rustc --version
           npm install --global npm@10.9.8
           npm ci --ignore-scripts --engine-strict
+      - name: Check the tag matches the app version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import json; print(json.load(open("apps/desktop/src-tauri/tauri.conf.json"))["version"])')
+          case "$GITHUB_REF_NAME" in
+            "v$version"*) ;;
+            *) echo "Tag $GITHUB_REF_NAME does not start with v$version, the app version." >&2; exit 1 ;;
+          esac
       - name: Build the package
         run: make package
       - name: Verify the package in a temporary home
@@ -54,7 +65,15 @@ jobs:
           cd "$package"
           HOME="$fake_home" ./install.sh
           HOME="$fake_home" "$fake_home/.local/bin/ariadne" doctor --json
+          test -e "$fake_home/.local/bin/ariadne"
           HOME="$fake_home" python3 install.py uninstall
+          test -z "$(ls -A "$fake_home/.local/share/ariadne/versions" 2>/dev/null)"
+          for leftover in .local/bin/ariadne .local/bin/ariadne-mcp Applications/Ariadne.app .agents/skills/ariadne; do
+            if [ -e "$fake_home/$leftover" ] || [ -L "$fake_home/$leftover" ]; then
+              echo "Uninstall left $leftover behind." >&2
+              exit 1
+            fi
+          done
       - name: Keep the package as a workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -63,12 +82,16 @@ jobs:
           retention-days: 14
           if-no-files-found: error
       - name: Publish the pre-release
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; tag a new alpha instead of re-running." >&2
+            exit 1
+          fi
           cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
           Alpha build, not signed or notarized. The first time you open Ariadne, macOS
           will refuse; right-click the app and choose Open (or use Open Anyway in

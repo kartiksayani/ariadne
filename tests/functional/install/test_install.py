@@ -720,6 +720,33 @@ class PackageTests(unittest.TestCase):
             installer.install_package(self.home, package)
         self.assertFalse(installer.exists(self.root / "current"))
 
+    def test_symlinked_package_members_are_refused(self):
+        _, package = self.extract()
+        for name in ("ariadne", "ariadne-mcp", "package.json"):
+            real = package / (name + ".real")
+            (package / name).rename(real)
+            (package / name).symlink_to(real)
+            with self.assertRaisesRegex(installer.InstallError, "missing " + name):
+                installer.install_package(self.home, package)
+            (package / name).unlink()
+            real.rename(package / name)
+        app = package / "bundle/macos/Ariadne.app"
+        app.rename(package / "bundle/macos/Real.app")
+        app.symlink_to("Real.app")
+        with self.assertRaisesRegex(installer.InstallError, "missing Ariadne.app"):
+            installer.install_package(self.home, package)
+
+    def test_package_description_keeps_only_known_short_values(self):
+        _, package = self.extract()
+        description = json.loads((package / "package.json").read_text())
+        (package / "package.json").write_text(json.dumps({**description, "source_sha": "a" * 201}))
+        with self.assertRaisesRegex(installer.InstallError, "longer than 200"):
+            installer.install_package(self.home, package)
+        (package / "package.json").write_text(json.dumps({**description, "extra": "x" * 400000}))
+        final = installer.install_package(self.home, package)
+        built = installer.json_read(final / "install.json")["preflight"]["built"]
+        self.assertEqual(sorted(built), sorted(installer.PACKAGE_KEYS))
+
     def extract_again(self):
         shutil.rmtree(self.base / "extracted")
         return self.extract()
