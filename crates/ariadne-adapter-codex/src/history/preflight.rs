@@ -184,7 +184,7 @@ impl CodexDaemonReader {
         limit: u32,
         deadline: Instant,
     ) -> Result<wire::thread_turns_list_response::ThreadTurnsListResponse, AdapterError> {
-        let page: wire::thread_turns_list_response::ThreadTurnsListResponse = self.rpc.request(
+        let page = self.rpc.request(
             "thread/turns/list",
             &wire::thread_turns_list_params::ThreadTurnsListParams {
                 thread_id: thread_id.to_owned(),
@@ -194,7 +194,24 @@ impl CodexDaemonReader {
                 items_view: Some(wire::thread_turns_list_params::TurnItemsView::Full),
             },
             deadline,
-        )?;
+        );
+        let page: wire::thread_turns_list_response::ThreadTurnsListResponse = match page {
+            Ok(page) => page,
+            // A fresh thread has no rollout until its first user message: no turns yet.
+            Err(_)
+                if self
+                    .rpc
+                    .last_server_error()
+                    .is_some_and(|detail| detail.is_thread_not_materialized()) =>
+            {
+                wire::thread_turns_list_response::ThreadTurnsListResponse {
+                    backwards_cursor: None,
+                    data: vec![],
+                    next_cursor: None,
+                }
+            }
+            Err(err) => return Err(err),
+        };
         if page.data.len() > limit as usize {
             return Err(error(
                 Code::IncompatibleAdapter,

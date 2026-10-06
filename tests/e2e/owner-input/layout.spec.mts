@@ -27,6 +27,13 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
     await dialog.getByLabel('Registered Ariadne session').selectOption('00000000-0000-4000-8000-000000000002');
     await dialog.getByRole('button', { name: 'Connect existing session', exact: true }).click();
     await expect(dialog).toHaveCount(0);
+    // The connect card sits directly under the project header, above the Active list.
+    await expect(page.getByRole('region', { name: 'Session setup' }).getByRole('button', { name: 'Copy instruction' })).toBeVisible();
+    expect(await page.evaluate(() => {
+      const card = document.querySelector('[aria-label="Session setup"]');
+      const active = [...document.querySelectorAll('h3')].find(heading => heading.textContent === 'Active');
+      return !!card && !!active && !!(card.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING);
+    })).toBe(true);
     await page.locator('button[data-session-id]').first().click();
     const tree = page.getByRole('tree'), setup = page.getByRole('region', { name: 'Session setup' });
     await expect(tree.getByRole('treeitem')).toHaveCount(2000);

@@ -27,6 +27,7 @@ fn queued_geometry_before_quit_finishes_its_first_read_and_save_after_the_fence(
             claude: None,
             codex: None,
             discovery_endpoints: vec![],
+            cli_invocation: "ariadne".into(),
         },
         Arc::new(|_| {}),
         Arc::new(|_| true),

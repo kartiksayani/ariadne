@@ -61,6 +61,7 @@ fn facts(params: &BindingConnectParams) -> VerifiedHost {
         compatibility: Compatibility::Compatible,
         availability: Availability::Available,
         connection_state: ConnectionState::Connected,
+        cli_invocation: "ariadne".into(),
         setup_instruction: "Use the saved binding and generation for this explicit host thread."
             .into(),
     }
@@ -1847,6 +1848,7 @@ fn saved_instructions_keep_verified_bytes_and_concrete_routes_even_for_unknown_c
                     let mut host = facts(params);
                     host.connection_state = ConnectionState::Unknown;
                     host.setup_instruction = original.into();
+                    host.cli_invocation = "ARIADNE_HOME=/data/root /opt/ariadne".into();
                     Ok(host)
                 },
                 || setup.allocate(),
@@ -1868,12 +1870,12 @@ fn saved_instructions_keep_verified_bytes_and_concrete_routes_even_for_unknown_c
         generation.as_str()
     )));
     assert!(setup_instruction.contains(&format!(
-        "ariadne read --binding {} --generation {} --view items --json",
+        "ARIADNE_HOME=/data/root /opt/ariadne read --binding {} --generation {} --view items --json",
         binding.as_str(),
         generation.as_str()
     )));
     assert!(setup_instruction.contains(&format!(
-        "ariadne apply --binding {} --generation {} --json-stdin",
+        "ARIADNE_HOME=/data/root /opt/ariadne apply --binding {} --generation {} --json-stdin",
         binding.as_str(),
         generation.as_str()
     )));

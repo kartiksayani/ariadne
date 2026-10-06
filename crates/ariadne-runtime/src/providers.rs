@@ -20,6 +20,9 @@ pub type ProjectRootResolver = dyn Fn(&UuidV4) -> Result<PathBuf, CoreError> + S
 pub struct ProviderInstructions {
     pub claude: String,
     pub codex: String,
+    /// Exact CLI invocation named in the saved setup instruction; the agent's
+    /// tool shell neither inherits `ARIADNE_HOME` nor finds the helper on PATH.
+    pub cli_invocation: String,
 }
 
 #[derive(Clone)]
@@ -161,6 +164,7 @@ impl ProviderFactory {
                     availability: facts.availability,
                     connection_state: ConnectionState::Unknown,
                     setup_instruction: self.instructions.codex.clone(),
+                    cli_invocation: self.instructions.cli_invocation.clone(),
                 };
                 within(deadline)?;
                 Ok(QualifiedProvider {
@@ -264,6 +268,7 @@ impl ProviderFactory {
             availability: Availability::Available,
             connection_state: ConnectionState::Unknown,
             setup_instruction: self.instructions.claude.clone(),
+            cli_invocation: self.instructions.cli_invocation.clone(),
         };
         Ok(QualifiedProvider {
             host,
@@ -352,6 +357,7 @@ mod tests {
             ProviderInstructions {
                 claude: body.into(),
                 codex: body.into(),
+                cli_invocation: "ariadne".into(),
             },
         )
     }
