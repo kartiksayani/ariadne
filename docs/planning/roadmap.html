@@ -1695,7 +1695,7 @@
       "acceptance": [
         "Single-instance registers before plugins and queues ID routes until webview ready; actual packaged CLI open handles paths with spaces and same revealItem route.",
         "Ariadne persists Pin and geometry, clamps stored geometry to supplied monitor bounds, reconciles on wake (wake triggers Ariadne's window reconcile: observer registered, reconcile invoked off the posting thread; physical-monitor behaviour is delegated to macOS and not a gate), and distinguishes hide from Quit. Focused tests prove our state/routing/lifecycle logic; Quit stops only Ariadne dispatch and preserves active external host work. Standard macOS window/menu behavior is delegated to Apple APIs, not a physical acceptance gate (owner clarification 2026-10-05).",
-        "Quit note text and trigger are proved by unit tests; the native journey asserts the Quit request, PID exit and lease release."
+        "Quit note trigger is proved by unit tests; the note text, the Quit request, PID exit and lease release are asserted by the native journey."
       ],
       "checks": [
         "rtk proxy npm run test:native -- --suite routes",
