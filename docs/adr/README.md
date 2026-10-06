@@ -43,3 +43,7 @@ beside the source install.
 [ADR-0080](ADR-0080-app-bundle-in-applications.md) installs `~/Applications/Ariadne.app`
 as a real owned copy of the bundle, because Finder, Spotlight and Launchpad ignore a
 symlink into a hidden folder. It supersedes the symlink sentence of ADR-0062.
+
+[ADR-0081](ADR-0081-provider-paths-from-setup.md) makes `ariadne setup` record the
+explicit Claude and Codex paths in `providers.json`, so the app finds them when opened
+normally. Flags still override; the app never searches PATH or launches a host.

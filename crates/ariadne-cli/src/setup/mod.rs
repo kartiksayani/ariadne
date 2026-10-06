@@ -1,6 +1,7 @@
 //! Explicit integration setup. Host trust stays in the host UI.
 pub mod owned;
 pub mod package_resources;
+pub mod providers;
 pub mod resources;
 
 use ariadne_core::{CoreError, CoreErrorCode};
@@ -9,18 +10,20 @@ use ariadne_store::registry::Registry;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-pub const HELP: &str = "Integration setup: ariadne setup --agent claude|codex|both [--project /absolute/project] [--json]\nIntegration removal: ariadne uninstall [--agent claude|codex|both] [--json]\nInstall the matching personal app/helpers first. Setup prints host commands; run them explicitly in the original host. All project sessions/backups and foreign settings survive uninstall.\n";
+pub const HELP: &str = "Integration setup: ariadne setup --agent claude|codex|both [--project /absolute/project] [--claude-bin /absolute/claude] [--codex-bin /absolute/codex] [--json]\nIntegration removal: ariadne uninstall [--agent claude|codex|both] [--json]\nInstall the matching personal app/helpers first. Setup prints host commands; run them explicitly in the original host. Setup also records where Claude/Codex live (found on PATH, or the --claude-bin/--codex-bin you give) in providers.json so the app can find them. All project sessions/backups and foreign settings survive uninstall.\n";
 
 #[derive(Debug)]
 pub(crate) struct Request {
     pub agent: String,
     pub project: Option<PathBuf>,
     pub uninstall: bool,
+    pub explicit: providers::Explicit,
 }
 
 pub(crate) fn parse(args: &[&str], uninstall: bool) -> Result<Request, CoreError> {
     let mut agent = None;
     let mut project = None;
+    let mut explicit = providers::Explicit::default();
     let mut json = false;
     let mut i = 0;
     while i < args.len() {
@@ -48,17 +51,38 @@ pub(crate) fn parse(args: &[&str], uninstall: bool) -> Result<Request, CoreError
                 }
                 project = Some(path);
             }
+            flag @ ("--claude-bin" | "--codex-bin") if !uninstall => {
+                let slot = if flag == "--claude-bin" {
+                    &mut explicit.claude
+                } else {
+                    &mut explicit.codex
+                };
+                if slot.is_some() {
+                    return Err(invalid("Unknown or repeated setup/uninstall flag."));
+                }
+                i += 1;
+                *slot = Some(providers::explicit_path(flag, args.get(i).copied())?);
+            }
             "--json" if !json => json = true,
             _ => return Err(invalid("Unknown or repeated setup/uninstall flag.")),
         }
         i += 1;
     }
+    let agent: String = agent
+        .or_else(|| uninstall.then(|| "both".into()))
+        .ok_or_else(|| invalid("Setup requires --agent."))?;
+    if (explicit.claude.is_some() && agent == "codex")
+        || (explicit.codex.is_some() && agent == "claude")
+    {
+        return Err(invalid(
+            "--claude-bin needs --agent claude or both; --codex-bin needs --agent codex or both.",
+        ));
+    }
     Ok(Request {
-        agent: agent
-            .or_else(|| uninstall.then(|| "both".into()))
-            .ok_or_else(|| invalid("Setup requires --agent."))?,
+        agent,
         project,
         uninstall,
+        explicit,
     })
 }
 
@@ -67,12 +91,31 @@ pub(crate) fn invalid(message: &str) -> CoreError {
 }
 
 /// The entrypoint supplies the validated immutable installation, never a checkout.
+/// Without a process environment: no PATH search, so only explicit `--*-bin` paths are recorded.
 pub fn execute_in_installation(
     args: &[&str],
     uninstall: bool,
     data: &Path,
     version_root: &Path,
     stable_integrations: &Path,
+) -> Result<Value, CoreError> {
+    execute_with_environment(
+        args,
+        uninstall,
+        data,
+        version_root,
+        stable_integrations,
+        &providers::Environment::default(),
+    )
+}
+
+pub fn execute_with_environment(
+    args: &[&str],
+    uninstall: bool,
+    data: &Path,
+    version_root: &Path,
+    stable_integrations: &Path,
+    environment: &providers::Environment,
 ) -> Result<Value, CoreError> {
     let request = parse(args, uninstall)?;
     let project=request.project.as_ref().map(|root|root.canonicalize().map_err(|_|CoreError::new(CoreErrorCode::IoError,"Cannot resolve the explicitly selected project; integration setup was not attempted.","Restore access to that exact project path."))).transpose()?;
@@ -102,6 +145,16 @@ pub fn execute_in_installation(
                 return Err(error);
             }
         }
+    }
+    if !request.uninstall {
+        // Resources were applied; a failure here is safe to retry (idempotent).
+        result["providers"] = providers::record(
+            data,
+            stable_integrations,
+            &request.agent,
+            &request.explicit,
+            environment,
+        )?;
     }
     result["host_commands"] = json!(if request.uninstall {
         Vec::<String>::new()
@@ -159,6 +212,36 @@ pub(crate) fn write(
         for command in data["host_commands"].as_array().expect("commands") {
             writeln!(output, "{}", command.as_str().expect("command"))?;
         }
+        if !data["providers"].is_null() {
+            let providers = &data["providers"];
+            for entry in providers["recorded"].as_array().expect("recorded") {
+                let label = if entry["agent"] == "claude" {
+                    "Claude"
+                } else {
+                    "Codex"
+                };
+                writeln!(
+                    output,
+                    "Recorded {label} at {}",
+                    entry["executable"].as_str().expect("executable")
+                )?;
+            }
+            for entry in providers["not_recorded"].as_array().expect("not recorded") {
+                writeln!(output, "{}", entry["reason"].as_str().expect("reason"))?;
+            }
+            if providers["written"] == true {
+                writeln!(
+                    output,
+                    "Provider paths file: {}",
+                    providers["file"].as_str().expect("file")
+                )?;
+            }
+            writeln!(
+                output,
+                "{}",
+                providers["restart"].as_str().expect("restart")
+            )?;
+        }
         Ok(())
     })();
     if written.is_ok() {
@@ -177,6 +260,29 @@ pub fn run_in_installation(
     output: &mut dyn std::io::Write,
     errors: &mut dyn std::io::Write,
 ) -> i32 {
+    run_with_environment(
+        args,
+        uninstall,
+        data,
+        version_root,
+        stable_integrations,
+        &providers::Environment::default(),
+        output,
+        errors,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_environment(
+    args: &[&str],
+    uninstall: bool,
+    data: &Path,
+    version_root: &Path,
+    stable_integrations: &Path,
+    environment: &providers::Environment,
+    output: &mut dyn std::io::Write,
+    errors: &mut dyn std::io::Write,
+) -> i32 {
     if args == ["--help"] || args == ["-h"] {
         return if output.write_all(HELP.as_bytes()).is_ok() {
             0
@@ -185,7 +291,14 @@ pub fn run_in_installation(
         };
     }
     write(
-        execute_in_installation(args, uninstall, data, version_root, stable_integrations),
+        execute_with_environment(
+            args,
+            uninstall,
+            data,
+            version_root,
+            stable_integrations,
+            environment,
+        ),
         args.contains(&"--json"),
         output,
         errors,
@@ -220,12 +333,13 @@ pub fn run(
         let package_root = package_root_from_environment()?;
         let package = crate::open::installed_package(&package_root, resources::VERSION)?;
         let data = crate::bridge::command::home_from_environment()?;
-        execute_in_installation(
+        execute_with_environment(
             args,
             uninstall,
             &data,
             &package.version_root,
             &package_root.join("current/integrations"),
+            &providers::Environment::process(),
         )
     })();
     write(result, args.contains(&"--json"), output, errors)

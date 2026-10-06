@@ -1,4 +1,5 @@
 use super::Report;
+use crate::setup::providers;
 use ariadne_adapter_claude::{ClaudeOptions, SUPPORTED_HOST_VERSION};
 use ariadne_adapter_codex::{CodexDaemonReader, CodexOptions, SUPPORTED_CODEX_VERSION};
 use ariadne_agent_protocol::host_version::{
@@ -34,6 +35,20 @@ pub struct Options {
 /// Trusted native caller supplies private roots; tests use private profiles only.
 pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> Value {
     let mut report = Report::new();
+    // Flags win; otherwise the paths setup recorded in providers.json are used.
+    let recorded = providers::read(data);
+    let (recorded_claude, recorded_codex) = match &recorded {
+        providers::Read::Present(file) => (
+            file.claude.as_ref().map(|c| c.executable.clone()),
+            file.codex.as_ref().map(|c| c.executable.clone()),
+        ),
+        _ => (None, None),
+    };
+    let options = &Options {
+        project: options.project.clone(),
+        claude_bin: options.claude_bin.clone().or(recorded_claude),
+        codex_bin: options.codex_bin.clone().or(recorded_codex),
+    };
     if let Some(version_root) = version_root {
         match crate::setup::owned::check(version_root) {
             Ok(facts) => {
@@ -165,8 +180,37 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
             report.add(status, "registry.unavailable", "Registry coordination or validated metadata is unavailable.", "Keep the existing files unchanged. Missing/busy locks leave state unknown; inspect access or retry after the current writer finishes.", json!({"cause":cause}));
         }
     }
+    providers_config(&mut report, &recorded);
     providers(&mut report, data, version_root, options);
     report.value()
+}
+
+fn providers_config(report: &mut Report, recorded: &providers::Read) {
+    let hint = "Run `ariadne setup --agent claude` (or codex/both) so the app can find the host.";
+    let file = match recorded {
+        providers::Read::Present(file) => file,
+        providers::Read::Missing => {
+            report.add("warning", "providers.config", "No Claude/Codex paths are recorded, so the app cannot find the host when opened normally.", hint, json!({"state":"missing"}));
+            return;
+        }
+        providers::Read::Invalid => {
+            report.add("warning", "providers.config", "The providers file is unsafe or malformed and was ignored.", "It must be a private regular file under 64 KiB. Remove it yourself, then run `ariadne setup --agent claude` (or codex/both).", json!({"state":"invalid"}));
+            return;
+        }
+    };
+    let probe = |path: &Path| json!({"path":path,"exists":path.exists(),"executable":providers::is_executable_file(path)});
+    let claude = file.claude.as_ref().map(|c| probe(&c.executable));
+    let codex = file.codex.as_ref().map(|c| probe(&c.executable));
+    let healthy = |value: &Option<Value>| value.as_ref().is_none_or(|v| v["executable"] == true);
+    let any = claude.is_some() || codex.is_some();
+    let ok = any && healthy(&claude) && healthy(&codex);
+    report.add(
+        if ok { "ok" } else { "warning" },
+        "providers.config",
+        if ok { "Recorded host paths exist and are executable." } else if any { "A recorded host path is missing or not executable." } else { "The providers file records no agent." },
+        if ok { "The app reads these paths when it starts; reopen it after changing them." } else { hint },
+        json!({"state":"present","configured":{"claude":claude.is_some(),"codex":codex.is_some()},"claude":claude,"codex":codex}),
+    );
 }
 
 fn store_class(error: &StoreError) -> (&'static str, &'static str) {

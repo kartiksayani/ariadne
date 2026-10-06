@@ -116,10 +116,15 @@ Follow-ups the run surfaced:
   with `v0.1.0-alpha.1` that the `~/Applications/Ariadne.app` symlink is invisible to
   Finder, Spotlight and Launchpad. The installer now owns a real copy there and migrates
   the old symlink layout.
+- P8.5 App finds Claude and Codex when opened normally (ADR-0081, PR pending): the owner
+  found with `v0.1.0-alpha.1` that the app opened from Finder has no provider flags, so
+  `binding connect` answered "Selected native provider is not configured". `ariadne setup`
+  now records the Claude/Codex paths in `~/.ariadne/providers.json`; the app reads it at
+  start (flags win); `doctor` checks it. The live acceptance only ever passed with flags.
 
 ## Next steps
 
-1. P8.4 (in flight, above), then P8.3 UX review and theme refresh (held for the owner;
+1. P8.4 and P8.5 (in flight, above), then P8.3 UX review and theme refresh (held for the owner;
    owner ruling 2026-10-06; see tasks.json).
 2. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in

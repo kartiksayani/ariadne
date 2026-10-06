@@ -275,6 +275,99 @@ fn executable(path: &Path, output: &str) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
 }
 
+fn record(profile: &Profile, claude: Option<&Path>, codex: Option<&Path>) {
+    use ariadne_cli::setup::providers::{write, ClaudeEntry, CodexEntry, ProviderUpdate};
+    let current = profile.home.path().join("current");
+    write(
+        &profile.data,
+        ProviderUpdate {
+            claude: claude.map(|executable| ClaudeEntry {
+                executable: executable.into(),
+                installed_plugin: current.join("integrations/claude-mod/plugin"),
+                helper: current.join("bin/ariadne"),
+            }),
+            codex: codex.map(|executable| CodexEntry {
+                executable: executable.into(),
+                home: profile.home.path().join(".codex"),
+            }),
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn doctor_warns_when_no_provider_paths_are_recorded_and_stays_read_only() {
+    let profile = Profile::new();
+    let before = snapshot(profile.home.path());
+    let report = profile.report();
+    let check = &checks(&report, "providers.config")[0];
+    assert_eq!(check["status"], "warning");
+    assert_eq!(check["facts"]["state"], "missing");
+    assert!(check["hint"].as_str().unwrap().contains(
+        "Run `ariadne setup --agent claude` (or codex/both) so the app can find the host."
+    ));
+    assert_eq!(snapshot(profile.home.path()), before);
+}
+
+#[test]
+fn doctor_uses_recorded_paths_for_version_checks_and_flags_override_them() {
+    let profile = Profile::new();
+    let claude = profile.home.path().join("claude");
+    let codex = profile.home.path().join("codex");
+    executable(&claude, "2.1.289 (Claude Code)");
+    executable(&codex, "codex-cli 0.159.0");
+    record(&profile, Some(&claude), Some(&codex));
+    let before = snapshot(profile.home.path());
+    let report = profile.report();
+    let check = &checks(&report, "providers.config")[0];
+    assert_eq!(check["status"], "ok");
+    assert_eq!(check["facts"]["configured"]["claude"], true);
+    assert_eq!(check["facts"]["claude"]["executable"], true);
+    assert_eq!(check["facts"]["codex"]["exists"], true);
+    assert_eq!(
+        checks(&report, "claude.version")[0]["facts"]["detected_version"],
+        "2.1.289"
+    );
+    assert_eq!(
+        checks(&report, "codex.version")[0]["facts"]["detected_version"],
+        "0.159.0"
+    );
+    assert_eq!(snapshot(profile.home.path()), before);
+    let other = profile.home.path().join("other-claude");
+    executable(&other, "2.1.290 (Claude Code)");
+    let report = inspect::collect(
+        &profile.data,
+        Some(&profile.version),
+        &Options {
+            claude_bin: Some(other),
+            ..Options::default()
+        },
+    );
+    assert_eq!(
+        checks(&report, "claude.version")[0]["facts"]["detected_version"],
+        "2.1.290"
+    );
+}
+
+#[test]
+fn doctor_reports_a_moved_recorded_binary_and_an_unsafe_providers_file() {
+    let profile = Profile::new();
+    let claude = profile.home.path().join("moved-claude");
+    record(&profile, Some(&claude), None);
+    let report = profile.report();
+    let check = &checks(&report, "providers.config")[0];
+    assert_eq!(check["status"], "warning");
+    assert_eq!(check["facts"]["claude"]["exists"], false);
+    assert_eq!(check["facts"]["configured"]["codex"], false);
+    let file = profile.data.join("providers.json");
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+    let report = profile.report();
+    let check = &checks(&report, "providers.config")[0];
+    assert_eq!(check["status"], "warning");
+    assert_eq!(check["facts"]["state"], "invalid");
+    assert!(!checks(&report, "claude.version_unknown").is_empty());
+}
+
 fn accept_fixture(listener: &std::os::unix::net::UnixListener) -> std::os::unix::net::UnixStream {
     listener.set_nonblocking(true).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);

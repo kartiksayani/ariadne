@@ -152,6 +152,12 @@ folders the terminal searches for commands) in `~/.zshrc`.
 never edits Claude Code or Codex settings. It prints the commands you run
 yourself in the host. Running setup again is safe.
 
+Setup also records where Claude and Codex live in `~/.ariadne/providers.json`.
+It looks for `claude` and `codex` on the PATH of your terminal and prints each path
+it recorded. If one is not found, run setup again with `--claude-bin
+/absolute/path/to/claude` or `--codex-bin /absolute/path/to/codex`. The app reads
+that file when it opens, so quit and reopen Ariadne after running setup.
+
 Check the result at any time:
 
 ```sh
@@ -160,8 +166,9 @@ Check the result at any time:
 ```
 
 Doctor only reads. It repairs nothing, resends nothing and starts no session.
-You can point it at specific programs with `--claude-bin` and `--codex-bin`
-(absolute paths). Add `--json` for machine-readable output.
+It uses the paths setup recorded, and warns if none are recorded or a recorded
+program has moved. You can point it at specific programs with `--claude-bin` and
+`--codex-bin` (absolute paths). Add `--json` for machine-readable output.
 
 ## Connect Claude Code
 
@@ -288,6 +295,8 @@ A small lock file under `~/.local/share/ariadne` can remain.
 ## Known limits
 
 - Claude Code and Codex only. There is no plugin system for further agents yet.
+- After `ariadne setup` (or after moving Claude or Codex), quit and reopen the
+  app. It reads the recorded program paths only when it starts.
 - Codex: you paste the setup instruction once per thread. Ariadne cannot yet
   send it for you.
 - Codex: a thread with no messages yet may not appear in the connect dialog's
