@@ -57,6 +57,7 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertIn("uses: Swatinem/rust-cache@", workflow)
         self.assertIn('key: ${{ matrix.stage }}\n          workspaces: ". -> target/native-e2e"\n'
                       "          cache-on-failure: true", workflow)
+        self.assertIn('cache-bin: "false"', workflow)
         self.assertNotIn("save-if", workflow)
         self.assertIn("path: ~/.cargo/bin/cargo-llvm-cov\n          key: ${{ runner.os }}-cargo-llvm-cov-0.9.1", workflow)
         self.assertIn("steps.llvm-cov-cache.outputs.cache-hit != 'true'", workflow)
