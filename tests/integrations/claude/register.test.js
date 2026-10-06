@@ -176,6 +176,8 @@ describe('supported Mod entry convention', () => {
     expect(summary).toContain(`session ${ids.session} in project ${ids.project}`);
     expect(summary).toContain(`binding ${ids.binding}, generation ${ids.generation}`);
     expect(summary).toContain('[ARIADNE_INPUT:');
+    expect(result.text).toContain('without waiting for an input');
+    expect(result.text).toContain('Never edit .ariadne/');
     expect(result.text).not.toContain('Use published Ariadne domain commands.');
     expect(result.text).not.toContain('"instruction"');
     expect(guidance.join('\n')).toContain(`project ${ids.project}, session ${ids.session}`);

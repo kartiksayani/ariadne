@@ -24,11 +24,11 @@ fn examples() -> Vec<String> {
 #[test]
 fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surface() {
     let blocks = examples();
-    assert!(blocks.len() >= 5, "expected the worked examples");
+    assert!(blocks.len() >= 7, "expected the worked examples");
     let mut ops = BTreeSet::new();
     let mut outcomes = BTreeSet::new();
     let mut owners = BTreeSet::new();
-    let (mut local_ref, mut child) = (false, false);
+    let (mut local_ref, mut child, mut local_topic) = (false, false, false);
     for block in &blocks {
         let request: ApplyRequest = serde_json::from_str(block)
             .unwrap_or_else(|error| panic!("example does not deserialize: {error}\n{block}"));
@@ -45,6 +45,7 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
             if value["op"] == "item.add" {
                 owners.insert(value["owner"]["kind"].as_str().unwrap().to_owned());
                 child |= !value["parent"].is_null();
+                local_topic |= value["topic"].get("ref").is_some();
             }
         }
         if let Some(result) = &request.input_result {
@@ -67,6 +68,7 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
         }
     }
     for op in [
+        "topic.add",
         "item.add",
         "item.ask",
         "item.status",
@@ -79,7 +81,7 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
         assert!(outcomes.contains(outcome), "{outcome}");
     }
     assert!(owners.contains("agent") && owners.contains("other"));
-    assert!(child && local_ref);
+    assert!(child && local_ref && local_topic);
 }
 
 #[test]
