@@ -66,9 +66,11 @@ substantive result as an item under the right topic with a full `reply`: a
 `finding` for something you established; a `decision` you took yourself, closed
 with outcome and why so the owner can see and overturn it; an `explanation` for
 something the owner should understand; a `task` for follow-up work you cannot do
-now; a `question` only the owner can answer: `item.add` then `item.ask` on
-`{"ref":…}` in the same request (items added in the request skip the revision
-guard), with options so it appears under "Waiting on me", never only in the
+now; a `question` only the owner can answer: `item.add` with `status:"open"` and
+owner `{"kind":"agent",…}`, then `item.ask` on its `{"ref":…}` in the same request
+(`item.ask` flips it to `waiting_on_me` owned by `me` and opens exactly one round;
+adding it as `waiting_on_me` would open a second; items added in the request skip
+the revision guard), with options so it appears under "Waiting on me", never only in the
 terminal. File an established finding or explanation as `done` with outcome and
 why, unless the owner must act on it. Mark other items `in_progress` when you
 start them and `done`, `decided` or `dropped` with outcome and why when you
@@ -122,7 +124,13 @@ No dispatched input: start an item, then close an earlier round:
 No dispatched input: create a topic and file a finding in it with a full reply:
 
 ```json
-{"op_id":"00000000-0000-4000-8000-000000000106","source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"Filed a security finding","operations":[{"op":"topic.add","ref":"t","name":"Security"},{"op":"item.add","ref":"f","topic":{"ref":"t"},"parent":null,"question":"Token is logged on failure","type":"finding","status":"done","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":"Token no longer logged","why":"The retry path logged the bearer token at error level; it is now redacted","replaced_by":null,"source_round_id":null},{"op":"reply","ref":"r1","item":{"ref":"f"},"text":"The retry path logs the bearer token at error level. Full reasoning and the fix.","round_id":null}],"input_result":null}
+{"op_id":"00000000-0000-4000-8000-000000000106","source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"Filed a security finding","operations":[{"op":"topic.add","ref":"t","name":"Security"},{"op":"item.add","ref":"f","topic":{"ref":"t"},"parent":null,"question":"Token is logged on failure","type":"finding","status":"done","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":"Token no longer logged","why":"The retry path logged the bearer token at error level; it is now redacted","replaced_by":null,"source_round_id":null},{"op":"reply","ref":"r1","item":{"ref":"f"},"text":"The retry path logged the bearer token at error level; I redacted it. Full reasoning and the fix.","round_id":null}],"input_result":null}
+```
+
+No dispatched input: file a question only the owner can answer (add, then ask on the new ref, one round):
+
+```json
+{"op_id":"00000000-0000-4000-8000-000000000107","source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"Asked which database","operations":[{"op":"item.add","ref":"q","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":null,"question":"Which database should we use?","type":"question","status":"open","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"item.ask","item":{"ref":"q"},"ask":"Which database should we use?","options":[{"id":"pg","label":"Postgres","consequence":"Needs a server","recommended":true},{"id":"sqlite","label":"SQLite","consequence":"Single file, no concurrency","recommended":false}],"recipient_binding_id":"00000000-0000-4000-8000-000000000003"},{"op":"reply","ref":"r1","item":{"ref":"q"},"text":"I cannot choose the storage engine without your deployment constraints; both options work for the current schema.","round_id":null}],"input_result":null}
 ```
 
 Errors. Exit 2 (`invalid_argument`, `invalid_ref`): fix the named field and send a
@@ -132,7 +140,7 @@ rebuild with current revisions and a new `op_id`. Specific codes:
 
 | Code | Exit | Do |
 |---|---|---|
-| `stale_generation` | 3 | The generation is no longer current. Stop writing for this input; ask the owner for the current setup instruction or a fresh `/ariadne-connect`. Never guess one. |
+| `stale_generation` | 3 | The generation is no longer current. Stop writing to Ariadne; ask the owner for the current setup instruction or a fresh `/ariadne-connect`. Never guess one. |
 | `attempt_sealed` | 3 | This input/attempt is closed. Do not retry or invent another attempt; tell the owner. |
 | `result_already_committed` | 3 | The result is already saved. Send nothing more for this attempt; only an exact replay is valid. |
 | `commit_uncertain`, `store_busy`, `io_error`, or no reply at all (timeout, killed call) | 4 | The save may have happened. Replay the SAME bytes with the SAME `op_id`, at most 3 times, never a new `op_id`. If there is still no receipt, stop and tell the owner; uncertain delivery stays visible and nothing is resent automatically. |

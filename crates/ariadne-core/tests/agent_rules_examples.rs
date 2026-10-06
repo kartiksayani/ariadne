@@ -24,7 +24,7 @@ fn examples() -> Vec<String> {
 #[test]
 fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surface() {
     let blocks = examples();
-    assert!(blocks.len() >= 6, "expected the worked examples");
+    assert!(blocks.len() >= 7, "expected the worked examples");
     let mut ops = BTreeSet::new();
     let mut outcomes = BTreeSet::new();
     let mut owners = BTreeSet::new();
