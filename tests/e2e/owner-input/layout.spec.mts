@@ -19,6 +19,8 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
     await page.goto(`${origin}/tests/e2e/owner-input/fixture.html?largeTree`);
     await page.getByRole('button', { name: 'Connect existing session', exact: true }).click();
     const dialog = page.getByRole('dialog');
+    // Only the Codex notice renders the pasted instruction; the Claude Mod has nothing to paste.
+    await dialog.getByLabel('Adapter').selectOption('codex');
     await dialog.getByLabel('External session ID').fill('layout-host');
     await dialog.getByLabel('Socket path').fill('/tmp/layout-host.sock');
     await dialog.getByLabel('Attach to an existing Ariadne session').check();
