@@ -37,10 +37,11 @@ Messages rail on the right](docs/planning/assets/screenshot-dark-tree.png)
 
 ### Download
 
-Releases are being set up. The first alpha tag is `v0.1.0-alpha.1`. Download the
-`.tar.gz` from the GitHub Releases pre-release, then run `tar xzf` on it and
-`./install.sh`. The app is not signed, so the first time, right-click it and
-choose Open. It needs python3 3.11 or newer.
+Download the `.tar.gz` from the [Releases page](https://github.com/kartiksayani/ariadne/releases).
+The alpha is for Apple Silicon Macs (on Intel, build from source). Run `tar xzf`
+on it, then `./install.sh`; it needs python3 3.11 or newer. The download is
+unsigned, and `install.sh` removes the macOS download quarantine mark from the
+package folder and says so. The first time, right-click the app and choose Open.
 
 Full steps: [user guide](docs/GUIDE.md#install-from-a-release-download).
 

@@ -8,10 +8,10 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 6a0adec (#114). Roadmap: 48/51 on main.** Open tasks: P8.1 (release evidence, this PR), P8.2 (prebuilt alpha release package, branch `task/alpha-package`), P8.3 (UX review and theme refresh, held for the owner).
+**Main: 1e8d9e7 (#116). Roadmap: 49/51 on main once #118 lands.** Open tasks: P8.1 (release evidence, done in #118), P8.2 (prebuilt alpha release package, branch `task/alpha-package`), P8.3 (UX review and theme refresh, held for the owner).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-Open PRs and branches: #116 (`fix/codex-onboarding`, awaiting CI rerun), `ci/parallel-quality` (CI stages split and reopen flake fix, in progress), `task/alpha-package` (P8.2, in progress) and the P8.1 release-evidence docs PR (PR_NUMBER_PENDING, branch `docs/release-evidence`). Main SHA for the release install trial: MAIN_SHA_PENDING (the commit after #116 merges; its green `quality` run is MAIN_RUN_PENDING). P8.1 is in progress: docs and matrix are done in the docs PR; the clean-checkout install trial and the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)) remain. Duplicate and
+Open PRs and branches: #117 (`task/alpha-package`, P8.2, Opus-approved, awaiting CI), #118 (`docs/release-evidence`, P8.1) and `ci/parallel-quality` (CI stages split and reopen flake fix, no PR number yet). The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.
@@ -90,6 +90,13 @@ Follow-ups the run surfaced:
   whether the daemon lists such threads at all.
 - D8: Ariadne should send the setup instruction through `codex queue` itself instead of
   the owner pasting it.
+- Release: `release.yml` tag pattern should match `v<version>` or `v<version>-*`
+  exactly.
+- Release: the release notes text still describes the right-click Open prompt, which
+  quarantine removal may make unnecessary; confirm with a real browser download before
+  the first tag.
+- Install: `install.sh`'s same-version guard also blocks an identical re-install;
+  uninstall first.
 
 ## Known gaps, not blocking
 

@@ -39,18 +39,27 @@ Contents:
 
 ## Install from a release download
 
-Releases are being set up. The first alpha tag is `v0.1.0-alpha.1`. When it is
-published, download the `.tar.gz` from the GitHub Releases pre-release, then:
+Download `ariadne-<version>-macos-<arch>.tar.gz` from the
+[Releases page](https://github.com/kartiksayani/ariadne/releases) (the alpha is a
+pre-release). It is for Apple Silicon Macs; on an Intel Mac, build from source.
+You need macOS 13 or newer and `python3` 3.11 or newer, nothing else. Then:
 
 ```sh
-tar xzf <downloaded-file>.tar.gz
-cd <extracted-folder>
+tar xzf ariadne-*.tar.gz
+cd ariadne-*/
 ./install.sh
 ```
 
-You need `python3` 3.11 or newer. The app is not signed, so the first time,
-right-click it and choose Open (see [First launch](#first-launch-unsigned-app)).
-A managed company Mac may block an unsigned app either way.
+`install.sh` prints "This download is unsigned; removing macOS's download
+quarantine mark from this folder so it can run. Only install packages you trust."
+and clears the quarantine mark from the package folder. It stops if this version
+is already installed (the app stays 0.1.0 across alphas, so uninstall first;
+project history is kept).
+
+The app is not signed, so the first time, right-click it and choose Open (see
+[First launch](#first-launch-unsigned-app)). A managed company Mac may block an
+unsigned app either way. To uninstall, run `python3 install.py uninstall` from the
+package folder.
 
 ## Quick start (build from source)
 

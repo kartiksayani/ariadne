@@ -14,7 +14,7 @@ Leave a Result cell blank until the step has been done; write `pass`, `fail` or
 | Claude Code version | 2.1.291 (Claude Code) |
 | Codex CLI version | codex-cli 0.160.1 |
 | Ariadne version | 0.1.0 |
-| Source SHA | MAIN_SHA_PENDING |
+| Source SHA | 1e8d9e7 |
 | Date and tester | DATE_TESTER_PENDING |
 
 ## V11: app lifecycle with external host
