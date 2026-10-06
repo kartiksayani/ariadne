@@ -74,7 +74,7 @@ describe('guarded history controls', () => {
     await props.actions.session.refresh(); render(<HistoryActions {...props} />);
     fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
     expect(dialog().queryByRole('button', { name: 'Pause dispatch' })).toBeNull();
-    expect(dialog().getByText('Dispatch is already stopped (binding disconnected). Confirm Close.')).toBeTruthy();
+    expect(dialog().getByText('Dispatch is already stopped (binding not connected). Confirm Close.')).toBeTruthy();
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm session close' })); });
     expect(transport.mutations.map(value => value.command.command)).toEqual(['session_close']);
     expect(transport.source.state).toBe('closed');

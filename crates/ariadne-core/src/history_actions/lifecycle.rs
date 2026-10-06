@@ -124,12 +124,28 @@ pub(super) fn apply(
                 ));
             }
             if close {
+                // A missing binding record (dangling active_binding_id) counts as
+                // quiesced on purpose: there is nothing to pause.
                 let quiesced = session
                     .active_binding_id
                     .as_ref()
                     .and_then(|id| session.bindings.0.get(id))
                     .is_none_or(|binding| binding.dispatch_quiesced());
                 blockers(session, None, !quiesced, CoreErrorCode::SessionNotClosable)?;
+                // Invariant: a closed session carries an owner pause, so a later
+                // reconnect plus reopen never implicitly resumes dispatch. The binding
+                // lives inside the session, so this commits with the close itself.
+                if let Some(binding) = session
+                    .active_binding_id
+                    .clone()
+                    .and_then(|id| session.bindings.0.get_mut(&id))
+                {
+                    binding.owner_paused = true;
+                    binding.dispatch_state = crate::bindings::dispatch(
+                        binding,
+                        binding.dispatch_state == DispatchState::RecoveryRequired,
+                    );
+                }
             }
             session.state = if close {
                 SessionState::Closed

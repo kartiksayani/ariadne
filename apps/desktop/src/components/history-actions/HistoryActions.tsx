@@ -84,7 +84,7 @@ export function HistoryActions({ actions, targets, actionsForTarget, revealItem,
         });
       }}>Reconcile saved action</button> : pauseReview
         ? <button type="button" className="ref-button ref-primary" disabled={disabled || !!changing} onClick={() => { void pause(); }}>Confirm Pause dispatch</button>
-        : mustPause ? <button type="button" className="ref-button ref-primary" disabled={disabled || !!changing || !binding} onClick={() => setPauseReview(true)}>Pause dispatch</button>
+        : mustPause ? <button type="button" className="ref-button ref-primary" disabled={disabled || !!changing} onClick={() => setPauseReview(true)}>Pause dispatch</button>
           : <button type="button" className="ref-button ref-primary" disabled={disabled || !!changing || blockers.length > 0} onClick={() => { void confirm(); }}>Confirm {label}</button>}
     </>}><div className="history-action-dialog">
       <p>{session.title}{review.topicId && ` · ${session.topics[review.topicId]?.name}`}</p>
@@ -92,7 +92,7 @@ export function HistoryActions({ actions, targets, actionsForTarget, revealItem,
         : 'This changes Ariadne metadata and retains IDs, binding and complete history. The external host keeps running.'}</p>
       {review.kind === 'session_reopen' && <p>Reopening does not resume dispatch.</p>}
       {mustPause && !pauseReview && <p>Pause dispatch, wait for persisted paused state, then confirm Close separately.</p>}
-      {alreadyStopped && !pauseReview && <p>Dispatch is already stopped (binding disconnected). Confirm Close.</p>}
+      {alreadyStopped && !pauseReview && <p>Dispatch is already stopped (binding not connected). Confirm Close.</p>}
       {blockers.map(blocker => <button key={blocker.key} type="button" className="ref-button ref-secondary" onClick={() => {
         resetReview(); if (blocker.item) revealItem(blocker.item); else openSession(route);
       }}>{blocker.label}</button>)}
