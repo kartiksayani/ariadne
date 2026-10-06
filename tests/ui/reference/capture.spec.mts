@@ -67,7 +67,7 @@ async function ready(page: Page, source: boolean) {
   if (source) {
     await page.waitForFunction(() => window.__dcRegistry?.[window.__dcRootName()]?.Logic);
     await expect(page.locator('.sc-placeholder, .sc-missing, .sc-logic-error')).toHaveCount(0);
-  } else await expect(page.locator('#root > *')).toBeVisible();
+  } else await expect(page.locator('#root > *')).toBeVisible({ timeout: 30_000 }); // first gallery load cold-compiles under Vite
   await page.evaluate(async () => {
     await document.fonts.ready;
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
