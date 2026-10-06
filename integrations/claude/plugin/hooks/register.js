@@ -83,7 +83,7 @@ async function sessionStart(state, $, event, next) {
   }
   // Discovery may describe an unqualified engine; only native inspection can
   // qualify it. Its heartbeat never enables the independent claim loop.
-  if (descriptorValid(state.descriptor,{name:$.plugin.name,root:$.plugin.root})) {
+  if (descriptorValid(state.descriptor,{name:pluginName($),root:pluginRoot($)})) {
     state.announcementTimer = $.clock.every(30000,() => heartbeat(state,$));
     await heartbeat(state,$);
   }

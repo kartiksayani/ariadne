@@ -42,9 +42,15 @@ The rules it enforced, one error at a time:
 
 ## Consequences
 
-- Behaviour is unchanged: same hooks, handlers, messages, helper calls and timers.
+- Hooks, handlers, messages, helper calls and timers are unchanged. Two small
+  differences follow from the rules: the plugin identity passed to
+  `descriptorValid` is always a built `{name, root}` pair, so extra keys on the
+  host's `$.plugin` no longer make the descriptor invalid; and a host whose
+  `$.plugin` getter throws is reported with the Mod's own "plugin name not
+  supplied" message instead of a raw helper-unavailable error.
 - New Mod code must follow the rules above; the validator names the offending line.
-- The host facade is the only place the real `$` is touched, so the next SDK rule
-  change has one place to fix.
+- The host facade is the only place the imported helpers reach `$`, so the next
+  SDK rule change has one place to fix for them; `register.js` itself still calls
+  `$.command.register`, `$.clock.every` and `$.ui.log` directly.
 - The check cannot run where `claude` is not installed; CI without it relies on the
   manual run before release.
