@@ -30,6 +30,13 @@ through an old binding or attempt. Wait for an actual claimed envelope before
 dispatch-specific mutations or input completion.
 <!-- /only -->
 
+When this session is connected to Ariadne, or the owner says "use Ariadne", you
+structure the task yourself: read the existing topics and items, reuse what fits,
+create the topics the task needs, and file each result as a typed item with a full
+reply as the work proceeds. Mark progress with statuses, and route owner decisions
+through `item.ask`. The owner never has to name topics or items. The working method
+is in the rules below.
+
 Publish changes through `ariadne apply --binding B --generation G --json-stdin`
 or the owner-configured MCP `apply` tool. Request shapes and worked examples are in
 {{RULES}}. Distinguish another round of the same

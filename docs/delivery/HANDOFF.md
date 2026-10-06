@@ -123,6 +123,10 @@ Follow-ups the run surfaced:
   package); `ariadne setup` records the Codex path in `~/.ariadne/providers.json`, which
   the app reads at start (flags win) and `doctor` checks. The live acceptance only ever
   passed with flags. Claude bindings qualified before this must reconnect once.
+- P8.6 Ariadne working method in the Mod rules (PR pending): the owner found the shipped
+  rules only documented the wire protocol. They now tell Claude to choose its own topics,
+  file typed items with full replies as it works and route decisions through `item.ask`, so
+  "use Ariadne" is enough. Source is `integrations/rules/source.md`; run `cargo xtask gen-rules`.
 
 ## Next steps
 

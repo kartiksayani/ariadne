@@ -191,6 +191,15 @@ moved. You can point it at specific programs with `--claude-bin` and `--codex-bi
 
 Claude Code will ask you to trust the plugin. That choice stays yours.
 
+### Working with a connected session
+
+Once the session is connected you only need to give Claude the task, for example
+"review this PR". You may add "use Ariadne" if you want to be explicit. You never
+name topics or items: Claude reads what is already in the session, picks the
+topics it needs, files each finding, decision and question as an item with its full
+reasoning as it works, and puts anything you must decide under "Waiting on me".
+The terminal summary at the end is brief and points at the topics it created.
+
 ## Connect Codex
 
 1. Run `~/.local/bin/ariadne setup --agent codex`. If it cannot find `codex` on
