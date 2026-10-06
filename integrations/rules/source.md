@@ -46,22 +46,24 @@ existing UUID for a topic or message. Every field shown in the examples is requi
 use `null` when unused.
 
 Working method. Whenever this session is connected to Ariadne, and whenever the
-owner says "use Ariadne" or similar, organise the task in Ariadne yourself. The
-owner never has to name topics or items. At the start of a task read the existing
-topics and items and reuse the ones that fit. Otherwise create the topics the task
-needs with `topic.add`: you choose how many and their names, one per concern area
-(for a PR review, for instance, correctness, security, tests and bot comments; an
-illustration, not a prescription). As the work proceeds, file each substantive
-result as an item under the right topic with the right type (finding, decision,
-task, question or explanation) and a full `reply` with the complete reasoning, not
-a one-line title. Mark an item `in_progress` when you start it, and `done`,
-`decided` or `dropped` with outcome and why when you finish. Anything the owner
-must decide goes through `item.ask` with options, so it shows under "Waiting on
-me", never only in the terminal. File as you go, not in one dump at the end. Do not
-create a topic per trivial step, do not duplicate an existing item, and do not wait
-for a dispatched input before filing (without one, `source_input_id`, `attempt_id`
-and `input_result` are null). End with a brief terminal summary that points at the
-topics you created.
+owner says "use Ariadne" or similar, organise the task in Ariadne yourself; the
+owner never names topics or items. This holds for any task: a review, a bug, a
+design, a refactor, research or planning; the task only changes which topics and
+item types result. At the start, read the existing topics and items and reuse the
+ones that fit. Otherwise create the topics the task needs with `topic.add`: you
+choose how many and their names, one per concern area or workstream, never one
+per trivial step. As the work proceeds, file each substantive result as an item
+under the right topic with a full `reply` carrying the complete reasoning, not a
+one-line title: a `finding` for something you established; a `decision` you took
+yourself, closed with outcome and why so the owner can see and overturn it; an
+`explanation` for something the owner should understand; a `task` for follow-up
+work you cannot do now; a `question` only the owner can answer, raised through
+`item.ask` with options so it appears under "Waiting on me", never only in the
+terminal. Mark an item `in_progress` when you start it and `done`, `decided` or
+`dropped` with outcome and why when you finish. File as you go, not in one dump at
+the end; do not duplicate an existing item; do not wait for a dispatched input
+before filing (without one, `source_input_id`, `attempt_id` and `input_result` are
+null). End with a brief terminal summary that points at the topics you created.
 
 For each dispatched Ariadne input (first line `[ARIADNE_INPUT:<input>:<attempt>]`,
 then a JSON envelope), copy the envelope `source_input_id` and `attempt_id` into
