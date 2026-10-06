@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { bindingStatus, qualify, setup } from '../../../integrations/claude/plugin/hooks/setup.js';
 import { descriptor, failure, host, ids, status, success, capabilities } from './fixtures.js';
@@ -19,6 +20,19 @@ describe('installed owner helper setup', () => {
     expect(result.binding.session).toEqual({project_id:ids.project,session_id:ids.session});
     expect(result.instruction).toBe('Use published Ariadne domain commands.');
     expect(h.prompts).toEqual([]);
+  });
+  it('accepts the shipped setup instruction and refuses one past the core limit', async () => {
+    const shipped = readFileSync(new URL('../../../integrations/rules/claude.md', import.meta.url), 'utf8')
+      + `\n\nUse these routing IDs for Ariadne commands: binding ${ids.binding}, generation ${ids.generation}.`;
+    expect(Buffer.byteLength(shipped)).toBeGreaterThan(4096);
+    const connectWith = async instruction => {
+      const h = host({handler:(argv,options) => argv[1] === 'binding' && argv[2] === 'connect' ? success({operation_id:JSON.parse(options.stdin).command.op_id,
+        session_id:ids.session,revision:2,data:{kind:'binding_connect',binding_id:ids.binding,generation:ids.generation,
+          capabilities:capabilities(),setup_instruction:instruction}}) : undefined});
+      return setup(descriptor.helperPath).connect(h.$);
+    };
+    expect((await connectWith(shipped)).instruction).toBe(shipped);
+    await expect(connectWith('x'.repeat(64 * 1024 + 1))).rejects.toThrow('exact canonical saved receipt');
   });
   it('rejects an explicit-target receipt mismatch before status, preserving the pending body', async () => {
     const h = host({handler:(argv,options) => argv[1] === 'binding' ? success({operation_id:JSON.parse(options.stdin).command.op_id,

@@ -17,6 +17,9 @@ function command(name, params) {
   return {api_version:API_VERSION,op_id:globalThis.crypto.randomUUID(),command:name,params};
 }
 function positive(value) { return Number.isSafeInteger(value) && value > 0; }
+// The core accepts a setup instruction up to 64 KiB (bindings/mod.rs); the
+// shipped Claude rules plus routing IDs are already past the 4 KiB default.
+const INSTRUCTION_LIMIT = 64 * 1024;
 function capabilities(value) {
   const names = ['existing_session','deferred_delivery','turn_correlation','turn_completion','domain_cli','domain_mcp','history_reconcile','streaming_output','final_text_read','discover_sessions'];
   return fields(value,[...names,'delivery_mode']) && value.delivery_mode === 'pull'
@@ -91,7 +94,7 @@ export function setup(helperPath, savedBinding = async () => {}) {
       || receipt.operation_id !== connectRequest.command.op_id || !uuid(receipt.session_id) || !positive(receipt.revision)
       || !fields(data,['kind','binding_id','generation','capabilities','setup_instruction'])
       || data.kind !== 'binding_connect' || !uuid(data.binding_id) || !uuid(data.generation)
-      || !capabilities(data.capabilities) || !bounded(data.setup_instruction)) {
+      || !capabilities(data.capabilities) || !bounded(data.setup_instruction,INSTRUCTION_LIMIT)) {
       throw new ModError('Binding connect did not return its exact canonical saved receipt; retain the original operation ID.');
     }
     if (targetSessionId !== null && receipt.session_id !== targetSessionId) {
