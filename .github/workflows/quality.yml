@@ -37,8 +37,9 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22.23.2"
-          package-manager-cache: false
-      - name: Check the pushed branch head
+          package-manager-cache: true
+      - name: Resolve the check scope
+        id: scope
         shell: bash
         run: |
           set -euo pipefail
@@ -46,23 +47,53 @@ jobs:
           if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then args+=(--merge-base); fi
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then args+=(--full); fi
           scope=$(python scripts/check-commit.py "${args[@]}" --print-scope)
-          if [[ "$scope" == application* ]]; then
-            # Isolate partial runner state; fail before expensive reference captures.
-            RUSTUP_HOME=$(mktemp -d "$RUNNER_TEMP/ariadne-rustup.XXXXXX")
-            export RUSTUP_HOME
-            rustup toolchain install 1.98.1 --profile minimal --component cargo --component rustc --component rust-std --component rustfmt --component clippy --component llvm-tools-preview
-            cargo --version
-            rustc --version
-            if [[ "$STAGE" == "coverage" ]]; then
-              cargo install cargo-llvm-cov --version 0.9.1 --locked
-            fi
-          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "CHECK_ARGS=${args[*]}" >> "$GITHUB_ENV"
+      - name: Install the Rust toolchain
+        if: contains(steps.scope.outputs.scope, 'application')
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Isolate partial runner state; fail before expensive reference captures.
+          RUSTUP_HOME=$(mktemp -d "$RUNNER_TEMP/ariadne-rustup.XXXXXX")
+          export RUSTUP_HOME
+          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
+          rustup toolchain install 1.98.1 --profile minimal --component cargo --component rustc --component rust-std --component rustfmt --component clippy --component llvm-tools-preview
+          cargo --version
+          rustc --version
+      - name: Restore cargo-llvm-cov
+        id: llvm-cov-cache
+        if: contains(steps.scope.outputs.scope, 'application') && matrix.stage == 'coverage'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: ${{ runner.os }}-cargo-llvm-cov-0.9.1
+      - name: Install cargo-llvm-cov
+        if: contains(steps.scope.outputs.scope, 'application') && matrix.stage == 'coverage' && steps.llvm-cov-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Cache the Rust build
+        if: contains(steps.scope.outputs.scope, 'application')
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.stage }}
+          workspaces: ". -> target/native-e2e"
+          cache-on-failure: true
+      - name: Check the pushed branch head
+        shell: bash
+        env:
+          SCOPE: ${{ steps.scope.outputs.scope }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$CHECK_ARGS"
           npm install --global npm@10.9.8
           python -m venv .venv-quality
           .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
           npm ci --ignore-scripts --engine-strict
           .venv-quality/bin/python scripts/check-commit.py "${args[@]}" --stage "$STAGE"
-          if [[ "$STAGE" == "static" && "$scope" == *" reference=true" ]]; then
+          if [[ "$STAGE" == "static" && "$SCOPE" == *" reference=true" ]]; then
             export PLAYWRIGHT_BROWSERS_PATH="$GITHUB_WORKSPACE/target/reference-browser"
             node node_modules/playwright/cli.js install chromium
             npm run capture:reference

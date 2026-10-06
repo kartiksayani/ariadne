@@ -43,6 +43,14 @@ report that nothing applies. A final `quality` job (the required status check) n
 all three and fails unless every one succeeded. Each job uploads `coverage/` as
 `quality-evidence-<run>-<attempt>-<stage>`; rerunning a failed job reruns only that stage.
 
+CI caches the Rust build and npm between runs (owner ruling 2026-10-06, reversing
+PR #23's no-cache choice for wall-clock): `Swatinem/rust-cache` per stage (key
+`<stage>`, `target/native-e2e` included, saved on every branch), the `cargo-llvm-cov`
+binary via `actions/cache` (installed only on a miss) and the `~/.npm` cache keyed on
+`package-lock.json`. The isolated `RUSTUP_HOME` toolchain is not cached. Builds stay
+`--locked`, so a cache cannot change inputs; clear a corrupted cache by changing the key
+or from the Actions → Caches page.
+
 | Scope | Pushed-head checks |
 | --- | --- |
 | Docs/planning/static chart | Relevant data regeneration and ordinary inline JavaScript ESLint |

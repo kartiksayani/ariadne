@@ -1,6 +1,7 @@
 """Execute CI orchestration without claiming command doubles prove app checks."""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -52,9 +53,29 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertIn("- name: Record result\n        if: always()", workflow)
         self.assertIn('[[ "$STAGE_RESULT" == "success" ]]', workflow)
         self.assertIn("-${{ matrix.stage }}\n", workflow)
-        step = workflow.split("      - name: Check the pushed branch head\n", 1)[1]
-        script = "\n".join(line.removeprefix("          ") for line in
-                           step.split("        run: |\n", 1)[1].split("      - name:", 1)[0].splitlines())
+        self.assertIn("package-manager-cache: true", workflow)
+        self.assertIn("uses: Swatinem/rust-cache@", workflow)
+        self.assertIn('key: ${{ matrix.stage }}\n          workspaces: ". -> target/native-e2e"\n'
+                      "          cache-on-failure: true", workflow)
+        self.assertNotIn("save-if", workflow)
+        self.assertIn("path: ~/.cargo/bin/cargo-llvm-cov\n          key: ${{ runner.os }}-cargo-llvm-cov-0.9.1", workflow)
+        self.assertIn("steps.llvm-cov-cache.outputs.cache-hit != 'true'", workflow)
+        order = [workflow.index(f"      - name: {name}\n") for name in (
+            "Resolve the check scope", "Install the Rust toolchain", "Restore cargo-llvm-cov",
+            "Install cargo-llvm-cov", "Cache the Rust build", "Check the pushed branch head")]
+        self.assertEqual(order, sorted(order))
+
+        def step_script(name):
+            step = workflow.split(f"      - name: {name}\n", 1)[1]
+            body = step.split("        run: |\n", 1)[1]
+            body = re.split(r"      - (?:name|uses):", body, maxsplit=1)[0]
+            return "\n".join(line.removeprefix("          ") for line in body.splitlines())
+
+        steps = [("Resolve the check scope", lambda application, stage: True),
+                 ("Install the Rust toolchain", lambda application, stage: application),
+                 ("Install cargo-llvm-cov", lambda application, stage: application and stage == "coverage"),
+                 ("Check the pushed branch head", lambda application, stage: True)]
+        scripts = [(step_script(name), condition) for name, condition in steps]
         with tempfile.TemporaryDirectory(prefix="ariadne-ci-orchestration-") as folder:
             root = Path(folder)
             commands = root / "commands"
@@ -101,9 +122,25 @@ class QualityWorkflowTests(unittest.TestCase):
                            "PROVISION_EXIT": str(provision_status), "CAPTURE_EXIT": str(capture_status),
                            "COMMAND_LOG": str(log), "SCOPE": scope, "GATE_EXIT": str(status),
                            "STAGE": stage}
-                    result = subprocess.run(["bash", "-c", script], cwd=checkout, env=env,
-                                            text=True, capture_output=True)
                     application = scope.startswith("application")
+                    github_env = checkout / "github-env"
+                    github_output = checkout / "github-output"
+                    env.update(GITHUB_ENV=str(github_env), GITHUB_OUTPUT=str(github_output))
+                    for script, condition in scripts:
+                        github_env.touch()
+                        github_output.touch()
+                        for line in github_env.read_text().splitlines():
+                            key, _, value = line.partition("=")
+                            env[key] = value
+                        for line in github_output.read_text().splitlines():
+                            key, _, value = line.partition("=")
+                            env[key.upper()] = value
+                        if not condition(application, stage):
+                            continue
+                        result = subprocess.run(["bash", "-c", script], cwd=checkout, env=env,
+                                                text=True, capture_output=True)
+                        if result.returncode:
+                            break
                     reference = "reference=true" in scope and stage == "static"
                     expected_status = setup_status or status or ((provision_status or capture_status) if reference else 0)
                     self.assertEqual(result.returncode, expected_status, result.stderr)

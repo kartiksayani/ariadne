@@ -24,6 +24,16 @@ full run and a rerun repeated every stage.
   `quality-evidence-<run>-<attempt>-<stage>`.
 - A final job named `quality` (`needs: [stage]`, `if: always()`) fails unless every
   stage succeeded. It keeps the status check name the branch ruleset requires.
+- Caching (owner ruling 2026-10-06) reverses PR #23's deliberate no-cache choice; the
+  reason is CI wall-clock. Application-scope runs use `Swatinem/rust-cache` on `.` and
+  `target/native-e2e` (the workflow's `CARGO_TARGET_DIR`) with `key: <stage>`, so each
+  stage has its own cache (coverage builds instrumented artifacts) and
+  `cache-on-failure: true`. Every branch saves, so a pull request's second push benefits.
+  The `cargo-llvm-cov` binary is cached with `actions/cache` (key
+  `<os>-cargo-llvm-cov-0.9.1`) and installed only on a miss. `setup-node` caches `~/.npm`
+  keyed on `package-lock.json`. The isolated `RUSTUP_HOME` toolchain is not cached.
+  Scope detection, the toolchain install and the gate run as separate workflow steps so
+  the cache step can follow the toolchain and be gated on the scope output.
 - `history.spec.mjs` clicks "Request reopen"/"Follow up" again once if the owner-input
   editor has not appeared after 2 s. CI showed the click landing during the re-render
   after a CLI-published result, leaving the previous saved receipt on screen.
@@ -32,8 +42,11 @@ full run and a rerun repeated every stage.
 
 - Wall-clock is bounded by the slowest stage, failures surface within minutes and a
   failed stage can be rerun alone.
-- Each stage sets up its own runner: toolchain and `npm ci` repeat, and
-  `cargo-llvm-cov` installs only for `coverage`.
+- Each stage sets up its own runner: the toolchain and `npm ci` repeat, and
+  `cargo-llvm-cov` is needed only for `coverage`; build outputs and downloads come
+  from the caches.
+- A cache cannot change inputs, because every build is `--locked` and `npm ci` is exact.
+  A corrupted cache is cleared by changing the key or from the Actions → Caches page.
 - Test content, coverage floors and order inside a stage are unchanged; no retry
   policy is added.
 
