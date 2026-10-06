@@ -69,7 +69,7 @@ Early preview, macOS 13 or newer (Apple Silicon or Intel).
   Newer versions work and show a "newer than tested" note.
 - **Testing:** CI runs the automated tests without the real tools. On
   2026-10-06 the core loop also ran live against Claude Code 2.1.291 and Codex.
-  Not yet run live: recovery paths, several sessions at once and quit/relaunch.
+  Not yet run live: recovery paths, several sessions at once and app quit/relaunch.
   Evidence: [Claude](docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md),
   [Codex](docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md).
 - **Looks:** the interface works but the visual design is a preview; a polish

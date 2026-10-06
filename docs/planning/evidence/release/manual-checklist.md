@@ -35,7 +35,9 @@ Leave a Result cell blank until the step has been done; write `pass`, `fail` or
 | 3 | Launch Ariadne a second time. The running app comes to the front; no second window or process starts. | |
 | 4 | Quit Ariadne. External Claude Code and Codex sessions stay running. | |
 | 5 | Register a project whose path contains spaces. Connect, ask and answer work normally. | |
-| 6 | Quit Ariadne, let a question arrive, then click its notification. The app opens with that item shown. | |
+| 6a | With Ariadne open, let an agent question arrive. Leave its notification in Notification Center; do not click it. | |
+| 6b | Quit Ariadne from the menu. | |
+| 6c | Click the notification in Notification Center. The app opens with that item shown. | |
 
 ## V24: full release journey
 

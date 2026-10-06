@@ -2,9 +2,10 @@
 
 One row per [VERIFICATION](../../low-level/VERIFICATION.md) acceptance row, V01–V29,
 as pruned by [ADR-0069](../../../adr/ADR-0069-release-evidence-is-proportionate.md).
-Evidence kinds: `test` (an automated test in this repository), `CI run` (a passing
-required CI run on main), `live run` (real Claude Code / Codex session), `manual
-check` (short owner checklist). Every test path below was opened and exists on main.
+Evidence kinds: `test` or `tests` (an automated test in this repository), `CI run` (a
+passing required CI run on main), `live run` (real Claude Code / Codex session), `manual
+check` (short owner checklist), `tests + live` (tests plus a live run), `tests (manual
+check pending)` (tests plus a manual check not yet run), `none` (no evidence; deferred). Every test path below was opened and exists on main.
 Where a row is only partly covered, the Status column names the gap. "No automated
 test" means exactly that: the row rests on a live run or a manual check, and the gap
 is named.

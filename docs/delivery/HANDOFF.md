@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-06
+# Ariadne handoff — 2026-10-07
 
 Claude Code session is the maintainer (Fable 5.1); reviewers Opus 5.5, implementers
 Sonnet 5.5, at most seven delegates. The owner approved autonomous delivery, pushes
@@ -81,8 +81,8 @@ join orders, missing-result/uncertain recovery, same-project/cross-project isola
 Follow-ups the run surfaced:
 
 - D1-D6 (fresh-thread connect, RPC error text, setup instruction path and
-  `ARIADNE_HOME`, connect card, `question_changed` message, discovery dialog) are tracked
-  for the fix/codex-onboarding PR (branch in progress).
+  `ARIADNE_HOME`, connect card, `question_changed` message, discovery dialog) were fixed
+  and merged in #116; docs/GUIDE.md documents the fixed behaviour.
 - D7 (UX: font, alignment, button contrast, scrollbars, raw UUIDs): task P8.3, UX review
   and theme refresh, runs after P8.1.
 - D6 discovery: a Codex thread with no messages yet may not appear in the discovery
@@ -92,9 +92,10 @@ Follow-ups the run surfaced:
   the owner pasting it.
 - Release: `release.yml` tag pattern should match `v<version>` or `v<version>-*`
   exactly.
-- Release: the release notes text still describes the right-click Open prompt, which
-  quarantine removal may make unnecessary; confirm with a real browser download before
-  the first tag.
+- Release: `.github/workflows/release.yml` release-notes text still says "right-click
+  the app and choose Open"; fix it to the "System Settings → Privacy & Security → Open
+  Anyway" wording in the next application-scope PR, and edit the published
+  v0.1.0-alpha.1 notes to match.
 - Install: `install.sh`'s same-version guard also blocks an identical re-install;
   uninstall first.
 
@@ -112,13 +113,10 @@ Follow-ups the run surfaced:
 
 ## Next steps
 
-1. P8.1 (owner-home install, if wanted, writes under the real home: Claude plugin
-   registration, `~/.agents/skills/ariadne`, scratch histories, Codex daemon restart;
-   see the owner summary at the top of
-   [PLAN.md](../planning/evidence/live-acceptance/PLAN.md)).
-2. P8.2 prebuilt alpha release package (branch `task/alpha-package`); P8.3 UX review
-   and theme refresh (held for the owner; owner ruling 2026-10-06; see tasks.json).
-3. README screenshot is a real capture of the demo session (`docs/planning/assets/
+1. P8.2 prebuilt alpha release package (merged as #117); the remaining step is marking
+   it done once the release workflow has published. P8.3 UX review and theme refresh
+   (held for the owner; owner ruling 2026-10-06; see tasks.json).
+2. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
    `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,
    `apps/desktop/wdio.screenshot.conf.mjs`, `apps/desktop/tests/e2e/screenshot.spec.mjs`):
