@@ -268,38 +268,49 @@ impl Fixture {
         // unchanged-operation retry. Its former 3s deadline was shorter than a
         // single declared control request; bound this join by three requests.
         let until = Instant::now() + CONTROL_TIMEOUT * 3;
-        let (connected, receipt) = loop {
+        let connected = loop {
             let connected = self
                 .sdk
                 .command(json!({"action":"connect","session":id(2)}));
             let text = connected["value"]["text"].as_str().unwrap();
-            if let Ok(receipt) = serde_json::from_str::<Value>(text.split('\n').next().unwrap()) {
+            if text.starts_with("Ariadne connected: ") {
                 assert!(text.contains("Resume structured Ariadne context"));
-                break (connected, receipt);
+                break connected;
             }
             assert!(Instant::now() < until, "{connected}");
             assert!(connected["prompts"].as_array().unwrap().is_empty());
             std::thread::sleep(Duration::from_millis(10));
         };
-        let connect_operations: Vec<Value> = connected["replies"]
+        // The Mod prints only a short summary; the saved IDs come from the
+        // helper's connect receipt, which the summary must repeat.
+        let connect_receipts: Vec<Value> = connected["replies"]
             .as_array()
             .unwrap()
             .iter()
             .filter(|r| r["argv"][1] == "binding" && r["argv"][2] == "connect")
             .map(|r| {
                 serde_json::from_str::<Value>(r["result"]["stdout"].as_str().unwrap()).unwrap()
-                    ["data"]["operation_id"]
+                    ["data"]
                     .clone()
             })
             .collect();
-        assert!(connect_operations
+        assert!(connect_receipts
             .iter()
-            .all(|op| op == &connect_operations[0]));
-        assert_eq!(receipt["binding"]["session"]["session_id"], json!(id(2)));
+            .all(|receipt| receipt["operation_id"] == connect_receipts[0]["operation_id"]));
+        let receipt = &connect_receipts[0];
+        assert_eq!(receipt["session_id"], json!(id(2)));
         let binding: UuidV4 =
-            serde_json::from_value(receipt["binding"]["binding_id"].clone()).unwrap();
+            serde_json::from_value(receipt["data"]["binding_id"].clone()).unwrap();
         let generation: UuidV4 =
-            serde_json::from_value(receipt["binding"]["generation"].clone()).unwrap();
+            serde_json::from_value(receipt["data"]["generation"].clone()).unwrap();
+        let text = connected["value"]["text"].as_str().unwrap();
+        assert!(text.contains(&format!("session {} ", id(2).as_str())));
+        assert!(text.contains(&format!(
+            "binding {}, generation {}",
+            binding.as_str(),
+            generation.as_str()
+        )));
+        assert!(!text.contains("setup_instruction") && text.len() < 1024);
         let initial = self.saved();
         assert!(initial
             .messages
