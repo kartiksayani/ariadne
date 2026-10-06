@@ -4,7 +4,7 @@ import type { ItemRoute, OwnerCommand, SessionRef } from '../../generated/core';
 import { SessionActions, useSessionActions } from '../bindings/actions';
 import { ReferenceDialog } from '../reference/ReferenceDialog';
 import { ContinueDialog, type ContinueTarget } from './ContinueDialog';
-import { lifecycleBlockers } from './selectors';
+import { dispatchQuiesced, lifecycleBlockers } from './selectors';
 import './history-actions.css';
 
 type Lifecycle = 'topic_archive' | 'topic_restore' | 'session_close' | 'session_reopen';
@@ -26,7 +26,8 @@ export function HistoryActions({ actions, targets, actionsForTarget, revealItem,
   const guarded = review?.kind === 'topic_archive' || review?.kind === 'session_close';
   const error = review?.error instanceof CoreFailure ? review.error.error : undefined;
   const blockers = review && guarded ? lifecycleBlockers(session, review.topicId, error) : [];
-  const mustPause = review?.kind === 'session_close' && binding?.dispatch_state !== 'paused';
+  const mustPause = review?.kind === 'session_close' && !dispatchQuiesced(binding);
+  const alreadyStopped = review?.kind === 'session_close' && !!binding && binding.dispatch_state !== 'paused' && dispatchQuiesced(binding);
   const historyPending = operation.pending?.command.command.startsWith('topic_') || operation.pending?.command.command.startsWith('session_');
   const historyReceipt = operation.receipt && 'data' in operation.receipt && ['topic_lifecycle', 'session_lifecycle', 'continuation'].includes(operation.receipt.data.kind);
   const label = review?.kind.replace(/_/g, ' ') ?? '';
@@ -91,7 +92,7 @@ export function HistoryActions({ actions, targets, actionsForTarget, revealItem,
         : 'This changes Ariadne metadata and retains IDs, binding and complete history. The external host keeps running.'}</p>
       {review.kind === 'session_reopen' && <p>Reopening does not resume dispatch.</p>}
       {mustPause && !pauseReview && <p>Pause dispatch, wait for persisted paused state, then confirm Close separately.</p>}
-      {review.kind === 'session_close' && !binding && <p role="alert">No selected binding can confirm paused dispatch. Connect a binding before closing.</p>}
+      {alreadyStopped && !pauseReview && <p>Dispatch is already stopped (binding disconnected). Confirm Close.</p>}
       {blockers.map(blocker => <button key={blocker.key} type="button" className="ref-button ref-secondary" onClick={() => {
         resetReview(); if (blocker.item) revealItem(blocker.item); else openSession(route);
       }}>{blocker.label}</button>)}

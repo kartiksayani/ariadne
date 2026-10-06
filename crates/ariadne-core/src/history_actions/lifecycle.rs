@@ -124,12 +124,12 @@ pub(super) fn apply(
                 ));
             }
             if close {
-                let paused = session
+                let quiesced = session
                     .active_binding_id
                     .as_ref()
                     .and_then(|id| session.bindings.0.get(id))
-                    .is_some_and(|binding| binding.dispatch_state == DispatchState::Paused);
-                blockers(session, None, !paused, CoreErrorCode::SessionNotClosable)?;
+                    .is_none_or(|binding| binding.dispatch_quiesced());
+                blockers(session, None, !quiesced, CoreErrorCode::SessionNotClosable)?;
             }
             session.state = if close {
                 SessionState::Closed

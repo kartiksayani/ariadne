@@ -156,7 +156,7 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `input_cancel` | queued input_id, expected_revision, op_id | only before any preparation; preserve history, persist cancelled state + receipt |
 | `input_resolve` | input_id, attempt_id, decision (retry_unexecuted/resend/skip/request_result_repair/confirm_evidence), reason, expected_revision, op_id | queue recovery; decisions in queue spec |
 | `topic_archive/restore` | topic_id, expected_revision, op_id | lifecycle only; archive guards active items/unresolved inputs |
-| `session_close/reopen` | session_id, expected_revision, op_id | close requires dispatch paused, all items terminal and no unresolved inputs; never terminate host |
+| `session_close/reopen` | session_id, expected_revision, op_id | close requires dispatch paused or the binding not connected, all items terminal and no unresolved inputs; never terminate host |
 | `topic_continue_preview` | source session/topic, target session | snapshot revision/hash, mapping preview, full summary, readiness |
 | `topic_continue` | source refs/revision/hash, target session/binding, op_id | atomic target copy + input + origin mapping; source untouched |
 | `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry |

@@ -16,6 +16,44 @@ fn p(n: u64) -> PositiveSafeInteger {
 fn at() -> UtcMillis {
     UtcMillis::new("2026-10-04T12:00:00.000Z").unwrap()
 }
+fn close_with(edit: impl FnOnce(&mut Session)) -> Result<MutationReceipt, HistoryActionError> {
+    let mut session = terminal_seed();
+    edit(&mut session);
+    let setup = Setup::new(&session);
+    let service = HistoryActionService::new(&setup.registry);
+    service.execute(&context(), &command("close", 1, 100), at())
+}
+
+#[test]
+fn disconnected_binding_closes_without_a_pause() {
+    for (dispatch, connection) in [
+        (DispatchState::Disconnected, ConnectionState::Disconnected),
+        (DispatchState::RecoveryRequired, ConnectionState::Unknown),
+        (DispatchState::Enabled, ConnectionState::Reconnecting),
+    ] {
+        close_with(|session| {
+            let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+            binding.dispatch_state = dispatch;
+            binding.connection_state = connection;
+            binding.owner_paused = true;
+        })
+        .unwrap();
+    }
+}
+
+#[test]
+fn connected_enabled_binding_is_still_not_closable_and_no_binding_closes() {
+    let blocked = error(close_with(|session| {
+        let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+        binding.dispatch_state = DispatchState::Enabled;
+        binding.connection_state = ConnectionState::Connected;
+        binding.owner_paused = false;
+    }));
+    assert_eq!(blocked.code, CoreErrorCode::SessionNotClosable);
+    assert!(blocked.details.unwrap().dispatch_must_pause);
+    close_with(|session| session.active_binding_id = None).unwrap();
+}
+
 fn seed() -> Session {
     serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap()
 }
