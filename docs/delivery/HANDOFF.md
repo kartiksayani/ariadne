@@ -8,7 +8,7 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 85518a0 (#119: parallel quality stages and caches). Roadmap: 50/51 on main.** The only open task is P8.3 (UX review and theme refresh, held for the owner). P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
+**Main: 85518a0 (#119: parallel quality stages and caches). Roadmap: 50/53 on main.** The only open task is P8.3 (UX review and theme refresh, held for the owner). P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
 No open PRs. The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
@@ -94,6 +94,10 @@ Follow-ups the run surfaced:
   exactly.
 - Install: `install.sh`'s same-version guard also blocks an identical re-install;
   uninstall first.
+- Install: `place_app` failure after `current` is switched leaves `current` on the new version while `~/Applications/Ariadne.app` is the old one; rerunning install recovers; fix: switch `current` back on failure or say "run install again" in the error (`scripts/install/install.py` ~671-685).
+- Desktop: `read_provider_file` accepts 0644 and does not check owner uid; the CLI reader is strict (`mode & 0o077 == 0`, uid == euid); align the desktop (`apps/desktop/src-tauri/src/composition/configuration.rs` ~177).
+- Desktop: `read_provider_file` opens with blocking `File::open`; a FIFO swapped in between lstat and open would hang startup; open with `O_NOFOLLOW|O_NONBLOCK` via `custom_flags` (`configuration.rs` ~184).
+- Doctor: the Codex check takes the home from `CODEX_HOME`/default while the app uses the recorded `home`; pass the recorded home to doctor when no flag is given (`crates/ariadne-cli/src/doctor/inspect.rs` ~365).
 
 ## Known gaps, not blocking
 

@@ -349,6 +349,8 @@ Select trusted provider executables with additive `--claude-bin /absolute/claude
 and `--codex-bin /absolute/codex` options; without them, provider version/capability
 checks report unknown and the required option. Existing `CODEX_HOME`/default
 semantics select the endpoint without provider configuration or credential reads.
+Doctor also uses the Codex path recorded by `ariadne setup` when no flag is given and
+reports a `providers.config` check; see [ADR-0081](../../adr/ADR-0081-provider-paths-from-setup.md).
 Doctor opens only existing coordination files, using bounded lock admission;
 missing/busy coordination stays unknown. Index comparison needs complete validated
 authoritative observations and never rebuilds it. These timestamped diagnostics

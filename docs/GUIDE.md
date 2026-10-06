@@ -169,8 +169,9 @@ Check the result at any time:
 ```
 
 Doctor only reads. It repairs nothing, resends nothing and starts no session.
-It uses the Codex path setup recorded, and warns if none is recorded or Codex has
-moved. You can point it at specific programs with `--claude-bin` and `--codex-bin`
+It uses the Codex path setup recorded, and reports ok when none is recorded
+(Claude-only installs need none), and warns only if the file is unsafe or malformed or
+the recorded Codex path is gone. You can point it at specific programs with `--claude-bin` and `--codex-bin`
 (absolute paths). Add `--json` for machine-readable output.
 
 ## Connect Claude Code

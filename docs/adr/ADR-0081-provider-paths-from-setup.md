@@ -47,8 +47,9 @@ zero configuration when the app is opened from Finder.
   absolute paths only. Anything else is ignored with one line on stderr; Codex stays
   unconfigured and the app still starts. Flags win.
 - `ariadne doctor` uses the recorded Codex path for its version check when no flag is
-  given, and adds a `providers.config` check (warning when the file is missing, or the
-  recorded path is gone or not executable). Doctor keeps `--claude-bin` for an explicit
+  given, and adds a `providers.config` check (ok when the file is missing, since Claude-only
+  installs need none; warning when the file is unsafe or malformed, or the recorded
+  path is missing or not executable). Doctor keeps `--claude-bin` for an explicit
   Claude version check and stays read-only.
 - The app still never searches PATH at runtime and never launches a host.
 
