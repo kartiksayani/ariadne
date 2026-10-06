@@ -213,9 +213,9 @@ export async function seedJourney(configuration, env = process.env) {
   const readArgs = read.slice(read.indexOf(' read --binding ') + 1).replace(/\.$/, '').split(/\s+/);
   assert.equal((await cliRequest(configuration.cli, readArgs, undefined, env)).code, 0);
   const { question, ask, options, request: seed } = journeySeedRequest(bindingId);
-  const apply = receipt.data.setup_instruction.split('\n').find(line => line.startsWith('Publish full item replies with ariadne apply '));
+  const apply = receipt.data.setup_instruction.split('\n').find(line => line.startsWith('Publish full item replies with ') && line.includes(' apply --binding '));
   assert.ok(apply, 'Saved setup contains pasteable canonical apply arguments');
-  const applyArgs = apply.slice('Publish full item replies with ariadne '.length).split('. Use explicit')[0].split(/\s+/);
+  const applyArgs = apply.slice(apply.indexOf(' apply --binding ') + 1).split('. Use explicit')[0].split(/\s+/);
   const seeded = await cliRequest(configuration.cli, applyArgs, seed, env);
   assert.equal(seeded.code, 0);
   const demoProject = join(configuration.project, '..', 'canonical-demo'); await mkdir(demoProject);
