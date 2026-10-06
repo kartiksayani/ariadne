@@ -8,4 +8,4 @@ mod worker;
 pub use adapter::ClaudeAdapter;
 pub use evidence::{LoadedModIdentity, ModEvidence, ModEvidenceSlot, QualifiedClaudeHost};
 pub use normalization::{normalize_mod_event, CapturedScope};
-pub use probe::{ClaudeOptions, SUPPORTED_HOST_VERSION};
+pub use probe::{read_cli_version, ClaudeOptions, SUPPORTED_HOST_VERSION};

@@ -66,6 +66,9 @@ jobs:
           HOME="$fake_home" ./install.sh
           HOME="$fake_home" "$fake_home/.local/bin/ariadne" doctor --json
           test -e "$fake_home/.local/bin/ariadne"
+          # The app is a real bundle in ~/Applications, so Finder, Spotlight and Launchpad see it.
+          test -x "$fake_home/Applications/Ariadne.app/Contents/MacOS/ariadne-desktop"
+          test ! -L "$fake_home/Applications/Ariadne.app"
           HOME="$fake_home" python3 install.py uninstall
           test -z "$(ls -A "$fake_home/.local/share/ariadne/versions" 2>/dev/null)"
           for leftover in .local/bin/ariadne .local/bin/ariadne-mcp Applications/Ariadne.app .agents/skills/ariadne; do

@@ -72,28 +72,18 @@ impl Fixture {
         let loaded = files.path().join("loaded");
         let project = files.path().join("project");
         fs::create_dir(&project).unwrap();
-        let executable = files.path().join("claude");
         let helper = files.path().join("ariadne");
         let barrier = files.path().join("qualification.sock");
         let shell_path = |path: &std::path::Path| {
             format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
         };
-        for (path, version) in [
-            (&executable, "2.1.287 (Claude Code)"),
-            (&helper, "ariadne 0.1.0"),
-        ] {
-            let pause = if path == &helper {
-                format!(
-                    "if [ -S {socket} ]; then ARIADNE_QUALIFICATION_BARRIER={socket} {test} --exact qualification_version_child_process >/dev/null || exit 4; fi\n",
-                    socket = shell_path(&barrier),
-                    test = shell_path(&std::env::current_exe().unwrap()),
-                )
-            } else {
-                String::new()
-            };
-            fs::write(path, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n{pause}printf '%s\\n' '{version}'\n")).unwrap();
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
-        }
+        let pause = format!(
+            "if [ -S {socket} ]; then ARIADNE_QUALIFICATION_BARRIER={socket} {test} --exact qualification_version_child_process >/dev/null || exit 4; fi\n",
+            socket = shell_path(&barrier),
+            test = shell_path(&std::env::current_exe().unwrap()),
+        );
+        fs::write(&helper, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n{pause}printf '%s\\n' 'ariadne 0.1.0'\n")).unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
         for root in [&installed, &loaded] {
             for (name, text) in [
                 (
@@ -118,7 +108,6 @@ impl Fixture {
             _files: files,
             loaded,
             options: ClaudeOptions {
-                executable,
                 helper,
                 installed_plugin: installed,
                 project_root: project.canonicalize().unwrap(),

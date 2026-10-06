@@ -37,18 +37,23 @@ const RESOURCES: [&str; 9] = [
 /// Explicit installed paths supplied by native composition, never discovered from PATH/cache.
 #[derive(Debug, Clone)]
 pub struct ClaudeOptions {
-    pub executable: PathBuf,
     pub installed_plugin: PathBuf,
     pub helper: PathBuf,
     pub project_root: PathBuf,
     pub app_version: String,
 }
+
+/// Read only an explicitly selected CLI's version (doctor's `--claude-bin`). The
+/// adapter itself never runs a Claude executable: it trusts the loaded Mod's report.
+pub fn read_cli_version(executable: &Path, deadline: Instant) -> Result<String, AdapterError> {
+    absolute(executable)?;
+    cli_version(
+        executable,
+        deadline.min(Instant::now() + Duration::from_secs(5)),
+    )
+}
+
 impl ClaudeOptions {
-    /// Read only the selected CLI version; this does not qualify a loaded Mod.
-    pub fn read_host_version(&self, deadline: Instant) -> Result<String, AdapterError> {
-        absolute(&self.executable)?;
-        version(self, deadline.min(Instant::now() + Duration::from_secs(5)))
-    }
     /// Blocking trusted native qualification of a UID-checked SDK announcement.
     /// Offload outside Registry/Store locks, then recheck candidate/association before
     /// publishing. The original receipt time is retained; this creates no heartbeat.
@@ -93,12 +98,7 @@ impl ClaudeOptions {
         Ok((evidence, fingerprint))
     }
     pub(crate) fn validate(&self) -> Result<(), AdapterError> {
-        for path in [
-            &self.executable,
-            &self.installed_plugin,
-            &self.helper,
-            &self.project_root,
-        ] {
+        for path in [&self.installed_plugin, &self.helper, &self.project_root] {
             absolute(path)?;
         }
         if self.app_version.trim().is_empty() || self.app_version.len() > 4096 {
@@ -122,16 +122,15 @@ pub(crate) fn qualify(
             "The original native Mod announcement is stale; qualification cannot refresh its age",
         ));
     }
-    let cli = version(options, deadline)?;
-    if classify_host_version(SUPPORTED_HOST_VERSION, &cli).is_none()
-        || evidence.identity.engine_version != cli
-    {
+    // The loaded Mod's announcement is the version source; the installed resources
+    // checked below are the trust anchor, not a `claude --version` run.
+    let reported = &evidence.identity.engine_version;
+    if classify_host_version(SUPPORTED_HOST_VERSION, reported).is_none() {
         return Err(error(
             AdapterErrorCode::UnsupportedHostVersion,
             &format!(
-                "Claude executable and loaded SDK must be the same version, and Ariadne requires Claude Code {}; observed CLI {cli} and SDK {}",
+                "Ariadne requires Claude Code {}; the loaded Mod reports {reported}",
                 accepted_range(SUPPORTED_HOST_VERSION),
-                evidence.identity.engine_version
             ),
         ));
     }
@@ -143,8 +142,8 @@ pub(crate) fn qualify(
     Ok(EndpointFingerprint(fingerprint))
 }
 
-pub(crate) fn version(options: &ClaudeOptions, deadline: Instant) -> Result<String, AdapterError> {
-    let output = version_output(&options.executable, deadline)?;
+fn cli_version(executable: &Path, deadline: Instant) -> Result<String, AdapterError> {
+    let output = version_output(executable, deadline)?;
     let version = output.strip_suffix(" (Claude Code)").ok_or_else(|| {
         error(
             AdapterErrorCode::UnsupportedHostVersion,
@@ -325,14 +324,10 @@ pub(crate) fn resource_identity(
         }
         records.push((name, format!("{:x}", Sha256::digest(&actual))));
     }
-    let executable = canonical(&options.executable)?;
-    let executable_identity = file_identity(&executable, true)?;
     let tuple = (
         installed,
         loaded,
         project,
-        executable,
-        executable_identity,
         helper,
         helper_identity,
         identity.external_session_id.as_str(),
@@ -340,7 +335,7 @@ pub(crate) fn resource_identity(
         records,
     );
     let bytes = serde_json::to_vec(&tuple).map_err(|_| io_error())?;
-    Ok(format!("claude-mod-v1:{:x}", Sha256::digest(bytes)))
+    Ok(format!("claude-mod-v2:{:x}", Sha256::digest(bytes)))
 }
 fn read_resource(root: &File, name: &str, deadline: Instant) -> Result<Vec<u8>, AdapterError> {
     let components: Vec<_> = name.split('/').collect();

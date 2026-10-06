@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::{io::Write, path::PathBuf};
 pub mod inspect;
 
-pub const HELP: &str = "Diagnostics: ariadne doctor [--project /absolute/project] [--claude-bin /absolute/claude] [--codex-bin /absolute/codex] [--json]\nProvider paths are explicit. CODEX_HOME/default selects only the existing endpoint. Read-only checks never repair data, resend work, enable host trust or launch a provider session. Unknown/stale observations never grant dispatch readiness.\n";
+pub const HELP: &str = "Diagnostics: ariadne doctor [--project /absolute/project] [--claude-bin /absolute/claude] [--codex-bin /absolute/codex] [--json]\nProvider paths are explicit: the flags override the paths `ariadne setup` recorded in providers.json. CODEX_HOME/default selects only the existing endpoint. Read-only checks never repair data, resend work, enable host trust or launch a provider session. Unknown/stale observations never grant dispatch readiness.\n";
 
 pub(crate) fn parse(args: &[&str]) -> Result<inspect::Options, CoreError> {
     let mut options = inspect::Options::default();

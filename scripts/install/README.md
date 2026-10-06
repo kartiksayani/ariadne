@@ -18,8 +18,14 @@ automatic toolchain installation disabled. Missing Rust components require
 explicit setup before retrying.
 
 The app, CLI, MCP and canonical Mod/rules live together in a version directory.
-The owned Applications and optional existing PATH-directory links go through
-`current`. No shell startup or host configuration files are edited. After
+The app is also a real, installer-owned copy of the bundle at
+`~/Applications/Ariadne.app`, so Finder, Spotlight and Launchpad find it (a
+symlink into a hidden folder is invisible to them; ADR-0080). The versioned
+package stays canonical and holds the helpers. Install swaps the copy after the
+`current` pointer flips and replaces an existing one only when its bytes match a
+receipt (or it is the old symlink layout), otherwise it refuses; uninstall
+removes the copy only when unedited. The optional existing PATH-directory links
+and the Codex skill link go through `current`. No shell startup or host configuration files are edited. After
 publication the installed helper runs read-only doctor; unknown provider status
 still requires explicit host qualification/setup. Installation alone does not
 register, trust or load the Mod in an existing terminal.
