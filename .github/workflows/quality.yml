@@ -13,15 +13,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: quality
+  stage:
+    name: quality / ${{ matrix.stage }}
     runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [static, coverage, native]
     env:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       CARGO_TARGET_DIR: "${{ github.workspace }}/target/native-e2e"
       BASE_SHA: ${{ github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
+      STAGE: ${{ matrix.stage }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,14 +53,16 @@ jobs:
             rustup toolchain install 1.98.1 --profile minimal --component cargo --component rustc --component rust-std --component rustfmt --component clippy --component llvm-tools-preview
             cargo --version
             rustc --version
-            cargo install cargo-llvm-cov --version 0.9.1 --locked
+            if [[ "$STAGE" == "coverage" ]]; then
+              cargo install cargo-llvm-cov --version 0.9.1 --locked
+            fi
           fi
           npm install --global npm@10.9.8
           python -m venv .venv-quality
           .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
           npm ci --ignore-scripts --engine-strict
-          .venv-quality/bin/python scripts/check-commit.py "${args[@]}"
-          if [[ "$scope" == *" reference=true" ]]; then
+          .venv-quality/bin/python scripts/check-commit.py "${args[@]}" --stage "$STAGE"
+          if [[ "$STAGE" == "static" && "$scope" == *" reference=true" ]]; then
             export PLAYWRIGHT_BROWSERS_PATH="$GITHUB_WORKSPACE/target/reference-browser"
             node node_modules/playwright/cli.js install chromium
             npm run capture:reference
@@ -64,12 +71,20 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stage }}
           path: coverage/
           retention-days: 14
           if-no-files-found: ignore
+  quality:
+    name: quality
+    needs: [stage]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
       - name: Record result
         if: always()
         env:
-          JOB_STATUS: ${{ job.status }}
-        run: echo "Quality result for $GITHUB_SHA — $JOB_STATUS. Pushed branch head must pass." >> "$GITHUB_STEP_SUMMARY"
+          STAGE_RESULT: ${{ needs.stage.result }}
+        run: |
+          echo "Quality result for $GITHUB_SHA — $STAGE_RESULT. Pushed branch head must pass." >> "$GITHUB_STEP_SUMMARY"
+          [[ "$STAGE_RESULT" == "success" ]]

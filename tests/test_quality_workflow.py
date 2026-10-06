@@ -46,7 +46,12 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertNotIn("paths:", workflow)
         self.assertIn("group: quality-${{ github.ref }}\n  cancel-in-progress: true", workflow)
         self.assertIn("github.event.before || 'origin/main'", workflow)
+        self.assertIn("matrix:\n        stage: [static, coverage, native]", workflow)
+        self.assertIn("fail-fast: false", workflow)
+        self.assertIn("  quality:\n    name: quality\n    needs: [stage]\n    if: always()\n    runs-on: ubuntu-latest", workflow)
         self.assertIn("- name: Record result\n        if: always()", workflow)
+        self.assertIn('[[ "$STAGE_RESULT" == "success" ]]', workflow)
+        self.assertIn("-${{ matrix.stage }}\n", workflow)
         step = workflow.split("      - name: Check the pushed branch head\n", 1)[1]
         script = "\n".join(line.removeprefix("          ") for line in
                            step.split("        run: |\n", 1)[1].split("      - name:", 1)[0].splitlines())
@@ -81,8 +86,9 @@ class QualityWorkflowTests(unittest.TestCase):
             cases = [(*case, 0) for case in cases] + [
                 ("application release=true reference=true", 0, "push", "refs/heads/feature", 0, 0, 42),
             ]
-            for index, (scope, status, event, ref, provision_status, capture_status, setup_status) in enumerate(cases):
-                with self.subTest(scope=scope, status=status, event=event, ref=ref, setup_status=setup_status):
+            cases = [(stage, *case) for stage in ("static", "coverage", "native") for case in cases]
+            for index, (stage, scope, status, event, ref, provision_status, capture_status, setup_status) in enumerate(cases):
+                with self.subTest(stage=stage, scope=scope, status=status, event=event, ref=ref, setup_status=setup_status):
                     checkout = root / str(index)
                     checkout.mkdir()
                     runner_temp = checkout / "runner-temp"
@@ -93,11 +99,12 @@ class QualityWorkflowTests(unittest.TestCase):
                            "GITHUB_REF": ref, "GITHUB_WORKSPACE": str(checkout),
                            "RUNNER_TEMP": str(runner_temp), "SETUP_EXIT": str(setup_status),
                            "PROVISION_EXIT": str(provision_status), "CAPTURE_EXIT": str(capture_status),
-                           "COMMAND_LOG": str(log), "SCOPE": scope, "GATE_EXIT": str(status)}
+                           "COMMAND_LOG": str(log), "SCOPE": scope, "GATE_EXIT": str(status),
+                           "STAGE": stage}
                     result = subprocess.run(["bash", "-c", script], cwd=checkout, env=env,
                                             text=True, capture_output=True)
                     application = scope.startswith("application")
-                    reference = "reference=true" in scope
+                    reference = "reference=true" in scope and stage == "static"
                     expected_status = setup_status or status or ((provision_status or capture_status) if reference else 0)
                     self.assertEqual(result.returncode, expected_status, result.stderr)
                     calls = [json.loads(line) for line in log.read_text().splitlines()]
@@ -106,6 +113,7 @@ class QualityWorkflowTests(unittest.TestCase):
                         gate += ["--merge-base"]
                     if event == "workflow_dispatch":
                         gate += ["--full"]
+                    gate += ["--stage", stage]
                     gate_ok = not (setup_status or status)
                     self.assertEqual(calls.count(gate), int(not setup_status))
                     provisioning = ["node", "node_modules/playwright/cli.js", "install", "chromium"]
@@ -125,12 +133,14 @@ class QualityWorkflowTests(unittest.TestCase):
                         for version in version_checks:
                             self.assertLess(calls.index(installs[0]), calls.index(version))
                         self.assertLess(calls.index(version_checks[-1]), calls.index(gate))
+                    llvm_cov = ["cargo", "install", "cargo-llvm-cov", "--version", "0.9.1", "--locked"]
+                    self.assertEqual(calls.count(llvm_cov), int(application and stage == "coverage" and not setup_status))
                     self.assertFalse(any(call[0] == "rtk" for call in calls))
 
     def test_captures_before_gate_are_rejected(self):
         workflow_path = ROOT / ".github/workflows/quality.yml"
         workflow = workflow_path.read_text()
-        gate = '          .venv-quality/bin/python scripts/check-commit.py "${args[@]}"\n'
+        gate = '          .venv-quality/bin/python scripts/check-commit.py "${args[@]}" --stage "$STAGE"\n'
         self.assertEqual(workflow.count(gate), 1)
         next_step = "      - name: Preserve native and coverage evidence\n"
         mutation = workflow.replace(gate, "").replace(next_step, gate + next_step)

@@ -234,6 +234,8 @@ def main(argv=None):
     parser.add_argument("--merge-base", action="store_true", help="Compare the feature branch from its common ancestor with --base")
     parser.add_argument("--full", action="store_true", help="All tests plus release isolation")
     parser.add_argument("--print-scope", action="store_true")
+    parser.add_argument("--stage", choices=("all", "static", "coverage", "native"), default="all",
+                        help="Run one CI stage; all (default) runs every stage in order")
     args = parser.parse_args(argv)
     paths = changed_paths(args.base, args.working_tree, args.merge_base) if args.base or not args.ci else None
     scope, release = scope_for(paths)
@@ -243,15 +245,20 @@ def main(argv=None):
         print(f"{scope} release={str(release).lower()} "
               f"reference={str(reference_capture_for(paths, args.full)).lower()}")
         return
-    lint(paths or [], full=(args.ci or args.full) and scope == "application")
-    if args.ci or args.full or any(name in {"docs/delivery/tasks.json", "docs/planning/roadmap.html"} for name in paths or []):
-        run(sys.executable, "scripts/regenerate-roadmap.py", "--check")
+    stage = args.stage
+    in_static, in_coverage, in_native = (stage in ("all", name) for name in ("static", "coverage", "native"))
+    if in_static:
+        lint(paths or [], full=(args.ci or args.full) and scope == "application")
+        if args.ci or args.full or any(name in {"docs/delivery/tasks.json", "docs/planning/roadmap.html"} for name in paths or []):
+            run(sys.executable, "scripts/regenerate-roadmap.py", "--check")
     if not (args.ci or args.full):
         print("Changed-language commit checks passed.")
         return
     print(f"Quality scope: {scope}; release isolation: {release}", flush=True)
-    if scope != "docs":
+    if in_static and scope != "docs":
         run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py")
+    if scope != "application" and stage in ("coverage", "native"):
+        print(f"Stage {stage}: nothing applies to the {scope} scope.")
     if scope == "application":
         config = json.loads((ROOT / "quality-gates.json").read_text())
         floor = config["minimum_line_coverage"]
@@ -262,35 +269,38 @@ def main(argv=None):
         for report in [*reports, xtask_report]:
             report.unlink(missing_ok=True)
         (ROOT / "coverage").mkdir(exist_ok=True)
-        run(sys.executable, "-m", "coverage", "run", "--data-file=coverage/install.coverage",
-            "--source=scripts/install", "-m", "unittest", "discover",
-            "-s", "tests/functional/install", "-p", "test_*.py")
-        run(sys.executable, "-m", "coverage", "xml", "--data-file=coverage/install.coverage",
-            "-o", "coverage/install.xml")
-        run(sys.executable, "-m", "coverage", "report", "--data-file=coverage/install.coverage",
-            "--fail-under=80")
-        run("npm", "run", "build")
-        run("cargo", "build", "--workspace", "--locked", "--all-features")
-        run("cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings")
-        # The pinned driver's two local key mappings are outside the workspace;
-        # exercise their actual dispatcher as well as the native Home/End journey.
-        run("cargo", "test", "-p", "ariadne-desktop", "-p", "tauri-plugin-wdio-webdriver",
-            "--features", "ariadne-desktop/e2e", "--lib", "key_event_tests", "--locked", "--offline")
-        run("env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean", "--workspace", "--locked", "--offline")
-        ignored = "(^|/)(tools|generated|vendor|tests|__tests__)/|" + "|".join(
-            re.escape(name).replace(r"\*", ".*").replace(r"\?", ".") + "$"
-            for name in config["coverage_exclusions"])
-        run("cargo", "llvm-cov", "--workspace", "--all-features", "--locked", "--lcov",
-            "--ignore-filename-regex", ignored, "--output-path", reports[0])
-        run("cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--locked", "--offline", "--lcov",
-            "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
-            "--output-path", xtask_report, "--fail-under-lines", "80")
-        run("npm", "run", "test:coverage")
-        covered, total = coverage_counts(reports, ROOT, config)
-        print(f"Application line coverage: {covered}/{total} = {100 * covered / total:.2f}%", flush=True)
-        if 100 * covered < floor * total:
-            raise ValueError("Application coverage is below the configured minimum")
-        run("npm", "run", "test:e2e" if release else "test:native")
+        if in_static:
+            run(sys.executable, "-m", "coverage", "run", "--data-file=coverage/install.coverage",
+                "--source=scripts/install", "-m", "unittest", "discover",
+                "-s", "tests/functional/install", "-p", "test_*.py")
+            run(sys.executable, "-m", "coverage", "xml", "--data-file=coverage/install.coverage",
+                "-o", "coverage/install.xml")
+            run(sys.executable, "-m", "coverage", "report", "--data-file=coverage/install.coverage",
+                "--fail-under=80")
+            run("npm", "run", "build")
+            run("cargo", "build", "--workspace", "--locked", "--all-features")
+            run("cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings")
+            # The pinned driver's two local key mappings are outside the workspace;
+            # exercise their actual dispatcher as well as the native Home/End journey.
+            run("cargo", "test", "-p", "ariadne-desktop", "-p", "tauri-plugin-wdio-webdriver",
+                "--features", "ariadne-desktop/e2e", "--lib", "key_event_tests", "--locked", "--offline")
+        if in_coverage:
+            run("env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean", "--workspace", "--locked", "--offline")
+            ignored = "(^|/)(tools|generated|vendor|tests|__tests__)/|" + "|".join(
+                re.escape(name).replace(r"\*", ".*").replace(r"\?", ".") + "$"
+                for name in config["coverage_exclusions"])
+            run("cargo", "llvm-cov", "--workspace", "--all-features", "--locked", "--lcov",
+                "--ignore-filename-regex", ignored, "--output-path", reports[0])
+            run("cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--locked", "--offline", "--lcov",
+                "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
+                "--output-path", xtask_report, "--fail-under-lines", "80")
+            run("npm", "run", "test:coverage")
+            covered, total = coverage_counts(reports, ROOT, config)
+            print(f"Application line coverage: {covered}/{total} = {100 * covered / total:.2f}%", flush=True)
+            if 100 * covered < floor * total:
+                raise ValueError("Application coverage is below the configured minimum")
+        if in_native:
+            run("npm", "run", "test:e2e" if release else "test:native")
     print(f"Quality checks passed ({scope}).")
 
 

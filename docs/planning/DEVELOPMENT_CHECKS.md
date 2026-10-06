@@ -27,6 +27,22 @@ capture; this is not a general frontend exemption.
 Application tests, frontend build/lint/types, weighted Rust+web coverage, Clippy,
 native WebView smoke and selected packaged release checks run independently.
 
+CI runs three parallel matrix jobs (`quality / static`, `quality / coverage`,
+`quality / native`), each `scripts/check-commit.py --ci ... --stage <name>`
+([ADR-0078](../adr/ADR-0078-parallel-quality-stages.md)). `--stage` defaults to `all`,
+which runs every stage in the original order for local use:
+
+| Stage | Runs |
+| --- | --- |
+| `static` | Lint, roadmap check, Python tests, install coverage, `npm run build`, `cargo build`, Clippy, `key_event_tests`; reference capture when selected |
+| `coverage` | `cargo llvm-cov` (workspace and xtask), `npm run test:coverage`, combined line-coverage floor |
+| `native` | `npm run test:e2e` (`test:native` without release isolation) |
+
+Docs/tooling scopes run their cheap checks in `static`; `coverage` and `native`
+report that nothing applies. A final `quality` job (the required status check) needs
+all three and fails unless every one succeeded. Each job uploads `coverage/` as
+`quality-evidence-<run>-<attempt>-<stage>`; rerunning a failed job reruns only that stage.
+
 | Scope | Pushed-head checks |
 | --- | --- |
 | Docs/planning/static chart | Relevant data regeneration and ordinary inline JavaScript ESLint |
