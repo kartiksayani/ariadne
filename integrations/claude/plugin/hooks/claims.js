@@ -122,15 +122,13 @@ export function claimLoop(helperPath, binding) {
         captured.settled = true;
       }
     } catch (error) {
+      const once = (key, message) => { if (blocked !== key) { blocked = key; log($,message); } };
       if (error?.code === 'invalid_transition') {
         const reason = typeof error.details?.reason === 'string' ? error.details.reason : 'blocked';
-        if (blocked !== reason) {
-          blocked = reason;
-          log($,`Dispatch is withheld by the app (${reason}); claims resume when the owner resumes or recovers.`);
-        }
+        once(reason,`Dispatch is withheld by the app (${reason}); claims resume when the owner resumes or recovers.`);
         return;
       }
-      log($,'Claim/report helper failed. The same claim request/event IDs are retained; no prompt was resent.');
+      once(error?.code ?? 'failure','Claim/report helper failed. The same claim request/event IDs are retained; no prompt was resent.');
     }
   }
   function observe(action) {

@@ -64,7 +64,7 @@ Follow-ups the run surfaced:
   `resend`; add a "confirm completed" resolution.
 - Lifecycle: a session whose active binding is Disconnected cannot be closed
   (`history_actions/lifecycle.rs:127-132` only waives Paused).
-- Delivery format: `recent_context` grows to the 16 KiB cap per input; cap lower or dedupe.
+- Delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill.
 - Rules: `source.md` should say option `consequence` is required.
 - Claude Mod: `$.plugin.root` is used but undocumented.
 

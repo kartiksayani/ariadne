@@ -102,12 +102,29 @@ describe('captured Claude claim lifecycle', () => {
     expect(h.logs).toHaveLength(2);
     expect(h.logs.every(text => text.includes('(owner_paused)'))).toBe(true);
   });
-  it('still logs other claim failures on every poll', async () => {
+  it('logs a repeated claim failure once across polls', async () => {
     const h = host({handler:argv => argv[2] === 'claim' ? failure('host_unreachable') : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     for (let index=0;index<3;index++) await loop.poll(h.$);
-    expect(h.logs).toHaveLength(3);
-    expect(h.logs.every(text => text.includes('Claim/report helper failed'))).toBe(true);
+    expect(h.logs).toHaveLength(1);
+    expect(h.logs[0]).toContain('Claim/report helper failed');
+  });
+  it('logs a claim failure again after an empty queue resets it', async () => {
+    let mode = 'down';
+    const h = host({handler:argv => argv[2] === 'claim' && mode === 'down' ? failure('host_unreachable') : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await loop.poll(h.$);
+    mode = 'empty';await loop.poll(h.$);
+    mode = 'down';await loop.poll(h.$);await loop.poll(h.$);
+    expect(h.logs).toHaveLength(2);
+  });
+  it('logs each time the claim failure code changes', async () => {
+    let code = 'host_unreachable';
+    const h = host({handler:argv => argv[2] === 'claim' ? failure(code) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await loop.poll(h.$);
+    code = 'not_found';await loop.poll(h.$);await loop.poll(h.$);
+    expect(h.logs).toHaveLength(2);
   });
   it('serializes concurrent poll callbacks and retains lifecycle exactly across desktop/helper failure', async () => {
     const value = await prepared();const response = deferred();const admitted = deferred();const submission = deferred();let failing = true;
