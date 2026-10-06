@@ -33,7 +33,8 @@ register, trust or load the Mod in an existing terminal.
 Repeat install preserves identical version bytes. An edited/foreign package or
 install target causes refusal. Uninstall removes only unchanged owned inventory;
 an edited/missing helper prevents ownership validation and preserves the entire
-package. Foreign files, edited resources, project history and backups survive.
+package. Foreign files, edited resources, project history and backups survive
+(history lives under `~/.ariadne/projects/`, not in project folders).
 The stable installation coordination lock can remain after uninstall.
 
 ## Prebuilt package

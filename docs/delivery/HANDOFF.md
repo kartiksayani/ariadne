@@ -127,10 +127,15 @@ Follow-ups the run surfaced:
   package); `ariadne setup` records the Codex path in `~/.ariadne/providers.json`, which
   the app reads at start (flags win) and `doctor` checks. The live acceptance only ever
   passed with flags. Claude bindings qualified before this must reconnect once.
+- P8.7 Project store under the data root (ADR-0082, PR pending): the per-project store moves
+  from `<project>/.ariadne/` to `~/.ariadne/projects/<project-id>/`. Opening or registering a
+  project migrates a legacy store (copy, verify byte-for-byte, remove; both kept on failure).
+  If both exist the open fails until the owner removes the legacy one. Native e2e was not run
+  locally; CI's native stage is the proof for the rewritten fixtures.
 
 ## Next steps
 
-1. P8.4 and P8.5 (in flight, above), then P8.3 UX review and theme refresh (held for the owner;
+1. P8.4, P8.5 and P8.7 (in flight, above), then P8.3 UX review and theme refresh (held for the owner;
    owner ruling 2026-10-06; see tasks.json).
 2. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in

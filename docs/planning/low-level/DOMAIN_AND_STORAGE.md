@@ -77,19 +77,25 @@ See [ADR-0012](../../adr/ADR-0012-complete-the-domain-v1-contract.md) and
 ## 2. Files and entity inventory
 
 ```text
-<project>/.ariadne/
-  project.json                   # schema_version, id, display_name
-  sessions/<session_uuid>.json    # canonical domain + delivery snapshot
-  locks/<session_uuid>.lock       # never renamed/deleted
-  backups/<session>.previous.json
-  backups/<session>.v<old>.<uuid>.json # future concrete migration only
-~/.ariadne/
+~/.ariadne/                      # data root: $ARIADNE_HOME or ~/.ariadne (ADR-0082)
+  projects/<project_uuid>/        # per-project store; nothing lives in the project root
+    project.json                 # schema_version, id, display_name
+    sessions/<session_uuid>.json  # canonical domain + delivery snapshot
+    locks/<session_uuid>.lock     # never renamed/deleted
+    backups/<session>.previous.json
+    backups/<session>.v<old>.<uuid>.json # future concrete migration only
   projects.json                  # registered canonical roots + IDs
   bindings.json                  # host identity → session/binding index, rebuildable
   adapters/                      # reserved for deferred executable registrations
   ui.json                        # preferences, drafts, tabs, local Later flags
   run/                           # private control socket, leases, presence
 ```
+
+A legacy `<project>/.ariadne/` store is migrated to `projects/<project_uuid>/`
+automatically when its registered project is opened: copy, verify byte-for-byte,
+then remove. A failure leaves both in place; if both exist the new store wins and
+the open fails until the owner removes the legacy one. See
+[ADR-0082](../../adr/ADR-0082-project-store-under-data-root.md).
 
 Project: `{schema_version:1,id,display_name}`.
 
@@ -586,7 +592,7 @@ This does not change the mutation algorithm below; see
 
 The transaction follows this algorithm:
 
-1. Resolve project/session from registered IDs, not arbitrary renderer paths. Open canonical root and `.ariadne` descendants with no-follow checks. Reject symlinked store/lock targets and unsafe filesystem types; account for path-to-use races using directory-relative opens in the OS module.
+1. Resolve project/session from registered IDs, not arbitrary renderer paths. Open the data root and the project's `projects/<id>` descendants with no-follow checks; the registered canonical root must still exist as a real directory. Reject symlinked store/lock targets and unsafe filesystem types; account for path-to-use races using directory-relative opens in the OS module.
 2. Open stable `locks/<session>.lock` and acquire `flock(LOCK_EX|LOCK_NB)` in a bounded retry loop: 10 ms initial, cap 50 ms, deadline 2 s. Never rename/delete the lock file. Failed lock returns `store_busy` and no effects.
 3. Re-read live snapshot under the lock, enforcing schema/structural/semantic checks without introducing a snapshot hard cap. Compute idempotency key `(actor_scope,op_id)`; canonical digest is SHA-256 of the normalized route/actor/command tuple (sorted keys, explicit defaults, exact text). Exclude transport request IDs; include routing, actor scope and expected revisions.
 4. If a receipt exists: same digest returns its saved result even if current revisions differ; different digest is `operation_reused`. Otherwise validate authorization, revisions and transitions, then apply to an owned copy.

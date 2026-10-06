@@ -295,7 +295,8 @@ Only unchanged files that Ariadne owns are removed. If you edited the app, it is
 left in place with a message. Anything you edited or
 anything that is not Ariadne's is left in place and listed.
 
-Kept: all project history, sessions and backups, and every Claude Code and Codex
+Kept: all project history, sessions and backups (they live under
+`~/.ariadne/projects/`, never inside your project folder), and every Claude Code and Codex
 setting. Remove the Ariadne plugin from Claude Code yourself if you want it gone.
 A small lock file under `~/.local/share/ariadne` can remain.
 
@@ -330,7 +331,8 @@ Checked in the app configuration and source:
 ## How it's built
 
 A Rust core, the `ariadne` command-line tool and the `ariadne-mcp` server share
-one saved store of plain JSON files on disk. The window is a Tauri 2 app (a
+one saved store of plain JSON files on disk (under `~/.ariadne/projects/`; an older
+`.ariadne` folder inside a project is moved there automatically when you open it). The window is a Tauri 2 app (a
 desktop shell around a web view) with a React interface.
 
 Design notes: [docs/planning](planning/README.md).

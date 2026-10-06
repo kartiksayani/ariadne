@@ -27,12 +27,12 @@ for the end-to-end user flow and [POC results](../INTEGRATIONS.md#live-evidence-
   run/                                 # owner-only directory, mode 0700
   ui.json                     # UI/window state and drafts
   logs/                                # bounded redacted diagnostics
-<project>/.ariadne/
-  project.json                         # immutable project UUID and metadata
-  project.lock                         # stable project metadata/setup lock
-  sessions/<uuid>.json                 # authoritative domain, binding and outbox state
-  locks/<session-uuid>.lock             # stable session transaction lock
-  backups/                              # previous snapshot; automated repair deferred
+  projects/<project-uuid>/             # per-project store (ADR-0082); not in the project root
+    project.json                       # immutable project UUID and metadata
+    project.lock                       # stable project metadata/setup lock
+    sessions/<uuid>.json               # authoritative domain, binding and outbox state
+    locks/<session-uuid>.lock           # stable session transaction lock
+    backups/                            # previous snapshot; automated repair deferred
 ```
 
 Directories are mode 0700 and data files mode 0600 where supported. Executable
