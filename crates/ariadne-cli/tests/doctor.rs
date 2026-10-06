@@ -291,12 +291,12 @@ fn record(profile: &Profile, codex: &Path) {
 }
 
 #[test]
-fn doctor_warns_when_no_codex_path_is_recorded_and_stays_read_only() {
+fn doctor_accepts_a_missing_codex_record_and_stays_read_only() {
     let profile = Profile::new();
     let before = snapshot(profile.home.path());
     let report = profile.report();
     let check = &checks(&report, "providers.config")[0];
-    assert_eq!(check["status"], "warning");
+    assert_eq!(check["status"], "ok");
     assert_eq!(check["facts"]["state"], "missing");
     assert!(check["hint"]
         .as_str()

@@ -187,11 +187,12 @@ fn providers_config(report: &mut Report, recorded: &providers::Read) {
     let hint = "Run `ariadne setup --agent codex` (or both) so the app can find Codex.";
     let file = match recorded {
         providers::Read::Present(file) => file,
+        // Claude-only installs never need this file, so its absence is not a warning.
         providers::Read::Missing => {
             report.add(
-                "warning",
+                "ok",
                 "providers.config",
-                "No Codex path is recorded, so the app cannot find Codex when opened normally.",
+                "No Codex path is recorded; Claude needs none. Record one only if you use Codex.",
                 hint,
                 json!({"state":"missing"}),
             );
