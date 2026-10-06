@@ -110,8 +110,8 @@
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-07T00:00:00Z",
-    "headline": "49/51 merged on main once #118 lands; P8.2 alpha package merged in #117, release workflow in progress; P8.3 UX review held for the owner.",
+    "updated_at": "2026-10-07T01:00:00Z",
+    "headline": "50/51 merged on main; P8.3 UX review held for the owner.",
     "notes": [
       "P7.3 live Codex run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md). Codex onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7), and docs/GUIDE.md documents the fixed behaviour; D7 is task P8.3; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
       "P7.2 live Claude run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md, ADR-0076, PR #114); remaining coverage rows deferred by owner ruling 2026-10-06. Follow-ups: queued inputs stay bound to a retired binding after rebind; no confirm-completed resolution for committed-result/unknown-turn attempts; a session with a Disconnected binding cannot be closed; delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill; rules source.md should say option consequence is required; Claude Mod uses undocumented $.plugin.root.",
@@ -2012,14 +2012,14 @@
       ],
       "estimate_days": 1,
       "completion": {
-        "pr_url": null
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/117"
       },
       "progress": {
-        "state": "in_progress",
+        "state": "done",
         "prs": [
           117
         ],
-        "note": "PR #117 merged (main dbd8dfc); tag v0.1.0-alpha.1 pushed, release workflow run in progress"
+        "note": "Merged in #117; v0.1.0-alpha.1 pre-release published by release workflow run 37523466225 (Apple Silicon tarball + install.sh)."
       }
     },
     {

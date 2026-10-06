@@ -189,8 +189,8 @@ Claude Code will ask you to trust the plugin. That choice stays yours.
    their project folder.)
 4. Open that project and click **Connect existing session**. The dialog lists
    the Codex threads that are loaded and fills in the socket path from your
-   Codex home. Each entry shows a thread's title or its ID. Pick a thread, then
-   match the thread ID from `/status` against the **External session ID** field,
+   Codex home. Each entry shows a thread's title or its ID. Click **Use host
+   session** on the entry, then match the thread ID from `/status` against the **External session ID** field,
    which fills in when a candidate is picked. Click **Connect existing
    session** again. A fresh thread works: it does not need a first message.
 5. Under the project header, a **Session connected** card shows the setup
@@ -288,7 +288,7 @@ A small lock file under `~/.local/share/ariadne` can remain.
 - Codex: you paste the setup instruction once per thread. Ariadne cannot yet
   send it for you.
 - Codex: a thread with no messages yet may not appear in the connect dialog's
-  list. Click the dialog's own **Refresh** button and look again. As a fallback,
+  list. Click the dialog's own **Refresh host sessions** button and look again. As a fallback,
   type the thread ID from `/status` into the **External session ID** field by
   hand.
 - No automatic repair for corrupted data, full disks or power loss.

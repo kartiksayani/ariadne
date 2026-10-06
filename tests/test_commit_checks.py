@@ -330,6 +330,11 @@ class CoverageTests(unittest.TestCase):
                     commit.main(["--ci", "--base", "main", "--stage", stage])
                 calls = [list(call.args) for call in run.call_args_list]
                 self.assertEqual(calls.count(["cargo", "fetch", "--locked"]), fetches)
+                later = {"coverage": ["env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean"],
+                         "native": ["npm", "run", "test:e2e"]}.get(stage)
+                if later:
+                    first = next(index for index, call in enumerate(calls) if call[:len(later)] == later)
+                    self.assertLess(calls.index(["cargo", "fetch", "--locked"]), first)
 
     def test_weighted_counts_include_uncovered_lines_and_merge_duplicates(self):
         with tempfile.TemporaryDirectory() as folder:

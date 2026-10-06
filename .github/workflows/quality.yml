@@ -82,6 +82,8 @@ jobs:
           key: ${{ matrix.stage }}
           workspaces: ". -> target/native-e2e"
           cache-on-failure: true
+          # Keep ~/.cargo/bin: rust-cache would delete cargo-llvm-cov there, so its own cache entry could never save.
+          cache-bin: "false"
       - name: Check the pushed branch head
         if: contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static'
         shell: bash

@@ -8,10 +8,10 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: dbd8dfc (#117). Roadmap: 49/51 on main once #118 lands.** Open tasks: P8.1 (release evidence, done in #118), P8.2 (prebuilt alpha release package, merged in #117; tag v0.1.0-alpha.1 pushed, release workflow in progress), P8.3 (UX review and theme refresh, held for the owner).
+**Main: 85518a0 (#119: parallel quality stages and caches). Roadmap: 50/51 on main.** The only open task is P8.3 (UX review and theme refresh, held for the owner). P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-Open PRs: #118 (`docs/release-evidence`, P8.1) and #119 (`ci/parallel-quality`, CI stages split and reopen flake fix). The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
+No open PRs. The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.
@@ -92,10 +92,6 @@ Follow-ups the run surfaced:
   the owner pasting it.
 - Release: `release.yml` tag pattern should match `v<version>` or `v<version>-*`
   exactly.
-- Release: `.github/workflows/release.yml` release-notes text still says "right-click
-  the app and choose Open"; fix it to the "System Settings → Privacy & Security → Open
-  Anyway" wording in the next application-scope PR, and edit the published
-  v0.1.0-alpha.1 notes to match.
 - Install: `install.sh`'s same-version guard also blocks an identical re-install;
   uninstall first.
 
@@ -113,9 +109,8 @@ Follow-ups the run surfaced:
 
 ## Next steps
 
-1. P8.2 prebuilt alpha release package (merged as #117); the remaining step is marking
-   it done once the release workflow has published. P8.3 UX review and theme refresh
-   (held for the owner; owner ruling 2026-10-06; see tasks.json).
+1. P8.3 UX review and theme refresh (held for the owner; owner ruling 2026-10-06;
+   see tasks.json). Nothing else is open.
 2. README screenshot is a real capture of the demo session (`docs/planning/assets/
    screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
    `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,

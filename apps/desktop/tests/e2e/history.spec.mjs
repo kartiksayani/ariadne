@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { historyFailureFacts, withFailureEvidence } from './history-evidence.mjs';
-import { admissions, cliRequest, completeTurn, journeyResultRequest, snapshot } from './scripted-provider.mjs';
+import { admissions, awaitConnected, cliRequest, completeTurn, journeyResultRequest, snapshot } from './scripted-provider.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
@@ -131,6 +131,7 @@ async function seed(configuration) {
   const history = { ...selected, cli: configuration.cli, thread: selected.externalSessionId,
     projectId, sessionId: receipt.session_id, bindingId: receipt.data.binding_id, generation: receipt.data.generation,
     itemId: '1', sessionPath: join(selected.projectRoot, '.ariadne/sessions', `${receipt.session_id}.json`) };
+  await awaitConnected(history);
   const publication = [await apply(history, [], {}, historySeedRequest(history.bindingId))];
   return { history, publication };
 }

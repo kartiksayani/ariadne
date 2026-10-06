@@ -58,6 +58,8 @@ full run and a rerun repeated every stage.
 - Docs and tooling scope skip the setup, check and evidence steps of `coverage` and
   `native`; the aggregate `quality` job uses `if: ${{ !cancelled() }}` so a superseded
   run does not report a red status.
+- `Swatinem/rust-cache` runs with `cache-bin: "false"` so the `cargo-llvm-cov` cache
+  entry survives its cleanup of `~/.cargo/bin`.
 - Test content, coverage floors and order inside a stage are unchanged; no retry
   policy is added.
 
