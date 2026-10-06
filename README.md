@@ -5,11 +5,11 @@
 Questions, replies and decisions stay as a history you can follow, like a thread
 through a labyrinth. Local only: no account, no cloud, no telemetry.
 
-![Design mockup of the Ariadne window: the Waiting list on the left, the tree of
-topics and items in the middle, an item's detail and the message rail on the
-right](docs/planning/assets/mockup-dark-tree.png)
+![The Ariadne window, dark theme: the Waiting list on the left, the tree of
+topics and items in the middle with one item selected, its detail and the
+Messages rail on the right](docs/planning/assets/screenshot-dark-tree.png)
 
-*Design mockup, not a screenshot of the running app.*
+*The running app showing the built-in demo session (`ariadne demo`), 1600×960.*
 
 ## How it works
 

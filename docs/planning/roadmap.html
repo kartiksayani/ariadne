@@ -110,12 +110,13 @@
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-06T01:55:00Z",
-    "headline": "44/49 merged. #106 (seven items) merged as f020bbe after the full native journey passed locally and on CI; README rewrite merged as 9075ea7. Remaining: P6.4 install trial on final main, P7.1 CI link, P7.2/P7.3 live host runs (owner approval), P8.1.",
+    "updated_at": "2026-10-06T05:00:00Z",
+    "headline": "45/49 merged once this PR lands. #109 merged as 1906583 (minimum host and toolchain versions, doctor first-run fixes, release docs, #106 evidence). P6.4 install trial passed on the ed56f7d tree. Remaining: P7.1 CI link, P7.2/P7.3 live host runs (owner approval), P8.1.",
     "notes": [
       "PR #107 (agent rule sheet) merged to main as db352e5. It is not a roadmap item.",
       "PR #106 carried the whole former stack (#94-#103) plus the Codex skill and the preferences-conflict fix; squash-merged as f020bbe at head 87aa6b4.",
-      "Superseded stack PRs #94, #93, #97, #101, #104, #99, #105, #98, #103 are closed; their branches are kept."
+      "Superseded stack PRs #94, #93, #97, #101, #104, #99, #105, #98, #103 are closed; their branches are kept.",
+      "PR #109 squash-merged as 1906583 at head ed56f7d after quality run 37411039163; run 2 had failed only on a reference-capture first-load wait."
     ]
   },
   "tasks": [
@@ -1822,10 +1823,8 @@
       ],
       "estimate_days": 1,
       "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/92",
-      "progress": {
-        "state": "queued",
-        "prs": [],
-        "note": "Implementation merged in #92; final artifact qualification waits for the stack to merge."
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/110"
       }
     },
     {
@@ -1865,12 +1864,9 @@
       "estimate_days": 1,
       "active": true,
       "progress": {
-        "state": "fixing_ci",
-        "prs": [
-          98,
-          103
-        ],
-        "note": "Parallel-lane and missing-result repair acceptance tests are in the stack; waiting on the shared native e2e fix."
+        "state": "evidence_pending",
+        "prs": [],
+        "note": "All acceptance tests merged via #106 and #109; evidence is the quality run on main in progress (run 37415365326 on 1906583)."
       }
     },
     {
