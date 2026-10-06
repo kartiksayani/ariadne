@@ -65,8 +65,8 @@ the stable Mod path. The owner runs them through Claude's host interface, then
 uses `/ariadne-connect` in the already-open target conversation. It returns the
 binding ID, session/project identity, connection status, and brief usage text.
 It does not trigger a model call. For terminal work that should create original
-Ariadne findings, the owner copies the printed Ariadne connection instruction
-into the conversation explicitly.
+Ariadne findings, the full Ariadne rules are in the plugin's `ariadne` skill,
+which Claude loads on demand; the connect output does not repeat them.
 
 The Mod obtains the input via the bridge CLI and private desktop control socket.
 If the app is closed, it does not dispatch new owner messages. Existing bound
@@ -209,7 +209,7 @@ reports the existing resources without duplicating them. Confirm installed paths
 and app/helper version parity.
 2. Connect an already-open host conversation explicitly. Confirm correct
 project/session binding and that connection sends no model prompt. Use the
-printed instruction explicitly to create terminal-originated findings and verify
+binding and generation (Claude) or pasted instruction (Codex) explicitly to create terminal-originated findings and verify
 CLI/MCP mutations carry the intended `binding_id`.
 3. Send two Ariadne inputs to one binding, one while its host turn is busy.
 Confirm distinct ordered turns and exact input/attempt correlation. Send an input

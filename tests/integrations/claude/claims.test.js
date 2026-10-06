@@ -8,8 +8,8 @@ describe('captured Claude claim lifecycle', () => {
     const h = host({claim:value,submit:() => submission.promise});
     const loop = claimLoop(descriptor.helperPath,binding);
     await loop.poll(h.$);
-    expect(h.prompts).toEqual([{text:value.formatted_payload}]);
-    await loop.start(h.$,{text:'prefix\n'+value.formatted_payload,turnId:'unrelated'});
+    expect(h.prompts).toEqual([{text:value.formatted_payload,asUser:true}]);
+    await loop.start(h.$,{text:'prefix'+value.formatted_payload,turnId:'unrelated'});
     await loop.start(h.$,{text:value.formatted_payload+' ',turnId:'changed'});
     expect(h.events).toEqual([]);
     await loop.start(h.$,{text:value.formatted_payload,turnId:'actual-turn'});
@@ -21,6 +21,46 @@ describe('captured Claude claim lifecycle', () => {
     expect(loop.outstanding()).toBe(true); // Detached submission still unsettled.
     submission.resolve({text:value.formatted_payload});
     await loop.stop(h.$);
+  });
+  const frames = {
+    between:payload => `The ariadne plugin sent a message:\n${payload}\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`,
+    mid:payload => `The ariadne plugin sent a message while you were working:\n${payload}\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`,
+  };
+  for (const [name,frame] of Object.entries(frames)) {
+    it(`correlates a host-framed turn.start (${name}) and finishes the turn`, async () => {
+      const value = await prepared(); const h = host({claim:value});
+      const loop = claimLoop(descriptor.helperPath,binding);
+      await loop.poll(h.$);await h.reported('accepted');
+      await loop.start(h.$,{text:frame(value.formatted_payload),turnId:'framed-turn'});
+      expect(loop.status().active.host_turn_id).toBe('framed-turn');
+      expect(h.events.map(event => event.kind)).toContain('turn_started');
+      await loop.complete(h.$,{turnId:'framed-turn',answer:'done',reason:'answer',isAborted:false});
+      expect(h.events.at(-1).kind).toBe('turn_finished');
+      expect(h.events.at(-1).payload.status).toBe('completed');
+      expect(loop.status().active).toBe(null);
+    });
+  }
+  it('does not correlate a framed turn.start with an altered payload or a mid-line marker', async () => {
+    const value = await prepared(); const h = host({claim:value});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await h.reported('accepted');
+    await loop.start(h.$,{text:frames.between(value.formatted_payload.slice(0,-1)+'X'),turnId:'altered'});
+    await loop.start(h.$,{text:`Sent: ${value.formatted_payload}\nrest`,turnId:'midline'});
+    await loop.start(h.$,{text:frames.between(value.formatted_payload+'extra'),turnId:'suffix'});
+    expect(loop.status().active.host_turn_id).toBe(null);
+    expect(h.events.map(event => event.kind)).toEqual(['accepted']);
+  });
+  it('logs the observed turn.start form exactly once across two correlated claims', async () => {
+    const value = await prepared(); const h = host({claim:value});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await h.reported('accepted');
+    await loop.start(h.$,{text:frames.between(value.formatted_payload),turnId:'t1'});
+    await loop.complete(h.$,{turnId:'t1',answer:'a',reason:'answer',isAborted:false});
+    await loop.poll(h.$);
+    await loop.start(h.$,{text:value.formatted_payload,turnId:'t2'});
+    const evidence = h.logs.filter(text => text.startsWith('Ariadne: turn.start carried'));
+    expect(evidence).toEqual([`Ariadne: turn.start carried the framed payload (${frames.between(value.formatted_payload).length} chars).`]);
+    expect(loop.status().active.host_turn_id).toBe('t2');
   });
   it('accepts an exact submission result before start without producing another prompt or acceptance', async () => {
     const value = await prepared(); const h = host({claim:value});
@@ -42,6 +82,70 @@ describe('captured Claude claim lifecycle', () => {
     expect(claims[0].argv.at(-1)).toBe(claims[1].argv.at(-1));
     expect(h.prompts).toHaveLength(1);
     await h.reported('accepted');
+  });
+  it('logs an owner-paused claim block once, keeps polling, and never pauses or submits', async () => {
+    const h = host({handler:argv => argv[2] === 'claim' ? failure('invalid_transition',{reason:'owner_paused'}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    for (let index=0;index<3;index++) await loop.poll(h.$);
+    expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(3);
+    expect(h.logs).toEqual(['Ariadne paused: Dispatch is withheld by the app (owner_paused); claims resume when the owner resumes or recovers.']);
+    expect(loop.status().paused).toBe(false);
+    expect(h.prompts).toHaveLength(0);
+  });
+  it('logs the generic blocked form for an unexpected invalid_transition reason, never the raw string', async () => {
+    const h = host({handler:argv => argv[2] === 'claim' ? failure('invalid_transition',{reason:'evil\nreason $(x)'}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);
+    expect(h.logs).toEqual(['Ariadne paused: Dispatch is withheld by the app (blocked); claims resume when the owner resumes or recovers.']);
+    expect(h.logs.join('')).not.toContain('evil');
+  });
+  it('logs a malformed claim once across three polls', async () => {
+    const h = host({handler:argv => argv[2] === 'claim' ? success({input_id:'not-a-claim'}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    for (let index=0;index<3;index++) await loop.poll(h.$);
+    expect(h.logs).toHaveLength(1);
+    expect(h.prompts).toHaveLength(0);
+  });
+  it('correlates a framed turn.start when the marker also appears mid-line before the payload line', async () => {
+    const value = await prepared(); const h = host({claim:value});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await h.reported('accepted');
+    await loop.start(h.$,{text:`Note: ${value.wire_marker} is quoted here\n${value.formatted_payload}\nrest`,turnId:'later'});
+    expect(loop.status().active.host_turn_id).toBe('later');
+  });
+  it('logs a blocked claim again after an empty queue resets the reason', async () => {
+    let mode = 'blocked';
+    const h = host({handler:argv => argv[2] === 'claim' && mode === 'blocked' ? failure('invalid_transition',{reason:'owner_paused'}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await loop.poll(h.$);
+    mode = 'empty';await loop.poll(h.$);
+    mode = 'blocked';await loop.poll(h.$);await loop.poll(h.$);
+    expect(h.logs).toHaveLength(2);
+    expect(h.logs.every(text => text.includes('(owner_paused)'))).toBe(true);
+  });
+  it('logs a repeated claim failure once across polls', async () => {
+    const h = host({handler:argv => argv[2] === 'claim' ? failure('host_unreachable') : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    for (let index=0;index<3;index++) await loop.poll(h.$);
+    expect(h.logs).toHaveLength(1);
+    expect(h.logs[0]).toContain('Claim/report helper failed');
+  });
+  it('logs a claim failure again after an empty queue resets it', async () => {
+    let mode = 'down';
+    const h = host({handler:argv => argv[2] === 'claim' && mode === 'down' ? failure('host_unreachable') : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await loop.poll(h.$);
+    mode = 'empty';await loop.poll(h.$);
+    mode = 'down';await loop.poll(h.$);await loop.poll(h.$);
+    expect(h.logs).toHaveLength(2);
+  });
+  it('logs each time the claim failure code changes', async () => {
+    let code = 'host_unreachable';
+    const h = host({handler:argv => argv[2] === 'claim' ? failure(code) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    await loop.poll(h.$);await loop.poll(h.$);
+    code = 'not_found';await loop.poll(h.$);await loop.poll(h.$);
+    expect(h.logs).toHaveLength(2);
   });
   it('serializes concurrent poll callbacks and retains lifecycle exactly across desktop/helper failure', async () => {
     const value = await prepared();const response = deferred();const admitted = deferred();const submission = deferred();let failing = true;

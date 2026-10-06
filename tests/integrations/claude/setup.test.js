@@ -18,7 +18,7 @@ describe('installed owner helper setup', () => {
     const result = await owner.connect(h.$,ids.session);
     expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
     expect(result.binding.session).toEqual({project_id:ids.project,session_id:ids.session});
-    expect(result.instruction).toBe('Use published Ariadne domain commands.');
+    expect(result).not.toHaveProperty('instruction');
     expect(h.prompts).toEqual([]);
   });
   it('accepts the shipped setup instruction and refuses one past the core limit', async () => {
@@ -31,7 +31,7 @@ describe('installed owner helper setup', () => {
           capabilities:capabilities(),setup_instruction:instruction}}) : undefined});
       return setup(descriptor.helperPath).connect(h.$);
     };
-    expect((await connectWith(shipped)).instruction).toBe(shipped);
+    expect((await connectWith(shipped)).binding.binding_id).toBe(ids.binding);
     await expect(connectWith('x'.repeat(64 * 1024 + 1))).rejects.toThrow('exact canonical saved receipt');
   });
   it('rejects an explicit-target receipt mismatch before status, preserving the pending body', async () => {
@@ -56,6 +56,28 @@ describe('installed owner helper setup', () => {
     await expect(qualify(h.$,null)).rejects.toThrow('descriptor');
     const mismatch = host({handler:() => ({exitCode:0,stdout:'ariadne 0.2.0\n'})});
     await expect(qualify(mismatch.$,descriptor)).rejects.toThrow('versions disagree');
+  });
+  it('waits for the app to publish the binding route while status reports not_found', async () => {
+    let polls = 0;
+    const h = host({handler:argv => {
+      if (argv[2] === 'connection-status' && ++polls <= 2) return failure('not_found');
+    }});
+    const result = await setup(descriptor.helperPath,undefined,{waitMs:2000,pollMs:1}).connect(h.$);
+    expect(result.binding.binding_id).toBe(ids.binding);
+    expect(result.status).toEqual(status);
+    expect(h.calls.filter(call => call.argv[2] === 'connection-status')).toHaveLength(3);
+  });
+  it('reports pending status after the publish wait elapses on persistent not_found', async () => {
+    const h = host({handler:argv => argv[2] === 'connection-status' ? failure('not_found') : undefined});
+    await expect(setup(descriptor.helperPath,undefined,{waitMs:5,pollMs:1}).connect(h.$))
+      .rejects.toThrow(/connection status remains pending[\s\S]*\(not_found\)/);
+    expect(h.calls.filter(call => call.argv[2] === 'connection-status').length).toBeGreaterThan(1);
+  });
+  it('does not retry connection status errors other than not_found', async () => {
+    const h = host({handler:argv => argv[2] === 'connection-status' ? failure('host_unreachable') : undefined});
+    await expect(setup(descriptor.helperPath,undefined,{waitMs:2000,pollMs:1}).connect(h.$))
+      .rejects.toThrow('host_unreachable');
+    expect(h.calls.filter(call => call.argv[2] === 'connection-status')).toHaveLength(1);
   });
   it('uses canonical bootstrap wrappers and installed fixed provider facts, then validates scoped status', async () => {
     const h = host();const owner = setup(descriptor.helperPath);

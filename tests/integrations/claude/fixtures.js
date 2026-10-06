@@ -8,8 +8,8 @@ export const binding = Object.freeze({binding_id:ids.binding,generation:ids.gene
 export const status = Object.freeze({id:ids.binding,generation:ids.generation,adapter_id:'claude_code_mod',external_session_id:binding.external_session_id,
   dispatch_state:'enabled',owner_paused:false,pause_reason:null,connection_state:'connected',presence:null});
 export function success(data) { return {exitCode:0,stdout:JSON.stringify({api_version:1,ok:true,data}),stderr:''}; }
-export function failure(code = 'host_unreachable') {
-  return {exitCode:4,stdout:JSON.stringify({api_version:1,ok:false,error:{code,message:'Fixture failure',hint:'Retain original IDs',retryable:false,field_errors:[]}}),stderr:''};
+export function failure(code = 'host_unreachable', details) {
+  return {exitCode:4,stdout:JSON.stringify({api_version:1,ok:false,error:{code,message:'Fixture failure',hint:'Retain original IDs',retryable:false,field_errors:[],...(details ? {details} : {})}}),stderr:''};
 }
 export function capabilities() {
   return {...Object.fromEntries(['existing_session','deferred_delivery','turn_correlation','turn_completion','domain_cli','domain_mcp','history_reconcile','streaming_output','final_text_read','discover_sessions'].map(name => [name,{supported:true,conditions:[]}])),delivery_mode:'pull'};

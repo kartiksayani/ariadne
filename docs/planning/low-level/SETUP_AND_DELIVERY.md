@@ -139,10 +139,10 @@ Claude settings or host trust records.
 
 In the already-open target conversation, `/ariadne-connect` explicitly creates
 or selects a binding and returns its `binding_id`, external session ID, project
-identity, current connection state, and a short usage instruction. It does not
-send a model prompt. The owner can copy/paste the printed Ariadne connection
-instruction into the existing conversation to record original terminal work;
-this is explicit and never an automatic boot prompt. Each Ariadne-dispatched
+identity, current connection state, and a short usage line. It does not
+send a model prompt. The full rules are in the plugin's `ariadne` skill, loaded
+on demand; the Mod does not print them. Codex owners paste the setup instruction
+into the existing thread; this is explicit and never an automatic boot prompt. Each Ariadne-dispatched
 prompt includes the binding ID, input ID and attempt ID in its correlation marker.
 The Mod polls the bridge CLI for claims. One input per binding may be in flight;
 the next Ariadne input waits for the correlated turn to finish successfully and

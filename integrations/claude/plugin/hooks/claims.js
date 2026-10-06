@@ -1,5 +1,18 @@
 import { bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, prepared, reportReceipt } from './contracts.js';
 
+// 'exact' when text is the payload, 'framed' when the payload sits intact as whole
+// lines inside host framing text, otherwise null.
+function carried(text, captured) {
+  const payload = captured.formatted_payload;
+  if (text === payload) return 'exact';
+  for (let at = text.indexOf(captured.wire_marker); at !== -1; at = text.indexOf(captured.wire_marker, at + 1)) {
+    if ((at !== 0 && text[at - 1] !== '\n') || !text.startsWith(payload, at)) continue;
+    const end = at + payload.length;
+    if (end === text.length || text[end] === '\n') return 'framed';
+  }
+  return null;
+}
+
 // One captured claim and one serialized reporter. Core remains the sole queue authority.
 export function claimLoop(helperPath, binding) {
   let active = null;
@@ -10,8 +23,10 @@ export function claimLoop(helperPath, binding) {
   let stopped = false;
   let paused = false;
   let claimId = null;
+  let blocked = null;
   let capturedSubmission = null;
   let disconnected = false;
+  let observedForm = false;
   const pending = [];
   const route = ['--binding',binding.binding_id,'--generation',binding.generation];
   function log($, message) { $.ui.log(`Ariadne paused: ${message}`); }
@@ -74,7 +89,9 @@ export function claimLoop(helperPath, binding) {
   }
   async function runPoll($) {
     try {
+      const hadPending = pending.length > 0;
       await flush($);
+      if (hadPending) blocked = null;
       if (!admissionOpen || stopped || paused || active || (capturedSubmission && !capturedSubmission.settled)) return;
       if (await $.session.id() !== binding.external_session_id) {
         paused = true;
@@ -84,8 +101,9 @@ export function claimLoop(helperPath, binding) {
       if (!admissionOpen || stopped) return;
       claimId ??= globalThis.crypto.randomUUID();
       const result = envelope(await $.process.run([helperPath,'bridge','claim',...route,'--request-id',claimId],{timeoutMs:5000}));
-      if (result === null) { claimId = null; return; }
+      if (result === null) { blocked = null; claimId = null; return; }
       const value = await prepared(result,binding);
+      blocked = null;
       const captured = {...value,turnId:null,accepted:false,settled:false,terminalSnapshots:[],terminalGap:false,uncertainReasons:new Set()};
       active = captured;
       capturedSubmission = captured;
@@ -99,7 +117,7 @@ export function claimLoop(helperPath, binding) {
       // Do not await: the SDK promise can settle before or after turn.start.
       // All callbacks close over this original binding and captured attempt.
       try {
-        void $.prompt.submit({text:captured.formatted_payload})
+        void $.prompt.submit({text:captured.formatted_payload,asUser:true})
           .then(result => settled($,captured,result))
           .catch(() => uncertain($,captured,'Prompt submission failed with unknown delivery; reconcile the original attempt.'))
           .finally(() => { captured.settled = true; });
@@ -107,8 +125,14 @@ export function claimLoop(helperPath, binding) {
         await uncertain($,captured,'Prompt submission threw with unknown delivery; reconcile the original attempt.');
         captured.settled = true;
       }
-    } catch {
-      log($,'Claim/report helper failed. The same claim request/event IDs are retained; no prompt was resent.');
+    } catch (error) {
+      const once = (key, message) => { if (blocked !== key) { blocked = key; log($,message); } };
+      if (error?.code === 'invalid_transition') {
+        const reason = ['owner_paused','recovery_required'].includes(error.details?.reason) ? error.details.reason : 'blocked';
+        once(reason,`Dispatch is withheld by the app (${reason}); claims resume when the owner resumes or recovers.`);
+        return;
+      }
+      once(error?.code ?? 'failure','Claim/report helper failed. The same claim request/event IDs are retained; no prompt was resent.');
     }
   }
   function observe(action) {
@@ -119,16 +143,21 @@ export function claimLoop(helperPath, binding) {
   function complete($, event) { return observe(() => observeComplete($,event)); }
   async function observeStart($, event) {
     const captured = active;
+    // The payload digest was verified by prepared() at claim time; the host may
+    // frame the text, so a whole-text digest is not meaningful here.
     if (!captured || captured.turnId !== null || !bounded(event.turnId)
-      || typeof event.text !== 'string'
-      || !event.text.startsWith(`${captured.wire_marker}\n`)
-      || event.text !== captured.formatted_payload
-      || await hash(event.text) !== captured.payload_sha256) return;
+      || typeof event.text !== 'string') return;
+    const form = carried(event.text,captured);
+    if (form === null) return;
     if (await $.session.id() !== binding.external_session_id) {
       await uncertain($,captured,'Session identity changed before matching turn.start; recover the original attempt.');
       return;
     }
     captured.turnId = event.turnId;
+    if (!observedForm) {
+      observedForm = true;
+      $.ui.log(`Ariadne: turn.start carried the ${form} payload (${event.text.length} chars).`);
+    }
     captured.startReporting = (async () => {
       if (!captured.accepted) {
         captured.accepted = true;

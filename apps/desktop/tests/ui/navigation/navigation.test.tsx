@@ -654,10 +654,10 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(close).toHaveBeenCalledOnce();
   });
   it.each([
-    ['codex', /Paste this setup instruction into the selected Codex thread.*Ariadne skill for Codex unless its link was skipped/],
-    ['claude_code_mod', /Run \/ariadne-connect in the selected Claude conversation/],
-    ['demo.local', /Paste this setup instruction into the selected host conversation/],
-  ])('tells the owner how to give the saved setup instruction to a %s host once per binding', async (adapterId, wording) => {
+    ['codex', /Paste this setup instruction into the selected Codex thread.*Ariadne skill for Codex unless its link was skipped/, /once per binding/, true],
+    ['claude_code_mod', /Run \/ariadne-connect in the selected Claude conversation/, /Nothing to paste/, false],
+    ['demo.local', /Paste this setup instruction into the selected host conversation/, /once per binding/, true],
+  ])('tells the owner how to give the saved setup instruction to a %s host', async (adapterId, wording, frequency, showsInstruction) => {
     const { transport, store } = setup(); read(transport);
     const binding = Object.values((demo as Session).bindings)[0]!;
     render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
@@ -670,8 +670,9 @@ describe('source-backed navigation views and explicit registration', () => {
     const banner = await screen.findByLabelText('Session setup');
     expect(within(banner).getByText(wording)).toBeTruthy();
     expect(within(banner).getByText(/Connecting sent nothing to the model/)).toBeTruthy();
-    expect(within(banner).getByText(/once per binding/)).toBeTruthy();
-    expect(within(banner).getByText('Saved Ariadne rules.')).toBeTruthy();
+    expect(within(banner).getByText(frequency)).toBeTruthy();
+    if (showsInstruction) expect(within(banner).getByText('Saved Ariadne rules.')).toBeTruthy();
+    else expect(within(banner).queryByText('Saved Ariadne rules.')).toBeNull();
   });
   it('retains actionable rebind guard errors without showing setup or changing session data', async () => {
     const { transport, store } = setup(); read(transport); await store.start();

@@ -16,8 +16,8 @@ There is no runnable `npm run test:live` or `tests/live` suite.
 (your Claude and Codex accounts are billed or drawn against their usage limits). At
 most **24 short paid turns in total, 12 per host**, with no retries. If a turn fails,
 it still counts and the run stops for that host instead of resending. The setup
-paste for the second project's connection is also a paid turn and counts against
-that host's 12-turn cap.
+paste for the second Codex project's connection is also a paid turn and counts against
+that host's 12-turn cap. Claude needs no paste turn.
 
 **What you do by hand.**
 - Create both scratch projects per host yourself, each with its own Claude
@@ -97,12 +97,13 @@ before the cap is raised. Two Ariadne sessions in the first project still prove
 same-project isolation.
 
 Proposed cap: **24 model turns total, at most 12 per host**: one reserved
-turn for pasting the setup instruction, one domain bootstrap, five baseline queued
+turn for pasting the setup instruction (Codex only; Claude reads the connect output
+and loads the rules from its skill), one domain bootstrap, five baseline queued
 inputs, one delayed-result input, one missing-result input, one result-repair turn
 and two quit/relaunch inputs. Connecting itself sends nothing to the model
-(`/ariadne-connect` and Codex **Connect existing session** only produce the
-instruction), but the owner's paste of that instruction is an ordinary model turn and
-counts, once per connection. Every other model invocation, including failed or
+(`/ariadne-connect` prints a short result; Codex **Connect existing session** produces
+the instruction), but the Codex owner's paste of that instruction is an ordinary model
+turn and counts, once per connection. The Claude skill load is not a paste turn. Every other model invocation, including failed or
 interrupted turns and unexpected bootstrap, also counts; no retry/resend
 allowance. Stop before exceeding
 either cap; report unmet rows and seek a revised explicit budget. Registration,
@@ -134,8 +135,9 @@ Setup resolves its package under process `HOME`; use the installation handoff's
 validated process environment, not an invented `--install-root` flag or an
 owner-home install. Follow its printed Claude commands exactly:
 `/plugin marketplace add <installed-root>`, `/plugin install ariadne@ariadne-local`,
-`/reload-plugins`, `/ariadne-connect`. `/ariadne-connect` prints a setup instruction
-that the owner pastes into the same conversation, once per connection. Record
+`/reload-plugins`, `/ariadne-connect`. `/ariadne-connect` prints a short result (session,
+project, binding, generation, state); no paste is needed, the rules load from the
+plugin's `ariadne` skill. Record
 trust/reload and loaded Mod parity.
 For Codex: Projects page, **Register project** (or **Discover host sessions**), open
 the project, **Connect existing session**, pick the thread shown by `/status`, click
@@ -232,9 +234,10 @@ added.
 - Model turn: `/ariadne-connect` is a plugin command handled by the Mod's
   `command.run` handler, which calls the helper and returns text
   (`integrations/claude/plugin/hooks/register.js:84-99`); the source contains no
-  model call, so the command itself uses no model turn. The owner then pastes the
-  printed setup instruction into the same conversation; that paste is a model turn
-  and counts in the cap. Record observed usage for both.
+  model call, so the command itself uses no model turn. On Codex the owner then
+  pastes the setup instruction into the thread; that paste is a model turn and counts
+  in the cap. On Claude there is no paste; the rules load from the skill. Record
+  observed usage for both.
 
 ## Five distinct queued inputs on each host
 
