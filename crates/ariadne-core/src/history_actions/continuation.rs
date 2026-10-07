@@ -523,6 +523,7 @@ fn copy(
                 round_id: None,
                 continuation_operation_id: Some(operation_id.clone()),
             },
+            removed: None,
         },
         state: InputState::Queued,
         attempts: vec![],

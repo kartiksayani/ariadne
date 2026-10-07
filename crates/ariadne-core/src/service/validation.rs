@@ -86,6 +86,8 @@ impl OwnerMutationRequest {
             OwnerCommand::ProjectRegister { .. }
                 | OwnerCommand::BindingConnect { .. }
                 | OwnerCommand::PreferencesPatch { .. }
+                | OwnerCommand::SessionRemove { .. }
+                | OwnerCommand::ProjectRemove { .. }
         );
         if needs_session != self.session.is_some() {
             return Err(invalid(
@@ -267,7 +269,11 @@ impl OwnerCommand {
             | Self::SessionClose { op_id, .. }
             | Self::SessionReopen { op_id, .. }
             | Self::TopicContinue { op_id, .. }
-            | Self::PreferencesPatch { op_id, .. } => op_id,
+            | Self::PreferencesPatch { op_id, .. }
+            | Self::ItemRemove { op_id, .. }
+            | Self::TopicRemove { op_id, .. }
+            | Self::SessionRemove { op_id, .. }
+            | Self::ProjectRemove { op_id, .. } => op_id,
         }
     }
     pub fn validate_wire(&self) -> Result<(), CoreError> {
@@ -985,8 +991,27 @@ pub fn validate_owner_receipt(
                     ) | (
                         OwnerCommand::TopicContinue { .. },
                         SavedReceiptData::Continuation { .. }
+                    ) | (
+                        OwnerCommand::ItemRemove { .. } | OwnerCommand::TopicRemove { .. },
+                        SavedReceiptData::Removal { .. }
                     )
                 )
+        }
+        MutationReceipt::Removed(receipt) => {
+            receipt.operation_id == *request.command.operation_id()
+                && match &request.command {
+                    OwnerCommand::SessionRemove { params, .. } => {
+                        receipt.scope == RemovedScope::Session
+                            && receipt.project_id == params.project_id
+                            && receipt.session_ids == [params.session_id.clone()]
+                    }
+                    OwnerCommand::ProjectRemove { params, .. } => {
+                        receipt.scope == RemovedScope::Project
+                            && receipt.project_id == params.project_id
+                    }
+                    _ => false,
+                }
+                && !receipt.backup.trim().is_empty()
         }
     };
     if matches {

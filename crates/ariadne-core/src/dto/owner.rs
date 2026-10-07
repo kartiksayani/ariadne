@@ -27,6 +27,10 @@ owner_commands!(
     SessionReopen(SessionLifecycleParams),
     TopicContinue(TopicContinueParams),
     PreferencesPatch(PreferencesPatch),
+    ItemRemove(ItemRemoveParams),
+    TopicRemove(TopicLifecycleParams),
+    SessionRemove(SessionRemoveParams),
+    ProjectRemove(ProjectRemoveParams),
 );
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -100,12 +104,51 @@ pub struct TopicContinueParams {
     pub summary: String,
 }
 
+/// Removes the item and everything below it (session route).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ItemRemoveParams {
+    pub item_id: ItemRef,
+    pub expected_revision: PositiveSafeInteger,
+}
+/// Uses `session: null` so an exact retry still replays after the file is gone.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SessionRemoveParams {
+    pub project_id: UuidV4,
+    pub session_id: UuidV4,
+    pub expected_revision: PositiveSafeInteger,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectRemoveParams {
+    pub project_id: UuidV4,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(untagged)]
 pub enum MutationReceipt {
     Session(Box<SavedReceipt>),
     ProjectRegistered(ProjectRegisteredReceipt),
     PreferencesPatched(PreferencesPatchedReceipt),
+    Removed(RemovedReceipt),
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum RemovedScope {
+    Session,
+    Project,
+}
+/// Session or project removal. `backup` is the absolute path of the
+/// pre-remove snapshot (a file for a session, a directory for a project).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct RemovedReceipt {
+    pub operation_id: UuidV4,
+    pub scope: RemovedScope,
+    pub project_id: UuidV4,
+    pub session_ids: Vec<UuidV4>,
+    pub backup: String,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]

@@ -103,6 +103,24 @@ pub enum SavedReceiptData {
     Continuation {
         continuation: ContinuationReceipt,
     },
+    /// Owner item/topic removal in this session. `family` lists every
+    /// session/topic pair a topic removal covers (empty for an item removal).
+    Removal {
+        item_ids: Vec<ItemRef>,
+        topic_ids: Vec<UuidV4>,
+        input_ids: Vec<UuidV4>,
+        family: Vec<RemovalTarget>,
+        notice: Option<RemovalTarget>,
+        backup: String,
+    },
+}
+
+/// A session-qualified topic (family member) or notice input.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct RemovalTarget {
+    pub session_id: UuidV4,
+    pub id: UuidV4,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]

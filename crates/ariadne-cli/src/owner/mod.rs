@@ -12,6 +12,11 @@ pub const HELP: &str = r#"Owner commands (explicit registered routes):
   ariadne topic archive|restore|continue|continue-preview --json-stdin [--json]
   ariadne item messages|rounds|reveal --json-stdin [--json]
   ariadne preferences get|patch [--json-stdin] [--json]
+  ariadne remove item|topic|session|project --json-stdin [--json]
+Remove is permanent inside Ariadne; files and the agent's conversation stay.
+Item and topic removal use a session route and queue a `removed` notice for
+the told agent; session and project removal use session:null. Every removal
+first writes a pre-remove backup and its receipt prints the backup path.
 Stdin is the complete canonical OwnerQueryRequest or OwnerMutationRequest,
 at most 512KiB. Its command tag must match the CLI noun/verb. Stdin commands
 return one canonical JSON envelope by default. Every mutation requires stdin;
@@ -39,7 +44,7 @@ pub fn handles(args: &[&str]) -> bool {
     }
     matches!(
         args.first(),
-        Some(&("project" | "session" | "binding" | "input" | "topic" | "preferences"))
+        Some(&("project" | "session" | "binding" | "input" | "topic" | "preferences" | "remove"))
     )
 }
 
