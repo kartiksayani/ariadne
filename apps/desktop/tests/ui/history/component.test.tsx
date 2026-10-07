@@ -1,118 +1,96 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
-import type { QueryResult } from '../../../src/generated/core';
-import { ItemDetail, itemTimeline } from '../../../src/components/history/ItemDetail';
+import { DetailPath, ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { MessageRail } from '../../../src/components/rail/MessageRail';
-import { immutable } from '../../../src/data/session-store';
-import { deferred, extraMessage, page, projections, setup } from './fixtures';
+import { OwnerDraftStore } from '../../../src/state/drafts/store';
+import { extraMessage, setup } from './fixtures';
 
 const opened: ReturnType<typeof setup>[] = [];
-async function ready() { const value = setup(); opened.push(value); await value.store.refresh(); return value; }
+async function ready(change?: (session: ReturnType<typeof setup>['transport']['session']) => void) {
+  const value = setup(); opened.push(value); change?.(value.transport.session); await value.store.refresh(); return value;
+}
 afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); });
 
-describe('complete item detail', () => {
-  it('renders five rounds, exact full answer/reply/result bodies, two registered forks and terminal follow-up', async () => {
-    const value = await ready(), reveal = vi.fn(), intent = vi.fn();
-    render(<ItemDetail {...value} itemId="1" onReveal={reveal} onIntent={intent} />);
-    await waitFor(() => expect(screen.getAllByRole('region', { name: /^Round / })).toHaveLength(5));
-    const expected = projections(value.transport.session);
-    for (let index = 0; index < 5; index++) {
-      const round = screen.getByRole('region', { name: `Round ${index + 1}` });
-      expect(round.textContent).toContain(expected.rounds[index].round.ask_snapshot);
-      expect(round.textContent).toContain(expected.rounds[index].answers.items[0].text);
-      expect(round.textContent).toContain(expected.rounds[index].agent_messages.items[0].body);
-      expect(round.textContent).toContain(expected.rounds[index].results.items[0].result.explanation);
-      expect(round.querySelectorAll('[data-message-id="'+expected.rounds[index].owner_messages.items[0].id+'"]').length).toBe(0);
-    }
-    expect(screen.getAllByRole('button', { name: /^Fork ·/ })).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: /^Fork · Item 1.1/ }));
-    await waitFor(() => expect(reveal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'item', route: expect.objectContaining({ item_id: '1.1' }) })));
-    fireEvent.click(screen.getByRole('button', { name: 'Follow up' }));
-    expect(intent).toHaveBeenCalledWith('followup', '1');
-    fireEvent.click(screen.getByRole('button', { name: 'Request reopen' }));
-    expect(intent).toHaveBeenCalledWith('reopen', '1');
-    fireEvent.click(screen.getByRole('button', { name: /^Timeline ·/ }));
-    const messages = document.querySelectorAll('.history-timeline [data-message-id]');
-    expect(new Set([...messages].map(element => element.getAttribute('data-message-id'))).size).toBe(messages.length);
+describe('item detail panel', () => {
+  const panel = (value: Awaited<ReturnType<typeof ready>>, itemId = '1', open = vi.fn()) =>
+    <ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId={itemId} later={false} onOpenItem={open} />;
+
+  it('reads every section from the session snapshot in the handoff order', async () => {
+    const value = await ready(), session = value.transport.session, item = session.items['1']!, open = vi.fn();
+    render(panel(value, '1', open));
+    await screen.findByRole('heading', { name: item.question });
+    const created = session.messages.find(message => message.id === item.created_message_id)!;
+    expect(screen.getByText(`Decision · next action: you · raised in #${created.number}`)).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toBe(`Done${item.outcome}`);
+    expect(screen.getByText(item.why!)).toBeTruthy();
+    const order = [...document.querySelectorAll('.item-detail > section, .item-detail > div')].map(element => element.getAttribute('aria-label') ?? element.className);
+    expect(order.filter(name => ['Your answer', 'Revisit', 'Current outcome', 'Child items', 'Item links', 'Back and forth', 'Timeline'].includes(name)))
+      .toEqual(['Your answer', 'Revisit', 'Current outcome', 'Child items', 'Item links', 'Back and forth', 'Timeline']);
+    // The handled answer is the request the stepper follows.
+    expect(within(screen.getByRole('region', { name: 'Your answer' })).getByText('Resolved')).toBeTruthy();
+    const round = screen.getByLabelText('Round 1');
+    expect(round.textContent).toContain('You chose “Keep complete history”');
+    expect(round.textContent).toContain('Recorded the original reply and receipt-test follow-up.');
+    fireEvent.click(within(round).getByRole('button', { name: /Add the receipt lookup test/ }));
+    expect(open).toHaveBeenCalledWith('1.1');
+    fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(within(screen.getByRole('region', { name: 'Item links' })).getAllByRole('link').map(link => link.textContent)).toEqual(item.links.map(link => link.label));
+    const timeline = screen.getByRole('region', { name: 'Timeline' });
+    // Owner messages on the item join as replies, as the handoff keeps them in `updated`.
+    const replies = session.messages.filter(message => message.author === 'owner' && message.item_id === item.id).map(message => message.id);
+    expect(replies.length).toBeGreaterThan(0);
+    expect(timeline.querySelectorAll('.excerpt-timeline')).toHaveLength(new Set([item.created_message_id, ...item.updated_message_ids, ...replies]).size);
+    expect(timeline.querySelector('.excerpt-created .excerpt-mark')!.textContent).toBe('Agent raised this');
+    expect([...timeline.querySelectorAll('.excerpt-mark')].map(mark => mark.textContent)).toContain('You replied');
+    expect(screen.getByText('Agent reference').parentElement!.querySelector('code')!.textContent).toBe('1');
   });
-  it('keeps former outcome/reason after reopen and never offers replaced-item reopen', async () => {
+  it('deduplicates a message that both created and updated the item into one timeline entry', async () => {
+    const value = await ready(session => {
+      const item = session.items['1']!;
+      item.updated_message_ids = [item.created_message_id, ...item.updated_message_ids, item.updated_message_ids[0]];
+    }), item = value.transport.session.items['1']!;
+    render(panel(value));
+    const timeline = await screen.findByRole('region', { name: 'Timeline' });
+    const replies = value.transport.session.messages.filter(message => message.author === 'owner' && message.item_id === item.id).map(message => message.id);
+    const ids = new Set([...item.updated_message_ids, ...replies]);
+    expect(timeline.querySelectorAll('.excerpt-timeline')).toHaveLength(ids.size);
+    expect(timeline.querySelector('.excerpt-created .excerpt-mark')!.textContent).toBe('Agent raised this · Agent updated');
+  });
+  it('shows the outcome before reopening and never offers Back to Open on a replaced item', async () => {
+    const reopened = await ready(session => {
+      const item = session.items['1']!;
+      item.status = 'open'; item.outcome = null;
+      item.status_history.push({ ...item.status_history[0], old_status: 'done', new_status: 'open', previous_outcome: 'Former exact outcome', reason: 'Owner requested more work' });
+    });
+    render(panel(reopened));
+    expect((await screen.findByText('Before you reopened it')).parentElement!.textContent).toContain('Done');
+    expect(screen.getByText('Former exact outcome')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Not discussed yet' })).toBeTruthy();
+    cleanup();
+    const replaced = await ready(session => { session.items['1']!.status = 'replaced'; session.items['1']!.replaced_by = '4'; });
+    render(panel(replaced));
+    expect(((await screen.findByRole('button', { name: 'Back to Open' })) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: /Record retry limits/ })).toBeTruthy();
+  });
+  it('hides owner actions in closed sessions and archived topics', async () => {
     const value = await ready(), item = value.transport.session.items['1']!;
-    item.status = 'open'; item.outcome = null;
-    item.status_history.push({ ...item.status_history[0], old_status: 'done', new_status: 'open',
-      previous_outcome: 'Former exact outcome\nretained', previous_why: 'Former exact reason', reason: 'Owner requested more work' });
-    render(<ItemDetail {...value} itemId="1" onReveal={vi.fn()} onIntent={vi.fn()} />);
-    await waitFor(() => expect(screen.getAllByRole('region', { name: 'Former outcome' }).some(section => section.textContent?.includes('Former exact outcome\nretained'))).toBe(true));
-    expect(screen.getByText('Former exact reason')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Request reopen' })).toBeNull();
-    cleanup(); item.status = 'replaced';
-    render(<ItemDetail {...value} itemId="1" onReveal={vi.fn()} onIntent={vi.fn()} />);
-    await screen.findByRole('button', { name: 'Follow up' });
-    expect(screen.queryByRole('button', { name: 'Request reopen' })).toBeNull();
-  });
-  it('deduplicates activity backlinks as one timeline event, without manufacturing another conversation reply', () => {
-    const value = setup(); value.sessions.closeAll();
-    const projection = projections(value.transport.session);
-    const activity = value.transport.session.messages[0];
-    activity.items_touched = ['1', '2'];
-    projection.read.updated_messages.items.push(activity, activity);
-    const timeline = itemTimeline(immutable({ conversation: projection.conversation, item: projection.read,
-      rounds: { item_id: '1', rounds: page(projection.rounds) } }));
-    expect(timeline.filter(message => message.id === activity.id)).toHaveLength(1);
-    expect(projection.conversation.messages.items.every(message => message.kind === 'owner_input' || message.kind === 'reply')).toBe(true);
-  });
-  it('retains previous complete history on failure and retries without clearing bodies', async () => {
-    const value = await ready();
-    const intent = vi.fn();
-    render(<ItemDetail {...value} itemId="1" onReveal={vi.fn()} onIntent={intent} />);
-    await screen.findByText('Round 5 exact question');
-    value.transport.session.revision = 22;
-    value.transport.override = request => {
-      if ('request' in request && request.request.command === 'item_rounds') throw new Error('fixture transport unavailable');
-      return;
-    };
-    await act(() => value.store.refresh());
-    await screen.findByRole('alert');
-    expect(screen.getByText('Round 5 exact question')).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toContain('previous complete history');
-    expect((screen.getByRole('button', { name: 'Follow up' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Follow up' })); expect(intent).not.toHaveBeenCalled();
-    value.transport.override = null;
-    fireEvent.click(screen.getByRole('button', { name: 'Retry history read' }));
-    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
-  });
-  it('reads location, children and complete link targets; closed sessions and archived topics disable owner intents', async () => {
-    const value = await ready(), item = value.transport.session.items['1']!, intent = vi.fn(), reveal = vi.fn();
-    item.links = [{ kind: 'file', label: 'Exact source', target: 'src/full/path.ts:40' }];
-    const rendered = render(<ItemDetail {...value} itemId="1" onReveal={reveal} onIntent={intent} />);
-    await screen.findByText('src/full/path.ts:40', { exact: false });
-    expect(screen.getByRole('navigation', { name: 'Item location' }).textContent).toContain(value.transport.session.topics[item.topic_id]!.name);
-    const children = screen.getByRole('region', { name: 'Child items' });
-    fireEvent.click(within(children).getByRole('button', { name: /^Item 1.1/ }));
-    await waitFor(() => expect(reveal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'item', route: expect.objectContaining({ item_id: '1.1' }) })));
+    const rendered = render(panel(value));
+    await screen.findByRole('region', { name: 'Revisit' });
     value.transport.session.state = 'closed'; value.transport.session.revision++;
     await act(() => value.store.refresh());
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Follow up' }) as HTMLButtonElement).disabled).toBe(true));
-    fireEvent.click(screen.getByRole('button', { name: 'Follow up' })); expect(intent).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Revisit' })).toBeNull());
     value.transport.session.state = 'active'; value.transport.session.topics[item.topic_id]!.archived_at = '2026-10-04T00:00:00.000Z'; value.transport.session.revision++;
     await act(() => value.store.refresh());
-    await screen.findByText(`done · decision · history revision ${value.transport.session.revision}`);
-    expect((screen.getByRole('button', { name: 'Request reopen' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('region', { name: 'Revisit' })).toBeNull();
+    expect(screen.getByRole('heading', { name: item.question })).toBeTruthy();
     rendered.unmount();
   });
-  it('never publishes a superseded selected item or a closed-store read', async () => {
-    const value = await ready(), pending = deferred<QueryResult>();
-    value.transport.override = request => 'request' in request && request.request.command === 'item_messages' && request.request.params.item_id === '1' ? pending.promise : undefined;
-    const rendered = render(<ItemDetail {...value} itemId="1" onReveal={vi.fn()} />);
-    await waitFor(() => expect(value.transport.calls.some(request => 'request' in request && request.request.command === 'item_messages')).toBe(true));
-    rendered.rerender(<ItemDetail {...value} itemId={null} onReveal={vi.fn()} />);
-    await act(async () => { pending.resolve({ kind: 'item_messages', data: projections(value.transport.session).conversation }); });
-    expect(screen.queryByText('Round 1 exact question')).toBeNull();
-    expect(screen.getByText('Select an item to read its complete history.')).toBeTruthy();
-    expect(value.transport.calls.filter(request => 'request' in request && ['item_rounds', 'session_read'].includes(request.request.command))).toHaveLength(0);
-    rendered.rerender(<ItemDetail {...value} itemId="1" onReveal={vi.fn()} />);
-    await act(() => value.sessions.closeAll());
-    expect(screen.queryByText('Round 1 exact question')).toBeNull();
+  it('names the path by short labels, cutting long names at a word boundary', async () => {
+    const value = await ready(session => { session.topics[session.items['1']!.topic_id]!.name = 'Delivery decisions for the whole receipt pipeline'; });
+    render(<DetailPath store={value.store} itemId="1.1" onOpenItem={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('navigation', { name: 'Item location' }).textContent).toBe('Delivery decisions for…Keep the full reply…'));
   });
 });
 

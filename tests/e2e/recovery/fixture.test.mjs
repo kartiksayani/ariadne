@@ -77,7 +77,7 @@ test('a known successive Reply waits for the delayed Saved acknowledgement befor
   globalThis.browser = {
     $(selector) {
       if (selector === '.owner-input') return { $(selector) { assert.equal(selector, 'button=Write another input'); return another; } };
-      assert.equal(selector, '[aria-label="Owner actions"]');
+      assert.equal(selector, '[aria-label="Item actions"]');
       assert.equal(rendered, 'new form', 'Original Reply cannot be reused before Saved replaces it');
       return { $(selector) { assert.equal(selector, 'button=Reply'); return reply; } };
     },

@@ -476,7 +476,7 @@ async function treeAcceptance(configuration) {
   await wait(async () => (await visibleIds()).includes('1.1'), 'Filtered context must temporarily expose its ancestry');
   await (await search()).waitForEnabled();
   const beforeReveal = (await preferences(tree)).view;
-  const child = await browser.$('[aria-label="Child items"]').$('button*=Item 1.2 ·'); await child.waitForDisplayed(); await child.click();
+  const child = await browser.$('[aria-label="Child items"]').$(`button*=${initialSession.items['1.2'].question.split('\n')[0]}`); await child.waitForDisplayed(); await child.click();
   await wait(async () => (await browser.$('.sentence-tree').getText()).includes('Item 1.2 is outside the current filters.'), 'Detail child reveal did not preserve the filter and expose an outside-filter row');
   assert.equal(await focusedId(), '1.2');
   const revealed = (await preferences(tree)).view;

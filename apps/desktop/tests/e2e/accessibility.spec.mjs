@@ -36,8 +36,11 @@ export async function runAccessibilityAcceptance(configuration) {
   await browser.keys('g');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   assert.equal(await active(editor), true, 'Editor typing must not switch workspace');
+  // Esc in the answer returns focus to the row; Esc on the row closes detail.
   await browser.keys('Escape');
-  await wait(async () => !(await browser.$('.shell-detail').isExisting()), 'Editor Escape did not close detail');
+  await wait(() => active(row), 'Editor Escape did not return focus to the item row');
+  await browser.keys('Escape');
+  await wait(async () => !(await browser.$('.shell-detail').isExisting()), 'Row Escape did not close detail');
   // Draft saves patch preferences; the navigation store re-reads them only every
   // 2 s. Let the saved file stay unchanged past one refresh so Reply is not
   // issued with a stale preferences revision.

@@ -66,7 +66,7 @@ async function openSession(sessionId, itemId) {
     }, 'Selected session navigation did not finish its saved preference update');
     const item = await browser.$(`.ref-tree-row[data-item-id="${itemId}"]`);
     await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
-    await wait(async () => await browser.$('.history-header strong').getText() === `Item ${itemId}`, 'Selected item detail did not load');
+    await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === itemId, 'Selected item detail did not load');
   } catch (error) {
     await json(join(evidence, `navigation-failure-${sessionId}.json`), { before,
       after: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
@@ -115,8 +115,8 @@ async function delivery(configuration) {
   await openSession(configuration.demo.session_id, '1');
   await showHistory(configuration.demo.before.messages.filter(message => message.item_id === '1').map(message => message.body));
   const child = await browser.$('[aria-label="Child items"] button');
-  await child.waitForDisplayed(); assert.ok((await child.getText()).includes('1.1')); await child.click();
-  await wait(async () => await browser.$('.history-header strong').getText() === 'Item 1.1'
+  await child.waitForDisplayed(); assert.ok((await child.getText()).includes('Add the receipt lookup test')); await child.click();
+  await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === '1.1'
     && (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
   await browser.saveScreenshot(join(evidence, 'canonical-demo.png'));
 
@@ -149,7 +149,7 @@ async function delivery(configuration) {
   for (const text of ownerTexts.slice(1)) {
     const another = await browser.$('.owner-input').$('button=Write another input');
     await another.waitForDisplayed(); await another.waitForEnabled(); await another.click();
-    const actions = await browser.$('[aria-label="Owner actions"]'); await actions.waitForDisplayed();
+    const actions = await browser.$('[aria-label="Item actions"]'); await actions.waitForDisplayed();
     const reply = await actions.$('button=Reply'); await reply.waitForDisplayed(); await reply.waitForEnabled(); await reply.click();
     await sendDetailReply(configuration, text);
   }

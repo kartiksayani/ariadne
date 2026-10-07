@@ -23,6 +23,6 @@ it.each(frameIds)('mounts DesktopApp in design frame %s through the real stores'
   await screen.findByRole('tree', { name: 'Sentences' });
   if (spec.state === 'empty') expect(await screen.findByText('No items yet', { exact: false })).toBeTruthy();
   if (spec.state === 'clear') expect(await screen.findByText('Nothing waiting on you')).toBeTruthy();
-  if (spec.selected) await waitFor(() => expect(document.querySelector('.shell-detail')?.textContent).toContain(`Item ${spec.selected}`));
+  if (spec.selected) await waitFor(() => expect(document.querySelector('.shell-detail .detail-reference code')?.textContent).toBe(spec.selected));
   if (spec.scenario === 'archive') expect(await screen.findByText('Pin the Redis client at 5.2, or take 5.3?')).toBeTruthy();
 });

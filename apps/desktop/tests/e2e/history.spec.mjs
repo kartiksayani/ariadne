@@ -10,7 +10,7 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const evidence = () => process.env.ARIADNE_E2E_EVIDENCE;
 const request = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
   expected_item_revisions: {}, expected_topic_revisions: {}, summary: '', operations, input_result: null });
-const detail = () => browser.$('.item-history');
+const detail = () => browser.$('.item-detail');
 const failureEvidence = (label, action, expected = null) => withFailureEvidence(action, async error => {
   const dom = await browser.execute(historyFailureFacts);
   let canonical;
@@ -23,11 +23,11 @@ const failureEvidence = (label, action, expected = null) => withFailureEvidence(
 });
 export async function waitForHistoryItem(item, label = 'history-item') {
   await failureEvidence(label, () => wait(() => browser.execute(expected => {
-    const header = document.querySelector('.item-history > .history-header > strong');
-    const question = document.querySelector('.item-history > h2');
-    const source = [...document.querySelectorAll('.item-history > .history-meta')]
+    const header = document.querySelector('.item-detail .detail-reference code');
+    const question = document.querySelector('.item-detail .detail-question');
+    const source = [...document.querySelectorAll('.item-detail > .history-meta')]
       .some(value => value.textContent === `Source round · ${expected.source_round_id}`);
-    return header?.textContent === `Item ${expected.id}` && question?.textContent === expected.question
+    return header?.textContent === expected.id && question?.textContent === expected.question
       && (expected.source_round_id === null || source);
   }, { id: item.id, question: item.question, source_round_id: item.source_round_id }),
   'Native detail did not reveal the registered item, complete question and correlated source round'),
@@ -211,9 +211,9 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
     assert.equal(firstRound.find(value => value.id === message.id).body, operation.text);
   }
   assert.ok(rounds[0].agent_message_ids.length > 100, 'The actual nested round page must exceed its canonical 100-message boundary');
-  assert.equal((await browser.$$('button.history-fork')).length, 2);
+  assert.equal((await browser.$$('button.detail-fork')).length, 2);
   for (const id of ['1.1', '1.2']) {
-    const fork = await browser.$(`button.history-fork*=Fork · Item ${id}`); await fork.scrollIntoView(); await fork.click();
+    const fork = await browser.$(`button.detail-fork*=${saved.items[id].question.split('\n')[0]}`); await fork.scrollIntoView(); await fork.click();
     await waitForHistoryItem(saved.items[id], `after-fork-${id}`);
     assert.ok((await detail().getText()).includes(saved.items[id].source_round_id));
     await selectParent(saved.items['1']);
@@ -319,7 +319,7 @@ async function rail(history, saved, paged) {
       error.message += ` railState=${JSON.stringify(lastState)}`; throw error;
     }
   });
-  const reply = await browser.$('[aria-label="Owner actions"]').$('button=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
+  const reply = await browser.$('[aria-label="Item actions"]').$('button=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const another = await browser.$('.owner-input').$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
   const editor = await browser.$('.owner-input textarea'); await failureEvidence('owner-input-editor-first', () => editor.waitForEnabled());
@@ -429,7 +429,7 @@ export async function runHistoryAcceptance(configuration) {
   }
   saved = await snapshot(history); assert.equal(saved.items['1'].status, 'open'); assert.equal(saved.items['1'].outcome, null);
   await wait(async () => {
-    const former = await browser.$('.item-history > [aria-label="Former outcome"]');
+    const former = await browser.$('.item-detail [aria-label="Former outcome"]');
     return await former.isExisting() && (await former.getText()).includes('Full native completed outcome\nKeep the former outcome after reopening.');
   }, 'Genuine reopening lost its former outcome in native detail');
   assert.ok((await detail().getText()).includes('Full native completion reason\nEvery round was answered explicitly.'));

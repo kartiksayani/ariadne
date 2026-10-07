@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Session, SessionSummary, ProjectSummary } from '../../../src/generated/domain/models';
@@ -12,7 +12,7 @@ import { OpenSessions } from '../../../src/data/session-store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { OwnerInput } from '../../../src/components/inputs/OwnerInput';
 import { OwnerWaitingPanel } from '../../../src/components/inputs/OwnerWaitingPanel';
-import { OwnerItemDetail } from '../../../src/components/inputs/OwnerItemDetail';
+import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { SentenceTree } from '../../../src/components/tree/SentenceTree';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { RegisteredRoutes, type RevealedItem } from '../../../src/data/routes';
@@ -113,10 +113,10 @@ describe('owner input component and durable draft controller', () => {
               params: { expected_preferences_revision: value.prefs.revision, entries: [{ kind: 'set_later', item: { ...route, item_id: id }, later: enabled }] } } });
             setLater(new Set(value.prefs.later.map(item => item.item_id))); return true;
           }} />
-        <OwnerItemDetail key={selected} drafts={value.drafts} service={value.service} store={value.store} itemId={selected} routes={routes} onReveal={setReveal} />
+        <ItemDetail key={selected} drafts={value.drafts} store={value.store} itemId={selected} later={later.has(selected)} onOpenItem={() => {}} />
       </>;
     }
-    render(<Composition />); await screen.findByRole('textbox');
+    render(<Composition />); await screen.findByRole('region', { name: 'Revisit' });
     const row = screen.getAllByRole('treeitem').find(item => item.dataset.itemId === '1.1')!;
     await user.click(row);
     await waitFor(() => expect(row.getAttribute('aria-selected')).toBe('true'));
@@ -125,25 +125,45 @@ describe('owner input component and durable draft controller', () => {
     await user.keyboard('z');
     await waitFor(() => expect(value.prefs.later).toEqual([{ ...route, item_id: '1.1' }]));
     const laterWrites = () => value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'set_later'));
-    expect(laterWrites()).toHaveLength(1); expect(editor().value).toBe('');
+    expect(laterWrites()).toHaveLength(1);
+    await screen.findByRole('region', { name: 'Parked for later' });
+    await user.click(screen.getByRole('button', { name: 'Reply' }));
+    expect(editor().value).toBe('');
     await user.click(editor()); await user.keyboard('z');
     await waitFor(() => expect(value.prefs.drafts.find(draft => draft.target.item_id === '1.1')?.text).toBe('z'));
     await act(async () => { await value.store.refresh(); });
     expect(document.activeElement).toBe(editor()); expect(editor().value).toBe('z');
     expect(laterWrites()).toHaveLength(1); expect(value.calls).toHaveLength(0);
   });
-  it.each([['Follow up', 'Follow up message'], ['Request reopen', 'Reopen message']])('focuses the editor only after explicit %s, including repeated intent with retained text', async (action, label) => {
-    const value = await setup(), routes = new RegisteredRoutes(value.service, value.sessions), user = userEvent.setup();
-    render(<OwnerItemDetail drafts={value.drafts} service={value.service} store={value.store} itemId="1" routes={routes} onReveal={() => {}} />);
-    const button = await within(screen.getByRole('complementary', { name: 'Item detail' })).findByRole('button', { name: action });
+  it.each([['1', 'Follow up', 'Follow-up message'], ['1.1', 'Reply', 'Reply message']])('focuses the box only after explicit %s %s; Esc closes it and keeps the draft', async (itemId, action, label) => {
+    const value = await setup(), user = userEvent.setup();
+    render(<ItemDetail drafts={value.drafts} store={value.store} itemId={itemId} later={false} onOpenItem={() => {}} />);
+    const button = await screen.findByRole('button', { name: action });
     await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
+    expect(screen.queryByRole('textbox')).toBeNull();
     await user.click(button);
-    const textarea = await screen.findByLabelText(label);
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    const textarea = await screen.findByRole('textbox', { name: label });
     await waitFor(() => expect(document.activeElement).toBe(textarea));
     await user.keyboard('Retain this draft');
     await user.click(button);
-    expect(document.activeElement).toBe(textarea);
-    expect((textarea as HTMLTextAreaElement).value).toBe('Retain this draft'); expect(value.calls).toHaveLength(0);
+    await waitFor(() => expect(document.activeElement).toBe(textarea));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('textbox')).toBeNull();
+    await user.click(button);
+    expect((screen.getByRole('textbox', { name: label }) as HTMLTextAreaElement).value).toBe('Retain this draft'); expect(value.calls).toHaveLength(0);
+  });
+  it('drops with the optional reason on Enter', async () => {
+    const value = await setup(), user = userEvent.setup(), item = value.session.items['1.1']!;
+    render(<ItemDetail drafts={value.drafts} store={value.store} itemId="1.1" later={false} onOpenItem={() => {}} />);
+    const drop = await screen.findByRole('button', { name: 'Drop' });
+    await waitFor(() => expect(drop.hasAttribute('disabled')).toBe(false));
+    await user.click(drop);
+    expect(screen.getByText('Tells the agent to drop it. It stays in the tree, marked Dropped.')).toBeTruthy();
+    await user.type(await screen.findByRole('textbox', { name: 'Drop reason' }), 'covered elsewhere{Enter}');
+    await waitFor(() => expect(value.calls).toHaveLength(1));
+    const sent = value.calls[0]!.command;
+    expect(sent.command === 'input_submit' && [sent.params.kind, sent.params.text]).toEqual(['drop', `Let’s drop this (covered elsewhere): ${item.question}`]);
   });
   it('has no default choice; number selects only; focused Cmd+Enter and duplicate clicks submit once after durable draft save', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox');
@@ -351,14 +371,16 @@ describe('owner input component and durable draft controller', () => {
     expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(1);
     expect(value.drafts.getSnapshot().preferenceUncertain).toBe(true); expect((await value.restart()).find(route, '2', 'answer')?.uncertain).toBe(true);
   });
-  it('connects actual terminal history actions to the owner editor without replacing the retained outcome', async () => {
-    const value = await setup(), routes = new RegisteredRoutes(value.service, value.sessions);
-    render(<OwnerItemDetail drafts={value.drafts} service={value.service} store={value.store} itemId="1" routes={routes} onReveal={() => {}} />);
-    const request = await screen.findByRole('button', { name: 'Request reopen' });
+  it('Back to Open asks the agent to reopen at once and keeps the current outcome', async () => {
+    const value = await setup(), item = value.session.items['1']!;
+    render(<ItemDetail drafts={value.drafts} store={value.store} itemId="1" later={false} onOpenItem={() => {}} />);
+    const request = await screen.findByRole('button', { name: 'Back to Open' });
     await waitFor(() => expect(request.hasAttribute('disabled')).toBe(false)); fireEvent.click(request);
-    await screen.findByLabelText('Reopen message'); expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toContain(value.session.items['1']!.outcome);
-    fireEvent.change(editor(), { target: { value: 'Request another round' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reopen' }));
-    await screen.findByText('Saved · Queue position #4'); expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params.kind).toBe('reopen');
+    await waitFor(() => expect(value.calls).toHaveLength(1));
+    const sent = value.calls[0]!.command;
+    expect(sent.command === 'input_submit' && [sent.params.kind, sent.params.text]).toEqual(['reopen', `Let’s reopen this: ${item.question}`]);
+    expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toContain(item.outcome);
+    expect(screen.queryByRole('textbox')).toBeNull();
   });
   it.each(['bring', 'reply', 'note', 'followup', 'drop', 'reopen'] as const)('queues explicit %s intent for an eligible terminal item', async intent => {
     const value = await setup(); value.render('1', { initialIntent: intent }); await screen.findByRole('textbox');
