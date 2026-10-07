@@ -3,8 +3,8 @@
 //! Pure string plumbing over the agent-side process environment: no OS calls,
 //! no AppleScript. The label is display text only and grants nothing.
 
-/// Longest stored label, in characters.
-pub const MAX_HOST_LOCATION_CHARS: usize = 60;
+/// Longest stored label, in characters; the store validator uses the same bound.
+pub const MAX_HOST_LOCATION_CHARS: usize = ariadne_domain::validation::HOST_LOCATION_MAX_CHARS;
 
 /// Label from the agent process's `TERM_PROGRAM` and `ITERM_SESSION_ID` values.
 /// iTerm adds the 1-based window number parsed from `w<n>t<n>p<n>:<uuid>`.

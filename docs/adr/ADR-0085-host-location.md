@@ -16,7 +16,9 @@ terminal.
 
 - **`Binding.host_location: Option<String>`.** A trimmed one-line label of at most
   60 characters, cut at the first control character. Serde default and omitted when
-  absent, so older stores load and re-serialize unchanged. `BindingSummary` carries
+  absent, so older stores load and re-serialize unchanged. Stored-session validation
+  rejects a hand-edited label that is blank, untrimmed, multi-line, has control
+  characters or is over 60 characters. `BindingSummary` carries
   the same field (`host_location?: string | null` in TypeScript).
 - **Parsed from the agent-side environment only.** `ariadne_agent_protocol::host_location`
   maps `TERM_PROGRAM`: `iTerm.app` → "iTerm", `Apple_Terminal` → "Terminal",

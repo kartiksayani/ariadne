@@ -111,7 +111,7 @@
   "schema_version": 1,
   "status": {
     "updated_at": "2026-10-07T01:00:00Z",
-    "headline": "54/57 done; P8.11 remove commands and P8.12 short labels in progress; P8.3 UX review held for the owner.",
+    "headline": "56/58 done; P8.13 host location and topic counts in progress; P8.3 UX review held for the owner.",
     "notes": [
       "P7.3 live Codex run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md). Codex onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7), and docs/GUIDE.md documents the fixed behaviour; D7 is task P8.3; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
       "P7.2 live Claude run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md, ADR-0076, PR #114); remaining coverage rows deferred by owner ruling 2026-10-06. Follow-ups: queued inputs stay bound to a retired binding after rebind; no confirm-completed resolution for committed-result/unknown-turn attempts; a session with a Disconnected binding cannot be closed; delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill; rules source.md should say option consequence is required; Claude Mod uses undocumented $.plugin.root.",
@@ -2266,10 +2266,15 @@
         "rtk proxy python3 scripts/regenerate-roadmap.py --check"
       ],
       "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/125"
+      },
       "progress": {
-        "state": "in_progress",
-        "prs": [],
-        "note": "PR pending"
+        "state": "done",
+        "prs": [
+          125
+        ],
+        "note": "Merged in #125."
       }
     },
     {
@@ -2312,10 +2317,61 @@
         "rtk proxy python3 scripts/regenerate-roadmap.py --check"
       ],
       "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/131"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          131
+        ],
+        "note": "Merged in #131; the owner's UI redesign shows an agent-written 2-4 word label as the graph node title and in breadcrumbs."
+      }
+    },
+    {
+      "id": "P8.13",
+      "title": "Host location and topic counts for the session bar",
+      "phase": "M8",
+      "depends_on": [
+        "P8.12"
+      ],
+      "paths": [
+        "crates/ariadne-agent-protocol/src/host_location.rs",
+        "crates/ariadne-domain/src/models/*",
+        "crates/ariadne-domain/src/validation/*",
+        "crates/ariadne-core/src/bindings/*",
+        "crates/ariadne-core/src/queries/*",
+        "crates/ariadne-runtime/src/discovery/*",
+        "crates/ariadne-runtime/src/providers.rs",
+        "crates/ariadne-cli/src/bridge/command.rs",
+        "contracts/generated/*",
+        "apps/desktop/src/generated/*",
+        "docs/adr/ADR-0085-host-location.md",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md",
+        "docs/planning/low-level/API_AND_MCP.md"
+      ],
+      "spec": [
+        "docs/adr/ADR-0085-host-location.md"
+      ],
+      "acceptance": [
+        "`Binding` and `BindingSummary` carry optional `host_location` (trimmed, one line, at most 60 characters); a store written before it loads unchanged and a binding without it re-serializes without the key; stored-session validation rejects a malformed hand edit.",
+        "`TERM_PROGRAM` maps iTerm.app, Apple_Terminal, vscode and WarpTerminal to iTerm, Terminal, VS Code and Warp, else the raw value; iTerm adds the 1-based window from `ITERM_SESSION_ID`; the parser is unit-tested with env-free inputs.",
+        "`ariadne bridge announce` adds the label from its environment; discovery normalizes it; connect and reconnect write it to the binding; Codex bindings have none.",
+        "`SessionSummary.topic_count` counts every topic in the session, archived included; generated TypeScript has `host_location?: string | null` and `topic_count`."
+      ],
+      "checks": [
+        "rtk proxy cargo test --workspace --locked",
+        "rtk proxy cargo clippy --workspace --all-targets -- -D warnings",
+        "rtk proxy cargo xtask gen-rules --check",
+        "rtk proxy cargo xtask gen-contracts --check",
+        "rtk proxy npm run check",
+        "rtk proxy python3 scripts/regenerate-roadmap.py --check"
+      ],
+      "estimate_days": 1,
       "progress": {
         "state": "in_progress",
         "prs": [],
-        "note": "PR pending; the owner's UI redesign shows an agent-written 2-4 word label as the graph node title and in breadcrumbs."
+        "note": "PR pending; the owner's UI redesign shows where the agent runs (\"iTerm window 1\") in the session bar and \"N topics\" on session cards."
       }
     }
   ]

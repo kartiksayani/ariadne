@@ -36,6 +36,7 @@ pub fn validate_session_items(session: &Session) -> Result<(), ValidationError> 
             true,
             Some(4096),
         )?;
+        optional_host_location(&binding.host_location, "bindings.host_location")?;
     }
     if let Some(id) = &session.active_binding_id {
         require(
