@@ -63,8 +63,9 @@ Follow-ups the run surfaced:
   rebind (`delivery/claim.rs` filters by `binding_id`); re-target or let the owner move them.
 - Recovery: a committed result with unknown turn state can only be sealed by `skip` or
   `resend`; add a "confirm completed" resolution.
-- Lifecycle: a session whose active binding is Disconnected cannot be closed
-  (`history_actions/lifecycle.rs:127-132` only waives Paused).
+- Lifecycle: a session whose active binding is Disconnected could not be closed; fixed:
+  `Binding::dispatch_quiesced` (paused, disconnected dispatch or non-connected binding,
+  or no binding) is now the close precondition in core and the Close dialog.
 - Delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill.
 - Rules: `source.md` should say option `consequence` is required.
 - Claude Mod: `$.plugin.root` is used but undocumented.

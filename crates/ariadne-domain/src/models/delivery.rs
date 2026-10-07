@@ -76,6 +76,19 @@ pub struct Binding {
     pub adapter_config: AdapterConfig,
 }
 
+impl Binding {
+    /// True when nothing can be dispatched through this binding: dispatch is paused
+    /// or disconnected, or the connection is not `connected`. This is the session
+    /// close precondition. Mirrored by `dispatchQuiesced` in
+    /// `apps/desktop/src/components/history-actions/selectors.ts`.
+    pub fn dispatch_quiesced(&self) -> bool {
+        matches!(
+            self.dispatch_state,
+            DispatchState::Paused | DispatchState::Disconnected
+        ) || self.connection_state != ConnectionState::Connected
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatchState {

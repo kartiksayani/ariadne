@@ -446,7 +446,7 @@ fn unresolved(session: &Session) -> bool {
         )
     })
 }
-fn dispatch(binding: &Binding, needs_recovery: bool) -> DispatchState {
+pub(crate) fn dispatch(binding: &Binding, needs_recovery: bool) -> DispatchState {
     if binding.connection_state != ConnectionState::Connected {
         DispatchState::Disconnected
     } else if needs_recovery || binding.pause_reason.is_some() {
