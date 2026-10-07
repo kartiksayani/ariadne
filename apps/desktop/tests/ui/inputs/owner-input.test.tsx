@@ -10,6 +10,7 @@ import { createDesktopService, type DesktopTransport } from '../../../src/data/s
 import { OpenSessions } from '../../../src/data/session-store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { AnswerSlot, type AnswerSlotProps } from '../../../src/ui/detail/AnswerSlot';
+import type { PendingSubmission } from '../../../src/ui/answer/useSubmit';
 import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
@@ -191,6 +192,31 @@ describe('owner input component and durable draft controller', () => {
     await act(async () => { await value.store.refresh(); }); view.rerender(<AnswerSlot drafts={restored} store={value.store} itemId="2" onEscape={() => {}} />);
     expect(value.calls).toHaveLength(1); value.outcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Retry saved input' }));
     await screen.findByText('Saved · Queue position #4'); expect(value.calls[1]).toEqual(original); expect(value.prefs.drafts).toEqual([]);
+  });
+  it('keeps the typed text and chosen option when the agent-not-running dialog is cancelled; Queue saves the send', async () => {
+    const value = await setup(), held: PendingSubmission[] = [];
+    value.session.bindings[value.session.active_binding_id!]!.connection_state = 'disconnected'; value.session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    value.render('2', { onAgentNotRunning: submission => { held.push(submission); } }); await screen.findByRole('textbox');
+    const [, second] = screen.getAllByRole('button').filter(button => button.hasAttribute('data-answer-option'));
+    second!.focus(); fireEvent.keyDown(second!, { key: '2' });
+    await waitFor(() => expect(second!.getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.change(editor(), { target: { value: 'Keep my words' } });
+    const saved = () => Object.values(value.drafts.getSnapshot().entries).find(entry => entry.draft.target.item_id === '2')!.draft;
+    await waitFor(() => expect(saved().text).toBe('Keep my words'));
+    const reply = screen.getByRole('button', { name: 'Send reply' });
+    await waitFor(() => expect(reply.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(reply);
+    expect(held).toHaveLength(1); expect(held[0]!.change).toEqual({ selected_option_id: null, text: 'Keep my words' });
+    // Cancel: the dialog never queues, so the draft is unchanged.
+    expect([saved().text, saved().selected_option_id]).toEqual(['Keep my words', 'no']);
+    fireEvent.click(screen.getByRole('button', { name: 'Send “Change the design”' }));
+    expect(held).toHaveLength(2); expect(held[1]!.change).toEqual({ selected_option_id: 'no', text: '' });
+    expect([saved().text, saved().selected_option_id]).toEqual(['Keep my words', 'no']);
+    expect(editor().value).toBe('Keep my words'); expect(value.calls).toHaveLength(0);
+    await act(async () => { await held[1]!.queue(); });
+    const sent = value.calls[0]!.command;
+    expect(sent.command === 'input_submit' && [sent.params.text, sent.params.selected_option_id]).toEqual(['', 'no']);
   });
   it('asks to review a saved detail reply after the item changed, then sends it re-based on the current revision', async () => {
     const value = await setup(), user = userEvent.setup();

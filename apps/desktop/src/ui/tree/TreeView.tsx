@@ -182,17 +182,17 @@ export function TreeView(props: TreeViewProps) {
   const send = (change: { selected_option_id: string | null; text: string }) => {
     if (!entry || entry.saving || blocked) return;
     const id = entry.draft.op_id, itemKey = answering, item = answerRow?.item;
-    drafts.edit(id, change);
-    const submit = () => drafts.submit(id).then(saved => {
+    // The change is saved only when the input goes out: a cancelled "not running" dialog keeps the draft as typed.
+    const submit = () => { drafts.edit(id, change); return drafts.submit(id).then(saved => {
       if (saved && mounted.current) {
         setAnswering(current => current === itemKey ? null : current);
         if (itemKey) focusRow(itemKey);
       }
       return saved;
-    });
+    }); };
     if (item && binding?.connection_state !== 'connected' && onAgentNotRunning) {
       const label = change.selected_option_id ? item.options.find(option => option.id === change.selected_option_id)?.label ?? '' : change.text;
-      onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', queue: submit });
+      onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', change, queue: submit });
     } else void submit();
   };
   const sendOption = (index: number) => { const option = options[index]; if (option) send({ selected_option_id: option.id, text: '' }); };

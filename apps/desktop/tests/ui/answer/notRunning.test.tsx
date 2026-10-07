@@ -36,8 +36,8 @@ function fakeDrafts(held: { op_id: string; text: string; selected_option_id: str
     submit: (id: string) => { submitted.push(id); return Promise.resolve(true); },
   } };
 }
-const submission = (queue = vi.fn(() => Promise.resolve(true))): PendingSubmission => ({
-  route: { ...source, item_id: '3.1' }, intent: 'answer', question: 'Keep the retry?', label: 'Drop it', agent: 'codex', queue,
+const submission = (queue = vi.fn(() => Promise.resolve(true)), change: PendingSubmission['change'] = { text: '', selected_option_id: 'b' }): PendingSubmission => ({
+  route: { ...source, item_id: '3.1' }, intent: 'answer', question: 'Keep the retry?', label: 'Drop it', agent: 'codex', change, queue,
 });
 const deps = (drafts: ReturnType<typeof fakeDrafts>, reveal = vi.fn()) =>
   ({ navigation: navigation as never, drafts: drafts.store as never, reveal });
@@ -79,7 +79,8 @@ describe('Send while the agent is not running', () => {
 
   it('carries a written answer, and reports no copy when the topic was not continued', async () => {
     const drafts = fakeDrafts({ op_id: 'held', text: 'Only on 5xx', selected_option_id: null });
-    expect(await carryAnswer(navigation as never, drafts.store as never, submission(), live)).toEqual({ ...live, item_id: '2.1' });
+    const written = submission(undefined, { text: 'Only on 5xx', selected_option_id: null });
+    expect(await carryAnswer(navigation as never, drafts.store as never, written, live)).toEqual({ ...live, item_id: '2.1' });
     expect(drafts.edits[0]).toEqual(['new-op', { text: 'Only on 5xx', selected_option_id: null }]);
     const other = { ...submission(), route: { ...source, item_id: '9' } };
     expect(await carryAnswer(navigation as never, fakeDrafts(null).store as never, other, live)).toBeNull();

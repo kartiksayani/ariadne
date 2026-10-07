@@ -11,6 +11,9 @@ import { agentName } from '../shell/model';
 /** A keyboard request to open the input for an intent, optionally choosing option `optionIndex`. */
 export interface OwnerFocusRequest { intent: OwnerIntent; token: number; optionIndex?: number }
 
+/** The text and option a send puts into the draft. */
+export interface DraftChange { readonly text: string; readonly selected_option_id: string | null }
+
 /** A send held because the session's agent is not running (handoff 1ad). */
 export interface PendingSubmission {
   readonly route: ItemRoute;
@@ -21,7 +24,9 @@ export interface PendingSubmission {
   readonly label: string;
   /** The agent that is not running, e.g. "codex". */
   readonly agent: string;
-  /** Queues the saved draft for that agent; resolves true once the input is saved. */
+  /** What the owner chose to send. It is saved into the draft only on Queue or Send, so Cancel keeps the draft as it was. */
+  readonly change: DraftChange;
+  /** Saves `change` into the draft and queues it for that agent; resolves true once the input is saved. */
   readonly queue: () => Promise<boolean>;
 }
 
@@ -93,10 +98,15 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
         : guard === emptyDraft ? null : guard;
   const locked = !entry || entry.saving || entry.uncertain || state.preferenceUncertain;
   const submit = () => entry ? drafts.submit(entry.draft.op_id).then(saved => { if (saved) onSaved?.(); return saved; }) : Promise.resolve(false);
-  const dispatch = (label: string) => {
-    if (!route) return;
-    if (connection !== 'connected' && onAgentNotRunning) onAgentNotRunning({ route: { ...route, item_id: itemId }, intent, question: item?.question ?? '', label, agent, queue: submit });
-    else void submit();
+  // The change is saved only when the input goes out: a cancelled "not running" dialog keeps the draft as typed.
+  const dispatch = (label: string, change: DraftChange) => {
+    if (!route || !entry) return;
+    const id = entry.draft.op_id;
+    const apply = () => { const saved = drafts.getSnapshot().entries[id]?.draft;
+      if (saved && (saved.text !== change.text || saved.selected_option_id !== change.selected_option_id)) drafts.edit(id, change); };
+    const queue = () => { apply(); return submit(); };
+    if (connection !== 'connected' && onAgentNotRunning) onAgentNotRunning({ route: { ...route, item_id: itemId }, intent, question: item?.question ?? '', label, agent, change, queue });
+    else void queue();
   };
   const ready = () => !!entry && !locked && !changed && !blocked;
   return {
@@ -107,13 +117,13 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
     sendOption: optionId => {
       const option = item?.options.find(value => value.id === optionId);
       if (!entry || !option || !ready()) return;
-      drafts.edit(entry.draft.op_id, { selected_option_id: option.id, text: '' }); dispatch(option.label);
+      dispatch(option.label, { selected_option_id: option.id, text: '' });
     },
     sendText: text => {
       if (!entry || !text.trim() || !ready()) return;
-      drafts.edit(entry.draft.op_id, { selected_option_id: null, text }); dispatch(text);
+      dispatch(text, { selected_option_id: null, text });
     },
-    send: () => { if (entry && ready() && guard !== emptyDraft) dispatch(entry.draft.text); },
+    send: () => { if (entry && ready() && guard !== emptyDraft) dispatch(entry.draft.text, { text: entry.draft.text, selected_option_id: entry.draft.selected_option_id }); },
     retry: () => entry && !entry.saving && !state.preferenceUncertain && (entry.uncertain || entry.error) ? submit() : Promise.resolve(false),
     review: () => { if (entry && session) drafts.review(entry.draft.op_id, session); },
     prepareRevised: () => { if (entry && session) drafts.prepareRevised(entry.draft.op_id, session); },
