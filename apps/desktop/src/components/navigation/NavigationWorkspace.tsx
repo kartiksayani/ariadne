@@ -5,7 +5,7 @@ import { CoreFailure } from '../../data/service';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import { NavigationStore, useNavigation, type NavigationState } from '../../state/navigation/store';
 import { ProjectCard, SessionCard } from '../reference/ProjectSessionCard';
-import { GlobalWaitingPanel, type GlobalWaitingPanelProps } from '../reference/GlobalWaitingPanel';
+import { WaitingFrame } from '../../ui/waiting/WaitingColumn';
 import { RegisterProject, BindSession } from './Registration';
 import { DiscoverProjects } from './Discovery';
 import type { DiscoveryController } from '../../data/discovery';
@@ -26,7 +26,6 @@ export interface OpenedSessionView {
 export interface NavigationWorkspaceProps {
   readonly store: NavigationStore;
   readonly discovery?: DiscoveryController;
-  readonly waiting?: GlobalWaitingPanelProps;
   readonly waitingContent?: ReactNode;
   readonly detail?: ReactNode;
   readonly railContent?: ReactNode;
@@ -125,7 +124,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, waiting, waitingContent, detail, railContent, chrome, session, onCloseDetail, onRemove, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
+export function NavigationWorkspace({ store, discovery, waitingContent, detail, railContent, chrome, session, onCloseDetail, onRemove, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const [registering, setRegistering] = useState(false);
   const [registrationRoot, setRegistrationRoot] = useState('');
@@ -221,7 +220,7 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
   </div>;
   return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
     tabs={{ tabs, disabled, onSelect: selectTab, onClose: closeTab }}
-    body={{ waiting: waitingContent ?? <GlobalWaitingPanel {...(waiting ?? { count: '—', emptyText: 'Reading registered sessions…', waiting: [], sent: [] })} />,
+    body={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />,
       center, detail, rail: railContent, onCloseDetail, onRemove }}
     summary={footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,
       inProgress: global.items_by_status.in_progress, open: global.items_by_status.open, archivedTopics: global.archived_topics } : null)} overlay={registering

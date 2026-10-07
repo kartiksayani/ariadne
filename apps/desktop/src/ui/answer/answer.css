@@ -1,10 +1,9 @@
-/* Answer Control.dc.html, minimal WP1 stand-in. WP2 owns the final styles. */
-.answer-control {
+/* Answer control: values from the handoff's "Answer Control.dc.html". */
+.answer {
   display: flex;
   flex-direction: column;
   gap: 8px;
   font-family: var(--font-body);
-  cursor: default;
 }
 
 .answer-warn {
@@ -19,10 +18,23 @@
   background: color-mix(in srgb, var(--a-warn) 12%, transparent);
 }
 
-.answer-warn i, .answer-blocked i {
+.answer-warn > i,
+.answer-blocked > i {
   flex: none;
   margin-top: 2px;
   font-size: 13px;
+}
+
+.answer-warn > span {
+  flex: 1;
+  min-width: 0;
+}
+
+/* `.btn` loads after this file (style.css); button rules carry `.btn` to win the tie. */
+.btn.answer-warn-action {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 12.5px;
 }
 
 .answer-options {
@@ -31,11 +43,9 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-.answer-full .answer-options {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
+.answer-full .answer-options { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 
-.answer-control .answer-option {
+.btn.answer-option {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -43,20 +53,18 @@
   gap: 3px;
   width: 100%;
   min-height: 44px;
-  height: auto;
   padding: 8px 10px 9px;
   text-align: left;
   font-weight: 400;
   background: transparent;
 }
 
-.answer-full .answer-option {
-  padding: 10px 12px 11px;
-}
+.answer-full .btn.answer-option { padding: 10px 12px 11px; }
 
-.answer-control .answer-option[data-picked] {
-  box-shadow: 0 0 0 1px var(--color-accent), 0 0 18px color-mix(in srgb, var(--color-accent) 20%, transparent);
+.btn.answer-option-on,
+.btn.answer-option-on:hover {
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  box-shadow: 0 0 0 1px var(--color-accent), 0 0 18px color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 .answer-option-head {
@@ -87,29 +95,22 @@
   color: var(--color-text);
 }
 
-.answer-full .answer-label {
-  font-size: 14px;
-}
-
-.answer-label[data-recommended] {
-  color: var(--a-acc-text);
-}
+.answer-full .answer-label { font-size: 14px; }
+.answer-option-rec .answer-label { color: var(--a-acc-text); }
 
 .answer-picked {
-  margin-left: auto;
   flex: none;
   display: inline-grid;
   place-items: center;
   width: 18px;
   height: 18px;
+  margin-left: auto;
   border-radius: 50%;
   background: var(--color-accent);
   color: var(--a-bg);
 }
 
-.answer-picked i {
-  font-size: 11px;
-}
+.answer-picked > i { font-size: 11px; }
 
 .answer-consequence {
   padding-left: 26px;
@@ -119,9 +120,7 @@
   color: color-mix(in srgb, var(--color-text) 68%, transparent);
 }
 
-.answer-full .answer-consequence {
-  font-size: 13px;
-}
+.answer-full .answer-consequence { font-size: 13px; }
 
 .answer-recommended {
   display: inline-flex;
@@ -132,25 +131,21 @@
   color: var(--a-acc-text);
 }
 
-.answer-recommended i {
-  font-size: 11px;
-}
+.answer-recommended > i { font-size: 11px; }
 
-.answer-send {
+.answer-send-row {
   display: flex;
-  align-items: center;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px 10px;
 }
 
-.answer-control .answer-send-option {
+.btn.answer-send {
   height: 32px;
   max-width: 100%;
 }
 
-.answer-send-option i {
-  font-size: 14px;
-}
+.answer-send > i { font-size: 14px; }
 
 .answer-send-label {
   overflow: hidden;
@@ -177,27 +172,27 @@
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
-.answer-text {
+.answer-reply {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-top: 2px;
 }
 
-.answer-text textarea.input {
+textarea.answer-text {
   min-height: 56px;
   font-size: 13.5px;
   line-height: 1.5;
   resize: vertical;
 }
 
-.answer-text-send {
+.answer-reply-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.answer-text-send .btn {
+.btn.answer-reply-send {
   height: 30px;
   font-size: 13px;
 }
@@ -209,4 +204,30 @@
   font-size: 12.5px;
   line-height: 1.45;
   color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+/* Detail panel composer (interim, until the detail redesign). */
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.composer-actions > .btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.composer-error {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--a-warn);
 }

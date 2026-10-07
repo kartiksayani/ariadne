@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
@@ -10,7 +9,8 @@ import { createDesktopService, immutable, OpenSessions, ServiceFailure, type Des
 import { deliveryEvidence } from '../../../src/selectors/waiting/delivery';
 import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
-import { WaitingPanel } from '../../../src/components/waiting/WaitingPanel';
+import { OwnerDraftStore } from '../../../src/state/drafts/store';
+import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
 function fixture(): { session: Session; project: ProjectSummary; summary: SessionSummary } {
@@ -68,8 +68,21 @@ const stores: WaitingStore[] = [], sessions: OpenSessions[] = [];
 function setup() {
   const transport = new Transport(), service = createDesktopService(transport), opened = new OpenSessions(service);
   const store = new WaitingStore(service, opened); stores.push(store); sessions.push(opened);
-  return { transport, store, opened };
+  // The column's answer drafts: one preferences read with no saved drafts.
+  const drafts = () => {
+    transport.push('preferences_get', { api_version: 1, ok: true, data: { kind: 'preferences_get', data: { schema_version: 1, revision: 1,
+      global: { theme: 'system', selected_navigation: { kind: 'projects' }, window: null, pinned: false, notification_watermark: null }, sessions: [], later: [], drafts: [] } } } as unknown as QueryEnvelope);
+    let id = 0; return new OwnerDraftStore(service, () => inputId(String(50 + ++id)));
+  };
+  return { transport, store, opened, drafts };
 }
+/** A session whose waiting item 2 offers two options. */
+function withOptions(session = mutableSession()): Session {
+  session.items['2']!.options = [{ id: 'yes', label: 'Keep the design', consequence: 'Retain the current contract.', recommended: true },
+    { id: 'no', label: 'Change the design', consequence: 'Review a new contract.', recommended: false }];
+  return session;
+}
+const sentRow = (text: string) => screen.getAllByRole('button').find(element => element.classList.contains('waiting-sent') && element.textContent?.includes(text))!;
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); sessions.splice(0).forEach(opened => opened.closeAll()); vi.useRealTimers(); });
 
 describe('current Waiting and immutable Sent selection', () => {
@@ -307,78 +320,70 @@ describe('registered global capture', () => {
 });
 
 describe('source-backed Waiting and Sent panel', () => {
-  it('keeps the answer control, focus and draft through qualified presence heartbeats without recapturing the queue', async () => {
-    const { store, transport } = setup(), seed = mutableSession(), summary = fixture().summary;
+  it('keeps the card control and its focus through qualified presence heartbeats without recapturing the queue', async () => {
+    const { store, transport, drafts } = setup(), seed = withOptions(), summary = fixture().summary;
     summary.active_binding!.presence = null;
     const queued = seed.inputs[inputId('76')]!; queued.state = 'queued'; queued.active_attempt_id = null;
     transport.push('project_list', projectPage()); transport.push('session_list', sessionPage([summary])); transport.push('session_get', loaded(seed));
-    await store.start();
-    const submit = vi.fn();
-    function Panel() {
-      const [draft, setDraft] = useState('');
-      return <WaitingPanel store={store} revealItem={vi.fn()} openSession={vi.fn()}
-        answerControl={() => ({ options: [], selected: null, draft, onSelect: vi.fn(), onDraft: setDraft, onSubmit: submit })} />;
-    }
-    render(<Panel />);
-    const textbox = screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement;
-    textbox.focus(); fireEvent.change(textbox, { target: { value: 'owner draft in progress' } });
-    textbox.setSelectionRange(6, 11);
+    await store.start(); const answers = drafts();
+    render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
+    await act(async () => { await answers.load(); });
+    const option = screen.getByTitle('Press 2 to select'); option.focus();
     const before = store.getSnapshot(), reads = transport.calls.length;
-    const card = screen.getAllByRole('button').find(element => element.textContent?.includes(queued.payload.target_snapshot.item_question!))!;
-    expect(card.textContent).toContain('Saved');
+    const row = sentRow(queued.payload.target_snapshot.item_question!);
+    expect(row.textContent).toContain('Sending your drop request…');
     const active = summary.active_binding!, observation = { ...structuredClone(binding.presence!), freshness: 'fresh' as const,
       generation: active.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
     for (const [index, execution] of ['running', 'idle', 'running'].entries()) {
       await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
         observation: { ...observation, execution_state: execution as 'running' | 'idle', last_seen_at: `2026-10-05T02:05:0${index}.000Z` } }); });
-      expect(screen.getByRole('textbox')).toBe(textbox); expect(document.activeElement).toBe(textbox);
-      expect(textbox.value).toBe('owner draft in progress'); expect(textbox.selectionStart).toBe(6); expect(textbox.selectionEnd).toBe(11);
+      expect(screen.getByTitle('Press 2 to select')).toBe(option); expect(document.activeElement).toBe(option);
       expect(store.getSnapshot().status).toBe('ready'); expect(store.getSnapshot().waiting).toBe(before.waiting);
       expect(store.getSnapshot().sent).toBe(before.sent); expect(store.getSnapshot().counts).toBe(before.counts);
-      expect(card.textContent).toContain(execution === 'running' ? 'Queued · waiting for connection' : 'Saved');
+      expect(row.textContent).toContain(execution === 'running' ? 'Queued for demo.local · delivers when it’s running again' : 'Sending your drop request…');
       expect(transport.calls).toHaveLength(reads);
     }
-    fireEvent.keyDown(textbox, { key: 'Enter', metaKey: true });
-    expect(submit).toHaveBeenCalledWith({ text: 'owner draft in progress' });
+    fireEvent.keyDown(option, { key: '2' });
+    expect(option.getAttribute('aria-pressed')).toBe('true'); expect(screen.getByRole('button', { name: 'Send answer' })).toBeTruthy();
   });
   it('fences an old question immediately after a durable revision hint until the complete new question is captured', async () => {
-    const { store, transport } = setup(); transport.capture(); await store.start();
-    const answer = vi.fn<NonNullable<Parameters<typeof WaitingPanel>[0]['answerControl']>>(() => ({ options: [], selected: null,
-      draft: 'old question draft', onSelect: vi.fn(), onDraft: vi.fn(), onSubmit: vi.fn() }));
-    render(<WaitingPanel store={store} revealItem={vi.fn()} openSession={vi.fn()} answerControl={answer} />);
-    const oldControl = screen.getByRole('textbox'), changed = mutableSession(), summary = fixture().summary;
+    const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start(); const answers = drafts();
+    render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
+    await act(async () => { await answers.load(); });
+    const send = () => screen.getByRole('button', { name: 'Send answer' });
+    expect(send().hasAttribute('disabled')).toBe(false);
+    const changed = withOptions(), summary = fixture().summary;
     changed.revision++; summary.revision = changed.revision;
     changed.items['2']!.question_revision++; changed.items['2']!.question = 'The revised current question';
     const pending = deferred<QueryEnvelope>();
     transport.push('project_list', pending.promise); transport.push('session_list', sessionPage([summary]), sessionPage([summary]), sessionPage([summary]));
     transport.push('session_get', loaded(changed), loaded(changed));
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: demo.id, revision: changed.revision }); });
-    expect(store.getSnapshot().status).toBe('stale'); expect(screen.queryByRole('textbox')).toBeNull();
-    expect(oldControl.isConnected).toBe(false); expect(screen.getByText(/Refresh is pending/)).toBeTruthy();
+    expect(store.getSnapshot().status).toBe('stale'); expect(send().hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/Refresh is pending/)).toBeTruthy();
     const active = summary.active_binding!;
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
       observation: { ...structuredClone(binding.presence!), generation: active.generation, last_seen_at: '2026-10-05T02:05:00.000Z' } }); });
-    expect(store.getSnapshot().status).toBe('stale'); expect(screen.queryByRole('textbox')).toBeNull();
-    const calls = answer.mock.calls.length;
+    expect(store.getSnapshot().status).toBe('stale'); expect(send().hasAttribute('disabled')).toBe(true);
     await act(async () => { pending.resolve(projectPage()); await store.refresh(); });
     expect(store.getSnapshot().status).toBe('ready'); expect(screen.getByText(changed.items['2']!.question)).toBeTruthy();
-    expect(answer.mock.calls.length).toBeGreaterThan(calls);
-    expect(answer.mock.lastCall).toEqual([expect.objectContaining({ item: expect.objectContaining({ question_revision: 2 }) })]);
-    expect(screen.getByRole('textbox')).not.toBe(oldControl);
+    // The untouched draft follows the new question; no review is asked for.
+    expect(screen.queryByText(/This item changed/)).toBeNull();
+    expect(Object.values(answers.getSnapshot().entries).map(entry => entry.draft.question_revision)).toEqual([2]);
   });
   it('renders live scoped session presence when catalogue summaries have no observation', async () => {
-    const { store, transport, opened } = setup(), seed = mutableSession();
+    const { store, transport, opened, drafts } = setup(), seed = mutableSession();
     const summary = fixture().summary; summary.active_binding!.presence = null;
     const queued = seed.inputs[inputId('76')]!;
     queued.state = 'queued'; queued.active_attempt_id = null;
     transport.push('project_list', projectPage()); transport.push('session_list', sessionPage([summary])); transport.push('session_get', loaded(seed));
-    await store.start(); render(<WaitingPanel store={store} revealItem={vi.fn()} openSession={vi.fn()} />);
-    const card = screen.getAllByRole('button').find(element => element.textContent?.includes(queued.payload.target_snapshot.item_question!))!;
-    expect(card.textContent).toContain('Saved');
+    await store.start(); render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    const row = sentRow(queued.payload.target_snapshot.item_question!), saved = 'Sending your drop request…';
+    expect(row.textContent).toContain(saved);
     const active = summary.active_binding!, running = { ...structuredClone(binding.presence!), freshness: 'fresh' as const,
       generation: active.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
-    expect(card.textContent).toContain('Queued · waiting for connection');
+    expect(row.textContent).toContain('Queued for demo.local');
     expect(opened.open(route).getSnapshot().presence[active.id].execution_state).toBe('running');
     expect(store.getSnapshot().sessions[0].summary.active_binding!.presence).toBeNull();
     for (const observation of [
@@ -386,51 +391,76 @@ describe('source-backed Waiting and Sent panel', () => {
       { ...running, execution_state: 'unknown' as const },
     ]) {
       await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation }); });
-      expect(card.textContent).toContain('Saved');
-      expect(card.textContent).not.toContain('Idle');
+      expect(row.textContent).toContain(saved);
+      expect(row.textContent).not.toContain('Idle');
     }
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: inputId('99'),
       observation: { ...running, generation: inputId('99') } }); });
-    expect(card.textContent).toContain('Saved');
+    expect(row.textContent).toContain(saved);
     const captured = store.getSnapshot(); store.stop();
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
     expect(store.getSnapshot()).toBe(captured);
   });
   it('routes waiting/current and original Sent targets, including a topic-only input', async () => {
-    const { store, transport } = setup(); transport.capture(); await store.start();
+    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
     const reveal = vi.fn(), open = vi.fn();
-    render(<WaitingPanel store={store} revealItem={reveal} openSession={open} />);
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={open} />);
+    expect(screen.getByText('Waiting on me')).toBeTruthy(); expect(screen.getByText('Oldest first')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Details' })); expect(reveal).toHaveBeenCalledWith({ ...route, item_id: '2' });
-    const sent = screen.getAllByRole('button').find(button => button.textContent?.includes('Continue'));
+    expect(screen.getByText(/^Waiting .* · asked in #\d+$/)).toBeTruthy();
     // The topic-only input opens the registered session, never an invented item.
-    const topic = sent ?? screen.getAllByRole('button').find(button => button.textContent?.includes('continue'))!;
-    fireEvent.keyDown(topic, { key: 'Enter' }); expect(open).toHaveBeenCalledWith(route);
+    fireEvent.keyDown(sentRow('Continued context'), { key: 'Enter' }); expect(open).toHaveBeenCalledWith(route);
+    fireEvent.click(sentRow('Implement receipt lookup')); expect(reveal).toHaveBeenLastCalledWith({ ...route, item_id: '3' });
+    expect(document.querySelector('.waiting-sent-label')?.textContent).toBe('Sent· waiting for the agent to pick up');
     expect(screen.queryByRole('textbox')).toBeNull();
   });
-  it('shows incomplete data and immutable saved choice/body instead of a false all-clear state', async () => {
-    const { store, transport } = setup(), seed = mutableSession();
-    seed.inputs[inputId('76')]!.payload.text = '  exact\nowner bytes  ';
-    seed.inputs[inputId('76')]!.payload.selected_option_id = 'frozen';
-    seed.inputs[inputId('76')]!.payload.target_snapshot.options = [{ id: 'frozen', label: 'Old choice', consequence: 'Old consequence', recommended: false }];
+  it('shows incomplete data and the frozen Sent label instead of a false all-clear state', async () => {
+    const { store, transport, drafts } = setup(), seed = mutableSession();
+    const followup = seed.inputs[inputId('74')]!; followup.kind = 'answer'; followup.payload.selected_option_id = 'frozen';
+    followup.payload.target_snapshot.options = [{ id: 'frozen', label: 'Old choice', consequence: 'Old consequence', recommended: false }];
     const sessions = sessionPage(); if (sessions.ok && sessions.data.kind === 'session_list') {
       sessions.data.data.counts.completeness = 'partial'; sessions.data.data.counts.unavailable_session_ids = [inputId('99')];
     }
     const projects = projectPage(); if (projects.ok && projects.data.kind === 'project_list' && sessions.ok && sessions.data.kind === 'session_list') projects.data.data.counts = structuredClone(sessions.data.data.counts);
     transport.push('project_list', projects); transport.push('session_list', sessions); transport.push('session_get', loaded(seed)); await store.start();
-    render(<WaitingPanel store={store} revealItem={vi.fn()} openSession={vi.fn()} />);
-    expect(screen.getByText('1 · incomplete')).toBeTruthy(); expect(screen.getByText(/Queue counts are incomplete/)).toBeTruthy();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    expect(screen.getByText(/Queue counts are incomplete/)).toBeTruthy();
     expect(screen.getByText(`Unavailable session ${inputId('99')}`)).toBeTruthy();
-    expect(screen.getByText('Saved choice: Old choice · Old consequence')).toBeTruthy();
-    expect(screen.getByText(/exact owner bytes/).textContent).toBe('  exact\nowner bytes  ');
+    expect(screen.queryByText('Nothing waiting on you')).toBeNull();
+    expect(sentRow('Replace the old retry question').textContent).toMatch(/“Old choice”/);
   });
-  it('keeps stale rows but removes answer actions after a read failure', async () => {
-    const { store, transport } = setup(); transport.capture(); await store.start();
-    const submit = vi.fn(); render(<WaitingPanel store={store} revealItem={vi.fn()} openSession={vi.fn()}
-      answerControl={() => ({ options: [], selected: null, draft: 'retained', onSelect: vi.fn(), onDraft: vi.fn(), onSubmit: submit })} />);
-    expect(screen.getByRole('textbox')).toHaveProperty('value', 'retained');
+  it('keeps stale rows but blocks sending after a read failure', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start(); const answers = drafts();
+    render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
+    await act(async () => { await answers.load(); });
+    expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(false);
     transport.push('project_list', { api_version: 1, ok: false, error });
     await act(async () => { await store.refresh(); });
-    expect(screen.queryByRole('textbox')).toBeNull(); expect(submit).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByText(error.hint)).toBeTruthy(); expect(screen.getByRole('button', { name: 'Details' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Refresh queue' })).toBeTruthy();
+  });
+  it('shows the empty state, the loading skeleton and the selected ring', async () => {
+    const { store, transport, drafts } = setup(), seed = mutableSession(); seed.items['2']!.status = 'in_progress';
+    const answers = drafts();
+    const view = render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
+    expect(screen.getAllByLabelText('Loading waiting questions')).toHaveLength(2); expect(screen.getByText('–')).toBeTruthy();
+    transport.capture(seed); await act(async () => { await store.start(); });
+    expect(screen.getByText('Nothing waiting on you')).toBeTruthy(); expect(screen.getByText('New questions from the agent will appear here.')).toBeTruthy();
+    expect(screen.getByText('0')).toBeTruthy();
+    view.unmount();
+  });
+  it('rings the selected card and offers preference reconciliation', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start(); const answers = drafts();
+    const view = render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
+    await act(async () => { await answers.load(); });
+    expect(document.querySelector('[data-waiting-item="2"]')?.getAttribute('aria-current')).toBeNull();
+    view.rerender(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} selected={{ ...route, item_id: '2' }} />);
+    expect(document.querySelector('[data-waiting-item="2"]')?.getAttribute('aria-current')).toBe('true');
+    // A preference write that cannot be confirmed locks the drafts until it is retried.
+    drafts(); transport.push('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'commit_uncertain' } });
+    fireEvent.click(screen.getByTitle('Press 2 to select'));
+    expect(await screen.findByRole('button', { name: 'Retry saving draft preferences' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(true);
   });
 });

@@ -6,7 +6,7 @@
 import demo from '../../../fixtures/domain/demo/session.json';
 import { AppTransport, assertOwnerWire } from '../../../apps/desktop/tests/ui/app/transport';
 import type { OwnerMutationRequest, OwnerQueryRequest, SessionPreferences, SessionRef } from '../../../apps/desktop/src/generated/core';
-import type { Binding, Item, ItemStatus, Message, Page, ProjectSummary, Round, Session, SessionSummary, SummaryCounts, Topic } from '../../../apps/desktop/src/generated/domain/models';
+import type { Answer, Attempt, Binding, Input, Item, ItemStatus, Message, Page, ProjectSummary, Round, Session, SessionSummary, SummaryCounts, Topic } from '../../../apps/desktop/src/generated/domain/models';
 import { designNow, frameNow, frameSpec, type FrameSpec } from './frames';
 
 export interface ProtoOption { readonly id: string; readonly label: string; readonly consequence: string; readonly rec?: boolean }
@@ -70,7 +70,7 @@ function sessionTimes(range: string): { created: string; ended: string | null } 
 /** The prototype scenario's world (Ariadne.dc.html:904-970). */
 function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
   const thread = spec.scenario === 'thread', review = spec.scenario === 'review' || thread;
-  const project = !['default', 'review', 'thread', 'reveal'].includes(spec.scenario), blank = spec.state === 'empty' || spec.state === 'loading';
+  const project = ['project', 'archive', 'sessions', 'session', 'projects', 'projectpage'].includes(spec.scenario), blank = spec.state === 'empty' || spec.state === 'loading';
   const topics = project ? [...data.EARLIER_TOPICS, ...data.TOPICS, ...data.ARCHIVED_TOPICS, ...data.OTHER_TOPICS]
     : review ? [...data.TOPICS, data.REVIEW_TOPIC] : data.TOPICS;
   const items: ProtoItem[] = blank ? [] : structuredClone(project ? [...data.EARLIER_ITEMS, ...data.ITEMS, ...data.ARCHIVED_ITEMS, ...data.OTHER_ITEMS]
@@ -87,6 +87,15 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
       item.status = reply.status; item.outcome = reply.outcome; item.updated.push(n, n + 1);
     });
   }
+  // Answers in delivery (Ariadne.dc.html:929-937): 1l's answer is received;
+  // 1m's 3.1 failed and 2.1.1 is being checked after an interruption.
+  const submissions: Submission[] = [];
+  if (spec.scenario === 'sent') {
+    msgs.push({ number: 19, author: 'me', time: fmt(++clock), excerpt: 'Approve' });
+    items.find(item => item.id === '2.1.1')!.updated.push(19);
+    submissions.push({ item: '2.1.1', choice: 0, stage: 'received', message: 19 });
+  }
+  if (spec.scenario === 'failed') submissions.push({ item: '3.1', choice: 0, stage: 'failed' }, { item: '2.1.1', choice: 0, stage: 'checking' });
   const sessions = project ? data.PROJECT_SESSIONS : [data.PROJECT_SESSIONS[0]];
   const projects = project ? data.PROJECTS : [data.PROJECTS[0]];
   // The prototype keeps the archive per project ("kept for every session",
@@ -98,8 +107,18 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
   const tab = ({ sessions: 'all', session: 's1', projects: 'home', projectpage: 'home' } as Record<string, string>)[spec.scenario] ?? (autoTab && autoTab !== 's2' ? autoTab : 's2');
   const openTabs = ({ sessions: ['s2', 's1', 'c1'], projects: ['s2', 's1', 'c1'], projectpage: ['s2', 's1'], session: ['s2', 's1'], project: ['s2', 's1'],
     archive: ['s2', 's1'] } as Record<string, string[]>)[spec.scenario] ?? ['s2'];
-  return { topics, items, msgs, sessions, projects, sessionOf, tab, openTabs, now: new Date(frameNow(spec)).toISOString() };
+  return { topics, items, msgs, sessions, projects, sessionOf, tab, openTabs, submissions, reconnecting: spec.scenario === 'reconnecting',
+    now: new Date(frameNow(spec)).toISOString() };
 }
+
+/** One answer of the prototype's `subs`: the item, the option index, its delivery stage and the owner message it posted. */
+interface Submission { readonly item: string; readonly choice: number; readonly stage: 'received' | 'failed' | 'checking'; readonly message?: number }
+
+/** The attempt facts that `deliveryEvidence` reads as each stage. */
+const attemptFacts = (stage: Submission['stage']): Pick<Attempt,'acceptance' | 'turn_state' | 'error'> => stage === 'received'
+  ? { acceptance: 'accepted', turn_state: 'running', error: null }
+  : stage === 'failed' ? { acceptance: 'accepted', turn_state: 'failed', error: { code: 'turn_failed', reason: 'The host turn failed.', retryable: true, observed_at: at(0, '15:05') } }
+    : { acceptance: 'uncertain', turn_state: 'unknown', error: { code: 'delivery_uncertain', reason: 'Bridge disconnected during acceptance.', retryable: false, observed_at: at(0, '15:05') } };
 
 const counts = (sessions: readonly Session[]): SummaryCounts => {
   const value: SummaryCounts = { items_by_status: { open: 0, waiting_on_me: 0, in_progress: 0, decided: 0, done: 0, dropped: 0, replaced: 0 },
@@ -133,7 +152,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
     const ref = refs.get(proto.id)!, times = sessionTimes(proto.range), bindingId = uuid('e', index + 1);
     const binding: Binding = { ...structuredClone(demo.bindings['00000000-0000-4000-8000-000000000020']) as Binding, id: bindingId,
       adapter_id: proto.agent === 'claude-code' ? 'claude_code_mod' : proto.agent, external_session_id: `${proto.id}-thread`, generation: uuid('f', index + 1),
-      created_at: times.created, dispatch_state: proto.running ? 'enabled' : 'disconnected', connection_state: proto.running ? 'connected' : 'disconnected',
+      created_at: times.created, dispatch_state: proto.running ? 'enabled' : 'disconnected', connection_state: !proto.running ? 'disconnected' : world.reconnecting ? 'reconnecting' : 'connected',
       active_input_id: null, issued_through_message_number: 0 };
     const topics = world.topics.filter(topic => world.sessionOf(topic) === proto.id);
     const topicIds = new Map(topics.map(topic => [topic.id, uuid('c', world.topics.indexOf(topic) + 1)]));
@@ -148,7 +167,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         items_touched: items, binding_id: bindingId, input_id: null, attempt_id: null, host_turn_id: null, round_id: null, origin: null };
     });
     // Only the thread scenario writes rounds (THREAD_PATCH); every other item has none, as in the prototype.
-    const rounds = protoItems.flatMap(proto => (proto.rounds ?? []).map((round, index): Round => {
+    const threadRounds = protoItems.flatMap(proto => (proto.rounds ?? []).map((round, index): Round => {
       const ids = (author: ProtoMessage['author']) => round.msgs.filter(number => protoMessages.find(message => message.number === number)?.author === author)
         .map(number => messageIds.get(number)!);
       return { id: uuid('f', 1000 + protoItems.indexOf(proto) * 10 + index), item_id: proto.id, ordinal: index + 1, opened_message_id: messageIds.get(round.msgs[0])!, question_snapshot: proto.q,
@@ -158,7 +177,9 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
     const items = Object.fromEntries(protoItems.map((proto): [string, Item] => {
       const siblings = protoItems.filter(item => item.parent === proto.parent && item.topic === proto.topic);
       const created = messageTimes.get(proto.created) ?? times.created, status = statusOf[proto.status];
-      return [proto.id, { id: proto.id, ordinal: siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
+      // `short` is the planned backend label (P8.3 follow-up); the views read it when present.
+      const short = { short: proto.short };
+      return [proto.id, { ...short, id: proto.id, ordinal:siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
         type: proto.type, status, owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
         revision: 1 + proto.updated.length, question_revision: 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
         ask: proto.ask || null, note: proto.note || null,
@@ -170,17 +191,49 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         created_message_id: messageIds.get(proto.created) ?? uuid('d', 0), updated_message_ids: proto.updated.flatMap(number => messageIds.get(number) ?? []),
         status_history: [], waiting_since: status === 'waiting_on_me' ? messageTimes.get(proto.waitingSince ?? -1) ?? created : null,
         recipient_binding_id: status === 'waiting_on_me' ? bindingId : null,
-        current_round_id: rounds.find(round => round.item_id === proto.id && round.closed_at === null)?.id ?? null, source_round_id: null, origin: null }];
+        // A waiting question is the open round of its item; answers bind to it.
+        current_round_id: threadRounds.find(round => round.item_id === proto.id && round.closed_at === null)?.id
+          ?? (status === 'waiting_on_me' ? uuid('f', 200 + world.items.indexOf(proto)) : null), source_round_id: null, origin: null }];
     }));
+    const threadRoundIds = new Set(threadRounds.map(round => round.id));
+    const rounds = Object.fromEntries(threadRounds.map((round): [string, Round] => [round.id, round]));
+    Object.assign(rounds, Object.fromEntries(Object.values(items).filter(item => item.current_round_id && !threadRoundIds.has(item.current_round_id)).map((item): [string, Round] => [item.current_round_id!, {
+      id: item.current_round_id!, item_id: item.id, ordinal: 1, opened_message_id: item.created_message_id, question_snapshot: item.question, ask_snapshot: item.ask,
+      options_snapshot: item.options, question_revision: item.question_revision, owner_message_ids: [], agent_message_ids: [], result_input_ids: [], fork_item_ids: [],
+      closed_at: null, origin: null }])));
+    const inputs: Record<string, Input> = {}, answers: Answer[] = [];
+    world.submissions.filter(submission => items[submission.item]).forEach((submission, index) => {
+      const item = items[submission.item]!, option = item.options[submission.choice]!, round = rounds[item.current_round_id!]!, seq = index + 1;
+      const inputId = uuid('f', 300 + seq), answerId = uuid('f', 400 + seq), attemptId = uuid('f', 500 + seq), marker = `[ARIADNE_INPUT:${inputId}:${attemptId}]`;
+      const messageId = submission.message ? messageIds.get(submission.message)! : uuid('d', 900 + seq);
+      const created = submission.message ? messageTimes.get(submission.message)! : at(0, '15:04');
+      const message = messages.find(value => value.id === messageId);
+      if (message) { message.input_id = inputId; round.owner_message_ids.push(messageId); }
+      if (submission.stage === 'received') binding.active_input_id = inputId;
+      answers.push({ id: answerId, seq, item_id: item.id, question_revision: item.question_revision, question_snapshot: item.question, ask_snapshot: item.ask,
+        options_snapshot: item.options, selected_option_id: option.id, text: '', message_id: messageId, input_id: inputId, supersedes_answer_id: null, created_at: created });
+      inputs[inputId] = { id: inputId, seq, binding_id: bindingId, kind: 'answer', target: { topic_id: item.topic_id, item_id: item.id }, message_id: messageId, answer_id: answerId,
+        created_at: created, expected_question_revision: item.question_revision,
+        payload: { text: '', intent: 'answer', selected_option_id: option.id,
+          target_snapshot: { topic_name: topics.find(topic => topicIds.get(topic.id) === item.topic_id)!.name, item_question: item.question,
+            question_revision: item.question_revision, ask: item.ask, options: item.options },
+          context: { message_ids: [], item_ids: [item.id], round_id: round.id, continuation_operation_id: null } },
+        state: submission.stage === 'received' ? 'in_flight' : 'needs_attention',
+        attempts: [{ id: attemptId, purpose: 'work', repair_for_attempt_id: null, claim_request_id: uuid('f', 600 + seq), binding_generation: binding.generation,
+          prepared_at: created, formatted_payload: `${marker}\n${option.label}`, payload_sha256: '0'.repeat(64), wire_marker: marker, ...attemptFacts(submission.stage),
+          acceptance_receipt: null, acceptance_observed_at: created, host_turn_id: submission.stage === 'received' ? `${proto.id}-turn` : null, turn_observed_at: null,
+          domain_result: null, result_state: 'pending', sealed_at: null, reconciliation_checkpoint: null }],
+        active_attempt_id: attemptId, resolution_history: [] };
+    });
     return { schema_version: 1, id: ref.session_id, project_id: ref.project_id, title: `${proto.agent} · ${proto.when}`, state: proto.status,
       created_at: times.created, updated_at: messages.at(-1)?.created_at ?? times.ended ?? times.created, revision: 1,
       closed_at: proto.status === 'closed' ? times.ended ?? times.created : null,
       counters: { next_root: protoItems.filter(item => item.parent === null).length + 1, next_topic_order: topics.length + 1,
-        next_message: Math.max(0, ...messages.map(message => message.number)) + 1, next_input: 1, next_answer: 1 },
+        next_message: Math.max(0, ...messages.map(message => message.number)) + 1, next_input: answers.length + 1, next_answer: answers.length + 1 },
       active_binding_id: bindingId,
-      topics: Object.fromEntries(topics.map((topic, order): [string, Topic] => [topicIds.get(topic.id)!, { id: topicIds.get(topic.id)!, name: topic.name,
+      topics: Object.fromEntries(topics.map((topic, order): [string, Topic] => [topicIds.get(topic.id)!, { ...{ short: topic.short }, id: topicIds.get(topic.id)!, name: topic.name,
         order: order + 1, revision: 1, created_at: times.created, archived_at: topic.archived ? times.created : null, origin: null }])),
-      items, messages, rounds: Object.fromEntries(rounds.map(round => [round.id, round])), answers: [], bindings: { [bindingId]: binding }, inputs: {}, operation_receipts: {}, continuations: {} };
+      items, messages, rounds, answers, bindings: { [bindingId]: binding }, inputs, operation_receipts: {}, continuations: {} };
   });
   const summaries = sessions.map((session, index): SessionSummary => {
     const binding = session.bindings[session.active_binding_id!]!, running = world.sessions[index].running;
@@ -188,7 +241,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
       created_at: session.created_at, updated_at: session.updated_at, closed_at: session.closed_at, counts: counts([session]),
       active_binding: { id: binding.id, adapter_id: binding.adapter_id, external_session_id: binding.external_session_id, generation: binding.generation,
         dispatch_state: binding.dispatch_state, owner_paused: false, pause_reason: null, connection_state: binding.connection_state,
-        presence: running ? { instance_id: uuid('f', 100 + index), generation: binding.generation, connection_state: 'connected', execution_state: 'running',
+        presence: running ? { instance_id: uuid('f', 100 + index), generation: binding.generation, connection_state: binding.connection_state, execution_state: 'running',
           last_seen_at: world.now, source: 'host_event', process_identity: null, freshness: 'fresh' } : null } };
   });
   const projects = world.projects.map((project): ProjectSummary => ({ project_id: projectIds.get(project.id)!,

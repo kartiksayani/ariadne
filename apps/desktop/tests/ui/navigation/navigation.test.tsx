@@ -510,13 +510,12 @@ describe('canonical preference mutations', () => {
 });
 
 const adapter: AdapterChoice = { adapter_id: 'demo.local', label: 'Installed adapter', configuration: { namespace: 'demo.local', values: {} } };
-const waiting = { count: '1', loading: true, emptyText: 'Waiting panel is supplied by its owner.', waiting: [], sent: [] };
 describe('source-backed navigation views and explicit registration', () => {
   it.each(['projects', 'project', 'all_sessions'] as const)('blocks %s navigation during explicit Refresh until fresh preferences are published', async kind => {
     const { transport, store } = setup(); const prefs = preferences();
     prefs.global.selected_navigation = kind === 'project' ? { kind, project_id: projectId } : { kind };
     read(transport, prefs);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={store} adapterChoices={[adapter]} renderSession={() => null} />);
     const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     const conflict: CoreError = { ...error, code: 'revision_conflict', message: 'Preferences revision changed.', current_revision: 3 };
@@ -583,7 +582,7 @@ describe('source-backed navigation views and explicit registration', () => {
   it('clears explicit Refresh progress after a failed read and keeps failure visible without changing navigation', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
     read(transport, prefs);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={store} adapterChoices={[]} renderSession={() => null} />);
     const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error });
@@ -611,7 +610,7 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'all_sessions' };
     const result = sessionResult(); result.sessions.items.push({ ...result.sessions.items[0], session_id: '00000000-0000-4000-8000-000000000003', title: 'Closed work', state: 'closed', closed_at: demo.updated_at });
     read(transport, prefs, projectResult(), result);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     expect(await screen.findByRole('heading', { name: 'All sessions', level: 1 })).toBeTruthy();
     expect(screen.getByText('9 active · 3 closed')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Unavailable project' })).toBeTruthy();
@@ -658,7 +657,7 @@ describe('source-backed navigation views and explicit registration', () => {
   ])('tells the owner how to give the saved setup instruction to a %s host', async (adapterId, wording, frequency, showsInstruction) => {
     const { transport, store } = setup(); read(transport);
     const binding = Object.values((demo as Session).bindings)[0]!;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
@@ -678,7 +677,7 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
     read(transport, prefs);
     const binding = Object.values((demo as Session).bindings)[0]!;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
@@ -699,7 +698,7 @@ describe('source-backed navigation views and explicit registration', () => {
     const binding = Object.values((demo as Session).bindings)[0]!;
     const capabilities = structuredClone(binding.capabilities);
     for (const value of Object.values(capabilities)) if (typeof value === 'object') value.supported = true;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities,
@@ -745,7 +744,7 @@ describe('source-backed navigation views and explicit registration', () => {
   });
   it('offers tab close separately from session lifecycle controls', async () => {
     const { transport, store } = setup(); read(transport);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} adapterChoices={[]} renderSession={() => <p>Session workspace</p>} />);
     const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
     const close = /^Close .* tab$/;
     await waitFor(() => expect(within(tabs).getByRole('button', { name: close })).toBeTruthy());
@@ -762,7 +761,7 @@ describe('source-backed navigation views and explicit registration', () => {
       <p>Selected item {view.preferences?.selected_item_id}</p><p>{view.preferences?.filters.search}</p>
       <p>Scroll {view.preferences?.scroll?.offset}</p><p>{view.store.getSnapshot().snapshot?.session.title}</p>
     </div>;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={received} />);
+    render(<NavigationWorkspace store={store} adapterChoices={[]} renderSession={received} />);
     expect(await screen.findByText('Selected item 1.1')).toBeTruthy();
     expect(screen.getByText('Scroll 124')).toBeTruthy();
     expect(await screen.findByText('Canonical domain v1 demo', { selector: 'p' })).toBeTruthy();
@@ -770,7 +769,7 @@ describe('source-backed navigation views and explicit registration', () => {
   });
   it('reuses the source dialog focus trap, Escape and focus return', async () => {
     const { transport, store } = setup(); read(transport);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={store} adapterChoices={[]} renderSession={() => null} />);
     await screen.findByRole('heading', { name: 'Projects', level: 1 });
     const opener = screen.getByRole('button', { name: 'Register project' }); opener.focus(); fireEvent.click(opener);
     const dialog = screen.getByRole('dialog', { name: 'Register project' });

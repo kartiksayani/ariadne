@@ -189,7 +189,7 @@ export function TreeView(props: TreeViewProps) {
   const sendOption = (index: number) => { const option = options[index]; if (option) send({ selected_option_id: option.id, text: '' }); };
   const answerControl = answerRow ? <AnswerControl variant="full" selected={chosen} draft={entry?.draft.text ?? ''}
     options={options.map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: option.recommended }))}
-    warn={entry?.error?.message ?? null} blocked={blocked} busy={!entry || entry.saving}
+    warn={entry?.error?.message} blocked={blocked ?? undefined} locked={!entry || entry.saving}
     onSelect={index => { if (entry && options[index]) drafts.edit(entry.draft.op_id, { selected_option_id: options[index].id }); focusRow(answerRow.key); }}
     onDraft={text => { if (entry) drafts.edit(entry.draft.op_id, { text }); }}
     onSendOption={sendOption} onSendText={text => send({ selected_option_id: null, text })}

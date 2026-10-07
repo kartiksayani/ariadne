@@ -319,7 +319,7 @@ describe('session tree inline answering', () => {
     { id: 'morning', label: 'Morning', consequence: 'Deliver before lunch.', recommended: false },
     { id: 'afternoon', label: 'Afternoon', consequence: 'Deliver after lunch.', recommended: true },
   ]; };
-  const control = () => row('2').querySelector<HTMLElement>('.answer-control');
+  const control = () => row('2').querySelector<HTMLElement>('.answer');
   const picked = () => [...control()!.querySelectorAll('.answer-option')].map(button => button.getAttribute('aria-pressed'));
   it('opens on a with the recommended option picked, changes it by number and sends it on Enter', async () => {
     const { transport, drafts } = await mount({ configure: options });

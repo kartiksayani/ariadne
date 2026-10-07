@@ -84,7 +84,7 @@ async function showHistory(texts) {
   }, 'Complete saved history was not visible in native item detail');
 }
 async function nativeCard(kind, question) {
-  for (const card of await browser.$$(`aside[aria-label="Waiting on me"] .ref-${kind}-card`)) {
+  for (const card of await browser.$$(`aside[aria-label="Waiting on me"] .waiting-${kind === 'waiting' ? 'card' : 'sent'}`)) {
     if ((await card.getText()).includes(question)) return card;
   }
   return undefined;
@@ -131,10 +131,10 @@ async function delivery(configuration) {
   const cardText = await card.getText();
   assert.ok(cardText.includes(configuration.ask)); assert.ok(cardText.includes(configuration.options[0].label));
   assert.ok(cardText.includes(configuration.options[0].consequence));
-  const ownerTexts = Array.from({ length: 5 }, (_, index) => `native-owner-${nonce}-${index + 1}\nKeep this complete line for input ${index + 1}.`);
+  // The compact Waiting card sends the chosen option alone; later inputs are detail replies.
+  const ownerTexts = Array.from({ length: 5 }, (_, index) => index ? `native-owner-${nonce}-${index + 1}\nKeep this complete line for input ${index + 1}.` : '');
   const choice = await card.$('button*=Use the native window'); await choice.click();
-  await card.$('textarea[aria-label="Reply in your own words"]').setValue(ownerTexts[0]);
-  await card.$('button*=Send').click();
+  await card.$('button=Send answer').click();
   await wait(async () => {
     const saved = orderedInputs(await snapshot(configuration)), queued = await admissions(configuration);
     return saved.length === 1 && queued.length === 1 && saved[0].attempts.length === 1
@@ -143,7 +143,7 @@ async function delivery(configuration) {
   await wait(async () => !(await nativeCard('waiting', configuration.question)), 'Answered Waiting episode remained in Waiting');
   await wait(async () => !!(await nativeCard('sent', configuration.question)), 'Waiting answer did not appear in Sent');
   const sent = await nativeCard('sent', configuration.question);
-  assert.ok((await sent.getText()).includes(ownerTexts[0])); assert.ok((await sent.getText()).includes(configuration.options[0].label));
+  assert.ok((await sent.getText()).includes(configuration.options[0].label));
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
 
   for (const text of ownerTexts.slice(1)) {

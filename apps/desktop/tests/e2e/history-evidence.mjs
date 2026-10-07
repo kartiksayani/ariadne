@@ -7,7 +7,7 @@ export function historyFailureFacts() {
   const titled = document.querySelector('button[title="Messages (m)"]');
   const owner = document.querySelector('.owner-input');
   const editor = owner?.querySelector('textarea') ?? null;
-  const send = owner?.querySelector('.ref-send-row button') ?? null;
+  const send = owner?.querySelector('.answer-send-row button') ?? null;
   const search = document.querySelector('[data-shell-search]');
   const stateButtons = /^(Refresh|Refreshing…|Reconcile operation|Register project|Connect existing session|Retry saving draft preferences|Retry saved input|Write another input)$/;
   const active = document.activeElement;
@@ -31,7 +31,7 @@ export function historyFailureFacts() {
       send: control(send), buttons: owner ? [...owner.querySelectorAll('button')].map(control) : [],
       alerts: owner ? [...owner.querySelectorAll('[role="alert"]')].map(text) : [],
       statuses: owner ? [...owner.querySelectorAll('[role="status"]')].map(text) : [],
-      blocked: text(owner?.querySelector('.ref-blocked') ?? null),
+      blocked: text(owner?.querySelector('.answer-blocked') ?? null),
       // Identifies a missing editor: "Loading saved drafts…", the receipt view or a locked draft all render here.
       innerText: owner?.innerText ?? null },
     activeElement: active ? { tag: active.tagName, className: String(active.className), title: active.getAttribute('title'), ariaLabel: active.getAttribute('aria-label') } : null,

@@ -76,7 +76,7 @@ it('routes owner shortcuts from roving rows, repeats focus requests and never su
   };
   // a answers inline in the tree (frame 1c); the number keys then change the picked option.
   press('2', 'a');
-  await waitFor(() => expect(document.querySelector('[role="treeitem"][data-item-id="2"] .answer-control')).not.toBeNull());
+  await waitFor(() => expect(document.querySelector('[role="treeitem"][data-item-id="2"] .answer')).not.toBeNull());
   press('2', '2');
   await waitFor(() => expect(transport.preferences.drafts.some(value => value.target.item_id === '2' && value.selected_option_id === transport.sessions.get(route.session_id)!.items['2']!.options[1].id)).toBe(true));
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
@@ -96,7 +96,7 @@ it('answers the oldest waiting item when the focused item is not waiting', async
   await setup(); const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'a' });
   const waiting = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
-  await waitFor(() => expect(waiting.querySelector('.answer-control')).not.toBeNull());
+  await waitFor(() => expect(waiting.querySelector('.answer')).not.toBeNull());
   expect(document.activeElement).toBe(waiting);
 });
 
