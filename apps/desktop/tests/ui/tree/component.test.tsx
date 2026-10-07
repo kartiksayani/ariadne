@@ -212,6 +212,15 @@ describe('session tree column states', () => {
     await mount({ configure: transport => { const session = transport.sessions.get(route.session_id)!; session.items = {}; session.inputs = {}; } });
     expect(screen.getByText('No items yet')).toBeTruthy();
     expect(document.querySelector('.tree-empty-connection')?.textContent).toMatch(/^Connected to .* waiting for the agent’s first message$/);
+    expect(document.querySelector('.tree-empty-connection')?.textContent).not.toMatch(/ in /);
+  });
+  it('names the host location in the session bar and the terminal app in the empty state', async () => {
+    await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!; session.items = {}; session.inputs = {};
+      session.bindings[session.active_binding_id!]!.host_location = 'iTerm window 1';
+    } });
+    expect(document.querySelector('.tree-session-title')?.textContent).toBe('demo.local · iTerm window 1');
+    expect(document.querySelector('.tree-empty-connection')?.textContent).toBe('Connected to demo.local in iTerm · waiting for the agent’s first message');
   });
   it('shows the empty session without a running agent', async () => {
     await mount({ configure: transport => {
