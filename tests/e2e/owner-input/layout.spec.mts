@@ -121,11 +121,16 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
       expect(completeRow.top).toBeGreaterThanOrEqual(completeRow.viewportTop);
       expect(completeRow.bottom).toBeLessThanOrEqual(completeRow.viewportBottom);
     }
-    // Session sizing ends with Tree mode. Other routes retain the centre pane
-    // scroller, including complete setup content below the graph/catalogue.
+    // Graph, like Tree, owns its scrolling inside the centre pane. Other routes
+    // retain the centre pane scroller, including complete setup content below the catalogue.
     await page.getByRole('button', { name: 'Graph', exact: true }).click();
-    await expect(page.getByRole('region', { name: 'Topic graph' }).first()).toBeVisible();
-    expect(await page.locator('.shell-center').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+    await expect(page.getByRole('tree', { name: / graph$/ }).first()).toBeVisible();
+    expect(await page.locator('.graph-scroll').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+    expect(await page.locator('.shell-center').evaluate(element => getComputedStyle(element).overflowY)).toBe('hidden');
+    const graphBox = (await page.locator('.graph-scroll').boundingBox())!, centerBox = (await page.locator('.shell-center').boundingBox())!;
+    expect(graphBox.y + graphBox.height).toBeLessThanOrEqual(centerBox.y + centerBox.height + 1);
+    // Nothing in the session column is clipped: banners and controls shrink and scroll themselves.
+    expect(await page.locator('.nav-session-content').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
     await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
     await setup.evaluate(element => element.scrollIntoView({ block: 'end' }));

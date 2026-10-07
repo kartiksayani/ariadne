@@ -37,7 +37,7 @@ body {
   margin-bottom: 16px;
 }
 
-/* The tree owns sentence scrolling; catalogue and Graph keep pane scrolling. */
+/* The tree owns sentence scrolling (Graph likewise, in ui/graph/graph.css); the catalogue keeps pane scrolling. */
 .product-app .shell-center:has(.nav-session-content .sentence-tree) {
   overflow: hidden;
 }

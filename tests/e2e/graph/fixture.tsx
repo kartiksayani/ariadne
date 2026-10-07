@@ -1,42 +1,67 @@
 import { Profiler, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { SessionTopicGraph } from '../../../apps/desktop/src/components/graph/SessionTopicGraph';
-import { graphFixture } from '../../../apps/desktop/tests/ui/graph-culling/fixture';
-import { layoutGraph } from '../../../apps/desktop/src/graph/layout/geometry';
-import { indexGraph, worldViewport } from '../../../apps/desktop/src/graph/culling/bounds-index';
+import demo from '../../../fixtures/domain/demo/session.json';
+import type { Session } from '../../../apps/desktop/src/generated/domain/models';
+import type { SessionPreferences } from '../../../apps/desktop/src/generated/core';
+import { OpenSessions } from '../../../apps/desktop/src/data/session-store';
+import { RegisteredRoutes } from '../../../apps/desktop/src/data/routes';
+import { createDesktopService, type DesktopTransport } from '../../../apps/desktop/src/data/service';
+import { GraphView } from '../../../apps/desktop/src/ui/graph/GraphView';
 import '../../../apps/desktop/src/styles/reference.css';
 
 declare global {
-  interface Window { __graphEvidence: { mountMs: number[]; updateMs: number[]; layoutMs: number; indexMs: number;
-    queries: { scale: number; nodes: number; edges: number; p95Ms: number }[] }; }
+  interface Window { __graphEvidence: { mountMs: number[]; updateMs: number[]; saved: SessionPreferences[] } }
 }
-const fixture = await graphFixture(), items = Object.values(fixture.session.items).flatMap(item => item ? [item] : []);
-const start = performance.now(), layout = layoutGraph(items), laidOut = performance.now(), query = indexGraph(layout);
-window.__graphEvidence = { mountMs: [], updateMs: [], layoutMs: laidOut - start, indexMs: performance.now() - laidOut, queries: [] };
-for (const scale of [0.25, 0.5, 1, 2]) {
-  const view = { scale, x: 936 / 2 - layout.bounds.width / 2 * scale, y: 420 / 2 - layout.bounds.height / 2 * scale };
-  const rect = worldViewport(view, 936, 420);
-  const elapsed: number[] = [];
-  for (let iteration = 0; iteration < 100; iteration++) {
-    const start = performance.now(); query(rect); elapsed.push(performance.now() - start);
+
+// Twenty ordered trees of 100 items in one topic; a long replacement runs from
+// the first tree to the last. Only the transport is doubled.
+function graphSession(): Session {
+  const session = structuredClone(demo) as Session, template = session.items['1']!;
+  session.items = {};
+  for (let root = 1; root <= 20; root++) {
+    for (let child = 0; child < 100; child++) {
+      const id = child ? `${root}.${child}` : String(root);
+      session.items[id] = { ...structuredClone(template), id, parent: child ? String(root) : null,
+        ordinal: child || root, question: `Graph question ${id}`, status: 'open', replaced_by: null };
+    }
   }
-  const rendered = query(rect);
-  window.__graphEvidence.queries.push({ scale, nodes: rendered.nodes.length, edges: rendered.edges.length,
-    p95Ms: elapsed.sort((a, b) => a - b)[94] });
+  session.items['1.1']!.status = 'replaced'; session.items['1.1']!.replaced_by = '20.99';
+  return session;
 }
+
+const session = graphSession(), route = { project_id: session.project_id, session_id: session.id };
+const transport: DesktopTransport = {
+  async invoke<T>(command: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
+    const request = args.request;
+    const data = command === 'session_get' ? { session: structuredClone(session), freshness: 'fresh' }
+      : { ...route, item_id: 'request' in request ? (request.request.params as { item_id: string }).item_id : '1' };
+    return { api_version: 1, ok: true, data: { kind: command, data } } as T;
+  },
+  async listen() { return () => {}; },
+};
+const service = createDesktopService(transport), opened = new OpenSessions(service), store = opened.open(route);
+await store.refresh();
+const routes = new RegisteredRoutes(service, opened), later = new Set<string>();
+// Every root expanded: all 2,000 nodes are laid out and rendered.
+const initial: SessionPreferences = { session: route, tab_open: true, tab_order: 0, selected_item_id: null,
+  expanded_item_ids: Array.from({ length: 20 }, (_, index) => String(index + 1)),
+  filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'hidden', scroll: null };
+window.__graphEvidence = { mountMs: [], updateMs: [], saved: [] };
+
 function Fixture() {
-  const [view, setView] = useState(fixture.view), [tree, setTree] = useState(false);
+  const [view, setView] = useState(initial), [detail, setDetail] = useState<string | null>(null);
   return <>
-    <button type="button" onClick={() => setView(previous => ({ ...previous, selected_item_id: '20.99' }))}>Select off-screen item</button>
-    {tree && <p role="status">Tree route requested</p>}
-    <Profiler id="actual-topic-graph" onRender={(_id, phase, duration) => {
-      window.__graphEvidence[phase === 'mount' ? 'mountMs' : 'updateMs'].push(duration);
-    }}>
-      <SessionTopicGraph {...fixture} view={view} later={later} onReveal={() => {}}
-        saveSelection={async id => { setView(previous => ({ ...previous, selected_item_id: id })); return true; }}
-        onSwitchToTree={() => setTree(true)} />
-    </Profiler>
+    <button type="button" onClick={() => setView(previous => ({ ...previous, selected_item_id: '15.50' }))}>Select off-screen item</button>
+    {detail && <p role="status">Detail {detail}</p>}
+    <div style={{ display: 'flex', flexDirection: 'column', height: 600 }}>
+      <Profiler id="graph-view" onRender={(_id, phase, duration) => {
+        window.__graphEvidence[phase === 'mount' ? 'mountMs' : 'updateMs'].push(duration);
+      }}>
+        <GraphView store={store} routes={routes} view={view} later={later} reveal={null} tight={false} sessionLabel={null}
+          saveView={async next => { window.__graphEvidence.saved.push(next); setView(next); return true; }}
+          onReveal={(result, openDetail) => { if (openDetail && result.kind === 'item') setDetail(result.route.item_id); }} />
+      </Profiler>
+    </div>
   </>;
 }
-const later = new Set<string>();
 createRoot(document.getElementById('root')!).render(<Fixture />);

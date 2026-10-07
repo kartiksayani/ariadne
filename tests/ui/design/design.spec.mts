@@ -144,6 +144,42 @@ async function compare(page: Page, design: Buffer, app: Buffer) {
   }, { design: design.toString('base64'), app: app.toString('base64'), tolerance });
 }
 
+/** A frame's threshold: a number for the whole frame, or one for a region while other views still differ around it. */
+type Threshold = number | { readonly threshold: number; readonly region: 'graph' };
+
+/**
+ * The graph region: the design's graph scroll area (legend and topic cards) beside the app's `.graph-scroll`.
+ * Until the session bar and filter chips land (WP1) and the old session controls go (WP7), the app hides
+ * the other session-column content, gives its scroller the design's height and scroll offsets, and both
+ * sides are clipped to the same size.
+ */
+async function graphRegion(designPage: Page, page: Page, id: string) {
+  const design = await designPage.locator(`[id="${id}"] .dv-card`).evaluate(card => {
+    const legend = [...card.querySelectorAll('span')].find(span => span.textContent === 'One graph per topic');
+    let scroller = legend?.parentElement ?? null;
+    while (scroller && getComputedStyle(scroller).overflowY !== 'auto') scroller = scroller.parentElement;
+    if (!scroller) throw new Error('The design frame has no graph scroll area');
+    const rect = scroller.getBoundingClientRect();
+    return { x: rect.x + window.scrollX, y: rect.y + window.scrollY, width: scroller.clientWidth, height: scroller.clientHeight,
+      top: scroller.scrollTop, left: scroller.scrollLeft };
+  });
+  await page.addStyleTag({ content: `.product-app .app-session > :not(.graph-view), .product-app .nav-session-content > :not(.app-session) { display: none !important; }
+    .graph-scroll { flex: none !important; height: ${design.height}px !important; }` });
+  const app = await page.evaluate(({ top, left }) => {
+    const scroller = document.querySelector<HTMLElement>('.graph-scroll');
+    if (!scroller) throw new Error('The app has no .graph-scroll');
+    scroller.scrollTop = top; scroller.scrollLeft = left;
+    const rect = scroller.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: scroller.clientWidth, height: scroller.clientHeight };
+  }, design);
+  await settle(page);
+  const width = Math.min(design.width, app.width), height = Math.min(design.height, app.height);
+  return {
+    design: await designPage.screenshot({ animations: 'disabled', fullPage: true, clip: { x: Math.round(design.x), y: Math.round(design.y), width, height } }),
+    app: await page.screenshot({ animations: 'disabled', clip: { x: Math.round(app.x), y: Math.round(app.y), width, height } }),
+  };
+}
+
 test.describe.configure({ mode: 'parallel' });
 for (const id of designFrames) {
   test(`frame ${id}`, async ({ page, origin, designPage }) => {
@@ -173,14 +209,25 @@ for (const id of designFrames) {
       clip: { x: Math.round(box.x), y: Math.round(box.y), width: spec.width, height: spec.height } });
     const canvas = await page.context().newPage();
     const result = await compare(canvas, design, app);
-    await canvas.close();
     writeFileSync(resolve(output, `${id}-design.png`), design);
     writeFileSync(resolve(output, `${id}-app.png`), app);
     writeFileSync(resolve(output, `${id}-diff.png`), Buffer.from(result.png, 'base64'));
-    const threshold = (thresholds as Record<string, number>)[id] ?? 0;
+    const configured = (thresholds as Record<string, Threshold>)[id] ?? 0;
+    const threshold = typeof configured === 'number' ? configured : configured.threshold;
+    let region: { name: string; ratio: number; width: number; height: number } | null = null;
+    if (typeof configured !== 'number') {
+      const crops = await graphRegion(designPage, page, id), compared = await compare(canvas, crops.design, crops.app);
+      writeFileSync(resolve(output, `${id}-${configured.region}-design.png`), crops.design);
+      writeFileSync(resolve(output, `${id}-${configured.region}-app.png`), crops.app);
+      writeFileSync(resolve(output, `${id}-${configured.region}-diff.png`), Buffer.from(compared.png, 'base64'));
+      region = { name: configured.region, ratio: Number(compared.ratio.toFixed(4)), width: compared.width, height: compared.height };
+    }
+    await canvas.close();
     writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ ratio: Number(result.ratio.toFixed(4)), threshold, tolerance,
-      size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }, null, 2)}\n`);
+      size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell,
+      ...region ? { region: region.name, regionRatio: region.ratio, regionSize: { width: region.width, height: region.height } } : {} }, null, 2)}\n`);
     expect(denied).toEqual([]);
-    expect(result.ratio, `${id} mismatch ratio`).toBeLessThanOrEqual(threshold);
+    if (region) expect(region.ratio, `${id} ${region.name} mismatch ratio`).toBeLessThanOrEqual(threshold);
+    else expect(result.ratio, `${id} mismatch ratio`).toBeLessThanOrEqual(threshold);
   });
 }
