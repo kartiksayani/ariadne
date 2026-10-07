@@ -764,8 +764,10 @@ conversation links through `items_touched`.
 
 The native `HistoryActionService` implements guarded archive/restore, close/reopen,
 read-only preview and target-only continuation. Archive/close errors identify the
-actual blocking item/input IDs; close requires the selected binding's persisted
-Paused dispatch state. Restore/reopen preserve domain/delivery history, IDs and
+actual blocking item/input IDs; close requires the active binding to be quiesced
+(persisted Paused or Disconnected dispatch state, a non-connected connection, or no
+binding record) and records an owner pause on it in the same commit, so a closed
+session always carries an owner pause and reopen never resumes dispatch. Restore/reopen preserve domain/delivery history, IDs and
 binding state and never resume dispatch implicitly. CLI/CoreService consumer
 routing is a separate composition task.
 

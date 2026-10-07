@@ -1,9 +1,14 @@
 import type { CoreError, ContinuePreview, ItemRoute, SessionRef } from '../../generated/core';
-import type { Session } from '../../generated/domain/models';
+import type { Binding, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data';
 
 const terminal = new Set(['decided', 'done', 'dropped', 'replaced']);
 const pending = new Set(['queued', 'in_flight', 'needs_attention']);
+/** Mirrors `Binding::dispatch_quiesced` in crates/ariadne-domain/src/models/delivery.rs. */
+export function dispatchQuiesced(binding: Immutable<Binding> | null | undefined): boolean {
+  return !binding || binding.dispatch_state === 'paused' || binding.dispatch_state === 'disconnected'
+    || binding.connection_state !== 'connected';
+}
 export interface Blocker { key: string; label: string; item: ItemRoute | null }
 export function lifecycleBlockers(session: Immutable<Session>, topicId: string | null, error?: CoreError): Blocker[] {
   const route = { project_id: session.project_id, session_id: session.id };

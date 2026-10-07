@@ -1,4 +1,6 @@
+use ariadne_agent_protocol::{EventPayload, NormalizedEvent};
 use ariadne_core::{
+    delivery::DeliveryService,
     history_actions::{HistoryActionError, HistoryActionService},
     *,
 };
@@ -16,6 +18,111 @@ fn p(n: u64) -> PositiveSafeInteger {
 fn at() -> UtcMillis {
     UtcMillis::new("2026-10-04T12:00:00.000Z").unwrap()
 }
+fn close_with(edit: impl FnOnce(&mut Session)) -> Result<MutationReceipt, HistoryActionError> {
+    let mut session = terminal_seed();
+    edit(&mut session);
+    let setup = Setup::new(&session);
+    let service = HistoryActionService::new(&setup.registry);
+    service.execute(&context(), &command("close", 1, 100), at())
+}
+
+#[test]
+fn disconnected_binding_closes_without_a_pause() {
+    for (dispatch, connection) in [
+        (DispatchState::Disconnected, ConnectionState::Disconnected),
+        (DispatchState::RecoveryRequired, ConnectionState::Unknown),
+        (DispatchState::Enabled, ConnectionState::Reconnecting),
+    ] {
+        close_with(|session| {
+            let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+            binding.dispatch_state = dispatch;
+            binding.connection_state = connection;
+            binding.owner_paused = true;
+        })
+        .unwrap();
+    }
+}
+
+#[test]
+fn closing_a_disconnected_enabled_binding_records_an_owner_pause() {
+    let mut session = terminal_seed();
+    let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+    binding.dispatch_state = DispatchState::Disconnected;
+    binding.connection_state = ConnectionState::Disconnected;
+    binding.owner_paused = false;
+    let setup = Setup::new(&session);
+    let service = HistoryActionService::new(&setup.registry);
+    service
+        .execute(&context(), &command("close", 1, 100), at())
+        .unwrap();
+    let closed = setup.store().read(&id(2)).unwrap();
+    assert_eq!(closed.state, SessionState::Closed);
+    let binding = &closed.bindings.0[&id(3)];
+    assert!(binding.owner_paused);
+    assert_eq!(binding.dispatch_state, DispatchState::Disconnected);
+}
+
+#[test]
+fn reconnect_then_reopen_never_resumes_dispatch() {
+    let mut session = terminal_seed();
+    let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+    binding.dispatch_state = DispatchState::Disconnected;
+    binding.connection_state = ConnectionState::Disconnected;
+    binding.owner_paused = false;
+    let setup = Setup::new(&session);
+    let service = HistoryActionService::new(&setup.registry);
+    service
+        .execute(&context(), &command("close", 1, 100), at())
+        .unwrap();
+    let binding = setup.store().read(&id(2)).unwrap().bindings.0[&id(3)].clone();
+    let event = NormalizedEvent {
+        event_id: "reconnected".into(),
+        binding_id: binding.id.clone(),
+        generation: binding.generation.clone(),
+        input_id: None,
+        attempt_id: None,
+        host_turn_id: None,
+        observed_at: at(),
+        event: EventPayload::Connected {
+            external_session_id: binding.external_session_id.clone(),
+            endpoint_fingerprint: binding.endpoint_fingerprint.clone(),
+            capabilities: Box::new(binding.capabilities.clone()),
+        },
+    };
+    let adapter = AdapterContext::from_trusted_entrypoint(
+        RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+        id(3),
+        binding.generation.clone(),
+        None,
+    );
+    DeliveryService::new(&setup.registry)
+        .report(&adapter, &event, || id(500))
+        .unwrap();
+    let revision = setup.store().read(&id(2)).unwrap().revision.value();
+    service
+        .execute(&context(), &command("reopen", revision, 101), at())
+        .unwrap();
+    let live = setup.store().read(&id(2)).unwrap();
+    assert_eq!(live.state, SessionState::Active);
+    let binding = &live.bindings.0[&id(3)];
+    assert_eq!(binding.connection_state, ConnectionState::Connected);
+    assert!(binding.owner_paused);
+    assert_eq!(binding.dispatch_state, DispatchState::Paused);
+}
+
+#[test]
+fn connected_enabled_binding_is_still_not_closable_and_no_binding_closes() {
+    let blocked = error(close_with(|session| {
+        let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+        binding.dispatch_state = DispatchState::Enabled;
+        binding.connection_state = ConnectionState::Connected;
+        binding.owner_paused = false;
+    }));
+    assert_eq!(blocked.code, CoreErrorCode::SessionNotClosable);
+    assert!(blocked.details.unwrap().dispatch_must_pause);
+    close_with(|session| session.active_binding_id = None).unwrap();
+}
+
 fn seed() -> Session {
     serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap()
 }

@@ -7,7 +7,7 @@ import { SessionActionControllers } from '../../../src/components/bindings/actio
 import { HistoryActions } from '../../../src/components/history-actions/HistoryActions';
 import { ContinueDialog } from '../../../src/components/history-actions/ContinueDialog';
 import { CopiedProvenance } from '../../../src/components/history-actions/CopiedProvenance';
-import { lifecycleBlockers } from '../../../src/components/history-actions/selectors';
+import { dispatchQuiesced, lifecycleBlockers } from '../../../src/components/history-actions/selectors';
 import { route, secondId } from '../app/transport';
 import { HistoryTransport } from './fixture';
 
@@ -65,6 +65,29 @@ describe('guarded history controls', () => {
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm session close' })); });
     expect(transport.mutations.map(value => value.command.command)).toEqual(['binding_pause', 'session_close']);
     expect(transport.source.state).toBe('closed');
+  });
+  it('offers Confirm Close directly when the active binding is disconnected', async () => {
+    const { props, transport } = await setup(true);
+    const binding = transport.source.bindings[transport.source.active_binding_id!]!;
+    binding.dispatch_state = 'disconnected'; binding.connection_state = 'disconnected'; binding.owner_paused = true;
+    ++transport.source.revision;
+    await props.actions.session.refresh(); render(<HistoryActions {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
+    expect(dialog().queryByRole('button', { name: 'Pause dispatch' })).toBeNull();
+    expect(dialog().getByText('Dispatch is already stopped (binding not connected). Confirm Close.')).toBeTruthy();
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm session close' })); });
+    expect(transport.mutations.map(value => value.command.command)).toEqual(['session_close']);
+    expect(transport.source.state).toBe('closed');
+  });
+  it('pins the dispatch-quiesced truth table shared with Binding::dispatch_quiesced', () => {
+    const make = (dispatch_state: string, connection_state: string) => ({ dispatch_state, connection_state }) as never;
+    expect(dispatchQuiesced(null)).toBe(true);
+    expect(dispatchQuiesced(make('paused', 'connected'))).toBe(true);
+    expect(dispatchQuiesced(make('disconnected', 'disconnected'))).toBe(true);
+    expect(dispatchQuiesced(make('recovery_required', 'unknown'))).toBe(true);
+    expect(dispatchQuiesced(make('enabled', 'reconnecting'))).toBe(true);
+    expect(dispatchQuiesced(make('enabled', 'connected'))).toBe(false);
+    expect(dispatchQuiesced(make('recovery_required', 'connected'))).toBe(false);
   });
   it('archives/restores and closes/reopens with retained IDs, history and paused binding', async () => {
     const { props, topic, transport } = await setup(true), items = structuredClone(transport.source.items), messages = structuredClone(transport.source.messages);
