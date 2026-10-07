@@ -117,7 +117,6 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   const reveal = navigation.reveal;
   const matchingReveal = reveal?.store === store ? reveal : null;
   return <>
-    {session.status === 'loading' && <p role="status">Loading session…</p>}
     {session.error && <p role="alert">{session.error.message}</p>}
     {session.snapshot?.session.state === 'closed' && <p className="nav-banner">Closed session · opening this tab does not resume dispatch.</p>}
     {matchingReveal?.kind === 'missing_item' && <p className="nav-banner" role="status">{matchingReveal.banner}</p>}

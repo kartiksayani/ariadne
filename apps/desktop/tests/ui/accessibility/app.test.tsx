@@ -11,8 +11,8 @@ async function setup(configure?: (transport: AppTransport) => void) {
     const button = document.querySelector<HTMLButtonElement>(`[data-session-id="${route.session_id}"]`)!;
     expect(button).not.toBeNull(); expect(button.disabled).toBe(false); return button;
   });
-  fireEvent.click(button); await screen.findByRole('tree', { name: 'Sentences' });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Pause dispatch' }).hasAttribute('disabled')).toBe(false));
+  fireEvent.click(button); await screen.findByRole('tree', { name: 'Session items' });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
   return transport;
 }
 it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts inside modal controls', async () => {
@@ -24,7 +24,7 @@ it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts
   expect(fireEvent.keyDown(row, { key: '/' })).toBe(false); expect(document.activeElement).toBe(search);
   row.focus(); expect(fireEvent.keyDown(row, { key: 'Backspace' })).toBe(true); expect(document.activeElement).toBe(row);
   fireEvent.click(document.querySelector('[data-item-id="1"]')!); await screen.findByRole('group', { name: 'Owner actions' });
-  const pause = screen.getByRole('button', { name: 'Pause dispatch' }); pause.focus(); fireEvent.click(pause);
+  const pause = screen.getByRole('button', { name: 'Close session' }); pause.focus(); fireEvent.click(pause);
   const dialog = screen.getByRole('dialog'), cancel = within(dialog).getByRole('button', { name: 'Cancel' });
   fireEvent.keyDown(cancel, { key: 'g' }); fireEvent.keyDown(cancel, { key: 'm' }); fireEvent.keyDown(cancel, { key: '/' });
   expect(screen.getByRole('tree')).toBeTruthy(); expect(screen.queryByRole('log')).toBeNull(); expect(document.activeElement?.closest('[role="dialog"]')).toBe(dialog);
@@ -74,8 +74,9 @@ it('routes owner shortcuts from roving rows, repeats focus requests and never su
     const row = document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
     row.focus(); fireEvent.keyDown(row, { key });
   };
+  // a answers inline in the tree (frame 1c); the number keys then change the picked option.
   press('2', 'a');
-  await waitFor(() => expect(document.activeElement?.closest('[aria-label="Owner input for #2"]')).not.toBeNull());
+  await waitFor(() => expect(document.querySelector('[role="treeitem"][data-item-id="2"] .answer-control')).not.toBeNull());
   press('2', '2');
   await waitFor(() => expect(transport.preferences.drafts.some(value => value.target.item_id === '2' && value.selected_option_id === transport.sessions.get(route.session_id)!.items['2']!.options[1].id)).toBe(true));
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
@@ -94,7 +95,9 @@ it('routes owner shortcuts from roving rows, repeats focus requests and never su
 it('answers the oldest waiting item when the focused item is not waiting', async () => {
   await setup(); const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'a' });
-  await waitFor(() => expect(document.activeElement?.closest('[aria-label="Owner input for #2"]')).not.toBeNull());
+  const waiting = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
+  await waitFor(() => expect(waiting.querySelector('.answer-control')).not.toBeNull());
+  expect(document.activeElement).toBe(waiting);
 });
 
 it('queues a fresh Bring once with its visible fixed text and reveals its receipt on repeat', async () => {
@@ -131,7 +134,8 @@ async function delayedReveal(transport: AppTransport) {
   });
   return { started: () => started, release: async () => { await act(async () => { release(); await gate; }); } };
 }
-it.each(['r', 'a', 'b'])('rejects delayed %s before it can undo newer All sessions navigation or mutate Bring', async key => {
+// a answers inline in the tree without a reveal, so only r and b can be delayed.
+it.each(['r', 'b'])('rejects delayed %s before it can undo newer All sessions navigation or mutate Bring', async key => {
   const transport = await setup(), pending = await delayedReveal(transport);
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key }); await waitFor(() => expect(pending.started()).toBe(true));

@@ -8,18 +8,16 @@ import { NavigationStore, useNavigation } from './state/navigation/store';
 import { OwnerDraftStore } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
-import { NavigationSentenceTree } from './components/tree/NavigationSentenceTree';
 import { NavigationTopicGraph } from './components/graph/NavigationTopicGraph';
 import type { OwnerFocusRequest } from './components/inputs/OwnerInput';
 import { OwnerItemDetail } from './components/inputs/OwnerItemDetail';
 import { OwnerWaitingPanel } from './components/inputs/OwnerWaitingPanel';
 import { MessageRail } from './components/rail/MessageRail';
 import { SessionActionControllers } from './components/bindings/actions';
-import { BindingControls } from './components/bindings/BindingControls';
-import { RecoveryPanel } from './components/recovery/RecoveryPanel';
-import { HistoryActions } from './components/history-actions/HistoryActions';
+import { RecoveryPanel, recoveryTargets } from './components/recovery/RecoveryPanel';
 import { CopiedProvenance } from './components/history-actions/CopiedProvenance';
-import { EdgeState, SessionNotice } from './components/edge-states/EdgeState';
+import { SessionNotice } from './components/edge-states/EdgeState';
+import { TreeView, type RowIntent } from './ui/tree/TreeView';
 import { agentName, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import type { ViewTab } from './ui/shell/Header';
@@ -106,29 +104,32 @@ function workspaceKeys(app: {
     remove: () => false,
   };
 }
-function SessionCenter({ application, view, graph, onReveal, revealItem, switchToTree, highlightedItemIds, onHoverItem }: {
-  application: Application; view: OpenedSessionView; graph: boolean; onReveal: (result: RevealedItem) => void;
-  revealItem: (route: ItemRoute) => void; switchToTree: () => void;
-  highlightedItemIds: ReadonlySet<string>; onHoverItem: (itemId: string | null) => void;
-}) {
+interface CenterProps {
+  readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
+  readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean; readonly railOpen: boolean;
+  readonly highlightedItems: ReadonlySet<string>; readonly highlightedMessages: ReadonlySet<string>;
+  readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem) => void;
+  readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
+  readonly onClearFilters: () => void; readonly onShowArchive: () => void; readonly revealItem: (route: ItemRoute) => void;
+  readonly switchToTree: () => void; readonly onRemove: () => void;
+}
+function SessionCenter({ application, view, graph, switchToTree, reveal, ...props }: CenterProps) {
   const state = useSession(view.store), session = state.snapshot?.session;
   const navigation = useNavigation(application.navigation);
   const actions = application.actions.forSession(view.store);
   const topics = Object.values(session?.topics ?? {}).filter((topic): topic is NonNullable<typeof topic> => !!topic && (view.preferences?.filters.archived ? topic.archived_at !== null : topic.archived_at === null)
     && (!view.preferences?.filters.topic_id || topic.id === view.preferences.filters.topic_id)).sort((a, b) => a.order - b.order);
-  return <section className="app-session" aria-label="Session workspace">
-    <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />
-    <BindingControls actions={actions} />
-    <RecoveryPanel actions={actions} />
-    <HistoryActions actions={actions} targets={(navigation.sessions?.sessions.items ?? []).map(target => ({
-      route: { project_id: target.project_id, session_id: target.session_id }, label: target.title,
-    }))} actionsForTarget={target => application.actions.forSession(application.navigation.opened.open(target))}
-      revealItem={revealItem} openSession={target => { void application.navigation.navigate({ kind: 'session', session: target }); }} />
-    {session && Object.keys(session.items).length === 0 && <EdgeState kind="empty" />}
-    {graph ? topics.map(topic => <NavigationTopicGraph key={topic.id} navigation={application.navigation} store={view.store}
-      topicId={topic.id} onReveal={onReveal} onSwitchToTree={switchToTree} />)
-      : <NavigationSentenceTree navigation={application.navigation} store={view.store} onReveal={onReveal} highlightedItemIds={highlightedItemIds} onHoverItem={onHoverItem} />}
-  </section>;
+  const summaries = navigation.sessions?.sessions.items ?? [];
+  const recovering = session ? recoveryTargets(session).length > 0 : false;
+  const notice = state.status !== 'loading' && <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />;
+  return <TreeView {...props} navigation={application.navigation} store={view.store} actions={actions} drafts={application.drafts}
+    reveal={reveal?.store === view.store ? reveal : null} summaries={summaries}
+    continueTargets={summaries.map(target => ({ route: { project_id: target.project_id, session_id: target.session_id }, label: target.title }))}
+    actionsForTarget={target => application.actions.forSession(application.navigation.opened.open(target))}
+    openSession={target => { void application.navigation.navigate({ kind: 'session', session: target }); }}
+    notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
+    graph={graph ? <div className="tree-graphs">{topics.map(topic => <NavigationTopicGraph key={topic.id} navigation={application.navigation} store={view.store}
+      topicId={topic.id} onReveal={props.onSelected} onSwitchToTree={switchToTree} />)}</div> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
@@ -150,6 +151,8 @@ function Workspace({ application }: { application: Application }) {
   const [detailOpen, setDetailOpen] = useState(true);
   const detailDismissedAt = useRef<number | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
+  // "Resume filtered view", a filter change or a fold drops the tree's temporary reveal.
+  const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
   const [highlightedItems, setHighlightedItems] = useState<ReadonlySet<string>>(new Set());
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const hoverItem = useCallback((itemId: string | null) => setHoveredItem(itemId), []);
@@ -158,6 +161,7 @@ function Workspace({ application }: { application: Application }) {
   const [routeError, setRouteError] = useState<string | null>(null);
   const graph = graphModes[key] ?? false;
   const currentReveal = localReveal?.store === store ? localReveal : state.reveal?.store === store ? state.reveal : null;
+  const treeReveal = currentReveal === dismissedReveal ? null : currentReveal;
   const selectedId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
   const theme = preferences?.global.theme ?? 'system';
   const query = searchEdit?.route === key ? searchEdit.text : view?.filters.search ?? '';
@@ -279,6 +283,15 @@ function Workspace({ application }: { application: Application }) {
     { label: 'Graph', icon: 'ph ph-graph', title: 'Graph (g)', on: graph && !archived, onSelect: () => showView('graph') },
     { label: archivedTopics ? `Archive ${archivedTopics}` : 'Archive', icon: 'ph ph-archive', title: 'Archived topics', on: archived, onSelect: () => showView('archive') },
   ] : null;
+  const clearFilters = () => {
+    if (!view) return;
+    setSearchEdit(null); setDismissedReveal(currentReveal);
+    saveView({ filters: clearedFilters(view.filters) });
+  };
+  const toggleLater = (target: ItemRoute, itemId: string) => {
+    if (!preferences) return false;
+    void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === itemId), preferences.revision); return true;
+  };
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({
     store: !!store, closeDetail, focusOwner, queueBring, archiveTopic: topicId => {
       const control = document.querySelector<HTMLButtonElement>(`[data-shortcut-archive-topic="${topicId}"]`);
@@ -291,13 +304,9 @@ function Workspace({ application }: { application: Application }) {
       return route && item ? { item, target: { ...route, item_id: item.id } } : null;
     },
     oldestWaiting: () => application.waiting.getSnapshot().waiting[0]?.route,
-    toggleLater: (target, itemId) => {
-      if (!preferences) return false;
-      void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === itemId), preferences.revision); return true;
-    },
+    toggleLater,
     toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })), toggleRail,
-    clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) ? undefined
-      : () => saveView({ filters: clearedFilters(view.filters) }),
+    clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
   }), { scope: 'workspace' });
   return <div className="product-app" onKeyDown={keys}>
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery}
@@ -319,7 +328,18 @@ function Workspace({ application }: { application: Application }) {
       onCloseDetail={closeDetail}
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} routes={navigation.routes}
         selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onReveal={reveal} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} /> : undefined}
-      renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} onReveal={selected} revealItem={revealItem} switchToTree={switchToTree} highlightedItemIds={highlightedItems} onHoverItem={hoverItem} />} />
+      renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
+        selectedId={selectedId} detailOpen={detailOpen && !!selectedId} railOpen={!!view && view.rail !== 'hidden'}
+        highlightedItems={highlightedItems} highlightedMessages={highlightedMessages} onHoverItem={hoverItem} onSelected={selected}
+        onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}
+        onAct={(intent, target) => {
+          if (intent === 'bring') void queueBring(target);
+          else if (intent === 'later') toggleLater(target, target.item_id);
+          else focusOwner(target, intent);
+        }}
+        onClearFilters={clearFilters} onShowArchive={() => showView('archive')} revealItem={revealItem} switchToTree={switchToTree}
+        // TODO(WP6): remove the item or topic after asking; a no-op until the remove command lands.
+        onRemove={() => {}} />} />
   </div>;
 }
 

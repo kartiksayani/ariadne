@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
 
-test('scrolls full variable sentence rows with history actions, setup and toolbar accessible', async ({ page }, testInfo) => {
+test('scrolls full variable tree rows with the session bar, setup and filters accessible', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -36,21 +36,18 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
     })).toBe(true);
     await page.locator('button[data-session-id]').first().click();
     const tree = page.getByRole('tree'), setup = page.getByRole('region', { name: 'Session setup' });
-    await expect(tree.getByRole('treeitem')).toHaveCount(2000);
+    await expect(tree.locator('.tree-item')).toHaveCount(2000);
     await expect(setup.getByRole('heading', { name: 'Session connected' })).toBeVisible();
     const geometry = () => page.evaluate(() => {
-      const rows = document.querySelector<HTMLElement>('.sentence-rows')!, center = document.querySelector<HTMLElement>('.shell-center')!;
+      const rows = document.querySelector<HTMLElement>('.tree-scroll')!, center = document.querySelector<HTMLElement>('.shell-center')!;
       return { rowsHeight: rows.clientHeight, rowsScrollHeight: rows.scrollHeight, rowsScrollTop: rows.scrollTop,
         centerScrollTop: center.scrollTop, centerHeight: center.clientHeight, centerScrollHeight: center.scrollHeight,
-        toolbarTop: document.querySelector('.sentence-filters')!.getBoundingClientRect().top,
+        toolbarTop: document.querySelector('.tree-filters')!.getBoundingClientRect().top,
         headerTop: document.querySelector('.shell-header')!.getBoundingClientRect().top };
     });
     const before = await geometry();
     await testInfo.attach('initial-tree-geometry', { body: JSON.stringify(before), contentType: 'application/json' });
-    // At least one full variable-height row (about 64px) stays visible. JetBrains
-    // Mono wraps the old status filters onto a third line at these widths (106px
-    // of rows under the old proportional font at 1000x668, 87px now) until WP1's
-    // filter chips land.
+    // At least one full variable-height row (about 64px) stays visible.
     const usefulRows = 64;
     expect(before.rowsHeight).toBeGreaterThan(usefulRows);
     const row = tree.locator('[data-item-id="10.50"]');
@@ -66,15 +63,14 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
     expect(after.centerScrollHeight).toBeLessThanOrEqual(after.centerHeight + 1);
     expect(after.toolbarTop).toBe(before.toolbarTop);
     expect(after.headerTop).toBe(before.headerTop);
-    await expect(page.getByRole('button', { name: 'Open', exact: true })).toBeInViewport();
+    await expect(page.getByRole('group', { name: 'Filter items' }).getByRole('button', { name: /\bOpen \d+$/ })).toBeInViewport();
     await expect(setup.getByRole('heading', { name: 'Session connected' })).toBeInViewport();
     for (const viewport of [{ width: 1000, height: 668 }, { width: 900, height: 650 }]) {
       await page.setViewportSize(viewport);
-      const binding = page.locator('.lifecycle-binding');
-      await binding.getByRole('button', { name: 'Pause dispatch', exact: true }).scrollIntoViewIfNeeded();
-      await expect(binding.getByRole('button', { name: 'Pause dispatch', exact: true })).toBeInViewport();
-      const history = page.getByRole('region', { name: 'History actions' });
-      for (const action of [...await binding.getByRole('button').all(), ...await history.getByRole('button').all()]) {
+      // The tree keeps only Close session; pause and connect live on the project page.
+      const bar = page.locator('.tree-session-bar');
+      await expect(bar.getByRole('button', { name: 'Close session' })).toBeInViewport();
+      for (const action of await bar.getByRole('button').all()) {
         await action.scrollIntoViewIfNeeded();
         await expect(action).toBeInViewport();
         expect(await action.evaluate(element => {
@@ -104,8 +100,8 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
       expect(current.rowsHeight).toBeGreaterThan(usefulRows);
       expect(current.centerScrollTop).toBe(0);
       expect(current.centerScrollHeight).toBeLessThanOrEqual(current.centerHeight + 1);
-      await expect(page.getByRole('button', { name: 'Open', exact: true })).toBeInViewport();
-      const controls = await page.locator('.sentence-filters').evaluate(element => [...element.querySelectorAll('button, input, select')].map(control => {
+      await expect(page.getByRole('group', { name: 'Filter items' }).getByRole('button', { name: /\bOpen \d+$/ })).toBeInViewport();
+      const controls = await page.locator('.tree-filters').evaluate(element => [...element.querySelectorAll('button, input, select')].map(control => {
         const bounds = control.getBoundingClientRect();
         return { label: control.textContent || control.closest('label')?.textContent,
           reachable: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button, input, select') === control };
@@ -114,18 +110,19 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
       const ordinary = tree.locator('[data-item-id="10.49"]');
       await ordinary.evaluate(element => element.scrollIntoView({ block: 'start' }));
       const completeRow = await ordinary.evaluate(element => {
-        const bounds = element.getBoundingClientRect(), viewport = element.closest('.sentence-rows')!.getBoundingClientRect();
+        const bounds = element.getBoundingClientRect(), viewport = element.closest('.tree-scroll')!.getBoundingClientRect();
         return { height: bounds.height, top: bounds.top, bottom: bounds.bottom, viewportTop: viewport.top, viewportBottom: viewport.bottom };
       });
       expect(completeRow.height).toBeGreaterThan(40);
       expect(completeRow.top).toBeGreaterThanOrEqual(completeRow.viewportTop);
       expect(completeRow.bottom).toBeLessThanOrEqual(completeRow.viewportBottom);
     }
-    // Session sizing ends with Tree mode. Other routes retain the centre pane
-    // scroller, including complete setup content below the graph/catalogue.
+    // Graph mode renders inside the tree column, which keeps its own scroller.
+    // Catalogue routes retain the centre pane scroller, including complete
+    // setup content below the catalogue.
     await page.getByRole('button', { name: 'Graph', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Topic graph' }).first()).toBeVisible();
-    expect(await page.locator('.shell-center').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+    expect(await page.locator('.tree-scroll').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
     await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
     await setup.evaluate(element => element.scrollIntoView({ block: 'end' }));
@@ -148,7 +145,7 @@ test('keeps saved owner controls below complete history in the ordinary App', as
     await page.goto(`${origin}/tests/e2e/owner-input/fixture.html`);
     const session = page.locator('button[data-session-id]').first();
     await expect(session).toBeEnabled(); await session.click();
-    await expect(page.getByRole('button', { name: 'Pause dispatch' })).toBeEnabled();
+    await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
     await page.locator('[data-item-id="2"]').click();
     const detail = page.locator('.shell-detail-scroll'), history = detail.locator('.item-history');
     await expect(history.getByRole('heading', { name: 'Which native delivery window should we use?', level: 3 })).toBeVisible();

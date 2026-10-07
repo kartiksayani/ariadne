@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import demo from '../../../../../fixtures/domain/demo/session.json';
@@ -13,7 +12,6 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 import * as catalogue from '../../../src/state/navigation/catalogue';
 import { bindingLabel, NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
 import { BindSession, RegisterProject } from '../../../src/components/navigation/Registration';
-import { NavigationSentenceTree } from '../../../src/components/tree/NavigationSentenceTree';
 
 const projectId = demo.project_id;
 const route: SessionRef = { project_id: projectId, session_id: demo.id };
@@ -790,14 +788,14 @@ describe('tree edits through canonical navigation preferences', () => {
   it('keeps a confirmed search receipt when an overlapping refresh finishes its catalogues and uses that revision for the next filter', async () => {
     const { transport, store } = setup(), prefs = preferences();
     prefs.sessions[0].filters = { search: 'native', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false };
-    read(transport, prefs); await store.start(); transport.enqueue('session_get', loaded());
-    const opened = store.opened.open(route); await opened.refresh();
-    render(<NavigationSentenceTree navigation={store} store={opened} onReveal={() => {}} />);
+    read(transport, prefs); await store.start();
+    // The header search and the tree's status chips both write through saveSessionView with the current revision.
+    const view = () => structuredClone(store.getSnapshot().preferences!.sessions[0]) as SessionPreferences;
     const receipt = deferred<MutationEnvelope>(), projects = deferred<QueryEnvelope>();
     transport.enqueue('preferences_patch', receipt.promise);
-    vi.useFakeTimers();
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
-    await act(async () => { vi.advanceTimersByTime(100); });
+    const cleared = view(); cleared.filters.search = '';
+    let search!: Promise<boolean>;
+    await act(async () => { search = store.saveSessionView(cleared, store.getSnapshot().preferences!.revision); });
     expect(store.getSnapshot().writing).toBe(true);
     transport.enqueue('preferences_get', success('preferences_get', prefs));
     transport.enqueue('project_list', projects.promise);
@@ -812,9 +810,10 @@ describe('tree edits through canonical navigation preferences', () => {
     expect(store.getSnapshot().preferences?.revision).toBe(2);
     expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe('');
     expect(store.getSnapshot().status).toBe('ready'); expect(store.getSnapshot().error).toBeNull();
+    expect(await search).toBe(true);
     transport.enqueue('preferences_patch', patchReceipt(3));
-    const statuses = screen.getByRole('group', { name: 'Item status' });
-    await act(async () => { fireEvent.click(within(statuses).getByRole('button', { name: 'Open' })); });
+    const open = view(); open.filters.statuses = ['open'];
+    await act(async () => { await store.saveSessionView(open, store.getSnapshot().preferences!.revision); });
     expect(store.getSnapshot().preferences?.revision).toBe(3);
     expect(store.getSnapshot().preferences?.sessions[0]).toEqual({ ...prefs.sessions[0],
       filters: { ...prefs.sessions[0].filters, search: '', statuses: ['open'] } });
@@ -826,57 +825,8 @@ describe('tree edits through canonical navigation preferences', () => {
         preferences: { filters: { search: '', statuses: ['open'] } } }] },
     } });
   });
-  it('keeps the newest tree selection reveal through Later and new search after dismissing an older external reveal', async () => {
-    const { transport, store } = setup(), prefs = preferences(), session = structuredClone(demo) as Session;
-    prefs.global.selected_navigation = { kind: 'session', session: route };
-    prefs.sessions[0].filters.search = 'needle'; prefs.sessions[0].expanded_item_ids = [];
-    const root = session.items['1']!, child = session.items['1.1']!;
-    session.items = {
-      '1': { ...root, question: 'Parent context' },
-      '1.1': { ...child, question: 'Matching needle child' },
-      '1.2': { ...child, id: '1.2', ordinal: 2, question: 'Sibling outside search' },
-    };
-    session.messages = [];
-    const snapshot = () => success('session_get', { session, freshness: 'fresh' });
-    read(transport, prefs); await store.start();
-    transport.enqueue('session_get', snapshot());
-    const opened = store.opened.open(route); await opened.refresh();
-    const revealRoute = async (id: string, revision: number) => {
-      transport.enqueue('reveal_item', success('reveal_item', { ...route, item_id: id }));
-      transport.enqueue('session_get', snapshot(), snapshot());
-      transport.enqueue('preferences_patch', patchReceipt(revision));
-      await act(async () => { transport.emit('ariadne://route', { ...route, item_id: id }); });
-      await waitFor(() => expect(store.getSnapshot().preferences?.revision).toBe(revision));
-    };
-    const ids = () => screen.queryAllByRole('treeitem').map(row => row.getAttribute('data-item-id'));
-    const user = userEvent.setup();
-    render(<NavigationSentenceTree navigation={store} store={opened} onReveal={() => {}} />);
-    await revealRoute('1.2', 2);
-    expect(screen.getByText('Item 1.2 is outside the current filters.')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Dismiss temporary reveal' }));
-    expect(ids()).toEqual(['1', '1.1']);
-    transport.enqueue('reveal_item', success('reveal_item', { ...route, item_id: '1.1' }));
-    transport.enqueue('session_get', snapshot()); transport.enqueue('preferences_patch', patchReceipt(3));
-    await user.click(screen.getAllByRole('treeitem')[1]);
-    await waitFor(() => expect(store.getSnapshot().preferences?.sessions[0].selected_item_id).toBe('1.1'));
-    expect(document.activeElement?.getAttribute('data-item-id')).toBe('1.1');
-    transport.enqueue('preferences_patch', patchReceipt(4)); await user.keyboard('z');
-    await waitFor(() => expect(store.getSnapshot().preferences?.later).toEqual([{ ...route, item_id: '1.1' }]));
-    transport.enqueue('preferences_patch', patchReceipt(5)); vi.useFakeTimers();
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'No canonical native tree question matches this phrase' } });
-    await act(async () => { vi.advanceTimersByTime(100); });
-    expect(screen.getByText('Item 1.1 is outside the current filters.')).toBeTruthy();
-    expect(ids()).toEqual(['1', '1.1']);
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss temporary reveal' }));
-    expect(ids()).toEqual([]); expect(screen.getByText('No sentences match these filters.')).toBeTruthy();
-    expect(store.getSnapshot().preferences?.sessions[0]).toEqual({ ...prefs.sessions[0], selected_item_id: '1.1',
-      filters: { ...prefs.sessions[0].filters, search: 'No canonical native tree question matches this phrase' } });
-    expect(store.getSnapshot().preferences?.later).toEqual([{ ...route, item_id: '1.1' }]);
-    vi.useRealTimers(); await revealRoute('1.2', 6);
-    expect(screen.getByText('Item 1.2 is outside the current filters.')).toBeTruthy();
-    expect(ids()).toEqual(['1', '1.2']);
-    expect(document.activeElement?.getAttribute('data-item-id')).toBe('1.2');
-  });
+  // The temporary-reveal sequence (outside-filter reveal, Resume, reselect) is covered by tests/ui/tree/component.test.tsx
+  // now that the workspace, not the tree, owns the reveal.
   it('completes saved view edits while a catalogue refresh is blocked and rejects its older snapshot', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
     const blocked = deferred<QueryEnvelope>(); transport.enqueue('preferences_get', blocked.promise);
@@ -1059,14 +1009,12 @@ describe('tree edits through canonical navigation preferences', () => {
     expect(calls).toHaveLength(2); expect(calls[0]).toEqual(calls[1]);
     expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe('immutable choice');
   });
-  it('composes real tree Later callbacks into the same canonical mutation path and preserves unrelated preferences', async () => {
+  it('sends Later through the same canonical mutation path and preserves unrelated preferences', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.sessions[0].filters.search = '';
-    read(transport, prefs); await store.start(); transport.enqueue('session_get', loaded());
-    const opened = store.opened.open(route); await opened.refresh();
-    render(<NavigationSentenceTree navigation={store} store={opened} onReveal={() => {}} />);
+    read(transport, prefs); await store.start();
     const next = structuredClone(prefs); next.revision = 2; next.later = [{ ...route, item_id: '1' }];
     transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
-    await act(async () => { fireEvent.keyDown(screen.getAllByRole('treeitem')[0], { key: 'z' }); });
+    await act(async () => { await store.setLater({ ...route, item_id: '1' }, true, 1); });
     await waitFor(() => expect(store.getSnapshot().preferences?.later).toEqual(next.later));
     expect(transport.calls.find(call => call.name === 'preferences_patch')!.request).toEqual({ session: null, command: {
       api_version: 1, command: 'preferences_patch', op_id: operationId, params: { expected_preferences_revision: 1,

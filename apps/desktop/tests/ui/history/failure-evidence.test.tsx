@@ -9,7 +9,7 @@ describe('native history failure evidence', () => {
     document.body.innerHTML = `<header class="shell-header"><button title="Messages (m)" aria-label="Messages (m)" disabled></button></header>
       <div class="nav-banner" role="alert"><p>Preferences revision changed</p></div>
       <button disabled>Refreshing…</button><button>Reconcile operation</button>
-      <label class="sentence-search"><input disabled value="needle"></label><p role="status">Search preview · save pending</p>
+      <input data-shell-search disabled value="needle"><p role="status">Search preview · save pending</p>
       <div role="treeitem" data-item-id="1.1" aria-selected="true"></div>
       <div class="owner-input" aria-label="Owner input for #1"><textarea disabled>abc</textarea>
         <div class="ref-send-row"><button disabled>Saving…</button></div><p role="status">Save completion is unknown.</p></div>`;

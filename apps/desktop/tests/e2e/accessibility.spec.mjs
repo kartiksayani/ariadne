@@ -58,8 +58,8 @@ export async function runAccessibilityAcceptance(configuration) {
   await focus(row); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-retained-editor.png'));
-  const lifecycle = await browser.$('[aria-label="Binding lifecycle"]');
-  const pauseButton = await lifecycle.$('button=Pause dispatch'); await pauseButton.waitForEnabled(); await pauseButton.click();
+  // Close session in the session bar opens the guarded review dialog.
+  const closeButton = await browser.$('.tree-session-bar').$('button*=Close session'); await closeButton.waitForEnabled(); await closeButton.click();
   await (await browser.$('[role="dialog"]')).waitForDisplayed();
   await focus('[role="dialog"] button');
   await browser.keys(['Shift', 'Tab']);
@@ -70,7 +70,7 @@ export async function runAccessibilityAcceptance(configuration) {
   await browser.keys('Escape');
   await wait(async () => !(await browser.$('[role="dialog"]').isExisting()), 'Dialog Escape did not close overlay');
   assert.equal(await (await browser.$('.shell-detail')).isExisting(), true, 'Dialog Escape must preserve selected detail');
-  assert.equal(await browser.execute(() => document.activeElement?.textContent === 'Pause dispatch'), true, 'Dialog restores opener');
+  assert.equal(await browser.execute(() => document.activeElement?.textContent === 'Close session'), true, 'Dialog restores opener');
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-dialog-return.png'));
   assert.deepEqual(await readFile(configuration.demo.sessionPath), before, 'Keyboard focus/draft/modal checks leave durable demo domain unchanged');
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'keyboard-accessibility.json'), { ordinaryApp: true, actualCoreStore: true,

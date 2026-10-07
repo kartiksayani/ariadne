@@ -140,12 +140,12 @@ export async function runGraphAcceptance(configuration) {
   const filtered = await sample(); assert.deepEqual(filtered.nodes.map(value => value.id), ['10', '10.80']);
   await detail(canonical, '10.80');
   await click('button=Switch to tree', browser.$('.topic-graph-controls'));
-  await wait(async () => JSON.stringify(await browser.execute(() => [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].map(element => element.dataset.itemId))) === JSON.stringify(['10', '10.80']), 'Native tree fallback must preserve Graph filters and ordinary ancestry');
+  await wait(async () => JSON.stringify(await browser.execute(() => [...document.querySelectorAll('.tree-rows .tree-item')].map(element => element.dataset.itemId))) === JSON.stringify(['10', '10.80']), 'Native tree fallback must preserve Graph filters and ordinary ancestry');
   await detail(canonical, '10.80');
   const filteredView = await view(tree); assert.equal(filteredView.filters.search, 'Native token_10_80_end'); assert.equal(filteredView.selected_item_id, '10.80');
   assert.deepEqual(filteredView.expanded_item_ids, beforeView.expanded_item_ids, 'Graph search/reveal must not rewrite explicit tree expansion');
   await (await search()).waitForEnabled(); await (await search()).setValue('');
-  await wait(async () => (await view(tree)).filters.search === '' && await browser.execute(() => document.querySelectorAll('.sentence-rows [role="treeitem"]').length === 1901), 'Clear shared search must preserve the saved collapsed tree branch');
+  await wait(async () => (await view(tree)).filters.search === '' && await browser.execute(() => document.querySelectorAll('.tree-rows .tree-item').length === 1901), 'Clear shared search must preserve the saved collapsed tree branch');
   const finalView = await view(tree);
   assert.deepEqual(await snapshot(tree), canonical, 'Graph view actions must not change canonical items, messages or inputs');
   assert.deepEqual(await snapshot(configuration), original); assert.deepEqual(await admissions(configuration), journal); assert.equal(journal.length, 5);

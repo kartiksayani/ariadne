@@ -5,6 +5,7 @@ import type { Session } from '../../generated/domain/models';
 import { SessionActions, useSessionActions } from '../bindings/actions';
 import { ReferenceDialog } from '../reference/ReferenceDialog';
 import { continueGroups, sameRoute } from './selectors';
+import './history-actions.css';
 
 export interface ContinueTarget { route: SessionRef; label: string }
 interface Prepared { preview: Immutable<ContinuePreview>; source: Immutable<Session>; targetRevision: number }
