@@ -448,11 +448,11 @@ describe('registered variable-height sentence tree', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
     await waitFor(() => expect(value.saved.at(-1)?.filters).toEqual({ search: '', statuses: [], owners: [], topic_id: null, archived: true, hide_later: false }));
   });
-  it('focuses search from tree shortcuts without invoking browser search or changing item selection', async () => {
+  it('leaves / and Cmd+F to the header search without changing item selection', async () => {
     const value = await setup(); render(<value.Composition />); rows()[0].focus();
-    fireEvent.keyDown(rows()[0], { key: '/' }); expect(document.activeElement).toBe(screen.getByRole('searchbox'));
-    rows()[0].focus(); fireEvent.keyDown(rows()[0], { key: 'f', metaKey: true });
-    expect(document.activeElement).toBe(screen.getByRole('searchbox')); expect(value.reveals).toHaveLength(0);
+    expect(fireEvent.keyDown(rows()[0], { key: '/' })).toBe(true); expect(document.activeElement).toBe(rows()[0]);
+    expect(fireEvent.keyDown(rows()[0], { key: 'f', metaKey: true })).toBe(true);
+    expect(document.activeElement).toBe(rows()[0]); expect(value.reveals).toHaveLength(0);
   });
   it('shows outside-filter reveal, focuses its ancestry and dismisses it without clearing saved filters', async () => {
     const view = preferences(); view.filters.statuses = ['waiting_on_me']; view.expanded_item_ids = [];

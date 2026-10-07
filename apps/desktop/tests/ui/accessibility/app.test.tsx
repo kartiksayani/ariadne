@@ -20,6 +20,9 @@ it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts
   fireEvent.keyDown(screen.getByRole('button', { name: 'Switch to light' }), { key: 'f', metaKey: true });
   const search = screen.getByLabelText('Search questions and outcomes'); expect(document.activeElement).toBe(search);
   fireEvent.keyDown(search, { key: 'g' }); expect(screen.getByRole('tree')).toBeTruthy();
+  const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!; row.focus();
+  expect(fireEvent.keyDown(row, { key: '/' })).toBe(false); expect(document.activeElement).toBe(search);
+  row.focus(); expect(fireEvent.keyDown(row, { key: 'Backspace' })).toBe(true); expect(document.activeElement).toBe(row);
   fireEvent.click(document.querySelector('[data-item-id="1"]')!); await screen.findByRole('group', { name: 'Owner actions' });
   const pause = screen.getByRole('button', { name: 'Pause dispatch' }); pause.focus(); fireEvent.click(pause);
   const dialog = screen.getByRole('dialog'), cancel = within(dialog).getByRole('button', { name: 'Cancel' });
