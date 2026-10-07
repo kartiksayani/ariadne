@@ -5,7 +5,7 @@ import type { SessionRef } from '../../generated/core';
 import type { ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
 import type { NavigationStore } from '../../state/navigation/store';
 import type { SessionActionControllers } from '../../components/bindings/actions';
-import { lifecycleBlockers } from '../../components/history-actions/selectors';
+import { dispatchQuiesced, lifecycleBlockers } from '../../components/history-actions/selectors';
 import { RemoveDialog } from '../dialogs/RemoveDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from '../dialogs/remove';
 import { sessionWhen } from '../shell/model';
@@ -75,7 +75,7 @@ export function SessionLists(props: SessionListsProps) {
       const { store, session, controller } = await ready(route);
       const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
       const agent = sessionCardText(summary, null, now).agent, when = sessionWhen(Date.parse(summary.created_at), now);
-      if (kind === 'session_close' && (binding?.dispatch_state !== 'paused' || lifecycleBlockers(session, null).length)) {
+      if (kind === 'session_close' && (!dispatchQuiesced(binding) || lifecycleBlockers(session, null).length)) {
         setDialog({ kind: 'close', store, agent, when, route }); return;
       }
       const done = await controller.execute({ command: kind, api_version: 1, op_id: '', params: { expected_revision: session.revision } }, session.revision);
