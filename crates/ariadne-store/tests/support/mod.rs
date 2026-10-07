@@ -29,8 +29,8 @@ pub struct ProjectDir {
 impl ProjectDir {
     pub fn empty() -> Self {
         let root = tempfile::tempdir().unwrap();
-        let data = root.path().join(".ariadne");
-        fs::create_dir(&data).unwrap();
+        // The tempdir is the project's store directory (`<data root>/projects/<id>`).
+        let data = root.path().to_path_buf();
         fs::set_permissions(&data, fs::Permissions::from_mode(0o700)).unwrap();
         let project = Project {
             schema_version: SchemaVersion::new(1).unwrap(),
@@ -54,17 +54,17 @@ impl ProjectDir {
     pub fn live(&self) -> PathBuf {
         self.root
             .path()
-            .join(format!(".ariadne/sessions/{}.json", id(2).as_str()))
+            .join(format!("sessions/{}.json", id(2).as_str()))
     }
     pub fn backup(&self) -> PathBuf {
         self.root
             .path()
-            .join(format!(".ariadne/backups/{}.previous.json", id(2).as_str()))
+            .join(format!("backups/{}.previous.json", id(2).as_str()))
     }
     pub fn lock(&self) -> PathBuf {
         self.root
             .path()
-            .join(format!(".ariadne/locks/{}.lock", id(2).as_str()))
+            .join(format!("locks/{}.lock", id(2).as_str()))
     }
 }
 

@@ -20,6 +20,10 @@ use std::{
 };
 use tempfile::TempDir;
 
+/// Project store directory under a data-root home, as `Registry::project_dir` derives it.
+fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
+    home.join(".ariadne/projects").join(id(project).as_str())
+}
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -800,7 +804,7 @@ fn native_with_seed() -> (TempDir, TempDir, NativeCoreService) {
     registry.register(root.path(), &id(99), || id(1)).unwrap();
     let seed: Session =
         serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap();
-    Store::open_registered(root.path(), id(1))
+    Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .create(&seed)
         .unwrap();
@@ -864,7 +868,7 @@ fn event(p: &PreparedAttempt, name: &str, payload: EventPayload) -> NormalizedEv
 
 #[test]
 fn concrete_core_routes_real_input_fifo_claim_report_apply_and_join_receipts() {
-    let (_home, root, core) = native_with_seed();
+    let (home, _root, core) = native_with_seed();
     let service: &dyn CoreService = &core;
     let first = submit(service, 100);
     let second = submit(service, 101);
@@ -896,7 +900,7 @@ fn concrete_core_routes_real_input_fifo_claim_report_apply_and_join_receipts() {
     assert!(receipt.durable_effect);
     receipt.replayed = true;
     assert_eq!(service.report(adapter(), start).unwrap(), receipt);
-    let current = Store::open_registered(root.path(), id(1))
+    let current = Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .read(&id(2))
         .unwrap();
@@ -955,7 +959,7 @@ fn concrete_core_routes_real_input_fifo_claim_report_apply_and_join_receipts() {
             ),
         )
         .unwrap();
-    let saved = Store::open_registered(root.path(), id(1))
+    let saved = Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .read(&id(2))
         .unwrap();
@@ -991,9 +995,9 @@ fn concrete_core_routes_real_input_fifo_claim_report_apply_and_join_receipts() {
 
 #[test]
 fn concrete_native_expiry_and_cancel_delegate_preserve_owned_history() {
-    let (_home, root, core) = native_with_seed();
+    let (home, _root, core) = native_with_seed();
     let cancelled = submit(&core, 100);
-    let before = Store::open_registered(root.path(), id(1))
+    let before = Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .read(&id(2))
         .unwrap();
@@ -1053,7 +1057,7 @@ fn concrete_native_expiry_and_cancel_delegate_preserve_owned_history() {
         .expire_missing_result(&adapter(), &input, &prepared.attempt_id, &id(105))
         .unwrap()
         .is_none());
-    let saved = Store::open_registered(root.path(), id(1))
+    let saved = Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .read(&id(2))
         .unwrap();
@@ -1085,7 +1089,7 @@ fn concrete_native_expiry_and_cancel_delegate_preserve_owned_history() {
 #[test]
 fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay() {
     let (home, root, old_core) = native_with_seed();
-    let seed = Store::open_registered(root.path(), id(1))
+    let seed = Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .read(&id(2))
         .unwrap();
@@ -1093,7 +1097,7 @@ fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay()
     let calls = Arc::new(AtomicU64::new(0));
     let observed = calls.clone();
     let data_home = home.path().to_owned();
-    let project_root = root.path().to_owned();
+    let project_root = store_dir(home.path(), 1);
     let ids = Arc::new(AtomicU64::new(20000));
     drop(old_core);
     let core = NativeCoreService::new(
@@ -1156,7 +1160,7 @@ fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay()
         registered
     );
     let old_input = submit(&core, 76);
-    let current = Store::open_registered(root.path(), id(1))
+    let current = Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .read(&id(2))
         .unwrap();
@@ -1172,7 +1176,7 @@ fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay()
         },
     )
     .unwrap();
-    let history = Store::open_registered(root.path(), id(1))
+    let history = Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .read(&id(2))
         .unwrap();
@@ -1222,7 +1226,7 @@ fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay()
     else {
         panic!()
     };
-    let live = Store::open_registered(root.path(), id(1))
+    let live = Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .read(&id(2))
         .unwrap();

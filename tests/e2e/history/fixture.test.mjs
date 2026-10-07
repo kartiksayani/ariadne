@@ -159,7 +159,7 @@ test('complete native history batches deserialize through the real CLI/Core disp
     const env = { ...process.env, ARIADNE_HOME: home };
     const demo = await cliRequest(cli, ['demo', '--root', project, '--json'], undefined, env);
     assert.equal(demo.code, 0);
-    const path = join(project, '.ariadne/sessions', `${demo.value.data.session_id}.json`), before = await readFile(path);
+    const path = join(home, 'projects', demo.value.data.project_id, 'sessions',`${demo.value.data.session_id}.json`), before = await readFile(path);
     const session = JSON.parse(before), binding = session.bindings[session.active_binding_id];
     const roundId = Object.keys(session.rounds)[0], batches = [[1, 50], [51, 50], [101, 5]].map(([first, count]) => historyMessageBatch(roundId, first, count));
     const replies = batches.flat();

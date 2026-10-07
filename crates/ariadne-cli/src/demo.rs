@@ -45,10 +45,16 @@ fn execute(args: &[&str]) -> Result<serde_json::Value, CoreError> {
         }
         i += 1;
     }
-    let prepared = prepare(Path::new(root.ok_or_else(|| {
-        error(CoreErrorCode::InvalidArgument, "Demo requires --root.")
-    })?))?;
+    let root =
+        root.ok_or_else(|| error(CoreErrorCode::InvalidArgument, "Demo requires --root."))?;
+    if !Path::new(root).is_absolute() {
+        return Err(error(
+            CoreErrorCode::InvalidArgument,
+            "Demo requires an explicit absolute --root.",
+        ));
+    }
     let data = crate::bridge::command::home_from_environment()?;
+    let prepared = prepare(Path::new(root), &data)?;
     let registry = Registry::create_data_directory(&data)?;
     let operation_id = UuidV4::new(uuid::Uuid::new_v4().to_string()).expect("native UUIDv4");
     let route = prepared.publish(&registry, &operation_id)?;
@@ -67,7 +73,8 @@ pub struct PreparedDemo {
 
 /// An ordinary existing-session collision is rejected before registration.
 /// This observation is a preflight; final Store creation is still authoritative.
-pub fn prepare(root: &Path) -> Result<PreparedDemo, CoreError> {
+/// `data` is the data root; the demo session lives under `data/projects/<id>`.
+pub fn prepare(root: &Path, data: &Path) -> Result<PreparedDemo, CoreError> {
     if !root.is_absolute() {
         return Err(error(
             CoreErrorCode::InvalidArgument,
@@ -89,8 +96,10 @@ pub fn prepare(root: &Path) -> Result<PreparedDemo, CoreError> {
             "The bundled canonical demo is invalid.",
         )
     })?;
-    let path = root
-        .join(".ariadne/sessions")
+    let path = data
+        .join("projects")
+        .join(session.project_id.as_str())
+        .join("sessions")
         .join(format!("{}.json", session.id.as_str()));
     match fs::symlink_metadata(&path) {
         Ok(_) => {
@@ -123,8 +132,11 @@ impl PreparedDemo {
         operation_id: &UuidV4,
     ) -> Result<SessionRef, CoreError> {
         registry.register_fixed(&self.root, operation_id, &self.session.project_id)?;
-        let result = Store::open_registered(&self.root, self.session.project_id.clone())
-            .and_then(|store| store.create(&self.session));
+        let result = Store::open_registered(
+            &registry.project_dir(&self.session.project_id),
+            self.session.project_id.clone(),
+        )
+        .and_then(|store| store.create(&self.session));
         if let Err(cause) = result {
             let mut cause = CoreError::from(cause);
             cause.message = "Project registered; demo publication was not confirmed. Existing session bytes were not replaced; inspect the explicit root.".into();

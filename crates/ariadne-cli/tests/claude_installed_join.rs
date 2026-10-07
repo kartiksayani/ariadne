@@ -95,7 +95,7 @@ impl Fixture {
         let old = session.bindings.0.get_mut(&id(3)).unwrap();
         old.connection_state = ConnectionState::Disconnected;
         old.dispatch_state = DispatchState::Disconnected;
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&registry.project_dir(&id(1)), id(1))
             .unwrap()
             .create(&session)
             .unwrap();
@@ -252,7 +252,7 @@ impl Fixture {
         fixture
     }
     fn saved(&self) -> Session {
-        Store::open_registered(self.root.path(), id(1))
+        Store::open_registered(&self.core.registry().project_dir(&id(1)), id(1))
             .unwrap()
             .read(&id(2))
             .unwrap()

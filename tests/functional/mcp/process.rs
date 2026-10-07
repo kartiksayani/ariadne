@@ -15,7 +15,8 @@ fn id(n: u64) -> UuidV4 {
 }
 struct Setup {
     _home: tempfile::TempDir,
-    root: tempfile::TempDir,
+    _root: tempfile::TempDir,
+    store_dir: std::path::PathBuf,
     data: std::path::PathBuf,
 }
 impl Setup {
@@ -27,25 +28,26 @@ impl Setup {
         let session: Session =
             serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json"))
                 .unwrap();
-        Store::open_registered(root.path(), id(1))
+        let store_dir = registry.project_dir(&id(1));
+        Store::open_registered(&store_dir, id(1))
             .unwrap()
             .create(&session)
             .unwrap();
         let data = home.path().join(".ariadne");
         Self {
             _home: home,
-            root,
+            _root: root,
+            store_dir,
             data,
         }
     }
     fn store(&self) -> Store {
-        Store::open_registered(self.root.path(), id(1)).unwrap()
+        Store::open_registered(&self.store_dir, id(1)).unwrap()
     }
     fn bytes(&self) -> Vec<u8> {
         fs::read(
-            self.root
-                .path()
-                .join(format!(".ariadne/sessions/{}.json", id(2).as_str())),
+            self.store_dir
+                .join(format!("sessions/{}.json", id(2).as_str())),
         )
         .unwrap()
     }
@@ -229,7 +231,7 @@ pub fn persisted_race_and_parity(binary: &str, args: &[&str], cli: Option<&str>)
     }));
     let barrier = Arc::new(Barrier::new(2));
     let b = barrier.clone();
-    let root = setup.root.path().to_owned();
+    let root = setup.store_dir.clone();
     let writer = thread::spawn(move || {
         b.wait();
         Store::open_registered(&root, id(1))

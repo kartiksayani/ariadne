@@ -43,7 +43,7 @@ impl Lane {
     fn bytes(&self) -> Vec<u8> {
         fs::read(
             self.root
-                .join(format!(".ariadne/sessions/{}.json", self.session.as_str())),
+                .join(format!("sessions/{}.json", self.session.as_str())),
         )
         .unwrap()
     }
@@ -225,7 +225,7 @@ pub fn parallel_queued_isolation(binary: &str) {
             let offset = index * 10;
             let project = if index == 2 { id(101) } else { id(1) };
             let lane = Lane {
-                root: projects[usize::from(index == 2)].path().into(),
+                root: registry.project_dir(&project),
                 project: project.clone(),
                 session: id(2 + offset),
                 binding: id(3 + offset),
@@ -474,7 +474,7 @@ fn installed_cli_repairs_a_missing_result_without_repeating_original_work() {
     let registry = Registry::open(home.path()).unwrap();
     registry.register(root.path(), &id(800), || id(1)).unwrap();
     let lane = Lane {
-        root: root.path().into(),
+        root: registry.project_dir(&id(1)),
         project: id(1),
         session: id(2),
         binding: id(3),

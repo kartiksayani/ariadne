@@ -9,6 +9,11 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
+pub use crate::migrate::{
+    legacy_store_path, parked_copy_differences, parked_copy_matches, parked_legacy_paths,
+    parked_legacy_paths_in_root,
+};
+
 #[derive(Debug)]
 pub enum RegistryError {
     Store(StoreError),
@@ -60,6 +65,8 @@ pub struct RegisteredProjectRead {
 #[derive(Debug)]
 pub struct RegistryCatalogue {
     pub revision: NonnegativeSafeInteger,
+    /// Canonical data root the projects' stores live under.
+    pub data: PathBuf,
     pub projects: Vec<RegisteredProjectRead>,
 }
 impl RegistryCatalogue {
@@ -83,7 +90,7 @@ impl RegistryCatalogue {
                 });
             }
         }
-        selected_routes(&located).map(Some)
+        selected_routes(&self.data, &located).map(Some)
     }
 }
 /// Native local-setup result; transport uses its canonical core DTO.
@@ -306,23 +313,74 @@ impl Registry {
             if canonical.to_str().is_none() {
                 return Err(RegistryError::InvalidArgument);
             }
-            let data = directory.child(".ariadne", true)?;
+            // The store lives under the data root; nothing is created in `root`.
+            // An id comes from this registry, else from a legacy in-project store
+            // that is migrated here, else it is newly allocated.
+            let legacy = crate::migrate::legacy_metadata(&directory)?;
+            let known = projects
+                .projects
+                .iter()
+                .find(|entry| entry.root == canonical)
+                .map(|entry| entry.project_id.clone())
+                .or_else(|| legacy.as_ref().map(|metadata| metadata.id.clone()));
+            if let (Some(expected), Some(known)) = (expected_project_id, &known) {
+                if expected != known {
+                    // Refused before any migration or other write.
+                    return Err(RegistryError::Conflict {
+                        paths: vec![if legacy.is_some() {
+                            canonical.join(".ariadne").join("project.json")
+                        } else {
+                            canonical.clone()
+                        }],
+                    });
+                }
+            }
+            let store_parent = self.data.child("projects", true)?;
+            let mut fresh = None;
+            let data = if let Some(id) = &known {
+                if legacy.is_some() {
+                    crate::migrate::migrate_legacy(&self.data, &canonical, id)?;
+                }
+                store_parent.child(id.as_str(), false).map_err(|source| {
+                    RegistryError::Unavailable {
+                        path: canonical.clone(),
+                        source,
+                    }
+                })?
+            } else {
+                let display_name = canonical
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|name| !name.trim().is_empty() && name.len() <= 4096)
+                    .ok_or(RegistryError::InvalidArgument)?;
+                let project = Project {
+                    schema_version: SchemaVersion::new(1).expect("literal"),
+                    id: allocate_project_id(),
+                    display_name: display_name.to_owned(),
+                };
+                let data = store_parent.child(project.id.as_str(), true)?;
+                fresh = Some(project);
+                data
+            };
             lock::with_lock(&data, "project.lock", || {
                 let create_project = !data.verify_target("project.json")?;
-                let project = if !create_project {
-                    read_data(&data, "project.json")?
-                } else {
-                    let display_name = canonical
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .filter(|name| !name.trim().is_empty() && name.len() <= 4096)
-                        .ok_or(RegistryError::InvalidArgument)?;
-                    Project {
-                        schema_version: SchemaVersion::new(1).expect("literal"),
-                        id: allocate_project_id(),
-                        display_name: display_name.to_owned(),
+                let project = match (create_project, fresh) {
+                    (false, _) => read_data(&data, "project.json")?,
+                    (true, Some(project)) => project,
+                    (true, None) => {
+                        return Err(RegistryError::InvalidData {
+                            path: data.path.join("project.json"),
+                            source: StoreError::InvalidSnapshot,
+                        })
                     }
                 };
+                if data.path.file_name().and_then(|name| name.to_str()) != Some(project.id.as_str())
+                {
+                    // The directory name is the identity; metadata must agree.
+                    return Err(RegistryError::Conflict {
+                        paths: vec![data.path.join("project.json")],
+                    });
+                }
                 if expected_project_id.is_some_and(|expected| expected != &project.id) {
                     return Err(RegistryError::Conflict {
                         paths: vec![data.path.join("project.json")],
@@ -344,7 +402,7 @@ impl Registry {
                     .any(|entry| entry.root == canonical)
                 {
                     for registered in &projects.projects {
-                        validate_project(registered)?;
+                        self.prepare_project(registered)?;
                     }
                 }
                 if create_project {
@@ -393,26 +451,66 @@ impl Registry {
         })
     }
 
+    /// Listing is the first touch of a project by long-running readers, so any
+    /// pending legacy in-project store is migrated here (best effort: a failed
+    /// migration leaves the legacy store intact and is reported by `catalogue`,
+    /// `resolve_project` and the doctor's `store.legacy` check).
     pub fn registered_projects(&self) -> Result<Vec<RegisteredProject>, RegistryError> {
         lock::with_lock(&self.data, "registry.lock", || {
-            Ok(self.projects()?.projects)
+            let projects = self.projects()?.projects;
+            for project in &projects {
+                let _ =
+                    crate::migrate::migrate_legacy(&self.data, &project.root, &project.project_id);
+            }
+            Ok(projects)
         })
     }
     pub fn catalogue(&self) -> Result<RegistryCatalogue, RegistryError> {
-        let projects = lock::with_lock(&self.data, "registry.lock", || self.projects())?;
+        // Legacy in-project stores migrate here, under the registry lock; a
+        // failed migration is that project's read error, never a silent skip.
+        let (projects, migrated) = lock::with_lock(&self.data, "registry.lock", || {
+            let projects = self.projects()?;
+            let migrated: Vec<Result<bool, StoreError>> = projects
+                .projects
+                .iter()
+                .map(|registered| {
+                    crate::migrate::migrate_legacy(
+                        &self.data,
+                        &registered.root,
+                        &registered.project_id,
+                    )
+                })
+                .collect();
+            Ok::<_, RegistryError>((projects, migrated))
+        })?;
         // Capture registration identity once, then release the registry lock.
         // Each project read obeys metadata -> session lock order; ordinary
         // mutations remain independently locked and all counts use these results.
         let outcomes = projects
             .projects
             .into_iter()
-            .map(|registered| {
-                let result = Store::inspect_registered(&registered.root, &registered.project_id);
+            .zip(migrated)
+            .map(|(registered, migrated)| {
+                let result = migrated.and_then(|_| {
+                    // An unavailable project root stays a per-project error even
+                    // though the store no longer lives inside it.
+                    check_root(&registered).map_err(|error| match error {
+                        RegistryError::Unavailable { source, .. } => source,
+                        _ => StoreError::UnsafePath {
+                            path: registered.root.clone(),
+                        },
+                    })?;
+                    Store::inspect_registered(
+                        &self.project_dir(&registered.project_id),
+                        &registered.project_id,
+                    )
+                });
                 RegisteredProjectRead { registered, result }
             })
             .collect();
         Ok(RegistryCatalogue {
             revision: projects.revision,
+            data: self.data.path.clone(),
             projects: outcomes,
         })
     }
@@ -425,12 +523,16 @@ impl Registry {
         })?;
         Ok(RegistryCatalogue {
             revision: projects.revision,
+            data: registry.data.path.clone(),
             projects: projects
                 .projects
                 .into_iter()
                 .map(|registered| {
-                    let result =
-                        Store::diagnose_registered(&registered.root, &registered.project_id);
+                    // Diagnosis never migrates; a pending legacy store reads as absent.
+                    let result = Store::diagnose_registered(
+                        &registry.project_dir(&registered.project_id),
+                        &registered.project_id,
+                    );
                     RegisteredProjectRead { registered, result }
                 })
                 .collect(),
@@ -471,9 +573,37 @@ impl Registry {
                 .into_iter()
                 .find(|entry| &entry.project_id == project_id)
                 .ok_or(RegistryError::NotRegistered)?;
-            validate_project(&project)?;
+            self.prepare_project(&project)?;
             Ok(project)
         })
+    }
+    /// Canonical store directory of a project: `<data root>/projects/<id>`.
+    /// Pure path derivation; pass it to `Store::open_registered` and the
+    /// catalogue readers after the project was resolved through this registry
+    /// (resolution migrates any legacy in-project store).
+    pub fn project_dir(&self, project_id: &UuidV4) -> PathBuf {
+        self.data.path.join("projects").join(project_id.as_str())
+    }
+    /// Migrate a legacy `<root>/.ariadne` store if one is pending, then open the
+    /// project directory and verify its identity. Caller holds the registry lock.
+    fn prepare_project(&self, project: &RegisteredProject) -> Result<Directory, RegistryError> {
+        check_root(project)?;
+        crate::migrate::migrate_legacy(&self.data, &project.root, &project.project_id)?;
+        let opened = self
+            .data
+            .child("projects", false)
+            .and_then(|projects| projects.child(project.project_id.as_str(), false))
+            .map_err(|source| RegistryError::Unavailable {
+                path: project.root.clone(),
+                source,
+            })?;
+        let metadata: Project = read_data(&opened, "project.json")?;
+        if metadata.id != project.project_id {
+            return Err(RegistryError::Conflict {
+                paths: vec![project.root.clone()],
+            });
+        }
+        Ok(opened)
     }
     /// Resolve from authoritative registered snapshots, never trust stale index data.
     pub fn resolve_binding(&self, binding_id: &UuidV4) -> Result<BindingRoute, RegistryError> {
@@ -575,11 +705,11 @@ impl BindingSetup<'_> {
             sessions.extend(self.project_sessions(&project.project_id)?);
         }
         // Validate all selected identities before a caller allocates a new one.
-        selected_routes(&sessions)?;
+        selected_routes(&self.registry.data.path, &sessions)?;
         Ok(sessions)
     }
     pub fn routes(&self) -> Result<Vec<BindingRoute>, RegistryError> {
-        selected_routes(&self.sessions()?)
+        selected_routes(&self.registry.data.path, &self.sessions()?)
     }
     pub fn with_store<T, E: From<RegistryError>>(
         &self,
@@ -592,7 +722,7 @@ impl BindingSetup<'_> {
             .find(|entry| &entry.project_id == project_id)
             .ok_or(RegistryError::NotRegistered)
             .map_err(E::from)?;
-        let data = validate_project(project).map_err(E::from)?;
+        let data = self.registry.prepare_project(project).map_err(E::from)?;
         lock::with_lock::<_, RegistryError>(&data, "project.lock", || {
             let metadata: Project = read_data(&data, "project.json")?;
             if metadata.id != project.project_id {
@@ -600,7 +730,7 @@ impl BindingSetup<'_> {
                     paths: vec![project.root.clone()],
                 });
             }
-            let store = Store::open_registered(&project.root, project.project_id.clone()).map_err(
+            let store = Store::open_registered(&data.path, project.project_id.clone()).map_err(
                 |source| RegistryError::Unavailable {
                     path: project.root.clone(),
                     source,
@@ -636,36 +766,34 @@ impl BindingSetup<'_> {
     }
 }
 
-fn validate_project(project: &RegisteredProject) -> Result<Directory, RegistryError> {
-    let opened = Directory::root(&project.root)
+/// The registered root must still be a canonical, reachable directory even
+/// though the store no longer lives inside it.
+fn check_root(project: &RegisteredProject) -> Result<(), RegistryError> {
+    Directory::root(&project.root)
         .and_then(|root| {
             if root.path != project.root {
                 return Err(StoreError::UnsafePath {
                     path: project.root.clone(),
                 });
             }
-            root.child(".ariadne", false)
+            Ok(())
         })
         .map_err(|source| RegistryError::Unavailable {
             path: project.root.clone(),
             source,
-        })?;
-    let metadata: Project = read_data(&opened, "project.json")?;
-    if metadata.id != project.project_id {
-        return Err(RegistryError::Conflict {
-            paths: vec![project.root.clone()],
-        });
-    }
-    Ok(opened)
+        })
 }
-fn selected_routes(sessions: &[LocatedSession]) -> Result<Vec<BindingRoute>, RegistryError> {
+fn selected_routes(
+    data: &Path,
+    sessions: &[LocatedSession],
+) -> Result<Vec<BindingRoute>, RegistryError> {
     let mut routes: Vec<BindingRoute> = Vec::new();
     let mut binding_ids = BTreeMap::new();
     for located in sessions {
-        let path = located
-            .project
-            .root
-            .join(".ariadne/sessions")
+        let path = data
+            .join("projects")
+            .join(located.project.project_id.as_str())
+            .join("sessions")
             .join(format!("{}.json", located.session.id.as_str()));
         for (id, binding) in &located.session.bindings.0 {
             if id != &binding.id {

@@ -401,13 +401,14 @@ fn saved_connect_instruction_routes_real_read_and_apply_processes() {
         serde_json::from_slice::<serde_json::Value>(&actual.stdout).unwrap()["data"],
         serde_json::to_value(result).unwrap()
     );
-    let before: Vec<_> = std::fs::read_dir(root.path().join(".ariadne/sessions"))
-        .unwrap()
-        .map(|entry| {
-            let path = entry.unwrap().path();
-            (path.clone(), std::fs::read(path).unwrap())
-        })
-        .collect();
+    let before: Vec<_> =
+        std::fs::read_dir(data.join("projects").join(id(1).as_str()).join("sessions"))
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                (path.clone(), std::fs::read(path).unwrap())
+            })
+            .collect();
     let mut unavailable = fresh.clone();
     if let OwnerCommand::BindingConnect { op_id, .. } = &mut unavailable.command {
         *op_id = id(95);

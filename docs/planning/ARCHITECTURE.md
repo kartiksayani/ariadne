@@ -118,8 +118,10 @@ reports persist through the CLI; Codex reconciliation reads host history on reop
 
 ## Storage, trust and failure boundaries
 
-Canonical data is `<project>/.ariadne/sessions/<uuid>.json`, with project identity,
-locks and backups beside it. Global `~/.ariadne` holds project registration,
+Canonical data is `~/.ariadne/projects/<project-id>/sessions/<uuid>.json`, with
+project identity, locks and backups beside it; nothing is written into the project
+folder ([ADR-0082](../adr/ADR-0082-project-store-under-data-root.md)). The data
+root also holds project registration,
 first-party adapter configuration, UI preferences, binding index and private
 runtime files. Project roots are explicit or registered by a connection; no
 private transcript crawler. Global indexes are rebuildable from known registered session files, not the sole copy of

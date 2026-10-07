@@ -41,7 +41,7 @@ impl Files {
         registry
             .register(project.path(), &id(90), || id(1))
             .unwrap();
-        let root = fs::canonicalize(project.path()).unwrap();
+        let root = registry.project_dir(&id(1));
         Store::open_registered(&root, id(1))
             .unwrap()
             .create(&seed())
@@ -57,8 +57,7 @@ impl Files {
         Registry::open_data_directory(&self.data).unwrap()
     }
     fn live(&self) -> PathBuf {
-        self.root
-            .join(format!(".ariadne/sessions/{}.json", id(2).as_str()))
+        self.root.join(format!("sessions/{}.json", id(2).as_str()))
     }
     fn publish(&self, revision: u64) {
         let mut session = seed();
@@ -73,7 +72,8 @@ impl Files {
 #[test]
 fn registered_scan_validates_and_retains_last_revision_on_bad_deleted_or_unavailable_data() {
     let files = Files::new();
-    let projects = files.registry().registered_projects().unwrap();
+    let registry = files.registry();
+    let projects = registry.registered_projects().unwrap();
     let mut scan = scan::Scan::default();
     let hints = Arc::new(Mutex::new(Vec::new()));
     let capture = hints.clone();
@@ -85,34 +85,35 @@ fn registered_scan_validates_and_retains_last_revision_on_bad_deleted_or_unavail
         project_id: id(1),
         session_id: id(2),
     };
-    scan.reconcile(&projects, Some(&route), &emit);
+    scan.reconcile(&registry, &projects, Some(&route), &emit);
     assert_eq!(hints.lock().unwrap().len(), 1); // Selected plus catalogue dedupe.
     files.publish(3);
-    scan.reconcile(&projects, Some(&route), &emit);
+    scan.reconcile(&registry, &projects, Some(&route), &emit);
     assert_eq!(hints.lock().unwrap().last().unwrap().revision.value(), 3);
     let valid = fs::read(files.live()).unwrap();
     fs::write(files.live(), b"{invalid snapshot").unwrap();
-    scan.reconcile(&projects, Some(&route), &emit);
+    scan.reconcile(&registry, &projects, Some(&route), &emit);
     fs::remove_file(files.live()).unwrap();
-    scan.reconcile(&projects, Some(&route), &emit);
-    let data = files.root.join(".ariadne");
-    let offline = files.root.join("offline");
+    scan.reconcile(&registry, &projects, Some(&route), &emit);
+    let data = files.root.clone();
+    let offline = files.root.with_file_name("offline");
     fs::rename(&data, &offline).unwrap();
-    scan.reconcile(&projects, Some(&route), &emit);
+    scan.reconcile(&registry, &projects, Some(&route), &emit);
     fs::rename(offline, data).unwrap();
     fs::write(files.live(), valid).unwrap();
     files.publish(2); // A restored older snapshot cannot regress the hint cache.
-    scan.reconcile(&projects, Some(&route), &emit);
+    scan.reconcile(&registry, &projects, Some(&route), &emit);
     assert_eq!(hints.lock().unwrap().len(), 2);
     files.publish(4);
-    scan.reconcile(&projects, Some(&route), &emit);
+    scan.reconcile(&registry, &projects, Some(&route), &emit);
     assert_eq!(hints.lock().unwrap().last().unwrap().revision.value(), 4);
 }
 
 #[test]
 fn failed_event_publication_retries_and_wrong_project_selection_cannot_route_a_read() {
     let files = Files::new();
-    let projects = files.registry().registered_projects().unwrap();
+    let registry = files.registry();
+    let projects = registry.registered_projects().unwrap();
     let mut scan = scan::Scan::default();
     let wrong = SessionRef {
         project_id: id(999),
@@ -120,14 +121,14 @@ fn failed_event_publication_retries_and_wrong_project_selection_cannot_route_a_r
     };
     let rejected = Arc::new(Mutex::new(0));
     let record = rejected.clone();
-    scan.reconcile(&projects, Some(&wrong), &move |_| {
+    scan.reconcile(&registry, &projects, Some(&wrong), &move |_| {
         *record.lock().unwrap() += 1;
         false
     });
     assert_eq!(*rejected.lock().unwrap(), 1); // Only actual registered catalogue.
     let accepted = Arc::new(Mutex::new(Vec::new()));
     let record = accepted.clone();
-    scan.reconcile(&projects, None, &move |hint| {
+    scan.reconcile(&registry, &projects, None, &move |hint| {
         record.lock().unwrap().push(hint);
         true
     });
@@ -176,12 +177,12 @@ fn native_parent_watch_observes_atomic_publish_new_session_and_registration_then
         id(20)
     );
     let another = tempfile::tempdir().unwrap();
-    files
-        .registry()
+    let registry = files.registry();
+    registry
         .register(another.path(), &id(91), || id(10))
         .unwrap();
     let session = new_session(10, 21);
-    Store::open_registered(another.path(), id(10))
+    Store::open_registered(&registry.project_dir(&id(10)), id(10))
         .unwrap()
         .create(&session)
         .unwrap();

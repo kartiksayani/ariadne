@@ -222,6 +222,16 @@ fn expiry_after_unrelated_project_scan_lock_cannot_allocate_or_save() {
         },
     )
     .unwrap();
+    let other_root = other.path().canonicalize().unwrap();
+    let other_id = core
+        .registry()
+        .registered_projects()
+        .unwrap()
+        .into_iter()
+        .find(|project| project.root == other_root)
+        .unwrap()
+        .project_id;
+    let other_lock = core.registry().project_dir(&other_id).join("project.lock");
     let allocations = allocated.load(Ordering::SeqCst);
     let deadline = Instant::now() + Duration::from_millis(300);
     let mut unlocker = None;
@@ -232,7 +242,7 @@ fn expiry_after_unrelated_project_scan_lock_cannot_allocate_or_save() {
             let file = OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(other.path().join(".ariadne/project.lock"))
+                .open(&other_lock)
                 .unwrap();
             file.try_lock().unwrap();
             unlocker = Some(std::thread::spawn(move || {
@@ -256,13 +266,17 @@ fn expiry_after_unrelated_project_scan_lock_cannot_allocate_or_save() {
 #[test]
 fn expiry_at_new_session_final_lock_cannot_persist_speculative_ids() {
     use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt, sync::Mutex};
-    let (home, root, _registered, command, _) = setup();
+    let (home, _root, _registered, command, _) = setup();
     let deadline = Instant::now() + Duration::from_millis(300);
     let next = Arc::new(AtomicU64::new(500));
     let allocated = next.clone();
     let unlocker = Arc::new(Mutex::new(None));
     let unlocking = unlocker.clone();
-    let locks = root.path().join(".ariadne/locks");
+    let registry = Registry::open(home.path()).unwrap();
+    let project_id = registry.registered_projects().unwrap()[0]
+        .project_id
+        .clone();
+    let locks = registry.project_dir(&project_id).join("locks");
     let core = NativeCoreService::new(
         Registry::open(home.path()).unwrap(),
         move || {

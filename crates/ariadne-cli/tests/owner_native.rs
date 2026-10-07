@@ -23,7 +23,7 @@ fn seed() -> Session {
 }
 struct Setup {
     home: tempfile::TempDir,
-    root: tempfile::TempDir,
+    _root: tempfile::TempDir,
     registry: Registry,
 }
 impl Setup {
@@ -32,24 +32,24 @@ impl Setup {
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::open(home.path()).unwrap();
         registry.register(root.path(), &id(99), || id(1)).unwrap();
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&registry.project_dir(&id(1)), id(1))
             .unwrap()
             .create(session)
             .unwrap();
         Self {
             home,
-            root,
+            _root: root,
             registry,
         }
     }
     fn store(&self) -> Store {
-        Store::open_registered(self.root.path(), id(1)).unwrap()
+        Store::open_registered(&self.registry.project_dir(&id(1)), id(1)).unwrap()
     }
     fn bytes(&self, session: u64) -> Vec<u8> {
         fs::read(
-            self.root
-                .path()
-                .join(format!(".ariadne/sessions/{}.json", id(session).as_str())),
+            self.registry
+                .project_dir(&id(1))
+                .join(format!("sessions/{}.json", id(session).as_str())),
         )
         .unwrap()
     }
@@ -235,9 +235,9 @@ fn installed_preview_and_continue_copy_full_history_once_and_replay_without_sour
     }
     let after = s.bytes(20);
     fs::remove_file(
-        s.root
-            .path()
-            .join(format!(".ariadne/sessions/{}.json", id(2).as_str())),
+        s.registry
+            .project_dir(&id(1))
+            .join(format!("sessions/{}.json", id(2).as_str())),
     )
     .unwrap();
     assert_eq!(s.mutation("topic", "continue", 20, command), (0, receipt));

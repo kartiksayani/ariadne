@@ -242,22 +242,25 @@ fn global_setup_does_not_infer_or_register_a_project_and_explicit_registration_r
         .unwrap();
     assert_eq!(first["project"]["state"], "registered");
     let registry = fs::read(data.join("projects.json")).unwrap();
-    let metadata = fs::read(project.path().join(".ariadne/project.json")).unwrap();
+    let registered = ariadne_store::registry::Registry::open_data_directory(&data)
+        .unwrap()
+        .registered_projects()
+        .unwrap();
+    let metadata_path = data
+        .join("projects")
+        .join(registered[0].project_id.as_str())
+        .join("project.json");
+    let metadata = fs::read(&metadata_path).unwrap();
+    assert!(!project.path().join(".ariadne").exists());
     let repeated =
         ariadne_cli::setup::execute_in_installation(&args, false, &data, &version, &stable)
             .unwrap();
     assert_eq!(repeated["project"]["state"], "already_registered");
     assert_eq!(fs::read(data.join("projects.json")).unwrap(), registry);
-    assert_eq!(
-        fs::read(project.path().join(".ariadne/project.json")).unwrap(),
-        metadata
-    );
+    assert_eq!(fs::read(&metadata_path).unwrap(), metadata);
     ariadne_cli::setup::execute_in_installation(&[], true, &data, &version, &stable).unwrap();
     assert_eq!(fs::read(data.join("projects.json")).unwrap(), registry);
-    assert_eq!(
-        fs::read(project.path().join(".ariadne/project.json")).unwrap(),
-        metadata
-    );
+    assert_eq!(fs::read(&metadata_path).unwrap(), metadata);
 }
 
 #[test]

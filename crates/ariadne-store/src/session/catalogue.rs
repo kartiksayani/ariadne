@@ -20,6 +20,8 @@ struct CapturedSessionRead {
     result: Result<Vec<u8>, StoreError>,
 }
 
+/// Every function below takes the project's store directory
+/// (`<data root>/projects/<id>`, canonical), named `root` for brevity.
 impl Store {
     pub fn read_registered(
         root: &Path,
@@ -102,11 +104,10 @@ fn with_project<T>(
     create_locks: bool,
     work: impl FnOnce(&Directory, Project) -> Result<T, StoreError>,
 ) -> Result<T, StoreError> {
-    let opened = Directory::root(root)?;
-    if opened.path != root {
+    let data = Directory::existing(root)?;
+    if data.path != root {
         return Err(StoreError::UnsafePath { path: root.into() });
     }
-    let data = opened.child(".ariadne", false)?;
     lock::with_lock_mode(&data, "project.lock", create_locks, || {
         let project: Project = decode(&data.read("project.json")?)?;
         if &project.id != project_id {

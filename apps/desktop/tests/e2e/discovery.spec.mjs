@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { snapshot, admissions } from './scripted-provider.mjs';
 
@@ -44,13 +44,25 @@ export async function waitForDiscoveredCandidate(candidate) {
 // Discovery uses a distinct empty project/thread; it cannot change the FIFO fixture.
 export async function runDiscoveryAcceptance(configuration) {
   const { projectRoot, externalSessionId, socketPath } = configuration.discovery;
-  const projectPath = join(projectRoot, '.ariadne/project.json');
-  const sessionsPath = join(projectRoot, '.ariadne/sessions');
+  // ADR-0082: the store lives at <data root>/projects/<project-id>; the project
+  // id is only known once the registry maps this root, and the root itself must
+  // never receive a store.
+  const home = process.env.ARIADNE_HOME;
+  const registeredId = async () => {
+    try {
+      const registry = JSON.parse(await readFile(join(home, 'projects.json'), 'utf8'));
+      const root = await realpath(projectRoot);
+      return registry.projects.find(project => project.root === root)?.project_id;
+    } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  };
+  const projectPath = async () => join(home, 'projects', await registeredId(), 'project.json');
+  const sessionsPath = async () => join(home, 'projects', await registeredId(), 'sessions');
   const original = await snapshot(configuration);
   const queuedBefore = await admissions(configuration);
   const demoBefore = await readFile(configuration.demo.sessionPath);
   assert.equal(queuedBefore.length, 5);
-  await assert.rejects(stat(projectPath), { code: 'ENOENT' });
+  assert.equal(await registeredId(), undefined);
+  await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
 
   const projects = await browser.$('button=Projects');
   await projects.waitForEnabled(); await projects.click();
@@ -60,18 +72,21 @@ export async function runDiscoveryAcceptance(configuration) {
   await waitForDiscoveredCandidate(candidate);
   assert.ok((await candidate.getText()).includes('fresh'));
   assert.ok((await candidate.getText()).includes('daemon loaded'));
-  await assert.rejects(stat(projectPath), { code: 'ENOENT' });
+  assert.equal(await registeredId(), undefined);
+  await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
   const registerCandidate = await candidate.$('button=Register this project');
   await registerCandidate.waitForEnabled(); await registerCandidate.click();
   const registerDialog = await browser.$('[role="dialog"][aria-label="Register project"]');
   assert.equal(await registerDialog.$('input').getValue(), projectRoot);
-  await assert.rejects(stat(projectPath), { code: 'ENOENT' });
+  assert.equal(await registeredId(), undefined);
+  await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
   await registerDialog.$('button=Register project').click();
   await waitForRegistrationCompletion(registerDialog, async () => {
-    try { return JSON.parse(await readFile(projectPath, 'utf8')).id !== undefined; }
+    try { return JSON.parse(await readFile(await projectPath(), 'utf8')).id !== undefined; }
     catch (error) { if (error.code === 'ENOENT') return false; throw error; }
   }, { timeout: 15000, timeoutMsg: 'Explicit Register did not persist the discovered project and dismiss its completed form' });
-  const metadata = JSON.parse(await readFile(projectPath, 'utf8'));
+  const metadata = JSON.parse(await readFile(await projectPath(), 'utf8'));
+  await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
   const connect = await browser.$('.nav-group-heading').$('button=Connect existing session');
   await connect.waitForDisplayed(); await connect.waitForEnabled(); await connect.click();
   const dialog = await browser.$('[role="dialog"][aria-label="Connect existing session"]');
@@ -79,15 +94,16 @@ export async function runDiscoveryAcceptance(configuration) {
   await chosen.waitForEnabled(); await chosen.click();
   assert.equal(await dialog.$('label*=External session ID').$('input').getValue(), externalSessionId);
   assert.equal(await dialog.$('label*=Socket path').$('input').getValue(), socketPath);
-  const beforeConnect = await readdir(sessionsPath).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+  const sessionsDir = await sessionsPath();
+  const beforeConnect = await readdir(sessionsDir).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
   assert.deepEqual(beforeConnect.filter(name => name.endsWith('.json')), []);
   await dialog.$('button=Connect existing session').click();
   let connected;
   await waitForRegistrationCompletion(dialog, async () => {
-    const files = await readdir(sessionsPath).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+    const files = await readdir(sessionsDir).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
     const names = files.filter(name => name.endsWith('.json'));
     if (names.length !== 1) return false;
-    connected = JSON.parse(await readFile(join(sessionsPath, names[0]), 'utf8'));
+    connected = JSON.parse(await readFile(join(sessionsDir, names[0]), 'utf8'));
     return connected.active_binding_id !== null;
   }, { timeout: 20000, timeoutMsg: 'Explicit Connect did not persist the exact selected host identity and dismiss its completed form' });
   assert.equal(connected.project_id, metadata.id);

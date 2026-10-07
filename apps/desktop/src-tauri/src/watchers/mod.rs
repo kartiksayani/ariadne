@@ -188,16 +188,17 @@ fn work(
         if let Ok(projects) = registry.registered_projects() {
             let mut desired = BTreeSet::from([data_directory.clone()]);
             for project in &projects {
-                desired.insert(project.root.clone());
-                desired.insert(project.root.join(".ariadne"));
-                desired.insert(project.root.join(".ariadne/sessions"));
+                // The store lives under the data root, never in the project folder.
+                let store = registry.project_dir(&project.project_id);
+                desired.insert(store.join("sessions"));
+                desired.insert(store);
             }
             parents.refresh(desired);
             if let Some(ready) = ready.take() {
                 let _ = ready.send(());
             }
             let route = selected.lock().ok().and_then(|value| value.clone());
-            scan.reconcile(&projects, route.as_ref(), &*emit);
+            scan.reconcile(&registry, &projects, route.as_ref(), &*emit);
         } else {
             // Preserve the registry parent subscription even while the index is
             // unavailable, and let the bounded fallback retry registration.

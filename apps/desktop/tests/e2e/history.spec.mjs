@@ -130,7 +130,7 @@ async function seed(configuration) {
   const receipt = connected.value.data;
   const history = { ...selected, cli: configuration.cli, thread: selected.externalSessionId,
     projectId, sessionId: receipt.session_id, bindingId: receipt.data.binding_id, generation: receipt.data.generation,
-    itemId: '1', sessionPath: join(selected.projectRoot, '.ariadne/sessions', `${receipt.session_id}.json`) };
+    itemId: '1', sessionPath: join(process.env.ARIADNE_HOME, 'projects', projectId, 'sessions', `${receipt.session_id}.json`) };
   await awaitConnected(history);
   const publication = [await apply(history, [], {}, historySeedRequest(history.bindingId))];
   return { history, publication };

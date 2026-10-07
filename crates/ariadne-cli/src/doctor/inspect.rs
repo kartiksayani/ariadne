@@ -106,16 +106,49 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
                     continue;
                 }
                 let root = &project.registered.root;
+                let store_dir = catalogue
+                    .data
+                    .join("projects")
+                    .join(project.registered.project_id.as_str());
+                if let Some(legacy) = ariadne_store::registry::legacy_store_path(root) {
+                    report.add("warning", "store.legacy", "Unmigrated store at this path: the project still has a store inside its folder; migration to the data directory is pending, blocked by a running Ariadne process, or failed.", "Quit the Ariadne app and agent sessions, then open the project in the app or run any ariadne project command to migrate it; if that reports a conflict, compare the two directories by hand. Nothing is deleted automatically.", json!({"project_id":project.registered.project_id,"canonical_root":root,"legacy_path":legacy,"store_path":store_dir}));
+                }
+                let parked_copies = ariadne_store::registry::parked_legacy_paths(
+                    &catalogue.data,
+                    &project.registered.project_id,
+                )
+                .into_iter()
+                .chain(ariadne_store::registry::parked_legacy_paths_in_root(root));
+                for parked in parked_copies {
+                    let shown = parked.display();
+                    let differences =
+                        ariadne_store::registry::parked_copy_differences(&parked, &store_dir);
+                    let (message, hint) = match differences {
+                        Ok(0) => (
+                            format!("Parked copy at {shown} is identical to the store; safe to delete."),
+                            "The store was migrated and the old copy was moved aside instead of being deleted; delete this directory when you no longer need it.".to_owned(),
+                        ),
+                        Ok(count) => (
+                            format!("Parked copy at {shown} differs from the store ({count} files differ); keep it until you have checked."),
+                            "Compare the parked copy with the store before deleting it; it may hold sessions the store lacks.".to_owned(),
+                        ),
+                        Err(error) => (
+                            format!("Parked copy at {shown} could not be compared with the store ({error}); keep it until you have checked."),
+                            "Compare the parked copy with the store by hand before deleting it.".to_owned(),
+                        ),
+                    };
+                    report.add("warning", "store.legacy", &message, &hint, json!({"project_id":project.registered.project_id,"canonical_root":root,"parked_path":parked,"store_path":store_dir}));
+                }
                 match project.result {
-                    Ok(catalogue) => {
-                        report.add("ok", "project.identity", "Canonical project identity and private metadata were verified.", "Project sessions and backups remain authoritative and are never repaired by doctor.", json!({"canonical_root":root,"project_id":catalogue.project.id}));
-                        match catalogue.sessions {
+                    Ok(project_catalogue) => {
+                        report.add("ok", "project.identity", "Canonical project identity and private metadata were verified.", "Project sessions and backups remain authoritative and are never repaired by doctor.", json!({"canonical_root":root,"project_id":project_catalogue.project.id,"store_path":store_dir}));
+                        match project_catalogue.sessions {
                             Ok(sessions) => {
                                 for read in sessions {
                                     match read.result {
                                         Ok(session) => {
                                             report.add("ok", "session.valid", "Session schema, identity and invariants passed canonical Store validation.", "Doctor only reports metadata; session bodies are omitted.", json!({"session_id":session.id,"revision":session.revision}));
-                                            backup(&mut report, root, &session);
+                                            backup(&mut report, &store_dir, &session);
                                             for binding in session.bindings.0.values() {
                                                 binding_check(
                                                     &mut report,
@@ -230,6 +263,7 @@ fn store_class(error: &StoreError) -> (&'static str, &'static str) {
         StoreError::FutureSchema => ("error", "future_schema"),
         StoreError::UnsafePath { .. } => ("error", "unsafe_path_or_permissions"),
         StoreError::Busy => ("warning", "coordination_busy"),
+        StoreError::Migration { .. } => ("warning", "migration_pending"),
         StoreError::Io {
             kind: std::io::ErrorKind::NotFound,
             ..
@@ -243,9 +277,9 @@ fn store_error(report: &mut Report, kind: &str, error: &StoreError, facts: Value
     report.add(status, &format!("{kind}.{cause}"), "Existing data could not be validated safely.", "Keep these files unchanged. Restore access or inspect the original data; future schemas remain read-only and no backup is restored automatically.", facts);
 }
 
-fn backup(report: &mut Report, root: &Path, session: &Session) {
+fn backup(report: &mut Report, store_dir: &Path, session: &Session) {
     let result = (|| -> Result<bool, StoreError> {
-        let data = OwnedDirectory::root(root)?.child(".ariadne", false)?;
+        let data = OwnedDirectory::existing(store_dir)?;
         let backups = match data.child("backups", false) {
             Ok(b) => b,
             Err(StoreError::Io {

@@ -31,12 +31,7 @@ fn create_read_and_previous_snapshot_are_durable_private_and_deterministic() {
     for path in [project.live(), project.backup(), project.lock()] {
         assert_eq!(fs::metadata(path).unwrap().mode() & 0o777, 0o600);
     }
-    for directory in [
-        ".ariadne",
-        ".ariadne/sessions",
-        ".ariadne/locks",
-        ".ariadne/backups",
-    ] {
+    for directory in ["", "sessions", "locks", "backups"] {
         assert_eq!(
             fs::metadata(project.root.path().join(directory))
                 .unwrap()
@@ -499,15 +494,13 @@ fn unsafe_backup_target_rejects_replacement_and_cleans_candidate_temp() {
     assert_eq!(fs::read(project.live()).unwrap(), before);
     assert_eq!(fs::read(&outside).unwrap(), b"untouched");
     for directory in ["sessions", "backups"] {
-        assert!(
-            fs::read_dir(project.root.path().join(".ariadne").join(directory))
+        assert!(fs::read_dir(project.root.path().join(directory))
+            .unwrap()
+            .all(|entry| !entry
                 .unwrap()
-                .all(|entry| !entry
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .contains(".tmp-"))
-        );
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp-")));
     }
 }
 
@@ -540,13 +533,15 @@ fn target_replaced_after_reread_is_rechecked_before_commit() {
 
 #[test]
 fn project_data_metadata_descendants_locks_and_sessions_reject_symlinks() {
-    for target in [
-        ".ariadne",
-        ".ariadne/project.json",
-        ".ariadne/sessions",
-        ".ariadne/locks",
-        ".ariadne/backups",
-    ] {
+    {
+        // The store directory itself must not be reached through a link.
+        let project = ProjectDir::new();
+        let holder = tempfile::tempdir().unwrap();
+        let link = holder.path().join("store");
+        symlink(project.root.path(), &link).unwrap();
+        assert!(Store::open_registered(&link, id(1)).is_err());
+    }
+    for target in ["project.json", "sessions", "locks", "backups"] {
         let project = ProjectDir::new();
         let path = project.root.path().join(target);
         let moved = project.root.path().join("moved");
@@ -594,11 +589,7 @@ fn wrong_project_identity_unsafe_permissions_and_nonregular_files_are_rejected()
         project.store().read(&id(2)),
         Err(StoreError::UnsafePath { .. })
     ));
-    fs::set_permissions(
-        project.root.path().join(".ariadne"),
-        fs::Permissions::from_mode(0o755),
-    )
-    .unwrap();
+    fs::set_permissions(project.root.path(), fs::Permissions::from_mode(0o755)).unwrap();
     assert!(matches!(
         Store::open_registered(project.root.path(), id(1)),
         Err(StoreError::UnsafePath { .. })

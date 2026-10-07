@@ -5,6 +5,10 @@ use ariadne_core::{
 use ariadne_domain::models::*;
 use ariadne_store::{registry::Registry, session::Store};
 use std::os::unix::fs::PermissionsExt;
+/// Project store directory under a data-root home, as `Registry::project_dir` derives it.
+fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
+    home.join(".ariadne/projects").join(id(project).as_str())
+}
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -20,7 +24,7 @@ fn routing_checks_membership_and_keeps_historical_scope_for_locked_replay() {
     let mut session = seed();
     session.state = SessionState::Closed;
     session.closed_at = Some(UtcMillis::new("2026-10-04T12:00:00.000Z").unwrap());
-    Store::open_registered(root.path(), id(1))
+    Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .create(&session)
         .unwrap();
@@ -94,7 +98,7 @@ fn captured_catalogue_preserves_dispatched_scope_and_does_not_reread_storage() {
     let root = tempfile::tempdir().unwrap();
     let registry = Registry::open(home.path()).unwrap();
     registry.register(root.path(), &id(99), || id(1)).unwrap();
-    let store = Store::open_registered(root.path(), id(1)).unwrap();
+    let store = Store::open_registered(&store_dir(home.path(), 1), id(1)).unwrap();
     store.create(&seed()).unwrap();
     let next = std::sync::atomic::AtomicU64::new(100);
     let core = NativeCoreService::new(
@@ -160,8 +164,7 @@ fn captured_catalogue_preserves_dispatched_scope_and_does_not_reread_storage() {
     // Borrowed resolution is a route observation, not current eligibility.
     // A fresh independent resolver still observes this real storage failure.
     std::fs::write(
-        root.path()
-            .join(format!(".ariadne/sessions/{}.json", id(2).as_str())),
+        store_dir(home.path(), 1).join(format!("sessions/{}.json", id(2).as_str())),
         b"broken",
     )
     .unwrap();
@@ -186,7 +189,7 @@ fn catalogue_resolution_scans_historical_duplicates_and_preserves_first_failure_
     let root = tempfile::tempdir().unwrap();
     let registry = Registry::open(home.path()).unwrap();
     registry.register(root.path(), &id(99), || id(1)).unwrap();
-    let store = Store::open_registered(root.path(), id(1)).unwrap();
+    let store = Store::open_registered(&store_dir(home.path(), 1), id(1)).unwrap();
     store.create(&seed()).unwrap();
     let mut historical = seed();
     historical.id = id(20);
@@ -207,9 +210,7 @@ fn catalogue_resolution_scans_historical_duplicates_and_preserves_first_failure_
         CoreErrorCode::BindingAmbiguous
     );
     // The later unreadable snapshot cannot replace an earlier duplicate error.
-    let broken_path = root
-        .path()
-        .join(format!(".ariadne/sessions/{}.json", id(21).as_str()));
+    let broken_path = store_dir(home.path(), 1).join(format!("sessions/{}.json", id(21).as_str()));
     std::fs::write(&broken_path, b"broken").unwrap();
     std::fs::set_permissions(&broken_path, std::fs::Permissions::from_mode(0o600)).unwrap();
     let catalogue = registry.catalogue().unwrap();
@@ -225,8 +226,7 @@ fn catalogue_resolution_scans_historical_duplicates_and_preserves_first_failure_
     // reject it even though the first valid snapshot already contains the ID.
     std::fs::rename(
         broken_path,
-        root.path()
-            .join(format!(".ariadne/sessions/{}.json", id(19).as_str())),
+        store_dir(home.path(), 1).join(format!("sessions/{}.json", id(19).as_str())),
     )
     .unwrap();
     let catalogue = registry.catalogue().unwrap();
@@ -254,11 +254,12 @@ fn catalogue_resolution_retains_unavailable_project_failure() {
     std::fs::create_dir(&root).unwrap();
     let registry = Registry::open(home.path()).unwrap();
     registry.register(&root, &id(99), || id(1)).unwrap();
-    Store::open_registered(&root, id(1))
+    Store::open_registered(&store_dir(home.path(), 1), id(1))
         .unwrap()
         .create(&seed())
         .unwrap();
-    std::fs::rename(&root, base.path().join("moved")).unwrap();
+    // The store lives under the data root, so the project's store is what goes missing.
+    std::fs::rename(store_dir(home.path(), 1), base.path().join("moved")).unwrap();
     let catalogue = registry.catalogue().unwrap();
     let error =
         AgentResolver::resolve_from_catalogue(&catalogue, id(3), id(4), None, None).unwrap_err();

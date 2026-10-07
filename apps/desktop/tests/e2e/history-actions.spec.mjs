@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { cliRequest, admissions, snapshot } from './scripted-provider.mjs';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
 
@@ -44,12 +44,15 @@ export async function runHistoryActionsAcceptance(configuration) {
   assert.equal(targetProject, join(fixtureRoot, 'discovery-project'), 'Only the exact owned discovery fixture may be changed');
   const discovered = await readJson(join(evidence, 'discovery-acceptance.json'));
   assert.match(discovered.connected.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  const targetPath = join(targetProject, '.ariadne/sessions', `${discovered.connected.id}.json`);
+  // ADR-0082: stores live under the data root at projects/<project-id>.
+  const home = process.env.ARIADNE_HOME;
+  const targetStore = join(home, 'projects', discovered.connected.project_id);
+  const targetPath = join(targetStore, 'sessions', `${discovered.connected.id}.json`);
   const sourcePath = configuration.demo.sessionPath;
   const sourceBytes = await readFile(sourcePath), source = JSON.parse(sourceBytes);
-  const sourceProject = await realpath(resolve(dirname(sourcePath), '..', '..'));
+  const sourceProject = await realpath(join(fixtureRoot, 'canonical-demo'));
   assert.equal(sourceProject, join(fixtureRoot, 'canonical-demo'), 'Only the exact owned canonical demo may be made unavailable');
-  assert.equal(resolve(sourcePath), join(sourceProject, '.ariadne/sessions', `${source.id}.json`));
+  assert.equal(resolve(sourcePath), join(home, 'projects', source.project_id, 'sessions', `${source.id}.json`));
   const mainBefore = await snapshot(configuration), queuedBefore = await admissions(configuration);
   let target = await readJson(targetPath);
   assert.equal(Object.keys(target.items).length, 0); assert.equal(Object.keys(target.inputs).length, 0);
@@ -105,7 +108,7 @@ export async function runHistoryActionsAcceptance(configuration) {
   const send = await continuePreview(source.id, sourceTopic.name, targetBefore.title);
   const approvedSummary = await dialog().$('details p').getProperty('textContent');
   assert.deepEqual(await readFile(targetPath), targetBytes, 'Preview must not allocate or persist a target copy');
-  const backup = join(targetProject, '.ariadne/backups', `${target.id}.previous.json`);
+  const backup = join(targetStore, 'backups',`${target.id}.previous.json`);
   const preservedBackup = `${backup}.preserved-${randomUUID()}`;
   await rename(backup, preservedBackup);
   let obstruction = false;

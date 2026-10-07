@@ -48,6 +48,13 @@ pub enum StoreError {
     CommitUncertain {
         operation_id: Option<UuidV4>,
     },
+    /// Legacy `<project>/.ariadne` could not be moved under the data root; the
+    /// named legacy directory is untouched or already verified-copied.
+    Migration {
+        legacy: PathBuf,
+        project: PathBuf,
+        detail: &'static str,
+    },
 }
 
 impl StoreError {
@@ -91,11 +98,11 @@ pub struct Store {
 }
 
 impl Store {
-    /// `root` is selected by trusted registry wiring, never a renderer command.
+    /// `project_dir` is `<data root>/projects/<id>`, selected by trusted registry
+    /// wiring (`Registry::project_dir`), never a renderer command.
     /// Existing project metadata must match; setup/registry owns its creation.
-    pub fn open_registered(root: &Path, project_id: UuidV4) -> Result<Self, StoreError> {
-        let root = Directory::root(root)?;
-        let data = root.child(".ariadne", false)?;
+    pub fn open_registered(project_dir: &Path, project_id: UuidV4) -> Result<Self, StoreError> {
+        let data = Directory::existing(project_dir)?;
         let bytes = data.read("project.json")?;
         let project: Project = decode(&bytes)?;
         if project.id != project_id {

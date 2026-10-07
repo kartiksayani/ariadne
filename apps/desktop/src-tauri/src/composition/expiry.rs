@@ -76,7 +76,8 @@ impl ResultExpiry {
             let mut found = None;
             let mut unavailable = false;
             for project in &projects {
-                match Store::read_registered(&project.root, &project.project_id, &id) {
+                let store = self.core.registry().project_dir(&project.project_id);
+                match Store::read_registered(&store, &project.project_id, &id) {
                     Ok(session) if found.is_none() => found = Some(session),
                     Ok(_) => unavailable = true,
                     Err(StoreError::Io {
