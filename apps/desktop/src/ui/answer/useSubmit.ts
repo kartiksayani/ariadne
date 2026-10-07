@@ -92,7 +92,10 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   const changed = !!draft && !!item && !!session && (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision
     || session.active_binding_id !== draft.binding_id);
   // An untouched draft follows a revised question; only owner content needs a deliberate review.
-  const pristine = changed && !!entry && !entry.saving && !entry.uncertain && !entry.receipt && !draft!.text && draft!.selected_option_id === null;
+  // Only a newer item moves it: the detail and Waiting stores read the same session at different
+  // moments, and a stale view re-basing the draft backwards would loop with the fresh one.
+  const newer = !!draft && !!item && (item.revision > draft.target_revision || item.question_revision > (draft.question_revision ?? 0));
+  const pristine = newer && !!entry && !entry.saving && !entry.uncertain && !entry.receipt && !draft!.text && draft!.selected_option_id === null;
   useEffect(() => { if (pristine && session && entry) drafts.review(entry.draft.op_id, session); }, [pristine, session, entry, drafts]);
   const guard = draft && session ? blockedDraft(draft, session) : null;
   const blocked = !session || !draft ? null : !current ? stale

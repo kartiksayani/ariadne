@@ -38,3 +38,15 @@ body {
   margin: 10px 16px 0;
   overflow: auto;
 }
+
+/* RootBoundary: a render error names itself instead of leaving the window blank. */
+.root-failure {
+  padding: 32px;
+  font-family: var(--font-body);
+  color: var(--color-text);
+}
+
+.root-failure > pre {
+  white-space: pre-wrap;
+  user-select: text;
+}
