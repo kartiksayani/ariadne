@@ -1,6 +1,6 @@
 @import url("./assembled-reference.css");
 
-/* Ported from the immutable Nocturne stylesheet and the four source components. */
+/* Reference component styles on the Paperwhite tokens (design-tokens.css). */
 .ariadne-reference {
   font-family: var(--font-body);
   font-size: 15px;

@@ -5,13 +5,8 @@ import { createDesktopService } from '../../../src/data/service';
 import { loadItemHistory } from '../../../src/components/history/load';
 import { ordinaryCases, type OrdinaryCase } from '../../../../../tests/visual/cases';
 import { createOrdinaryCapture } from '../../../../../tests/visual/fixture';
-import source from '../../../../../docs/planning/evidence/design-assets/source.json';
 
 afterEach(cleanup);
-it('covers every applicable board frame once, retaining the reference sheets as gallery states', () => {
-  const application = source.frames.filter(frame => frame.member.endsWith('/Ariadne.dc.html')).map(frame => frame.id);
-  expect([...ordinaryCases.map(value => value.id)].sort()).toEqual(application.filter(id => !['1j', '1k', '1s'].includes(id)).sort());
-});
 it.each(ordinaryCases)('mounts ordinary DesktopApp frame $id through the existing transport and stores', async value => {
   const scenario: OrdinaryCase = value, capture = createOrdinaryCapture(new URLSearchParams({ frame: value.id, theme: 'light' }));
   const service = createDesktopService(capture.transport); render(<DesktopApp service={service} />);

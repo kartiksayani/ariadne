@@ -162,9 +162,9 @@ export async function frontendModules(inventory, output, started) {
   return inventory.chunks.flatMap(chunk => chunk.modules);
 }
 export function verifyReferenceIsolation(modules, files) {
-  const testModule = /(?:^|\/)tests\/ui\/reference\/|\/node_modules\/(?:@babel\/standalone\/|@playwright\/|playwright(?:-core)?\/)|Ariadne UI mockups\.zip/;
+  const testModule = /(?:^|\/)tests\/ui\/(?:reference|design)\/|\/node_modules\/(?:@babel\/standalone\/|@playwright\/|playwright(?:-core)?\/)|Ariadne[ -]UI[ -]mockups(?:-v2)?\.zip/;
   assert.ok(!modules.some(name => testModule.test(name)), 'Reference fixtures or source runtime entered production modules');
-  const testFile = /(?:^|\/)(?:tests\/ui\/reference\/|source-runtime\/|support\.js$|gallery\.(?:html|tsx)$)|\.dc\.html$|Ariadne UI mockups\.zip/;
+  const testFile = /(?:^|\/)(?:tests\/ui\/(?:reference|design)\/|source-runtime\/|support\.js$|gallery\.(?:html|tsx)$)|\.dc\.html$|Ariadne[ -]UI[ -]mockups(?:-v2)?\.zip/;
   assert.ok(!files.some(name => testFile.test(name)), 'Reference mount or prototype source entered production files');
 }
 export function verifyGraph(names, config, acl, capabilities, modules) {
