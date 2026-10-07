@@ -153,6 +153,6 @@ export function SessionLists(props: SessionListsProps) {
       onClose={() => { setDialog(null); void navigation.refresh(); }} />}
     {dialog?.kind === 'close' && <CloseSessionDialog store={dialog.store} actions={actions.forSession(dialog.store)} agent={dialog.agent} when={dialog.when}
       onOpenSession={() => onOpenSession(dialog.route)} onClose={() => { setDialog(null); void navigation.refresh(); }} />}
-    {dialog?.kind === 'remove' && <RemoveDialog subject={dialog.subject} onCancel={() => setDialog(null)} onConfirm={() => onRemove(dialog.target)} />}
+    {dialog?.kind === 'remove' && <RemoveDialog subject={dialog.subject} onCancel={() => setDialog(null)} onConfirm={() => onRemove(dialog.target, dialog.subject)} />}
   </div>;
 }

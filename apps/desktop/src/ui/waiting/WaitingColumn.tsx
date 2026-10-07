@@ -11,6 +11,7 @@ import { useWorkspaceKeys } from '../keys';
 import { AnswerControl, defaultSelection } from '../answer/AnswerControl';
 import { useSubmit, type PendingSubmission } from '../answer/useSubmit';
 import { waitingModel, type SentRowModel, type WaitingCardModel } from './model';
+import { useHidden } from '../remove/queue';
 import './waiting.css';
 
 export interface WaitingColumnProps {
@@ -50,10 +51,16 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
   useEffect(() => { void store.start(); }, [store]);
   useEffect(() => { if (!drafts.getSnapshot().ready) void drafts.load(); }, [drafts]);
   const clock = now ?? Date.now();
-  const model = useMemo(() => waitingModel({ state, now: clock,
-    draft: route => draftState.ready ? drafts.find(route, route.item_id, 'answer') : undefined,
-    presence: (route, bindingId) => store.sessionState(route)?.presence[bindingId] ?? null,
-  }), [state, draftState, drafts, store, clock]);
+  const hidden = useHidden();
+  const model = useMemo(() => {
+    const all = waitingModel({ state, now: clock,
+      draft: route => draftState.ready ? drafts.find(route, route.item_id, 'answer') : undefined,
+      presence: (route, bindingId) => store.sessionState(route)?.presence[bindingId] ?? null,
+    });
+    // A pending removal takes its questions out of the column at once.
+    const cards = all.cards.filter(card => !hidden.item(card.route, card.session, card.route.item_id));
+    return cards.length === all.cards.length ? all : { ...all, cards, count: String(cards.length) };
+  }, [state, draftState, drafts, store, clock, hidden]);
   const incomplete = state.counts?.completeness === 'partial' || state.unavailableProjects.length > 0;
   const current = state.status === 'ready' && !state.error;
   const loading = state.status === 'loading';

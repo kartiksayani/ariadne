@@ -7,8 +7,8 @@ export type RemoveTarget =
   | { readonly kind: 'session'; readonly session: SessionRef }
   | { readonly kind: 'topic'; readonly session: SessionRef; readonly topic_id: string }
   | { readonly kind: 'item'; readonly item: ItemRoute };
-/** Runs after the owner confirms a Remove dialog. Required wherever a Remove trigger renders. */
-export type RemoveHandler = (target: RemoveTarget) => void;
+/** Runs after the owner confirms a Remove dialog, with what the dialog showed. Required wherever a Remove trigger renders. */
+export type RemoveHandler = (target: RemoveTarget, subject: RemoveSubject) => void;
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 const capital = (text: string) => text ? text.charAt(0).toUpperCase() + text.slice(1) : '';

@@ -7,6 +7,8 @@ import type { Topic } from '../../generated/domain/models';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
 import { useWorkspaceKeys } from '../keys';
+import { useHidden } from '../remove/queue';
+import { visibleSession } from '../remove/model';
 import { applyChange, mergeChange, sessionGraph, statusVisual, type GraphNode, type TopicGraph, type ViewChange } from './model';
 import './graph.css';
 
@@ -96,7 +98,8 @@ function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, o
 }
 
 export function GraphView({ store, routes, view, later, reveal, tight, sessionLabel, continuedFrom, preferencesBusy = false, saveView, onReveal, onHoverItem }: GraphViewProps) {
-  const state = useSession(store), session = state.snapshot?.session;
+  const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
+  const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const marker = useId().replace(/:/g, '');
   const scroller = useRef<HTMLDivElement>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);

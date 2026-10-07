@@ -17,6 +17,7 @@ import { SessionLists, type SessionGroup } from '../../ui/pages/SessionLists';
 import { LoadingSession } from '../../ui/pages/SessionStates';
 import { Notices } from '../../ui/pages/notices';
 import { useSessionSnapshots } from '../../ui/pages/snapshots';
+import { useHidden } from '../../ui/remove/queue';
 import '../../styles/navigation.css';
 
 export interface AdapterChoice { readonly adapter_id: string; readonly label: string; readonly configuration: AdapterConfig;
@@ -41,7 +42,7 @@ export interface NavigationWorkspaceProps {
   /** Facts for the selected session tab's header; null while it opens. */
   readonly session?: SessionFacts | null;
   readonly onCloseDetail?: () => void;
-  /** The detail column's trash button. */
+  /** The detail column's trash button: asks to remove the item it shows. */
   readonly onRemove?: () => void;
   /** Runs after the owner confirms a project or session Remove on the pages. Required: the triggers always render. */
   readonly onRemoveTarget: RemoveHandler;
@@ -128,10 +129,12 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   // must not permanently stop a shared store during React's effect replay.
   useEffect(() => { void store.start(); }, [store]);
   const selection: Immutable<NavigationSelection> = state.preferences?.global.selected_navigation ?? { kind: 'projects' };
-  const projects = state.projects?.projects.items ?? [];
+  // A pending project or session removal hides its cards and tabs until it runs or is undone.
+  const hidden = useHidden();
+  const projects = (state.projects?.projects.items ?? []).filter(project => !hidden.project(project.project_id));
   const projectId = selection.kind === 'project' ? selection.project_id : null;
   const matchingSessions = state.sessionProjectId === projectId ? state.sessions : null;
-  const sessions = matchingSessions?.sessions.items ?? [];
+  const sessions = (matchingSessions?.sessions.items ?? []).filter(session => !hidden.session(session));
   const selectedProject = selection.kind === 'project' ? projects.find(project => project.project_id === selection.project_id) : null;
   const selectedSession = selection.kind === 'session' ? sessions.find(session => key(session) === key(selection.session)) : null;
   const mutationDisabled = refreshPending || state.writing || state.pendingOperationId !== null;
@@ -143,7 +146,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
     finally { setRefreshPending(false); }
   };
   const select = (next: NavigationSelection) => { void store.navigate(next); };
-  const openViews: readonly Immutable<SessionPreferences>[] = state.preferences?.sessions.filter(view => view.tab_open)
+  const openViews: readonly Immutable<SessionPreferences>[] = state.preferences?.sessions.filter(view => view.tab_open && !hidden.session(view.session))
     .sort((a, b) => a.tab_order - b.tab_order || key(a.session).localeCompare(key(b.session))) ?? [];
   const projectNameOf = (projectId: string) => { const project = projects.find(value => value.project_id === projectId); return project ? projectName(project) : 'Unavailable project'; };
   const at = now();

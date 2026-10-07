@@ -101,6 +101,14 @@ export class AppTransport implements DesktopTransport {
         return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
           data: { kind: 'input_submit', input_id: input.id, input_seq: input.seq, message_id: message.id, message_number: message.number } } } as T;
       }
+      if (command.command === 'item_remove') {
+        // Core removes the item and everything below it (ADR-0083).
+        const gone = new Set([command.params.item_id]);
+        for (let grew = true; grew;) { grew = false; for (const item of Object.values(session.items)) if (item?.parent && gone.has(item.parent) && !gone.has(item.id)) { gone.add(item.id); grew = true; } }
+        gone.forEach(id => { delete session.items[id]; }); ++session.revision;
+        return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
+          data: { kind: 'removal', item_ids: [...gone], topic_ids: [], input_ids: [], family: [], notice: null, backup: 'backups/pre-remove.json' } } } as T;
+      }
       throw new Error(`Unexpected mutation ${name}`);
     }
     this.queries.push(structuredClone(request));
