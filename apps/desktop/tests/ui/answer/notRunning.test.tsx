@@ -11,12 +11,13 @@ vi.mock('../../../src/ui/dialogs/AgentNotRunning', () => ({
 vi.mock('../../../src/ui/dialogs/ContinueTopicDialog', () => ({ openContinueTopic: (request: ContinueRequest) => { dialog.continued.push(request); } }));
 
 const { agentNotRunning, carryAnswer } = await import('../../../src/ui/answer/notRunning');
+const { notices } = await import('../../../src/ui/pages/notices');
 
 const source = { project_id: 'p', session_id: 'old' }, live = { project_id: 'p', session_id: 'live' };
 const option = (id: string, label: string) => ({ id, label, consequence: null, recommended: false });
 const sessions: Record<string, unknown> = {
   old: { id: 'old', project_id: 'p', items: { '3.1': { id: '3.1', topic_id: 't1', options: [option('a', 'Keep it'), option('b', 'Drop it')] } } },
-  live: { id: 'live', project_id: 'p', items: {
+  live: { id: 'live', project_id: 'p', active_binding_id: 'b', bindings: { b: { adapter_id: 'claude_code_mod' } }, items: {
     '1': { id: '1', topic_id: 't9', options: [], origin: null },
     '2.1': { id: '2.1', topic_id: 't9', options: [option('x', 'Keep it'), option('y', 'Drop it')], origin: { project_id: 'p', session_id: 'old', topic_id: 't1', entity_id: '3.1', source_revision: 4 } },
   } },
@@ -36,14 +37,14 @@ function fakeDrafts(held: { op_id: string; text: string; selected_option_id: str
     submit: (id: string) => { submitted.push(id); return Promise.resolve(true); },
   } };
 }
-const submission = (queue = vi.fn(() => Promise.resolve(true))): PendingSubmission => ({
-  route: { ...source, item_id: '3.1' }, intent: 'answer', question: 'Keep the retry?', label: 'Drop it', agent: 'codex', queue,
+const submission = (queue = vi.fn(() => Promise.resolve(true)), change: PendingSubmission['change'] = { text: '', selected_option_id: 'b' }): PendingSubmission => ({
+  route: { ...source, item_id: '3.1' }, intent: 'answer', question: 'Keep the retry?', label: 'Drop it', agent: 'codex', change, queue,
 });
 const deps = (drafts: ReturnType<typeof fakeDrafts>, reveal = vi.fn()) =>
   ({ navigation: navigation as never, drafts: drafts.store as never, reveal });
 
 describe('Send while the agent is not running', () => {
-  beforeEach(() => { dialog.asked = []; dialog.continued = []; refreshed.length = 0; });
+  beforeEach(() => { dialog.asked = []; dialog.continued = []; refreshed.length = 0; notices.clear(); });
 
   it('asks with the question, then queues for the stopped agent', async () => {
     dialog.choice = { kind: 'queue' };
@@ -79,9 +80,18 @@ describe('Send while the agent is not running', () => {
 
   it('carries a written answer, and reports no copy when the topic was not continued', async () => {
     const drafts = fakeDrafts({ op_id: 'held', text: 'Only on 5xx', selected_option_id: null });
-    expect(await carryAnswer(navigation as never, drafts.store as never, submission(), live)).toEqual({ ...live, item_id: '2.1' });
+    const written = submission(undefined, { text: 'Only on 5xx', selected_option_id: null });
+    expect(await carryAnswer(navigation as never, drafts.store as never, written, live)).toEqual({ ...live, item_id: '2.1' });
     expect(drafts.edits[0]).toEqual(['new-op', { text: 'Only on 5xx', selected_option_id: null }]);
     const other = { ...submission(), route: { ...source, item_id: '9' } };
     expect(await carryAnswer(navigation as never, fakeDrafts(null).store as never, other, live)).toBeNull();
+    expect(notices.getSnapshot()).toEqual([]);
+  });
+
+  it('says so when the copy was made but nothing could be sent', async () => {
+    const drafts = fakeDrafts(null), store = { ...drafts.store, begin: () => null };
+    expect(await carryAnswer(navigation as never, store as never, submission(), live)).toEqual({ ...live, item_id: '2.1' });
+    expect(notices.getSnapshot().map(notice => [notice.text, notice.dismissible])).toEqual([['Copied to the claude-code session; nothing sent — answer it there.', true]]);
+    expect(drafts.submitted).toEqual([]);
   });
 });

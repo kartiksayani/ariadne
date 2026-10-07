@@ -14,6 +14,7 @@ import { ContinueDialog, type ContinueTarget } from '../../components/history-ac
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { AnswerControl } from '../answer/AnswerControl';
 import type { PendingSubmission } from '../answer/useSubmit';
+import { notices as noticeStore } from '../pages/notices';
 import { CHIPS, collapsedNote, oldestWaiting, parentKey, sessionBar, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
@@ -125,7 +126,11 @@ export function TreeView(props: TreeViewProps) {
       if (!mounted.current || call !== request.current || !result) return;
       onSelected(result);
       if (result.kind === 'item' && latest.current.view?.selected_item_id !== id) void saveView(next => { next.selected_item_id = id; });
-    }).catch(() => {});
+    }).catch((error: unknown) => {
+      if (!mounted.current || call !== request.current) return;
+      noticeStore.push({ id: 'tree-reveal-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+        text: `Item #${id} could not be opened${error instanceof Error && error.message ? `: ${error.message}` : '.'}` });
+    });
   };
   const toggleItem = (id: string) => {
     const row = latest.current.rows.find(value => value.key === id);
@@ -182,17 +187,17 @@ export function TreeView(props: TreeViewProps) {
   const send = (change: { selected_option_id: string | null; text: string }) => {
     if (!entry || entry.saving || blocked) return;
     const id = entry.draft.op_id, itemKey = answering, item = answerRow?.item;
-    drafts.edit(id, change);
-    const submit = () => drafts.submit(id).then(saved => {
+    // The change is saved only when the input goes out: a cancelled "not running" dialog keeps the draft as typed.
+    const submit = () => { drafts.edit(id, change); return drafts.submit(id).then(saved => {
       if (saved && mounted.current) {
         setAnswering(current => current === itemKey ? null : current);
         if (itemKey) focusRow(itemKey);
       }
       return saved;
-    });
+    }); };
     if (item && binding?.connection_state !== 'connected' && onAgentNotRunning) {
       const label = change.selected_option_id ? item.options.find(option => option.id === change.selected_option_id)?.label ?? '' : change.text;
-      onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', queue: submit });
+      onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', change, queue: submit });
     } else void submit();
   };
   const sendOption = (index: number) => { const option = options[index]; if (option) send({ selected_option_id: option.id, text: '' }); };

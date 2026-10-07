@@ -1,12 +1,13 @@
 // The session card's dispatch and Close dialogs. They keep the binding rules of
 // the former BindingControls and HistoryActions: resume needs an active,
 // connected binding with no pause reason or input needing attention; Close
-// needs paused dispatch and no open items or pending inputs.
+// needs quiesced dispatch (paused, disconnected or unbound) and no open items
+// or pending inputs.
 import { CoreFailure, useSession, type SessionStore } from '../../data';
 import type { OwnerCommand } from '../../generated/core';
 import type { AdapterConfig } from '../../generated/domain/models';
 import { useSessionActions, type SessionActions } from '../../components/bindings/actions';
-import { lifecycleBlockers } from '../../components/history-actions/selectors';
+import { dispatchQuiesced, lifecycleBlockers } from '../../components/history-actions/selectors';
 import { Dialog } from '../dialogs/Dialog';
 
 type BindingAction = 'connect' | 'pause' | 'resume' | 'disconnect';
@@ -77,7 +78,9 @@ export function CloseSessionDialog({ store, actions, agent, when, onOpenSession,
   const disabled = !session || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
   const error = operation.error instanceof CoreFailure ? operation.error.error : undefined;
   const blockers = session ? lifecycleBlockers(session, null, error) : [];
-  const mustPause = !binding || binding.dispatch_state !== 'paused';
+  // A disconnected or unbound session is already quiesced: Close needs no pause first.
+  const mustPause = !dispatchQuiesced(binding);
+  const alreadyStopped = !!binding && binding.dispatch_state !== 'paused' && !mustPause;
   const pause = () => {
     if (!session || !binding || disabled) return;
     void actions.execute({ command: 'binding_pause', api_version: 1, op_id: '', params: { binding_id: binding.id, expected_generation: binding.generation } }, session.revision);
@@ -90,7 +93,7 @@ export function CloseSessionDialog({ store, actions, agent, when, onOpenSession,
   return <Dialog label={title} width={520} onCancel={() => { if (!operation.writing) onClose(); }} onConfirm={() => { void close(); }}>
     <div className="dialog-title">{title}</div>
     <div className="pw-dialog-body">Ariadne marks the session Closed and keeps it read-only. The agent process isn’t touched.</div>
-    {session && !binding && <div className="pw-dialog-warn">No agent binding can confirm that dispatch is paused. Connect the session before closing it.</div>}
+    {alreadyStopped && <div className="pw-dialog-body">Dispatch is already stopped (binding not connected).</div>}
     {session && binding && mustPause && <div className="pw-dialog-step"><span>Dispatch is on. Pause it first so nothing more is sent.</span>
       <button type="button" className="btn btn-secondary" disabled={disabled} onClick={pause}><i className="ph ph-pause" aria-hidden="true" />Pause dispatch</button></div>}
     {blockers.length > 0 && <div className="pw-dialog-body">These are still open. Settle them in the session first:

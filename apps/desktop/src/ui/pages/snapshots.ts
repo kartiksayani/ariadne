@@ -6,6 +6,7 @@ import type { RendererService } from '../../data/service';
 import { immutable, type Immutable } from '../../data/session-store';
 import type { Session, SessionSummary } from '../../generated/domain/models';
 import { sessionKey } from './model';
+import { notices } from './notices';
 
 type Entry = { readonly revision: number; readonly session: Immutable<Session> };
 
@@ -21,7 +22,12 @@ export function useSessionSnapshots(service: RendererService | null, summaries: 
         .then(result => {
           if (!current || result.session.id !== summary.session_id) return;
           setEntries(previous => new Map(previous).set(sessionKey(summary), { revision: result.session.revision, session: immutable(result.session) }));
-        }, () => {});
+        }, (error: unknown) => {
+          if (!current) return;
+          // One note per session; a later successful read does not clear it, the owner dismisses it.
+          notices.push({ id: `session-read-failed:${sessionKey(summary)}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+            text: `A session could not be read, so its card is incomplete${error instanceof Error && error.message ? `: ${error.message}` : '.'}` });
+        });
     }
     return () => { current = false; };
   // `wanted` names every listed session at its revision; `entries` changes only from these reads.
