@@ -3,6 +3,7 @@ mod continuation;
 mod error;
 mod lifecycle;
 mod preview;
+mod remove;
 pub use error::HistoryActionError;
 
 use crate::*;

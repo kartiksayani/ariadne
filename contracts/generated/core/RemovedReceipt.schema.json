@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RemovedReceipt",
+  "description": "Session or project removal. `backup` is the absolute path of the\npre-remove snapshot (a file for a session, a directory for a project).",
+  "type": "object",
+  "properties": {
+    "backup": {
+      "type": "string"
+    },
+    "operation_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "project_id": {
+      "$ref": "#/$defs/UuidV4"
+    },
+    "scope": {
+      "$ref": "#/$defs/RemovedScope"
+    },
+    "session_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UuidV4"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "scope",
+    "project_id",
+    "session_ids",
+    "backup"
+  ],
+  "$defs": {
+    "RemovedScope": {
+      "type": "string",
+      "enum": [
+        "session",
+        "project"
+      ]
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

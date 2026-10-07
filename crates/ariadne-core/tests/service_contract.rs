@@ -681,7 +681,8 @@ fn all_inventory_commands_preserve_typed_params_and_original_bounds() {
         inventory["owner_commands"]
             .as_array()
             .unwrap()
-            .last()
+            .iter()
+            .find(|command| command["command"] == "preferences_patch")
             .unwrap()
             .clone(),
     )
@@ -923,6 +924,8 @@ fn owner_transport_routes_are_required_once_and_never_silently_overridden() {
             OwnerCommand::ProjectRegister { .. }
                 | OwnerCommand::BindingConnect { .. }
                 | OwnerCommand::PreferencesPatch { .. }
+                | OwnerCommand::SessionRemove { .. }
+                | OwnerCommand::ProjectRemove { .. }
         );
         let mut wrapper = OwnerMutationRequest {
             session: needs_session.then(|| session.clone()),

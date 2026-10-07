@@ -88,6 +88,12 @@ fn submit(
             "Continue and topic-only submissions require topic_continue with its preview and mapping",
         ));
     }
+    if params.kind == InputKind::Removed {
+        return Err(core(
+            CoreErrorCode::InvalidArgument,
+            "Removal notices are created by item_remove and topic_remove",
+        ));
+    }
     if session.state != SessionState::Active {
         return Err(core(
             CoreErrorCode::InvalidTransition,
@@ -216,6 +222,7 @@ fn submit(
                 round_id: round_id.clone(),
                 continuation_operation_id: None,
             },
+            removed: None,
         },
         state: InputState::Queued,
         attempts: vec![],

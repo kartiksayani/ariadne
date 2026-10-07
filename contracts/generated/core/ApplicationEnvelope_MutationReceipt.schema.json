@@ -497,6 +497,9 @@
         },
         {
           "$ref": "#/$defs/PreferencesPatchedReceipt"
+        },
+        {
+          "$ref": "#/$defs/RemovedReceipt"
         }
       ]
     },
@@ -549,6 +552,62 @@
         "operation_id",
         "project_id",
         "registry_revision"
+      ]
+    },
+    "RemovalTarget": {
+      "description": "A session-qualified topic (family member) or notice input.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "id"
+      ]
+    },
+    "RemovedReceipt": {
+      "description": "Session or project removal. `backup` is the absolute path of the\npre-remove snapshot (a file for a session, a directory for a project).",
+      "type": "object",
+      "properties": {
+        "backup": {
+          "type": "string"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "project_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "scope": {
+          "$ref": "#/$defs/RemovedScope"
+        },
+        "session_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "scope",
+        "project_id",
+        "session_ids",
+        "backup"
+      ]
+    },
+    "RemovedScope": {
+      "type": "string",
+      "enum": [
+        "session",
+        "project"
       ]
     },
     "ResolutionKind": {
@@ -1011,6 +1070,63 @@
           "required": [
             "kind",
             "continuation"
+          ]
+        },
+        {
+          "description": "Owner item/topic removal in this session. `family` lists every\nsession/topic pair a topic removal covers (empty for an item removal).",
+          "type": "object",
+          "properties": {
+            "backup": {
+              "type": "string"
+            },
+            "family": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RemovalTarget"
+              }
+            },
+            "input_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UuidV4"
+              }
+            },
+            "item_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ItemRef"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "removal"
+            },
+            "notice": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RemovalTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "topic_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UuidV4"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "item_ids",
+            "topic_ids",
+            "input_ids",
+            "family",
+            "notice",
+            "backup"
           ]
         }
       ]
