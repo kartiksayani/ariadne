@@ -34,6 +34,7 @@ async function setup(session: Session = graphSession(), view = preferences()) {
   function Composition({ reveal = null, tight = false }: { reveal?: RevealedItem | null; tight?: boolean }) {
     const [current, setCurrent] = useState(view);
     return <GraphView store={store} routes={routes} view={immutable(current)} later={new Set()} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
+      continuedFrom={topic => topic.name === 'Continued context' ? 'Continued from claude-code · yesterday' : null}
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
       onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }}
       onHoverItem={id => hovered.push(id)} />;
@@ -53,6 +54,9 @@ describe('session graph view', () => {
     expect(within(card).getByText('1 waiting on you · 2 open · 1 in progress · 2 closed')).toBeTruthy();
     expect(within(card).getByText('codex · yesterday')).toBeTruthy();
     expect(screen.getByRole('tree', { name: 'Continued context graph' })).toBeTruthy();
+    // A continued topic names its origin session instead of this one.
+    const continued = screen.getByRole('region', { name: 'Continued context' });
+    expect(continued.querySelector('.graph-card-session')?.textContent).toBe('Continued from claude-code · yesterday');
     expect(ids()).toEqual(['1', '1.1', '1.1.1', '1.2', '2', '3', '8']);
     const waiting = node('1.1.1');
     expect(waiting.getAttribute('aria-label')).toBe('Which delivery window…: Which delivery window: morning or evening?');

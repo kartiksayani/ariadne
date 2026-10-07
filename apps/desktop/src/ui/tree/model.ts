@@ -11,6 +11,7 @@ import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
 import { agentName, dayWord, hostApp, sessionRange } from '../shell/model';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
+import { continuedLabel } from '../shared/continued';
 import { qualifiedPresence } from '../../components/bindings/presence';
 
 export const visual = (status: ItemStatus): StatusKey => statusKey[status];
@@ -190,13 +191,7 @@ export interface TreeModel {
 }
 
 function topicChip(session: Immutable<Session>, topic: Immutable<Topic>, summaries: readonly Immutable<SessionSummary>[], now: number) {
-  if (topic.origin) {
-    const origin = topic.origin;
-    const source = summaries.find(value => value.project_id === origin.project_id && value.session_id === origin.session_id);
-    const day = source ? dayWord(Date.parse(source.created_at), now).toLowerCase() : '';
-    const name = source?.active_binding ? agentName(source.active_binding.adapter_id) : 'an earlier session';
-    return { label: `Continued from ${name}${day ? ` · ${day}` : ''}`, title: 'Started in an earlier session, continued in this one' };
-  }
+  if (topic.origin) return { label: continuedLabel(topic.origin, summaries, now), title: 'Started in an earlier session, continued in this one' };
   const day = dayWord(Date.parse(session.created_at), now).toLowerCase();
   if (!day) return null;
   const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;

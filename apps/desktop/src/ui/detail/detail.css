@@ -260,12 +260,6 @@
   color: var(--a-acc-text);
 }
 
-/* The placeholder legacy input keeps only its answer form here; the
-   panel's own sections replace its intent switcher. */
-.detail-answer-slot .owner-actions {
-  display: none;
-}
-
 /* — outcome, note, why — */
 .detail-outcome > p {
   margin: 0;

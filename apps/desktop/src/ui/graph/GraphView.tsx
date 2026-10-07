@@ -3,6 +3,7 @@
 // one card per topic with 190×66 nodes, Bezier edges, "+N" and "−".
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import type { SessionPreferences } from '../../generated/core';
+import type { Topic } from '../../generated/domain/models';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
 import { useWorkspaceKeys } from '../keys';
@@ -20,6 +21,8 @@ export interface GraphViewProps {
   readonly tight: boolean;
   /** Session chip shown on every topic card ("codex · yesterday"), or null. */
   readonly sessionLabel: string | null;
+  /** "Continued from codex · yesterday" for a topic continued from another session; replaces the session chip. */
+  readonly continuedFrom?: (topic: Immutable<Topic>) => string | null;
   readonly preferencesBusy?: boolean;
   readonly saveView: (view: SessionPreferences) => Promise<boolean>;
   /** Selection reached the item; `openDetail` is false for ↑/↓ moves and "−". */
@@ -92,7 +95,7 @@ function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, o
   </section>;
 }
 
-export function GraphView({ store, routes, view, later, reveal, tight, sessionLabel, preferencesBusy = false, saveView, onReveal, onHoverItem }: GraphViewProps) {
+export function GraphView({ store, routes, view, later, reveal, tight, sessionLabel, continuedFrom, preferencesBusy = false, saveView, onReveal, onHoverItem }: GraphViewProps) {
   const state = useSession(store), session = state.snapshot?.session;
   const marker = useId().replace(/:/g, '');
   const scroller = useRef<HTMLDivElement>(null);
@@ -240,7 +243,7 @@ export function GraphView({ store, routes, view, later, reveal, tight, sessionLa
           <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>
       </div>
       <div className="graph-cards">
-        {graph?.topics.map(topic => <TopicCard key={topic.topic.id} graph={topic} sessionLabel={sessionLabel} marker={`${marker}-${topic.topic.id}`}
+        {graph?.topics.map(topic => <TopicCard key={topic.topic.id} graph={topic} sessionLabel={continuedFrom?.(topic.topic) ?? sessionLabel} marker={`${marker}-${topic.topic.id}`}
           focusId={focusId} onOpen={open} onCollapse={collapse} onHover={onHoverItem} />)}
       </div></>}
     </div>
