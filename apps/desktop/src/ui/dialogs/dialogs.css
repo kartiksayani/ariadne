@@ -10,6 +10,9 @@
 }
 
 .pw-dialog {
+  /* A long dialog (registration, recovery) scrolls inside the window's padding. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   background: var(--a-card);
   color: var(--color-text);
   font-family: var(--font-body);

@@ -480,44 +480,7 @@
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
-/* — empty and loading — */
-.pw-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  max-width: 500px;
-  padding: 72px 44px;
-}
-
-.pw-empty-icon {
-  font-size: 34px;
-  color: var(--color-accent);
-}
-
-.pw-empty-title {
-  font-size: 20px;
-  font-weight: 500;
-  letter-spacing: -0.012em;
-}
-
-.pw-empty-text {
-  margin: 0;
-  font-size: 14.5px;
-  line-height: 1.6;
-  text-wrap: pretty;
-  color: color-mix(in srgb, var(--color-text) 66%, transparent);
-}
-
-.pw-empty-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  font-size: 12.5px;
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
-}
-
+/* — loading (the empty state is the tree's, ui/tree) — */
 .pw-loading {
   display: flex;
   flex-direction: column;

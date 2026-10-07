@@ -174,7 +174,7 @@ export function TreeView(props: TreeViewProps) {
   const pickedIndex = entry?.draft.selected_option_id ? options.findIndex(option => option.id === entry.draft.selected_option_id) : -1;
   const chosen = pickedIndex >= 0 ? pickedIndex : options.findIndex(option => option.recommended);
   const blocked = session?.state !== 'active' ? 'This session is closed. Reopen it to answer.'
-    : binding?.connection_state === 'reconnecting' ? `Reconnecting to ${bar?.title ?? 'the agent'}. Your choice is kept; sending resumes when the connection is back.` : null;
+    : binding?.connection_state === 'reconnecting' ? `Reconnecting to ${bar?.agent ?? 'the agent'}. Your choice is kept; sending resumes when the connection is back.` : null;
   const focusRow = (key: string) => { setFocusKey(key); elements.current.get(key)?.focus({ preventScroll: true }); };
   const send = (change: { selected_option_id: string | null; text: string }) => {
     if (!entry || entry.saving || blocked) return;
@@ -345,7 +345,7 @@ export function TreeView(props: TreeViewProps) {
     return [
       // Continuation is a core workflow: every topic without an origin offers it,
       // not only earlier-session ones as the prototype draws (main, P8.3 WP1).
-      ...!row.topic.origin ? [{ icon: 'ph ph-arrow-bend-down-right', label: 'Continue here', title: `Continue this topic with ${bar?.title ?? 'this session'}`, run: () => setContinuing(id) }] : [],
+      ...!row.topic.origin ? [{ icon: 'ph ph-arrow-bend-down-right', label: 'Continue here', title: `Continue this topic with ${bar?.agent ?? 'this session'}`, run: () => setContinuing(id) }] : [],
       { icon: 'ph ph-archive', label: 'Archive', title: 'Archive topic (e)', run: () => lifecycle.archive(id), archive: true },
       { icon: 'ph ph-trash', label: 'Remove', title: 'Remove topic (⌫)', run: onRemove },
     ];
@@ -382,7 +382,8 @@ export function TreeView(props: TreeViewProps) {
       <div className="tree-empty-title">No items yet</div>
       <p>Ariadne is following this session. Questions, decisions and findings appear here as the agent writes them, grouped by topic.</p>
       <div className="tree-empty-connection" data-running={running || undefined}><span className="tree-run-dot" />
-        {running ? `Connected to ${bar?.title ?? 'the agent'} · waiting for the agent’s first message` : `${bar?.title ?? 'The agent'} is not running · items appear when it writes`}</div>
+        {running ? `Connected to ${bar?.agent ?? 'the agent'}${bar?.where ? ` in ${bar.where}` : ''} · waiting for the agent’s first message`
+          : `${bar?.agent ?? 'The agent'} is not running · items appear when it writes`}</div>
     </div>;
   } else if (model?.noMatch) {
     body = <div className="tree-no-match">

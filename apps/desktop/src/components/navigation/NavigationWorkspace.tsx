@@ -151,6 +151,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
     sessions: openViews.map(view => {
       const summary = sessions.find(value => key(value) === key(view.session));
       return { id: key(view.session), project: projectNameOf(view.session.project_id), agent: summary?.active_binding ? agentName(summary.active_binding.adapter_id) : null,
+        where: summary?.active_binding?.host_location ?? null,
         createdAt: summary ? Date.parse(summary.created_at) : null, endedAt: summary ? Date.parse(summary.closed_at ?? summary.updated_at) : null, running: summary ? running(summary) : false,
         on: selection.kind === 'session' && key(selection.session) === key(view.session) };
     }) }, at);

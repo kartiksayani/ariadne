@@ -100,7 +100,7 @@ export function SessionLists(props: SessionListsProps) {
       subject: { kind: 'project', name: projectName(project), path: project.canonical_root, sessions: own.length, ...counts } });
   };
   const card = (summary: Immutable<SessionSummary>) => {
-    const key = sessionKey(summary), snapshot = snapshots.get(key) ?? null, text = sessionCardText(summary, snapshot, now);
+    const key = sessionKey(summary), snapshot = snapshots.get(key) ?? null, text = sessionCardText(summary, snapshot, now, summary.active_binding?.host_location ?? null);
     const chips = snapshot ? topicChips(snapshot, links.movedOn) : [], open = openTabs.has(key), route = routeOf(summary);
     const off = disabled || busy === key;
     return <div key={key} className="pw-session-card" style={{ background: text.background }} data-session-card={summary.session_id}>

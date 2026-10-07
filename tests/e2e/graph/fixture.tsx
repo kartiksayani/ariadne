@@ -7,7 +7,6 @@ import { OpenSessions } from '../../../apps/desktop/src/data/session-store';
 import { RegisteredRoutes } from '../../../apps/desktop/src/data/routes';
 import { createDesktopService, type DesktopTransport } from '../../../apps/desktop/src/data/service';
 import { GraphView } from '../../../apps/desktop/src/ui/graph/GraphView';
-import '../../../apps/desktop/src/styles/reference.css';
 
 declare global {
   interface Window { __graphEvidence: { mountMs: number[]; updateMs: number[]; saved: SessionPreferences[] } }

@@ -210,7 +210,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
     const binding: Binding = { ...structuredClone(demo.bindings['00000000-0000-4000-8000-000000000020']) as Binding, id: bindingId,
       adapter_id: proto.agent === 'claude-code' ? 'claude_code_mod' : proto.agent, external_session_id: `${proto.id}-thread`, generation: uuid('f', index + 1),
       created_at: times.created, dispatch_state: proto.running ? 'enabled' : 'disconnected', connection_state: !proto.running ? 'disconnected' : world.reconnecting ? 'reconnecting' : 'connected',
-      active_input_id: null, issued_through_message_number: 0 };
+      active_input_id: null, issued_through_message_number: 0, host_location: proto.where };
     const topics = world.topics.filter(topic => world.sessionOf(topic) === proto.id);
     const topicIds = new Map(topics.map(topic => [topic.id, uuid('c', world.topics.indexOf(topic) + 1)]));
     const protoItems = world.items.filter(item => topicIds.has(item.topic));
@@ -305,6 +305,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
       topic_count: Object.keys(session.topics).length,
       active_binding: { id: binding.id, adapter_id: binding.adapter_id, external_session_id: binding.external_session_id, generation: binding.generation,
         dispatch_state: binding.dispatch_state, owner_paused: false, pause_reason: null, connection_state: binding.connection_state,
+        host_location: binding.host_location ?? null,
         presence: running ? { instance_id: uuid('f', 100 + index), generation: binding.generation, connection_state: binding.connection_state, execution_state: 'running',
           last_seen_at: world.now, source: 'host_event', process_identity: null, freshness: 'fresh' } : null } };
   });

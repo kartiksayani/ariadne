@@ -8,7 +8,7 @@ import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 import { normalizeSearch, sameOwner } from '../../selectors/tree/rows';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
-import { agentName, dayWord, sessionRange } from '../shell/model';
+import { agentName, dayWord, hostApp, sessionRange } from '../shell/model';
 import { qualifiedPresence } from '../../components/bindings/presence';
 
 export type Visual = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
@@ -115,7 +115,12 @@ export function deliveryLine(session: Immutable<Session>, target: { readonly top
 // ---------------------------------------------------------------- session bar
 
 export interface SessionBar {
+  /** "codex · iTerm window 2"; the location segment only when the host reports one. */
   readonly title: string;
+  /** The agent alone ("codex"), or "No agent". */
+  readonly agent: string;
+  /** The terminal app ("iTerm") for "Connected to codex in iTerm", or null. */
+  readonly where: string | null;
   readonly meta: string;
   readonly running: boolean;
   /** The binding's qualified host presence, as the binding controls word it ("Host running · fresh host event"). */
@@ -132,9 +137,13 @@ export function sessionBar(session: Immutable<Session> | null, summary: Immutabl
   // A qualified presence observation outranks the binding's stored connection state.
   const host = bound ? qualifiedPresence(bound, presence ?? undefined) : null;
   const running = !!binding && (host?.qualified ? presence!.connection_state === 'connected' : binding.connection_state === 'connected');
-  const topics = session ? topicList(session).filter(topic => topic.archived_at === null).length : null;
+  // Before the snapshot loads, the summary's topic count stands in (archived topics excluded, like the loaded count).
+  const topics = session ? topicList(session).filter(topic => topic.archived_at === null).length
+    : summary ? summary.topic_count - summary.counts.archived_topics : null;
   const range = sessionRange(Date.parse(created), ended ? Date.parse(ended) : null, running, now);
-  return { title: binding ? agentName(binding.adapter_id) : 'No agent', meta: topics === null ? range : `${range} · ${plural(topics, 'topic')}`,
+  const agent = binding ? agentName(binding.adapter_id) : 'No agent', location = binding?.host_location ?? null;
+  return { title: location ? `${agent} · ${location}` : agent, agent, where: hostApp(location),
+    meta: topics === null ? range : `${range} · ${plural(topics, 'topic')}`,
     running, host: host?.label ?? null, closed: (session?.state ?? summary?.state) === 'closed' };
 }
 

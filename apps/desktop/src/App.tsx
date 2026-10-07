@@ -23,7 +23,7 @@ import { useSessionSnapshots } from './ui/pages/snapshots';
 import { AgentNotRunningHost } from './ui/dialogs/AgentNotRunning';
 import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
 import type { RemoveHandler } from './ui/dialogs/remove';
-import { agentName, themeToggle, type SessionFacts } from './ui/shell/model';
+import { agentName, hostApp, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import type { ViewTab } from './ui/shell/Header';
 import { useWorkspaceKeys, type WorkspaceHandlers, type WorkspaceIntent } from './ui/keys';
@@ -50,7 +50,7 @@ function sessionFacts(state: SessionState | null, projectName: (projectId: strin
   const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
   const last = session.messages.at(-1);
   return { projectName: projectName(session.project_id), createdAt: Date.parse(session.created_at), messageCount: session.messages.length,
-    agent: binding ? agentName(binding.adapter_id) : null,
+    agent: binding ? agentName(binding.adapter_id) : null, where: hostApp(binding?.host_location),
     connection: !binding ? 'none' : binding.connection_state === 'connected' ? 'connected' : binding.connection_state === 'reconnecting' ? 'reconnecting' : 'not_running',
     lastMessage: last ? { number: last.number, createdAt: Date.parse(last.created_at) } : null };
 }

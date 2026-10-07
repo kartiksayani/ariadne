@@ -17,6 +17,11 @@ export function agentName(adapterId: string): string {
   return adapterId;
 }
 
+/** The terminal app of a binding's host location: "iTerm window 1" → "iTerm" (ADR-0085). Null when the host reports none. */
+export function hostApp(location: string | null | undefined): string | null {
+  return location ? location.replace(/ window \d+$/, '') : null;
+}
+
 /** Local wall-clock time, "15:04". */
 export function clock(at: number): string {
   const date = new Date(at);
