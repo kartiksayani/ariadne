@@ -116,6 +116,9 @@ remain for provenance; multiple sessions in one project may run concurrently.
 
 Topic: `{id,name,order,revision,created_at,archived_at,origin}`. `origin` is null or
 `{project_id,session_id,topic_id,source_revision,continued_at}` for a snapshot copy.
+Topic and Item also carry optional `short` (ADR-0084): an agent-written 2-4 word
+label, trimmed, one line, at most 40 characters; omitted from JSON when absent, so
+stores written before it load and re-serialize unchanged.
 
 Item: `{id,ordinal,topic_id,parent,question,type,status,owner,revision,
 question_revision,next_child,ask,note,options,links,outcome,why,replaced_by,

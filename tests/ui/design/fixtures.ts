@@ -217,8 +217,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         topicName: topics.find(topic => topic.id === proto.topic)!.name, authorOf: number => protoMessages.find(message => message.number === number)?.author }));
       const waiting = status === 'waiting_on_me' ? messageTimes.get(proto.waitingSince ?? -1) ?? created : null;
       return [proto.id, { id: proto.id, ordinal: siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
-        // The backend has no short label yet (Topic.short / Item.short); the views read it when present.
-        ...{ short: proto.short },
+        short: proto.short,
         type: proto.type, status, owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
         revision: 1 + proto.updated.length, question_revision: 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
         ask: proto.ask || null, note: proto.note || null,
@@ -268,8 +267,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         next_message: Math.max(0, ...messages.map(message => message.number)) + 1, next_input: answers.length + 1, next_answer: answers.length + 1 },
       active_binding_id: bindingId,
       topics: Object.fromEntries(topics.map((topic, order): [string, Topic] => [topicIds.get(topic.id)!, { id: topicIds.get(topic.id)!, name: topic.name,
-        ...{ short: topic.short },
-        order: order + 1, revision: 1, created_at: times.created, archived_at: topic.archived ? times.created : null, origin: null }])),
+        short: topic.short, order: order + 1, revision: 1, created_at: times.created, archived_at: topic.archived ? times.created : null, origin: null }])),
       items, messages, rounds, answers, bindings: { [bindingId]: binding }, inputs, operation_receipts: {}, continuations: {} };
   });
   const summaries = sessions.map((session, index): SessionSummary => {

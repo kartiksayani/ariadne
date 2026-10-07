@@ -178,3 +178,31 @@ fn canonical_manifest_and_error_budget_are_enforced_without_raw_error_leaks() {
     assert_eq!(value["error"]["code"], "capacity_exceeded");
     assert!(value.to_string().len() < 1024 * 1024);
 }
+
+#[test]
+fn apply_tool_schema_offers_an_optional_bounded_short_label() {
+    let tools = manifest().unwrap();
+    let apply = tools.iter().find(|tool| tool.name == "apply").unwrap();
+    let schema = apply.schema_as_json_value();
+    let defs = &schema["$defs"];
+    let mut labelled = Vec::new();
+    for operation in defs["Operation"]["oneOf"].as_array().unwrap() {
+        let Some(short) = operation["properties"].get("short") else {
+            continue;
+        };
+        assert_eq!(short["maxLength"], 40);
+        assert_eq!(short["type"], json!(["string", "null"]));
+        assert!(!operation["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("short")));
+        labelled.push(operation["properties"]["op"]["const"].clone());
+    }
+    assert_eq!(labelled, [json!("topic.add"), json!("item.add")]);
+    let patch = &defs["ItemPatch"];
+    assert_eq!(patch["properties"]["short"]["maxLength"], 40);
+    assert!(!patch["required"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("short")));
+}

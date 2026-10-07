@@ -2,9 +2,10 @@
 // lines 324-464 and 1953-2079), built from the session snapshot the store
 // already holds. Strings are the prototype's; nothing here is invented copy.
 import type { Immutable } from '../../data/session-store';
-import type { Input, InputKind, Item, ItemOption, ItemStatus, Message, Round, Session, Topic } from '../../generated/domain/models';
+import type { Input, InputKind, Item, ItemOption, ItemStatus, Message, Round, Session } from '../../generated/domain/models';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentName, clock, dayWord } from '../shell/model';
+import { shortLabel } from '../shared/short';
 
 /** The prototype's status keys; they name the `--st-*` colour tokens. */
 export type StatusKey = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
@@ -17,22 +18,6 @@ const OUTLBL: Readonly<Partial<Record<StatusKey, string>>> = { decided: 'Decided
 const LINKICON: Readonly<Record<string, string>> = { pr: 'ph ph-git-pull-request', file: 'ph ph-file-code', doc: 'ph ph-file-text' };
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
 const quote = (text: string) => `“${text.length > 40 ? `${text.slice(0, 38)}…` : text}”`;
-
-/** Optional short labels (README data model `short`); the domain does not carry them yet. */
-export type Shortened<T> = T & { readonly short?: string | null };
-
-/**
- * The short label of a topic or item for paths and breadcrumbs: its `short`
- * when present, else its name or question cut at a word boundary near 24
- * characters with "…".
- */
-export function shortLabel(entity: Immutable<Shortened<Topic>> | Immutable<Shortened<Item>>): string {
-  if (entity.short?.trim()) return entity.short.trim();
-  const text = ('question' in entity ? entity.question : entity.name).trim();
-  if (text.length <= 24) return text;
-  const cut = text.slice(0, 25), space = cut.lastIndexOf(' ');
-  return `${(space > 8 ? cut.slice(0, space) : cut.slice(0, 24)).replace(/[\s,.;:·–—-]+$/, '')}…`;
-}
 
 export type OpenMode = 'reply' | 'drop' | 'note' | 'followup';
 /** Which box `r` opens for an item (Ariadne.dc.html:1401). */

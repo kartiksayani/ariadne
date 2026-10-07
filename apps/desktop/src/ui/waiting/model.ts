@@ -2,7 +2,7 @@
 // `sent`, `pathText`, `lastOf`, `deliveryOf`). Pure: the column passes the
 // captured queue, the answer drafts and the clock.
 import type { ItemRoute, SessionRef } from '../../generated/core';
-import type { Input, Item, PresenceObservation, Session, Topic } from '../../generated/domain/models';
+import type { Input, Item, PresenceObservation, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data/session-store';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import type { WaitingSession } from '../../selectors/waiting/rows';
@@ -10,14 +10,7 @@ import type { WaitingState } from '../../selectors/waiting/store';
 import type { DraftEntry } from '../../state/drafts/store';
 import { deliveryLine, deliveryStage, draftStage, quote, type DeliveryLine, type DeliveryStage } from '../answer/delivery';
 import { agentName, dayWord } from '../shell/model';
-
-/**
- * Short labels. The handoff's paths use a short label per topic and item;
- * the domain has none yet (backend gap: `Topic.short`, `Item.short`), so the
- * name or question stands in until those fields exist.
- */
-export const topicShort = (topic: Immutable<Topic> & { readonly short?: string | null }): string => topic.short || topic.name;
-export const itemShort = (item: Immutable<Item> & { readonly short?: string | null }): string => item.short || item.question;
+import { shortLabel } from '../shared/short';
 
 /** How the card's Retry resolves: prepare a revised draft of a rejected save, or open the item's recovery review. */
 export type RetryKind = 'revise' | 'recovery';
@@ -83,9 +76,9 @@ export function waitingAge(at: number, now: number): string {
 /** Project (when several), topic and ancestors; longer than four collapses to the first two, "…" and the last. */
 export function pathText(session: Immutable<Session>, item: Immutable<Item>, project: string | null): string {
   const ancestors: string[] = [];
-  for (let parent = item.parent ? session.items[item.parent] : undefined; parent; parent = parent.parent ? session.items[parent.parent] : undefined) ancestors.unshift(itemShort(parent));
+  for (let parent = item.parent ? session.items[item.parent] : undefined; parent; parent = parent.parent ? session.items[parent.parent] : undefined) ancestors.unshift(shortLabel(parent));
   const topic = session.topics[item.topic_id];
-  let parts = [...(project ? [project] : []), topic ? topicShort(topic) : '', ...ancestors];
+  let parts = [...(project ? [project] : []), topic ? shortLabel(topic) : '', ...ancestors];
   if (parts.length > 4) parts = [parts[0], parts[1], '…', parts[parts.length - 1]];
   return parts.join('  ›  ');
 }

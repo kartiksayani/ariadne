@@ -52,8 +52,15 @@ finding, task, explanation. Preserve closed outcome history.
 
 References: `{"ref":"a"}` names an earlier `ref` (letter first, letters, digits or
 `_`, at most 32) in the same request; `{"id":"1.2"}` is an existing item, or an
-existing UUID for a topic or message. Every field shown in the examples is required;
-use `null` when unused.
+existing UUID for a topic or message. Every field shown in the examples is required,
+except `short`; use `null` when unused.
+
+Short labels. Give every topic (`topic.add`) and item (`item.add`) you create a
+`short` label: a 2-4 word noun phrase, one line, at most 40 characters, such as
+"SDK cache PR" or "Fallback merge test". The app shows it as the graph node title
+and in breadcrumbs, so keep it stable across updates. In `item.edit`, leave
+`short` out of the patch to keep the label, send a string to replace it (for
+example to label an older item that has none) and `null` only to clear it.
 
 Working method. Whenever this session is connected to Ariadne, and whenever the
 owner says "use Ariadne" or similar, organise the task in Ariadne yourself; the
@@ -104,7 +111,7 @@ Reply, decide, answer the input:
 Add an item and a child of existing item 1, defer the input:
 
 ```json
-{"op_id":"00000000-0000-4000-8000-000000000102","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":4},"expected_topic_revisions":{},"summary":"Recorded follow-ups","operations":[{"op":"item.add","ref":"a","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":null,"question":"Should we migrate?","type":"decision","status":"open","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"item.add","ref":"b","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":{"id":"1"},"question":"Who reviews it?","type":"task","status":"open","owner":{"kind":"other","name":"Alice"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"reply","ref":"r1","item":{"ref":"a"},"text":"Recorded for later.","round_id":null}],"input_result":{"outcome":"deferred","explanation":"Recorded follow-up items.","reply_refs":[{"ref":"r1"}],"followup_item_refs":[{"ref":"a"},{"ref":"b"}],"handled_through_message_number":7}}
+{"op_id":"00000000-0000-4000-8000-000000000102","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":4},"expected_topic_revisions":{},"summary":"Recorded follow-ups","operations":[{"op":"item.add","ref":"a","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":null,"question":"Should we migrate?","short":"Migration decision","type":"decision","status":"open","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"item.add","ref":"b","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":{"id":"1"},"question":"Who reviews it?","short":"Migration reviewer","type":"task","status":"open","owner":{"kind":"other","name":"Alice"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"reply","ref":"r1","item":{"ref":"a"},"text":"Recorded for later.","round_id":null}],"input_result":{"outcome":"deferred","explanation":"Recorded follow-up items.","reply_refs":[{"ref":"r1"}],"followup_item_refs":[{"ref":"a"},{"ref":"b"}],"handled_through_message_number":7}}
 ```
 
 Ask the owner a question on item 1 (new round):
@@ -125,22 +132,22 @@ Acknowledge a `removed` input (no operations, no replies):
 {"op_id":"00000000-0000-4000-8000-000000000108","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":{"outcome":"answered","explanation":"Stopped work on the removed items.","reply_refs":[],"followup_item_refs":[],"handled_through_message_number":7}}
 ```
 
-No dispatched input: start an item, then close an earlier round:
+No dispatched input: label an older item, start it, then close an earlier round:
 
 ```json
-{"op_id":"00000000-0000-4000-8000-000000000105","source_input_id":null,"attempt_id":null,"expected_item_revisions":{"2":3},"expected_topic_revisions":{},"summary":"Started item 2","operations":[{"op":"item.status","item":{"id":"2"},"status":"in_progress","outcome":null,"why":null,"reason":"Started work"},{"op":"round.close","round_id":"00000000-0000-4000-8000-000000000020"}],"input_result":null}
+{"op_id":"00000000-0000-4000-8000-000000000105","source_input_id":null,"attempt_id":null,"expected_item_revisions":{"2":3},"expected_topic_revisions":{},"summary":"Started item 2","operations":[{"op":"item.edit","item":{"id":"2"},"patch":{"question":null,"type":null,"links":null,"short":"Retry backoff"}},{"op":"item.status","item":{"id":"2"},"status":"in_progress","outcome":null,"why":null,"reason":"Started work"},{"op":"round.close","round_id":"00000000-0000-4000-8000-000000000020"}],"input_result":null}
 ```
 
 No dispatched input: create a topic and file a finding in it with a full reply:
 
 ```json
-{"op_id":"00000000-0000-4000-8000-000000000106","source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"Filed a security finding","operations":[{"op":"topic.add","ref":"t","name":"Security"},{"op":"item.add","ref":"f","topic":{"ref":"t"},"parent":null,"question":"Token is logged on failure","type":"finding","status":"done","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":"Token no longer logged","why":"The retry path logged the bearer token at error level; it is now redacted","replaced_by":null,"source_round_id":null},{"op":"reply","ref":"r1","item":{"ref":"f"},"text":"The retry path logged the bearer token at error level; I redacted it. Full reasoning and the fix.","round_id":null}],"input_result":null}
+{"op_id":"00000000-0000-4000-8000-000000000106","source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"Filed a security finding","operations":[{"op":"topic.add","ref":"t","name":"Security","short":"Security"},{"op":"item.add","ref":"f","topic":{"ref":"t"},"parent":null,"question":"Token is logged on failure","short":"Logged bearer token","type":"finding","status":"done","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":"Token no longer logged","why":"The retry path logged the bearer token at error level; it is now redacted","replaced_by":null,"source_round_id":null},{"op":"reply","ref":"r1","item":{"ref":"f"},"text":"The retry path logged the bearer token at error level; I redacted it. Full reasoning and the fix.","round_id":null}],"input_result":null}
 ```
 
 No dispatched input: file a question only the owner can answer (add, then ask on the new ref, one round):
 
 ```json
-{"op_id":"00000000-0000-4000-8000-000000000107","source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"Asked which database","operations":[{"op":"item.add","ref":"q","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":null,"question":"Which database should we use?","type":"question","status":"open","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"item.ask","item":{"ref":"q"},"ask":"Which database should we use?","options":[{"id":"pg","label":"Postgres","consequence":"Needs a server","recommended":true},{"id":"sqlite","label":"SQLite","consequence":"Single file, no concurrency","recommended":false}],"recipient_binding_id":"00000000-0000-4000-8000-000000000003"},{"op":"reply","ref":"r1","item":{"ref":"q"},"text":"I cannot choose the storage engine without your deployment constraints; both options work for the current schema.","round_id":null}],"input_result":null}
+{"op_id":"00000000-0000-4000-8000-000000000107","source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"Asked which database","operations":[{"op":"item.add","ref":"q","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":null,"question":"Which database should we use?","short":"Database choice","type":"question","status":"open","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"item.ask","item":{"ref":"q"},"ask":"Which database should we use?","options":[{"id":"pg","label":"Postgres","consequence":"Needs a server","recommended":true},{"id":"sqlite","label":"SQLite","consequence":"Single file, no concurrency","recommended":false}],"recipient_binding_id":"00000000-0000-4000-8000-000000000003"},{"op":"reply","ref":"r1","item":{"ref":"q"},"text":"I cannot choose the storage engine without your deployment constraints; both options work for the current schema.","round_id":null}],"input_result":null}
 ```
 
 Errors. Exit 2 (`invalid_argument`, `invalid_ref`): fix the named field and send a

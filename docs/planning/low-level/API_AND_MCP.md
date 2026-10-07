@@ -492,9 +492,9 @@ input_result: ResultDraft|null
 
 | Operation | Required fields and optional fields |
 |---|---|
-| `topic.add` | `ref,name` |
-| `item.add` | `ref,topic,parent?,question,type,status,owner`; optional ask/options/note/links/outcome/why/replaced_by/source_round_id |
-| `item.edit` | `item,patch` restricted to question/type/note/links; expected revision |
+| `topic.add` | `ref,name`; optional `short` |
+| `item.add` | `ref,topic,parent?,question,type,status,owner`; optional short/ask/options/note/links/outcome/why/replaced_by/source_round_id |
+| `item.edit` | `item,patch` restricted to question/type/note/links/short; expected revision |
 | `item.ask` | `item,ask,options,recipient_binding_id`; opens new round + waiting episode, owner=me |
 | `item.status` | `item,status`; `outcome,why` required for decided/done/dropped; `reason` required for other transitions; replaced uses item.replace; waiting uses item.ask |
 | `item.replace` | `item,replacement,outcome,why` |
@@ -502,7 +502,9 @@ input_result: ResultDraft|null
 | `round.close` | `round_id`; immutable history retained |
 
 In `item.edit.patch`, omitted `note` leaves it unchanged, explicit null clears it,
-and a string preserves its exact text, including an empty string. Other optional
+and a string preserves its exact text, including an empty string. `short`
+(ADR-0084) follows the same omitted/null/string rule, but the string is trimmed
+and must then be nonblank, one line and at most 40 characters. Other optional
 patch fields emit null when absent and update only when present with a value;
 an empty links array clears links. Scope/reference/revision and domain-transition
 checks belong to the real core, after exact operation replay lookup.

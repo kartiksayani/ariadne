@@ -1746,6 +1746,14 @@
                   "null"
                 ]
               },
+              "short": {
+                "description": "Absent keeps the label, null clears it, a string replaces it (trimmed).",
+                "maxLength": 40,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "type": {
                 "anyOf": [
                   {
@@ -1824,6 +1832,14 @@
                   },
                   "ref": {
                     "$ref": "#/$defs/RequestRef"
+                  },
+                  "short": {
+                    "description": "Optional 2-4 word label; trimmed, one line, at most 40 characters, measured after trimming.",
+                    "maxLength": 40,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -1903,6 +1919,14 @@
                       {
                         "type": "null"
                       }
+                    ]
+                  },
+                  "short": {
+                    "description": "Optional 2-4 word label; trimmed, one line, at most 40 characters, measured after trimming.",
+                    "maxLength": 40,
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   },
                   "source_round_id": {

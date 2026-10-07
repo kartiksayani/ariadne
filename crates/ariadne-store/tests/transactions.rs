@@ -687,3 +687,72 @@ fn keyed_in_process_lock_wait_is_bounded_and_other_sessions_remain_available() {
         assert!(start.elapsed() < Duration::from_secs(4));
     });
 }
+
+#[test]
+fn snapshot_written_before_short_labels_loads_and_keeps_its_bytes() {
+    // The seed fixture predates short labels: no topic or item carries `short`.
+    let project = ProjectDir::new();
+    let store = project.store();
+    let fixture = include_str!("../../../fixtures/domain/history/seed.json");
+    assert!(!fixture.contains("\"short\""));
+    let loaded = store.read(&id(2)).unwrap();
+    assert!(loaded.topics.0.values().all(|topic| topic.short.is_none()));
+    assert!(loaded.items.0.values().all(|item| item.short.is_none()));
+    transact(&store, "1", 100, Some(1)).unwrap();
+    let live = fs::read_to_string(project.live()).unwrap();
+    assert!(
+        !live.contains("\"short\""),
+        "an unlabelled record gains no key"
+    );
+
+    let label = |operation: u64, short: String| {
+        store.transact(
+            &id(2),
+            &actor(),
+            &id(operation),
+            &command("1", operation, Some(2)),
+            |session| {
+                let data = reply(session, "1", operation, None)?;
+                session.items.0.get_mut(&item("1")).unwrap().short = Some(short.clone());
+                for topic in session.topics.0.values_mut() {
+                    topic.short = Some(short.clone());
+                }
+                Ok::<_, &'static str>(data)
+            },
+        )
+    };
+    label(101, "Fallback merge test".into()).unwrap();
+    let saved = store.read(&id(2)).unwrap();
+    assert_eq!(
+        saved.items.0[&item("1")].short.as_deref(),
+        Some("Fallback merge test")
+    );
+    assert!(saved
+        .topics
+        .0
+        .values()
+        .all(|topic| topic.short.as_deref() == Some("Fallback merge test")));
+    let before = fs::read(project.live()).unwrap();
+    assert!(matches!(
+        label(102, "x".repeat(41)),
+        Err(TransactionError::Store(StoreError::Validation(_)))
+    ));
+    assert_eq!(fs::read(project.live()).unwrap(), before);
+}
+
+#[test]
+fn hand_edited_session_with_overlong_short_label_fails_validation() {
+    use ariadne_domain::validation::ValidationErrorKind;
+    let project = ProjectDir::new();
+    let store = project.store();
+    let mut edited = seed();
+    edited.items.0.get_mut(&item("1")).unwrap().short = Some("x".repeat(41));
+    fs::write(project.live(), serde_json::to_vec(&edited).unwrap()).unwrap();
+    match store.read(&id(2)) {
+        Err(StoreError::Validation(error)) => assert_eq!(
+            error.kind,
+            ValidationErrorKind::TooManyChars { maximum_chars: 40 }
+        ),
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+}

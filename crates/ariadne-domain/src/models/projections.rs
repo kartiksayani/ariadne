@@ -129,6 +129,9 @@ pub struct ItemSnapshot {
     pub topic_id: UuidV4,
     pub parent: Option<ItemRef>,
     pub question: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub short: Option<String>,
     #[serde(rename = "type")]
     pub item_type: ItemType,
     pub status: ItemStatus,
