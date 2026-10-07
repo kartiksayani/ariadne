@@ -8,6 +8,8 @@ import type { OwnerDraftStore } from '../../state/drafts/store';
 import type { NavigationStore } from '../../state/navigation/store';
 import { openAgentNotRunning } from '../dialogs/AgentNotRunning';
 import { openContinueTopic } from '../dialogs/ContinueTopicDialog';
+import { notices } from '../pages/notices';
+import { agentName } from '../shell/model';
 import type { PendingSubmission } from './useSubmit';
 
 export interface NotRunningDeps {
@@ -46,12 +48,17 @@ export async function carryAnswer(navigation: NavigationStore, drafts: OwnerDraf
   const route = { ...target, item_id: copy.id };
   // The owner's choice travels with the submission; the held draft was never changed by the Send.
   const { change } = submission, held = drafts.find(source, item_id, submission.intent), id = drafts.begin(session, copy.id, submission.intent);
-  if (!id) return route;
+  const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
+  // The handoff has no wording for this case.
+  const unsent = () => notices.push({ icon: 'ph ph-warning', iconColor: 'var(--a-warn)', dismissible: true,
+    text: `Copied to the ${binding ? agentName(binding.adapter_id) : 'other'} session; nothing sent — answer it there.` });
+  if (!id) { unsent(); return route; }
   const picked = change.selected_option_id
     ? navigation.opened.open(source).getSnapshot().snapshot?.session.items[item_id]?.options.find(option => option.id === change.selected_option_id) : undefined;
   const option = picked ? copy.options.find(value => value.id === picked.id) ?? copy.options.find(value => value.label === picked.label) : undefined;
   drafts.edit(id, { text: change.text, selected_option_id: option?.id ?? null });
   // The original stays unsent in the old session; clear it so it is not sent twice.
-  if (await drafts.submit(id) && held) drafts.edit(held.draft.op_id, { text: '', selected_option_id: null });
+  if (!await drafts.submit(id)) { unsent(); return route; }
+  if (held) drafts.edit(held.draft.op_id, { text: '', selected_option_id: null });
   return route;
 }
