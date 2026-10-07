@@ -104,9 +104,10 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   useEffect(() => {
     if (!focusRequest || handled.current === focusRequest.token || !model || !item) return;
     const { intent, token } = focusRequest;
-    if (intent === 'answer' || (model.status === 'waiting' && intent === 'reply')) return;
+    if (intent === 'answer' || (model.status === 'waiting' && intent === 'reply' && !model.followUp)) return;
     handled.current = token;
     onFocusRequestConsumed?.(token);
+    if (model.followUp) { if (intent === 'reply' && !model.followUp.disabled) openBox('reply'); return; }
     if (!model.open) return;
     const available = new Set(model.open.actions.filter(action => !action.disabled).map(action => action.action));
     if ((intent === 'reply' || intent === 'note' || intent === 'followup' || intent === 'drop') && available.has(intent)) openBox(intent);
@@ -122,11 +123,37 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const text = mode && mode !== 'drop' ? boxText[mode] : null;
   // The open box's saved draft, or a reopen that could not go out, was written against an older item (OwnerInput's Review step).
   const stale = mode && submit.changed(mode) ? mode : submit.changed('reopen') ? 'reopen' : null;
-  const answerFocus = focusRequest && model.status === 'waiting' && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
+  const answerFocus = focusRequest && model.status === 'waiting' && !model.followUp && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
   const copy = () => {
     try { void navigator.clipboard?.writeText(`${model.id} — ${model.question}`).catch(() => {}); } catch { /* The reference still shows. */ }
     setCopied(true);
   };
+  // The open box: the Open section's actions, or the follow-up of a waiting item whose input is pending.
+  // data-owner-input marks it with its changed-target warning, like the answer slot (native tests).
+  const ownerBox = (stale || mode) && <div className="detail-owner-input" data-owner-input={itemId}>
+    {stale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
+      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked(stale)} onClick={() => submit.review(stale)}>Review current target</button></div>}
+    {text && mode && <div className="detail-box">
+      <textarea ref={box} className="input" rows={3} aria-label={text.label} placeholder={text.placeholder} value={submit.text(mode)} disabled={submit.locked(mode)}
+        onChange={event => submit.edit(mode, event.target.value)} onKeyDown={boxKey} />
+      <div className="detail-box-row">
+        <button type="button" className="btn btn-primary" disabled={!submit.ready || !submit.text(mode).trim() || submit.saving !== null || stale === mode} onClick={sendBox}>
+          <i className="ph ph-paper-plane-right" aria-hidden="true" />{text.button}</button>
+        <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button>
+        <span className="detail-box-hint">{text.hint}</span>
+      </div>
+    </div>}
+    {mode === 'drop' && <div className="detail-box">
+      <input ref={box} className="input" aria-label="Drop reason" placeholder="Reason (optional), e.g. the metric already covers it" value={reason}
+        disabled={submit.locked('drop')} onChange={event => setReason(event.target.value)} onKeyDown={boxKey} />
+      <div className="detail-box-row">
+        <button type="button" className="btn btn-secondary" disabled={!submit.ready || submit.saving !== null || stale === 'drop'} onClick={sendBox}>
+          <i className="ph ph-x-circle" aria-hidden="true" />Drop item</button>
+        <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button>
+        <span className="detail-box-hint">Enter drops · the agent confirms</span>
+      </div>
+    </div>}
+  </div>;
 
   return <article className="item-detail" data-status={model.status} aria-label={`Detail of #${model.id}`}>
     <div className="detail-head">
@@ -157,33 +184,21 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         </button>)}
       </div>
       <div className="detail-hint">{model.open.hint}</div>
-      {/* data-owner-input marks the action box with its changed-target warning, like the answer slot (native tests). */}
-      {(stale || mode) && <div className="detail-owner-input" data-owner-input={itemId}>
-      {stale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
-        <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked(stale)} onClick={() => submit.review(stale)}>Review current target</button></div>}
-      {text && mode && <div className="detail-box">
-        <textarea ref={box} className="input" rows={3} aria-label={text.label} placeholder={text.placeholder} value={submit.text(mode)} disabled={submit.locked(mode)}
-          onChange={event => submit.edit(mode, event.target.value)} onKeyDown={boxKey} />
-        <div className="detail-box-row">
-          <button type="button" className="btn btn-primary" disabled={!submit.ready || !submit.text(mode).trim() || submit.saving !== null || stale === mode} onClick={sendBox}>
-            <i className="ph ph-paper-plane-right" aria-hidden="true" />{text.button}</button>
-          <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button>
-          <span className="detail-box-hint">{text.hint}</span>
-        </div>
-      </div>}
-      {mode === 'drop' && <div className="detail-box">
-        <input ref={box} className="input" aria-label="Drop reason" placeholder="Reason (optional), e.g. the metric already covers it" value={reason}
-          disabled={submit.locked('drop')} onChange={event => setReason(event.target.value)} onKeyDown={boxKey} />
-        <div className="detail-box-row">
-          <button type="button" className="btn btn-secondary" disabled={!submit.ready || submit.saving !== null || stale === 'drop'} onClick={sendBox}>
-            <i className="ph ph-x-circle" aria-hidden="true" />Drop item</button>
-          <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button>
-          <span className="detail-box-hint">Enter drops · the agent confirms</span>
-        </div>
-      </div>}
-      </div>}
+      {ownerBox}
       {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
       {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
+    </section>}
+
+    {model.followUp && <section className="detail-section detail-open" aria-label="Follow-up">
+      <div className="detail-actions" role="group" aria-label="Item actions">
+        <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !submit.ready}
+          title="Reply in your own words" onClick={() => openBox('reply')}>
+          <i className="ph ph-chat-text" aria-hidden="true" />{model.followUp.label}<span className="detail-key" aria-hidden="true">r</span>
+        </button>
+      </div>
+      <div className="detail-hint">{model.followUp.hint}</div>
+      {(mode === 'reply' || stale === 'reply') && ownerBox}
+      {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
     </section>}
 
     {(model.answer || retainedAnswer) && <section className="detail-section detail-answer" aria-label="Your answer">

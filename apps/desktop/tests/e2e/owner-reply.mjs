@@ -31,6 +31,22 @@ export async function openOwnerReply(afterSaved = false) {
   }
 }
 
+/**
+ * Opens the follow-up Reply box of a waiting item whose answer is in flight: the answer slot is gone,
+ * and the reply queues behind the held input (owner FIFO). `afterSaved`: a previous follow-up saved on
+ * disk; its box closes before the next one opens.
+ */
+export async function openFollowUp(afterSaved = false) {
+  if (afterSaved) await wait(async () => !(await browser.$('.item-detail .detail-box').isExisting()), 'The sent follow-up box did not close');
+  if (!(await browser.$('.item-detail .detail-box textarea').isExisting())) {
+    // The follow-up section holds this one action; its key hint ("r") follows the label.
+    const followUp = await browser.$('.item-detail [aria-label="Follow-up"] [aria-label="Item actions"] button');
+    await followUp.waitForDisplayed();
+    if (!(await followUp.getText()).includes('Add a follow-up')) throw new Error('The follow-up section did not offer "Add a follow-up"');
+    await click(followUp);
+  }
+}
+
 export function replyControlState(itemId) {
   const form = document.querySelector(`[data-owner-input="${itemId}"]`);
   const editor = form?.querySelector('textarea');

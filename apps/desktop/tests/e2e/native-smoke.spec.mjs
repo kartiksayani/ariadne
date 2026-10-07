@@ -12,7 +12,7 @@ import { runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.m
 import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
 import { runRemoveAcceptance } from './remove.spec.mjs';
-import { folded, openOwnerReply, sendDetailReply } from './owner-reply.mjs';
+import { folded, openFollowUp, sendDetailReply } from './owner-reply.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
 const nonce = process.env.ARIADNE_E2E_NONCE;
@@ -135,20 +135,23 @@ async function delivery(configuration) {
   // The compact Waiting card sends the chosen option alone; later inputs are detail replies.
   const ownerTexts = Array.from({ length: 5 }, (_, index) => index ? `native-owner-${nonce}-${index + 1}\nKeep this complete line for input ${index + 1}.` : '');
   const choice = await card.$('button*=Use the native window'); await choice.click();
-  await card.$('button=Send answer').click();
+  // The compact send button carries its Enter hint ("Send answer ↵"); selecting saves the draft first.
+  const send = await card.$('button.answer-send');
+  await send.waitForEnabled(); assert.ok((await send.getText()).includes('Send answer')); await send.click();
   await wait(async () => {
     const saved = orderedInputs(await snapshot(configuration)), queued = await admissions(configuration);
     return saved.length === 1 && queued.length === 1 && saved[0].attempts.length === 1
       && queued[0].payload === saved[0].attempts[0].formatted_payload;
   }, 'Waiting answer did not persist and reach the host with its exact saved payload');
   await wait(async () => !(await nativeCard('waiting', configuration.question)), 'Answered Waiting episode remained in Waiting');
-  await wait(async () => !!(await nativeCard('sent', configuration.question)), 'Waiting answer did not appear in Sent');
-  const sent = await nativeCard('sent', configuration.question);
-  assert.ok((await sent.getText()).includes(configuration.options[0].label));
+  // The Sent row's delivery line quotes the chosen option once the saved input is read back.
+  await wait(async () => (await (await nativeCard('sent', configuration.question))?.getText())?.includes(configuration.options[0].label) ?? false,
+    'Waiting answer did not appear in Sent with its chosen option');
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
 
+  // The held answer hides the detail's answer slot; each reply queues behind it from the follow-up box.
   for (const text of ownerTexts.slice(1)) {
-    await openOwnerReply(true);
+    await openFollowUp(true);
     await sendDetailReply(configuration, text);
   }
   const held = await snapshot(configuration), inputs = orderedInputs(held), savedReceipts = receipts(held, inputs);

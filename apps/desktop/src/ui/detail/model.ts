@@ -52,6 +52,8 @@ export interface DetailModel {
   readonly steps: readonly Step[] | null;
   readonly delivery: DeliveryLine | null;
   readonly open: OpenSection | null;
+  /** A waiting item whose input is in flight or queued: a reply queues behind it (owner FIFO). */
+  readonly followUp: { readonly label: string; readonly hint: string; readonly disabled: boolean } | null;
   readonly answer: (AnswerModel & { readonly heading: boolean; readonly ask: string | null }) | null;
   readonly outcome: { readonly label: string; readonly text: string; readonly color: string } | null;
   readonly note: string | null;
@@ -202,6 +204,8 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   }
 
   const answerable = status === 'waiting' && !pending;
+  // The answer slot hides while its input is pending; a follow-up reply still queues behind it.
+  const followUp = !readOnly && status === 'waiting' && pending ? { label: 'Add a follow-up', hint: 'Queued behind the answer in flight', disabled: offline } : null;
   const recommended = item.options.findIndex(option => option.recommended);
   const blocked = session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
     : offline ? reconnectingNote(agent) : null;
@@ -242,6 +246,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     steps: showSteps ? stepsOf(sub.stage, status) : null,
     delivery: sub?.stage ? deliveryOf(sub.stage, sub.kind, sub.label, agent) : null,
     open,
+    followUp,
     answer: answerable ? { heading: !showSteps, ask: item.ask, options: item.options, recommended, blocked } : null,
     outcome: item.outcome ? { label: outLabel ?? 'Outcome', text: item.outcome, color: `var(--st-${status})` } : null,
     note: item.note && status === 'progress' ? item.note : null,

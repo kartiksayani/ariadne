@@ -374,6 +374,30 @@ describe('owner input component and durable draft controller', () => {
     expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(1);
     expect(value.drafts.getSnapshot().preferenceUncertain).toBe(true); expect((await value.restart()).find(route, '2', 'answer')?.uncertain).toBe(true);
   });
+  it('queues a follow-up reply behind a waiting item’s pending answer instead of hiding every owner input', async () => {
+    const value = await setup(), user = userEvent.setup(), item = value.session.items['2']!;
+    // The demo's queued drop, retargeted: an answer to item 2 that the agent has not taken yet.
+    const queued = structuredClone(Object.values(value.session.inputs).find(input => input?.state === 'queued' && input.kind === 'drop')!);
+    value.session.inputs[uuid(90)] = { ...queued, id: uuid(90), kind: 'answer', target: { topic_id: item.topic_id, item_id: '2' } };
+    value.session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
+    const followUp = await screen.findByRole('button', { name: 'Add a follow-up' });
+    expect(screen.getByText('Queued behind the answer in flight')).toBeTruthy();
+    expect(document.querySelector('.detail-answer-slot')).toBeNull();
+    await waitFor(() => expect(followUp.hasAttribute('disabled')).toBe(false));
+    expect(screen.queryByRole('textbox')).toBeNull();
+    await user.click(followUp);
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Reply message' }), { target: { value: 'One more thing' } });
+    const send = screen.getByRole('button', { name: 'Send reply' });
+    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(send);
+    await waitFor(() => expect(value.calls).toHaveLength(1));
+    const sent = value.calls[0]!.command;
+    expect(sent.command === 'input_submit' && [sent.params.kind, sent.params.text]).toEqual(['reply', 'One more thing']);
+    await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
+    expect(screen.getByRole('button', { name: 'Add a follow-up' })).toBeTruthy();
+  });
   it('Back to Open asks the agent to reopen at once and keeps the current outcome', async () => {
     const value = await setup(), item = value.session.items['1']!;
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="1" later={false} onOpenItem={() => {}} />);
