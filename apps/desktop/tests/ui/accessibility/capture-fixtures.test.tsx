@@ -16,7 +16,7 @@ it.each(ordinaryCases)('mounts ordinary DesktopApp frame $id through the existin
     await screen.findByRole('tree', { name: 'Sentences' });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Pause dispatch' }).hasAttribute('disabled')).toBe(false));
     if (scenario.item) {
-      await waitFor(() => expect(document.querySelector('.ref-detail-scroll .owner-input textarea')).not.toBeNull());
+      await waitFor(() => expect(document.querySelector('.shell-detail-scroll .owner-input textarea')).not.toBeNull());
       const history = await loadItemHistory(service, capture.route, scenario.item, capture.snapshot.revision);
       expect(history.item.item.id).toBe(scenario.item);
       if (scenario.id === '1u') { expect(history.rounds.rounds.items).toHaveLength(3); expect(history.rounds.rounds.items.flatMap(round => round.forks.items)).toHaveLength(2); }

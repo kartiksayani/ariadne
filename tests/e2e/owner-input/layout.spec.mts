@@ -39,11 +39,11 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
     await expect(tree.getByRole('treeitem')).toHaveCount(2000);
     await expect(setup.getByRole('heading', { name: 'Session connected' })).toBeVisible();
     const geometry = () => page.evaluate(() => {
-      const rows = document.querySelector<HTMLElement>('.sentence-rows')!, center = document.querySelector<HTMLElement>('.ref-center')!;
+      const rows = document.querySelector<HTMLElement>('.sentence-rows')!, center = document.querySelector<HTMLElement>('.shell-center')!;
       return { rowsHeight: rows.clientHeight, rowsScrollHeight: rows.scrollHeight, rowsScrollTop: rows.scrollTop,
         centerScrollTop: center.scrollTop, centerHeight: center.clientHeight, centerScrollHeight: center.scrollHeight,
         toolbarTop: document.querySelector('.sentence-filters')!.getBoundingClientRect().top,
-        headerTop: document.querySelector('.ref-workspace header')!.getBoundingClientRect().top };
+        headerTop: document.querySelector('.shell-header')!.getBoundingClientRect().top };
     });
     const before = await geometry();
     await testInfo.attach('initial-tree-geometry', { body: JSON.stringify(before), contentType: 'application/json' });
@@ -120,11 +120,11 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
     // scroller, including complete setup content below the graph/catalogue.
     await page.getByRole('button', { name: 'Graph', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Topic graph' }).first()).toBeVisible();
-    expect(await page.locator('.ref-center').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+    expect(await page.locator('.shell-center').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
     await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
     await setup.evaluate(element => element.scrollIntoView({ block: 'end' }));
-    expect(await page.locator('.ref-center').evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    expect(await page.locator('.shell-center').evaluate(element => element.scrollTop)).toBeGreaterThan(0);
     expect(errors).toEqual([]);
   } finally { await server.close(); }
 });
@@ -145,7 +145,7 @@ test('keeps saved owner controls below complete history in the ordinary App', as
     await expect(session).toBeEnabled(); await session.click();
     await expect(page.getByRole('button', { name: 'Pause dispatch' })).toBeEnabled();
     await page.locator('[data-item-id="2"]').click();
-    const detail = page.locator('.ref-detail-scroll'), history = detail.locator('.item-history');
+    const detail = page.locator('.shell-detail-scroll'), history = detail.locator('.item-history');
     await expect(history.getByRole('heading', { name: 'Which native delivery window should we use?', level: 3 })).toBeVisible();
     await detail.getByLabel('Reply in your own words').fill('Use the saved native delivery option.');
     await detail.getByRole('button', { name: 'Send answer', exact: true }).click();
@@ -156,7 +156,7 @@ test('keeps saved owner controls below complete history in the ordinary App', as
     // the wide workspace, including a shorter window that requires scrolling.
     for (const viewport of [{ width: 900, height: 650 }, { width: 1000, height: 700 }, { width: 1600, height: 960 }, { width: 1000, height: 500 }]) {
       await page.setViewportSize(viewport);
-      await page.locator('.ref-workspace-scroll').evaluate(element => { element.scrollLeft = element.scrollWidth; });
+      await page.locator('.shell-body').evaluate(element => { element.scrollLeft = element.scrollWidth; });
       await another.scrollIntoViewIfNeeded();
       const historyBox = (await history.boundingBox())!, receiptBox = (await receipt.boundingBox())!, buttonBox = (await another.boundingBox())!;
       expect(receiptBox.y, `receipt below history at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(historyBox.y + historyBox.height);

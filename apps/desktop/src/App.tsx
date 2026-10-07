@@ -3,7 +3,7 @@ import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
 import { useSession, type SessionState, type SessionStore } from './data/session-store';
 import type { RevealedItem } from './data/routes';
-import type { ItemRoute, SessionPreferences, SessionRef, Theme } from './generated/core';
+import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
 import { OwnerDraftStore } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
@@ -16,11 +16,13 @@ import { OwnerWaitingPanel } from './components/inputs/OwnerWaitingPanel';
 import { MessageRail } from './components/rail/MessageRail';
 import { SessionActionControllers } from './components/bindings/actions';
 import { BindingControls } from './components/bindings/BindingControls';
-import { qualifiedPresence } from './components/bindings/presence';
 import { RecoveryPanel } from './components/recovery/RecoveryPanel';
 import { HistoryActions } from './components/history-actions/HistoryActions';
 import { CopiedProvenance } from './components/history-actions/CopiedProvenance';
 import { EdgeState, SessionNotice } from './components/edge-states/EdgeState';
+import { agentName, themeToggle, type SessionFacts } from './ui/shell/model';
+import { useAppliedTheme } from './ui/shell/theme';
+import type { ViewTab } from './ui/shell/Header';
 
 const adapters: readonly AdapterChoice[] = [
   { adapter_id: 'claude_code_mod', label: 'Claude Code Mod', configuration: { namespace: 'claude_code_mod', values: {} } },
@@ -37,24 +39,16 @@ interface Application {
   actions: SessionActionControllers;
   discovery: DiscoveryController;
 }
-function bindingContext(state: SessionState | null): string {
+/** Header facts for the selected session, from its loaded snapshot. */
+function sessionFacts(state: SessionState | null, projectName: (projectId: string) => string): SessionFacts | null {
   const session = state?.snapshot?.session;
-  const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
-  if (!binding) return 'No selected binding';
-  if (binding.owner_paused) return `${binding.adapter_id} · owner paused`;
-  if (binding.dispatch_state === 'recovery_required') return `${binding.adapter_id} · recovery required`;
-  if (binding.connection_state !== 'connected') return `${binding.adapter_id} · host unavailable`;
-  return `${binding.adapter_id} · ${qualifiedPresence(binding, state?.presence[binding.id]).label}`;
-}
-function ThemeAppearance({ theme }: { theme: Theme }) {
-  useEffect(() => {
-    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
-    const update = () => { document.documentElement.dataset.theme = theme === 'system' ? media?.matches === false ? 'light' : 'dark' : theme; };
-    update();
-    if (theme === 'system') media?.addEventListener('change', update);
-    return () => { if (theme === 'system') media?.removeEventListener('change', update); };
-  }, [theme]);
-  return null;
+  if (!state || !session) return null;
+  const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
+  const last = session.messages.at(-1);
+  return { projectName: projectName(session.project_id), createdAt: Date.parse(session.created_at), messageCount: session.messages.length,
+    agent: binding ? agentName(binding.adapter_id) : null,
+    connection: !binding ? 'none' : binding.connection_state === 'connected' ? 'connected' : binding.connection_state === 'reconnecting' ? 'reconnecting' : 'not_running',
+    lastMessage: last ? { number: last.number, createdAt: Date.parse(last.created_at) } : null };
 }
 function SessionCenter({ application, view, graph, onReveal, revealItem, switchToTree, highlightedItemIds, onHoverItem }: {
   application: Application; view: OpenedSessionView; graph: boolean; onReveal: (result: RevealedItem) => void;
@@ -216,10 +210,23 @@ function Workspace({ application }: { application: Application }) {
   };
   const switchToTree = () => setGraphModes(previous => ({ ...previous, [key]: false }));
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
+  const shown = useAppliedTheme(theme);
+  const projectName = (projectId: string) => state.projects?.projects.items.find(project => project.project_id === projectId)?.project?.display_name ?? 'Unavailable project';
+  const archived = view?.filters.archived ?? false;
+  const archivedTopics = Object.values(sessionState?.snapshot?.session.topics ?? {}).filter(topic => topic && topic.archived_at !== null).length;
+  const showView = (mode: 'tree' | 'graph' | 'archive') => {
+    setGraphModes(previous => ({ ...previous, [key]: mode === 'graph' }));
+    if (view && archived !== (mode === 'archive')) saveView({ filters: { ...structuredClone(view.filters), archived: mode === 'archive' } } as Partial<SessionPreferences>);
+  };
+  const views: readonly ViewTab[] | null = store ? [
+    { label: 'Tree', icon: 'ph ph-tree-view', title: 'Tree (g)', on: !graph && !archived, onSelect: () => showView('tree') },
+    { label: 'Graph', icon: 'ph ph-graph', title: 'Graph (g)', on: graph && !archived, onSelect: () => showView('graph') },
+    { label: archivedTopics ? `Archive ${archivedTopics}` : 'Archive', icon: 'ph ph-archive', title: 'Archived topics', on: archived, onSelect: () => showView('archive') },
+  ] : null;
   return <div className="product-app" onKeyDown={event => {
     if (event.defaultPrevented || event.target instanceof HTMLElement && event.target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"],[role="dialog"]')) return;
     if (store && event.key.toLowerCase() === 'f' && event.metaKey && !event.ctrlKey && !event.altKey) {
-      event.preventDefault(); document.querySelector<HTMLInputElement>('.ref-search input')?.focus(); return;
+      event.preventDefault(); document.querySelector<HTMLInputElement>('[data-shell-search]')?.focus(); return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === 'Escape') closeDetail();
@@ -244,19 +251,16 @@ function Workspace({ application }: { application: Application }) {
     }
     if (store && event.key === 'g') { event.preventDefault(); setGraphModes(previous => ({ ...previous, [key]: !graph })); }
     if (store && event.key === 'm') { event.preventDefault(); toggleRail(); }
-    if (store && event.key === '/') { event.preventDefault(); document.querySelector<HTMLInputElement>('.ref-search input')?.focus(); }
+    if (store && event.key === '/') { event.preventDefault(); document.querySelector<HTMLInputElement>('[data-shell-search]')?.focus(); }
   }}>
-    <ThemeAppearance theme={theme} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery}
-      context={store ? { session: sessionState?.snapshot?.session.title ?? 'Loading session', binding: bindingContext(sessionState) } : undefined}
-      chrome={{ query, views: store ? ['Tree', 'Graph'].map((label, index) => ({ label, icon: index ? 'ph ph-tree-structure' : 'ph ph-list', title: label,
-        background: graph === Boolean(index) ? 'color-mix(in srgb, var(--color-text) 10%, transparent)' : 'transparent', color: 'var(--color-text)',
-        selected: graph === Boolean(index), onSelect: () => setGraphModes(previous => ({ ...previous, [key]: Boolean(index) })) })) : [],
-      railColor: view?.rail !== 'hidden' && store ? 'var(--color-accent)' : 'var(--color-text)', themeIcon: theme === 'light' ? 'ph ph-sun' : 'ph ph-moon',
-      themeTitle: `Theme: ${theme}` }}
-      onQueryChange={view ? text => setSearchEdit({ route: key, text, attempted: false }) : undefined}
-      onToggleRail={view ? toggleRail : undefined}
-      onThemeChange={() => { if (preferences) void navigation.saveTheme(theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system', preferences.revision); }}
+      session={store ? sessionFacts(sessionState, projectName) : undefined}
+      chrome={{ query, views, railOn: !!store && !!view && view.rail !== 'hidden', theme: shown,
+        onQueryChange: view ? text => setSearchEdit({ route: key, text, attempted: false }) : undefined,
+        onToggleRail: view ? toggleRail : undefined,
+        onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
+      // TODO(WP6): remove the selected item or topic after asking; the trash button is a no-op until then.
+      onRemove={() => {}}
       waitingContent={<div className="app-waiting">{routeError && <p role="alert">{routeError}</p>}<OwnerWaitingPanel drafts={application.drafts} store={application.waiting} revealItem={revealItem}
         openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} /></div>}
       detail={store && selectedId && detailOpen ? <><OwnerItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} service={application.service} store={store}
