@@ -1,6 +1,7 @@
-@import url("/fonts/inter.css");
+@import url("/fonts/jetbrains-mono.css");
 @import url("/icons/phosphor.css");
 @import url("/styles/design-tokens.css");
+@import url("/styles/paperwhite.css");
 
 html, body, #root {
   width: 100%;
