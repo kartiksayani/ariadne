@@ -1,6 +1,6 @@
 // The message rail (README §8), ported from Ariadne.dc.html:466-482 with the
 // rail variant of Message Excerpt.dc.html. Hovering a message highlights the
-// items it touched; clicking pins it. The rail follows the latest message
+// items it touched; clicking pins it and reveals its item. The rail follows the latest message
 // until the owner scrolls up, then offers "N new messages · Jump to latest".
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RendererService } from '../../data/service';
@@ -22,13 +22,15 @@ export interface MessageRailProps {
   readonly selectedItemId?: string | null;
   readonly hoveredItemId?: string | null;
   readonly onHighlight: (itemIds: ReadonlySet<string>, messageIds: ReadonlySet<string>) => void;
+  /** Pinning a message reveals the item it is about (its item, else the first it touched). */
+  readonly onReveal?: (itemId: string) => void;
   readonly onClose?: () => void;
   readonly closeDisabled?: boolean;
   /** Clock for day words; tests pin it. */
   readonly now?: () => number;
 }
 
-export function MessageRail({ service, store, selectedItemId = null, hoveredItemId = null, onHighlight, onClose, closeDisabled = false, now = Date.now }: MessageRailProps) {
+export function MessageRail({ service, store, selectedItemId = null, hoveredItemId = null, onHighlight, onReveal, onClose, closeDisabled = false, now = Date.now }: MessageRailProps) {
   const history = useHistory(service, store, 'messages', load);
   const messages = history.data?.items;
   const [hovered, setHovered] = useState<string | null>(null), [pinned, setPinned] = useState<string | null>(null);
@@ -94,7 +96,11 @@ export function MessageRail({ service, store, selectedItemId = null, hoveredItem
       {messages?.map(message => <RailExcerpt key={message.id} id={message.id} view={excerptView(message, at)} active={message.id === hovered || message.id === pinned}
         highlight={focus !== null && messageItems(message).includes(focus)}
         onHover={on => setHovered(previous => on ? message.id : previous === message.id ? null : previous)}
-        onPin={() => setPinned(previous => previous === message.id ? null : message.id)} />)}
+        onPin={() => {
+          const pinning = pinned !== message.id, item = messageItems(message)[0];
+          setPinned(pinning ? message.id : null);
+          if (pinning && item) onReveal?.(item);
+        }} />)}
     </div>
     {!following && unseen > 0 && <button type="button" className="btn btn-secondary pw-rail-jump" onClick={jump}>
       <i className="ph ph-arrow-down" aria-hidden="true" />{jumpText(unseen)}</button>}

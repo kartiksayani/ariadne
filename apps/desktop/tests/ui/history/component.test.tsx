@@ -135,23 +135,26 @@ describe('complete message rail', () => {
     expect(cleanupCalls.at(-1)).toEqual(new Set());
   });
   it('cross-highlights the items a message touched on hover and pin, and the messages of the selected or hovered item', async () => {
-    const value = await ready(), highlight = vi.fn();
-    const rendered = render(<MessageRail {...value} selectedItemId="2" onHighlight={highlight} />);
+    const value = await ready(), highlight = vi.fn(), reveal = vi.fn();
+    const rendered = render(<MessageRail {...value} selectedItemId="2" onHighlight={highlight} onReveal={reveal} />);
     const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(value.transport.session.messages.length));
     const message = value.transport.session.messages.find(message => message.item_id === '1')!;
     const card = log.querySelector(`[data-message-id="${message.id}"]`)!;
     fireEvent.mouseEnter(card);
     expect(highlight).toHaveBeenLastCalledWith(new Set(['1']), new Set([message.id]));
     fireEvent.click(card); fireEvent.mouseLeave(card);
+    expect(reveal).toHaveBeenCalledExactlyOnceWith('1');
     expect(card.classList.contains('pw-excerpt-active')).toBe(true);
     expect(highlight).toHaveBeenLastCalledWith(new Set(['1']), new Set([message.id]));
     const selected = value.transport.session.messages.find(message => message.item_id === '2')!;
     expect(log.querySelector(`[data-message-id="${selected.id}"]`)!.classList.contains('pw-excerpt-highlight')).toBe(true);
     // A hovered item takes over from the selected one (Ariadne.dc.html:2082).
-    rendered.rerender(<MessageRail {...value} selectedItemId="2" hoveredItemId="1" onHighlight={highlight} />);
+    rendered.rerender(<MessageRail {...value} selectedItemId="2" hoveredItemId="1" onHighlight={highlight} onReveal={reveal} />);
     expect(log.querySelector(`[data-message-id="${selected.id}"]`)!.classList.contains('pw-excerpt-highlight')).toBe(false);
     fireEvent.click(card);
     expect(card.getAttribute('aria-pressed')).toBe('false');
+    // Unpinning reveals nothing.
+    expect(reveal).toHaveBeenCalledOnce();
     expect(highlight).toHaveBeenLastCalledWith(new Set(), new Set());
     rendered.unmount(); expect(highlight).toHaveBeenLastCalledWith(new Set(), new Set());
   });
