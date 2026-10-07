@@ -14,6 +14,7 @@ import { ContinueDialog, type ContinueTarget } from '../../components/history-ac
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { AnswerControl } from '../answer/AnswerControl';
 import type { PendingSubmission } from '../answer/useSubmit';
+import { notices as noticeStore } from '../pages/notices';
 import { CHIPS, collapsedNote, oldestWaiting, parentKey, sessionBar, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
@@ -125,7 +126,11 @@ export function TreeView(props: TreeViewProps) {
       if (!mounted.current || call !== request.current || !result) return;
       onSelected(result);
       if (result.kind === 'item' && latest.current.view?.selected_item_id !== id) void saveView(next => { next.selected_item_id = id; });
-    }).catch(() => {});
+    }).catch((error: unknown) => {
+      if (!mounted.current || call !== request.current) return;
+      noticeStore.push({ id: 'tree-reveal-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+        text: `Item #${id} could not be opened${error instanceof Error && error.message ? `: ${error.message}` : '.'}` });
+    });
   };
   const toggleItem = (id: string) => {
     const row = latest.current.rows.find(value => value.key === id);
