@@ -1109,3 +1109,41 @@ fn timed_out_binding_connect_retains_all_admitted_permits_until_original_core_wo
         assert_eq!(command, &connect_request().command);
     }
 }
+
+// The Claude Mod's setup.js rejects any key outside this exact set.
+#[test]
+fn connection_status_json_keeps_the_exact_key_set_the_mod_accepts() {
+    let status = ControlResult::Status(BindingSummary {
+        id: UuidV4::new("00000000-0000-4000-8000-000000000001").unwrap(),
+        adapter_id: "claude_code_mod".into(),
+        external_session_id: "thread".into(),
+        generation: UuidV4::new("00000000-0000-4000-8000-000000000002").unwrap(),
+        dispatch_state: DispatchState::Enabled,
+        owner_paused: false,
+        pause_reason: None,
+        connection_state: ConnectionState::Connected,
+        presence: None,
+        host_location: None,
+    });
+    let value = serde_json::to_value(&status).unwrap();
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    let mut expected = vec![
+        "adapter_id",
+        "connection_state",
+        "dispatch_state",
+        "external_session_id",
+        "generation",
+        "id",
+        "owner_paused",
+        "pause_reason",
+        "presence",
+    ];
+    expected.sort_unstable();
+    assert_eq!(keys, expected);
+}
