@@ -31,9 +31,11 @@
   flex: none;
 }
 
-.shell-brand > i {
-  font-size: 20px;
-  color: var(--color-accent);
+.shell-brand > .shell-brand-mark {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: var(--color-text, currentColor);
 }
 
 .shell-brand > span {

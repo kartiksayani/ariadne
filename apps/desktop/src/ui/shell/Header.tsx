@@ -27,7 +27,7 @@ export interface HeaderProps {
 export function Header({ text, demo, query, onQueryChange, views, railOn, onToggleRail, theme, onToggleTheme, disabled }: HeaderProps) {
   const toggle = themeToggle(theme);
   return <header className="shell-header">
-    <div className="shell-brand"><i className="ph ph-spiral" aria-hidden="true" /><span>Ariadne</span></div>
+    <div className="shell-brand"><svg className="shell-brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(12 12)"><path d="M-3.245 9.986A10.5 10.5 0 1 1 3.245 9.986M2.086 -6.42A6.75 6.75 0 1 1 -2.086 -6.42M-1.721 2.457A3 3 0 1 1 1.721 2.457" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /><circle cx="0" cy="0" r="1.35" fill="currentColor" /></g></svg><span>Ariadne</span></div>
     <div className="shell-context">
       {demo && <span className="tag tag-accent shell-demo">Demo</span>}
       <span className="shell-session-text">{text.sessionText}</span>
