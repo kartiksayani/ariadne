@@ -6,7 +6,7 @@ afterEach(() => { document.body.innerHTML = ''; });
 
 describe('native history failure evidence', () => {
   it('reports the disabled Messages toggle, pending navigation state and owner-input lock', () => {
-    document.body.innerHTML = `<header class="ref-header"><button title="Messages (m)" aria-label="Messages (m)" disabled></button></header>
+    document.body.innerHTML = `<header class="shell-header"><button title="Messages (m)" aria-label="Messages (m)" disabled></button></header>
       <div class="nav-banner" role="alert"><p>Preferences revision changed</p></div>
       <button disabled>Refreshing…</button><button>Reconcile operation</button>
       <label class="sentence-search"><input disabled value="needle"></label><p role="status">Search preview · save pending</p>

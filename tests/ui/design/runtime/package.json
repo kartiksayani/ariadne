@@ -1,0 +1,11 @@
+{
+  "name": "@ariadne/design-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The handoff prototype's CDN runtime (support.js SRI versions), served offline by tests/ui/design.",
+  "devDependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "@babel/standalone": "7.29.0"
+  }
+}

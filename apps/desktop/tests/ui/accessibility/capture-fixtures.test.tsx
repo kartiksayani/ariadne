@@ -2,35 +2,27 @@ import { afterEach, expect, it } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
-import { loadItemHistory } from '../../../src/components/history/load';
-import { ordinaryCases, type OrdinaryCase } from '../../../../../tests/visual/cases';
-import { createOrdinaryCapture } from '../../../../../tests/visual/fixture';
-import source from '../../../../../docs/planning/evidence/design-assets/source.json';
+import { frameIds } from '../../../../../tests/ui/design/frames';
+import { designFixture, prototypeData } from '../../../../../tests/ui/design/fixtures';
+import { handoffMembers } from '../../../../../tests/ui/design/source.mts';
 
+const data = prototypeData(handoffMembers()['Ariadne.dc.html']);
 afterEach(cleanup);
-it('covers every applicable board frame once, retaining the reference sheets as gallery states', () => {
-  const application = source.frames.filter(frame => frame.member.endsWith('/Ariadne.dc.html')).map(frame => frame.id);
-  expect([...ordinaryCases.map(value => value.id)].sort()).toEqual(application.filter(id => !['1j', '1k', '1s'].includes(id)).sort());
+
+it('refuses handoff frames without a fixture', () => {
+  expect(() => designFixture('1f', data)).toThrow('fixture not written: 1f');
 });
-it.each(ordinaryCases)('mounts ordinary DesktopApp frame $id through the existing transport and stores', async value => {
-  const scenario: OrdinaryCase = value, capture = createOrdinaryCapture(new URLSearchParams({ frame: value.id, theme: 'light' }));
-  const service = createDesktopService(capture.transport); render(<DesktopApp service={service} />);
-  if (scenario.navigation) await screen.findByRole('heading', { level: 1 });
-  else if (scenario.loading) await screen.findByText('Loading session…', { exact: true });
-  else {
-    await screen.findByRole('tree', { name: 'Sentences' });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Pause dispatch' }).hasAttribute('disabled')).toBe(false));
-    if (scenario.item) {
-      await waitFor(() => expect(document.querySelector('.ref-detail-scroll .owner-input textarea')).not.toBeNull());
-      const history = await loadItemHistory(service, capture.route, scenario.item, capture.snapshot.revision);
-      expect(history.item.item.id).toBe(scenario.item);
-      if (scenario.id === '1u') { expect(history.rounds.rounds.items).toHaveLength(3); expect(history.rounds.rounds.items.flatMap(round => round.forks.items)).toHaveLength(2); }
-    }
-    if (scenario.empty) expect(await screen.findByText('No items yet')).toBeTruthy();
-    if (scenario.clear) expect(await screen.findByText('Nothing waiting on you')).toBeTruthy();
-    if (scenario.answered) {
-      expect(await screen.findAllByText('Please use the afternoon delivery.')).not.toHaveLength(0);
-      expect([...document.querySelectorAll('.ref-waiting-card')].some(card => card.textContent?.includes('Which delivery window?'))).toBe(false);
-    }
-  }
+
+it.each(frameIds)('mounts DesktopApp in design frame %s through the real stores', async id => {
+  const fixture = designFixture(id, data), spec = fixture.spec;
+  render(<DesktopApp service={createDesktopService(fixture.transport)} />);
+  await waitFor(() => expect(document.querySelector('.shell-summary')?.textContent).toMatch(/^\d+ items/));
+  expect(document.documentElement.dataset.theme).toBe(spec.theme);
+  if (!fixture.route) { await screen.findByRole('heading', { level: 1 }); return; }
+  if (spec.state === 'loading') { expect(await screen.findAllByText(/^Loading session/)).not.toHaveLength(0); return; }
+  await screen.findByRole('tree', { name: 'Sentences' });
+  if (spec.state === 'empty') expect(await screen.findByText('No items yet', { exact: false })).toBeTruthy();
+  if (spec.state === 'clear') expect(await screen.findByText('Nothing waiting on you')).toBeTruthy();
+  if (spec.selected) await waitFor(() => expect(document.querySelector('.shell-detail')?.textContent).toContain(`Item ${spec.selected}`));
+  if (spec.scenario === 'archive') expect(await screen.findByText('Pin the Redis client at 5.2, or take 5.3?')).toBeTruthy();
 });

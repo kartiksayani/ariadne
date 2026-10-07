@@ -41,7 +41,7 @@ synthetic keys do not move focus.
   to main cancel the previous main run, and a docs-only push runs the docs scope).
 - #109 run 2 failed only on the reference-capture first-load wait (fixed in ed56f7d).
   If it recurs as a ~31 s failure, set `optimizeDeps.entries` on the test's Vite server
-  in `tests/ui/reference/capture.spec.mts`.
+  in `tests/ui/design/design.spec.mts` (the design harness, `npm run test:design`).
 - `docs/live-acceptance-plan` is published by this PR.
 - Worktrees under `.worktrees/` (preference-conflicts, host-version-tolerance,
   toolchain-minimums, doctor-first-run, release-handoff, codex-skill, readme-for-users)

@@ -519,7 +519,7 @@ describe('source-backed navigation views and explicit registration', () => {
     prefs.global.selected_navigation = kind === 'project' ? { kind, project_id: projectId } : { kind };
     read(transport, prefs);
     render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => null} />);
-    const allSessions = screen.getByRole('button', { name: 'All sessions' });
+    const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     const conflict: CoreError = { ...error, code: 'revision_conflict', message: 'Preferences revision changed.', current_revision: 3 };
     const native = structuredClone(prefs); native.revision = 3;
@@ -586,7 +586,7 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
     read(transport, prefs);
     render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => null} />);
-    const allSessions = screen.getByRole('button', { name: 'All sessions' });
+    const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error });
     await act(async () => { fireEvent.click(allSessions); });
@@ -749,11 +749,12 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); read(transport);
     render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => <p>Session workspace</p>} />);
     const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
-    await waitFor(() => expect(within(tabs).getByRole('button', { name: `Close ${demo.title} tab` })).toBeTruthy());
+    const close = /^Close .* tab$/;
+    await waitFor(() => expect(within(tabs).getByRole('button', { name: close })).toBeTruthy());
     const next = preferences(2); next.sessions[0].tab_open = false;
     transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
-    await act(async () => { fireEvent.click(within(tabs).getByRole('button', { name: `Close ${demo.title} tab` })); });
-    expect(within(tabs).queryByRole('button', { name: `Close ${demo.title} tab` })).toBeNull();
+    await act(async () => { fireEvent.click(within(tabs).getByRole('button', { name: close })); });
+    expect(within(tabs).queryByRole('button', { name: close })).toBeNull();
     expect(transport.calls.some(call => call.name === 'session_close')).toBe(false);
   });
   it('renders the opened-session seam with retained selection/filter/scroll preferences', async () => {

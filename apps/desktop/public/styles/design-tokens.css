@@ -1,97 +1,121 @@
-/* Exact Nocturne root tokens and Ariadne THEMES; source coordinates in source.json. */
+/* Paperwhite tokens. The first block is `:root` of the handoff's _ds/paperwhite/styles.css verbatim;
+   the app roles, status colours and light overrides are the THEMES object of Ariadne.dc.html.
+   Values stay in the handoff's notation so they can be compared byte for byte. */
+/* stylelint-disable -- verbatim handoff notation (oklch lightness/hue, rgba, grouping blank lines). */
 :root,
 [data-theme="dark"] {
-  --color-bg: #161826;
-  --color-surface: #232532;
-  --color-text: #e9e9ed;
-  --color-accent: #9184d9;
-  --color-accent-2: #a7a1db;
-  --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
-  --color-neutral-100: #f3f5fe;
-  --color-neutral-200: #e4e7f5;
-  --color-neutral-300: #cfd3e5;
-  --color-neutral-400: #b2b6ca;
-  --color-neutral-500: #9397ab;
-  --color-neutral-600: #75798c;
-  --color-neutral-700: #595d6c;
-  --color-neutral-800: #3f424d;
-  --color-neutral-900: #292b31;
-  --color-accent-100: #f5f4ff;
-  --color-accent-200: #e7e5fe;
-  --color-accent-300: #d2cefd;
-  --color-accent-400: #b5abfc;
-  --color-accent-500: #968ae0;
-  --color-accent-600: #796cbf;
-  --color-accent-700: #5d5294;
-  --color-accent-800: #423a6a;
-  --color-accent-900: #2b2741;
-  --color-accent-2-100: #f5f4ff;
-  --color-accent-2-200: #e7e5fe;
-  --color-accent-2-300: #d2cefd;
-  --color-accent-2-400: #b5afe8;
-  --color-accent-2-500: #9690c9;
-  --color-accent-2-600: #7972a9;
-  --color-accent-2-700: #5c5783;
-  --color-accent-2-800: #423e5d;
-  --color-accent-2-900: #2b293a;
-  --color-section: #262a60;
-  --color-section-glow: #353b80;
-  --color-section-ghost: #4c5397;
-  --font-heading: "Inter", system-ui, sans-serif;
+  /* Dark ground (default). Light values live in each app's THEMES.light. */
+  --color-bg: oklch(0.2 0.006 80);
+  --color-surface: oklch(0.25 0.007 80);
+  --color-text: oklch(0.9 0.012 85);
+  --color-accent: oklch(0.7 0.12 255);
+  --color-accent-2: oklch(0.7 0.072 255);
+  --color-divider: color-mix(in srgb, oklch(0.9 0.012 85) 14%, transparent);
+
+  /* Warm paper neutrals (hue 80) and a calm cobalt accent (hue 255), OKLCH on one lightness scale. */
+  --color-neutral-100: oklch(0.975 0.008 80);
+  --color-neutral-200: oklch(0.935 0.008 80);
+  --color-neutral-300: oklch(0.875 0.008 80);
+  --color-neutral-400: oklch(0.79 0.008 80);
+  --color-neutral-500: oklch(0.69 0.008 80);
+  --color-neutral-600: oklch(0.585 0.008 80);
+  --color-neutral-700: oklch(0.48 0.008 80);
+  --color-neutral-800: oklch(0.38 0.008 80);
+  --color-neutral-900: oklch(0.29 0.008 80);
+
+  --color-accent-100: oklch(0.975 0.026 255);
+  --color-accent-200: oklch(0.935 0.052 255);
+  --color-accent-300: oklch(0.875 0.085 255);
+  --color-accent-400: oklch(0.79 0.111 255);
+  --color-accent-500: oklch(0.69 0.130 255);
+  --color-accent-600: oklch(0.585 0.130 255);
+  --color-accent-700: oklch(0.48 0.117 255);
+  --color-accent-800: oklch(0.38 0.098 255);
+  --color-accent-900: oklch(0.29 0.072 255);
+
+  --color-accent-2-100: oklch(0.975 0.016 255);
+  --color-accent-2-200: oklch(0.935 0.031 255);
+  --color-accent-2-300: oklch(0.875 0.051 255);
+  --color-accent-2-400: oklch(0.79 0.066 255);
+  --color-accent-2-500: oklch(0.69 0.078 255);
+  --color-accent-2-600: oklch(0.585 0.078 255);
+  --color-accent-2-700: oklch(0.48 0.070 255);
+  --color-accent-2-800: oklch(0.38 0.058 255);
+  --color-accent-2-900: oklch(0.29 0.043 255);
+
+  --font-heading: "JetBrains Mono", ui-monospace, Menlo, monospace;
   --font-heading-weight: 500;
-  --font-body: "Inter", system-ui, sans-serif;
+  --font-body: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
   --space-1: 2.8px;
   --space-2: 5.6px;
   --space-3: 8.4px;
   --space-4: 11.2px;
   --space-6: 16.8px;
   --space-8: 22.4px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 14px;
-  --shadow-sm: 0 0 0 1px #3f424d;
-  --shadow-md: 0 0 0 1px #595d6c, 0 6px 18px rgb(0 0 0 / 55%);
-  --shadow-lg: 0 0 0 1px #9397ab, 0 16px 40px rgb(0 0 0 / 65%);
+
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+
+  /* Light, soft shadows: sm lifts cards, md for popovers, lg for dialogs. */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.22), 0 4px 14px rgba(0,0,0,0.18);
+  --shadow-md: 0 0 0 1px oklch(0.4 0.008 80), 0 10px 30px rgba(0,0,0,0.4);
+  --shadow-lg: 0 0 0 1px oklch(0.45 0.008 80), 0 18px 48px rgba(0,0,0,0.5);
+
+  /* THEMES.dark */
   --a-bg: var(--color-bg);
-  --a-side: color-mix(in srgb, var(--color-surface) 45%, var(--color-bg));
+  --a-side: oklch(0.225 0.006 80);
   --a-card: var(--color-surface);
   --a-acc-text: var(--color-accent-300);
-  --a-guide: color-mix(in srgb, var(--color-text) 11%, transparent);
-  --a-edge: color-mix(in srgb, var(--color-text) 24%, transparent);
+  --a-guide: color-mix(in srgb, var(--color-text) 20%, transparent);
+  --a-edge: color-mix(in srgb, var(--color-text) 26%, transparent);
+  --a-edge-strong: color-mix(in srgb, var(--color-text) 42%, transparent);
+  --a-label: color-mix(in srgb, var(--color-text) 70%, transparent);
   --a-skel: color-mix(in srgb, var(--color-text) 8%, transparent);
   --a-pop: var(--shadow-md);
-  --a-warn: oklch(80% 0.11 55deg);
+  --a-lift: var(--shadow-sm);
+  --a-warn: oklch(0.8 0.11 55);
+  --a-danger: oklch(0.74 0.13 28);
   --st-open: var(--color-neutral-400);
   --st-waiting: var(--color-accent-400);
-  --st-progress: oklch(82% 0.09 78deg);
-  --st-decided: oklch(80% 0.075 178deg);
-  --st-done: oklch(80% 0.085 148deg);
+  --st-progress: oklch(0.82 0.09 78);
+  --st-decided: oklch(0.8 0.075 178);
+  --st-done: oklch(0.8 0.085 148);
   --st-dropped: var(--color-neutral-500);
   --st-replaced: var(--color-neutral-500);
 
   color-scheme: dark;
 }
 
+/* THEMES.light */
 [data-theme="light"] {
-  --color-bg: var(--color-neutral-100);
-  --color-surface: var(--color-neutral-100);
-  --color-text: var(--color-neutral-900);
+  --color-bg: oklch(0.958 0.009 85);
+  --color-surface: oklch(0.978 0.007 85);
+  --color-text: oklch(0.27 0.008 75);
   --color-accent: var(--color-accent-600);
-  --color-divider: color-mix(in srgb, var(--color-neutral-900) 14%, transparent);
-  --a-bg: var(--color-neutral-100);
-  --a-side: color-mix(in srgb, var(--color-neutral-200) 55%, var(--color-neutral-100));
-  --a-card: var(--color-neutral-100);
+  --color-divider: color-mix(in srgb, oklch(0.27 0.008 75) 12%, transparent);
+  --shadow-sm: 0 1px 2px oklch(0.35 0.02 80 / 0.07), 0 3px 10px oklch(0.35 0.02 80 / 0.06);
+  --shadow-md: 0 0 0 1px oklch(0.27 0.008 75 / 0.1), 0 10px 30px oklch(0.35 0.02 80 / 0.14);
+  --shadow-lg: 0 0 0 1px oklch(0.27 0.008 75 / 0.1), 0 18px 48px oklch(0.35 0.02 80 / 0.18);
+  --a-bg: var(--color-bg);
+  --a-side: oklch(0.938 0.01 85);
+  --a-card: var(--color-surface);
   --a-acc-text: var(--color-accent-700);
-  --a-guide: color-mix(in srgb, var(--color-neutral-900) 13%, transparent);
-  --a-edge: color-mix(in srgb, var(--color-neutral-900) 26%, transparent);
-  --a-skel: color-mix(in srgb, var(--color-neutral-900) 7%, transparent);
-  --a-pop: 0 0 0 1px color-mix(in srgb, var(--color-neutral-900) 12%, transparent), 0 8px 24px rgb(0 0 0 / 12%);
-  --a-warn: oklch(55% 0.14 45deg);
+  --a-guide: color-mix(in srgb, var(--color-text) 20%, transparent);
+  --a-edge: color-mix(in srgb, var(--color-text) 26%, transparent);
+  --a-edge-strong: color-mix(in srgb, var(--color-text) 45%, transparent);
+  --a-label: color-mix(in srgb, var(--color-text) 72%, transparent);
+  --a-skel: color-mix(in srgb, var(--color-text) 7%, transparent);
+  --a-pop: var(--shadow-md);
+  --a-lift: var(--shadow-sm);
+  --a-warn: oklch(0.55 0.14 45);
+  --a-danger: oklch(0.52 0.15 28);
   --st-open: var(--color-neutral-600);
   --st-waiting: var(--color-accent-600);
-  --st-progress: oklch(55% 0.11 68deg);
-  --st-decided: oklch(52% 0.08 185deg);
-  --st-done: oklch(52% 0.1 148deg);
+  --st-progress: oklch(0.55 0.11 68);
+  --st-decided: oklch(0.52 0.08 185);
+  --st-done: oklch(0.52 0.1 148);
   --st-dropped: var(--color-neutral-700);
   --st-replaced: var(--color-neutral-700);
 

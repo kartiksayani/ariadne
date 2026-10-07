@@ -6,6 +6,7 @@ import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
 import { sameOwner, sentenceRows, type SentenceRow } from '../../selectors/tree/rows';
 import { TreeRow } from '../reference/TreeRow';
 import { STATUS, type Status } from '../reference/StatusBadge';
+import { useWorkspaceKeys, type WorkspaceIntent } from '../../ui/keys';
 import '../../styles/tree.css';
 
 export interface SentenceTreeProps {
@@ -24,12 +25,10 @@ export interface SentenceTreeProps {
 }
 const visualStatus = (status: Item['status']): Status => status === 'waiting_on_me' ? 'waiting' : status === 'in_progress' ? 'progress' : status;
 const statuses: readonly ItemStatus[] = ['open', 'waiting_on_me', 'in_progress', 'decided', 'done', 'dropped', 'replaced'];
-const editable = (target: EventTarget | null) => target instanceof HTMLElement
-  && !!target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"]');
 type RowProps = { row: SentenceRow; selected: boolean; focused: boolean; later: boolean; highlighted: boolean; toggleDisabled: boolean; selectionDisabled: boolean;
   onHoverItem?: (itemId: string | null) => void;
   remember: (id: string, element: HTMLDivElement | null) => void; focus: (id: string) => void;
-  select: (id: string) => void; toggle: (id: string) => void; keyboard: (event: KeyboardEvent<HTMLDivElement>, id: string) => void };
+  select: (id: string) => void; toggle: (id: string) => void; keyboard: (event: KeyboardEvent<HTMLDivElement>) => void };
 
 const SentenceItem = memo(function SentenceItem({ row, selected, focused, later, highlighted, toggleDisabled, selectionDisabled, onHoverItem, remember, focus, select, toggle, keyboard }: RowProps) {
   const item = row.item;
@@ -39,7 +38,7 @@ const SentenceItem = memo(function SentenceItem({ row, selected, focused, later,
   depth={row.depth} selected={selected} selectionDisabled={selectionDisabled} focused={focused} context={row.context} touched={highlighted ? 'strong' : undefined}
   onEnter={() => onHoverItem?.(item.id)} onLeave={() => onHoverItem?.(null)}
   tabIndex={focused ? 0 : -1} rowRef={element => remember(item.id, element)} onFocus={() => focus(item.id)}
-  onKeyDown={event => keyboard(event, item.id)} onSelect={() => select(item.id)} onToggle={() => toggle(item.id)}
+  onKeyDown={keyboard} onSelect={() => select(item.id)} onToggle={() => toggle(item.id)}
   hasChildren={row.childCount > 0} expanded={row.expanded} toggleDisabled={toggleDisabled}
   collapsedSummary={!row.expanded && row.activeDescendants > 0 ? `${row.activeDescendants} active descendants` : undefined}
   replacement={row.replacement ? { question: row.replacement.question, status: visualStatus(row.replacement.status),
@@ -66,7 +65,7 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   const [searchPreview, setSearchPreview] = useState<{ store: SessionStore; text: string } | null>(null);
   const searchEdited = useRef(false), searchBlocked = useRef(false);
   const elements = useRef(new Map<string, HTMLDivElement>()), container = useRef<HTMLDivElement>(null);
-  const searchInput = useRef<HTMLInputElement>(null), ownerFocus = useRef<HTMLButtonElement | null>(null);
+  const ownerFocus = useRef<HTMLButtonElement | null>(null);
   const request = useRef(0), mounted = useRef(true);
   const latest = useRef({ view, saveView, saveLater, onReveal, routes, later, state, writing, search, preferencesBusy });
   latest.current = { view, saveView, saveLater, onReveal, routes, later, state, writing, search, preferencesBusy };
@@ -126,25 +125,31 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
       return confirmed;
     });
   }, [write]);
-  const keyboard = useCallback((event: KeyboardEvent<HTMLDivElement>, id: string) => {
-    if (editable(event.target) || event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey) return;
-    const visible = currentRows.current, index = visible.findIndex(row => row.item.id === id), row = visible[index];
-    if (!row) return;
-    let destination: string | undefined;
-    switch (event.key) {
-      case 'ArrowDown': case 'j': destination = visible[Math.min(index + 1, visible.length - 1)]?.item.id; break;
-      case 'ArrowUp': case 'k': destination = visible[Math.max(0, index - 1)]?.item.id; break;
-      case 'Home': destination = visible[0]?.item.id; break;
-      case 'End': destination = visible.at(-1)?.item.id; break;
-      case 'ArrowRight': case 'l': if (row.childCount && !row.expanded) toggle(id); else if (row.expanded) destination = visible[index + 1]?.depth > row.depth ? visible[index + 1].item.id : undefined; break;
-      case 'ArrowLeft': case 'h': if (row.childCount && row.expanded && latest.current.view.expanded_item_ids.includes(id)) toggle(id); else destination = row.item.parent ?? undefined; break;
-      case 'Enter': select(id); break;
-      case 'z': void write(() => latest.current.saveLater(id, !latest.current.later.has(id))); break;
-      default: return;
-    }
-    event.preventDefault();
-    if (destination) { setFocusId(destination); elements.current.get(destination)?.focus({ preventScroll: true }); }
-  }, [select, toggle, write]);
+  // Row keys from the workspace keymap; other keys bubble to the App's share of it.
+  const onRow = (act: (at: { visible: readonly SentenceRow[]; index: number; row: SentenceRow; id: string }) => string | undefined) =>
+    (_intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => {
+      const visible = currentRows.current, id = event.currentTarget.dataset.itemId ?? '', index = visible.findIndex(row => row.item.id === id), row = visible[index];
+      if (!row) return false;
+      const destination = act({ visible, index, row, id });
+      if (destination) { setFocusId(destination); elements.current.get(destination)?.focus({ preventScroll: true }); }
+      return true;
+    };
+  const keyboard = useWorkspaceKeys<HTMLDivElement>({
+    'move-down': onRow(({ visible, index }) => visible[Math.min(index + 1, visible.length - 1)]?.item.id),
+    'move-up': onRow(({ visible, index }) => visible[Math.max(0, index - 1)]?.item.id),
+    first: onRow(({ visible }) => visible[0]?.item.id),
+    last: onRow(({ visible }) => visible.at(-1)?.item.id),
+    unfold: onRow(({ visible, index, row, id }) => {
+      if (row.childCount && !row.expanded) { toggle(id); return undefined; }
+      return row.expanded && visible[index + 1]?.depth > row.depth ? visible[index + 1].item.id : undefined;
+    }),
+    fold: onRow(({ row, id }) => {
+      if (row.childCount && row.expanded && latest.current.view.expanded_item_ids.includes(id)) { toggle(id); return undefined; }
+      return row.item.parent ?? undefined;
+    }),
+    enter: onRow(({ id }) => { select(id); return undefined; }),
+    later: onRow(({ id }) => { void write(() => latest.current.saveLater(id, !latest.current.later.has(id))); return undefined; }),
+  }, { scope: 'row' });
   useLayoutEffect(() => {
     searchEdited.current = false; searchBlocked.current = false;
     setSearch(latest.current.view.filters.search); setPendingSearch(null); setSearchPreview(null);
@@ -255,12 +260,8 @@ export function SentenceTree({ store, routes, view, later, reveal, saveView, sav
   const outside = rows.find(row => row.outsideFilters);
   const owners: Immutable<ItemOwner>[] = [...view.filters.owners];
   for (const item of Object.values(session?.items ?? {})) if (item && !owners.some(owner => sameOwner(owner, item.owner))) owners.push(item.owner);
-  return <section className="ariadne-reference sentence-tree" aria-label="Session sentence tree" onKeyDown={event => {
-    if (!editable(event.target) && (event.key === '/' || (event.metaKey && event.key.toLowerCase() === 'f'))) {
-      event.preventDefault(); searchInput.current?.focus();
-    }
-  }}>
-    <label className="sentence-search">Search sentences<input ref={searchInput} type="search" value={search} onChange={event => {
+  return <section className="ariadne-reference sentence-tree" aria-label="Session sentence tree">
+    <label className="sentence-search">Search sentences<input type="search" value={search} onChange={event => {
       const text = event.target.value;
       searchEdited.current = text !== view.filters.search; searchBlocked.current = false;
       setPendingSearch(null); setSearch(text);
