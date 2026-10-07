@@ -196,6 +196,10 @@ fn desktop_handler<R: tauri::Runtime>(
         commands::session_reopen,
         commands::topic_continue,
         commands::preferences_patch,
+        commands::item_remove,
+        commands::topic_remove,
+        commands::session_remove,
+        commands::project_remove,
     ];
     #[cfg(feature = "e2e")]
     {

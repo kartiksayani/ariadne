@@ -141,6 +141,7 @@ fn prepare_owner(
                 round_id: round.clone(),
                 continuation_operation_id: None,
             },
+            removed: None,
         },
         state: InputState::Queued,
         attempts: vec![],

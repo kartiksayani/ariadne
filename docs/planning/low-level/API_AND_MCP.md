@@ -159,6 +159,10 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `session_close/reopen` | session_id, expected_revision, op_id | close requires dispatch paused or the binding not connected, all items terminal and no unresolved inputs; never terminate host; close also records an owner pause on the active binding so reopen never resumes dispatch |
 | `topic_continue_preview` | source session/topic, target session | snapshot revision/hash, mapping preview, full summary, readiness |
 | `topic_continue` | source refs/revision/hash, target session/binding, op_id | atomic target copy + input + origin mapping; source untouched |
+| `item_remove` | session ref, item_id, expected_revision (item), op_id | hard-deletes the item and its subtree, their rounds, answers and inputs; queues a `removed` notice; saved `removal` receipt with backup path |
+| `topic_remove` | session ref, topic_id, expected_revision (topic), op_id | hard-deletes the topic's continuation family in every session that holds a copy, in any registered project; one `removed` notice to the latest copy; saved `removal` receipt |
+| `session_remove` | session:null, project_id, session_id, expected_revision, op_id | deletes the session file after a backup; refuses in-flight inputs; `Removed` receipt |
+| `project_remove` | session:null, project_id, op_id | unregisters the project and deletes only its Ariadne store after a backup; `Removed` receipt |
 | `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry |
 | `preferences_get` | none | local owner-only versioned UI preferences, including unsent drafts |
 | `reveal_item` | registered project/session/item IDs | focus route; no mutation |
@@ -740,6 +744,82 @@ capacity errors save no target effects. Full copied history is never truncated.
 The single queued input references its immutable continuation operation/map.
 CLI and NativeCoreService routing are later consumer joins.
 
+
+### Remove (P8.11, ADR-0083)
+
+Remove is permanent inside Ariadne. It never changes the host conversation or any
+file outside Ariadne's own store; the UI's 5-second undo is client-side, so Core
+has no undo. Every removal first writes a backup and returns its path:
+
+| Command | Backup | Receipt |
+|---|---|---|
+| `item_remove`, `topic_remove` | `<store>/backups/pre-remove-<stamp>-<op>-<session>.json` per changed session | `MutationReceipt::Session` with `data.kind:"removal"`: `item_ids`, `topic_ids`, `input_ids`, `family`, `notice`, `backup` |
+| `session_remove` | the same file name for the removed session | `MutationReceipt::Removed {operation_id, scope:"session", project_id, session_ids, backup}` |
+| `project_remove` | `<data root>/backups/pre-remove-<stamp>-<op>/` with `project.json`, the store's earlier `backups/`, `sessions/` and `removal.json` | `Removed` with `scope:"project"` and every removed session id |
+
+`<store>` is `<data root>/projects/<project-id>` (ADR-0082). `<stamp>` is the
+command time with only its letters and digits. Exact retries
+replay on op_id: item/topic through the session receipt, session removal by
+finding its backup, project removal through `removal.json`.
+
+- **Item.** Removes the item and every item below it (parent links), their rounds,
+  answers, inputs targeting them, and messages that exist only for them. Remaining
+  records lose references to removed ones. Refuses with `invalid_transition` while
+  an input on the subtree is in flight or needs attention, or while a remaining
+  item is `replaced_by` a removed one (`blocking_input_ids`/`blocking_item_ids`).
+- **Topic.** Removes the topic and its items in every session that holds a copy,
+  in any registered project (copies link to their source through `origin`), plus
+  continuation records and copied history. One session can hold several family
+  topics (a topic continued twice into it, or continued back into its source);
+  each goes. Every member is read before anything commits; a registered project
+  whose sessions cannot be read refuses the removal. The route session commits
+  first, removing every family topic it holds, and records the family; the
+  others follow under the same op_id. If one of them then fails, the error names
+  the sessions already done and the ones that still hold a copy; an exact retry
+  finishes them.
+- **Session.** Deletes the session file and rebuilds binding routes. Copies of
+  its topics in other sessions are their own topics and stay. Refuses with
+  `session_not_closable` and `blocking_input_ids` while an input is in flight.
+- **Project.** Same in-flight guard over all sessions. A pending legacy
+  `<root>/.ariadne` store is migrated first. Deletes only `<store>` through
+  anchored no-follow directory handles, never the project folder, its files,
+  parked legacy copies or link targets; then unregisters the project. A missing
+  folder does not block removal. A later new session in that folder registers it
+  again. Nothing is written until the guard passes. `removal.json` is written
+  before the store is deleted (`project.json` last) and the project unregistered,
+  so a retry after a crash finishes those steps; a backup without
+  `removal.json` for an already unregistered project is turned back into the
+  record.
+
+Item and topic removal tell the agent. Core queues one input of kind `removed` on
+the selected binding of the told session: the owning session for an item, and for
+a topic the family member most recently continued into (latest
+`origin.continued_at`, else the original). A disconnected agent receives it when
+it next claims; a closed session, or one with no selected binding, gets nothing.
+Session and project removal tell no agent. Owners cannot submit `removed` through
+`input_submit`. The notice targets the topic with `item_id:null`; its owner
+message has no topic or item. `payload.removed={refs:RemovedRef[],note}` with
+`RemovedRef={kind:"item",ref,question}|{kind:"topic",topic_id,name}`; when the
+full list would exceed the 64 KiB payload, questions are shortened to 200
+characters, then only the topic or root refs are kept.
+
+The delivered envelope carries no removed records or context:
+
+```json
+{"instruction":"The owner removed the items and topics listed in removed.refs from Ariadne. They are gone for good. Stop all work on them now and never bring them up again: do not ask about them, reply on them, recreate them or mention them. Do not touch any files or the conversation because of this notice. Acknowledge it with one apply: put source_input_id and attempt_id from this envelope into the ApplyRequest, send no operations, and set input_result to outcome answered with empty reply_refs and followup_item_refs and handled_through_message_number set to owner_message_number.",
+ "project_id":"…","session_id":"…","binding_id":"…","generation":"…",
+ "source_input_id":"…","attempt_id":"…","owner_message_number":42,"input_kind":"removed",
+ "removed":{"refs":[{"kind":"item","ref":"1","question":"Pick the release date"},{"kind":"item","ref":"1.1","question":"Check the freeze window"}],
+  "note":"The owner removed item 1 \"Pick the release date\" and the 1 item below it from Ariadne. Stop working on them and never bring them up again."},
+ "tools":{"mutation":"apply"}}
+```
+
+The acknowledgement is the one result shape allowed with no replies or follow-ups:
+`answered` with empty `reply_refs` and `followup_item_refs`.
+
+CLI: `ariadne remove item|topic|session|project --json-stdin [--json]`, with the
+same canonical wrapper as other owner commands (session ref for item/topic,
+`session:null` for session/project). Tauri commands use the snake_case names.
 
 Copied message provenance retains a required fully qualified `source_target`
 (project/session plus nullable direct topic/item/round). A Reply directly aimed

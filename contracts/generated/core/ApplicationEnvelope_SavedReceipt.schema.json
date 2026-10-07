@@ -394,6 +394,16 @@
             }
           ]
         },
+        "partial_removal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PartialRemoval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "reason": {
           "anyOf": [
             {
@@ -487,6 +497,29 @@
         "number"
       ]
     },
+    "PartialRemoval": {
+      "description": "The sessions a partial topic removal already left and still has to leave.",
+      "type": "object",
+      "properties": {
+        "remaining": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "removed",
+        "remaining"
+      ]
+    },
     "PauseReason": {
       "type": "string",
       "enum": [
@@ -501,6 +534,23 @@
       "type": "integer",
       "maximum": 9007199254740991,
       "minimum": 1
+    },
+    "RemovalTarget": {
+      "description": "A session-qualified topic (family member) or notice input.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "id"
+      ]
     },
     "ResolutionKind": {
       "type": "string",
@@ -962,6 +1012,63 @@
           "required": [
             "kind",
             "continuation"
+          ]
+        },
+        {
+          "description": "Owner item/topic removal in this session. `family` lists every\nsession/topic pair a topic removal covers (empty for an item removal).",
+          "type": "object",
+          "properties": {
+            "backup": {
+              "type": "string"
+            },
+            "family": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RemovalTarget"
+              }
+            },
+            "input_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UuidV4"
+              }
+            },
+            "item_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ItemRef"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "removal"
+            },
+            "notice": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RemovalTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "topic_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UuidV4"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "item_ids",
+            "topic_ids",
+            "input_ids",
+            "family",
+            "notice",
+            "backup"
           ]
         }
       ]

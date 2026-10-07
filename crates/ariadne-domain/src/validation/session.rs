@@ -241,12 +241,22 @@ pub(crate) fn owner_input<'a>(
             path: "messages.owner_input.input_id".into(),
             kind: ValidationErrorKind::MissingReference,
         })?;
+    // A removal notice names a topic/items that no longer exist, so its owner
+    // message carries no topic or item link.
+    let topic_matches = if input.kind == InputKind::Removed {
+        message.topic_id.is_none() && input.target.item_id.is_none()
+    } else {
+        message.topic_id.as_ref() == Some(&input.target.topic_id)
+    };
     require(
-        input.message_id == message.id
-            && input.target.item_id == message.item_id
-            && message.topic_id.as_ref() == Some(&input.target.topic_id),
+        input.message_id == message.id && input.target.item_id == message.item_id && topic_matches,
         "messages.owner_input.target",
         ValidationErrorKind::IdentityMismatch,
+    )?;
+    require(
+        (input.kind == InputKind::Removed) == input.payload.removed.is_some(),
+        "inputs.payload.removed",
+        ValidationErrorKind::InvalidState,
     )?;
     Ok(input)
 }

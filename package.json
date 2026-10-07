@@ -10,7 +10,7 @@
     "lint": "npm run check",
     "test:ui": "vitest run --config apps/desktop/vite.config.ts",
     "test:coverage": "vitest run --coverage --config apps/desktop/vite.config.ts",
-    "capture:reference": "playwright test --config tests/ui/reference/playwright.config.ts",
+    "test:design": "playwright test --config tests/ui/design/playwright.config.ts",
     "test:native": "node scripts/run-native-e2e.mjs --suite native",
     "test:e2e": "node scripts/run-native-e2e.mjs",
     "test:integration": "vitest run --config apps/desktop/vite.config.ts",
@@ -58,6 +58,6 @@
   },
   "workspaces": [
     "apps/desktop",
-    "tests/ui/reference/source-runtime"
+    "tests/ui/design/runtime"
   ]
 }

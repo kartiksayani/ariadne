@@ -107,6 +107,69 @@ fn owner_receipt_checks_original_operation_route_and_variant_without_new_replay_
 }
 
 #[test]
+fn removed_receipts_name_the_requested_scope_and_a_backup() {
+    let version = SchemaVersion::new(1).unwrap();
+    let session = OwnerMutationRequest {
+        session: None,
+        command: OwnerCommand::SessionRemove {
+            api_version: version,
+            op_id: id(900),
+            params: SessionRemoveParams {
+                project_id: id(1),
+                session_id: id(2),
+                expected_revision: PositiveSafeInteger::new(3).unwrap(),
+            },
+        },
+    };
+    let mut receipt = RemovedReceipt {
+        operation_id: id(900),
+        scope: RemovedScope::Session,
+        project_id: id(1),
+        session_ids: vec![id(2)],
+        backup: "/data/backups/pre-remove-1-x.json".into(),
+    };
+    validate_owner_receipt(&session, &MutationReceipt::Removed(receipt.clone())).unwrap();
+    for broken in [
+        RemovedReceipt {
+            scope: RemovedScope::Project,
+            ..receipt.clone()
+        },
+        RemovedReceipt {
+            session_ids: vec![id(4)],
+            ..receipt.clone()
+        },
+        RemovedReceipt {
+            backup: " ".into(),
+            ..receipt.clone()
+        },
+        RemovedReceipt {
+            operation_id: id(901),
+            ..receipt.clone()
+        },
+    ] {
+        assert!(validate_owner_receipt(&session, &MutationReceipt::Removed(broken)).is_err());
+    }
+    let project = OwnerMutationRequest {
+        session: None,
+        command: OwnerCommand::ProjectRemove {
+            api_version: version,
+            op_id: id(900),
+            params: ProjectRemoveParams { project_id: id(1) },
+        },
+    };
+    receipt.scope = RemovedScope::Project;
+    receipt.session_ids = vec![id(2), id(5)];
+    validate_owner_receipt(&project, &MutationReceipt::Removed(receipt.clone())).unwrap();
+    // A removal receipt never stands in for another command's receipt.
+    let wire = serde_json::to_value(MutationReceipt::Removed(receipt)).unwrap();
+    assert_eq!(wire["scope"], "project");
+    assert!(matches!(
+        serde_json::from_value::<MutationReceipt>(wire).unwrap(),
+        MutationReceipt::Removed(_)
+    ));
+}
+
+#[test]
 fn malformed_owner_receipts_stay_outside_the_canonical_transport_union() {
     for wire in [
         json!({"operation_id":id(1),"session_id":id(2),"revision":0,"data":{"kind":"session_lifecycle","state":"closed","closed_at":null}}),

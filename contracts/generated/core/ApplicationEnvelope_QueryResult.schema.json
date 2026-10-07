@@ -1265,6 +1265,16 @@
             }
           ]
         },
+        "partial_removal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PartialRemoval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "reason": {
           "anyOf": [
             {
@@ -1549,16 +1559,25 @@
       ]
     },
     "InputKind": {
-      "type": "string",
-      "enum": [
-        "answer",
-        "bring",
-        "reply",
-        "note",
-        "followup",
-        "reopen",
-        "drop",
-        "continue"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "answer",
+            "bring",
+            "reply",
+            "note",
+            "followup",
+            "reopen",
+            "drop",
+            "continue"
+          ]
+        },
+        {
+          "description": "The owner removed items or topics; the agent stops work on them.",
+          "type": "string",
+          "const": "removed"
+        }
       ]
     },
     "InputPayload": {
@@ -1569,6 +1588,16 @@
         },
         "intent": {
           "$ref": "#/$defs/InputKind"
+        },
+        "removed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemovedNotice"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "selected_option_id": {
           "type": [
@@ -3222,6 +3251,29 @@
         "snapshot_revision"
       ]
     },
+    "PartialRemoval": {
+      "description": "The sessions a partial topic removal already left and still has to leave.",
+      "type": "object",
+      "properties": {
+        "remaining": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "removed",
+        "remaining"
+      ]
+    },
     "PauseReason": {
       "type": "string",
       "enum": [
@@ -3710,6 +3762,89 @@
           "required": [
             "kind",
             "binding_id"
+          ]
+        }
+      ]
+    },
+    "RemovalTarget": {
+      "description": "A session-qualified topic (family member) or notice input.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "session_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "id"
+      ]
+    },
+    "RemovedNotice": {
+      "description": "The owner's removal notice. Removed refs no longer exist in Ariadne.",
+      "type": "object",
+      "properties": {
+        "note": {
+          "type": "string"
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RemovedRef"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "refs",
+        "note"
+      ]
+    },
+    "RemovedRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "item"
+            },
+            "question": {
+              "type": "string"
+            },
+            "ref": {
+              "$ref": "#/$defs/ItemRef"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ref",
+            "question"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "topic"
+            },
+            "name": {
+              "type": "string"
+            },
+            "topic_id": {
+              "$ref": "#/$defs/UuidV4"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topic_id",
+            "name"
           ]
         }
       ]
@@ -4466,6 +4601,63 @@
           "required": [
             "kind",
             "continuation"
+          ]
+        },
+        {
+          "description": "Owner item/topic removal in this session. `family` lists every\nsession/topic pair a topic removal covers (empty for an item removal).",
+          "type": "object",
+          "properties": {
+            "backup": {
+              "type": "string"
+            },
+            "family": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RemovalTarget"
+              }
+            },
+            "input_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UuidV4"
+              }
+            },
+            "item_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ItemRef"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "removal"
+            },
+            "notice": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RemovalTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "topic_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UuidV4"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "item_ids",
+            "topic_ids",
+            "input_ids",
+            "family",
+            "notice",
+            "backup"
           ]
         }
       ]

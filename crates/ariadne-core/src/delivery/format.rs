@@ -18,6 +18,9 @@ pub(crate) fn body(
         .iter()
         .find(|m| m.id == input.message_id)
         .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Input owner message is missing"))?;
+    if input.kind == InputKind::Removed {
+        return removed_body(session, input, owner, attempt_id);
+    }
     let topic = session
         .topics
         .0
@@ -77,6 +80,39 @@ pub(crate) fn body(
         return Err(core(
             CoreErrorCode::CapacityExceeded,
             "The complete prepared input/current target exceeds the 64 KiB payload budget",
+        ));
+    }
+    Ok(body)
+}
+
+/// Instruction for a `removed` notice. The removed records no longer exist,
+/// so the envelope names them from the saved notice and carries no context.
+pub const REMOVED_INSTRUCTION: &str = "The owner removed the items and topics listed in removed.refs from Ariadne. They are gone for good. Stop all work on them now and never bring them up again: do not ask about them, reply on them, recreate them or mention them. Do not touch any files or the conversation because of this notice. Acknowledge it with one apply: put source_input_id and attempt_id from this envelope into the ApplyRequest, send no operations, and set input_result to outcome answered with empty reply_refs and followup_item_refs and handled_through_message_number set to owner_message_number.";
+
+fn removed_body(
+    session: &Session,
+    input: &Input,
+    owner: &Message,
+    attempt_id: &UuidV4,
+) -> Result<String, CoreError> {
+    let notice = input
+        .payload
+        .removed
+        .as_ref()
+        .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Removal notice is missing"))?;
+    let body = json!({
+        "instruction": REMOVED_INSTRUCTION,
+        "project_id":session.project_id,"session_id":session.id,"binding_id":input.binding_id,
+        "generation":session.bindings.0.get(&input.binding_id).ok_or_else(||core(CoreErrorCode::BindingMismatch,"Input binding is missing"))?.generation,
+        "source_input_id":input.id,"attempt_id":attempt_id,"owner_message_number":owner.number,
+        "input_kind":input.kind,"removed":notice,
+        "tools":{"mutation":"apply"},
+    })
+    .to_string();
+    if body.len() + "[ARIADNE_INPUT::]\n".len() + 2 * 36 > 64 * 1024 {
+        return Err(core(
+            CoreErrorCode::CapacityExceeded,
+            "The removal notice exceeds the 64 KiB payload budget",
         ));
     }
     Ok(body)

@@ -19,7 +19,7 @@ AppShell
   Dialogs: RegisterProject, BindSession, ArchiveTopic, ContinueTopic, ResolveInput, Settings
 ```
 
-Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, detail 400 px, optional rail 240 px. The target is 1600x960; minimum window is 1000x700. Waiting stays pinned; center/detail/rail can overflow horizontally. Panels scroll independently. Detail and rail can close explicitly. There is no mobile layout or user-resizable split pane in v1.
+Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, detail 400 px, optional rail 240 px. The target and default window is 1600x960; minimum window is 1300x760. Waiting stays pinned; center/detail/rail can overflow horizontally. Panels scroll independently. Detail and rail can close explicitly. There is no mobile layout or user-resizable split pane in v1.
 
 | State | Owner and persistence |
 | --- | --- |
@@ -231,6 +231,27 @@ Archive and close are guarded metadata operations. Render the returned blocking 
 - `topic.archive` is enabled only when every topic item is terminal and no `queued`, `in_flight`, or `needs_attention` input targets an item in it. Waiting items therefore cannot leave the global queue through archive. Handled, cancelled, and explicitly skipped inputs do not block. Restore uses `topic.restore` and preserves IDs/history.
 - `session.close` requires every item terminal, no `queued`, `in_flight`, or `needs_attention` input, and quiesced dispatch (`Binding::dispatch_quiesced`: persisted state `paused`, or the active binding is not connected, or there is no active binding). A disconnected binding shows "Dispatch is already stopped" and goes straight to Confirm Close. If dispatch is enabled and connected, show an explicit Pause dispatch step; wait until the paused state is confirmed, then offer a separately confirmed Close action. Keep close disabled and show blockers while active items or inputs remain. Close also records an owner pause on the active binding, so a later reconnect and reopen never resumes dispatch. It marks Ariadne metadata only; it never signals or terminates the terminal process. `session.reopen` reactivates the record without changing its binding or implicitly resuming dispatch.
 - Tab close changes navigation only. It does not close a session, remove its project registration, or discard drafts.
+
+### Remove
+
+Remove is permanent in Ariadne and is not Archive or Close (ADR-0083). The
+conversation and files on disk are never changed. The renderer holds each Remove
+for a 5-second undo and sends the command only after it lapses; the backend has
+no undo. The command shapes are in `API_AND_MCP.md` "Remove".
+
+- `item.remove` (`RendererService.removeItem`): removes the item and everything below it.
+- `topic.remove` (`removeTopic`): removes the topic and its items in every session that holds a copy, in any registered project. Every changed session gets a `session_changed` hint.
+- `session.remove` (`removeSession`): removes the session and its own topics; copies continued into other sessions stay.
+- `project.remove` (`removeProject`): removes the project with its sessions, topics and items. It is listed again only when a new session starts in that folder.
+
+Items and topics are told to the agent of the session they belong to, as a
+queued `removed` input. If the agent is not running the notice waits in the
+queue; a closed session gets no notice. Session and project removal tell no
+agent. Show the returned backup path after each removal so the owner can find
+it. Render guard errors like Archive and Close: `invalid_transition` with
+blocking input or item IDs for items and topics, and `session_not_closable` with
+blocking input IDs while an input is in flight for sessions and projects. After a
+`Removed` receipt there is no revision hint; reload the project and session lists.
 
 Persist navigation through the canonical owner preferences: global
 `selected_navigation` chooses Projects, All sessions, a registered project ID or

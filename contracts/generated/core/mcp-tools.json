@@ -1834,7 +1834,7 @@
                     "$ref": "#/$defs/RequestRef"
                   },
                   "short": {
-                    "description": "Optional 2-4 word label; trimmed, one line, at most 40 characters.",
+                    "description": "Optional 2-4 word label; trimmed, one line, at most 40 characters, measured after trimming.",
                     "maxLength": 40,
                     "type": [
                       "string",
@@ -1922,7 +1922,7 @@
                     ]
                   },
                   "short": {
-                    "description": "Optional 2-4 word label; trimmed, one line, at most 40 characters.",
+                    "description": "Optional 2-4 word label; trimmed, one line, at most 40 characters, measured after trimming.",
                     "maxLength": 40,
                     "type": [
                       "string",

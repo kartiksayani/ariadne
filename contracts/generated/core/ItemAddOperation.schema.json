@@ -69,7 +69,7 @@
       ]
     },
     "short": {
-      "description": "Optional 2-4 word label; trimmed, one line, at most 40 characters.",
+      "description": "Optional 2-4 word label; trimmed, one line, at most 40 characters, measured after trimming.",
       "type": [
         "string",
         "null"

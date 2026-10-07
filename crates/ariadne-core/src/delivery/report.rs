@@ -141,6 +141,7 @@ impl DeliveryService<'_> {
                     blocking_item_ids: vec![],
                     blocking_input_ids: vec![],
                     dispatch_must_pause: true,
+                    partial_removal: None,
                 }));
                 Err(e.into())
             }

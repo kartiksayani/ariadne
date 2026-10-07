@@ -97,6 +97,101 @@ impl Setup {
 }
 
 #[test]
+fn installed_remove_commands_print_the_backup_and_replay_exact_retries() {
+    let s = Setup::new(&seed());
+    let mut second = seed();
+    second.id = id(20);
+    s.store().create(&second).unwrap();
+    let version = || SchemaVersion::new(1).unwrap();
+    let item = OwnerCommand::ItemRemove {
+        api_version: version(),
+        op_id: id(100),
+        params: ItemRemoveParams {
+            item_id: ItemRef::new("1").unwrap(),
+            expected_revision: p(1),
+        },
+    };
+    let (exit, saved) = s.mutation("remove", "item", 2, item.clone());
+    assert_eq!(exit, 0, "{saved}");
+    assert_eq!(saved["data"]["data"]["kind"], "removal");
+    let backup = saved["data"]["data"]["backup"].as_str().unwrap();
+    let mut earlier = vec![std::path::Path::new(backup).file_name().unwrap().to_owned()];
+    assert!(
+        std::path::Path::new(backup).starts_with(s.registry.project_dir(&id(1)).join("backups"))
+    );
+    assert!(backup.contains("/backups/pre-remove-"));
+    assert!(fs::metadata(backup).unwrap().is_file());
+    // The agent is told through a queued removal notice.
+    let notice = saved["data"]["data"]["notice"]["id"].as_str().unwrap();
+    let live = s.store().read(&id(2)).unwrap();
+    assert_eq!(
+        live.inputs.0[&UuidV4::new(notice).unwrap()].kind,
+        InputKind::Removed
+    );
+    assert!(!live.items.0.contains_key(&ItemRef::new("1").unwrap()));
+    let before = s.bytes(2);
+    assert_eq!(s.mutation("remove", "item", 2, item), (0, saved));
+    assert_eq!(s.bytes(2), before);
+
+    // Session removal uses session:null and names its backup file.
+    let session = OwnerCommand::SessionRemove {
+        api_version: version(),
+        op_id: id(101),
+        params: SessionRemoveParams {
+            project_id: id(1),
+            session_id: id(20),
+            expected_revision: p(1),
+        },
+    };
+    let request = OwnerMutationRequest {
+        session: None,
+        command: session,
+    };
+    let (exit, removed) = s.call("remove", "session", &request);
+    assert_eq!(exit, 0, "{removed}");
+    assert_eq!(removed["data"]["scope"], "session");
+    let session_backup = std::path::PathBuf::from(removed["data"]["backup"].as_str().unwrap());
+    assert!(fs::metadata(&session_backup).unwrap().is_file());
+    earlier.push(session_backup.file_name().unwrap().to_owned());
+    assert_eq!(s.call("remove", "session", &request), (0, removed));
+    // A session route is refused for session removal before any change.
+    let routed = OwnerMutationRequest {
+        session: Some(SessionRef {
+            project_id: id(1),
+            session_id: id(2),
+        }),
+        command: request.command.clone(),
+    };
+    assert_eq!(s.call("remove", "session", &routed).0, 2);
+
+    // Project removal leaves the folder, drops the store and unregisters.
+    fs::write(s._root.path().join("notes.txt"), "owner file").unwrap();
+    let store = s.registry.project_dir(&id(1));
+    let project = OwnerMutationRequest {
+        session: None,
+        command: OwnerCommand::ProjectRemove {
+            api_version: version(),
+            op_id: id(102),
+            params: ProjectRemoveParams { project_id: id(1) },
+        },
+    };
+    let (exit, removed) = s.call("remove", "project", &project);
+    assert_eq!(exit, 0, "{removed}");
+    assert_eq!(removed["data"]["scope"], "project");
+    assert_eq!(removed["data"]["session_ids"], json!([id(2)]));
+    let backup = std::path::PathBuf::from(removed["data"]["backup"].as_str().unwrap());
+    assert!(backup.starts_with(fs::canonicalize(s.home.path().join(".ariadne/backups")).unwrap()));
+    assert!(backup.join("removal.json").is_file());
+    // Earlier item and session backups survive the store deletion.
+    for name in &earlier {
+        assert!(backup.join("backups").join(name).is_file());
+    }
+    assert!(!store.exists());
+    assert!(s._root.path().join("notes.txt").is_file());
+    assert!(s.registry.registered_projects().unwrap().is_empty());
+}
+
+#[test]
 fn installed_lifecycle_commands_keep_history_and_exact_receipts_without_resuming() {
     let mut original = seed();
     for item in original.items.0.values_mut() {

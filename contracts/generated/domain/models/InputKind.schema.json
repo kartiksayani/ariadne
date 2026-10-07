@@ -1,15 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "InputKind",
-  "type": "string",
-  "enum": [
-    "answer",
-    "bring",
-    "reply",
-    "note",
-    "followup",
-    "reopen",
-    "drop",
-    "continue"
+  "oneOf": [
+    {
+      "type": "string",
+      "enum": [
+        "answer",
+        "bring",
+        "reply",
+        "note",
+        "followup",
+        "reopen",
+        "drop",
+        "continue"
+      ]
+    },
+    {
+      "description": "The owner removed items or topics; the agent stops work on them.",
+      "type": "string",
+      "const": "removed"
+    }
   ]
 }

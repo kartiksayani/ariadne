@@ -212,6 +212,12 @@ impl CoreService for NativeCoreService {
             OwnerCommand::PreferencesPatch { .. } => PreferencesService::new(&self.registry)
                 .patch(&context, &command)
                 .map(MutationReceipt::PreferencesPatched),
+            OwnerCommand::ItemRemove { .. }
+            | OwnerCommand::TopicRemove { .. }
+            | OwnerCommand::SessionRemove { .. }
+            | OwnerCommand::ProjectRemove { .. } => HistoryActionService::new(&self.registry)
+                .remove(&context, &command, || (self.allocate)(), (self.now)())
+                .map_err(errors::history),
         }
     }
 

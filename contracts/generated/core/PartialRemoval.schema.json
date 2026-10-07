@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PartialRemoval",
+  "description": "The sessions a partial topic removal already left and still has to leave.",
+  "type": "object",
+  "properties": {
+    "remaining": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UuidV4"
+      }
+    },
+    "removed": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UuidV4"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "removed",
+    "remaining"
+  ],
+  "$defs": {
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

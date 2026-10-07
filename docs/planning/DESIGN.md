@@ -4,7 +4,7 @@
 
 ## Reference package
 
-The immutable source is [`designs/Ariadne UI mockups.zip`](../../designs/Ariadne%20UI%20mockups.zip). It contains the 433-line handoff README, main prototype, board, component sheets, status diagram, scenario pages, Nocturne stylesheet, and its prototype-only runtime. The source inventory, SHA-256 digests, and member sizes are in [`assets/design-manifest.json`](assets/design-manifest.json); frame-to-acceptance mapping is in [`DESIGN_TRACEABILITY.md`](DESIGN_TRACEABILITY.md).
+The immutable source is [`designs/Ariadne-UI-mockups-v2.zip`](../../designs/Ariadne-UI-mockups-v2.zip) (the v2 "Paperwhite" handoff; the v1 "Nocturne" zip stays in `designs/` as history only). It contains the handoff README, main prototype, board, component sheets, status diagram, scenario pages, Paperwhite stylesheet, and its prototype-only runtime. The source inventory, SHA-256 digests, and member sizes are in [`assets/design-manifest.json`](assets/design-manifest.json); frame-to-acceptance mapping is in [`DESIGN_TRACEABILITY.md`](DESIGN_TRACEABILITY.md).
 
 The existing `assets/mockup-dark-tree.png` and `assets/mockup-light-graph.png` are rendered design references, not Ariadne application screenshots. Port markup, dimensions, tokens, and SVG treatment. Do not ship `support.js`, its custom compiler, remote font/icon imports, fixture timers, or scripted agent behavior. Bundle required fonts and icons locally with their licenses.
 
@@ -26,15 +26,15 @@ Keep Projects, All sessions, and closable session tabs. Closing a tab changes on
 
 ### Shared visual tokens
 
-The complete source ramps and Nocturne variables are documented in the zipped `design_handoff_ariadne/README.md` under Design tokens and in `_ds/nocturne-…/styles.css`. These summary values are anchors; use the manifest to locate the exact source file.
+The complete source ramps and Paperwhite variables are documented in the zipped `design_handoff_ariadne/README.md` under Design tokens and in `_ds/paperwhite/styles.css`. They are ported to `apps/desktop/public/styles/design-tokens.css`, which is the shipped source of truth; the values below are summaries.
 
 | Element | Dark | Light |
 | --- | --- | --- |
-| Background / surface / text / accent | `#161826` / `#232532` / `#e9e9ed` / `#9184d9` | `#f3f5fe` / `#f3f5fe` / `#292b31` / `#796cbf` |
-| Divider | text at 16% | neutral-900 at 14% |
+| Background / surface / text / accent | `oklch(0.2 0.006 80)` / `oklch(0.25 0.007 80)` / `oklch(0.9 0.012 85)` / `oklch(0.7 0.12 255)` | `oklch(0.958 0.009 85)` / `oklch(0.978 0.007 85)` / `oklch(0.27 0.008 75)` / accent-600 |
+| Divider | text at 14% | text at 12% |
 | Status | Open neutral-400; Waiting accent-400; In progress `oklch(0.82 0.09 78)`; Decided `oklch(0.8 0.075 178)`; Done `oklch(0.8 0.085 148)`; Dropped/Replaced neutral-500 | Open neutral-600; Waiting accent-600; In progress `oklch(0.55 0.11 68)`; Decided `oklch(0.52 0.08 185)`; Done `oklch(0.52 0.1 148)`; Dropped/Replaced neutral-700 |
 
-Use the entire neutral/accent ramps from the stylesheet. Use Inter 400/500 and system/Menlo monospace for keycaps and secondary IDs. Bundle Phosphor regular and fill icons, the spiral mark, and fonts so the application works offline. Initial theme is System with Light and Dark overrides. Status has a distinct shape and a text label, never color alone. Preserve the source's accent-outline primary buttons, readable dimmed terminal rows, visible focus, and icon-plus-text states.
+Use the entire neutral/accent ramps from the stylesheet. Use JetBrains Mono 400/500 for all text, with `ui-monospace`/Menlo as fallback. Bundle Phosphor regular and fill icons, the spiral mark, and fonts so the application works offline. Themes are Dark and Light, toggled by a two-state control; a stored legacy `system` preference resolves through `prefers-color-scheme`. Status has a distinct shape and a text label, never color alone. Preserve the source's accent-outline primary buttons, readable dimmed terminal rows, visible focus, and icon-plus-text states.
 
 | Component | Source sizing and treatment |
 | --- | --- |

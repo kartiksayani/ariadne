@@ -1,86 +1,81 @@
 {
   "schema_version": 1,
   "source_archive": {
-    "path": "designs/Ariadne UI mockups.zip",
-    "sha256": "f17152968502d592ba604f03fab97dab678265d90f763b8e575bda1dd9445e98",
-    "member_count": 16,
-    "uncompressed_bytes": 382719
+    "path": "designs/Ariadne-UI-mockups-v2.zip",
+    "sha256": "f7ea0f3c88ac5e72834388a4977aebb4ecc614500c47b96807476afc24747aa3",
+    "member_count": 15,
+    "uncompressed_bytes": 402409
   },
   "members": [
     {
       "path": "design_handoff_ariadne/Answer Control.dc.html",
-      "uncompressed_bytes": 8870,
-      "sha256": "3957a843c2134517792495fc6cc243331ac10a1279306e0678b9636a7e082017"
+      "uncompressed_bytes": 8747,
+      "sha256": "a09bdea455992cd99126b6d4848b0e74049d2c22bb868fae932c47e99a0bb38f"
     },
     {
       "path": "design_handoff_ariadne/Ariadne Mockups.dc.html",
-      "uncompressed_bytes": 16391,
-      "sha256": "247c4a6b64016e287db6fe4ed98fe8b2dfe7b14f1d0669d727f58bfef362bdff"
+      "uncompressed_bytes": 16290,
+      "sha256": "bfd1d28bed13582290c91feb2491cdc4d7bef29df1d86ad745e70e9f96fc59b3"
     },
     {
       "path": "design_handoff_ariadne/Ariadne.dc.html",
-      "uncompressed_bytes": 186260,
-      "sha256": "aedb18f5a1d28fa099901db941c7155a8e64c680fb2a3184142159e0c0b0b467"
+      "uncompressed_bytes": 201947,
+      "sha256": "d9ef8fd96a56dc7e79fce8530e65fb214d453ffd90c967dc12c712279cb6bff9"
     },
     {
       "path": "design_handoff_ariadne/Component Sheet.dc.html",
-      "uncompressed_bytes": 18480,
-      "sha256": "9fff8eb7030cdf5e1c2051cbee321024d0322a28f615dd8ac1d984386f60fe9b"
+      "uncompressed_bytes": 19357,
+      "sha256": "39e3830c4dbf10e46b5c4e0f231e6f0d495f8677954478018c8a500249b72b25"
     },
     {
       "path": "design_handoff_ariadne/Item Row.dc.html",
-      "uncompressed_bytes": 11149,
-      "sha256": "1e1f963b3b8e29712dd7c0924fd7cc97783f5073debf9705a8259f4a7a740fb3"
+      "uncompressed_bytes": 11148,
+      "sha256": "4957e66466af7ca4b008b123e3e7a511a3f39008d7b2033d8b1da1a15c44ab89"
     },
     {
       "path": "design_handoff_ariadne/Message Excerpt.dc.html",
-      "uncompressed_bytes": 6110,
-      "sha256": "3bb5935a6bd1822968f1e912c6fa26f766de7776be56d449fee25d1e086c0eb9"
+      "uncompressed_bytes": 5987,
+      "sha256": "6b920901672464b70b0f338ba43b137ed53cbb8bfa5c65d06d439dd5038edfec"
     },
     {
       "path": "design_handoff_ariadne/PR Review Scenario.dc.html",
-      "uncompressed_bytes": 860,
-      "sha256": "f53b59dcdb97ed61ab01ce5db113051104b4b0aa50ffc32ab622502bfcf26098"
+      "uncompressed_bytes": 737,
+      "sha256": "46b5e3cee65133aa92af63f2b959e53351249ef31e4226543970de47db093d95"
     },
     {
       "path": "design_handoff_ariadne/Project Scenario.dc.html",
-      "uncompressed_bytes": 861,
-      "sha256": "01098c825061d30bb27654dc1418615bbc9e33802ed9f8f794fe171dc6a5f87c"
+      "uncompressed_bytes": 738,
+      "sha256": "1310ca524a530aabcfd7557cac93f9210ee67d97530b29deef6e237996ce904d"
     },
     {
       "path": "design_handoff_ariadne/Project Sessions.dc.html",
-      "uncompressed_bytes": 828,
-      "sha256": "2d414064b630f8a0b3a9d420d78b3b11c3936358c97f2df83329fbb913ab0586"
+      "uncompressed_bytes": 705,
+      "sha256": "82b65d284f56c3589e9e2154a84d2b97855bbd02de4af87a91eed267963e59cd"
     },
     {
       "path": "design_handoff_ariadne/README.md",
-      "uncompressed_bytes": 26525,
-      "sha256": "e1494e04f712ec6357ff8749c17f134082f638f739173d8602c66dc3adc06657"
+      "uncompressed_bytes": 30721,
+      "sha256": "349a2943311183ea7807018a4382b75cdc2b83b085b9c5f5e6d6ee1b37f666f4"
     },
     {
       "path": "design_handoff_ariadne/Status Badge.dc.html",
-      "uncompressed_bytes": 3167,
-      "sha256": "3e84fcbddf7924ee00b4680cdd287bb0fe4e8024a2202d15c2c0cd0cec354f70"
+      "uncompressed_bytes": 3044,
+      "sha256": "adce434ce3d577be5077afc904d22a6259d0f3d5efc5cb91b3e39e77adec9e1c"
     },
     {
       "path": "design_handoff_ariadne/Status Diagram.dc.html",
-      "uncompressed_bytes": 19879,
-      "sha256": "860c6f4e4671d61dffcfdce5b98ce05760615ef6f20e1a5bc23f0d02d18d6267"
+      "uncompressed_bytes": 20704,
+      "sha256": "f98cf7108e1dc6936f528d6ce69958955f2e5f69a874eb6e5b33871c5a4776b3"
     },
     {
       "path": "design_handoff_ariadne/Thread Scenario.dc.html",
-      "uncompressed_bytes": 860,
-      "sha256": "6c975c8960dafdff532eb596e3797d153c6a67b2662bcdf8f35a7e5f178ea4ff"
+      "uncompressed_bytes": 737,
+      "sha256": "04f07fad5717ca3a149dec0d3aa7953377111be2e8ddc7036b47e70669bc5c59"
     },
     {
-      "path": "design_handoff_ariadne/_ds/nocturne-4033399c-29c3-402d-981d-ce31f934863b/_ds_bundle.js",
-      "uncompressed_bytes": 300,
-      "sha256": "aceb66bfea8c86f6ebf519525c4669e2d6bda22791fdf24db8f2cff09deabfb0"
-    },
-    {
-      "path": "design_handoff_ariadne/_ds/nocturne-4033399c-29c3-402d-981d-ce31f934863b/styles.css",
-      "uncompressed_bytes": 13029,
-      "sha256": "6fea354710ec4e3b2b979b723ed37d8e8959bb7d9137425d0d562b4ad8733cda"
+      "path": "design_handoff_ariadne/_ds/paperwhite/styles.css",
+      "uncompressed_bytes": 12397,
+      "sha256": "9cdd7a5065783c0fdcc373297036cae76bbb0e3a906f488d671a980dde84fefc"
     },
     {
       "path": "design_handoff_ariadne/support.js",
@@ -98,8 +93,8 @@
     "design_handoff_ariadne/Message Excerpt.dc.html": "Timeline and optional message rail excerpt visuals.",
     "design_handoff_ariadne/Status Diagram.dc.html": "Reference status, delivery, and topic/session lifecycle; release-one behavior reconciled in planning docs.",
     "design_handoff_ariadne/Component Sheet.dc.html": "Dark/light component variants and state gallery.",
-    "design_handoff_ariadne/_ds/nocturne-4033399c-29c3-402d-981d-ce31f934863b/styles.css": "Exact Nocturne palette ramps, status colors, type, spacing, focus, and controls.",
-    "design_handoff_ariadne/support.js": "Prototype runtime only; do not ship."
+    "design_handoff_ariadne/support.js": "Prototype runtime only; do not ship.",
+    "design_handoff_ariadne/_ds/paperwhite/styles.css": "Exact Paperwhite palette ramps, status colors, type (JetBrains Mono), spacing, focus, and controls; ported to apps/desktop/public/styles/design-tokens.css."
   },
   "porting_policy": "Source archive is immutable. Port selected markup, CSS values, and vector shapes into the native app. Do not ship prototype runtime, remote assets, fixture data, timers, or scripted agent behavior."
 }

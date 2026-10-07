@@ -615,10 +615,10 @@ test('release proof rejects activated dependencies, inline permissions, globals 
 });
 test('reference isolation excludes only test mounts/runtime and allows reusable product primitives', () => {
   const modules = ['/node_modules/react/index.js', '/apps/desktop/src/components/reference/StatusBadge.tsx', '/apps/desktop/src/components/reference/TreeRow.tsx', '/apps/desktop/src/components/reference/AnswerControl.tsx', '/apps/desktop/src/components/reference/MessageExcerpt.tsx'];
-  const files = ['index.html', 'assets/main.js', 'fonts/inter-latin.woff2', 'styles/design-tokens.css'];
+  const files = ['index.html', 'assets/main.js', 'fonts/jetbrains-mono-latin-400-normal.woff2', 'styles/design-tokens.css', 'styles/paperwhite.css'];
   verifyReferenceIsolation(modules, files);
-  for (const path of ['/tests/ui/reference/gallery.tsx', '/tests/ui/reference/cases.tsx', '/tests/ui/reference/source-runtime/node_modules/react/umd/react.production.min.js', '/node_modules/@babel/standalone/babel.min.js', '/node_modules/@playwright/test/index.js', '/node_modules/playwright-core/lib/index.js', '/designs/Ariadne UI mockups.zip']) assert.throws(() => verifyReferenceIsolation([...modules, path], files), /production modules/);
-  for (const path of ['gallery.html', 'source/support.js', 'source/Item Row.dc.html', 'source-runtime/react.js', 'tests/ui/reference/fixture.json', 'Ariadne UI mockups.zip']) assert.throws(() => verifyReferenceIsolation(modules, [...files, path]), /production files/);
+  for (const path of ['/tests/ui/design/gallery.tsx', '/tests/ui/design/fixtures.ts', '/tests/ui/reference/cases.tsx', '/tests/ui/design/runtime/node_modules/react/umd/react.production.min.js', '/node_modules/@babel/standalone/babel.min.js', '/node_modules/@playwright/test/index.js', '/node_modules/playwright-core/lib/index.js', '/designs/Ariadne UI mockups.zip', '/designs/Ariadne-UI-mockups-v2.zip']) assert.throws(() => verifyReferenceIsolation([...modules, path], files), /production modules/);
+  for (const path of ['gallery.html', 'source/support.js', 'source/Item Row.dc.html', 'source-runtime/react.js', 'tests/ui/reference/fixture.json', 'tests/ui/design/thresholds.json', 'Ariadne UI mockups.zip', 'Ariadne-UI-mockups-v2.zip']) assert.throws(() => verifyReferenceIsolation(modules, [...files, path]), /production files/);
 });
 test('invalid or occupied preflight allocates no native root and leaves unrelated listener alive', async () => {
   const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

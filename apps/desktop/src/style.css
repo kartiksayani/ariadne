@@ -1,6 +1,7 @@
-@import url("/fonts/inter.css");
+@import url("/fonts/jetbrains-mono.css");
 @import url("/icons/phosphor.css");
 @import url("/styles/design-tokens.css");
+@import url("/styles/paperwhite.css");
 
 html, body, #root {
   width: 100%;
@@ -14,8 +15,13 @@ body {
   font-family: var(--font-body);
 }
 
+.product-app {
+  height: 100%;
+}
+
 .product-app .app-waiting {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-height: 0;
   overflow: auto;
@@ -32,7 +38,7 @@ body {
 }
 
 /* The tree owns sentence scrolling; catalogue and Graph keep pane scrolling. */
-.product-app .ref-center:has(.nav-session-content .sentence-tree) {
+.product-app .shell-center:has(.nav-session-content .sentence-tree) {
   overflow: hidden;
 }
 
@@ -68,7 +74,7 @@ body {
   overflow: auto;
 }
 
-.product-app .ref-detail-scroll {
+.product-app .shell-detail-scroll {
   padding: 0;
 }
 
@@ -81,7 +87,7 @@ body {
   overflow: visible;
 }
 
-.product-app .ref-detail-scroll .owner-input {
+.product-app .shell-detail-scroll .owner-input {
   padding: 16px;
 }
 

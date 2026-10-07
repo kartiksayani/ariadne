@@ -60,6 +60,7 @@ fn blockers(
         blocking_item_ids,
         blocking_input_ids,
         dispatch_must_pause: must_pause,
+        partial_removal: None,
     }));
     Err(error)
 }

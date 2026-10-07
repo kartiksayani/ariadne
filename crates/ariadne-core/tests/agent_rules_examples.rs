@@ -29,6 +29,7 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
     let mut outcomes = BTreeSet::new();
     let mut owners = BTreeSet::new();
     let (mut local_ref, mut child, mut local_topic) = (false, false, false);
+    let mut removed_ack = false;
     for block in &blocks {
         let request: ApplyRequest = serde_json::from_str(block)
             .unwrap_or_else(|error| panic!("example does not deserialize: {error}\n{block}"));
@@ -57,6 +58,11 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
             }
         }
         if let Some(result) = &request.input_result {
+            // A `removed` notice is acknowledged with nothing but the result.
+            removed_ack |= request.operations.is_empty()
+                && result.outcome == ariadne_domain::models::ResultOutcome::Answered
+                && result.reply_refs.is_empty()
+                && result.followup_item_refs.is_empty();
             outcomes.insert(
                 serde_json::to_value(&result.outcome)
                     .unwrap()
@@ -91,6 +97,7 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
     }
     assert!(owners.contains("agent") && owners.contains("other"));
     assert!(child && local_ref && local_topic);
+    assert!(removed_ack, "no example acknowledges a removed input");
 }
 
 #[test]

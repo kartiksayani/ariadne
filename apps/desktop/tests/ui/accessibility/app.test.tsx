@@ -17,9 +17,12 @@ async function setup(configure?: (transport: AppTransport) => void) {
 }
 it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts inside modal controls', async () => {
   await setup();
-  fireEvent.keyDown(screen.getByRole('button', { name: 'Theme: system' }), { key: 'f', metaKey: true });
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Switch to light' }), { key: 'f', metaKey: true });
   const search = screen.getByLabelText('Search questions and outcomes'); expect(document.activeElement).toBe(search);
   fireEvent.keyDown(search, { key: 'g' }); expect(screen.getByRole('tree')).toBeTruthy();
+  const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!; row.focus();
+  expect(fireEvent.keyDown(row, { key: '/' })).toBe(false); expect(document.activeElement).toBe(search);
+  row.focus(); expect(fireEvent.keyDown(row, { key: 'Backspace' })).toBe(true); expect(document.activeElement).toBe(row);
   fireEvent.click(document.querySelector('[data-item-id="1"]')!); await screen.findByRole('group', { name: 'Owner actions' });
   const pause = screen.getByRole('button', { name: 'Pause dispatch' }); pause.focus(); fireEvent.click(pause);
   const dialog = screen.getByRole('dialog'), cancel = within(dialog).getByRole('button', { name: 'Cancel' });
@@ -57,7 +60,7 @@ it('tracks OS appearance changes only while the saved theme is System', async ()
   try {
     await setup(); expect(document.documentElement.dataset.theme).toBe('light');
     media.matches = true; act(() => { change?.(); }); expect(document.documentElement.dataset.theme).toBe('dark');
-    fireEvent.click(screen.getByRole('button', { name: 'Theme: system' })); await screen.findByRole('button', { name: 'Theme: light' });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to light' })); await screen.findByRole('button', { name: 'Switch to dark' });
     expect(document.documentElement.dataset.theme).toBe('light'); expect(media.removeEventListener).toHaveBeenCalled();
   } finally { vi.unstubAllGlobals(); }
 });
@@ -77,7 +80,7 @@ it('routes owner shortcuts from roving rows, repeats focus requests and never su
   await waitFor(() => expect(transport.preferences.drafts.some(value => value.target.item_id === '2' && value.selected_option_id === transport.sessions.get(route.session_id)!.items['2']!.options[1].id)).toBe(true));
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
   press('4', 'r'); await screen.findByLabelText('Reply message'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Reply message')));
-  screen.getByRole('button', { name: 'Theme: system' }).focus(); fireEvent.keyDown(document.activeElement!, { key: 'r' });
+  screen.getByRole('button', { name: 'Switch to light' }).focus(); fireEvent.keyDown(document.activeElement!, { key: 'r' });
   await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Reply message')));
   fireEvent.keyDown(screen.getByLabelText('Reply message'), { key: 'g' }); expect(screen.getByRole('tree')).toBeTruthy();
   press('3', 'r'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Note message')));
@@ -132,7 +135,7 @@ it.each(['r', 'a', 'b'])('rejects delayed %s before it can undo newer All sessio
   const transport = await setup(), pending = await delayedReveal(transport);
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key }); await waitFor(() => expect(pending.started()).toBe(true));
-  fireEvent.click(screen.getByRole('button', { name: 'All sessions' }));
+  fireEvent.click(screen.getByRole('button', { name: /^All sessions/ }));
   await screen.findByRole('heading', { name: 'All sessions' });
   const selected = structuredClone(transport.preferences.global.selected_navigation), destination = document.activeElement;
   await pending.release(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
@@ -146,9 +149,9 @@ it('rejects delayed Reply after detail dismissal', async () => {
   await screen.findByLabelText('Reply message'); const pending = await delayedReveal(transport);
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'r' }); await waitFor(() => expect(pending.started()).toBe(true));
-  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
+  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
   await pending.release(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
-  expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(row);
+  expect(document.querySelector('.shell-detail')).toBeNull(); expect(document.activeElement).toBe(row);
 });
 it.each(['item', 'question', 'binding'])('preserves retained option until explicit %s target review and requires a new number afterward', async change => {
   const transport = await setup(transport => {
@@ -160,7 +163,7 @@ it.each(['item', 'question', 'binding'])('preserves retained option until explic
   });
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
   row.focus(); fireEvent.keyDown(row, { key: '2' }); await screen.findByLabelText('Reply in your own words');
-  const detail = within(document.querySelector('.ref-detail-scroll')!);
+  const detail = within(document.querySelector('.shell-detail-scroll')!);
   expect(detail.getByRole('button', { name: /^2Afternoon/ }).hasAttribute('disabled')).toBe(true);
   expect(detail.getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.keyDown(detail.getByRole('button', { name: 'Answer' }), { key: '2' });
@@ -180,11 +183,11 @@ it('consumes a numeric request so detail remount preserves the owner’s later c
   row.focus(); fireEvent.keyDown(row, { key: '2' });
   const saved = () => transport.preferences.drafts.find(value => value.intent === 'answer' && value.target.item_id === '2')!;
   await waitFor(() => expect(saved().selected_option_id).toBe('afternoon'));
-  const editor = document.querySelector<HTMLElement>('.ref-detail-scroll .owner-input')!;
+  const editor = document.querySelector<HTMLElement>('.shell-detail-scroll .owner-input')!;
   fireEvent.click(within(editor).getByRole('button', { name: /^1Morning/ })); await waitFor(() => expect(saved().selected_option_id).toBe('morning'));
-  fireEvent.keyDown(editor, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
-  fireEvent.click(row); await waitFor(() => expect(document.querySelector('.ref-detail-scroll .owner-input')).not.toBeNull());
-  expect(within(document.querySelector('.ref-detail-scroll')!).getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.keyDown(editor, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
+  fireEvent.click(row); await waitFor(() => expect(document.querySelector('.shell-detail-scroll .owner-input')).not.toBeNull());
+  expect(within(document.querySelector('.shell-detail-scroll')!).getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
   expect(saved().selected_option_id).toBe('morning');
 });
 
@@ -217,9 +220,9 @@ it.each([{ key: 'r', id: '4' }, { key: 'b', id: '4' }, { key: 'r', id: '3' }, { 
   });
   const beforeMutations = transport.mutations.length, row = document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
   row.focus(); fireEvent.keyDown(row, { key }); await waitFor(() => expect(dispatched).toBe(true));
-  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
+  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
   await act(async () => { release(); await gate; await new Promise(resolve => setTimeout(resolve, 150)); });
-  expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(row);
+  expect(document.querySelector('.shell-detail')).toBeNull(); expect(document.activeElement).toBe(row);
   expect(transport.preferences.revision).toBeGreaterThan(beforeRevision);
   expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
   expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe(id);
@@ -237,9 +240,9 @@ it('keeps detail dismissed when shortcut navigation session read completes after
   });
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'r' }); await waitFor(() => expect(reads).toBe(2));
-  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
+  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
   await act(async () => { release(); await gate; await new Promise(resolve => setTimeout(resolve, 150)); });
-  expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(row);
+  expect(document.querySelector('.shell-detail')).toBeNull(); expect(document.activeElement).toBe(row);
 });
 it('keeps detail dismissed after a dispatched oldest-waiting shortcut changes session, then opens deliberate tab navigation', async () => {
   const transport = await setup(value => {
@@ -256,15 +259,15 @@ it('keeps detail dismissed after a dispatched oldest-waiting shortcut changes se
       && args.request.command.params.entries.some(entry => entry.kind === 'set_global')) { dispatched = true; await gate; }
     return invoke(name, args);
   });
-  const control = screen.getByRole('button', { name: 'Theme: system' });
+  const control = screen.getByRole('button', { name: 'Switch to light' });
   control.focus(); fireEvent.keyDown(control, { key: 'a' }); await waitFor(() => expect(dispatched).toBe(true));
-  fireEvent.keyDown(control, { key: 'Escape' }); expect(document.querySelector('.ref-detail')).toBeNull();
+  fireEvent.keyDown(control, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
   await act(async () => { release(); await gate; await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } });
   expect(transport.preferences.sessions.find(view => view.session.session_id === secondId)?.selected_item_id).toBe('2');
-  expect(document.querySelector('.ref-detail')).toBeNull(); expect(document.activeElement).toBe(control);
+  expect(document.querySelector('.shell-detail')).toBeNull(); expect(document.activeElement).toBe(control);
   expect(transport.preferences.drafts).toEqual([]);
-  const tab = screen.getByRole('button', { name: 'Payments review' });
+  const tab = document.querySelector<HTMLButtonElement>(`[data-session-tab="${CSS.escape(JSON.stringify([route.project_id, route.session_id]))}"]`)!;
   await waitFor(() => expect(tab.hasAttribute('disabled')).toBe(false)); fireEvent.click(tab);
   expect(await screen.findByLabelText('Owner input for #4')).toBeTruthy();
 });
