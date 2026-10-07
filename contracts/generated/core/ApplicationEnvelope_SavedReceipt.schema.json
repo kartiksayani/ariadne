@@ -394,6 +394,16 @@
             }
           ]
         },
+        "partial_removal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PartialRemoval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "reason": {
           "anyOf": [
             {
@@ -485,6 +495,29 @@
       "required": [
         "id",
         "number"
+      ]
+    },
+    "PartialRemoval": {
+      "description": "The sessions a partial topic removal already left and still has to leave.",
+      "type": "object",
+      "properties": {
+        "remaining": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "removed",
+        "remaining"
       ]
     },
     "PauseReason": {

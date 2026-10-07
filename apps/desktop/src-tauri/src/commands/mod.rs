@@ -466,17 +466,14 @@ fn partial_removal_hints(
     error: &CoreError,
     query: impl FnMut(OwnerQueryRequest) -> Result<QueryResult, CoreError>,
 ) -> Vec<SessionChangedHint> {
-    const LEAD: &str = "The topic was removed from session(s) ";
-    let Some(rest) = error.message.strip_prefix(LEAD) else {
+    let Some(partial) = error
+        .details
+        .as_ref()
+        .and_then(|details| details.partial_removal.as_ref())
+    else {
         return vec![];
     };
-    let Some((done, _)) = rest.split_once(" but is still in session(s) ") else {
-        return vec![];
-    };
-    let wanted: BTreeSet<UuidV4> = done
-        .split(", ")
-        .filter_map(|id| UuidV4::new(id).ok())
-        .collect();
+    let wanted: BTreeSet<UuidV4> = partial.removed.iter().cloned().collect();
     listed_hints(wanted, query)
 }
 fn listed_hints(

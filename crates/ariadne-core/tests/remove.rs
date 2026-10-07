@@ -990,6 +990,15 @@ fn topic_remove_names_removed_and_remaining_members_when_one_fails_after_the_rou
         id(2).as_str()
     )));
     assert!(error.hint.contains(id(100).as_str()));
+    let partial = error
+        .details
+        .as_ref()
+        .unwrap()
+        .partial_removal
+        .as_ref()
+        .unwrap();
+    assert_eq!(partial.removed, vec![id(0x902)]);
+    assert_eq!(partial.remaining, vec![id(2)]);
     assert!(t.read(0x901, 0x902).topics.0.is_empty());
     assert!(t.read(1, 2).topics.0.contains_key(&id(0x11)));
     // The same operation finishes the family once the cause is fixed.

@@ -44,6 +44,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         CoreErrorCode,
         FieldError,
         ErrorDetails,
+        PartialRemoval,
         BarrierReason,
         QueryRequest,
         ProjectListRequest,

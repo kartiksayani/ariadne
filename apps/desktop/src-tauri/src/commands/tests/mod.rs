@@ -893,16 +893,20 @@ fn topic_removal_hints_every_other_family_session_at_its_listed_revision() {
     .is_empty());
 
     // A partial removal error hints the sessions it already removed from.
-    let partial = CoreError::new(
-        CoreErrorCode::IoError,
-        format!(
-            "The topic was removed from session(s) {}, {} but is still in session(s) {}: down",
-            uuid(1).as_str(),
-            uuid(2).as_str(),
-            uuid(3).as_str()
-        ),
-        "retry",
-    );
+    let mut partial = CoreError::new(CoreErrorCode::IoError, "partial removal: down", "retry");
+    partial.details = Some(Box::new(ErrorDetails {
+        reason: None,
+        binding_id: None,
+        input_id: None,
+        attempt_id: None,
+        blocking_item_ids: vec![],
+        blocking_input_ids: vec![],
+        dispatch_must_pause: false,
+        partial_removal: Some(PartialRemoval {
+            removed: vec![uuid(1), uuid(2)],
+            remaining: vec![uuid(3)],
+        }),
+    }));
     let hints = partial_removal_hints(&partial, |_| {
         Ok(list(
             vec![summary(1, 5), summary(2, 7), summary(3, 9)],

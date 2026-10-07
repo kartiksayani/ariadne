@@ -281,7 +281,15 @@ impl HistoryActionService<'_> {
                     operation_id.as_str()
                 ),
             );
-            error.details = first.details.clone();
+            let mut details = first
+                .details
+                .clone()
+                .unwrap_or_else(|| details(None, vec![], vec![]).expect("details"));
+            details.partial_removal = Some(PartialRemoval {
+                removed: done.clone(),
+                remaining: left.iter().map(|(id, _)| id.clone()).collect(),
+            });
+            error.details = Some(details);
             return Err(error.into());
         }
         Ok(MutationReceipt::Session(Box::new(saved)))
@@ -460,6 +468,7 @@ fn details(
         blocking_item_ids,
         blocking_input_ids,
         dispatch_must_pause: false,
+        partial_removal: None,
     }))
 }
 
