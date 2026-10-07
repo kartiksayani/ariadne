@@ -2,7 +2,7 @@
 // to <dc-import name="Ariadne"> in Ariadne Mockups.dc.html. Kept free of app
 // imports so the Playwright spec can read it in Node.
 
-export type Scenario = 'default' | 'project' | 'archive' | 'sessions' | 'session' | 'projects' | 'projectpage';
+export type Scenario = 'default' | 'project' | 'archive' | 'sessions' | 'session' | 'projects' | 'projectpage' | 'thread';
 export interface FrameSpec {
   readonly id: string;
   readonly width: number;
@@ -15,7 +15,7 @@ export interface FrameSpec {
   readonly detail?: boolean;
   readonly answering?: string;
   readonly view?: 'graph';
-  readonly openMode?: 'followup';
+  readonly openMode?: 'reply' | 'followup';
   readonly hoverMsg?: number;
 }
 
@@ -31,6 +31,8 @@ const specs: readonly FrameSpec[] = [
   { ...base, ...narrow, id: '1h', state: 'loading', rail: true },
   { ...base, ...narrow, id: '1i', theme: 'light', state: 'clear' },
   { ...base, id: '1q', selected: '1.4', detail: true, rail: true },
+  { ...base, ...narrow, id: '1r', theme: 'light', selected: '1.4', detail: true, openMode: 'reply' },
+  { ...base, id: '1u', scenario: 'thread', selected: '4.1', detail: true, rail: true },
   { ...base, ...narrow, id: '1v', selected: '1.3.1', detail: true, openMode: 'followup' },
   { ...base, id: '1w', scenario: 'project', selected: '5.3', detail: true, rail: true },
   { ...base, id: '1x', scenario: 'archive' },

@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
-import type { OwnerItemDetail } from '../../../src/components/inputs/OwnerItemDetail';
+import type { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route } from '../app/transport';
@@ -9,8 +9,9 @@ import { AppTransport, route } from '../app/transport';
 // Hold acknowledgments at the component boundary to reproduce an older editor
 // reporting completion after a newer ordinary App request has been published.
 const editor = vi.hoisted(() => ({ acknowledgments: new Map<number, () => void>() }));
-vi.mock('../../../src/components/inputs/OwnerItemDetail', () => ({
-  OwnerItemDetail: ({ focusRequest, onFocusRequestConsumed }: ComponentProps<typeof OwnerItemDetail>) => {
+vi.mock('../../../src/ui/detail/ItemDetail', () => ({
+  DetailPath: () => null,
+  ItemDetail: ({ focusRequest, onFocusRequestConsumed }: ComponentProps<typeof ItemDetail>) => {
     if (focusRequest) editor.acknowledgments.set(focusRequest.token, () => onFocusRequestConsumed?.(focusRequest.token));
     return <p role="status" aria-label="Current owner request">{focusRequest?.token ?? 'consumed'}</p>;
   },

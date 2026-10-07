@@ -111,6 +111,12 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   else await expect(page.getByText(/^Loading session/).first()).toBeVisible();
   const row = (id?: string) => id ? page.locator(`[data-item-id="${id}"]`) : page.locator('[data-item-id]').first();
   if (spec.answering) { await row(spec.answering).focus(); await page.keyboard.press('a'); }
+  // open-mode opens the reply or follow-up box; r opens either (Ariadne.dc.html:1490). The frame draws it unfocused.
+  if (spec.openMode) {
+    await row(spec.selected).first().focus(); await page.keyboard.press('r');
+    await page.locator('.detail-box textarea').waitFor();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  }
   if (graphFrame(spec)) {
     await row(spec.selected).focus();
     if (spec.selected && !spec.detail) await page.keyboard.press('Escape');
@@ -120,8 +126,8 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
 }
 
 /** Pixel diff in the browser canvas: mismatch ratio and a diff image (mismatches red over the dimmed app). */
-async function compare(page: Page, design: Buffer, app: Buffer) {
-  return page.evaluate(async ({ design, app, tolerance }) => {
+async function compare(page: Page, design: Buffer, app: Buffer, region: Region | null) {
+  return page.evaluate(async ({ design, app, tolerance, region }) => {
     const load = (base64: string) => new Promise<HTMLImageElement>((done, fail) => {
       const image = new Image(); image.onload = () => done(image); image.onerror = fail; image.src = `data:image/png;base64,${base64}`;
     });
@@ -133,16 +139,23 @@ async function compare(page: Page, design: Buffer, app: Buffer) {
     };
     const a = pixels(left), b = pixels(right), canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const context = canvas.getContext('2d')!, out = context.createImageData(width, height);
-    let mismatched = 0;
+    let mismatched = 0, inRegion = 0;
+    const inside = (index: number) => {
+      if (!region) return false;
+      const x = (index / 4) % width, y = Math.floor(index / 4 / width);
+      return x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height;
+    };
     for (let index = 0; index < a.length; index += 4) {
       const differs = [0, 1, 2, 3].some(channel => Math.abs(a[index + channel] - b[index + channel]) > tolerance);
-      if (differs) { mismatched++; out.data.set([255, 0, 64, 255], index); }
+      if (differs) { mismatched++; if (inside(index)) inRegion++; out.data.set([255, 0, 64, 255], index); }
       else out.data.set([b[index] * 0.3, b[index + 1] * 0.3, b[index + 2] * 0.3, 255], index);
     }
     context.putImageData(out, 0, 0);
-    return { ratio: mismatched / (width * height), width, height, png: canvas.toDataURL('image/png').split(',')[1] };
-  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance });
+    return { ratio: mismatched / (width * height), detail: region ? inRegion / (region.width * region.height) : null, width, height,
+      png: canvas.toDataURL('image/png').split(',')[1] };
+  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance, region });
 }
+interface Region { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 
 test.describe.configure({ mode: 'parallel' });
 for (const id of designFrames) {
@@ -171,14 +184,20 @@ for (const id of designFrames) {
     });
     const design = await designPage.screenshot({ animations: 'disabled', fullPage: true,
       clip: { x: Math.round(box.x), y: Math.round(box.y), width: spec.width, height: spec.height } });
+    // The detail column alone, so a work package can follow its own area.
+    const region = await page.evaluate(() => {
+      const rect = document.querySelector('.shell-detail')?.getBoundingClientRect();
+      return rect ? { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } : null;
+    });
     const canvas = await page.context().newPage();
-    const result = await compare(canvas, design, app);
+    const result = await compare(canvas, design, app, region);
     await canvas.close();
     writeFileSync(resolve(output, `${id}-design.png`), design);
     writeFileSync(resolve(output, `${id}-app.png`), app);
     writeFileSync(resolve(output, `${id}-diff.png`), Buffer.from(result.png, 'base64'));
     const threshold = (thresholds as Record<string, number>)[id] ?? 0;
     writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ ratio: Number(result.ratio.toFixed(4)), threshold, tolerance,
+      detail: result.detail === null ? null : { ratio: Number(result.detail.toFixed(4)), region },
       size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }, null, 2)}\n`);
     expect(denied).toEqual([]);
     expect(result.ratio, `${id} mismatch ratio`).toBeLessThanOrEqual(threshold);

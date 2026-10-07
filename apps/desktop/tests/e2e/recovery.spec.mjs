@@ -68,7 +68,7 @@ async function openPrimary(configuration) {
   // Graph mode can be retained from the preceding acceptance; choose Tree explicitly.
   await click(await browser.$('button[title="Tree"]'));
   await click(await browser.$(`.ref-tree-row[data-item-id="${configuration.itemId}"]`));
-  await wait(async () => await browser.$('.history-header strong').getText() === `Item ${configuration.itemId}`, 'Recovery selected a different item');
+  await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === configuration.itemId, 'Recovery selected a different item');
 }
 
 export async function openRecoveryReply(afterSaved = false) {
@@ -76,7 +76,7 @@ export async function openRecoveryReply(afterSaved = false) {
   // A successive Reply has already saved on disk; its renderer receipt may still
   // be arriving. Await that acknowledgement before choosing the next form.
   if (afterSaved || await another.isExisting()) await click(another);
-  await click(await browser.$('[aria-label="Owner actions"]').$('button=Reply'));
+  await click(await browser.$('[aria-label="Item actions"]').$('button=Reply'));
 }
 
 async function ownerReply(configuration, text, afterSaved = false) {

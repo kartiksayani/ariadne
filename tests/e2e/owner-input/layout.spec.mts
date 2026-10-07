@@ -134,7 +134,7 @@ test('scrolls full variable sentence rows with history actions, setup and toolba
   } finally { await server.close(); }
 });
 
-test('keeps saved owner controls below complete history in the ordinary App', async ({ page }, testInfo) => {
+test('keeps a sent answer between the item question and its timeline in the ordinary App', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -150,30 +150,34 @@ test('keeps saved owner controls below complete history in the ordinary App', as
     await expect(session).toBeEnabled(); await session.click();
     await expect(page.getByRole('button', { name: 'Pause dispatch' })).toBeEnabled();
     await page.locator('[data-item-id="2"]').click();
-    const detail = page.locator('.shell-detail-scroll'), history = detail.locator('.item-history');
-    await expect(history.getByRole('heading', { name: 'Which native delivery window should we use?', level: 3 })).toBeVisible();
+    // The handoff order puts the answer control under the question head and
+    // above the rounds and timeline (Ariadne.dc.html 324-464).
+    const detail = page.locator('.shell-detail-scroll'), head = detail.locator('.item-detail > .detail-head');
+    await expect(head.getByRole('heading', { name: 'Which native delivery window should we use?', level: 2 })).toBeVisible();
     await detail.getByLabel('Reply in your own words').fill('Use the saved native delivery option.');
     await detail.getByRole('button', { name: 'Send answer', exact: true }).click();
-    const receipt = detail.getByRole('status').filter({ hasText: 'Saved · Queue position' });
-    const another = detail.getByRole('button', { name: 'Write another input' });
-    await expect(receipt).toBeVisible(); await expect(another).toBeEnabled();
+    // A sent answer becomes the delivery stepper and its status line, and the
+    // reply joins the timeline (handoff README §5 "Item detail").
+    const receipt = detail.getByRole('region', { name: 'Your answer' }).getByRole('status').filter({ hasText: 'Use the saved native delivery option.' });
+    const sent = detail.getByRole('region', { name: 'Timeline' }).getByText('Use the saved native delivery option.');
+    await expect(receipt).toBeVisible(); await expect(sent).toBeAttached();
+    await expect(detail.getByLabel('Reply in your own words')).toHaveCount(0);
     // Check actual rectangles at the reported size, the supported minimum and
     // the wide workspace, including a shorter window that requires scrolling.
     for (const viewport of [{ width: 900, height: 650 }, { width: 1000, height: 700 }, { width: 1600, height: 960 }, { width: 1000, height: 500 }]) {
       await page.setViewportSize(viewport);
       await page.locator('.shell-body').evaluate(element => { element.scrollLeft = element.scrollWidth; });
-      await another.scrollIntoViewIfNeeded();
-      const historyBox = (await history.boundingBox())!, receiptBox = (await receipt.boundingBox())!, buttonBox = (await another.boundingBox())!;
-      expect(receiptBox.y, `receipt below history at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(historyBox.y + historyBox.height);
-      expect(buttonBox.y, `button below receipt at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(receiptBox.y + receiptBox.height);
-      for (const content of await history.locator('h2, h3, .history-body, .history-options').all()) {
+      await sent.scrollIntoViewIfNeeded();
+      await expect(sent).toBeInViewport();
+      const headBox = (await head.boundingBox())!, receiptBox = (await receipt.boundingBox())!, sentBox = (await sent.boundingBox())!;
+      expect(receiptBox.y, `receipt below the question at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(headBox.y + headBox.height);
+      expect(sentBox.y, `timeline reply below receipt at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(receiptBox.y + receiptBox.height);
+      for (const content of await head.locator('h2, .detail-status').all()) {
         const box = (await content.boundingBox())!;
-        expect(box.y + box.height, `history content above receipt at ${viewport.width}×${viewport.height}`).toBeLessThanOrEqual(receiptBox.y);
+        expect(box.y + box.height, `question head above receipt at ${viewport.width}×${viewport.height}`).toBeLessThanOrEqual(receiptBox.y);
       }
       if (viewport.width === 1000 && viewport.height === 700) await page.screenshot({ path: testInfo.outputPath('saved-answer.png') });
     }
-    await another.click();
-    await expect(detail.getByLabel('Reply in your own words')).toBeVisible();
     expect(errors).toEqual([]);
   } finally { await server.close(); }
 });

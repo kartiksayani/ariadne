@@ -1,0 +1,695 @@
+/* Item detail (handoff README §5; Ariadne.dc.html lines 324-464). Values are
+   the prototype's inline styles. The shell owns the aside, header and scroll. */
+
+/* — breadcrumb, in the shell header — */
+.detail-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 5px;
+  padding-top: 4px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.detail-crumb {
+  display: contents;
+}
+
+.detail-crumb > button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  color: inherit;
+}
+
+.detail-crumb > button:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.detail-crumb > i {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* — panel body — */
+.item-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detail-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.detail-meta {
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.detail-question {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  text-wrap: pretty;
+}
+
+.detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.detail-label-accent {
+  color: var(--a-acc-text);
+}
+
+.detail-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-count {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+/* — steps and delivery — */
+.detail-steps,
+.detail-open {
+  gap: 10px;
+}
+
+.detail-stepper {
+  display: flex;
+  align-items: flex-start;
+}
+
+.detail-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.detail-step-track {
+  display: flex;
+  align-items: center;
+}
+
+.detail-step-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.detail-step-line {
+  flex: 1;
+  height: 1.5px;
+  margin: 0 4px;
+}
+
+.detail-step-label {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.detail-delivery {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+.detail-delivery > i {
+  font-size: 14px;
+}
+
+.detail-delivery > span {
+  flex: 1;
+  min-width: 0;
+}
+
+/* — open actions and boxes — */
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Paperwhite's .btn loads after component CSS; the parent class out-ranks it. */
+.detail-actions > .detail-action {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.detail-action[aria-pressed="true"] {
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.detail-action > i {
+  font-size: 14px;
+}
+
+.detail-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.detail-hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.detail-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* textarea.input in paperwhite.css loads later at equal specificity; the
+   element-qualified class wins over it. */
+.detail-box > textarea.input {
+  min-height: 72px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.detail-box > input {
+  min-height: 34px;
+  font-size: 13.5px;
+}
+
+.detail-box-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.detail-box-row > .btn {
+  height: 32px;
+}
+
+.detail-box-row > :where(.btn) > i {
+  font-size: 14px;
+}
+
+.detail-box-row > .detail-cancel {
+  padding: 0 8px;
+}
+
+.detail-box-hint {
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.detail-error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--a-warn);
+}
+
+/* — answer — */
+.detail-answer {
+  gap: 8px;
+}
+
+.detail-ask {
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--a-acc-text);
+}
+
+/* The placeholder legacy input keeps only its answer form here; the
+   panel's own sections replace its intent switcher. */
+.detail-answer-slot .owner-actions {
+  display: none;
+}
+
+/* — outcome, note, why — */
+.detail-outcome > p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.detail-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  color: var(--st-progress);
+}
+
+.detail-note > i {
+  font-size: 15px;
+}
+
+.detail-why > p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+}
+
+.detail-prev {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 80%, transparent);
+}
+
+/* — replaced, kids, links — */
+.detail-replaced {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-md);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  color: var(--color-text);
+  background: var(--a-card);
+  box-shadow: 0 0 0 1px var(--color-divider), var(--a-lift);
+}
+
+.detail-replaced:hover {
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.detail-replaced > i {
+  flex: none;
+  margin-top: 3px;
+  font-size: 14px;
+  color: var(--st-replaced);
+}
+
+.detail-replaced > span:where(:first-of-type) {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.detail-kids,
+.detail-links {
+  gap: 4px;
+}
+
+.detail-kid {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  margin-left: -8px;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  background: transparent;
+  color: var(--color-text);
+}
+
+.detail-kid:hover {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.detail-kid-closed {
+  color: color-mix(in srgb, var(--color-text) 68%, transparent);
+}
+
+.detail-kid-icon {
+  flex: none;
+  height: 21px;
+  display: flex;
+  align-items: center;
+}
+
+.detail-kid-text {
+  font-size: 14px;
+  line-height: 21px;
+  text-wrap: pretty;
+}
+
+.detail-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13.5px;
+  line-height: 20px;
+  text-decoration: none;
+  color: var(--a-acc-text);
+}
+
+.detail-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.detail-link > i {
+  flex: none;
+  font-size: 15px;
+}
+
+.detail-link-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-link-meta {
+  flex: none;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+/* — rounds — */
+.detail-rounds {
+  gap: 8px;
+}
+
+.detail-rounds > .detail-label-row {
+  align-items: baseline;
+}
+
+.detail-round {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--a-card);
+  box-shadow: 0 0 0 1px var(--color-divider), var(--a-lift);
+}
+
+.detail-round-now {
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent), var(--a-lift);
+}
+
+.detail-round-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.detail-round-now .detail-round-head {
+  color: var(--a-acc-text);
+}
+
+.detail-round-range {
+  font-weight: 400;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 52%, transparent);
+}
+
+.detail-round-tag {
+  margin-left: auto;
+  padding: 1px 7px;
+  font-size: 10.5px;
+}
+
+.detail-round-line {
+  display: flex;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.detail-round-line > i {
+  flex: none;
+  margin-top: 3px;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.detail-round-line > span {
+  text-wrap: pretty;
+}
+
+.detail-round-you,
+.detail-round-you > i {
+  color: var(--a-acc-text);
+}
+
+.detail-round-result {
+  color: color-mix(in srgb, var(--color-text) 80%, transparent);
+}
+
+.detail-round-result > i {
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.detail-fork {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 21px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  cursor: pointer;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
+.detail-fork:hover {
+  background: color-mix(in srgb, var(--color-text) 9%, transparent);
+}
+
+.detail-fork > i {
+  flex: none;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.detail-fork > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+/* — timeline (Message Excerpt, timeline variant) — */
+.detail-timeline {
+  gap: 10px;
+}
+
+.detail-timeline-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.excerpt-timeline {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 10px;
+}
+
+.excerpt-rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.excerpt-dot {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--a-bg, var(--color-bg));
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
+
+.excerpt-created .excerpt-dot {
+  background: var(--color-accent);
+}
+
+.excerpt-origin .excerpt-dot {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-text) 40%, transparent);
+}
+
+.excerpt-line {
+  position: absolute;
+  top: 18px;
+  bottom: -2px;
+  left: 7.5px;
+  width: 1px;
+  background: var(--color-divider);
+}
+
+.excerpt-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 16px;
+  min-width: 0;
+}
+
+.excerpt-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  font-size: 12px;
+  line-height: 18px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.excerpt-mark {
+  font-weight: 500;
+  color: var(--a-acc-text, var(--color-accent-300));
+}
+
+.excerpt-origin .excerpt-mark {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.excerpt-number {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+}
+
+.excerpt-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.excerpt-who > i {
+  font-size: 12px;
+}
+
+.excerpt-body {
+  font-size: 13.5px;
+  line-height: 1.55;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+}
+
+.excerpt-origin .excerpt-body {
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.excerpt-highlighted .excerpt-content {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.excerpt-note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+/* — agent reference — */
+.detail-reference {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.detail-reference > code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.detail-reference > .detail-copy {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.detail-copy > i {
+  font-size: 13px;
+}
+
+/* — Status Badge — */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px 0 7px;
+  border-radius: 6px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.status-badge > i {
+  font-size: 14px;
+}
+
+.status-badge-icon {
+  display: block;
+  line-height: 1;
+}
