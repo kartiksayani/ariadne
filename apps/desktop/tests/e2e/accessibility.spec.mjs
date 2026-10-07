@@ -18,14 +18,21 @@ export async function runAccessibilityAcceptance(configuration) {
     } catch (error) { return { ok: false, message: String(error) }; }
   });
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-minimum-window.json'), { actualWebView: true,
-    viewport, nativeWindow, minimum: { width: 1000, height: 700 } });
+    viewport, nativeWindow, minimum: { width: 1300, height: 760 } });
   assert.equal(nativeWindow.ok, true, nativeWindow.message);
-  assert.ok(nativeWindow.logical.width >= 1000 && nativeWindow.logical.height >= 700,
-    'Ordinary native window must reach minimum outer size 1000×700');
+  assert.ok(nativeWindow.logical.width >= 1300 && nativeWindow.logical.height >= 760,
+    'Ordinary native window must reach minimum outer size 1300×760');
   const before = await readFile(configuration.demo.sessionPath);
   const catalogue = await browser.$('button[data-shell-tab="all_sessions"]'); await catalogue.waitForEnabled(); await catalogue.click();
   const session = await browser.$(`[data-session-id="${configuration.demo.session_id}"]`);
-  await session.waitForDisplayed(); await session.waitForEnabled(); await session.click();
+  try { await session.waitForDisplayed(); } catch (error) {
+    await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'accessibility-catalogue-failure.json'), { error: error.message,
+      observed: await browser.execute(() => ({ body: document.body.innerText,
+        sessions: Array.from(document.querySelectorAll('[data-session-id]')).map(element => element.dataset.sessionId),
+        tabs: Array.from(document.querySelectorAll('.shell-tabs button')).map(element => element.outerHTML) })) });
+    await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'accessibility-catalogue-failure.png')); throw error;
+  }
+  await session.waitForEnabled(); await session.click();
   const row = '[role="treeitem"][data-item-id="2"]';
   await (await browser.$(row)).waitForDisplayed(); await focus(row);
   await browser.keys('r');

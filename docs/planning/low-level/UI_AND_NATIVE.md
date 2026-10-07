@@ -19,7 +19,7 @@ AppShell
   Dialogs: RegisterProject, BindSession, ArchiveTopic, ContinueTopic, ResolveInput, Settings
 ```
 
-Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, detail 400 px, optional rail 240 px. The target is 1600x960; minimum window is 1000x700. Waiting stays pinned; center/detail/rail can overflow horizontally. Panels scroll independently. Detail and rail can close explicitly. There is no mobile layout or user-resizable split pane in v1.
+Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, detail 400 px, optional rail 240 px. The target and default window is 1600x960; minimum window is 1300x760. Waiting stays pinned; center/detail/rail can overflow horizontally. Panels scroll independently. Detail and rail can close explicitly. There is no mobile layout or user-resizable split pane in v1.
 
 | State | Owner and persistence |
 | --- | --- |
