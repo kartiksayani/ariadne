@@ -69,7 +69,7 @@ The existing reference gallery continues to compare every applicable immutable
 source frame/region and component variant in dark/light at 1600×960 and 1000×700.
 Frames 1j/1k/1s remain component sheets/diagrams, not new application pages.
 
-`tests/visual/cases.ts` maps the other 27 frames to **ordinary DesktopApp** states.
+`tests/ui/design/design.spec.mts` (the design harness) maps the other 27 frames to **ordinary DesktopApp** states.
 The existing canonical demo/AppTransport/HistoryTransport supply its real renderer
 service, navigation/session stores, owner drafts and screen components. The 1u
 three-round/two-fork projection reuses the existing history fixture. This is
@@ -132,7 +132,7 @@ existing delivery phase explicitly; 23 process-contract tests passed using the
 warm CLI without a native build. Parent native startup proof does not establish
 the full composed P4.8 native acceptance.
 
-Required pushed-head checks: `npm run capture:reference` (both themes/sizes,
+Required pushed-head checks: `npm run test:design` (both themes/sizes,
 immutable source gallery + ordinary captures), application tests/weighted coverage,
 and the existing real native smoke/release checks selected by CI. Results and
 artifact URLs are in "Final CI evidence" below.

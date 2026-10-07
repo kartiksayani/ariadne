@@ -1927,7 +1927,8 @@
         "The PR covers: type family and scale (owner dislikes the current font); an alignment grid (page heading vs the Register project button is misaligned); button hierarchy and contrast (button colour is close to the background; four equal-weight binding buttons); filter bar as grouped chips (status / owner / visibility) with adapter names instead of raw binding UUIDs; no raw UUIDs anywhere in the UI; visible scrollbars; the connect card placement; and no empty placeholder rows."
       ],
       "checks": [
-        "The existing UI and reference suites (tests/ui/**, rtk proxy npm run capture:reference)",
+        "The existing UI suites (tests/ui/**)",
+        "rtk proxy npm run test:design",
         "rtk proxy python3 scripts/regenerate-roadmap.py --check"
       ],
       "estimate_days": 2,

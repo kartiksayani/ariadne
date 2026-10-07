@@ -66,7 +66,7 @@ async function openPrimary(configuration) {
       && await browser.$('button[data-shell-tab="all_sessions"]').isEnabled();
   }, 'Recovery did not open the restored primary session');
   // Graph mode can be retained from the preceding acceptance; choose Tree explicitly.
-  await click(await browser.$('button[title="Tree"]'));
+  await click(await browser.$('button[title="Tree (g)"]'));
   await click(await browser.$(`.ref-tree-row[data-item-id="${configuration.itemId}"]`));
   await wait(async () => await browser.$('.history-header strong').getText() === `Item ${configuration.itemId}`, 'Recovery selected a different item');
 }

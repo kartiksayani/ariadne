@@ -227,18 +227,3 @@ textarea.input {
   color: color-mix(in srgb, var(--color-text) 84%, transparent);
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
-
-/* Section label: 11px/500 uppercase, 0.07em tracking. */
-.pw-label {
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
-}
-
-/* Mono item reference. */
-.pw-mono {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
-}
