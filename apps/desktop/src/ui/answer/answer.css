@@ -30,8 +30,7 @@
   min-width: 0;
 }
 
-/* `.btn` loads after this file (style.css); button rules carry `.btn` to win the tie. */
-.btn.answer-warn-action {
+.answer-warn-action {
   flex: none;
   padding: 3px 10px;
   font-size: 12.5px;
@@ -45,7 +44,7 @@
 
 .answer-full .answer-options { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 
-.btn.answer-option {
+.answer-option {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -59,10 +58,10 @@
   background: transparent;
 }
 
-.answer-full .btn.answer-option { padding: 10px 12px 11px; }
+.answer-full .answer-option { padding: 10px 12px 11px; }
 
-.btn.answer-option-on,
-.btn.answer-option-on:hover {
+.answer-option-on,
+.answer-option-on:hover {
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
   box-shadow: 0 0 0 1px var(--color-accent), 0 0 18px color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
@@ -140,7 +139,7 @@
   gap: 6px 10px;
 }
 
-.btn.answer-send {
+.answer-send {
   height: 32px;
   max-width: 100%;
 }
@@ -192,7 +191,7 @@ textarea.answer-text {
   gap: 10px;
 }
 
-.btn.answer-reply-send {
+.answer-reply-send {
   height: 30px;
   font-size: 13px;
 }
@@ -204,30 +203,4 @@ textarea.answer-text {
   font-size: 12.5px;
   line-height: 1.45;
   color: color-mix(in srgb, var(--color-text) 66%, transparent);
-}
-
-/* Detail panel composer (interim, until the detail redesign). */
-.composer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 13.5px;
-}
-
-.composer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.composer-actions > .btn[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-  box-shadow: 0 0 0 1px var(--color-accent);
-}
-
-.composer-error {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--a-warn);
 }

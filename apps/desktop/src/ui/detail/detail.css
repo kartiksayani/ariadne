@@ -168,8 +168,7 @@
   gap: 6px;
 }
 
-/* Paperwhite's .btn loads after component CSS; the parent class out-ranks it. */
-.detail-actions > .detail-action {
+.detail-action {
   height: 32px;
   padding: 0 10px;
   font-size: 13px;
@@ -209,9 +208,7 @@
   gap: 6px;
 }
 
-/* textarea.input in paperwhite.css loads later at equal specificity; the
-   element-qualified class wins over it. */
-.detail-box > textarea.input {
+.detail-box > textarea {
   min-height: 72px;
   font-size: 13.5px;
   line-height: 1.5;

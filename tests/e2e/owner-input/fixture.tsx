@@ -1,8 +1,9 @@
+// Base styles first, as in main.tsx.
+import '../../../apps/desktop/src/style.css';
 import { createRoot } from 'react-dom/client';
 import { DesktopApp } from '../../../apps/desktop/src/App';
 import { createDesktopService } from '../../../apps/desktop/src/data/service';
 import { AppTransport, route } from '../../../apps/desktop/tests/ui/app/transport';
-import '../../../apps/desktop/src/style.css';
 
 // The ordinary App and its real stores own the save flow. Only the native
 // transport is replaced, as in the existing composition tests.

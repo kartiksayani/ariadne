@@ -1,12 +1,13 @@
 // Mounts the real DesktopApp for one handoff frame: gallery.html?frame=1b.
 // design.spec.mts serves the unzipped handoff at /source/.
+// Base styles first, as in main.tsx: component CSS follows through the App import.
+import '../../../apps/desktop/src/style.css';
 import { createRoot } from 'react-dom/client';
 import { DesktopApp } from '../../../apps/desktop/src/App';
 import { createDesktopService } from '../../../apps/desktop/src/data/service';
 import { openAgentNotRunning } from '../../../apps/desktop/src/ui/dialogs/AgentNotRunning';
 import { openContinueTopic } from '../../../apps/desktop/src/ui/dialogs/ContinueTopicDialog';
 import { designFixture, prototypeData, type DesignFixture } from './fixtures';
-import '../../../apps/desktop/src/style.css';
 
 declare global { interface Window { __designFixture?: DesignFixture; __designError?: string } }
 

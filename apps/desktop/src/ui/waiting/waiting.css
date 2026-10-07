@@ -163,8 +163,7 @@
   min-width: 0;
 }
 
-/* `.btn` loads after this file (style.css); qualify button rules to win the tie. */
-.btn.waiting-delivery-action {
+.waiting-delivery-action {
   padding: 3px 10px;
   font-size: 12.5px;
 }
@@ -186,7 +185,7 @@
 
 .waiting-foot > i { font-size: 13px; }
 
-.btn.waiting-details {
+.waiting-details {
   margin-left: auto;
   padding: 2px 6px;
   font-size: 12px;
