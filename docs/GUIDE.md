@@ -345,7 +345,7 @@ Checked in the app configuration and source:
 
 A Rust core, the `ariadne` command-line tool and the `ariadne-mcp` server share
 one saved store of plain JSON files on disk (under `~/.ariadne/projects/`; an older
-`.ariadne` folder inside a project is moved there automatically when you open it). The window is a Tauri 2 app (a
+`.ariadne` folder inside a project is moved there automatically the first time you open it; the old copy is parked at `~/.ariadne/projects/<id>.legacy-<timestamp>` for you to delete, and Ariadne never deletes it itself. Quit the desktop app and any agent sessions before upgrading from alpha.2 or earlier, or the move stops and waits). The window is a Tauri 2 app (a
 desktop shell around a web view) with a React interface.
 
 Design notes: [docs/planning](planning/README.md).

@@ -61,7 +61,10 @@ installing Mac's facts plus the package's `built` facts in `install.json`.
 Uninstall is unchanged: `python3 install.py uninstall` from the package directory.
 `install.sh` first stops with a message if `~/.local/share/ariadne/versions/<app
 version>` already exists (the app stays 0.1.0 across alphas, so uninstall first;
-project history is kept). If `xattr` exists it then prints "This download is
+project history is kept). Quit the desktop app and agent sessions before upgrading
+from alpha.2 or earlier: the first open migrates each project's store out of the
+repo and parks the old copy at `~/.ariadne/projects/<id>.legacy-<ts>` for you to
+delete. If `xattr` exists it then prints "This download is
 unsigned; removing macOS's download quarantine mark from this folder so it can
 run. Only install packages you trust." and runs `xattr -dr com.apple.quarantine`
 on the package folder, because `tar` copies the browser's quarantine mark onto

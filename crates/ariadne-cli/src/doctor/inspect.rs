@@ -111,7 +111,13 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
                     .join("projects")
                     .join(project.registered.project_id.as_str());
                 if let Some(legacy) = ariadne_store::registry::legacy_store_path(root) {
-                    report.add("warning", "store.legacy", "This project still has a store inside its folder; migration to the data directory is pending or failed.", "Open the project in the Ariadne app or run any ariadne project command to migrate it; if that reports a conflict, compare the two directories and remove the legacy one by hand.", json!({"project_id":project.registered.project_id,"canonical_root":root,"legacy_path":legacy,"store_path":store_dir}));
+                    report.add("warning", "store.legacy", "Unmigrated store at this path: the project still has a store inside its folder; migration to the data directory is pending, blocked by a running Ariadne process, or failed.", "Quit the Ariadne app and agent sessions, then open the project in the app or run any ariadne project command to migrate it; if that reports a conflict, compare the two directories by hand. Nothing is deleted automatically.", json!({"project_id":project.registered.project_id,"canonical_root":root,"legacy_path":legacy,"store_path":store_dir}));
+                }
+                for parked in ariadne_store::registry::parked_legacy_paths(
+                    &catalogue.data,
+                    &project.registered.project_id,
+                ) {
+                    report.add("warning", "store.legacy", "Parked copy of the old in-project store, safe to delete once you have checked the migrated history.", "The store was migrated to the data directory and the old copy was moved here instead of being deleted; delete this directory when you no longer need it.", json!({"project_id":project.registered.project_id,"canonical_root":root,"parked_path":parked,"store_path":store_dir}));
                 }
                 match project.result {
                     Ok(project_catalogue) => {

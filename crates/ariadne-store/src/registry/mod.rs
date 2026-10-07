@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-pub use crate::migrate::legacy_store_path;
+pub use crate::migrate::{legacy_store_path, parked_legacy_paths};
 
 #[derive(Debug)]
 pub enum RegistryError {

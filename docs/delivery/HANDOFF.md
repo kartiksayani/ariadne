@@ -134,9 +134,11 @@ Follow-ups the run surfaced:
   Follow-up: `integrations/rules/codex.md` still mentions `/ariadne-connect`, which Codex does not have.
 - P8.7 Project store under the data root (ADR-0082, PR pending): the per-project store moves
   from `<project>/.ariadne/` to `~/.ariadne/projects/<project-id>/`. Opening or registering a
-  project migrates a legacy store (copy, verify byte-for-byte, remove; both kept on failure).
-  If both exist the open fails until the owner removes the legacy one. Native e2e was not run
+  project migrates a legacy store (copy, verify byte-for-byte, park the old copy at
+  `projects/<id>.legacy-<ts>`; never deleted, both kept on failure). If both exist and differ the
+  open fails until the owner compares them. Native e2e was not run
   locally; CI's native stage is the proof for the rewritten fixtures.
+  Follow-up: `registered_projects` runs migration from the desktop watcher tick; consider moving it to an explicit open.
 
 ## Next steps
 

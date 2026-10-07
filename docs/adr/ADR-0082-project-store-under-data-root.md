@@ -35,20 +35,32 @@ index and UI state, so the project store belongs beside them.
   1. Copy `project.json`, `sessions/` and `backups/` into a staging directory
      `projects/.<id>.migrating`. Locks are recreated, never copied.
   2. Verify every file byte-for-byte against the legacy source.
-  3. Rename the staging directory to `projects/<id>`, then remove the legacy
-     directory.
+  3. Rename the staging directory to `projects/<id>`, re-list the legacy
+     directory and compare its file set and bytes again, then park the legacy
+     directory by renaming it to `projects/<id>.legacy-<unix-ts>` (a sibling of
+     the new store, outside the user's repo). The owner deletes the parked copy.
+- Ariadne never deletes the legacy store. If the final rename fails (for example
+  across devices), the legacy directory stays where it was and doctor reports it.
+- Migration holds the legacy `project.lock` and every `locks/*.lock` the old
+  build used, non-blocking, from before planning until the legacy directory is
+  parked. If any is held by a running process, migration aborts with an error
+  naming the lock and changes nothing. Quit the desktop app and agent sessions
+  before upgrading from alpha.2 or earlier.
 - A failure at any step leaves the legacy directory untouched, removes the
-  staging directory and reports an error naming both paths. The legacy store is
-  never deleted before the copy is verified. A retry starts from the legacy
-  directory, so migration is idempotent.
+  staging directory and reports an error naming both paths. If the legacy files
+  changed after planning, migration aborts, removes nothing and leaves the new
+  store in place. A retry starts from the legacy directory, so migration is
+  idempotent.
 - If both exist, the new location wins and the legacy directory is not touched.
-  The open fails with an error telling the owner to compare the two and remove
-  the legacy one, unless the two are byte-identical (an interrupted removal), in
-  which case the legacy copy is removed.
-- `ariadne doctor` reports the new path in `project.identity` and adds a
-  `store.legacy` warning when a registered project still has a legacy directory
-  (hint: open the project in the app or CLI; compare and remove if both exist).
-  Doctor never migrates.
+  The open fails with an error telling the owner to compare the two, unless the
+  legacy files are byte-identical to the new store (an interrupted move), in
+  which case the legacy copy is re-verified and parked as above.
+- `ariadne doctor` reports the new path in `project.identity` and adds
+  `store.legacy` warnings: "unmigrated store at <path>" when a registered project
+  still has a legacy directory, and "parked copy at <path>, safe to delete" for
+  each `projects/<id>.legacy-*` directory. Doctor never migrates.
+- Anything that lists `projects/` must ignore `*.legacy-*` and `.<id>.migrating`
+  entries; the store itself addresses only `projects/<id>`.
 
 ## Consequences
 
