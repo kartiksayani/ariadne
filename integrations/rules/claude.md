@@ -88,6 +88,9 @@ explanation, `reply_refs` (your replies), `followup_item_refs` and
 dispatched input, set `source_input_id`, `attempt_id` and `input_result` to null.
 Successful host completion alone is not a domain result. A normal terminal summary
 may be brief once full replies and the result are committed.
+An input with `input_kind` `removed` means the owner removed the items and topics
+in `removed.refs`: stop all work on them, never mention or recreate them, and
+acknowledge with no operations and outcome `answered` with empty `reply_refs`.
 
 Examples (UUIDs ending in small numbers are placeholders; item `1`, topic `...0005`,
 binding `...0003`, input `...0010`, attempt `...0011`):

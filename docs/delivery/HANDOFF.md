@@ -140,6 +140,7 @@ Follow-ups the run surfaced:
   open fails until the owner compares them. Native e2e was not run
   locally; CI's native stage is the proof for the rewritten fixtures.
   Follow-up: `registered_projects` runs migration from the desktop watcher tick; consider moving it to an explicit open.
+- P8.11 Remove project, session, topic and item (ADR-0083, PR pending): backend, CLI `ariadne remove …`, Tauri and `RendererService` methods with a `pre-remove-…` backup and a `removed` agent notice; the renderer Remove UI and its 5-second undo are a separate work package.
 
 ## Next steps
 
