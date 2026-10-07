@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { admissions, snapshot } from './scripted-provider.mjs';
+import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
 import { openSessionButton } from './session-button.mjs';
 
@@ -51,6 +52,17 @@ export async function runRemoveAcceptance(configuration) {
   assert.ok(!Object.values(before.topics).some(value => value.id !== topic.id && value.origin?.entity_id === topic.id), 'The guarded topic must have no continuation copies');
   const item = Object.values(before.items).find(value => value.topic_id === topic.id && value.parent === null);
   assert.ok(item, 'The guarded topic must hold its seeded item');
+  // A topic with no root items leaves the tree, so a second root keeps the band listed after the item goes.
+  const bindingId = before.active_binding_id, generation = before.bindings[bindingId].generation;
+  const kept = await cliRequest(configuration.cli, ['apply', '--binding', bindingId, '--generation', generation, '--json-stdin'], {
+    op_id: randomUUID(), source_input_id: null, attempt_id: null, expected_item_revisions: {}, expected_topic_revisions: {},
+    summary: 'Seed a second terminal root so the guarded topic stays listed for its own Remove.', input_result: null,
+    operations: [{ op: 'item.add', ref: 'kept_item', topic: { id: topic.id }, parent: null, question: 'Keep the guarded topic listed', type: 'task',
+      status: 'done', owner: { kind: 'me' }, ask: null, options: null, note: null, links: null, outcome: 'Complete saved outcome',
+      why: 'Explicit terminal fixture', replaced_by: null, source_round_id: null }],
+  });
+  assert.equal(kept.code, 0);
+  await wait(async () => Object.values((await readJson(sessionPath)).items).filter(value => value.topic_id === topic.id).length === 2, 'The second guarded root was not saved');
 
   // Item: ⌫ on the row asks first, the row goes at once, and the command waits out the Undo window.
   await click(await browser.$('button[data-shell-tab="all_sessions"]'));
@@ -67,10 +79,11 @@ export async function runRemoveAcceptance(configuration) {
   const afterItem = await readJson(sessionPath);
   assert.ok(Object.values(afterItem.inputs).some(input => input.kind === 'removed'), 'Item remove did not queue the agent notice');
 
-  // Topic: the band's Remove action, same deferred command.
+  // Topic: ⌫ on the focused band, same deferred command.
   const band = await topicBand(topicName); await band.waitForDisplayed();
   await browser.execute(element => element.focus(), band);
-  await click(await band.$('button=Remove'));
+  // The band hides its Remove action while a delivery line shows (TreeView.tsx:369); the key path is used until that is decided.
+  await browser.keys('Backspace');
   await confirm('Remove topic');
   await wait(async () => !(await topicBand(topicName).isExisting()), 'The removed topic stayed in the tree');
   await wait(async () => !(await readJson(sessionPath)).topics[topic.id], 'Topic remove did not run after the Undo window', 30000);

@@ -309,6 +309,8 @@ export function TreeView(props: TreeViewProps) {
   useLayoutEffect(() => {
     if (reveal?.kind !== 'item' || !centered.current) return;
     settled.current = false; center(reveal.route.item_id); setAnchor(reveal.route.item_id);
+    // A reveal moves the keyboard focus to its row, as the graph does.
+    focusRow(reveal.route.item_id);
   }, [reveal]);
   // The prototype re-centres a while after mount (Ariadne.dc.html:976); here the centred row stays put
   // while the view settles (detail or rail opening, rows arriving or folding, the row's answer opening)

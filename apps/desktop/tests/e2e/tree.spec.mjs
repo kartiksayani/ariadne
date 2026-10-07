@@ -477,7 +477,10 @@ async function treeAcceptance(configuration) {
   await choose('all', true); await wait(async () => (await visibleIds()).length === 2000, 'All chip did not restore every item');
   assert.deepEqual((await preferences(tree)).view.filters.statuses, []);
 
-  await (await row('1')).click(); await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(initialSession.items['1'].question), 'Native tree selection did not use full registered item detail');
+  // The detail heading folds the stored line breaks in rendered text, so its DOM text carries the complete question.
+  const heading = () => browser.$('[aria-label="Item detail"] .detail-question');
+  await (await row('1')).click(); await wait(async () => await heading().isDisplayed()
+    && await browser.execute(element => element.textContent, await heading()) === initialSession.items['1'].question, 'Native tree selection did not use full registered item detail');
   const firstToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
   await firstToggle.waitForEnabled(); await firstToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('1'), 'Explicit collapse was not persisted');
@@ -528,7 +531,8 @@ async function treeAcceptance(configuration) {
   const live = await snapshot(tree), longer = `${live.items['1'].question}\n${'A complete upstream sentence wraps across the native row. '.repeat(40)}`;
   const beforeRowLayout = await completeRowLayout('1', live.items['1']);
   const edit = await apply(tree, [{ op: 'item.edit', item: { id: '1' }, patch: { question: longer } }], { 1: live.items['1'].revision });
-  await wait(async () => (await (await row('1')).getText()).includes(longer), 'Real CLI edit did not reach the native shared session');
+  // `longer` ends in a space that pre-line rendering drops, so the row's DOM question text is compared.
+  await wait(async () => await browser.execute(element => element.querySelector('.tree-question')?.textContent, await row('1')) === longer, 'Real CLI edit did not reach the native shared session');
   const afterRowLayout = await completeRowLayout('1', { ...live.items['1'], question: longer });
   assert.ok(afterRowLayout.row.height - beforeRowLayout.row.height >= Math.max(64, 2 * beforeRowLayout.question.lineHeight),
     'The real upstream edit must materially grow its native row before it can prove scroll anchoring');

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { delay, json } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, cliRequest, completeTurn, journeyResultRequest, publishResult, snapshot } from './scripted-provider.mjs';
-import { folded, openOwnerReply, sendDetailReply } from './owner-reply.mjs';
+import { folded, openFollowUp, openOwnerReply, sendDetailReply } from './owner-reply.mjs';
 import { openSessionButton } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
@@ -79,8 +79,10 @@ async function openDispatch(configuration) {
   await wait(async () => (await dialog().getText()).includes('dispatch and connection'), 'Dispatch dialog did not open');
 }
 
-async function ownerReply(configuration, text, afterSaved = false) {
-  await openOwnerReply(afterSaved);
+// The primary item is still waiting: with nothing pending its answer slot takes the reply; once an
+// input is held, the slot hides and the next reply queues behind it from the follow-up box.
+async function ownerReply(configuration, text, held = false) {
+  if (held) await openFollowUp(true); else await openOwnerReply();
   await sendDetailReply(configuration, text);
 }
 

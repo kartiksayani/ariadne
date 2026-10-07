@@ -96,11 +96,12 @@ export async function runGraphAcceptance(configuration) {
   await browser.saveScreenshot(join(evidence, 'native-graph-open.png'));
 
   // Existing detail -> parent -> child routes move the graph selection and centre it.
-  await detail(canonical, '10.50'); await click('button=Parent · Item 10', browser.$('[aria-label="Item location"]')); await detail(canonical, '10');
+  // Crumbs and child buttons carry the stored question (the crumb its short label, "Native branch 10 The…").
+  await detail(canonical, '10.50'); await click('button*=Native branch 10', browser.$('[aria-label="Item location"]')); await detail(canonical, '10');
   await selectedIn('10');
   await wait(async () => (await view(tree)).selected_item_id === '10' && await browser.$('.shell-views').$('button=Graph').isEnabled(),
     'The parent reveal must finish saving before the separate child reveal');
-  await click('button*=Item 10.80 ·', browser.$('[aria-label="Child items"]')); await detail(canonical, '10.80');
+  await click('button*=Native sentence 10.80', browser.$('[aria-label="Child items"]')); await detail(canonical, '10.80');
   const revealed = await selectedIn('10.80'); assertCentered(revealed, '10.80');
   await wait(async () => (await view(tree)).selected_item_id === '10.80', 'Registered reveal selection was not persisted');
   samples.push({ action: 'registered-reveal', selected: '10.80' });
@@ -116,7 +117,7 @@ export async function runGraphAcceptance(configuration) {
   await wait(async () => (await view(tree)).expanded_item_ids.includes('10'), 'Native expand was not persisted');
   assertGraph(await sample(), canonical, '10', expected);
   samples.push({ action: 'collapse-expand', item: '10' });
-  await click('button*=Item 10.80 ·', browser.$('[aria-label="Child items"]')); await detail(canonical, '10.80'); await selectedIn('10.80');
+  await click('button*=Native sentence 10.80', browser.$('[aria-label="Child items"]')); await detail(canonical, '10.80'); await selectedIn('10.80');
 
   await (await search()).waitForEnabled(); await (await search()).setValue('Native token_10_80_end');
   await wait(async () => JSON.stringify((await sample()).nodes.map(value => value.id)) === JSON.stringify(['10', '10.80']), 'Graph search must keep the match and its ancestry');
