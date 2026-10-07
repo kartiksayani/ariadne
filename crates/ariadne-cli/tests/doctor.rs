@@ -619,6 +619,74 @@ fn control_status_is_read_only_generation_scoped_and_reports_fresh_and_stale() {
     assert_eq!(snapshot(profile.project.path()), before);
 }
 
+fn copy_store(from: &Path, to: &Path) {
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        let target = to.join(&name);
+        if entry.file_type().unwrap().is_dir() {
+            if name == "locks" {
+                continue;
+            }
+            fs::create_dir(&target).unwrap();
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
+            copy_store(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).unwrap();
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
+}
+
+fn park_copy(profile: &Profile) -> PathBuf {
+    let parked = profile
+        .data
+        .join("projects")
+        .join(format!("{}.legacy-1", id(1).as_str()));
+    fs::create_dir(&parked).unwrap();
+    fs::set_permissions(&parked, fs::Permissions::from_mode(0o700)).unwrap();
+    copy_store(&profile.store(), &parked);
+    parked
+}
+
+#[test]
+fn identical_parked_copy_is_reported_safe_to_delete() {
+    let profile = Profile::new();
+    let parked = park_copy(&profile);
+    let report = profile.report();
+    let legacy = checks(&report, "store.legacy");
+    assert_eq!(legacy.len(), 1, "{legacy:?}");
+    let message = legacy[0]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("{}", parked.display()))
+            && message.contains("identical to the store; safe to delete."),
+        "{message}"
+    );
+}
+
+#[test]
+fn differing_parked_copy_is_reported_as_keep() {
+    let profile = Profile::new();
+    let parked = park_copy(&profile);
+    let session = fs::read_dir(parked.join("sessions"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    fs::write(&session, b"changed").unwrap();
+    let report = profile.report();
+    let legacy = checks(&report, "store.legacy");
+    assert_eq!(legacy.len(), 1, "{legacy:?}");
+    let message = legacy[0]["message"].as_str().unwrap();
+    assert!(
+        message
+            .contains("differs from the store (1 files differ); keep it until you have checked."),
+        "{message}"
+    );
+    assert!(!message.contains("safe to delete"));
+}
+
 #[test]
 fn explicit_project_filter_handles_unregistered_and_unavailable_roots() {
     let profile = Profile::new();

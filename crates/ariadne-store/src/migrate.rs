@@ -110,6 +110,16 @@ fn identical(
     current: &Directory,
     files: &[(Option<&'static str>, String)],
 ) -> Result<bool, StoreError> {
+    Ok(differing(legacy, current, files)? == 0)
+}
+
+/// Number of planned legacy files missing from `current` or holding other bytes.
+fn differing(
+    legacy: &Directory,
+    current: &Directory,
+    files: &[(Option<&'static str>, String)],
+) -> Result<usize, StoreError> {
+    let mut differ = 0;
     let mut cache = Vec::new();
     for directory in DATA_DIRECTORIES {
         match current.child(directory, false) {
@@ -130,20 +140,38 @@ fn identical(
             None => current,
             Some(directory) => match cache.iter().find(|(candidate, _)| candidate == directory) {
                 Some((_, child)) => child,
-                None => return Ok(false),
+                None => {
+                    differ += 1;
+                    continue;
+                }
             },
         };
         match target.read(name) {
             Ok(bytes) if bytes == source => {}
-            Ok(_) => return Ok(false),
+            Ok(_) => differ += 1,
             Err(StoreError::Io {
                 kind: io::ErrorKind::NotFound,
                 ..
-            }) => return Ok(false),
+            }) => differ += 1,
             Err(error) => return Err(error),
         }
     }
-    Ok(true)
+    Ok(differ)
+}
+
+/// Number of files of a parked legacy copy that are missing from, or differ
+/// from, the migrated `store`.
+pub fn parked_copy_differences(parked: &Path, store: &Path) -> Result<usize, StoreError> {
+    let parked = Directory::root(parked)?;
+    let store = Directory::root(store)?;
+    let files = plan(&parked, &store.path)?;
+    differing(&parked, &store, &files)
+}
+
+/// True when every file of a parked legacy copy exists in `store` with equal
+/// bytes, so the parked copy holds nothing the store lacks.
+pub fn parked_copy_matches(parked: &Path, store: &Path) -> Result<bool, StoreError> {
+    Ok(parked_copy_differences(parked, store)? == 0)
 }
 
 /// Non-blocking exclusive `flock` on one legacy lock file. A missing file means
@@ -205,9 +233,10 @@ fn hold_legacy_locks(legacy: &Directory, project_path: &Path) -> Result<Vec<File
 }
 
 /// Re-verify the legacy directory against `current` and move it aside to
-/// `<data>/projects/<id>.legacy-<unix-ts>`. Nothing is ever deleted: when the
-/// legacy files changed since `files` was planned, the move is refused with an
-/// error, and when the rename itself fails the legacy directory stays in place
+/// `<data>/projects/<id>.legacy-<unix-ts>`, or to `<root>/.ariadne.legacy-<ts>`
+/// when that rename fails (for example across volumes). Nothing is ever deleted:
+/// when the legacy files changed since `files` was planned, the move is refused
+/// with an error, and when both renames fail the legacy directory stays in place
 /// (the doctor's `store.legacy` warning reports it).
 fn park(
     projects: &Directory,
@@ -232,17 +261,52 @@ fn park(
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("");
-    let mut parked = projects.path.join(format!("{id}.legacy-{stamp}"));
-    let mut attempt = 0;
-    while parked.symlink_metadata().is_ok() {
-        attempt += 1;
-        parked = projects.path.join(format!("{id}.legacy-{stamp}-{attempt}"));
-    }
-    if std::fs::rename(&legacy.path, &parked).is_ok() {
+    let free = |parent: &Path, base: String| {
+        let mut candidate = parent.join(&base);
+        let mut attempt = 0;
+        while candidate.symlink_metadata().is_ok() {
+            attempt += 1;
+            candidate = parent.join(format!("{base}-{attempt}"));
+        }
+        candidate
+    };
+    let in_data = free(&projects.path, format!("{id}.legacy-{stamp}"));
+    #[cfg(test)]
+    let data_rename = if tests::FAIL_DATA_RENAME.with(std::cell::Cell::get) {
+        Err(io::Error::from_raw_os_error(libc::EXDEV))
+    } else {
+        std::fs::rename(&legacy.path, &in_data)
+    };
+    #[cfg(not(test))]
+    let data_rename = std::fs::rename(&legacy.path, &in_data);
+    if data_rename.is_ok() {
         let _ = projects.sync();
+        let _ = top.sync();
+        return Ok(());
+    }
+    // The data root may sit on another volume (EXDEV): park inside the project
+    // root instead, which shares a volume with the legacy directory.
+    let in_root = free(&top.path, format!("{LEGACY_NAME}.legacy-{stamp}"));
+    if std::fs::rename(&legacy.path, &in_root).is_ok() {
         let _ = top.sync();
     }
     Ok(())
+}
+
+/// Parked copies left inside a project root (`<root>/.ariadne.legacy-*`) when
+/// the data root is on another volume.
+pub fn parked_legacy_paths_in_root(root: &Path) -> Vec<PathBuf> {
+    let prefix = format!("{LEGACY_NAME}.legacy-");
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+        .map(|entry| entry.path())
+        .collect();
+    found.sort();
+    found
 }
 
 /// Parked copies of a project's legacy store under the data root, as left by a
@@ -381,6 +445,32 @@ pub(crate) mod tests {
         pub(crate) static TAMPER: Cell<bool> = const { Cell::new(false) };
         /// Writes a new legacy session file after the copy, before parking.
         pub(crate) static APPEAR: Cell<bool> = const { Cell::new(false) };
+        /// Makes the rename into the data root fail as a cross-device move would.
+        pub(crate) static FAIL_DATA_RENAME: Cell<bool> = const { Cell::new(false) };
+    }
+
+    #[test]
+    fn cross_device_parking_falls_back_to_the_project_root() {
+        let home = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let legacy = legacy_store(root.path());
+        let registry = Registry::open(home.path()).unwrap();
+        FAIL_DATA_RENAME.with(|flag| flag.set(true));
+        let result = registry.register(root.path(), &id(900), || id(77));
+        FAIL_DATA_RENAME.with(|flag| flag.set(false));
+        result.unwrap();
+        assert!(!legacy.exists());
+        assert!(parked(&registry, 1).is_empty());
+        let kept = parked_legacy_paths_in_root(root.path());
+        assert_eq!(kept.len(), 1);
+        assert_eq!(
+            fs::read(kept[0].join("sessions/a.json")).unwrap(),
+            b"session-a"
+        );
+        // The in-root parked copy is not a legacy store: later opens leave it be.
+        assert!(legacy_store_path(root.path()).is_none());
+        registry.resolve_project(&id(1)).unwrap();
+        assert_eq!(parked_legacy_paths_in_root(root.path()), kept);
     }
 
     fn parked(registry: &Registry, number: u64) -> Vec<PathBuf> {
@@ -521,7 +611,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn identical_leftover_legacy_store_is_removed_to_finish_an_interrupted_move() {
+    fn identical_leftover_legacy_store_is_parked_to_finish_an_interrupted_move() {
         let home = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::open(home.path()).unwrap();

@@ -113,11 +113,31 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
                 if let Some(legacy) = ariadne_store::registry::legacy_store_path(root) {
                     report.add("warning", "store.legacy", "Unmigrated store at this path: the project still has a store inside its folder; migration to the data directory is pending, blocked by a running Ariadne process, or failed.", "Quit the Ariadne app and agent sessions, then open the project in the app or run any ariadne project command to migrate it; if that reports a conflict, compare the two directories by hand. Nothing is deleted automatically.", json!({"project_id":project.registered.project_id,"canonical_root":root,"legacy_path":legacy,"store_path":store_dir}));
                 }
-                for parked in ariadne_store::registry::parked_legacy_paths(
+                let parked_copies = ariadne_store::registry::parked_legacy_paths(
                     &catalogue.data,
                     &project.registered.project_id,
-                ) {
-                    report.add("warning", "store.legacy", "Parked copy of the old in-project store, safe to delete once you have checked the migrated history.", "The store was migrated to the data directory and the old copy was moved here instead of being deleted; delete this directory when you no longer need it.", json!({"project_id":project.registered.project_id,"canonical_root":root,"parked_path":parked,"store_path":store_dir}));
+                )
+                .into_iter()
+                .chain(ariadne_store::registry::parked_legacy_paths_in_root(root));
+                for parked in parked_copies {
+                    let shown = parked.display();
+                    let differences =
+                        ariadne_store::registry::parked_copy_differences(&parked, &store_dir);
+                    let (message, hint) = match differences {
+                        Ok(0) => (
+                            format!("Parked copy at {shown} is identical to the store; safe to delete."),
+                            "The store was migrated and the old copy was moved aside instead of being deleted; delete this directory when you no longer need it.".to_owned(),
+                        ),
+                        Ok(count) => (
+                            format!("Parked copy at {shown} differs from the store ({count} files differ); keep it until you have checked."),
+                            "Compare the parked copy with the store before deleting it; it may hold sessions the store lacks.".to_owned(),
+                        ),
+                        Err(error) => (
+                            format!("Parked copy at {shown} could not be compared with the store ({error}); keep it until you have checked."),
+                            "Compare the parked copy with the store by hand before deleting it.".to_owned(),
+                        ),
+                    };
+                    report.add("warning", "store.legacy", &message, &hint, json!({"project_id":project.registered.project_id,"canonical_root":root,"parked_path":parked,"store_path":store_dir}));
                 }
                 match project.result {
                     Ok(project_catalogue) => {
