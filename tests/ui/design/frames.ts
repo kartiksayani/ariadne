@@ -2,7 +2,7 @@
 // to <dc-import name="Ariadne"> in Ariadne Mockups.dc.html. Kept free of app
 // imports so the Playwright spec can read it in Node.
 
-export type Scenario = 'default' | 'project' | 'archive' | 'sessions' | 'session' | 'projects' | 'projectpage';
+export type Scenario = 'default' | 'project' | 'archive' | 'sessions' | 'session' | 'projects' | 'projectpage' | 'review' | 'thread' | 'reveal';
 export interface FrameSpec {
   readonly id: string;
   readonly width: number;
@@ -17,10 +17,14 @@ export interface FrameSpec {
   readonly view?: 'graph';
   readonly openMode?: 'followup';
   readonly hoverMsg?: number;
+  /** Topic names the frame shows folded (the review scenario folds t1-t3). */
+  readonly collapseTopics?: readonly string[];
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
 const base = { ...wide, theme: 'dark', scenario: 'default', state: 'ready', rail: false } as const;
+// TOPICS t1-t3 (Ariadne.dc.html:530-532), folded by the review scenarios (Ariadne.dc.html:940).
+const reviewFolds = ["Reviewer's comments on the SDK cache PR (#226)", 'Cache entries the SDK can’t read', 'Agent instructions in the repo'] as const;
 const specs: readonly FrameSpec[] = [
   { ...base, id: '1a', rail: true, hoverMsg: 4 },
   { ...base, id: '1b', selected: '1.3.1.2', detail: true, rail: true },
@@ -30,7 +34,10 @@ const specs: readonly FrameSpec[] = [
   { ...base, ...narrow, id: '1g', state: 'empty', rail: true },
   { ...base, ...narrow, id: '1h', state: 'loading', rail: true },
   { ...base, ...narrow, id: '1i', theme: 'light', state: 'clear' },
+  { ...base, id: '1n', scenario: 'reveal', selected: '1.3.1.2', detail: true },
   { ...base, id: '1q', selected: '1.4', detail: true, rail: true },
+  { ...base, id: '1t', scenario: 'review', selected: '4.4', detail: true, rail: true, collapseTopics: reviewFolds },
+  { ...base, id: '1u', scenario: 'thread', selected: '4.1', detail: true, rail: true, collapseTopics: reviewFolds },
   { ...base, ...narrow, id: '1v', selected: '1.3.1', detail: true, openMode: 'followup' },
   { ...base, id: '1w', scenario: 'project', selected: '5.3', detail: true, rail: true },
   { ...base, id: '1x', scenario: 'archive' },
@@ -42,6 +49,10 @@ const specs: readonly FrameSpec[] = [
 
 /** The fixed wall clock of both sides: 7 Oct 2026 15:10 UTC, after the last message of every frame (1i answers until 15:10). */
 export const designNow = Date.UTC(2026, 9, 7, 15, 10);
+
+/** The app's clock for one frame: the review and thread scenarios run past designNow (Ariadne.dc.html:915 starts them at 15:15 and 15:28). */
+export const frameNow = (spec: FrameSpec): number => spec.scenario === 'thread' ? Date.UTC(2026, 9, 7, 15, 28)
+  : spec.scenario === 'review' ? Date.UTC(2026, 9, 7, 15, 15) : designNow;
 
 /** Frame ids with a written fixture. */
 export const frameIds: readonly string[] = specs.map(spec => spec.id);

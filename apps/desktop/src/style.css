@@ -32,46 +32,31 @@ body {
   min-height: 0;
 }
 
-.product-app .app-session > .lifecycle-binding,
-.product-app .app-session > .lifecycle-recovery {
-  margin-bottom: 16px;
-}
-
-/* The tree owns sentence scrolling; catalogue and Graph keep pane scrolling. */
-.product-app .shell-center:has(.nav-session-content .sentence-tree) {
+/* The tree column owns its scrolling; catalogue pages keep pane scrolling. */
+.product-app .shell-center:has(.nav-session-content .tree-column) {
   overflow: hidden;
 }
 
-.product-app .nav-session-content:has(.sentence-tree),
-.product-app .app-session:has(> .sentence-tree) {
+.product-app .nav-session-content:has(.tree-column) {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
+  padding: 0;
 }
 
-.product-app .app-session > .sentence-tree {
-  flex: 1;
-  height: auto;
-}
-
-.product-app .nav-session-content:has(.sentence-tree) {
-  padding: 12px 16px;
-}
-
-.product-app .nav-session-content:has(.sentence-tree) > .nav-banner {
+.product-app .nav-session-content:has(.tree-column) > .nav-banner {
   flex-shrink: 1;
   max-height: 15%;
+  margin: 10px 16px 0;
   overflow: auto;
 }
 
-.product-app .app-session:has(> .sentence-tree) > .lifecycle-binding,
-.product-app .app-session:has(> .sentence-tree) > .lifecycle-recovery,
-.product-app .app-session:has(> .sentence-tree) > .history-action-controls {
-  flex-shrink: 1;
-  max-height: 10%;
-  margin-block: 0 4px;
-  overflow: auto;
+.product-app .tree-graphs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 16px 0;
 }
 
 .product-app .shell-detail-scroll {

@@ -34,8 +34,3 @@ html[data-theme="light"] .product-app {
   --st-decided: oklch(46% 0.08 185deg);
   --st-done: oklch(46% 0.1 148deg);
 }
-
-html[data-theme="light"] .product-app .ref-tree-question[style*="color-mix"] {
-  /* These reference-derived elements set their muted foreground inline. */
-  color: color-mix(in srgb, var(--color-text) 78%, transparent) !important;
-}

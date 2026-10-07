@@ -6,8 +6,8 @@
 import demo from '../../../fixtures/domain/demo/session.json';
 import { AppTransport, assertOwnerWire } from '../../../apps/desktop/tests/ui/app/transport';
 import type { OwnerMutationRequest, OwnerQueryRequest, SessionPreferences, SessionRef } from '../../../apps/desktop/src/generated/core';
-import type { Binding, Item, ItemStatus, Message, Page, ProjectSummary, Session, SessionSummary, SummaryCounts, Topic } from '../../../apps/desktop/src/generated/domain/models';
-import { designNow, frameSpec, type FrameSpec } from './frames';
+import type { Binding, Item, ItemStatus, Message, Page, ProjectSummary, Round, Session, SessionSummary, SummaryCounts, Topic } from '../../../apps/desktop/src/generated/domain/models';
+import { designNow, frameNow, frameSpec, type FrameSpec } from './frames';
 
 export interface ProtoOption { readonly id: string; readonly label: string; readonly consequence: string; readonly rec?: boolean }
 export interface ProtoLink { readonly kind: 'pr' | 'file' | 'doc'; readonly label: string; readonly meta?: string }
@@ -15,8 +15,10 @@ export interface ProtoItem {
   id: string; topic: string; parent: string | null; short: string; type: Item['type'];
   status: 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced'; owner: string;
   q: string; outcome: string; why: string; note?: string; ask?: string; replacedBy?: string;
-  created: number; updated: number[]; links: ProtoLink[]; options?: ProtoOption[];
+  created: number; updated: number[]; links: ProtoLink[]; options?: ProtoOption[]; waitingSince?: number; rounds?: ProtoRound[];
 }
+/** One round of back and forth; msgs are the message numbers it spans (Ariadne.dc.html:725). */
+export interface ProtoRound { readonly ask: string; readonly you: { readonly chosen: boolean; readonly text: string } | null; readonly result?: string; readonly forks?: string[]; readonly msgs: number[] }
 export interface ProtoTopic { readonly id: string; readonly name: string; readonly short: string; readonly project?: string; readonly archived?: boolean }
 export interface ProtoMessage { readonly number: number; readonly author: 'me' | 'agent'; readonly time: string; readonly excerpt: string; readonly session?: string; readonly day?: string }
 export interface ProtoProject { readonly id: string; readonly name: string; readonly path: string; readonly last: string }
@@ -31,9 +33,12 @@ export interface PrototypeData {
   readonly ARCHIVED_TOPICS: ProtoTopic[]; readonly ARCHIVED_ITEMS: ProtoItem[]; readonly PROJECTS: ProtoProject[];
   readonly PROJECT_SESSIONS: ProtoSession[]; readonly SESSION_BASE: Record<string, number>; readonly OTHER_TOPICS: ProtoTopic[];
   readonly OTHER_ITEMS: ProtoItem[]; readonly CHARGE_MSGS: ProtoMessage[]; readonly TOPIC_SESSIONS: Record<string, string[]>;
+  readonly REVIEW_TOPIC: ProtoTopic; readonly REVIEW_ITEMS: ProtoItem[]; readonly REVIEW_MSGS: ProtoMessage[];
+  readonly THREAD_MSGS: ProtoMessage[]; readonly THREAD_PATCH: Partial<ProtoItem>; readonly THREAD_KIDS: ProtoItem[];
 }
 const dataNames = ['TOPICS', 'ITEMS', 'DEMO', 'MSGS', 'EARLIER_TOPICS', 'EARLIER_MSGS', 'EARLIER_ITEMS', 'ARCHIVED_TOPICS', 'ARCHIVED_ITEMS',
-  'PROJECTS', 'PROJECT_SESSIONS', 'SESSION_BASE', 'OTHER_TOPICS', 'OTHER_ITEMS', 'CHARGE_MSGS', 'TOPIC_SESSIONS'] as const;
+  'PROJECTS', 'PROJECT_SESSIONS', 'SESSION_BASE', 'OTHER_TOPICS', 'OTHER_ITEMS', 'CHARGE_MSGS', 'TOPIC_SESSIONS',
+  'REVIEW_TOPIC', 'REVIEW_ITEMS', 'REVIEW_MSGS', 'THREAD_MSGS', 'THREAD_PATCH', 'THREAD_KIDS'] as const;
 
 /** Evaluates the prototype's data constants from the text of Ariadne.dc.html. */
 export function prototypeData(html: string): PrototypeData {
@@ -64,10 +69,15 @@ function sessionTimes(range: string): { created: string; ended: string | null } 
 
 /** The prototype scenario's world (Ariadne.dc.html:904-970). */
 function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
-  const project = spec.scenario !== 'default', blank = spec.state === 'empty' || spec.state === 'loading';
-  const topics = project ? [...data.EARLIER_TOPICS, ...data.TOPICS, ...data.ARCHIVED_TOPICS, ...data.OTHER_TOPICS] : data.TOPICS;
-  const items: ProtoItem[] = blank ? [] : structuredClone(project ? [...data.EARLIER_ITEMS, ...data.ITEMS, ...data.ARCHIVED_ITEMS, ...data.OTHER_ITEMS] : data.ITEMS);
-  const msgs: ProtoMessage[] = blank ? [] : structuredClone(project ? [...data.EARLIER_MSGS, ...data.CHARGE_MSGS, ...data.MSGS] : data.MSGS);
+  const thread = spec.scenario === 'thread', review = spec.scenario === 'review' || thread;
+  const project = !['default', 'review', 'thread', 'reveal'].includes(spec.scenario), blank = spec.state === 'empty' || spec.state === 'loading';
+  const topics = project ? [...data.EARLIER_TOPICS, ...data.TOPICS, ...data.ARCHIVED_TOPICS, ...data.OTHER_TOPICS]
+    : review ? [...data.TOPICS, data.REVIEW_TOPIC] : data.TOPICS;
+  const items: ProtoItem[] = blank ? [] : structuredClone(project ? [...data.EARLIER_ITEMS, ...data.ITEMS, ...data.ARCHIVED_ITEMS, ...data.OTHER_ITEMS]
+    : review ? [...data.ITEMS, ...data.REVIEW_ITEMS, ...(thread ? data.THREAD_KIDS : [])] : data.ITEMS);
+  const msgs: ProtoMessage[] = blank ? [] : structuredClone(project ? [...data.EARLIER_MSGS, ...data.CHARGE_MSGS, ...data.MSGS]
+    : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
+  if (thread) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
   let clock = 15 * 60 + 6;
   if (spec.state === 'clear') {
     items.filter(item => item.status === 'waiting').sort((a, b) => a.created - b.created).forEach(item => {
@@ -88,7 +98,7 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
   const tab = ({ sessions: 'all', session: 's1', projects: 'home', projectpage: 'home' } as Record<string, string>)[spec.scenario] ?? (autoTab && autoTab !== 's2' ? autoTab : 's2');
   const openTabs = ({ sessions: ['s2', 's1', 'c1'], projects: ['s2', 's1', 'c1'], projectpage: ['s2', 's1'], session: ['s2', 's1'], project: ['s2', 's1'],
     archive: ['s2', 's1'] } as Record<string, string[]>)[spec.scenario] ?? ['s2'];
-  return { topics, items, msgs, sessions, projects, sessionOf, tab, openTabs, now: new Date(designNow).toISOString() };
+  return { topics, items, msgs, sessions, projects, sessionOf, tab, openTabs, now: new Date(frameNow(spec)).toISOString() };
 }
 
 const counts = (sessions: readonly Session[]): SummaryCounts => {
@@ -137,6 +147,14 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         created_at: messageTimes.get(message.number)!, item_id: message.author === 'me' ? items[0] ?? null : null, topic_id: first ? topicIds.get(first.topic)! : null,
         items_touched: items, binding_id: bindingId, input_id: null, attempt_id: null, host_turn_id: null, round_id: null, origin: null };
     });
+    // Only the thread scenario writes rounds (THREAD_PATCH); every other item has none, as in the prototype.
+    const rounds = protoItems.flatMap(proto => (proto.rounds ?? []).map((round, index): Round => {
+      const ids = (author: ProtoMessage['author']) => round.msgs.filter(number => protoMessages.find(message => message.number === number)?.author === author)
+        .map(number => messageIds.get(number)!);
+      return { id: uuid('f', 1000 + protoItems.indexOf(proto) * 10 + index), item_id: proto.id, ordinal: index + 1, opened_message_id: messageIds.get(round.msgs[0])!, question_snapshot: proto.q,
+        ask_snapshot: round.ask, options_snapshot: [], question_revision: 1, owner_message_ids: ids('me'), agent_message_ids: ids('agent'), result_input_ids: [],
+        fork_item_ids: round.forks ?? [], closed_at: round.you ? messageTimes.get(round.msgs.at(-1)!)! : null, origin: null };
+    }));
     const items = Object.fromEntries(protoItems.map((proto): [string, Item] => {
       const siblings = protoItems.filter(item => item.parent === proto.parent && item.topic === proto.topic);
       const created = messageTimes.get(proto.created) ?? times.created, status = statusOf[proto.status];
@@ -150,8 +168,9 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         outcome: proto.outcome || null, why: proto.why || null, replaced_by: proto.replacedBy ?? null,
         created_at: created, updated_at: messageTimes.get(proto.updated.at(-1) ?? -1) ?? created,
         created_message_id: messageIds.get(proto.created) ?? uuid('d', 0), updated_message_ids: proto.updated.flatMap(number => messageIds.get(number) ?? []),
-        status_history: [], waiting_since: status === 'waiting_on_me' ? created : null, recipient_binding_id: status === 'waiting_on_me' ? bindingId : null,
-        current_round_id: null, source_round_id: null, origin: null }];
+        status_history: [], waiting_since: status === 'waiting_on_me' ? messageTimes.get(proto.waitingSince ?? -1) ?? created : null,
+        recipient_binding_id: status === 'waiting_on_me' ? bindingId : null,
+        current_round_id: rounds.find(round => round.item_id === proto.id && round.closed_at === null)?.id ?? null, source_round_id: null, origin: null }];
     }));
     return { schema_version: 1, id: ref.session_id, project_id: ref.project_id, title: `${proto.agent} · ${proto.when}`, state: proto.status,
       created_at: times.created, updated_at: messages.at(-1)?.created_at ?? times.ended ?? times.created, revision: 1,
@@ -161,7 +180,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
       active_binding_id: bindingId,
       topics: Object.fromEntries(topics.map((topic, order): [string, Topic] => [topicIds.get(topic.id)!, { id: topicIds.get(topic.id)!, name: topic.name,
         order: order + 1, revision: 1, created_at: times.created, archived_at: topic.archived ? times.created : null, origin: null }])),
-      items, messages, rounds: {}, answers: [], bindings: { [bindingId]: binding }, inputs: {}, operation_receipts: {}, continuations: {} };
+      items, messages, rounds: Object.fromEntries(rounds.map(round => [round.id, round])), answers: [], bindings: { [bindingId]: binding }, inputs: {}, operation_receipts: {}, continuations: {} };
   });
   const summaries = sessions.map((session, index): SessionSummary => {
     const binding = session.bindings[session.active_binding_id!]!, running = world.sessions[index].running;
@@ -193,7 +212,8 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
   transport.preferences.sessions = world.openTabs.map((id, order): SessionPreferences => {
     const session = sessions.find(value => value.id === refs.get(id)!.session_id)!, current = id === world.tab;
     return { session: refs.get(id)!, tab_open: true, tab_order: order, selected_item_id: current ? spec.selected ?? null : null, expanded_item_ids: expanded(session),
-      filters: { search: '', statuses: [], owners: [], topic_id: null, archived: current && spec.scenario === 'archive', hide_later: false },
+      // The reveal scenario filters to Waiting (Ariadne.dc.html:938); the harness then reveals the selection through a route.
+      filters: { search: '', statuses: current && spec.scenario === 'reveal' ? ['waiting_on_me'] : [], owners: [], topic_id: null, archived: current && spec.scenario === 'archive', hide_later: false },
       rail: current && spec.rail ? 'activity' : 'hidden', scroll: null };
   });
   return { spec, route, transport };

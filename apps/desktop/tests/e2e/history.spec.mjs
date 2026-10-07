@@ -34,7 +34,7 @@ export async function waitForHistoryItem(item, label = 'history-item') {
   { id: item.id, question: item.question, source_round_id: item.source_round_id });
 }
 const inputs = session => Object.values(session.inputs).sort((a, b) => a.seq - b.seq);
-const row = id => browser.$(`.sentence-rows [data-item-id="${id}"]`);
+const row = id => browser.$(`.tree-rows [data-item-id="${id}"]`);
 let navigationRecovered = false;
 const revisionConflict = 'Preferences revision changed; reload before applying this new patch';
 const preferencesSnapshot = async () => (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot;
@@ -108,10 +108,10 @@ async function open(history, itemId = '1') {
   await waitForHistoryItem((await snapshot(history)).items[itemId]);
 }
 async function selectParent(item) {
-  await (await browser.$('.sentence-search input')).waitForEnabled();
+  await (await browser.$('[data-shell-search]')).waitForEnabled();
   const parent = await row('1'); await parent.waitForDisplayed(); await parent.scrollIntoView(); await parent.click();
   await waitForHistoryItem(item);
-  await (await browser.$('.sentence-search input')).waitForEnabled();
+  await (await browser.$('[data-shell-search]')).waitForEnabled();
 }
 async function seed(configuration) {
   const selected = configuration.history;
@@ -245,10 +245,10 @@ export async function closeHistoryRailReferences(message) {
   const close = await browser.$('button[aria-label="Close message rail"]');
   await close.waitForEnabled(); await close.click();
   await wait(async () => browser.execute(id => {
-    const mark = document.querySelector('[role="treeitem"][data-item-id="1"] .ref-tree-mark');
+    const item = document.querySelector('[role="treeitem"][data-item-id="1"]');
     const message = document.querySelector(`.history-timeline [data-message-id="${id}"]`);
     return !document.querySelector('.message-history-rail')
-      && mark && document.defaultView.getComputedStyle(mark).backgroundColor === 'rgba(0, 0, 0, 0)'
+      && item && !item.hasAttribute('data-highlight')
       && message && !message.classList.contains('history-highlight');
   }, message.id), 'Native rail Close did not clear transient tree and detail references');
 }
@@ -266,9 +266,9 @@ async function rail(history, saved, paged) {
   await card.scrollIntoView();
   await card.$(`button[aria-label="Pin message ${parentMessage.number}"]`).click();
   await wait(async () => browser.execute(id => {
-    const tree = document.querySelector('[role="treeitem"][data-item-id="1"] .ref-tree-mark');
+    const tree = document.querySelector('[role="treeitem"][data-item-id="1"]');
     const detail = document.querySelector(`.history-timeline [data-message-id="${id}"]`);
-    return tree.style.background.includes('75%') && detail?.classList.contains('history-highlight');
+    return tree?.getAttribute('data-highlight') === 'strong' && detail?.classList.contains('history-highlight');
   }, parentMessage.id), 'Native rail pin did not cross-highlight its real tree item and detail message');
   const childMessage = saved.messages.find(message => message.item_id === '1.1' && message.kind === 'reply'); assert.ok(childMessage);
   const parent = await row('1');
@@ -276,7 +276,7 @@ async function rail(history, saved, paged) {
     await parent.scrollIntoView();
     const fold = await parent.$('button[aria-label="Expand or collapse"]'); await fold.waitForEnabled(); await fold.click();
   }
-  await (await browser.$('.sentence-search input')).waitForEnabled();
+  await (await browser.$('[data-shell-search]')).waitForEnabled();
   const child = await row('1.1'); await child.waitForDisplayed(); await child.scrollIntoView(); await child.click();
   await waitForHistoryItem(saved.items['1.1']);
   await wait(async () => browser.execute(id => document.querySelector(`.rail-messages [data-message-id="${id}"]`)?.classList.contains('history-highlight'), childMessage.id), 'Native tree selection did not highlight its canonical rail backlink');

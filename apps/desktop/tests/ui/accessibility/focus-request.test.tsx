@@ -22,8 +22,8 @@ it('an older editor acknowledgment cannot clear the newer owner request', async 
     const button = document.querySelector<HTMLButtonElement>(`[data-session-id="${route.session_id}"]`)!;
     expect(button).not.toBeNull(); expect(button.disabled).toBe(false); return button;
   });
-  fireEvent.click(session); await screen.findByRole('tree', { name: 'Sentences' });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Pause dispatch' }).hasAttribute('disabled')).toBe(false));
+  fireEvent.click(session); await screen.findByRole('tree', { name: 'Session items' });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'r' });
   await waitFor(() => expect(editor.acknowledgments.size).toBe(1));

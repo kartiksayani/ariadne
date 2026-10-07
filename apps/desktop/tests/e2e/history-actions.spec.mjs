@@ -8,22 +8,30 @@ import { json } from '../../../../scripts/run-native-e2e.mjs';
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
-const historyControls = () => browser.$('[aria-label="History actions"]');
+// Close/Reopen sit in the tree's session bar; Archive and Continue on each topic band.
+const sessionBar = () => browser.$('.tree-session-bar');
+const topicBand = name => browser.$(`.tree-rows [role="treeitem"][aria-label="${name}"]`);
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 async function openSession(sessionId) {
   await click(await browser.$('button[data-shell-tab="all_sessions"]'));
   await click(await browser.$(`[data-session-id="${sessionId}"]`));
-  await historyControls().waitForDisplayed();
+  await sessionBar().waitForDisplayed();
+}
+// A topic band shows its actions while it holds focus (the prototype's hover).
+async function topicAction(name, label) {
+  const band = await topicBand(name); await band.waitForDisplayed();
+  await browser.execute(element => element.focus(), band);
+  await click(await band.$(`button*=${label}`));
 }
 async function lifecycle(button, confirmation, path, predicate) {
-  await click(await historyControls().$(`button=${button}`));
+  await click(await sessionBar().$(`button*=${button}`));
   await click(await dialog().$(`button=${confirmation}`));
   await wait(async () => predicate(await readJson(path)), `Persisted ${confirmation} was not visible on disk`);
   await wait(async () => !(await dialog().isExisting()), 'Saved history confirmation did not close');
 }
 async function continuePreview(sourceSession, topicName, targetTitle) {
   await openSession(sourceSession);
-  await click(await historyControls().$(`button=Continue ${topicName}`));
+  await topicAction(topicName, 'Continue here');
   await click(await dialog().$(`button=${targetTitle}`));
   const send = await dialog().$(`button=Send to ${targetTitle}`);
   try { await send.waitForEnabled(); } catch (failure) {
@@ -59,7 +67,7 @@ export async function runHistoryActionsAcceptance(configuration) {
   const bindingId = target.active_binding_id, generation = target.bindings[bindingId].generation;
 
   await openSession(target.id);
-  await click(await historyControls().$('button=Close session'));
+  await click(await sessionBar().$('button*=Close session'));
   await click(await dialog().$('button=Pause dispatch'));
   assert.equal((await readJson(targetPath)).bindings[bindingId].owner_paused, false, 'Opening Pause confirmation cannot save');
   await click(await dialog().$('button=Confirm Pause dispatch'));
@@ -85,17 +93,24 @@ export async function runHistoryActionsAcceptance(configuration) {
   target = await readJson(targetPath);
   const terminalTopic = Object.values(target.topics).find(topic => topic.name === topicName);
   assert.ok(terminalTopic);
-  await wait(async () => (await historyControls().getText()).includes(topicName), 'Agent-created terminal topic did not refresh in App');
+  await wait(async () => await topicBand(topicName).isExisting(), 'Agent-created terminal topic did not refresh in App');
   const targetHistory = { items: target.items, messages: target.messages, rounds: target.rounds, answers: target.answers, bindings: target.bindings };
-  await lifecycle(`Archive ${topicName}`, 'Confirm topic archive', targetPath, value => value.topics[terminalTopic.id].archived_at !== null);
-  await lifecycle(`Restore ${topicName}`, 'Confirm topic restore', targetPath, value => value.topics[terminalTopic.id].archived_at === null);
+  // Nothing blocks an all-closed topic, so its prompt archives at once and the
+  // column offers Undo, which restores it (no confirmation dialog either way).
+  await click(await topicBand(topicName).$('button*=Archive topic'));
+  await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at !== null, 'Direct topic archive was not visible on disk');
+  assert.equal(await dialog().isExisting(), false, 'An unblocked archive must not open the review');
+  await wait(async () => (await browser.$('.tree-column').getText()).includes(`Archived “${topicName}”.`), 'Archive did not report its Undo banner');
+  await click(await browser.$('.tree-column').$('button=Undo'));
+  await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at === null, 'Undo did not restore the topic on disk');
+  await wait(async () => await topicBand(topicName).isExisting(), 'Restored topic did not return to the tree');
   target = await readJson(targetPath);
   for (const [field, contents] of Object.entries(targetHistory)) assert.deepEqual(target[field], contents, `${field} changed across archive/restore`);
 
   await openSession(source.id);
   const sourceTopic = Object.values(source.topics).find(topic => Object.values(source.items).some(item => item.topic_id === topic.id && item.status === 'waiting_on_me'));
   assert.ok(sourceTopic);
-  await click(await historyControls().$(`button=Archive ${sourceTopic.name}`));
+  await topicAction(sourceTopic.name, 'Archive');
   assert.equal(await dialog().$('button=Confirm topic archive').isEnabled(), false);
   assert.ok((await dialog().getText()).includes('Input '));
   const blocker = await dialog().$('button*=Item ');
@@ -154,7 +169,7 @@ export async function runHistoryActionsAcceptance(configuration) {
   assert.ok(originalItem);
   const copiedItemId = copied.item_id_map[originalItem.id];
   await openSession(finalTarget.id);
-  await click(await browser.$(`.ref-tree-row[data-item-id="${copiedItemId}"]`));
+  await click(await browser.$(`.tree-item[data-item-id="${copiedItemId}"]`));
   await click(await browser.$('[aria-label="Item history view"]').$('button*=Timeline'));
   const copiedBodies = source.messages.filter(message => message.item_id === originalItem.id).map(message => message.body);
   await wait(async () => {

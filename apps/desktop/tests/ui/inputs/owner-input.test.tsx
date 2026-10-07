@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -6,16 +5,15 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Session, SessionSummary, ProjectSummary } from '../../../src/generated/domain/models';
 import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
 import summariesFixture from '../../../../../fixtures/domain/projections/sessions.json';
-import type { OwnerDraft, OwnerMutationRequest, PreferencesSnapshot, SessionPreferences } from '../../../src/generated/core';
+import type { OwnerDraft, OwnerMutationRequest, PreferencesSnapshot } from '../../../src/generated/core';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { OpenSessions } from '../../../src/data/session-store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { OwnerInput } from '../../../src/components/inputs/OwnerInput';
 import { OwnerWaitingPanel } from '../../../src/components/inputs/OwnerWaitingPanel';
 import { OwnerItemDetail } from '../../../src/components/inputs/OwnerItemDetail';
-import { SentenceTree } from '../../../src/components/tree/SentenceTree';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
-import { RegisteredRoutes, type RevealedItem } from '../../../src/data/routes';
+import { RegisteredRoutes } from '../../../src/data/routes';
 import { HistoryTransport } from '../history/fixtures';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
@@ -96,42 +94,7 @@ async function setup(saved: OwnerDraft[] = []) {
 const editor = () => screen.getByRole('textbox') as HTMLTextAreaElement;
 
 describe('owner input component and durable draft controller', () => {
-  it('retains row focus across selected detail remount so z persists Later, while editor typing stays a draft', async () => {
-    const value = await setup(), routes = new RegisteredRoutes(value.service, value.sessions), user = userEvent.setup();
-    value.drafts.begin(value.store.getSnapshot().snapshot!.session, '1.1', 'reply');
-    let operation = 90;
-    function Composition() {
-      const [view, setView] = useState<SessionPreferences>({ session: route, tab_open: true, selected_item_id: '1', tab_order: 0,
-        expanded_item_ids: ['1'], filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null });
-      const [reveal, setReveal] = useState<RevealedItem | null>(null), [later, setLater] = useState(new Set<string>());
-      const selected = reveal?.kind === 'item' ? reveal.route.item_id : view.selected_item_id!;
-      return <>
-        <SentenceTree store={value.store} routes={routes} view={view} later={later} reveal={reveal}
-          saveView={async next => { setView(next); return true; }} onReveal={setReveal}
-          saveLater={async (id, enabled) => {
-            await value.service.executeOwner({ session: null, command: { api_version: 1, command: 'preferences_patch', op_id: uuid(++operation),
-              params: { expected_preferences_revision: value.prefs.revision, entries: [{ kind: 'set_later', item: { ...route, item_id: id }, later: enabled }] } } });
-            setLater(new Set(value.prefs.later.map(item => item.item_id))); return true;
-          }} />
-        <OwnerItemDetail key={selected} drafts={value.drafts} service={value.service} store={value.store} itemId={selected} routes={routes} onReveal={setReveal} />
-      </>;
-    }
-    render(<Composition />); await screen.findByRole('textbox');
-    const row = screen.getAllByRole('treeitem').find(item => item.dataset.itemId === '1.1')!;
-    await user.click(row);
-    await waitFor(() => expect(row.getAttribute('aria-selected')).toBe('true'));
-    await waitFor(() => expect((screen.getByRole('searchbox') as HTMLInputElement).disabled).toBe(false));
-    expect(document.activeElement).toBe(row);
-    await user.keyboard('z');
-    await waitFor(() => expect(value.prefs.later).toEqual([{ ...route, item_id: '1.1' }]));
-    const laterWrites = () => value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'set_later'));
-    expect(laterWrites()).toHaveLength(1); expect(editor().value).toBe('');
-    await user.click(editor()); await user.keyboard('z');
-    await waitFor(() => expect(value.prefs.drafts.find(draft => draft.target.item_id === '1.1')?.text).toBe('z'));
-    await act(async () => { await value.store.refresh(); });
-    expect(document.activeElement).toBe(editor()); expect(editor().value).toBe('z');
-    expect(laterWrites()).toHaveLength(1); expect(value.calls).toHaveLength(0);
-  });
+  // The tree's z-persists-Later versus editor-typing check lives in App.test.tsx now that rows hand z to the workspace keys.
   it.each([['Follow up', 'Follow up message'], ['Request reopen', 'Reopen message']])('focuses the editor only after explicit %s, including repeated intent with retained text', async (action, label) => {
     const value = await setup(), routes = new RegisteredRoutes(value.service, value.sessions), user = userEvent.setup();
     render(<OwnerItemDetail drafts={value.drafts} service={value.service} store={value.store} itemId="1" routes={routes} onReveal={() => {}} />);

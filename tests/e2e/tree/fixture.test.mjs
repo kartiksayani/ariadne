@@ -118,7 +118,7 @@ for (const scenario of ['focused', 'unfocused', 'hidden', 'activation_error', 'f
         if (scenario === 'readiness_error') throw new Error('Native readiness callback failed');
       },
     };
-    const action = runInNewContext(`(${choose.toString()})('Item status', 'Open', true)`, context);
+    const action = runInNewContext(`(${choose.toString()})('open', true)`, context);
     if (scenario === 'activation_error') { await assert.rejects(action, /Owned activation rejected/); assert.deepEqual(calls, ['activate']); }
     else if (scenario === 'focus_timeout') { await assert.rejects(action, /did not become visible and focused before filtering/); assert.deepEqual(calls, ['activate', 'wait']); }
     else if (scenario === 'readiness_error') { await assert.rejects(action, /Native readiness callback failed/); assert.deepEqual(calls, ['clickable', 'observe', 'ready', 'cleanup']); }
