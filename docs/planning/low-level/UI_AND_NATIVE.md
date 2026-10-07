@@ -240,7 +240,7 @@ for a 5-second undo and sends the command only after it lapses; the backend has
 no undo. The command shapes are in `API_AND_MCP.md` "Remove".
 
 - `item.remove` (`RendererService.removeItem`): removes the item and everything below it.
-- `topic.remove` (`removeTopic`): removes the topic and its items in every session it was continued into.
+- `topic.remove` (`removeTopic`): removes the topic and its items in every session that holds a copy, in any registered project. Every changed session gets a `session_changed` hint.
 - `session.remove` (`removeSession`): removes the session and its own topics; copies continued into other sessions stay.
 - `project.remove` (`removeProject`): removes the project with its sessions, topics and items. It is listed again only when a new session starts in that folder.
 

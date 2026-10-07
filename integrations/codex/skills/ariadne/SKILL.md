@@ -162,6 +162,12 @@ Cannot do the work (no replies to cite, so `reply_refs` is empty):
 {"op_id":"00000000-0000-4000-8000-000000000104","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":{"outcome":"unable","explanation":"Cannot run the tests here.","reply_refs":[],"followup_item_refs":[],"handled_through_message_number":7}}
 ```
 
+Acknowledge a `removed` input (no operations, no replies):
+
+```json
+{"op_id":"00000000-0000-4000-8000-000000000108","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":{"outcome":"answered","explanation":"Stopped work on the removed items.","reply_refs":[],"followup_item_refs":[],"handled_through_message_number":7}}
+```
+
 No dispatched input: start an item, then close an earlier round:
 
 ```json

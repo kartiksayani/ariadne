@@ -323,6 +323,17 @@ impl Directory {
     /// anchored to an opened descriptor; symlinks are unlinked, never followed, so
     /// the walk cannot leave this child. Missing children are already removed.
     pub fn remove_tree(&self, name: &str) -> Result<(), StoreError> {
+        self.remove_tree_inner(name, None)
+    }
+
+    /// Like `remove_tree`, but the child's direct entry `last` goes only after
+    /// every other entry, so a walk cut short still leaves the child named by it.
+    pub fn remove_tree_last(&self, name: &str, last: &str) -> Result<(), StoreError> {
+        component(last, &self.path.join(name).join(last))?;
+        self.remove_tree_inner(name, Some(last))
+    }
+
+    fn remove_tree_inner(&self, name: &str, last: Option<&str>) -> Result<(), StoreError> {
         let path = self.path.join(name);
         match self.entry_type(name)? {
             None => return Ok(()),
@@ -330,12 +341,21 @@ impl Directory {
             Some(_) => return Err(StoreError::UnsafePath { path }),
         }
         let child = self.child(name, false)?;
-        for entry in child.names()? {
-            if child.entry_type(&entry)? == Some(libc::S_IFDIR) {
-                child.remove_tree(&entry)?;
+        let remove = |entry: &str| {
+            if child.entry_type(entry)? == Some(libc::S_IFDIR) {
+                child.remove_tree(entry)
             } else {
-                child.remove_entry(&entry)?;
+                child.remove_entry(entry)
             }
+        };
+        for entry in child.names()? {
+            if Some(entry.as_str()) != last {
+                remove(&entry)?;
+            }
+        }
+        if let Some(last) = last {
+            child.sync()?;
+            remove(last)?;
         }
         child.sync()?;
         drop(child);

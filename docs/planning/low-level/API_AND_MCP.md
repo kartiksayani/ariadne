@@ -160,7 +160,7 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `topic_continue_preview` | source session/topic, target session | snapshot revision/hash, mapping preview, full summary, readiness |
 | `topic_continue` | source refs/revision/hash, target session/binding, op_id | atomic target copy + input + origin mapping; source untouched |
 | `item_remove` | session ref, item_id, expected_revision (item), op_id | hard-deletes the item and its subtree, their rounds, answers and inputs; queues a `removed` notice; saved `removal` receipt with backup path |
-| `topic_remove` | session ref, topic_id, expected_revision (topic), op_id | hard-deletes the topic's continuation family in every session; one `removed` notice to the latest copy; saved `removal` receipt |
+| `topic_remove` | session ref, topic_id, expected_revision (topic), op_id | hard-deletes the topic's continuation family in every session that holds a copy, in any registered project; one `removed` notice to the latest copy; saved `removal` receipt |
 | `session_remove` | session:null, project_id, session_id, expected_revision, op_id | deletes the session file after a backup; refuses in-flight inputs; `Removed` receipt |
 | `project_remove` | session:null, project_id, op_id | unregisters the project and deletes only its Ariadne store after a backup; `Removed` receipt |
 | `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry |
@@ -765,10 +765,16 @@ finding its backup, project removal through `removal.json`.
   records lose references to removed ones. Refuses with `invalid_transition` while
   an input on the subtree is in flight or needs attention, or while a remaining
   item is `replaced_by` a removed one (`blocking_input_ids`/`blocking_item_ids`).
-- **Topic.** Removes the topic and its items in every session of its
-  continuation family (copies link to their source through `origin`), plus
-  continuation records and copied history. The route session commits first and
-  records the family; the others follow under the same op_id.
+- **Topic.** Removes the topic and its items in every session that holds a copy,
+  in any registered project (copies link to their source through `origin`), plus
+  continuation records and copied history. One session can hold several family
+  topics (a topic continued twice into it, or continued back into its source);
+  each goes. Every member is read before anything commits; a registered project
+  whose sessions cannot be read refuses the removal. The route session commits
+  first, removing every family topic it holds, and records the family; the
+  others follow under the same op_id. If one of them then fails, the error names
+  the sessions already done and the ones that still hold a copy; an exact retry
+  finishes them.
 - **Session.** Deletes the session file and rebuilds binding routes. Copies of
   its topics in other sessions are their own topics and stay. Refuses with
   `session_not_closable` and `blocking_input_ids` while an input is in flight.
@@ -777,7 +783,11 @@ finding its backup, project removal through `removal.json`.
   anchored no-follow directory handles, never the project folder, its files,
   parked legacy copies or link targets; then unregisters the project. A missing
   folder does not block removal. A later new session in that folder registers it
-  again.
+  again. Nothing is written until the guard passes. `removal.json` is written
+  before the store is deleted (`project.json` last) and the project unregistered,
+  so a retry after a crash finishes those steps; a backup without
+  `removal.json` for an already unregistered project is turned back into the
+  record.
 
 Item and topic removal tell the agent. Core queues one input of kind `removed` on
 the selected binding of the told session: the owning session for an item, and for

@@ -12,8 +12,10 @@ use std::path::Path;
 /// would not fit the delivery budget.
 const SHORT: usize = 200;
 
-/// Topic family members keyed by (project, session): the session and its topic.
-type Family = BTreeMap<(UuidV4, UuidV4), (Session, UuidV4)>;
+/// Topic family members keyed by (project, session): the session and every
+/// family topic it holds (a topic continued twice into one session, or back
+/// into its source session, puts two family topics in one session).
+type Family = BTreeMap<(UuidV4, UuidV4), (Session, BTreeSet<UuidV4>)>;
 
 impl HistoryActionService<'_> {
     pub fn remove(
@@ -135,9 +137,11 @@ impl HistoryActionService<'_> {
         }
     }
 
-    /// The route session commits first and records the whole topic family. Other
-    /// members then commit under the same operation ID, so a retry replays the
-    /// route and finishes any member that is still left.
+    /// The route session commits first, removing every family topic it holds,
+    /// and records the whole topic family. Other members then commit under the
+    /// same operation ID, so a retry replays the route and finishes any member
+    /// that is still left. Every member is read before the route commits; one
+    /// that cannot be read refuses the whole removal.
     #[allow(clippy::too_many_arguments)]
     fn remove_topic(
         &self,
@@ -155,22 +159,14 @@ impl HistoryActionService<'_> {
             Some(saved) => saved,
             None => {
                 let members = self.family(route, &params.topic_id)?;
-                for (session, topic) in members.values() {
-                    blocking(
-                        session,
-                        &subtree_of_topic(session, topic),
-                        &[topic.clone()].into(),
-                    )?;
+                for (session, topics) in members.values() {
+                    blocking(session, &subtree_of_topics(session, topics), topics)?;
                 }
                 // Tell only the copy most recently continued into, else the original.
                 let told = members
                     .values()
-                    .max_by_key(|(session, topic)| {
-                        session.topics.0[topic]
-                            .origin
-                            .as_ref()
-                            .map(|origin| origin.continued_at.clone())
-                    })
+                    .flat_map(|(session, topics)| topics.iter().map(move |t| (session, t)))
+                    .max_by_key(|(session, topic)| continued_at(session, topic))
                     .map(|(session, _)| session)
                     .filter(|session| told_binding(session).is_some());
                 let notice = match told {
@@ -182,9 +178,11 @@ impl HistoryActionService<'_> {
                 };
                 let family: Vec<_> = members
                     .values()
-                    .map(|(session, topic)| RemovalTarget {
-                        session_id: session.id.clone(),
-                        id: topic.clone(),
+                    .flat_map(|(session, topics)| {
+                        topics.iter().map(|topic| RemovalTarget {
+                            session_id: session.id.clone(),
+                            id: topic.clone(),
+                        })
                     })
                     .collect();
                 store.transact_removal(
@@ -198,15 +196,8 @@ impl HistoryActionService<'_> {
                             core(CoreErrorCode::NotFound, "The topic does not exist")
                         })?;
                         revision(params.expected_revision, topic.revision)?;
-                        remove_member(
-                            session,
-                            &params.topic_id,
-                            family,
-                            notice,
-                            backup,
-                            allocate,
-                            at,
-                        )
+                        let topics = held(session, &family);
+                        remove_member(session, &topics, family, notice, backup, allocate, at)
                     },
                 )?
             }
@@ -218,32 +209,31 @@ impl HistoryActionService<'_> {
             )
             .into());
         };
-        let projects = self.registry.registered_projects()?;
-        for member in family
+        let members: BTreeSet<&UuidV4> = family
             .iter()
-            .filter(|m| &m.session_id != route.session_id())
-        {
-            // Members may live in any registered project; a gone one is skipped.
-            for project in &projects {
-                let Ok(store) = self.open_store(&project.project_id) else {
-                    continue;
-                };
-                if store.read(&member.session_id).is_err() {
-                    continue;
-                }
+            .map(|m| &m.session_id)
+            .filter(|id| *id != route.session_id())
+            .collect();
+        let mut done = vec![route.session_id().clone()];
+        let mut left = vec![];
+        for member in members {
+            let result = self.member_store(member).and_then(|store| {
+                // A member session removed since is already done.
+                let Some(store) = store else { return Ok(()) };
                 let result = store.transact_removal(
-                    &member.session_id,
+                    member,
                     &owner,
                     operation_id,
                     normalized,
                     stamp,
                     |session, backup| {
-                        if !session.topics.0.contains_key(&member.id) {
+                        let topics = held(session, family);
+                        if topics.is_empty() {
                             return Err(core(CoreErrorCode::NotFound, "Already removed"));
                         }
                         remove_member(
                             session,
-                            &member.id,
+                            &topics,
                             family.clone(),
                             notice.clone(),
                             backup,
@@ -253,20 +243,96 @@ impl HistoryActionService<'_> {
                     },
                 );
                 match result {
-                    Ok(_) => {}
+                    Ok(_) => Ok(()),
                     Err(ariadne_store::session::TransactionError::Command(error))
-                        if error.code == CoreErrorCode::NotFound => {}
-                    Err(error) => return Err(error.into()),
+                        if error.code == CoreErrorCode::NotFound =>
+                    {
+                        Ok(())
+                    }
+                    Err(error) => Err(error.into()),
                 }
-                break;
+            });
+            match result {
+                Ok(()) => done.push(member.clone()),
+                Err(error) => left.push((
+                    member.clone(),
+                    match error {
+                        HistoryActionError::Core(error) => error,
+                        HistoryActionError::Registry(error) => error.into(),
+                        HistoryActionError::Store(error) => error.into(),
+                    },
+                )),
             }
+        }
+        if let Some((_, first)) = left.first() {
+            let names = |ids: &mut dyn Iterator<Item = &UuidV4>| {
+                ids.map(UuidV4::as_str).collect::<Vec<_>>().join(", ")
+            };
+            let mut error = CoreError::new(
+                first.code,
+                format!(
+                    "The topic was removed from session(s) {} but is still in session(s) {}: {}",
+                    names(&mut done.iter()),
+                    names(&mut left.iter().map(|(id, _)| id)),
+                    first.message,
+                ),
+                format!(
+                    "Fix the cause, then retry operation {} to finish removing the topic.",
+                    operation_id.as_str()
+                ),
+            );
+            error.details = first.details.clone();
+            return Err(error.into());
         }
         Ok(MutationReceipt::Session(Box::new(saved)))
     }
 
-    /// Every (session, topic) in the continuation family of the route topic,
+    /// The store holding a family member session, searched across registered
+    /// projects. `None` when no project holds it any more. A project whose
+    /// store, or the member file itself, cannot be read is an error.
+    fn member_store(&self, session_id: &UuidV4) -> Result<Option<Store>, HistoryActionError> {
+        for project in self.registry.registered_projects()? {
+            let Some(store) = self.family_store(&project)? else {
+                continue;
+            };
+            match store.read(session_id) {
+                Ok(_) => return Ok(Some(store)),
+                Err(ariadne_store::session::StoreError::Io {
+                    kind: std::io::ErrorKind::NotFound,
+                    ..
+                }) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(None)
+    }
+
+    /// A registered project's store for family reads, under the data root.
+    /// `None` when the project has no store there and no legacy store left to
+    /// migrate. The project folder itself need not be reachable.
+    fn family_store(
+        &self,
+        project: &ariadne_store::registry::RegisteredProject,
+    ) -> Result<Option<Store>, HistoryActionError> {
+        let dir = self.registry.project_dir(&project.project_id);
+        match Store::open_registered(&dir, project.project_id.clone()) {
+            Ok(store) => Ok(Some(store)),
+            Err(ariadne_store::session::StoreError::Io {
+                kind: std::io::ErrorKind::NotFound,
+                ..
+            }) if !dir.exists()
+                && ariadne_store::registry::legacy_store_path(&project.root).is_none() =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Every (session, topics) in the continuation family of the route topic,
     /// across registered projects, keyed by (project, session). Copies link to
     /// their source through `origin`; a removed source still joins its copies.
+    /// Any project whose sessions cannot be read refuses: it may hold a copy.
     fn family(
         &self,
         route: &RegisteredSession,
@@ -274,13 +340,13 @@ impl HistoryActionService<'_> {
     ) -> Result<Family, HistoryActionError> {
         let mut sessions = vec![];
         for project in self.registry.registered_projects()? {
-            match self
-                .open_store(&project.project_id)
-                .and_then(|store| Ok(store.sessions()?))
-            {
-                Ok(found) => sessions.extend(found),
-                Err(error) if &project.project_id == route.project_id() => return Err(error),
-                Err(_) => {}
+            let store = if &project.project_id == route.project_id() {
+                Some(self.open_store(&project.project_id)?)
+            } else {
+                self.family_store(&project)?
+            };
+            if let Some(store) = store {
+                sessions.extend(store.sessions()?);
             }
         }
         let route_session = sessions
@@ -313,15 +379,19 @@ impl HistoryActionService<'_> {
         Ok(sessions
             .into_iter()
             .filter_map(|session| {
-                let topic = session
+                let topics: BTreeSet<_> = session
                     .topics
                     .0
                     .keys()
-                    .find(|t| seen.contains(&(session.id.clone(), (*t).clone())))
-                    .cloned()?;
+                    .filter(|t| seen.contains(&(session.id.clone(), (*t).clone())))
+                    .cloned()
+                    .collect();
+                if topics.is_empty() {
+                    return None;
+                }
                 Some((
                     (session.project_id.clone(), session.id.clone()),
-                    (session, topic),
+                    (session, topics),
                 ))
             })
             .collect())
@@ -432,14 +502,33 @@ fn subtree(session: &Session, root: &ItemRef) -> BTreeSet<ItemRef> {
         }
     }
 }
-fn subtree_of_topic(session: &Session, topic: &UuidV4) -> BTreeSet<ItemRef> {
+fn subtree_of_topics(session: &Session, topics: &BTreeSet<UuidV4>) -> BTreeSet<ItemRef> {
     session
         .items
         .0
         .values()
-        .filter(|item| &item.topic_id == topic)
+        .filter(|item| topics.contains(&item.topic_id))
         .map(|item| item.id.clone())
         .collect()
+}
+
+/// The family topics this session still holds.
+fn held(session: &Session, family: &[RemovalTarget]) -> BTreeSet<UuidV4> {
+    family
+        .iter()
+        .filter(|m| m.session_id == session.id && session.topics.0.contains_key(&m.id))
+        .map(|m| m.id.clone())
+        .collect()
+}
+
+/// When the topic was continued into its session; `None` for an original.
+fn continued_at(session: &Session, topic: &UuidV4) -> Option<UtcMillis> {
+    session
+        .topics
+        .0
+        .get(topic)
+        .and_then(|topic| topic.origin.as_ref())
+        .map(|origin| origin.continued_at.clone())
 }
 
 fn targeted(input: &Input, items: &BTreeSet<ItemRef>, topics: &BTreeSet<UuidV4>) -> bool {
@@ -519,29 +608,31 @@ impl Purged {
     }
 }
 
+/// Remove every family topic `topics` this session holds, and queue the
+/// notice here when this is the told session.
 fn remove_member(
     session: &mut Session,
-    topic_id: &UuidV4,
+    topics: &BTreeSet<UuidV4>,
     family: Vec<RemovalTarget>,
     notice: Option<RemovalTarget>,
     backup: &Path,
     allocate: &mut impl FnMut() -> UuidV4,
     at: &UtcMillis,
 ) -> Result<SavedReceiptData, CoreError> {
-    let scope = subtree_of_topic(session, topic_id);
-    let purged = purge(session, scope, BTreeSet::from([topic_id.clone()]))?;
+    // The notice names the copy most recently continued into this session.
+    let told = topics
+        .iter()
+        .max_by_key(|topic| continued_at(session, topic))
+        .cloned()
+        .expect("a member holds at least one family topic");
+    let told_name = session.topics.0[&told].name.clone();
+    let scope = subtree_of_topics(session, topics);
+    let mut purged = purge(session, scope, topics.clone())?;
+    purged.topic_name = told_name;
     let mut notice = notice;
     if let Some(target) = notice.clone().filter(|n| n.session_id == session.id) {
         match told_binding(session) {
-            Some(binding) => enqueue(
-                session,
-                &binding,
-                &target.id,
-                topic_id.clone(),
-                &purged,
-                allocate,
-                at,
-            )?,
+            Some(binding) => enqueue(session, &binding, &target.id, told, &purged, allocate, at)?,
             // The told session lost its binding or closed since the family read.
             None => notice = None,
         }
@@ -986,4 +1077,40 @@ fn finish(session: &mut Session, at: &UtcMillis) -> Result<(), CoreError> {
         .map_err(|e| invalid(format!("{e:?}")))?;
     ariadne_domain::history::validate_session_history(session)
         .map_err(|e| invalid(format!("{e:?}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn demo() -> Session {
+        serde_json::from_str(include_str!(
+            "../../../../fixtures/domain/demo/session.json"
+        ))
+        .unwrap()
+    }
+
+    // No store-valid session is known to reach this through `purge`; the
+    // check is defence in depth, so it is driven with a hand-made candidate.
+    #[test]
+    fn finish_refuses_a_candidate_with_inconsistent_history() {
+        let at = UtcMillis::new("2026-10-04T12:00:00.000Z").unwrap();
+        let mut session = demo();
+        finish(&mut session, &at).unwrap();
+        // Item 7 still names item 4 as its replacement.
+        session.items.0.remove(&ItemRef::new("4").unwrap());
+        let error = finish(&mut session, &at).unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidTransition);
+        assert!(error
+            .message
+            .starts_with("Removal would leave inconsistent history: "));
+        // Round 0x42 left without its item 8.
+        let mut session = demo();
+        session.items.0.remove(&ItemRef::new("8").unwrap());
+        let error = finish(&mut session, &at).unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidTransition);
+        assert!(error
+            .message
+            .starts_with("Removal would leave inconsistent history: "));
+    }
 }

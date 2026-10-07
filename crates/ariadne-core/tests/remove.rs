@@ -62,14 +62,47 @@ fn item_remove(item: &str, revision: PositiveSafeInteger, op: u64) -> OwnerComma
     }
 }
 fn topic_remove(topic: u64, revision: PositiveSafeInteger, op: u64) -> OwnerCommand {
+    topic_remove_id(id(topic), revision, op)
+}
+fn topic_remove_id(topic: UuidV4, revision: PositiveSafeInteger, op: u64) -> OwnerCommand {
     OwnerCommand::TopicRemove {
         api_version: version(),
         op_id: id(op),
         params: TopicLifecycleParams {
-            topic_id: id(topic),
+            topic_id: topic,
             expected_revision: revision,
         },
     }
+}
+fn store_error(result: Result<MutationReceipt, HistoryActionError>) {
+    match result.unwrap_err() {
+        HistoryActionError::Store(_) => {}
+        other => panic!("store error, got {other:?}"),
+    }
+}
+/// Every `pre-remove-…` name in a directory (empty when it does not exist).
+fn removal_backups(dir: &Path) -> Vec<String> {
+    fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .map(|e| e.unwrap().file_name().into_string().unwrap())
+                .filter(|name| name.starts_with("pre-remove-"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+fn target_seed(session: u64) -> Session {
+    let mut target = seed();
+    target.id = id(session);
+    target
+}
+/// The seed with its binding paused by the owner.
+fn paused_seed() -> Session {
+    let mut session = seed();
+    let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+    binding.dispatch_state = DispatchState::Paused;
+    binding.owner_paused = true;
+    session
 }
 fn session_remove(
     project: u64,
@@ -207,6 +240,54 @@ impl Setup {
         command: &OwnerCommand,
     ) -> Result<MutationReceipt, HistoryActionError> {
         HistoryActionService::new(&self.registry).remove(context, command, || self.uuid(), at())
+    }
+    /// The data root's own `backups/` directory.
+    fn data_backups(&self) -> PathBuf {
+        fs::canonicalize(self.home.path())
+            .unwrap()
+            .join(".ariadne/backups")
+    }
+    fn projects_file(&self) -> PathBuf {
+        fs::canonicalize(self.home.path())
+            .unwrap()
+            .join(".ariadne/projects.json")
+    }
+    /// Continue `topic` from one session of project 1 into another through the
+    /// real preview and continue commands; returns the new copy's topic ID.
+    fn continue_into(&self, from: u64, topic: &UuidV4, to: u64, op: u64) -> UuidV4 {
+        let service = HistoryActionService::new(&self.registry);
+        let request = ContinuePreviewRequest {
+            source: SessionRef {
+                project_id: id(1),
+                session_id: id(from),
+            },
+            source_topic_id: topic.clone(),
+            target: SessionRef {
+                project_id: id(1),
+                session_id: id(to),
+            },
+        };
+        let preview = service.preview(&owner(1, to), &request).unwrap();
+        let command = OwnerCommand::TopicContinue {
+            api_version: version(),
+            op_id: id(op),
+            params: TopicContinueParams {
+                source: preview.source,
+                source_topic_id: preview.source_topic_id,
+                source_revision: preview.source_revision,
+                source_sha256: preview.source_sha256,
+                target: preview.target,
+                target_binding_id: id(3),
+                summary: preview.summary,
+            },
+        };
+        let receipt = service
+            .continue_topic(&owner(1, to), &command, || self.uuid(), at())
+            .unwrap();
+        let SavedReceiptData::Continuation { continuation } = saved(receipt).data else {
+            panic!("continuation receipt")
+        };
+        continuation.target_topic_id
     }
 }
 
@@ -629,6 +710,13 @@ fn project_remove_deletes_only_the_project_store_under_the_data_root() {
     fs::write(outside.path().join("keep.txt"), "outside").unwrap();
     fs::write(root.join("notes.txt"), "owner file").unwrap();
     std::os::unix::fs::symlink(outside.path(), store.join("link")).unwrap();
+    // An earlier removal leaves a backup in the store; the project backup keeps it.
+    let earlier = removal(&saved(
+        t.remove(&owner(0x901, 0x902), &item_remove("2", p(1), 99))
+            .unwrap(),
+    ))
+    .backup;
+    let earlier_bytes = fs::read(&earlier).unwrap();
     let session = fs::read(t.file(0x901, 0x902)).unwrap();
 
     let receipt = removed(
@@ -657,6 +745,11 @@ fn project_remove_deletes_only_the_project_store_under_the_data_root() {
         .unwrap(),
         session
     );
+    assert_eq!(
+        fs::read(backup.join("backups").join(earlier.file_name().unwrap())).unwrap(),
+        earlier_bytes
+    );
+    assert!(backup.join("project.json").is_file());
     // Only the project's store goes; the folder, its files and link targets stay.
     assert!(!store.exists());
     assert!(t.dir(1).exists());
@@ -681,9 +774,295 @@ fn project_remove_deletes_only_the_project_store_under_the_data_root() {
         ),
         receipt
     );
-    // A project whose session has an input in flight is refused untouched.
+    // A project whose session has an input in flight is refused untouched,
+    // without even an empty backup directory.
     let busy = core_error(t.remove(&registry_scope(), &project_remove(1, 101)));
     assert_eq!(busy.code, CoreErrorCode::SessionNotClosable);
     assert!(t.file(1, 2).exists());
     assert_eq!(t.registry.registered_projects().unwrap().len(), 1);
+    assert_eq!(
+        removal_backups(&t.data_backups()),
+        vec![format!(
+            "pre-remove-20261004T120000000Z-{}",
+            id(100).as_str()
+        )]
+    );
+}
+
+#[test]
+fn project_remove_retry_rebuilds_a_missing_record_from_the_backup() {
+    let t = Setup::new(&[(1, &[demo()]), (0x901, &[source()])]);
+    let receipt = removed(
+        t.remove(&registry_scope(), &project_remove(0x901, 100))
+            .unwrap(),
+    );
+    // A crash after unregistering but before the record was written.
+    let backup = PathBuf::from(&receipt.backup);
+    fs::remove_file(backup.join("removal.json")).unwrap();
+    let retry = removed(
+        t.remove(&registry_scope(), &project_remove(0x901, 100))
+            .unwrap(),
+    );
+    assert_eq!(retry, receipt);
+    assert!(backup.join("removal.json").is_file());
+    // The same operation ID for another project is refused.
+    fs::remove_file(backup.join("removal.json")).unwrap();
+    let reused = t.remove(&registry_scope(), &project_remove(1, 100));
+    assert!(reused.is_err());
+    assert!(t.file(1, 2).exists());
+}
+
+#[test]
+fn project_remove_retry_finishes_a_store_delete_cut_short() {
+    let t = Setup::new(&[(1, &[demo()]), (0x901, &[source()])]);
+    let projects = fs::read(t.projects_file()).unwrap();
+    let receipt = removed(
+        t.remove(&registry_scope(), &project_remove(0x901, 100))
+            .unwrap(),
+    );
+    // A crash part-way through deleting the store: the record is saved, the
+    // project is still registered and the store has lost `project.json`.
+    use std::os::unix::fs::PermissionsExt;
+    fs::write(t.projects_file(), &projects).unwrap();
+    fs::create_dir_all(t.dir(0x901).join("locks")).unwrap();
+    for dir in [t.dir(0x901), t.dir(0x901).join("locks")] {
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    fs::write(t.dir(0x901).join("locks/left.lock"), b"").unwrap();
+    assert_eq!(t.registry.registered_projects().unwrap().len(), 2);
+    let retry = removed(
+        t.remove(&registry_scope(), &project_remove(0x901, 100))
+            .unwrap(),
+    );
+    assert_eq!(retry, receipt);
+    assert!(!t.dir(0x901).exists());
+    let left = t.registry.registered_projects().unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].project_id, id(1));
+}
+
+#[test]
+fn topic_remove_takes_every_copy_one_member_session_holds() {
+    let t = Setup::new(&[(1, &[seed(), target_seed(20)])]);
+    let first = t.continue_into(2, &id(5), 20, 50);
+    let second = t.continue_into(2, &id(5), 20, 51);
+    assert_ne!(first, second);
+    let revision = t.read(1, 2).topics.0[&id(5)].revision;
+    let receipt = saved(
+        t.remove(&owner(1, 2), &topic_remove(5, revision, 100))
+            .unwrap(),
+    );
+    let data = removal(&receipt);
+    assert_eq!(data.family.len(), 3);
+    assert!(t.read(1, 2).topics.0.is_empty());
+    let after = t.read(1, 20);
+    assert!(!after.topics.0.contains_key(&first));
+    assert!(!after.topics.0.contains_key(&second));
+    // Session 20's own topic with the same ID is not a copy and stays.
+    assert!(after.topics.0.contains_key(&id(5)));
+    assert!(after.items.0.values().all(|i| i.topic_id == id(5)));
+    // One notice in the latest copy's session names both copies.
+    let notice = data.notice.unwrap();
+    assert_eq!(notice.session_id, id(20));
+    let refs = &after.inputs.0[&notice.id]
+        .payload
+        .removed
+        .as_ref()
+        .unwrap()
+        .refs;
+    for topic in [&first, &second] {
+        assert!(refs
+            .iter()
+            .any(|r| matches!(r, RemovedRef::Topic { topic_id, .. } if topic_id == topic)));
+    }
+    let bytes = fs::read(t.file(1, 20)).unwrap();
+    assert_eq!(
+        saved(
+            t.remove(&owner(1, 2), &topic_remove(5, revision, 100))
+                .unwrap()
+        ),
+        receipt
+    );
+    assert_eq!(fs::read(t.file(1, 20)).unwrap(), bytes);
+}
+
+#[test]
+fn topic_remove_takes_a_copy_continued_back_into_the_route_session() {
+    let t = Setup::new(&[(1, &[seed(), target_seed(20)])]);
+    let copy = t.continue_into(2, &id(5), 20, 50);
+    let back = t.continue_into(20, &copy, 2, 51);
+    let held = t.read(1, 2);
+    assert!(held.topics.0.contains_key(&id(5)) && held.topics.0.contains_key(&back));
+    // The route session holds the original and the copy of its copy.
+    let revision = held.topics.0[&id(5)].revision;
+    let data = removal(&saved(
+        t.remove(&owner(1, 2), &topic_remove(5, revision, 100))
+            .unwrap(),
+    ));
+    assert_eq!(data.family.len(), 3);
+    assert_eq!(data.topic_ids.len(), 2);
+    assert!(t.read(1, 2).topics.0.is_empty());
+    let other = t.read(1, 20);
+    assert!(!other.topics.0.contains_key(&copy));
+    assert!(other.topics.0.contains_key(&id(5)));
+
+    // From the middle copy: the far session holds two family topics.
+    let t = Setup::new(&[(1, &[seed(), target_seed(20)])]);
+    let copy = t.continue_into(2, &id(5), 20, 50);
+    let back = t.continue_into(20, &copy, 2, 51);
+    let revision = t.read(1, 20).topics.0[&copy].revision;
+    t.remove(&owner(1, 20), &topic_remove_id(copy.clone(), revision, 100))
+        .unwrap();
+    let source = t.read(1, 2);
+    assert!(!source.topics.0.contains_key(&id(5)));
+    assert!(!source.topics.0.contains_key(&back));
+    assert!(!t.read(1, 20).topics.0.contains_key(&copy));
+}
+
+#[test]
+fn topic_remove_refuses_when_a_member_store_cannot_be_read() {
+    let t = Setup::new(&[(1, &[demo()]), (0x901, &[source()])]);
+    let route = fs::read(t.file(0x901, 0x902)).unwrap();
+    fs::write(t.file(1, 2), b"{").unwrap();
+    store_error(t.remove(&owner(0x901, 0x902), &topic_remove(0x910, p(12), 100)));
+    // Nothing was removed and no backup was written.
+    assert_eq!(fs::read(t.file(0x901, 0x902)).unwrap(), route);
+    assert!(removal_backups(&t.dir(0x901).join("backups")).is_empty());
+    assert!(removal_backups(&t.dir(1).join("backups")).is_empty());
+}
+
+#[test]
+fn topic_remove_names_removed_and_remaining_members_when_one_fails_after_the_route() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = Setup::new(&[(1, &[demo()]), (0x901, &[source()])]);
+    // The member can be read, but a directory blocks its backup name, so its
+    // commit fails only after the route session has committed.
+    let blocker = t.dir(1).join("backups").join(format!(
+        "pre-remove-20261004T120000000Z-{}-{}.json",
+        id(100).as_str(),
+        id(2).as_str()
+    ));
+    fs::create_dir_all(&blocker).unwrap();
+    fs::set_permissions(&blocker, fs::Permissions::from_mode(0o700)).unwrap();
+    let error = core_error(t.remove(&owner(0x901, 0x902), &topic_remove(0x910, p(12), 100)));
+    fs::remove_dir(&blocker).unwrap();
+    assert!(error.message.contains(&format!(
+        "removed from session(s) {} but is still in session(s) {}",
+        id(0x902).as_str(),
+        id(2).as_str()
+    )));
+    assert!(error.hint.contains(id(100).as_str()));
+    assert!(t.read(0x901, 0x902).topics.0.is_empty());
+    assert!(t.read(1, 2).topics.0.contains_key(&id(0x11)));
+    // The same operation finishes the family once the cause is fixed.
+    let data = removal(&saved(
+        t.remove(&owner(0x901, 0x902), &topic_remove(0x910, p(12), 100))
+            .unwrap(),
+    ));
+    let after = t.read(1, 2);
+    assert!(!after.topics.0.contains_key(&id(0x11)));
+    let notice = data.notice.unwrap();
+    assert_eq!(after.inputs.0[&notice.id].kind, InputKind::Removed);
+}
+
+#[test]
+fn removal_notice_is_queued_on_a_paused_binding() {
+    let t = Setup::new(&[(1, &[paused_seed()])]);
+    let data = removal(&saved(
+        t.remove(&owner(1, 2), &item_remove("1", p(1), 100))
+            .unwrap(),
+    ));
+    let notice = data.notice.unwrap();
+    let input = &t.read(1, 2).inputs.0[&notice.id];
+    assert_eq!(input.binding_id, id(3));
+    assert_eq!(input.state, InputState::Queued);
+}
+
+#[test]
+fn removal_notice_is_queued_on_a_disconnected_binding() {
+    let t = Setup::new(&[(1, &[seed()])]);
+    let disconnect = OwnerCommand::BindingDisconnect {
+        api_version: version(),
+        op_id: id(90),
+        params: BindingStateParams {
+            binding_id: id(3),
+            expected_generation: id(4),
+        },
+    };
+    ariadne_core::bindings::BindingService::new(&t.registry)
+        .state(&owner(1, 2), &disconnect, at())
+        .unwrap();
+    let session = t.read(1, 2);
+    let revision = session.items.0[&r("1")].revision;
+    let data = removal(&saved(
+        t.remove(&owner(1, 2), &item_remove("1", revision, 100))
+            .unwrap(),
+    ));
+    let notice = data.notice.unwrap();
+    let input = &t.read(1, 2).inputs.0[&notice.id];
+    assert_eq!(input.binding_id, id(3));
+    assert_eq!(input.state, InputState::Queued);
+}
+
+#[test]
+fn item_remove_refuses_a_full_queue_without_writing() {
+    let t = Setup::new(&[(1, &[seed()])]);
+    for n in 0..100 {
+        let submit = OwnerCommand::InputSubmit {
+            api_version: version(),
+            op_id: id(1000 + n),
+            params: InputSubmitParams {
+                binding_id: id(3),
+                target: InputTarget {
+                    topic_id: id(5),
+                    item_id: Some(r("1")),
+                },
+                kind: InputKind::Note,
+                text: format!("Queued request {n}"),
+                selected_option_id: None,
+                expected_question_revision: None,
+                supersedes_answer_id: None,
+            },
+        };
+        InputService::new(&t.registry)
+            .execute(&owner(1, 2), &submit, || t.uuid(), at())
+            .unwrap();
+    }
+    let bytes = fs::read(t.file(1, 2)).unwrap();
+    let revision = t.read(1, 2).items.0[&r("2")].revision;
+    let full = core_error(t.remove(&owner(1, 2), &item_remove("2", revision, 100)));
+    assert_eq!(full.code, CoreErrorCode::QueueFull);
+    assert_eq!(fs::read(t.file(1, 2)).unwrap(), bytes);
+    assert!(removal_backups(&t.dir(1).join("backups")).is_empty());
+    // Removing the item the queued inputs target frees their slots.
+    let revision = t.read(1, 2).items.0[&r("1")].revision;
+    let data = removal(&saved(
+        t.remove(&owner(1, 2), &item_remove("1", revision, 101))
+            .unwrap(),
+    ));
+    assert_eq!(data.input_ids.len(), 100);
+    assert!(data.notice.is_some());
+}
+
+#[test]
+fn removal_notice_shortens_names_that_would_pass_the_delivery_budget() {
+    let mut session = seed();
+    let long = "n".repeat(70 * 1024);
+    session.topics.0.get_mut(&id(5)).unwrap().name = long.clone();
+    let t = Setup::new(&[(1, &[session])]);
+    let revision = t.read(1, 2).topics.0[&id(5)].revision;
+    let data = removal(&saved(
+        t.remove(&owner(1, 2), &topic_remove(5, revision, 100))
+            .unwrap(),
+    ));
+    let notice = data.notice.unwrap();
+    let input = &t.read(1, 2).inputs.0[&notice.id];
+    let removed = input.payload.removed.as_ref().unwrap();
+    let RemovedRef::Topic { topic_id, name } = &removed.refs[0] else {
+        panic!("topic ref")
+    };
+    assert_eq!(topic_id, &id(5));
+    assert_eq!(name.chars().count(), 200);
+    assert!(name.ends_with('…'));
+    assert!(removed.note.len() < 1024);
 }

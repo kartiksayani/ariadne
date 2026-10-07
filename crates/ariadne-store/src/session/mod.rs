@@ -355,8 +355,7 @@ impl Store {
             for session in [&mut baseline, &mut candidate] {
                 prune_delivery_receipts(session, &removed);
             }
-            self.backups.temp(&name, &previous)?.create(&name)?;
-            self.backups.sync()?;
+            self.write_removal_backup(&name, &previous)?;
             self.save_effect(
                 &baseline,
                 &previous,
@@ -391,8 +390,7 @@ impl Store {
             let (live, previous) = self.live(session_id)?;
             guard(&live).map_err(TransactionError::Command)?;
             let name = removal_backup_name(stamp, operation_id, session_id)?;
-            self.backups.temp(&name, &previous)?.create(&name)?;
-            self.backups.sync()?;
+            self.write_removal_backup(&name, &previous)?;
             if !self.sessions.remove_if_unchanged(&file, &previous)? {
                 return Err(StoreError::Busy.into());
             }
@@ -401,9 +399,8 @@ impl Store {
     }
 
     /// Project removal: move every session file into `into`, each under its own
-    /// lock, refusing a session with an input in flight. Returns the session IDs.
-    pub(crate) fn evict_all(&self, into: &Directory) -> Result<Vec<UuidV4>, StoreError> {
-        let mut removed = Vec::new();
+    /// lock, refusing a session with an input in flight.
+    pub(crate) fn evict_all(&self, into: &Directory) -> Result<(), StoreError> {
         for name in self.sessions.names()? {
             if name.starts_with('.') || !name.ends_with(".json") {
                 continue;
@@ -434,9 +431,8 @@ impl Store {
                 }
                 Ok(())
             })?;
-            removed.push(id);
         }
-        Ok(removed)
+        Ok(())
     }
 
     /// Project removal: copy the store's own earlier backups into `into`, so
@@ -456,6 +452,18 @@ impl Store {
         into.sync()
     }
 
+    /// Save the live bytes under the session lock. A backup with the same name
+    /// is left by an attempt that crashed before committing; nothing was
+    /// removed then, so it is replaced with the current pre-removal bytes.
+    fn write_removal_backup(&self, name: &str, previous: &[u8]) -> Result<(), StoreError> {
+        if self.backups.verify_target(name)? {
+            self.backups.temp(name, previous)?.replace(name)?;
+        } else {
+            self.backups.temp(name, previous)?.create(name)?;
+        }
+        self.backups.sync()
+    }
+
     fn find_removal_backup(
         &self,
         operation_id: &UuidV4,
@@ -466,7 +474,7 @@ impl Store {
             .backups
             .names()?
             .into_iter()
-            .find(|name| name.starts_with("pre-remove-") && name.ends_with(&suffix)))
+            .find(|name| removal_stamp_of(name, &suffix).is_some()))
     }
 
     /// Shared transaction bookkeeping, called only while the session lock is held.
@@ -641,6 +649,13 @@ pub(crate) fn removal_stamp(stamp: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// The stamp of a backup named exactly `pre-remove-<stamp><suffix>`, where
+/// `suffix` spells the operation (and session) the backup belongs to.
+pub(crate) fn removal_stamp_of<'a>(name: &'a str, suffix: &str) -> Option<&'a str> {
+    let stamp = name.strip_prefix("pre-remove-")?.strip_suffix(suffix)?;
+    removal_stamp(stamp).ok().map(|()| stamp)
+}
+
 /// Drop delivery receipts (claim, expiry, event) that name a removed input.
 fn prune_delivery_receipts(session: &mut Session, removed: &std::collections::BTreeSet<UuidV4>) {
     if removed.is_empty() {
@@ -704,6 +719,15 @@ pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, 
     Err(StoreError::InvalidSnapshot)
 }
 
+fn uncertain_operation(error: StoreError, operation_id: &UuidV4) -> StoreError {
+    match error {
+        StoreError::CommitUncertain { .. } => StoreError::CommitUncertain {
+            operation_id: Some(operation_id.clone()),
+        },
+        other => other,
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/decode.rs"]
 mod decode_tests;
@@ -712,11 +736,30 @@ mod decode_tests;
 #[path = "tests/read_capture.rs"]
 mod read_capture_tests;
 
-fn uncertain_operation(error: StoreError, operation_id: &UuidV4) -> StoreError {
-    match error {
-        StoreError::CommitUncertain { .. } => StoreError::CommitUncertain {
-            operation_id: Some(operation_id.clone()),
-        },
-        other => other,
+#[cfg(test)]
+mod removal_name_tests {
+    use super::removal_stamp_of;
+
+    #[test]
+    fn a_backup_matches_only_its_exact_operation_and_session() {
+        let suffix = "-op-session.json";
+        assert_eq!(
+            removal_stamp_of("pre-remove-20261004T1200Z-op-session.json", suffix),
+            Some("20261004T1200Z")
+        );
+        // Another op or session that merely ends with these ids does not match.
+        assert_eq!(
+            removal_stamp_of("pre-remove-20261004T1200Z-other-op-session.json", suffix),
+            None
+        );
+        assert_eq!(
+            removal_stamp_of("pre-remove--op-session.json", suffix),
+            None
+        );
+        assert_eq!(removal_stamp_of("x-20261004-op-session.json", suffix), None);
+        assert_eq!(
+            removal_stamp_of("pre-remove-20261004-op-session.json.tmp", suffix),
+            None
+        );
     }
 }

@@ -2,9 +2,8 @@
 #[cfg(test)]
 use ariadne_core::validate_owner_receipt as validate_receipt;
 use ariadne_core::*;
-#[cfg(test)]
-use ariadne_domain::models::SavedReceiptData;
-use ariadne_domain::models::SchemaVersion;
+use ariadne_domain::models::{SavedReceipt, SavedReceiptData, SchemaVersion, UuidV4};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{Emitter, Manager};
@@ -443,6 +442,50 @@ fn notify_native_preferences(
         refresh_tray();
     }
 }
+/// Revision hints for the other sessions a topic removal changed: every family
+/// member except the receipt's own session, at its current listed revision.
+/// Best effort: a failed or inconsistent list read yields fewer hints.
+fn family_hints(
+    receipt: &SavedReceipt,
+    mut query: impl FnMut(OwnerQueryRequest) -> Result<QueryResult, CoreError>,
+) -> Vec<SessionChangedHint> {
+    let SavedReceiptData::Removal { family, .. } = &receipt.data else {
+        return vec![];
+    };
+    let mut wanted: BTreeSet<UuidV4> = family
+        .iter()
+        .map(|member| member.session_id.clone())
+        .filter(|id| id != &receipt.session_id)
+        .collect();
+    let mut hints = vec![];
+    let mut cursor = None;
+    while !wanted.is_empty() {
+        let Ok(QueryResult::SessionList(result)) = query(OwnerQueryRequest {
+            session: None,
+            request: QueryRequest::SessionList(SessionListRequest {
+                project_id: None,
+                state: None,
+                cursor,
+                limit: PageLimit::new(100).expect("literal"),
+            }),
+        }) else {
+            break;
+        };
+        for summary in result.sessions.items {
+            if wanted.remove(&summary.session_id) {
+                hints.push(SessionChangedHint {
+                    session_id: summary.session_id,
+                    revision: summary.revision,
+                });
+            }
+        }
+        cursor = result.sessions.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    hints
+}
 macro_rules! mutations {
     ($($name:ident => $variant:ident),+ $(,)?) => { $(
         #[tauri::command]
@@ -459,6 +502,10 @@ macro_rules! mutations {
                 let _ = app.emit("ariadne://session_changed", SessionChangedHint {
                     session_id: receipt.session_id.clone(), revision: receipt.revision,
                 });
+                // A topic removal also changed every other family session.
+                for hint in family_hints(receipt, |request| service.native_query(request)) {
+                    let _ = app.emit("ariadne://session_changed", hint);
+                }
                 if let Some(tray) = app.try_state::<crate::native::tray::NativeTray>() {
                     tray.refresh();
                 }
