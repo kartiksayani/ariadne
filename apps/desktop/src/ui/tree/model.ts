@@ -8,6 +8,7 @@ import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 import { normalizeSearch, sameOwner } from '../../selectors/tree/rows';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
+import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
 import { agentName, dayWord, hostApp, sessionRange } from '../shell/model';
 import { qualifiedPresence } from '../../components/bindings/presence';
 
@@ -70,25 +71,9 @@ export function segments(text: string, query: string): readonly Segment[] {
 // ---------------------------------------------------------------- delivery
 
 export interface Delivery { readonly icon: string; readonly text: string; readonly color: string; readonly failed: boolean }
-const MUTED = 'color-mix(in srgb, var(--color-text) 66%, transparent)';
-const quote = (text: string) => `“${text.length > 40 ? `${text.slice(0, 38)}…` : text}”`;
-type DeliveryIntent = Input['kind'];
-const SENDING: Record<DeliveryIntent, (label: string, agent: string) => string> = {
-  answer: label => `Sending ${label}…`, bring: () => 'Asking the agent to bring this up…', reply: () => 'Sending your reply…',
-  drop: () => 'Sending your drop request…', note: () => 'Sending your note…', followup: () => 'Sending your follow-up…',
-  reopen: () => 'Asking the agent to reopen this…', continue: (_label, agent) => `Sending the topic summary to ${agent}…`,
-  removed: () => 'Telling the agent this was removed…',
-};
-const RECEIVED: Record<DeliveryIntent, (label: string) => string> = {
-  answer: label => `You answered ${label} · received, waiting for the agent`, bring: () => 'Asked the agent to bring this up · received, waiting for the agent',
-  reply: () => 'Your reply was received · waiting for the agent', drop: () => 'Drop request received · waiting for the agent',
-  note: () => 'Note received · the agent is folding it in', followup: () => 'Follow-up received · waiting for the agent',
-  reopen: () => 'Reopen request received · waiting for the agent', continue: () => 'Summary received · the agent is picking the topic up',
-  removed: () => 'Removal received · the agent stops work on it',
-};
 const inputLabel = (input: Immutable<Input>, options: readonly Immutable<ItemOption>[]) => {
   const option = input.payload.selected_option_id ? options.find(value => value.id === input.payload.selected_option_id) : null;
-  return quote(option?.label ?? input.payload.text);
+  return option?.label ?? input.payload.text;
 };
 /** The delivery line of the latest unsettled input on an item or topic (Ariadne.dc.html:1415). */
 export function deliveryLine(session: Immutable<Session>, target: { readonly topicId: string; readonly itemId: string | null },
@@ -102,14 +87,8 @@ export function deliveryLine(session: Immutable<Session>, target: { readonly top
   const evidence = deliveryEvidence(input, summary, session.operation_receipts, presence);
   const item = target.itemId ? session.items[target.itemId] : null;
   const label = inputLabel(input, item?.options ?? []), agent = binding ? agentName(binding.adapter_id) : 'the agent';
-  switch (evidence.kind) {
-    case 'queued': return { icon: 'ph ph-hourglass-medium', color: MUTED, text: `Queued for ${agent} · delivers when it’s running again`, failed: false };
-    case 'saved': case 'sending': case 'sent': return { icon: 'ph ph-paper-plane-tilt', color: MUTED, text: SENDING[input.kind](label, agent), failed: false };
-    case 'received': case 'published': case 'waiting_result': return { icon: 'ph ph-check', color: 'var(--a-acc-text)', text: RECEIVED[input.kind](label), failed: false };
-    case 'uncertain': case 'unavailable': return { icon: 'ph ph-circle-notch', color: MUTED, text: `Checking whether ${label} was delivered…`, failed: false };
-    case 'failed': case 'rejected': case 'missing': return { icon: 'ph ph-warning-circle', color: 'var(--a-warn)', text: `Couldn’t deliver ${label}. Your answer is kept.`, failed: true };
-    default: return null;
-  }
+  const stage = deliveryStage(evidence.kind);
+  return stage ? { ...deliveryText(stage, input.kind, label, agent), failed: stage === 'failed' } : null;
 }
 
 // ---------------------------------------------------------------- session bar

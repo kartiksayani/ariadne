@@ -6,6 +6,7 @@ import type { Input, InputKind, Item, ItemOption, ItemStatus, Message, Round, Se
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentName, clock, dayWord } from '../shell/model';
 import { shortLabel } from '../shared/short';
+import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
 
 /** The prototype's status keys; they name the `--st-*` colour tokens. */
 export type StatusKey = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
@@ -17,7 +18,6 @@ const TYPE: Readonly<Record<Item['type'], string>> = { question: 'Question', dec
 const OUTLBL: Readonly<Partial<Record<StatusKey, string>>> = { decided: 'Decided', done: 'Done', dropped: 'Dropped', replaced: 'Replaced' };
 const LINKICON: Readonly<Record<string, string>> = { pr: 'ph ph-git-pull-request', file: 'ph ph-file-code', doc: 'ph ph-file-text' };
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
-const quote = (text: string) => `“${text.length > 40 ? `${text.slice(0, 38)}…` : text}”`;
 
 export type OpenMode = 'reply' | 'drop' | 'note' | 'followup';
 /** Which box `r` opens for an item (Ariadne.dc.html:1401). */
@@ -85,12 +85,6 @@ export interface DetailInput {
 
 const ACTIVE_INPUT = new Set<Input['state']>(['queued', 'in_flight', 'needs_attention']);
 const TRACKED = new Set<InputKind>(['answer', 'bring', 'reply', 'drop', 'reopen']);
-const SENDING: Readonly<Record<string, string>> = { bring: 'Asking the agent to bring this up…', reply: 'Sending your reply…', drop: 'Sending your drop request…',
-  note: 'Sending your note…', followup: 'Sending your follow-up…', reopen: 'Asking the agent to reopen this…' };
-const RECEIVED: Readonly<Record<string, string>> = { bring: 'Asked the agent to bring this up · received, waiting for the agent', reply: 'Your reply was received · waiting for the agent',
-  drop: 'Drop request received · waiting for the agent', note: 'Note received · the agent is folding it in', followup: 'Follow-up received · waiting for the agent',
-  reopen: 'Reopen request received · waiting for the agent' };
-type Stage = 'queued' | 'sending' | 'received' | 'failed' | 'checking';
 
 export const messageTag = (message: Immutable<Message>) => `#${message.number}`;
 export function excerptMessage(message: Immutable<Message>, now: number): ExcerptMessage {
@@ -100,7 +94,7 @@ export function excerptMessage(message: Immutable<Message>, now: number): Excerp
 
 /** The submission whose delivery the stepper follows: one being saved, else the latest unresolved input. */
 function submission(session: Immutable<Session>, item: Immutable<Item>, saving: InputKind | null) {
-  if (saving) return { kind: saving, stage: 'sending' as Stage, label: '' };
+  if (saving) return { kind: saving, stage: 'sending' as DeliveryStage, label: '' };
   // Cancelled and skipped inputs never reached the agent; they leave no trace here.
   const inputs = Object.values(session.inputs).filter((input): input is Immutable<Input> => !!input && input.target.item_id === item.id
     && (ACTIVE_INPUT.has(input.state) || (input.state === 'handled' && TRACKED.has(input.kind)))).sort((a, b) => b.seq - a.seq);
@@ -112,36 +106,27 @@ function submission(session: Immutable<Session>, item: Immutable<Item>, saving: 
     const binding = session.bindings[latest.binding_id];
     const summary = binding ? { id: binding.id, adapter_id: binding.adapter_id, external_session_id: binding.external_session_id, generation: binding.generation,
       dispatch_state: binding.dispatch_state, owner_paused: binding.owner_paused, pause_reason: binding.pause_reason, connection_state: binding.connection_state, presence: null } : null;
-    const kind = deliveryEvidence(latest, summary, session.operation_receipts).kind;
-    const stage: Stage = kind === 'queued' ? 'queued' : kind === 'uncertain' || kind === 'unavailable' ? 'checking'
-      : ['failed', 'rejected', 'missing'].includes(kind) ? 'failed' : ['received', 'published', 'waiting_result'].includes(kind) ? 'received' : 'sending';
+    const stage = deliveryStage(deliveryEvidence(latest, summary, session.operation_receipts).kind) ?? 'sending';
     return { kind: latest.kind, stage, label };
   }
   return { kind: latest.kind, stage: null, label };
 }
 
-function stepsOf(stage: Stage | null, status: StatusKey): Step[] | null {
-  const fail = stage === 'failed';
-  const current = stage ? (stage === 'received' ? 1 : 0) : status === 'progress' ? 2 : 3;
-  return ['Sending', 'Received', 'In progress', 'Resolved'].map((text, index) => ({
-    label: index === 0 && fail ? 'Not delivered' : index === 0 && stage === 'checking' ? 'Checking…' : index === 0 && stage === 'queued' ? 'Queued' : text,
-    dotBg: index < current || (index === current && index === 3) ? 'var(--color-accent)' : 'transparent',
-    dotRing: index === current ? `inset 0 0 0 1.5px ${fail ? 'var(--a-warn)' : 'var(--color-accent)'}` : index < current ? 'none' : `inset 0 0 0 1.5px ${neutral(30)}`,
-    color: index === current ? (fail ? 'var(--a-warn)' : 'var(--color-text)') : index < current ? neutral(76) : neutral(56),
-    weight: index === current ? 500 : 400, line: index < 3, lineBg: index < current ? 'var(--color-accent)' : 'var(--color-divider)',
-  }));
+/** The stepper's dots and lines (Ariadne.dc.html stepsOf) over the shared step states of ui/answer/delivery. */
+function stepsOf(stage: DeliveryStage | null, status: StatusKey): Step[] | null {
+  return deliverySteps(stage, status === 'progress' ? 'in_progress' : 'resolved')?.map((step, index) => {
+    const current = step.state === 'current', done = step.state === 'done';
+    return { label: step.label,
+      dotBg: done || (current && index === 3) ? 'var(--color-accent)' : 'transparent',
+      dotRing: current ? `inset 0 0 0 1.5px ${step.failed ? 'var(--a-warn)' : 'var(--color-accent)'}` : done ? 'none' : `inset 0 0 0 1.5px ${neutral(30)}`,
+      color: current ? (step.failed ? 'var(--a-warn)' : 'var(--color-text)') : done ? neutral(76) : neutral(56),
+      weight: current ? 500 : 400, line: index < 3, lineBg: done ? 'var(--color-accent)' : 'var(--color-divider)' };
+  }) ?? null;
 }
 
-function deliveryOf(stage: Stage, kind: InputKind, label: string, agent: string): DeliveryLine {
-  const muted = neutral(66), said = quote(label || '…');
-  if (stage === 'queued') return { icon: 'ph ph-hourglass-medium', color: muted, text: `Queued for ${agent} · delivers when it’s running again`, retry: false };
-  if (stage === 'sending') return { icon: 'ph ph-paper-plane-tilt', color: muted, text: kind === 'answer' ? `Sending ${said}…` : SENDING[kind] ?? 'Sending…', retry: false };
-  if (stage === 'received') {
-    return { icon: 'ph ph-check', color: 'var(--a-acc-text)', text: kind === 'answer' ? `You answered ${said} · received, waiting for the agent` : RECEIVED[kind] ?? '', retry: false };
-  }
-  if (stage === 'checking') return { icon: 'ph ph-circle-notch', color: muted, text: `Checking whether ${said} was delivered…`, retry: false };
-  return { icon: 'ph ph-warning-circle', color: 'var(--a-warn)', text: `Couldn’t deliver ${said}. Your answer is kept.`, retry: true };
-}
+/** The shared delivery line; only a failed delivery offers Retry. */
+const deliveryOf = (stage: DeliveryStage, kind: InputKind, label: string, agent: string): DeliveryLine =>
+  ({ ...deliveryText(stage, kind, label || '…', agent), retry: stage === 'failed' });
 
 function roundView(session: Immutable<Session>, item: Immutable<Item>, round: Immutable<Round>, last: boolean): RoundView {
   const messages = (ids: readonly string[]) => ids.map(id => session.messages.find(message => message.id === id)).filter((message): message is Immutable<Message> => !!message);
