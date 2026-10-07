@@ -1,4 +1,4 @@
-.lifecycle-binding, .lifecycle-recovery {
+.lifecycle-recovery {
   padding: 12px 16px;
   border-bottom: 1px solid var(--color-divider);
   background: var(--color-surface);
@@ -6,20 +6,8 @@
   overflow-wrap: anywhere;
 }
 
-.lifecycle-binding p, .lifecycle-recovery p, .lifecycle-edge p {
+.lifecycle-recovery p, .lifecycle-edge p {
   margin: 4px 0;
-}
-
-.lifecycle-muted {
-  color: color-mix(in srgb, var(--color-text) 64%, transparent);
-  font-size: 12px;
-}
-
-.lifecycle-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0;
 }
 
 .lifecycle-notice, .lifecycle-recovery-row {

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import demo from '../../../../../fixtures/domain/demo/session.json';
@@ -11,9 +10,9 @@ import type { Page, ProjectSummary, QueryCursor, Session, SessionSummary, Summar
 import { createDesktopService, type DesktopTransport, type HintPayloads } from '../../../src/data/service';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import * as catalogue from '../../../src/state/navigation/catalogue';
-import { bindingLabel, NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
+import { NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
+import { sessionCardText } from '../../../src/ui/pages/model';
 import { BindSession, RegisterProject } from '../../../src/components/navigation/Registration';
-import { NavigationSentenceTree } from '../../../src/components/tree/NavigationSentenceTree';
 
 const projectId = demo.project_id;
 const route: SessionRef = { project_id: projectId, session_id: demo.id };
@@ -512,13 +511,12 @@ describe('canonical preference mutations', () => {
 });
 
 const adapter: AdapterChoice = { adapter_id: 'demo.local', label: 'Installed adapter', configuration: { namespace: 'demo.local', values: {} } };
-const waiting = { count: '1', loading: true, emptyText: 'Waiting panel is supplied by its owner.', waiting: [], sent: [] };
 describe('source-backed navigation views and explicit registration', () => {
   it.each(['projects', 'project', 'all_sessions'] as const)('blocks %s navigation during explicit Refresh until fresh preferences are published', async kind => {
     const { transport, store } = setup(); const prefs = preferences();
     prefs.global.selected_navigation = kind === 'project' ? { kind, project_id: projectId } : { kind };
     read(transport, prefs);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => null} />);
     const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     const conflict: CoreError = { ...error, code: 'revision_conflict', message: 'Preferences revision changed.', current_revision: 3 };
@@ -540,25 +538,27 @@ describe('source-backed navigation views and explicit registration', () => {
     transport.enqueue('project_list', projectRead.promise);
     transport.enqueue('session_list', success('session_list', sessionResult()));
     const readCount = transport.calls.filter(call => call.name === 'preferences_get').length;
+    // The listing pages read each session's snapshot for its card; Refresh must not open a session.
+    const sessionReads = () => transport.calls.filter(call => call.name === 'session_get').length;
+    const snapshotReads = sessionReads();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect((screen.getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled).toBe(true);
     const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
     within(tabs).getAllByRole('button').forEach(button => {
       expect((button as HTMLButtonElement).disabled).toBe(true); fireEvent.click(button);
     });
-    expect((screen.getByRole('button', { name: 'Register project' }) as HTMLButtonElement).disabled).toBe(true);
     if (kind === 'projects') {
-      screen.getAllByRole('button', { name: /Registered root/ }).forEach(card => {
-        expect(card.getAttribute('aria-disabled')).toBe('true'); fireEvent.click(card); fireEvent.keyDown(card, { key: 'Enter' });
-      });
+      expect((screen.getByRole('button', { name: 'Register project' }) as HTMLButtonElement).disabled).toBe(true);
+      const cards = [...document.querySelectorAll<HTMLButtonElement>('.pw-project-open')]; expect(cards).not.toHaveLength(0);
+      cards.forEach(card => { expect(card.disabled).toBe(true); fireEvent.click(card); fireEvent.click(card.closest('.pw-project-card')!); });
     } else {
-      expect((screen.getByRole('button', { name: 'Open' }) as HTMLButtonElement).disabled).toBe(true);
-      fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+      const open = document.querySelector<HTMLButtonElement>(`button[data-session-id="${demo.id}"]`)!;
+      expect(open.disabled).toBe(true); fireEvent.click(open);
       if (kind === 'project') expect((screen.getByRole('button', { name: 'Connect existing session' }) as HTMLButtonElement).disabled).toBe(true);
     }
     fireEvent.click(screen.getByRole('button', { name: 'Refreshing…' }));
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
-    expect(transport.calls.some(call => call.name === 'session_get')).toBe(false);
+    expect(sessionReads()).toBe(snapshotReads);
     await waitFor(() => expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(readCount + 1));
     await act(async () => { preferenceRead.resolve(success('preferences_get', fresh)); });
     expect(store.getSnapshot().preferences).toEqual(native);
@@ -585,7 +585,7 @@ describe('source-backed navigation views and explicit registration', () => {
   it('clears explicit Refresh progress after a failed read and keeps failure visible without changing navigation', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
     read(transport, prefs);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
     const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error });
@@ -613,16 +613,17 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'all_sessions' };
     const result = sessionResult(); result.sessions.items.push({ ...result.sessions.items[0], session_id: '00000000-0000-4000-8000-000000000003', title: 'Closed work', state: 'closed', closed_at: demo.updated_at });
     read(transport, prefs, projectResult(), result);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     expect(await screen.findByRole('heading', { name: 'All sessions', level: 1 })).toBeTruthy();
-    expect(screen.getByText('9 active · 3 closed')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Unavailable project' })).toBeTruthy();
-    expect(screen.getByText('/fixtures/unavailable-demo')).toBeTruthy();
-    expect(screen.getByText('Closed work')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /^Closed · \d+$/, level: 3 })).toBeTruthy();
+    const closed = document.querySelector('[data-session-card="00000000-0000-4000-8000-000000000003"]')!;
+    expect(within(closed as HTMLElement).getByRole('button', { name: 'Reopen' })).toBeTruthy();
     const next = preferences(2); transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Projects' })); });
     expect(await screen.findByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
-    expect(screen.getByText('0 waiting · incomplete')).toBeTruthy();
+    expect(screen.getByText(/^Counts are incomplete\./)).toBeTruthy();
+    expect(screen.getByText('Unavailable project')).toBeTruthy();
+    expect(screen.getByText('/fixtures/unavailable-demo')).toBeTruthy();
   });
   it('registers the exact root under canonical Registry scope', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
@@ -660,7 +661,7 @@ describe('source-backed navigation views and explicit registration', () => {
   ])('tells the owner how to give the saved setup instruction to a %s host', async (adapterId, wording, frequency, showsInstruction) => {
     const { transport, store } = setup(); read(transport);
     const binding = Object.values((demo as Session).bindings)[0]!;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
@@ -680,7 +681,7 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
     read(transport, prefs);
     const binding = Object.values((demo as Session).bindings)[0]!;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
@@ -688,7 +689,7 @@ describe('source-backed navigation views and explicit registration', () => {
     await act(async () => { await store.bind({ project_id: projectId, adapter_id: 'codex', configuration: adapter.configuration,
       external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
     const card = await screen.findByLabelText('Session setup');
-    const active = await screen.findByRole('heading', { name: 'Active', level: 3 });
+    const active = await screen.findByRole('heading', { name: /^Active sessions · \d+$/, level: 3 });
     expect(card.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(card).queryByRole('list')).toBeNull();
     expect(within(card).getByText('Unavailable capabilities: domain mcp, streaming output.')).toBeTruthy();
@@ -701,7 +702,7 @@ describe('source-backed navigation views and explicit registration', () => {
     const binding = Object.values((demo as Session).bindings)[0]!;
     const capabilities = structuredClone(binding.capabilities);
     for (const value of Object.values(capabilities)) if (typeof value === 'object') value.supported = true;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities,
@@ -736,18 +737,18 @@ describe('source-backed navigation views and explicit registration', () => {
     render(<BindSession store={store} project={projectsFixture.items[0] as ProjectSummary} sessions={sessionsFixture.items as SessionSummary[]} adapters={[adapter]} disabled={false} close={() => {}} />);
     expect(screen.getByRole('alert').textContent).toContain('Resolve its queued inputs before rebinding.');
   });
-  it('qualifies running labels by fresh current-generation observation and preserves closed/unbound/paused states', () => {
+  it('labels a session running only while it is active and its binding is connected', () => {
     const session = structuredClone(sessionsFixture.items[0]) as SessionSummary;
-    expect(bindingLabel(session)).toBe('Bound · running');
-    session.active_binding!.presence!.freshness = 'stale'; expect(bindingLabel(session)).toBe('Bound · execution unknown');
-    session.active_binding!.presence!.freshness = 'fresh'; session.active_binding!.presence!.generation = 'another'; expect(bindingLabel(session)).toBe('Bound · execution unknown');
-    session.active_binding!.owner_paused = true; expect(bindingLabel(session)).toBe('Bound · owner paused');
-    session.state = 'closed'; expect(bindingLabel(session)).toBe('Closed');
-    session.state = 'active'; session.active_binding = null; expect(bindingLabel(session)).toBe('Unbound');
+    session.active_binding!.connection_state = 'connected';
+    expect(sessionCardText(session, null, Date.now()).run).toBe('Agent running');
+    session.active_binding!.connection_state = 'disconnected'; expect(sessionCardText(session, null, Date.now()).run).toBe('Agent not running');
+    session.active_binding!.connection_state = 'connected'; session.state = 'closed';
+    expect(sessionCardText(session, null, Date.now())).toMatchObject({ run: 'Agent not running', closed: true });
+    session.state = 'active'; session.active_binding = null; expect(sessionCardText(session, null, Date.now())).toMatchObject({ agent: 'No agent', run: 'Agent not running' });
   });
   it('offers tab close separately from session lifecycle controls', async () => {
     const { transport, store } = setup(); read(transport);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => <p>Session workspace</p>} />);
     const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
     const close = /^Close .* tab$/;
     await waitFor(() => expect(within(tabs).getByRole('button', { name: close })).toBeTruthy());
@@ -764,7 +765,7 @@ describe('source-backed navigation views and explicit registration', () => {
       <p>Selected item {view.preferences?.selected_item_id}</p><p>{view.preferences?.filters.search}</p>
       <p>Scroll {view.preferences?.scroll?.offset}</p><p>{view.store.getSnapshot().snapshot?.session.title}</p>
     </div>;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={received} />);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={received} />);
     expect(await screen.findByText('Selected item 1.1')).toBeTruthy();
     expect(screen.getByText('Scroll 124')).toBeTruthy();
     expect(await screen.findByText('Canonical domain v1 demo', { selector: 'p' })).toBeTruthy();
@@ -772,11 +773,12 @@ describe('source-backed navigation views and explicit registration', () => {
   });
   it('reuses the source dialog focus trap, Escape and focus return', async () => {
     const { transport, store } = setup(); read(transport);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
     await screen.findByRole('heading', { name: 'Projects', level: 1 });
     const opener = screen.getByRole('button', { name: 'Register project' }); opener.focus(); fireEvent.click(opener);
     const dialog = screen.getByRole('dialog', { name: 'Register project' });
-    expect(document.activeElement).toBe(within(dialog).getByLabelText('Project root'));
+    // The Paperwhite dialog holds focus on its card first (ui/dialogs/Dialog).
+    expect(document.activeElement).toBe(dialog);
     const input = within(dialog).getByLabelText('Project root'); input.focus(); fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Register project' }));
     fireEvent.keyDown(dialog, { key: 'Escape' });
@@ -790,14 +792,14 @@ describe('tree edits through canonical navigation preferences', () => {
   it('keeps a confirmed search receipt when an overlapping refresh finishes its catalogues and uses that revision for the next filter', async () => {
     const { transport, store } = setup(), prefs = preferences();
     prefs.sessions[0].filters = { search: 'native', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false };
-    read(transport, prefs); await store.start(); transport.enqueue('session_get', loaded());
-    const opened = store.opened.open(route); await opened.refresh();
-    render(<NavigationSentenceTree navigation={store} store={opened} onReveal={() => {}} />);
+    read(transport, prefs); await store.start();
+    // The header search and the tree's status chips both write through saveSessionView with the current revision.
+    const view = () => structuredClone(store.getSnapshot().preferences!.sessions[0]) as SessionPreferences;
     const receipt = deferred<MutationEnvelope>(), projects = deferred<QueryEnvelope>();
     transport.enqueue('preferences_patch', receipt.promise);
-    vi.useFakeTimers();
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
-    await act(async () => { vi.advanceTimersByTime(100); });
+    const cleared = view(); cleared.filters.search = '';
+    let search!: Promise<boolean>;
+    await act(async () => { search = store.saveSessionView(cleared, store.getSnapshot().preferences!.revision); });
     expect(store.getSnapshot().writing).toBe(true);
     transport.enqueue('preferences_get', success('preferences_get', prefs));
     transport.enqueue('project_list', projects.promise);
@@ -812,9 +814,10 @@ describe('tree edits through canonical navigation preferences', () => {
     expect(store.getSnapshot().preferences?.revision).toBe(2);
     expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe('');
     expect(store.getSnapshot().status).toBe('ready'); expect(store.getSnapshot().error).toBeNull();
+    expect(await search).toBe(true);
     transport.enqueue('preferences_patch', patchReceipt(3));
-    const statuses = screen.getByRole('group', { name: 'Item status' });
-    await act(async () => { fireEvent.click(within(statuses).getByRole('button', { name: 'Open' })); });
+    const open = view(); open.filters.statuses = ['open'];
+    await act(async () => { await store.saveSessionView(open, store.getSnapshot().preferences!.revision); });
     expect(store.getSnapshot().preferences?.revision).toBe(3);
     expect(store.getSnapshot().preferences?.sessions[0]).toEqual({ ...prefs.sessions[0],
       filters: { ...prefs.sessions[0].filters, search: '', statuses: ['open'] } });
@@ -826,57 +829,8 @@ describe('tree edits through canonical navigation preferences', () => {
         preferences: { filters: { search: '', statuses: ['open'] } } }] },
     } });
   });
-  it('keeps the newest tree selection reveal through Later and new search after dismissing an older external reveal', async () => {
-    const { transport, store } = setup(), prefs = preferences(), session = structuredClone(demo) as Session;
-    prefs.global.selected_navigation = { kind: 'session', session: route };
-    prefs.sessions[0].filters.search = 'needle'; prefs.sessions[0].expanded_item_ids = [];
-    const root = session.items['1']!, child = session.items['1.1']!;
-    session.items = {
-      '1': { ...root, question: 'Parent context' },
-      '1.1': { ...child, question: 'Matching needle child' },
-      '1.2': { ...child, id: '1.2', ordinal: 2, question: 'Sibling outside search' },
-    };
-    session.messages = [];
-    const snapshot = () => success('session_get', { session, freshness: 'fresh' });
-    read(transport, prefs); await store.start();
-    transport.enqueue('session_get', snapshot());
-    const opened = store.opened.open(route); await opened.refresh();
-    const revealRoute = async (id: string, revision: number) => {
-      transport.enqueue('reveal_item', success('reveal_item', { ...route, item_id: id }));
-      transport.enqueue('session_get', snapshot(), snapshot());
-      transport.enqueue('preferences_patch', patchReceipt(revision));
-      await act(async () => { transport.emit('ariadne://route', { ...route, item_id: id }); });
-      await waitFor(() => expect(store.getSnapshot().preferences?.revision).toBe(revision));
-    };
-    const ids = () => screen.queryAllByRole('treeitem').map(row => row.getAttribute('data-item-id'));
-    const user = userEvent.setup();
-    render(<NavigationSentenceTree navigation={store} store={opened} onReveal={() => {}} />);
-    await revealRoute('1.2', 2);
-    expect(screen.getByText('Item 1.2 is outside the current filters.')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Dismiss temporary reveal' }));
-    expect(ids()).toEqual(['1', '1.1']);
-    transport.enqueue('reveal_item', success('reveal_item', { ...route, item_id: '1.1' }));
-    transport.enqueue('session_get', snapshot()); transport.enqueue('preferences_patch', patchReceipt(3));
-    await user.click(screen.getAllByRole('treeitem')[1]);
-    await waitFor(() => expect(store.getSnapshot().preferences?.sessions[0].selected_item_id).toBe('1.1'));
-    expect(document.activeElement?.getAttribute('data-item-id')).toBe('1.1');
-    transport.enqueue('preferences_patch', patchReceipt(4)); await user.keyboard('z');
-    await waitFor(() => expect(store.getSnapshot().preferences?.later).toEqual([{ ...route, item_id: '1.1' }]));
-    transport.enqueue('preferences_patch', patchReceipt(5)); vi.useFakeTimers();
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'No canonical native tree question matches this phrase' } });
-    await act(async () => { vi.advanceTimersByTime(100); });
-    expect(screen.getByText('Item 1.1 is outside the current filters.')).toBeTruthy();
-    expect(ids()).toEqual(['1', '1.1']);
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss temporary reveal' }));
-    expect(ids()).toEqual([]); expect(screen.getByText('No sentences match these filters.')).toBeTruthy();
-    expect(store.getSnapshot().preferences?.sessions[0]).toEqual({ ...prefs.sessions[0], selected_item_id: '1.1',
-      filters: { ...prefs.sessions[0].filters, search: 'No canonical native tree question matches this phrase' } });
-    expect(store.getSnapshot().preferences?.later).toEqual([{ ...route, item_id: '1.1' }]);
-    vi.useRealTimers(); await revealRoute('1.2', 6);
-    expect(screen.getByText('Item 1.2 is outside the current filters.')).toBeTruthy();
-    expect(ids()).toEqual(['1', '1.2']);
-    expect(document.activeElement?.getAttribute('data-item-id')).toBe('1.2');
-  });
+  // The temporary-reveal sequence (outside-filter reveal, Resume, reselect) is covered by tests/ui/tree/component.test.tsx
+  // now that the workspace, not the tree, owns the reveal.
   it('completes saved view edits while a catalogue refresh is blocked and rejects its older snapshot', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
     const blocked = deferred<QueryEnvelope>(); transport.enqueue('preferences_get', blocked.promise);
@@ -1059,14 +1013,12 @@ describe('tree edits through canonical navigation preferences', () => {
     expect(calls).toHaveLength(2); expect(calls[0]).toEqual(calls[1]);
     expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe('immutable choice');
   });
-  it('composes real tree Later callbacks into the same canonical mutation path and preserves unrelated preferences', async () => {
+  it('sends Later through the same canonical mutation path and preserves unrelated preferences', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.sessions[0].filters.search = '';
-    read(transport, prefs); await store.start(); transport.enqueue('session_get', loaded());
-    const opened = store.opened.open(route); await opened.refresh();
-    render(<NavigationSentenceTree navigation={store} store={opened} onReveal={() => {}} />);
+    read(transport, prefs); await store.start();
     const next = structuredClone(prefs); next.revision = 2; next.later = [{ ...route, item_id: '1' }];
     transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
-    await act(async () => { fireEvent.keyDown(screen.getAllByRole('treeitem')[0], { key: 'z' }); });
+    await act(async () => { await store.setLater({ ...route, item_id: '1' }, true, 1); });
     await waitFor(() => expect(store.getSnapshot().preferences?.later).toEqual(next.later));
     expect(transport.calls.find(call => call.name === 'preferences_patch')!.request).toEqual({ session: null, command: {
       api_version: 1, command: 'preferences_patch', op_id: operationId, params: { expected_preferences_revision: 1,

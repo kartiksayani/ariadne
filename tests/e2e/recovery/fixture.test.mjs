@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { assertRepairAdmission, openRecoveryReply, originalReplyRequest, repairResultRequest } from '../../../apps/desktop/tests/e2e/recovery.spec.mjs';
+import { openOwnerReply } from '../../../apps/desktop/tests/e2e/owner-reply.mjs';
+import { assertRepairAdmission, originalReplyRequest, repairResultRequest } from '../../../apps/desktop/tests/e2e/recovery.spec.mjs';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 
 function fixture() {
@@ -57,48 +58,63 @@ test('escaped multiline owner work injected into the decoded repair instruction 
   assert.throws(() => assertRepairAdmission(state.configuration, state.admission, state.session, state.original, state.reply), /Repair cannot repeat the original owner work/);
 });
 
-test('a known successive Reply waits for the delayed Saved acknowledgement before choosing another form', async t => {
-  const previousBrowser = globalThis.browser;
-  t.after(() => { globalThis.browser = previousBrowser; });
-  const calls = []; let rendered = 'original reply';
-  const another = {
-    async isExisting() { assert.fail('Successive Reply cannot decide once from a transient renderer state'); },
-    async waitForDisplayed() { assert.equal(rendered, 'original reply'); calls.push('await acknowledgement'); rendered = 'saved acknowledgement'; },
-    async waitForEnabled() { assert.equal(rendered, 'saved acknowledgement'); calls.push('acknowledgement enabled'); },
-    async scrollIntoView() {},
-    async click() { assert.equal(rendered, 'saved acknowledgement'); calls.push('write another'); rendered = 'new form'; },
-  };
+// The non-waiting detail: its Reply box closes once the previous reply saved.
+function replyBoxBrowser(closesAfter) {
+  const calls = []; let polls = 0, rendered = 'sent box';
   const reply = {
-    async waitForDisplayed() { assert.equal(rendered, 'new form'); calls.push('new Reply displayed'); },
-    async waitForEnabled() { assert.equal(rendered, 'new form'); },
+    async waitForDisplayed() { assert.equal(rendered, 'closed box'); calls.push('Reply displayed'); },
+    async waitForEnabled() { assert.equal(rendered, 'closed box'); },
     async scrollIntoView() {},
-    async click() { assert.equal(rendered, 'new form'); calls.push('choose Reply'); },
+    async click() { assert.equal(rendered, 'closed box'); calls.push('choose Reply'); rendered = 'new box'; },
   };
-  globalThis.browser = {
+  const exists = value => ({ async isExisting() { return value(); } });
+  const browser = {
     $(selector) {
-      if (selector === '.owner-input') return { $(selector) { assert.equal(selector, 'button=Write another input'); return another; } };
-      assert.equal(selector, '[aria-label="Owner actions"]');
-      assert.equal(rendered, 'new form', 'Original Reply cannot be reused before Saved replaces it');
-      return { $(selector) { assert.equal(selector, 'button=Reply'); return reply; } };
+      if (selector === '.item-detail .detail-answer-slot') return exists(() => false);
+      if (selector === '.item-detail .detail-box') return exists(() => {
+        if (++polls > closesAfter) rendered = 'closed box';
+        calls.push(`box ${rendered}`); return rendered !== 'closed box';
+      });
+      if (selector === '.item-detail .detail-box textarea') return exists(() => rendered !== 'closed box');
+      assert.equal(selector, '[aria-label="Item actions"]');
+      assert.equal(rendered, 'closed box', 'The sent Reply box cannot be reused before Saved closes it');
+      return { $(selector) { assert.equal(selector, 'button*=Reply'); return reply; } };
+    },
+    async waitUntil(condition, options) {
+      for (let attempt = 0; attempt < 3; attempt++) if (await condition()) return true;
+      throw new Error(options.timeoutMsg);
     },
   };
-  await openRecoveryReply(true);
-  assert.deepEqual(calls, ['await acknowledgement', 'acknowledgement enabled', 'write another', 'new Reply displayed', 'choose Reply']);
+  return { browser, calls };
+}
+
+test('a known successive Reply waits for the sent Reply box to close before choosing another form', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  const fake = replyBoxBrowser(1);
+  globalThis.browser = fake.browser;
+  await openOwnerReply(true);
+  assert.deepEqual(fake.calls, ['box sent box', 'box closed box', 'Reply displayed', 'choose Reply']);
 });
 
 test('a missing Saved acknowledgement fails before a known successive Reply can choose any form', async t => {
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; });
+  const fake = replyBoxBrowser(Infinity);
+  globalThis.browser = fake.browser;
+  await assert.rejects(openOwnerReply(true), /The sent Reply box did not close/);
+  assert.equal(fake.calls.includes('choose Reply'), false);
+  // A waiting item's answer slot must show its Saved receipt's "Write another input" first.
   globalThis.browser = {
     $(selector) {
-      assert.equal(selector, '.owner-input');
-      return { $(selector) {
+      if (selector === '.item-detail .detail-answer-slot') return { async isExisting() { return true; }, $(selector) {
         assert.equal(selector, 'button=Write another input');
         return { async waitForDisplayed() { throw new Error('Saved acknowledgement absent'); } };
       } };
+      assert.fail(`Successive answer cannot choose another form: ${selector}`);
     },
   };
-  await assert.rejects(openRecoveryReply(true), /Saved acknowledgement absent/);
+  await assert.rejects(openOwnerReply(true), /Saved acknowledgement absent/);
 });
 
 test('original publication deliberately omits its result; repair references the retained reply without another mutation', () => {

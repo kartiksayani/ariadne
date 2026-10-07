@@ -19,78 +19,34 @@ body {
   height: 100%;
 }
 
-.product-app .app-waiting {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  overflow: auto;
-}
-
-.product-app .app-waiting > .ref-waiting {
-  flex: 1;
-  min-height: 0;
-}
-
-.product-app .app-session > .lifecycle-binding,
-.product-app .app-session > .lifecycle-recovery {
-  margin-bottom: 16px;
-}
-
-/* The tree owns sentence scrolling; catalogue and Graph keep pane scrolling. */
-.product-app .shell-center:has(.nav-session-content .sentence-tree) {
+/* The tree column owns its scrolling, Graph included (it renders inside the column); catalogue pages keep pane scrolling. */
+.product-app .shell-center:has(.nav-session-content .tree-column) {
   overflow: hidden;
 }
 
-.product-app .nav-session-content:has(.sentence-tree),
-.product-app .app-session:has(> .sentence-tree) {
+.product-app .nav-session-content:has(.tree-column) {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
-}
-
-.product-app .app-session > .sentence-tree {
-  flex: 1;
-  height: auto;
-}
-
-.product-app .nav-session-content:has(.sentence-tree) {
-  padding: 12px 16px;
-}
-
-.product-app .nav-session-content:has(.sentence-tree) > .nav-banner {
-  flex-shrink: 1;
-  max-height: 15%;
-  overflow: auto;
-}
-
-.product-app .app-session:has(> .sentence-tree) > .lifecycle-binding,
-.product-app .app-session:has(> .sentence-tree) > .lifecycle-recovery,
-.product-app .app-session:has(> .sentence-tree) > .history-action-controls {
-  flex-shrink: 1;
-  max-height: 10%;
-  margin-block: 0 4px;
-  overflow: auto;
-}
-
-.product-app .shell-detail-scroll {
   padding: 0;
 }
 
-.product-app .item-history {
-  flex-shrink: 0;
-  width: 100%;
-  min-width: 0;
-  height: auto;
-  border: 0;
-  overflow: visible;
+.product-app .nav-session-content:has(.tree-column) > .nav-banner {
+  flex-shrink: 1;
+  max-height: 15%;
+  margin: 10px 16px 0;
+  overflow: auto;
 }
 
-.product-app .shell-detail-scroll .owner-input {
-  padding: 16px;
+/* RootBoundary: a render error names itself instead of leaving the window blank. */
+.root-failure {
+  padding: 32px;
+  font-family: var(--font-body);
+  color: var(--color-text);
 }
 
-.product-app .message-history-rail {
-  border-left: 1px solid var(--color-divider);
+.root-failure > pre {
+  white-space: pre-wrap;
+  user-select: text;
 }

@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { designNow, frameSpec, graphFrame, type FrameSpec } from './frames';
+import { designNow, frameNow, frameSpec, graphFrame, variantIds, type FrameSpec } from './frames';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 
@@ -101,27 +101,87 @@ async function settle(page: Page) {
 /** Opens the frame in the app and puts it in the frame's state. */
 async function openApp(page: Page, origin: string, spec: FrameSpec) {
   await page.setViewportSize({ width: spec.width, height: spec.height });
-  await page.clock.setFixedTime(designNow);
+  await page.clock.setFixedTime(frameNow(spec));
   await page.goto(`${origin}/tests/ui/design/gallery.html?frame=${spec.id}`);
   await page.waitForFunction(() => (window as { __designError?: string }).__designError
     || /\d+ items/.test(document.querySelector('.shell-summary')?.textContent ?? ''), null, { timeout: 60_000 });
   expect(await page.evaluate(() => (window as { __designError?: string }).__designError)).toBeUndefined();
   await expect(page.locator('html')).toHaveAttribute('data-theme', spec.theme);
   if (spec.state !== 'loading') await expect(page.getByText(/^(Loading|Opening)\b/)).toHaveCount(0, { timeout: 30_000 });
-  else await expect(page.getByText(/^Loading session/).first()).toBeVisible();
+  else await expect(page.getByText(/^Reading the session…/).first()).toBeVisible();
   const row = (id?: string) => id ? page.locator(`[data-item-id="${id}"]`) : page.locator('[data-item-id]').first();
-  if (spec.answering) { await row(spec.answering).focus(); await page.keyboard.press('a'); }
+  // The prototype folds these topics on load (Ariadne.dc.html:940); the app keeps topic folds local.
+  for (const name of spec.collapseTopics ?? []) {
+    const topic = page.locator(`[role="treeitem"][aria-label="${name}"]`);
+    // Hovering a band shows its actions, which re-wrap narrow bands; a dispatched click leaves no hover behind.
+    await topic.locator('.tree-chevron').dispatchEvent('click');
+    await expect(topic).toHaveAttribute('aria-expanded', 'false');
+  }
+  // The reveal scenario (Ariadne.dc.html:938): an item route, as a notification opens one, lands outside the Waiting filter.
+  if (spec.scenario === 'reveal') {
+    await page.evaluate(itemId => {
+      const fixture = (window as unknown as { __designFixture: { route: object; transport: { emit: (event: string, hint: object) => void } } }).__designFixture;
+      fixture.transport.emit('ariadne://route', { ...fixture.route, item_id: itemId });
+    }, spec.selected!);
+    await expect(page.getByText('Showing an item outside your current filters.')).toBeVisible();
+  }
+  if (spec.answering) {
+    await row(spec.answering).focus();
+    if (!spec.detail) await page.keyboard.press('Escape');
+    await page.keyboard.press('a');
+    await expect(page.locator(`[data-item-id="${spec.answering}"] .answer`)).toBeVisible();
+  }
+  // open-mode opens the reply or follow-up box; r opens either (Ariadne.dc.html:1490). The frame draws it unfocused.
+  if (spec.openMode) {
+    await row(spec.selected).first().focus(); await page.keyboard.press('r');
+    await page.locator('.detail-box textarea').waitFor();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  }
   if (graphFrame(spec)) {
     await row(spec.selected).focus();
     if (spec.selected && !spec.detail) await page.keyboard.press('Escape');
     await page.keyboard.press('g');
   }
+  // hover-msg (1a): the rail message is hovered, so the items it touched are highlighted. A dispatched
+  // mouseover is React's mouseenter and leaves the rail's scroll position and the pointer alone.
+  if (spec.hoverMsg) await railMessage(page, spec.hoverMsg).dispatchEvent('mouseover');
+  await settle(page);
+}
+
+const railMessage = (page: Page, number: number) => page.locator('.pw-rail-list [data-message-id]').filter({
+  has: page.locator('.pw-excerpt-number', { hasText: new RegExp(`^#${number}$`) }) });
+
+/**
+ * Puts the app's rail where the design's rail sits. The prototype scrolls its rail to the bottom 60 ms after
+ * mount (Ariadne.dc.html:988), before its fonts settle; in some frames the reflow leaves it above the bottom,
+ * showing "Follow latest" (Ariadne.dc.html:2196). The app's rail is scrolled to the same message and offset.
+ */
+async function matchRail(page: Page, designPage: Page, id: string) {
+  const aside = designPage.locator(`[id="${id}"] .dv-card aside[aria-label="Messages"]`);
+  if (!await aside.count()) return;
+  const position = await aside.evaluate(element => {
+    const list = element.children[1] as HTMLElement;
+    if (list.scrollHeight - list.scrollTop - list.clientHeight < 24) return null;
+    const top = list.getBoundingClientRect().top;
+    for (const card of list.children) {
+      const rect = card.getBoundingClientRect(), number = /^\s*#(\d+)/.exec(card.textContent ?? '')?.[1];
+      if (number && rect.bottom > top) return { number: Number(number), offset: rect.top - top };
+    }
+    return null;
+  });
+  if (!position) return;
+  const card = railMessage(page, position.number);
+  await card.evaluate((element, offset) => {
+    const list = element.closest<HTMLElement>('.pw-rail-list')!;
+    list.scrollTop += element.getBoundingClientRect().top - list.getBoundingClientRect().top - offset;
+  }, position.offset);
+  await expect(page.locator('.pw-rail-follow')).toHaveText('Follow latest');
   await settle(page);
 }
 
 /** Pixel diff in the browser canvas: mismatch ratio and a diff image (mismatches red over the dimmed app). */
-async function compare(page: Page, design: Buffer, app: Buffer) {
-  return page.evaluate(async ({ design, app, tolerance }) => {
+async function compare(page: Page, design: Buffer, app: Buffer, regions: readonly Region[] = []) {
+  return page.evaluate(async ({ design, app, tolerance, regions }) => {
     const load = (base64: string) => new Promise<HTMLImageElement>((done, fail) => {
       const image = new Image(); image.onload = () => done(image); image.onerror = fail; image.src = `data:image/png;base64,${base64}`;
     });
@@ -134,28 +194,54 @@ async function compare(page: Page, design: Buffer, app: Buffer) {
     const a = pixels(left), b = pixels(right), canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const context = canvas.getContext('2d')!, out = context.createImageData(width, height);
     let mismatched = 0;
+    const inRegion = regions.map(() => 0);
     for (let index = 0; index < a.length; index += 4) {
       const differs = [0, 1, 2, 3].some(channel => Math.abs(a[index + channel] - b[index + channel]) > tolerance);
-      if (differs) { mismatched++; out.data.set([255, 0, 64, 255], index); }
-      else out.data.set([b[index] * 0.3, b[index + 1] * 0.3, b[index + 2] * 0.3, 255], index);
+      if (differs) {
+        mismatched++;
+        const x = (index / 4) % width, y = Math.floor(index / 4 / width);
+        regions.forEach((region, at) => { if (x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height) inRegion[at]++; });
+        out.data.set([255, 0, 64, 255], index);
+      } else out.data.set([b[index] * 0.3, b[index + 1] * 0.3, b[index + 2] * 0.3, 255], index);
     }
     context.putImageData(out, 0, 0);
-    return { ratio: mismatched / (width * height), width, height, png: canvas.toDataURL('image/png').split(',')[1] };
-  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance });
+    return { ratio: mismatched / (width * height), regions: regions.map((region, at) => inRegion[at] / Math.max(1, region.width * region.height)), width, height,
+      png: canvas.toDataURL('image/png').split(',')[1] };
+  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance, regions });
 }
+interface Region { readonly name: string; readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 
 test.describe.configure({ mode: 'parallel' });
-for (const id of designFrames) {
+/** The tree row of item `itemId` in a board card: the Item Row whose id label reads it (Item Row.dc.html). */
+const designRow = (designPage: Page, card: string, itemId: string) => designPage.locator(`[id="${card}"] .dv-card [role="treeitem"]`)
+  .filter({ has: designPage.locator('span', { hasText: new RegExp(`^${itemId.replace(/\./g, '\\.')}$`) }) }).first();
+
+for (const id of [...designFrames, ...variantIds]) {
   test(`frame ${id}`, async ({ page, origin, designPage }) => {
     let spec: FrameSpec;
     try { spec = frameSpec(id); } catch (error) { test.skip(true, (error as Error).message); return; }
+    const card = spec.design ?? id;
     const denied: string[] = [];
     await route(page.context(), origin, denied);
     await openApp(page, origin, spec);
+    if (spec.rail) await matchRail(page, designPage, card);
+    // The pointer rests on a row in both: the prototype's hoverItem and the app's :hover. Moved off again after the capture.
+    if (spec.hoverItem) {
+      await designRow(designPage, card, spec.hoverItem).hover();
+      await page.locator(`.tree-item[data-item-id="${spec.hoverItem}"]`).hover();
+      await settle(page); await settle(designPage);
+    }
+    try { await capture(page, designPage, spec, id, card, denied); } finally { if (spec.hoverItem) await designPage.mouse.move(0, 0); }
+  });
+}
+
+async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string, card: string, denied: readonly string[]) {
+  {
     const shell = await page.evaluate(() => {
       const height = (selector: string) => document.querySelector(selector)?.getBoundingClientRect().height ?? null;
       const columns = [...document.querySelector('.shell-body')!.children].map(child => ({
-        name: ['waiting', 'center', 'detail'].find(name => child.classList.contains(`shell-${name}`)) ?? 'rail', width: child.getBoundingClientRect().width }));
+        name: ['waiting', 'center', 'detail'].find(name => child.classList.contains(`shell-${name}`)) ?? 'rail',
+        x: child.getBoundingClientRect().x, width: child.getBoundingClientRect().width }));
       return { header: height('.shell-header'), tabs: height('.shell-tabs'), footer: height('.shell-footer'), columns };
     });
     expect(shell.header).toBe(48); expect(shell.tabs).toBe(38); expect(shell.footer).toBe(30);
@@ -166,21 +252,28 @@ for (const id of designFrames) {
     }
     const app = await page.screenshot({ animations: 'disabled' });
     // The card sits at a fractional page offset; clip the frame's exact size at the rounded origin.
-    const box = await designPage.locator(`[id="${id}"] .dv-card`).evaluate(node => {
+    const box = await designPage.locator(`[id="${card}"] .dv-card`).evaluate(node => {
       const rect = node.getBoundingClientRect(); return { x: rect.x + window.scrollX, y: rect.y + window.scrollY };
     });
     const design = await designPage.screenshot({ animations: 'disabled', fullPage: true,
       clip: { x: Math.round(box.x), y: Math.round(box.y), width: spec.width, height: spec.height } });
+    // Each body column's own ratio, so a view can be followed apart from the columns around it.
+    const columns = await page.evaluate(() => [...document.querySelector('.shell-body')!.children].map(child => {
+      const rect = child.getBoundingClientRect();
+      return { name: ['waiting', 'center', 'detail'].find(name => child.classList.contains(`shell-${name}`)) ?? 'rail',
+        x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
+    }));
     const canvas = await page.context().newPage();
-    const result = await compare(canvas, design, app);
+    const result = await compare(canvas, design, app, columns);
     await canvas.close();
     writeFileSync(resolve(output, `${id}-design.png`), design);
     writeFileSync(resolve(output, `${id}-app.png`), app);
     writeFileSync(resolve(output, `${id}-diff.png`), Buffer.from(result.png, 'base64'));
     const threshold = (thresholds as Record<string, number>)[id] ?? 0;
     writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ ratio: Number(result.ratio.toFixed(4)), threshold, tolerance,
+      columns: Object.fromEntries(columns.map((column, at) => [column.name, Number(result.regions[at].toFixed(4))])),
       size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }, null, 2)}\n`);
     expect(denied).toEqual([]);
     expect(result.ratio, `${id} mismatch ratio`).toBeLessThanOrEqual(threshold);
-  });
+  }
 }

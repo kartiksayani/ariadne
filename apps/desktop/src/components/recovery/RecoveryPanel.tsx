@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useSession, type Immutable } from '../../data';
 import type { Attempt, Input, ResolutionKind, Session, TurnState } from '../../generated/domain/models';
-import { ReferenceDialog } from '../reference/ReferenceDialog';
-import { ActionFailure } from '../bindings/BindingControls';
+import { Dialog } from '../../ui/dialogs/Dialog';
+import { ActionFailure } from '../edge-states/EdgeState';
 import { SessionActions, useSessionActions } from '../bindings/actions';
 import { qualifiedPresence } from '../bindings/presence';
 import '../bindings/controls.css';
@@ -65,31 +65,28 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
       input_id: target.input.id, attempt_id: target.attempt.id, expected_revision: selected.revision, decision, reason, evidence,
     } }, selected.revision)) setSelected(null);
   };
-  return <section className="ariadne-reference lifecycle-recovery" aria-label="Delivery recovery">
+  return <section className="lifecycle-recovery" aria-label="Delivery recovery">
     {!selected && <ActionFailure actions={actions} />}
     {targets.length > 0 && <><h3>Delivery needs attention</h3><p>Inspect the exact input, prior replies and effects. Recovery never sends or resumes automatically.</p></>}
     {targets.map(({ input, attempt }) => <article className="lifecycle-recovery-row" key={`${input.id}/${attempt.id}`} data-input-id={input.id} data-attempt-id={attempt.id}>
       <div><strong>{input.payload.target_snapshot.item_question ?? input.payload.target_snapshot.topic_name}</strong>
         <p>Input {input.seq} · {input.kind} · {attempt.acceptance === 'uncertain' ? 'Delivery uncertain' : attempt.result_state === 'missing' ? 'Missing result' : input.state}
           {' · '}host turn {attempt.turn_state} · {attempt.purpose.replace(/_/g, ' ')}</p></div>
-      <button type="button" className="ref-button ref-secondary" disabled={disabled} onClick={() => {
+      <button type="button" className="btn btn-secondary" disabled={disabled} onClick={() => {
         setSelected({ inputId: input.id, attemptId: attempt.id, revision: snapshot.revision });
         setDecision(''); setReason(''); setIdle(false); setDuplicate(false); setTurn('unknown'); setHostTurn('');
       }}>Review recovery</button>
     </article>)}
     {operation.receipt && 'data' in operation.receipt && operation.receipt.data.kind === 'input_resolve'
       && <p role="status">Recovery decision saved. Inspect the refreshed queue. Resume dispatch is a separate explicit action.</p>}
-    {selected && <ReferenceDialog title="Resolve delivery" width={620} onCancel={() => { if (!operation.writing) setSelected(null); }} actions={<>
-      <button type="button" className="ref-button ref-secondary" disabled={operation.writing} onClick={() => setSelected(null)}>Cancel</button>
-      <button type="button" className="ref-button ref-primary" disabled={disabled || changed || !decision || !reason.trim()
-        || !!presence?.busy || !presence?.idle && !idle || decision === 'resend' && !duplicate}
-        onClick={() => { void submit(); }}>Save recovery decision</button></>}>
+    {selected && <Dialog label="Resolve delivery" width={620} onCancel={() => { if (!operation.writing) setSelected(null); }}>
+      <div className="dialog-title">Resolve delivery</div>
       <div className="lifecycle-dialog">
         <ActionFailure actions={actions} />
         <p>{snapshot.title} · {binding?.external_session_id} · generation <code>{binding?.generation}</code></p>
         <p>Input <code>{selected.inputId}</code> · attempt <code>{selected.attemptId}</code></p>
         {changed && <div role="alert"><p>The session or attempt changed. Review the current evidence before a new decision.</p>
-          {target && <button type="button" className="ref-button ref-secondary" disabled={disabled} onClick={() => {
+          {target && <button type="button" className="btn btn-secondary" disabled={disabled} onClick={() => {
             setSelected({ ...selected, revision: snapshot.revision }); setDecision(''); setIdle(false); setDuplicate(false);
           }}>Review current snapshot</button>}</div>}
         {target && <><p className="lifecycle-preserve">{target.input.payload.text}</p>
@@ -110,7 +107,7 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
           <label>Reason<input value={reason} required disabled={operation.writing || !!operation.pending} onChange={event => setReason(event.target.value)} /></label>
           {decision === 'request_result_repair' && <p>Request a new result-only model turn that inspects completed work. It can still make mistakes. Review prior effects before resuming.</p>}
           {decision === 'skip' && <p>This records Skipped, preserving prior results and replies. It does not mark the input Handled.</p>}
-          {decision === 'resend' && <><p className="ref-warning" role="alert">Resending may repeat work and side effects. Ariadne cannot guarantee exactly-once host execution after a lost acknowledgement.</p>
+          {decision === 'resend' && <><p className="pw-dialog-warn" role="alert">Resending may repeat work and side effects. Ariadne cannot guarantee exactly-once host execution after a lost acknowledgement.</p>
             <label><input type="checkbox" disabled={operation.writing || !!operation.pending} checked={duplicate} onChange={event => setDuplicate(event.target.checked)} />I reviewed the duplicate-work risk.</label></>}
           {decision === 'confirm_evidence' && <><p>Record attributed owner evidence. This does not create an agent result or successful host completion.</p>
             <label>Observed outcome<select tabIndex={0} value={turn} disabled={operation.writing || !!operation.pending} onChange={event => setTurn(event.target.value as TurnState)}>
@@ -120,6 +117,12 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
           {presence?.busy ? <p role="alert">The host is running or waiting for approval. Interrupt it in the terminal before recovery.</p>
             : !presence?.idle && <label><input type="checkbox" disabled={operation.writing || !!operation.pending} checked={idle} onChange={event => setIdle(event.target.checked)} />I confirm the terminal is stopped or idle now. This is my attestation, not machine evidence.</label>}
         </>}
-      </div></ReferenceDialog>}
+      </div>
+      <div className="dialog-actions">
+        <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={() => setSelected(null)}>Cancel</button>
+        <button type="button" className="btn btn-primary" disabled={disabled || changed || !decision || !reason.trim()
+          || !!presence?.busy || !presence?.idle && !idle || decision === 'resend' && !duplicate}
+          onClick={() => { void submit(); }}>Save recovery decision</button>
+      </div></Dialog>}
   </section>;
 }

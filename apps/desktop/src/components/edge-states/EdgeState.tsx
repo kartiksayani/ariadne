@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { CoreFailure, ServiceFailure, type SessionState } from '../../data';
+import { SessionActions, useSessionActions } from '../bindings/actions';
 import '../bindings/controls.css';
 
 export type EdgeKind = 'empty' | 'loading' | 'all_clear' | 'no_results' | 'stale' | 'unavailable' | 'malformed' | 'write_failure' | 'reconnecting';
@@ -18,12 +19,26 @@ export function EdgeState({ kind, children, detail, onRetry, retryLabel = 'Refre
   kind: EdgeKind; children?: ReactNode; detail?: ReactNode; onRetry?: () => void; retryLabel?: string;
 }) {
   const [heading, text, icon] = copy[kind];
-  return <div className="ariadne-reference lifecycle-edge" data-edge-state={kind}>
+  return <div className="lifecycle-edge" data-edge-state={kind}>
     <div className="lifecycle-notice" role={['unavailable', 'malformed', 'write_failure'].includes(kind) ? 'alert' : 'status'}>
       <i className={icon} aria-hidden="true" /><div><strong>{heading}</strong><p>{text}</p>{detail}</div>
-      {onRetry && <button type="button" className="ref-button ref-secondary" onClick={onRetry}>{retryLabel}</button>}
-    </div>{kind === 'loading' && <div className="ref-waiting-skeleton" aria-hidden="true"><span /><span /><span /></div>}{children}
+      {onRetry && <button type="button" className="btn btn-secondary" onClick={onRetry}>{retryLabel}</button>}
+    </div>{children}
   </div>;
+}
+/** The saved action whose completion is unknown, with its reviewed parameters and a deliberate Reconcile. */
+export function ActionFailure({ actions }: { actions: SessionActions }) {
+  const state = useSessionActions(actions);
+  const command = state.pending?.command;
+  return state.error && <EdgeState kind="write_failure" detail={<><p>{state.error.message}
+    {state.error instanceof CoreFailure && ` ${state.error.error.hint}`}</p>
+    {command?.command === 'input_resolve' && <p>Pending {command.params.decision.replace(/_/g, ' ')} for input <code>{command.params.input_id}</code>
+      {' · '}attempt <code>{command.params.attempt_id}</code> · reviewed revision {command.params.expected_revision}.</p>}
+    {command && (command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect')
+      && <p>Pending {command.command.replace('binding_', '')} · reviewed generation <code>{command.params.expected_generation}</code>.</p>}
+    {command?.command === 'binding_connect' && <p>Pending connection to {command.params.adapter_id} · {command.params.external_session_id}.</p>}
+    </>}
+    onRetry={state.pending && !state.writing ? () => { void actions.retry(); } : undefined} retryLabel="Reconcile saved action" />;
 }
 export function SessionNotice({ state, refresh }: { state: SessionState; refresh: () => void }) {
   const error = state.error;

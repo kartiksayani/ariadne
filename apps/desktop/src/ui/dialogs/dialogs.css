@@ -1,0 +1,189 @@
+/* Paperwhite dialogs, ported from Ariadne.dc.html:485-520 with the same values. */
+.pw-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--color-neutral-900) 55%, transparent);
+}
+
+.pw-dialog {
+  /* A long dialog (registration, recovery) scrolls inside the window's padding. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--a-card);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  outline: none;
+}
+
+/* The card takes focus only to hold it inside; its controls show the ring. */
+.pw-overlay .pw-dialog:focus-visible {
+  outline: none;
+}
+
+.pw-dialog-body {
+  font-size: 13.5px;
+  line-height: 1.6;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
+}
+
+.pw-dialog-lead {
+  font-size: 13.5px;
+  line-height: 1.55;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.pw-dialog-danger-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pw-dialog-danger-title i {
+  flex: none;
+  margin-top: 2px;
+  font-size: 18px;
+  color: var(--a-danger);
+}
+
+.pw-dialog-danger-title span { text-wrap: pretty; }
+
+.pw-dialog-warn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--a-danger);
+}
+
+.pw-dialog-warn i { font-size: 14px; }
+
+.pw-dialog-error {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--a-danger);
+}
+
+.pw-danger {
+  color: var(--a-danger);
+  border-color: var(--a-danger);
+}
+
+.pw-danger:hover { background: color-mix(in srgb, var(--a-danger) 12%, transparent); }
+
+/* — Agent isn’t running: the two routes — */
+.pw-dialog-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pw-dialog-option {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 400;
+}
+
+.pw-dialog-option-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.pw-dialog-option-label i { font-size: 15px; }
+
+.pw-dialog-option-desc {
+  padding-left: 23px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 68%, transparent);
+}
+
+/* — Continue in this session: the summary — */
+.pw-continue-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--a-bg);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.pw-continue-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pw-continue-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.pw-continue-group-title i { font-size: 12px; }
+
+.pw-continue-line {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pw-continue-line code {
+  flex: none;
+  min-width: 30px;
+  padding-top: 1px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.pw-continue-line span { text-wrap: pretty; }
+
+.pw-continue-status {
+  font-size: 13px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-text) 68%, transparent);
+}
+
+/* — dispatch and connection — */
+.pw-dialog-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pw-dialog-facts dt { color: color-mix(in srgb, var(--color-text) 58%, transparent); }
+.pw-dialog-facts dd { margin: 0; }
+
+.pw-dialog-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Kept last: more specific than the icon rules above. */
+.pw-dialog .btn i { font-size: 14px; }

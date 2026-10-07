@@ -1,14 +1,3 @@
-.history-action-controls, .history-action-topic {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.history-action-controls {
-  margin-block: 12px;
-}
-
 .history-action-dialog {
   display: grid;
   gap: 12px;

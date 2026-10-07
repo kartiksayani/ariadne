@@ -82,7 +82,7 @@ export class NavigationStore {
   private readonly reconcile = () => { void this.refresh(); };
   private readonly visibility = () => { if (document.visibilityState === 'visible') this.reconcile(); };
 
-  constructor(private readonly service: RendererService, private readonly operationId = () => crypto.randomUUID()) {
+  constructor(readonly service: RendererService, private readonly operationId = () => crypto.randomUUID()) {
     this.opened = new OpenSessions(service);
     this.routes = new RegisteredRoutes(service, this.opened);
   }

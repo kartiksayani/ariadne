@@ -93,10 +93,21 @@ export class AppTransport implements DesktopTransport {
         input.id = crypto.randomUUID(); input.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1; input.kind = command.params.kind;
         input.message_id = message.id; input.target = structuredClone(command.params.target); input.payload.intent = command.params.kind; input.payload.text = command.params.text;
         input.payload.target_snapshot.item_question = session.items[message.item_id!]!.question;
+        // Core binds an answer to the item's open round (the Waiting card reads it).
+        input.payload.selected_option_id = command.params.selected_option_id;
+        input.payload.context = { ...input.payload.context, round_id: command.params.kind === 'answer' ? session.items[message.item_id!]!.current_round_id : null };
         session.messages.push(message); session.inputs[input.id] = input; ++session.revision;
         this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
         return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
           data: { kind: 'input_submit', input_id: input.id, input_seq: input.seq, message_id: message.id, message_number: message.number } } } as T;
+      }
+      if (command.command === 'item_remove') {
+        // Core removes the item and everything below it (ADR-0083).
+        const gone = new Set([command.params.item_id]);
+        for (let grew = true; grew;) { grew = false; for (const item of Object.values(session.items)) if (item?.parent && gone.has(item.parent) && !gone.has(item.id)) { gone.add(item.id); grew = true; } }
+        gone.forEach(id => { delete session.items[id]; }); ++session.revision;
+        return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
+          data: { kind: 'removal', item_ids: [...gone], topic_ids: [], input_ids: [], family: [], notice: null, backup: 'backups/pre-remove.json' } } } as T;
       }
       throw new Error(`Unexpected mutation ${name}`);
     }

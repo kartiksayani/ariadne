@@ -66,3 +66,8 @@ An absent label in `item.edit` keeps it, `null` clears it; older stores load unc
 [ADR-0085](ADR-0085-host-location.md) records where the agent's terminal runs
 ("iTerm window 1") on the binding, parsed from the agent-side `TERM_PROGRAM` and
 `ITERM_SESSION_ID` by the Claude helper, and adds `topic_count` to `SessionSummary`.
+
+[ADR-0086](ADR-0086-paperwhite-design.md) makes the owner's v2 Paperwhite handoff the
+desktop design: a ported presentation layer under `apps/desktop/src/ui/`, tokens
+verbatim, JetBrains Mono, one keymap and one agent connection value. The pixel
+harness (`npm run test:design`, thresholds = measured + 0.01) is the fidelity gate.

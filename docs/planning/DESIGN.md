@@ -6,7 +6,7 @@
 
 The immutable source is [`designs/Ariadne-UI-mockups-v2.zip`](../../designs/Ariadne-UI-mockups-v2.zip) (the v2 "Paperwhite" handoff; the v1 "Nocturne" zip stays in `designs/` as history only). It contains the handoff README, main prototype, board, component sheets, status diagram, scenario pages, Paperwhite stylesheet, and its prototype-only runtime. The source inventory, SHA-256 digests, and member sizes are in [`assets/design-manifest.json`](assets/design-manifest.json); frame-to-acceptance mapping is in [`DESIGN_TRACEABILITY.md`](DESIGN_TRACEABILITY.md).
 
-The existing `assets/mockup-dark-tree.png` and `assets/mockup-light-graph.png` are rendered design references, not Ariadne application screenshots. Port markup, dimensions, tokens, and SVG treatment. Do not ship `support.js`, its custom compiler, remote font/icon imports, fixture timers, or scripted agent behavior. Bundle required fonts and icons locally with their licenses.
+`assets/paperwhite-tree.png`, `assets/paperwhite-graph.png` and `assets/paperwhite-detail.png` are the app's own renders of frames 1a, 1d and 1b from the design harness (`npm run test:design`, ADR-0086); the old Nocturne mockup renders are removed. Port markup, dimensions, tokens, and SVG treatment. Do not ship `support.js`, its custom compiler, remote font/icon imports, fixture timers, or scripted agent behavior. Bundle required fonts and icons locally with their licenses.
 
 ## Product shape shown by the UI
 

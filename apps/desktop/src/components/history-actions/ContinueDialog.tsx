@@ -3,8 +3,9 @@ import { immutable, ServiceFailure, useSession, type Immutable } from '../../dat
 import type { ContinuePreview, ItemRoute, SessionRef } from '../../generated/core';
 import type { Session } from '../../generated/domain/models';
 import { SessionActions, useSessionActions } from '../bindings/actions';
-import { ReferenceDialog } from '../reference/ReferenceDialog';
+import { Dialog } from '../../ui/dialogs/Dialog';
 import { continueGroups, sameRoute } from './selectors';
+import './history-actions.css';
 
 export interface ContinueTarget { route: SessionRef; label: string }
 interface Prepared { preview: Immutable<ContinuePreview>; source: Immutable<Session>; targetRevision: number }
@@ -54,12 +55,8 @@ function TargetPreview({ sourceActions, topicId, target, actions, revealItem, on
       summary: value.summary,
     } }, prepared.targetRevision)) onCancel();
   };
-  return <ReferenceDialog title="Continue topic" onCancel={() => { if (!operation.writing) onCancel(); }} actions={<>
-    <button type="button" className="ref-button ref-secondary" disabled={operation.writing} onClick={onCancel}>Cancel</button>
-    {operation.pending ? <button type="button" className="ref-button ref-primary" disabled={operation.writing} onClick={() => {
-      void actions.retry().then(saved => { if (saved) onCancel(); });
-    }}>Reconcile saved action</button> : <button type="button" className="ref-button ref-primary" disabled={disabled} onClick={() => { void send(); }}>Send to {target.label}</button>}
-  </>}>
+  return <Dialog label="Continue topic" width={580} onCancel={() => { if (!operation.writing) onCancel(); }}>
+    <div className="dialog-title">Continue topic</div>
     <div className="history-action-dialog">
       <p>From {prepared?.source.title ?? sourceState.snapshot?.session.title} to {target.label}.</p>
       <p>Project {sourceState.route.project_id} / session {sourceState.route.session_id} → project {target.route.project_id} / session {target.route.session_id}.</p>
@@ -72,7 +69,7 @@ function TargetPreview({ sourceActions, topicId, target, actions, revealItem, on
           : <p>Selected binding <code>{preview.readiness.binding_id}</code>. {preview.readiness.host_available ? 'Handoff will be queued.' : 'Host unavailable. Handoff will be saved as queued; no host is launched.'}</p>}
         {continueGroups(prepared!.source, preview).map(group => <section key={group.title} aria-label={`${group.title} items`}><strong>{group.title} ({group.items.length})</strong>
           {group.items.map(({ item, action }) => <div key={item.id}>
-            <button type="button" className="ref-button ref-secondary" onClick={() => revealItem({ ...structuredClone(preview.source), item_id: item.id })}>Item {item.id}</button>
+            <button type="button" className="btn btn-secondary" onClick={() => revealItem({ ...structuredClone(preview.source), item_id: item.id })}>Item {item.id}</button>
             <span>{item.question} · {item.status}</span>{item.outcome && <p>{item.outcome}</p>}
             {action.kind === 'imported_drop' && <p>Imported as Dropped: {action.outcome} {action.why} Source replacement {action.external_replacement_id} remains historical provenance.</p>}
           </div>)}</section>)}
@@ -81,9 +78,15 @@ function TargetPreview({ sourceActions, topicId, target, actions, revealItem, on
       {stale && <p role="alert">Source or target changed. Prepare a new preview before sending.</p>}
       {operation.error && <p role="alert">{operation.error.message} {operation.pending ? 'Completion is unknown. Reconcile the original action before preparing another Send.' : 'Source unchanged. Prepare a new preview, then send explicitly.'}</p>}
       {pending && <p data-operation-id={pending.op_id}>Pending handoff from session {pending.params.source.session_id}, revision {pending.params.source_revision}, to session {pending.params.target.session_id}. Its approved summary and operation ID are retained.</p>}
-      {!operation.pending && !operation.writing && <button type="button" className="ref-button ref-secondary" disabled={loading} onClick={() => setAttempt(value => value + 1)}>Prepare new preview</button>}
+      {!operation.pending && !operation.writing && <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => setAttempt(value => value + 1)}>Prepare new preview</button>}
     </div>
-  </ReferenceDialog>;
+    <div className="dialog-actions">
+      <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onCancel}>Cancel</button>
+      {operation.pending ? <button type="button" className="btn btn-primary" disabled={operation.writing} onClick={() => {
+        void actions.retry().then(saved => { if (saved) onCancel(); });
+      }}>Reconcile saved action</button> : <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => { void send(); }}>Send to {target.label}</button>}
+    </div>
+  </Dialog>;
 }
 export function ContinueDialog({ actions, topicId, targets, actionsForTarget, revealItem, onCancel }: {
   actions: SessionActions; topicId: string; targets: readonly ContinueTarget[]; actionsForTarget: (route: SessionRef) => SessionActions;
@@ -93,10 +96,12 @@ export function ContinueDialog({ actions, topicId, targets, actionsForTarget, re
   const source = actions.session.getSnapshot().route;
   const choices = targets.filter(target => !sameRoute(source, target.route));
   return selected ? <TargetPreview sourceActions={actions} topicId={topicId} target={selected} actions={actionsForTarget(selected.route)} revealItem={revealItem} onCancel={onCancel} />
-    : <ReferenceDialog title="Choose continuation target" onCancel={onCancel} actions={<button type="button" className="ref-button ref-secondary" onClick={onCancel}>Cancel</button>}>
+    : <Dialog label="Choose continuation target" width={580} onCancel={onCancel}>
+      <div className="dialog-title">Choose continuation target</div>
       <div className="history-action-dialog"><p>Choose an existing Ariadne session. The preview checks its active state and explicitly selected binding.</p>
         {choices.length === 0 && <p>No other registered sessions are available.</p>}
-        {choices.map(target => <button key={JSON.stringify(target.route)} type="button" className="ref-button ref-secondary" onClick={() => setSelected(target)}>{target.label}</button>)}
+        {choices.map(target => <button key={JSON.stringify(target.route)} type="button" className="btn btn-secondary" onClick={() => setSelected(target)}>{target.label}</button>)}
       </div>
-    </ReferenceDialog>;
+      <div className="dialog-actions"><button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button></div>
+    </Dialog>;
 }

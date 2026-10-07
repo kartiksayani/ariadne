@@ -3,6 +3,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { alive, delay, identity, listeners, json, proveQuit } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
+import { openSessionButton } from './session-button.mjs';
 import { runAccessibilityAcceptance } from './accessibility.spec.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
 import { runHistoryActionsAcceptance } from './history-actions.spec.mjs';
@@ -10,7 +11,8 @@ import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
 import { runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
 import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
-import { sendDetailReply } from './owner-reply.mjs';
+import { runRemoveAcceptance } from './remove.spec.mjs';
+import { folded, openFollowUp, sendDetailReply } from './owner-reply.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
 const nonce = process.env.ARIADNE_E2E_NONCE;
@@ -55,18 +57,16 @@ async function openSession(sessionId, itemId) {
       await wait(selectedCatalogue, 'Explicit refreshed All sessions choice did not persist');
       await json(join(evidence, 'navigation-recovery.json'), { rejected, recovered: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')) });
     }
-    const session = await browser.$(`[data-session-id="${sessionId}"]`);
-    await session.waitForDisplayed();
-    await session.waitForEnabled();
+    const session = await openSessionButton(sessionId);
     // Session cards can extend beyond the nested catalogue viewport.
     await session.scrollIntoView({ block: 'center', inline: 'center' }); await session.waitForClickable(); await session.click();
     await wait(async () => {
       const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
       return selected.kind === 'session' && selected.session.session_id === sessionId && await catalogue.isEnabled();
     }, 'Selected session navigation did not finish its saved preference update');
-    const item = await browser.$(`.ref-tree-row[data-item-id="${itemId}"]`);
+    const item = await browser.$(`.tree-item[data-item-id="${itemId}"]`);
     await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
-    await wait(async () => await browser.$('.history-header strong').getText() === `Item ${itemId}`, 'Selected item detail did not load');
+    await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === itemId, 'Selected item detail did not load');
   } catch (error) {
     await json(join(evidence, `navigation-failure-${sessionId}.json`), { before,
       after: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
@@ -76,15 +76,16 @@ async function openSession(sessionId, itemId) {
   }
 }
 async function showHistory(texts) {
-  const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline');
-  await timeline.waitForDisplayed(); await timeline.click();
+  // The Timeline is a section of the detail panel; it lays multi-line bodies out as one paragraph.
+  const timeline = await browser.$('.item-detail [aria-label="Timeline"]');
+  await timeline.waitForDisplayed(); await timeline.scrollIntoView();
   await wait(async () => {
-    const detail = await browser.$('[aria-label="Item detail"]').getText();
-    return texts.every(text => detail.includes(text));
+    const detail = folded(await browser.$('[aria-label="Item detail"]').getText());
+    return texts.every(text => detail.includes(folded(text)));
   }, 'Complete saved history was not visible in native item detail');
 }
 async function nativeCard(kind, question) {
-  for (const card of await browser.$$(`aside[aria-label="Waiting on me"] .ref-${kind}-card`)) {
+  for (const card of await browser.$$(`aside[aria-label="Waiting on me"] .waiting-${kind === 'waiting' ? 'card' : 'sent'}`)) {
     if ((await card.getText()).includes(question)) return card;
   }
   return undefined;
@@ -115,8 +116,8 @@ async function delivery(configuration) {
   await openSession(configuration.demo.session_id, '1');
   await showHistory(configuration.demo.before.messages.filter(message => message.item_id === '1').map(message => message.body));
   const child = await browser.$('[aria-label="Child items"] button');
-  await child.waitForDisplayed(); assert.ok((await child.getText()).includes('1.1')); await child.click();
-  await wait(async () => await browser.$('.history-header strong').getText() === 'Item 1.1'
+  await child.waitForDisplayed(); assert.ok((await child.getText()).includes('Add the receipt lookup test')); await child.click();
+  await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === '1.1'
     && (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
   await browser.saveScreenshot(join(evidence, 'canonical-demo.png'));
 
@@ -131,26 +132,26 @@ async function delivery(configuration) {
   const cardText = await card.getText();
   assert.ok(cardText.includes(configuration.ask)); assert.ok(cardText.includes(configuration.options[0].label));
   assert.ok(cardText.includes(configuration.options[0].consequence));
-  const ownerTexts = Array.from({ length: 5 }, (_, index) => `native-owner-${nonce}-${index + 1}\nKeep this complete line for input ${index + 1}.`);
+  // The compact Waiting card sends the chosen option alone; later inputs are detail replies.
+  const ownerTexts = Array.from({ length: 5 }, (_, index) => index ? `native-owner-${nonce}-${index + 1}\nKeep this complete line for input ${index + 1}.` : '');
   const choice = await card.$('button*=Use the native window'); await choice.click();
-  await card.$('textarea[aria-label="Reply in your own words"]').setValue(ownerTexts[0]);
-  await card.$('button*=Send').click();
+  // The compact send button carries its Enter hint ("Send answer ↵"); selecting saves the draft first.
+  const send = await card.$('button.answer-send');
+  await send.waitForEnabled(); assert.ok((await send.getText()).includes('Send answer')); await send.click();
   await wait(async () => {
     const saved = orderedInputs(await snapshot(configuration)), queued = await admissions(configuration);
     return saved.length === 1 && queued.length === 1 && saved[0].attempts.length === 1
       && queued[0].payload === saved[0].attempts[0].formatted_payload;
   }, 'Waiting answer did not persist and reach the host with its exact saved payload');
   await wait(async () => !(await nativeCard('waiting', configuration.question)), 'Answered Waiting episode remained in Waiting');
-  await wait(async () => !!(await nativeCard('sent', configuration.question)), 'Waiting answer did not appear in Sent');
-  const sent = await nativeCard('sent', configuration.question);
-  assert.ok((await sent.getText()).includes(ownerTexts[0])); assert.ok((await sent.getText()).includes(configuration.options[0].label));
+  // The Sent row's delivery line quotes the chosen option once the saved input is read back.
+  await wait(async () => (await (await nativeCard('sent', configuration.question))?.getText())?.includes(configuration.options[0].label) ?? false,
+    'Waiting answer did not appear in Sent with its chosen option');
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
 
+  // The held answer hides the detail's answer slot; each reply queues behind it from the follow-up box.
   for (const text of ownerTexts.slice(1)) {
-    const another = await browser.$('.owner-input').$('button=Write another input');
-    await another.waitForDisplayed(); await another.waitForEnabled(); await another.click();
-    const actions = await browser.$('[aria-label="Owner actions"]'); await actions.waitForDisplayed();
-    const reply = await actions.$('button=Reply'); await reply.waitForDisplayed(); await reply.waitForEnabled(); await reply.click();
+    await openFollowUp(true);
     await sendDetailReply(configuration, text);
   }
   const held = await snapshot(configuration), inputs = orderedInputs(held), savedReceipts = receipts(held, inputs);
@@ -246,6 +247,7 @@ describe('native owner FIFO and real process restoration', () => {
       await runHistoryAcceptance(configuration);
       await runHistoryActionsAcceptance(configuration);
       await runAccessibilityAcceptance(configuration);
+      await runRemoveAcceptance(configuration);
     }
     else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); await restoreTreeAcceptance(configuration); await runGraphAcceptance(configuration); await restoreHistoryAcceptance(configuration); await runRecoveryAcceptance(configuration); }
 

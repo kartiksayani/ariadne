@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  agentName, bodyColumns, clock, dayWord, footerSummary, glow, headerText, sessionRange, sessionWhen, tabModels, themeToggle, type SessionFacts,
+  agentName, bodyColumns, clock, dayWord, footerSummary, glow, headerText, hostApp, sessionRange, sessionWhen, tabModels, themeToggle, type SessionFacts,
 } from '../../../src/ui/shell/model';
 
 const now = new Date(2026, 9, 7, 15, 30).getTime();
@@ -14,6 +14,10 @@ describe('shell model', () => {
   it('names agents and formats times as the handoff writes them', () => {
     expect(agentName('claude_code_mod')).toBe('claude-code');
     expect(agentName('codex')).toBe('codex');
+    expect(hostApp('iTerm window 1')).toBe('iTerm');
+    expect(hostApp('VS Code')).toBe('VS Code');
+    expect(hostApp(null)).toBeNull();
+    expect(hostApp(undefined)).toBeNull();
     expect(clock(at(0, 9, 5))).toBe('09:05');
     expect(dayWord(at(0, 9, 5), now)).toBe('');
     expect(dayWord(at(1, 9, 5), now)).toBe('Yesterday');
