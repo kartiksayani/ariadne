@@ -306,6 +306,31 @@ fn verifier_holds_no_registry_metadata_or_session_lock_and_second_replay_wins_ev
 }
 
 #[test]
+fn reconnect_without_host_location_clears_the_stored_label() {
+    let s = Setup::new(1);
+    s.seed();
+    s.edit(&id(2), 90, |v| {
+        v.bindings.0.get_mut(&id(3)).unwrap().host_location = Some("Terminal".into());
+    });
+    let cmd = command(1, "existing-thread", 10, None);
+    s.service()
+        .connect(
+            &owner(),
+            &cmd,
+            |p| {
+                let mut f = facts(p);
+                f.host_location = None;
+                Ok(f)
+            },
+            || s.allocate(),
+            at(),
+        )
+        .unwrap();
+    let after = s.store(1).read(&id(2)).unwrap();
+    assert_eq!(after.bindings.0[&id(3)].host_location, None);
+}
+
+#[test]
 fn same_host_reconnect_preserves_history_pause_and_old_receipt_before_closed_guard() {
     let s = Setup::new(1);
     s.seed();
