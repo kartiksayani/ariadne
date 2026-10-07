@@ -192,6 +192,28 @@ describe('owner input component and durable draft controller', () => {
     expect(value.calls).toHaveLength(1); value.outcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Retry saved input' }));
     await screen.findByText('Saved · Queue position #4'); expect(value.calls[1]).toEqual(original); expect(value.prefs.drafts).toEqual([]);
   });
+  it('asks to review a saved detail reply after the item changed, then sends it re-based on the current revision', async () => {
+    const value = await setup(), user = userEvent.setup();
+    render(<ItemDetail drafts={value.drafts} store={value.store} itemId="1.1" later={false} onOpenItem={() => {}} />);
+    const reply = await screen.findByRole('button', { name: 'Reply' });
+    await waitFor(() => expect(reply.hasAttribute('disabled')).toBe(false));
+    await user.click(reply);
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Reply message' }), { target: { value: 'Keep this reply' } });
+    await waitFor(() => expect(value.prefs.drafts[0]?.text).toBe('Keep this reply'));
+    value.session.items['1.1']!.revision++; value.session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    expect(screen.getByText('This item changed. Review the current question and options; your text is retained.')).toBeTruthy();
+    const send = screen.getByRole('button', { name: /Send reply/ });
+    expect(send.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Review current target' }));
+    expect((screen.getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe('Keep this reply');
+    expect(screen.queryByText('This item changed. Review the current question and options; your text is retained.')).toBeNull();
+    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(send);
+    await waitFor(() => expect(value.calls).toHaveLength(1));
+    const sent = value.calls[0]!.command;
+    expect(sent.command === 'input_submit' && [sent.params.kind, sent.params.text]).toEqual(['reply', 'Keep this reply']);
+  });
   it('requires deliberate target review after a revision change and reselects options without discarding text', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox');
     fireEvent.change(editor(), { target: { value: 'Retain explanation' } });

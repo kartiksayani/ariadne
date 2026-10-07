@@ -8,7 +8,8 @@ import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { AnswerControl, defaultSelection } from '../answer/AnswerControl';
 import { useSubmit, type OwnerFocusRequest, type PendingSubmission } from '../answer/useSubmit';
 
-const changedText = 'This item changed. Review the current question and options; your text is retained.';
+/** The handoff's wording for a saved draft written against an older item revision or binding. */
+export const changedText ='This item changed. Review the current question and options; your text is retained.';
 
 export interface AnswerSlotProps {
   readonly drafts: OwnerDraftStore;

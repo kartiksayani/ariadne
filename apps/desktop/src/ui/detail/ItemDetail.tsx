@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import type { OwnerFocusRequest, PendingSubmission } from '../answer/useSubmit';
-import { AnswerSlot } from './AnswerSlot';
+import { AnswerSlot, changedText } from './AnswerSlot';
 import { TimelineExcerpt } from '../shared/MessageExcerpt';
 import { StatusBadge } from '../shared/StatusBadge';
 import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type OpenMode } from './model';
@@ -119,6 +119,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     if (mode === 'drop' && event.key === 'Enter') { event.stopPropagation(); event.preventDefault(); sendBox(); }
   };
   const text = mode && mode !== 'drop' ? boxText[mode] : null;
+  // The open box's saved draft, or a reopen that could not go out, was written against an older item (OwnerInput's Review step).
+  const stale = mode && submit.changed(mode) ? mode : submit.changed('reopen') ? 'reopen' : null;
   const answerFocus = focusRequest && model.status === 'waiting' && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
   const copy = () => {
     try { void navigator.clipboard?.writeText(`${model.id} — ${model.question}`).catch(() => {}); } catch { /* The reference still shows. */ }
@@ -154,11 +156,13 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         </button>)}
       </div>
       <div className="detail-hint">{model.open.hint}</div>
+      {stale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
+        <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked(stale)} onClick={() => submit.review(stale)}>Review current target</button></div>}
       {text && mode && <div className="detail-box">
         <textarea ref={box} className="input" rows={3} aria-label={text.label} placeholder={text.placeholder} value={submit.text(mode)} disabled={submit.locked(mode)}
           onChange={event => submit.edit(mode, event.target.value)} onKeyDown={boxKey} />
         <div className="detail-box-row">
-          <button type="button" className="btn btn-primary" disabled={!submit.ready || !submit.text(mode).trim() || submit.saving !== null} onClick={sendBox}>
+          <button type="button" className="btn btn-primary" disabled={!submit.ready || !submit.text(mode).trim() || submit.saving !== null || stale === mode} onClick={sendBox}>
             <i className="ph ph-paper-plane-right" aria-hidden="true" />{text.button}</button>
           <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button>
           <span className="detail-box-hint">{text.hint}</span>
@@ -168,7 +172,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         <input ref={box} className="input" aria-label="Drop reason" placeholder="Reason (optional), e.g. the metric already covers it" value={reason}
           disabled={submit.locked('drop')} onChange={event => setReason(event.target.value)} onKeyDown={boxKey} />
         <div className="detail-box-row">
-          <button type="button" className="btn btn-secondary" disabled={!submit.ready || submit.saving !== null} onClick={sendBox}>
+          <button type="button" className="btn btn-secondary" disabled={!submit.ready || submit.saving !== null || stale === 'drop'} onClick={sendBox}>
             <i className="ph ph-x-circle" aria-hidden="true" />Drop item</button>
           <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button>
           <span className="detail-box-hint">Enter drops · the agent confirms</span>
