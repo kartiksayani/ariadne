@@ -54,16 +54,16 @@ async function apply(configuration, request) {
 }
 
 async function openPrimary(configuration) {
-  await click(await browser.$('button[title="All sessions"]'));
+  await click(await browser.$('button[data-shell-tab="all_sessions"]'));
   await wait(async () => {
     const selected = JSON.parse(await readFile(join(process.env.ARIADNE_HOME, 'ui.json'), 'utf8')).snapshot.global.selected_navigation;
-    return selected.kind === 'all_sessions' && await browser.$('button[title="All sessions"]').isEnabled();
+    return selected.kind === 'all_sessions' && await browser.$('button[data-shell-tab="all_sessions"]').isEnabled();
   }, 'Recovery All sessions navigation did not finish');
   await click(await browser.$(`[data-session-id="${configuration.sessionId}"]`));
   await wait(async () => {
     const selected = JSON.parse(await readFile(join(process.env.ARIADNE_HOME, 'ui.json'), 'utf8')).snapshot.global.selected_navigation;
     return selected.kind === 'session' && selected.session.session_id === configuration.sessionId
-      && await browser.$('button[title="All sessions"]').isEnabled();
+      && await browser.$('button[data-shell-tab="all_sessions"]').isEnabled();
   }, 'Recovery did not open the restored primary session');
   // Graph mode can be retained from the preceding acceptance; choose Tree explicitly.
   await click(await browser.$('button[title="Tree"]'));

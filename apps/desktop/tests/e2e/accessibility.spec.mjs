@@ -23,13 +23,13 @@ export async function runAccessibilityAcceptance(configuration) {
   assert.ok(nativeWindow.logical.width >= 1000 && nativeWindow.logical.height >= 700,
     'Ordinary native window must reach minimum outer size 1000×700');
   const before = await readFile(configuration.demo.sessionPath);
-  const catalogue = await browser.$('button*=All sessions'); await catalogue.waitForEnabled(); await catalogue.click();
+  const catalogue = await browser.$('button[data-shell-tab="all_sessions"]'); await catalogue.waitForEnabled(); await catalogue.click();
   const session = await browser.$(`[data-session-id="${configuration.demo.session_id}"]`);
   await session.waitForDisplayed(); await session.waitForEnabled(); await session.click();
   const row = '[role="treeitem"][data-item-id="2"]';
   await (await browser.$(row)).waitForDisplayed(); await focus(row);
   await browser.keys('r');
-  const editor = '.ref-detail-scroll .owner-input textarea';
+  const editor = '.shell-detail-scroll .owner-input textarea';
   await wait(() => active(editor), 'Reply shortcut did not focus ordinary native editor');
   const draft = `Native keyboard retained draft ${process.env.ARIADNE_E2E_NONCE}`;
   await (await browser.$(editor)).setValue(draft);
@@ -37,7 +37,7 @@ export async function runAccessibilityAcceptance(configuration) {
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   assert.equal(await active(editor), true, 'Editor typing must not switch workspace');
   await browser.keys('Escape');
-  await wait(async () => !(await browser.$('.ref-detail').isExisting()), 'Editor Escape did not close detail');
+  await wait(async () => !(await browser.$('.shell-detail').isExisting()), 'Editor Escape did not close detail');
   // Draft saves patch preferences; the navigation store re-reads them only every
   // 2 s. Let the saved file stay unchanged past one refresh so Reply is not
   // issued with a stale preferences revision.
@@ -62,7 +62,7 @@ export async function runAccessibilityAcceptance(configuration) {
   await browser.keys('g'); assert.equal(await (await browser.$('[role="tree"]')).isExisting(), true);
   await browser.keys('Escape');
   await wait(async () => !(await browser.$('[role="dialog"]').isExisting()), 'Dialog Escape did not close overlay');
-  assert.equal(await (await browser.$('.ref-detail')).isExisting(), true, 'Dialog Escape must preserve selected detail');
+  assert.equal(await (await browser.$('.shell-detail')).isExisting(), true, 'Dialog Escape must preserve selected detail');
   assert.equal(await browser.execute(() => document.activeElement?.textContent === 'Pause dispatch'), true, 'Dialog restores opener');
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-dialog-return.png'));
   assert.deepEqual(await readFile(configuration.demo.sessionPath), before, 'Keyboard focus/draft/modal checks leave durable demo domain unchanged');

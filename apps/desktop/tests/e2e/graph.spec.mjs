@@ -5,7 +5,7 @@ import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const graph = () => browser.$('.session-topic-graph');
-const search = () => browser.$('.ref-search input');
+const search = () => browser.$('[data-shell-search]');
 const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) <= 0.01, `${message}: ${actual} != ${expected}`);
 
 // Closed-form bounds of the existing CLI corpus: twenty roots, each with 99
@@ -102,7 +102,7 @@ export async function runGraphAcceptance(configuration) {
   assert.equal(canonical.messages.length, prior.performance.messages + 1, 'The subsequent real CLI item edit adds one activity message');
   assert.equal(Object.keys(canonical.inputs).length, 0); assert.equal(beforeView.selected_item_id, '10.50');
   const samples = [], started = Date.now();
-  await click('button=Graph', browser.$('.ref-view-tabs')); await (await graph()).waitForDisplayed();
+  await click('button=Graph', browser.$('.shell-views')); await (await graph()).waitForDisplayed();
   await wait(async () => (await sample()).nodes.some(value => value.id === '10.50'), 'The real registered topic did not open in native Graph');
   const driverOpenToReadyMs = Date.now() - started;
   const initialFit = await fit(); assertCulled(initialFit, canonical, '10.50'); samples.push({ action: 'full-fit', ...initialFit });
@@ -116,7 +116,7 @@ export async function runGraphAcceptance(configuration) {
   // Existing detail -> parent -> child routes reach an initially off-screen node
   // through the real renderer/Core boundary; no node is added to the DOM by tests.
   await detail(canonical, '10.50'); await click('button=Parent · Item 10', browser.$('[aria-label="Item location"]')); await detail(canonical, '10');
-  await wait(async () => (await view(tree)).selected_item_id === '10' && await browser.$('.ref-view-tabs').$('button=Graph').isEnabled(),
+  await wait(async () => (await view(tree)).selected_item_id === '10' && await browser.$('.shell-views').$('button=Graph').isEnabled(),
     'The parent reveal must finish saving before the separate child reveal');
   assert.ok(!(await sample()).nodes.some(value => value.id === '10.80'), 'The reveal target must actually begin culled');
   await click('button*=Item 10.80 ·', browser.$('[aria-label="Child items"]'));

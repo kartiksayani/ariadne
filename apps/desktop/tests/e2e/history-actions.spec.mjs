@@ -11,7 +11,7 @@ const dialog = () => browser.$('[role="dialog"]');
 const historyControls = () => browser.$('[aria-label="History actions"]');
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 async function openSession(sessionId) {
-  await click(await browser.$('button=All sessions'));
+  await click(await browser.$('button[data-shell-tab="all_sessions"]'));
   await click(await browser.$(`[data-session-id="${sessionId}"]`));
   await historyControls().waitForDisplayed();
 }

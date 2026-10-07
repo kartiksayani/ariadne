@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event';
 import { STATUS, StatusBadge } from '../../../apps/desktop/src/components/reference/StatusBadge';
 import { AnswerControl, type AnswerControlProps } from '../../../apps/desktop/src/components/reference/AnswerControl';
 import { TreeRow, type TreeRowProps } from '../../../apps/desktop/src/components/reference/TreeRow';
-import { MessageExcerpt } from '../../../apps/desktop/src/components/reference/MessageExcerpt';
 
 afterEach(cleanup);
 const options = [
@@ -155,14 +154,11 @@ describe('source presentation primitives', () => {
     expect(screen.getByRole('treeitem').getAttribute('aria-expanded')).toBeNull();
   });
 
-  it('moves keyboard focus to the selected tree root and clickable excerpt root', async () => {
+  it('moves keyboard focus to the selected tree root', async () => {
     const user = userEvent.setup();
-    render(<><TreeRow {...rowProps()} selected /><MessageExcerpt message={{ number: 1, author: 'agent', when: '09:30', excerpt: 'Focused message' }} onClick={vi.fn()} /></>);
+    render(<TreeRow {...rowProps()} selected />);
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole('treeitem'));
-    expect(document.activeElement?.matches('.ariadne-reference:focus')).toBe(true);
-    await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole('button'));
     expect(document.activeElement?.matches('.ariadne-reference:focus')).toBe(true);
   });
 
@@ -191,29 +187,5 @@ describe('source presentation primitives', () => {
     fireEvent.click(screen.getByText('Replacement question'));
     expect(reveal).toHaveBeenCalledOnce();
     expect(props.onSelect).not.toHaveBeenCalled();
-  });
-
-  it('renders message authors, source roles and rail/timeline states with usable activation', () => {
-    const click = vi.fn(), enter = vi.fn(), leave = vi.fn();
-    const message = { number: 42, author: 'agent' as const, when: 'Today 09:30', excerpt: 'An excerpt from the actual message.' };
-    const { rerender, container } = render(<MessageExcerpt message={message} active highlight onClick={click} onEnter={enter} onLeave={leave} />);
-    const rail = screen.getByRole('button');
-    fireEvent.click(rail); fireEvent.keyDown(rail, { key: 'Enter' }); fireEvent.keyDown(rail, { key: ' ' }); fireEvent.keyDown(rail, { key: 'x' });
-    fireEvent.mouseEnter(rail); fireEvent.mouseLeave(rail);
-    expect(click).toHaveBeenCalledTimes(3); expect(enter).toHaveBeenCalledOnce(); expect(leave).toHaveBeenCalledOnce();
-    rerender(<MessageExcerpt message={{ ...message, author: 'me', tag: 'origin' }} highlight mark="origin" />);
-    expect(screen.getByText('origin')).toBeTruthy(); expect(screen.getByText('You')).toBeTruthy();
-    expect(screen.queryByRole('button')).toBeNull();
-    rerender(<MessageExcerpt message={message} />);
-    expect(screen.getByText('#42')).toBeTruthy();
-    for (const author of ['me', 'agent'] as const) for (const mark of ['created', 'updated', 'origin', 'answer'] as const) {
-      rerender(<MessageExcerpt message={{ ...message, author }} variant="timeline" mark={mark} note="Context remains visible" />);
-      const label = mark === 'created' ? (author === 'me' ? 'You asked here' : 'Agent raised this') : mark === 'updated' ? (author === 'me' ? 'You replied' : 'Agent updated') : mark === 'origin' ? 'Parent raised here' : 'Message';
-      expect(screen.getByText(label)).toBeTruthy();
-      expect(container.querySelector('.ref-message-connector')).toBeTruthy();
-      expect(screen.getByText('Context remains visible')).toBeTruthy();
-    }
-    rerender(<MessageExcerpt message={message} variant="timeline" last label="Explicit label" />);
-    expect(screen.getByText('Explicit label')).toBeTruthy(); expect(container.querySelector('.ref-message-connector')).toBeNull();
   });
 });

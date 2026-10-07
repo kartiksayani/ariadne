@@ -5,11 +5,13 @@ import { CoreFailure } from '../../data/service';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import { NavigationStore, useNavigation, type NavigationState } from '../../state/navigation/store';
 import { ProjectCard, SessionCard } from '../reference/ProjectSessionCard';
-import { ReferenceWorkspace, type ReferenceWorkspaceProps } from '../reference/ReferenceWorkspace';
-import type { GlobalWaitingPanelProps } from '../reference/GlobalWaitingPanel';
+import { GlobalWaitingPanel, type GlobalWaitingPanelProps } from '../reference/GlobalWaitingPanel';
 import { RegisterProject, BindSession } from './Registration';
 import { DiscoverProjects } from './Discovery';
 import type { DiscoveryController } from '../../data/discovery';
+import { Shell } from '../../ui/shell/Shell';
+import type { HeaderProps } from '../../ui/shell/Header';
+import { agentName, footerSummary, headerText, tabModels, type HeaderInput, type SessionFacts } from '../../ui/shell/model';
 import '../../styles/navigation.css';
 
 export interface AdapterChoice { readonly adapter_id: string; readonly label: string; readonly configuration: AdapterConfig;
@@ -28,12 +30,14 @@ export interface NavigationWorkspaceProps {
   readonly waitingContent?: ReactNode;
   readonly detail?: ReactNode;
   readonly railContent?: ReactNode;
-  readonly chrome?: Pick<ReferenceWorkspaceProps['header'], 'query' | 'views' | 'railColor' | 'themeIcon' | 'themeTitle'>;
-  readonly context?: { readonly session: string; readonly binding: string };
-  readonly onQueryChange?: (query: string) => void;
-  readonly onToggleRail?: () => void;
-  readonly onThemeChange?: () => void;
+  /** Header controls owned by the composition: search, views, rail and theme. */
+  readonly chrome?: Omit<HeaderProps, 'text' | 'disabled'>;
+  /** Facts for the selected session tab's header; null while it opens. */
+  readonly session?: SessionFacts | null;
   readonly onCloseDetail?: () => void;
+  readonly onRemove?: () => void;
+  /** Clock for relative times; tests pin it. */
+  readonly now?: () => number;
   readonly adapterChoices: readonly AdapterChoice[];
   readonly renderSession: (view: OpenedSessionView) => ReactNode;
 }
@@ -43,6 +47,8 @@ const accent = 'var(--color-accent)';
 const key = (route: SessionRef) => JSON.stringify([route.project_id, route.session_id]);
 const projectName = (project: Immutable<ProjectSummary>) => project.project?.display_name ?? 'Unavailable project';
 const partial = (counts: Immutable<SummaryCounts>) => counts.completeness === 'partial';
+const running = (session: Immutable<SessionSummary>) => session.state === 'active' && session.active_binding?.connection_state === 'connected';
+const defaultChrome: Omit<HeaderProps, 'text' | 'disabled'> ={ query: '', views: null, railOn: false, theme: 'dark' };
 
 export function bindingLabel(session: Immutable<SessionSummary>): string {
   if (session.state === 'closed') return 'Closed';
@@ -120,7 +126,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, waiting, waitingContent, detail, railContent, chrome, context, onQueryChange, onToggleRail, onThemeChange, onCloseDetail, adapterChoices, renderSession }: NavigationWorkspaceProps) {
+export function NavigationWorkspace({ store, discovery, waiting, waitingContent, detail, railContent, chrome, session, onCloseDetail, onRemove, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const [registering, setRegistering] = useState(false);
   const [registrationRoot, setRegistrationRoot] = useState('');
@@ -145,20 +151,28 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
     finally { setRefreshPending(false); }
   };
   const select = (next: NavigationSelection) => { void store.navigate(next); };
-  const tab = (id: string, label: string, selected: boolean, onSelect: () => void,
-    session?: Immutable<SessionPreferences>): ReferenceWorkspaceProps['tabs'][number] => ({
-    id, title: label, label, sub: '', icon: session ? 'ph ph-terminal-window' : 'ph ph-folders', iconSize: '15px',
-    iconColor: selected ? accent : muted, color: selected ? text : muted, background: selected ? 'var(--color-surface)' : 'transparent',
-    bar: selected ? accent : 'transparent', closable: !!session, selected, disabled, onSelect,
-    onClose: session ? () => { void store.closeTab(session.session); } : undefined,
-  });
-  const tabs = [tab('projects', 'Projects', selection.kind === 'projects' || selection.kind === 'project', () => select({ kind: 'projects' })),
-    tab('all_sessions', 'All sessions', selection.kind === 'all_sessions', () => select({ kind: 'all_sessions' })),
-    ...(state.preferences?.sessions.filter(view => view.tab_open).sort((a, b) => a.tab_order - b.tab_order || key(a.session).localeCompare(key(b.session))) ?? []).map(view => {
-      const session = sessions.find(session => key(session) === key(view.session));
-      return tab(key(view.session), session?.title ?? `Session ${view.session.session_id}`, selection.kind === 'session' && key(selection.session) === key(view.session),
-        () => select({ kind: 'session', session: view.session }), view);
-    })];
+  const openViews: readonly Immutable<SessionPreferences>[] = state.preferences?.sessions.filter(view => view.tab_open)
+    .sort((a, b) => a.tab_order - b.tab_order || key(a.session).localeCompare(key(b.session))) ?? [];
+  const projectNameOf = (projectId: string) => { const project = projects.find(value => value.project_id === projectId); return project ? projectName(project) : 'Unavailable project'; };
+  const at = now();
+  const tabs = tabModels({ selection: selection.kind === 'project' ? 'projects' : selection.kind, projectCount: projects.length,
+    sessions: openViews.map(view => {
+      const summary = sessions.find(value => key(value) === key(view.session));
+      return { id: key(view.session), project: projectNameOf(view.session.project_id), agent: summary?.active_binding ? agentName(summary.active_binding.adapter_id) : null,
+        createdAt: summary ? Date.parse(summary.created_at) : null, endedAt: summary ? Date.parse(summary.closed_at ?? summary.updated_at) : null, running: summary ? running(summary) : false,
+        on: selection.kind === 'session' && key(selection.session) === key(view.session) };
+    }) }, at);
+  const selectTab = (id: string) => {
+    if (id === 'projects' || id === 'all_sessions') { select({ kind: id }); return; }
+    const view = openViews.find(value => key(value.session) === id);
+    if (view) select({ kind: 'session', session: view.session });
+  };
+  const closeTab = (id: string) => { const view = openViews.find(value => key(value.session) === id); if (view) void store.closeTab(view.session); };
+  const headerInput: HeaderInput = selection.kind === 'all_sessions'
+    ? { kind: 'all_sessions', openTabs: openViews.length, openProjects: new Set(openViews.map(view => view.session.project_id)).size }
+    : selection.kind === 'session' ? { kind: 'session', facts: session ?? null, fallbackAgent: selectedSession?.active_binding ? agentName(selectedSession.active_binding.adapter_id) : null }
+      : { kind: 'projects', projectCount: projects.length, runningAgents: sessions.filter(running).length, projectPath: selectedProject?.canonical_root ?? null };
+  const global = state.projects?.counts;
   const showSessions = selection.kind === 'all_sessions' || selection.kind === 'project';
   const groups = selection.kind === 'project' ? selectedProject ? [selectedProject] : [] : projects;
   const sessionCard = (session: Immutable<SessionSummary>) => <SessionCard key={key(session)} title={session.title}
@@ -206,11 +220,12 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
     </>}
     {!setupInGroup && setupCard}
   </div>;
-  return <ReferenceWorkspace header={{ session: context?.session ?? selectedSession?.title ?? (selection.kind === 'session' ? `Session ${selection.session.session_id}` : selectedProject ? projectName(selectedProject) : 'Projects'),
-    binding: context?.binding ?? (selectedSession ? bindingLabel(selectedSession) : 'Registered navigation'), bindingColor: muted, bindingGlow: 'none',
-    query: '', views: [], railColor: muted, themeIcon: 'ph ph-moon', themeTitle: 'Theme', ...chrome }} tabs={tabs} waiting={waiting ?? { count: '—', emptyText: 'Reading registered sessions…', waiting: [], sent: [] }} waitingContent={waitingContent} detail={detail} railContent={railContent}
-    onQueryChange={onQueryChange} onToggleRail={onToggleRail} onThemeChange={onThemeChange} onCloseDetail={onCloseDetail} chromeDisabled={disabled}
-    center={center} summary={counts ? countsText(counts) : 'Catalogue unavailable'} overlay={registering
+  return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
+    tabs={{ tabs, disabled, onSelect: selectTab, onClose: closeTab }}
+    body={{ waiting: waitingContent ?? <GlobalWaitingPanel {...(waiting ?? { count: '—', emptyText: 'Reading registered sessions…', waiting: [], sent: [] })} />,
+      center, detail, rail: railContent, onCloseDetail, onRemove }}
+    summary={footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,
+      inProgress: global.items_by_status.in_progress, open: global.items_by_status.open, archivedTopics: global.archived_topics } : null)} overlay={registering
       ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={mutationDisabled} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}
         adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined} />;
