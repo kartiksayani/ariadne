@@ -59,6 +59,11 @@ pub struct SessionCounters {
 pub struct Topic {
     pub id: UuidV4,
     pub name: String,
+    // Agent-written 2-4 word label (ADR-0084), absent in stores written before it.
+    // Not a doc comment: ts-rs renders field docs with trailing spaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub short: Option<String>,
     pub order: PositiveSafeInteger,
     pub revision: PositiveSafeInteger,
     pub created_at: UtcMillis,
@@ -74,6 +79,11 @@ pub struct Item {
     pub topic_id: UuidV4,
     pub parent: Option<ItemRef>,
     pub question: String,
+    // Agent-written 2-4 word label (ADR-0084), absent in stores written before it.
+    // Not a doc comment: ts-rs renders field docs with trailing spaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub short: Option<String>,
     #[serde(rename = "type")]
     pub item_type: ItemType,
     pub status: ItemStatus,

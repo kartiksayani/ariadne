@@ -178,6 +178,7 @@ impl Setup {
             Operation::TopicAdd {
                 r#ref: RequestRef::new("topic").unwrap(),
                 name: "Codex native join".into(),
+                short: None,
             },
             Operation::ItemAdd(Box::new(ItemAddOperation {
                 r#ref: RequestRef::new("item").unwrap(),
@@ -186,6 +187,7 @@ impl Setup {
                 }),
                 parent: None,
                 question: "Preserve this full item question and owner reply".into(),
+                short: None,
                 item_type: ItemType::Question,
                 status: ItemStatus::Open,
                 owner: ItemOwner::Agent {

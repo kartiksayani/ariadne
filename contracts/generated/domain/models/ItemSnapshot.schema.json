@@ -111,6 +111,12 @@
     "revision": {
       "$ref": "#/$defs/PositiveSafeInteger"
     },
+    "short": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "source_round_id": {
       "anyOf": [
         {

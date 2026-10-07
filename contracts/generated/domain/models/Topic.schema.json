@@ -37,6 +37,12 @@
     },
     "revision": {
       "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "short": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "additionalProperties": false,

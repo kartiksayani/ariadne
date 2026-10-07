@@ -136,6 +136,7 @@ fn quit_preserves_running_external_turn_and_queued_input_with_real_native_runtim
                 Operation::TopicAdd {
                     r#ref: RequestRef::new("topic").unwrap(),
                     name: "Held external turn".into(),
+                    short: None,
                 },
                 Operation::ItemAdd(Box::new(ItemAddOperation {
                     r#ref: RequestRef::new("item").unwrap(),
@@ -144,6 +145,7 @@ fn quit_preserves_running_external_turn_and_queued_input_with_real_native_runtim
                     }),
                     parent: None,
                     question: "Continue external work?".into(),
+                    short: None,
                     item_type: ItemType::Question,
                     status: ItemStatus::Open,
                     owner: ItemOwner::Agent {

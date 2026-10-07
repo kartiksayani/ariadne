@@ -12,6 +12,9 @@ pub enum ItemChange {
         item_type: Option<ItemType>,
         note: Option<Option<String>>,
         links: Option<Vec<ItemLinkTarget>>,
+        /// `None` keeps the label, `Some(None)` clears it, `Some(Some(_))` sets
+        /// the trimmed value.
+        short: Option<Option<String>>,
     },
     Ask {
         ask: String,
@@ -96,7 +99,14 @@ pub fn transition_item(
             item_type,
             note,
             links,
+            short,
         } => {
+            if let Some(short) = short {
+                item.short = short
+                    .as_deref()
+                    .map(|value| validation::normalize_short_label(value, "edit.short"))
+                    .transpose()?;
+            }
             if let Some(question) = question {
                 if question != &item.question {
                     item.question_revision = increment(item.question_revision)?;
