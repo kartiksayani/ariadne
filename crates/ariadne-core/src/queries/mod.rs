@@ -189,7 +189,7 @@ impl<'a> QueryService<'a> {
                                             project_id: session.project_id.clone(),
                                             id: session.id.clone(),
                                         },
-                                        summary(session, counts),
+                                        summary(session, counts, counts::topics(session)?),
                                     ));
                                 }
                                 Err(_) => {
@@ -290,7 +290,11 @@ fn aggregate_scope(
         aggregate: true,
     })
 }
-fn summary(session: &Session, counts: SummaryCounts) -> SessionSummary {
+fn summary(
+    session: &Session,
+    counts: SummaryCounts,
+    topic_count: NonnegativeSafeInteger,
+) -> SessionSummary {
     SessionSummary {
         project_id: session.project_id.clone(),
         session_id: session.id.clone(),
@@ -314,8 +318,10 @@ fn summary(session: &Session, counts: SummaryCounts) -> SessionSummary {
                 pause_reason: binding.pause_reason.clone(),
                 connection_state: binding.connection_state.clone(),
                 presence: None,
+                host_location: binding.host_location.clone(),
             }),
         counts,
+        topic_count,
     }
 }
 fn not_found(message: &str) -> CoreError {

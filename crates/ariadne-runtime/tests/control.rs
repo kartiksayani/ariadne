@@ -842,6 +842,7 @@ fn binding_connect_bootstrap_preserves_canonical_request_and_receipt_without_dis
             api_version: 1,
         },
         binding_scope: None,
+        host_location: None,
     };
     let expected = announcement.acknowledgement();
     let announced = ControlRequest::new(

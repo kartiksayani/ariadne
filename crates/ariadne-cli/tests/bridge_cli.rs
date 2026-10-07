@@ -139,8 +139,11 @@ fn executable_announcement_is_unbound_and_checks_exact_native_identity_ack() {
             api_version: 1,
         },
         binding_scope: None,
+        host_location: None,
     };
-    let expected = announcement.clone();
+    // The helper adds where its inherited terminal runs (ADR-0085).
+    let mut expected = announcement.clone();
+    expected.host_location = Some("iTerm window 2".into());
     let request_id = r.generation.clone();
     let server = std::thread::spawn(move || {
         let _owner = owner;
@@ -187,6 +190,11 @@ fn executable_announcement_is_unbound_and_checks_exact_native_identity_ack() {
                 "--json-stdin",
             ])
             .env("ARIADNE_HOME", home.path())
+            .env("TERM_PROGRAM", "iTerm.app")
+            .env(
+                "ITERM_SESSION_ID",
+                "w1t0p0:6E5A0D0C-0000-4000-8000-000000000000",
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

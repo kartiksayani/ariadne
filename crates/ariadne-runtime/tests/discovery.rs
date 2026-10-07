@@ -135,6 +135,7 @@ fn announcement(root: &Path) -> SessionAnnouncement {
             api_version: 1,
         },
         binding_scope: None,
+        host_location: None,
     }
 }
 fn request(a: SessionAnnouncement) -> ControlRequest {

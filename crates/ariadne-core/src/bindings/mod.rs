@@ -480,6 +480,7 @@ fn new_binding(id: UuidV4, generation: UuidV4, host: &VerifiedHost, at: &UtcMill
         active_input_id: None,
         issued_through_message_number: NonnegativeSafeInteger::new(0).expect("literal"),
         adapter_config: host.configuration.clone(),
+        host_location: host.host_location.clone(),
     };
     binding.dispatch_state = dispatch(&binding, false);
     binding
@@ -592,6 +593,7 @@ fn connect_existing(
         binding.adapter_config = host.configuration.clone();
         binding.capabilities = host.capabilities.clone();
         binding.connection_state = host.connection_state.clone();
+        binding.host_location = host.host_location.clone();
         if needs_recovery && binding.pause_reason.is_none() {
             binding.pause_reason = Some(PauseReason::Uncertain);
         }

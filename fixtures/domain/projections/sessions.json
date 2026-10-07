@@ -30,7 +30,8 @@
             "started_at": "2026-10-03T12:00:00.000Z"
           },
           "freshness": "fresh"
-        }
+        },
+        "host_location": "iTerm window 1"
       },
       "counts": {
         "items_by_status": {
@@ -51,7 +52,8 @@
         "archived_topics": 0,
         "completeness": "complete",
         "unavailable_session_ids": []
-      }
+      },
+      "topic_count": 2
     }
   ],
   "next_cursor": null,

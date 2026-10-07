@@ -1,5 +1,5 @@
 use crate::{BindingConnectParams, CoreError, CoreErrorCode};
-use ariadne_agent_protocol::{Availability, Compatibility};
+use ariadne_agent_protocol::{host_location::is_host_location, Availability, Compatibility};
 use ariadne_domain::models::*;
 
 /// Trusted, read-only provider qualification, not a connection handle or wire DTO.
@@ -26,6 +26,9 @@ pub struct VerifiedHost {
     /// (absolute helper path, plus `ARIADNE_HOME=<root> ` for a non-default root);
     /// `ariadne` when the composition knows no helper path.
     pub cli_invocation: String,
+    /// Where the agent's terminal runs, from the agent-side environment; `None`
+    /// when the provider reports none (ADR-0085). Display text only.
+    pub host_location: Option<String>,
 }
 impl VerifiedHost {
     pub(super) fn validate(&self, request: &BindingConnectParams) -> Result<(), CoreError> {
@@ -67,6 +70,10 @@ impl VerifiedHost {
             || !valid(&self.setup_instruction, 64 * 1024)
             || !valid(&self.cli_invocation, 4096)
             || self.cli_invocation.contains('\n')
+            || self
+                .host_location
+                .as_deref()
+                .is_some_and(|value| !is_host_location(value))
             || !matches!(
                 self.connection_state,
                 ConnectionState::Connected | ConnectionState::Unknown
