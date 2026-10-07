@@ -739,3 +739,20 @@ fn snapshot_written_before_short_labels_loads_and_keeps_its_bytes() {
     ));
     assert_eq!(fs::read(project.live()).unwrap(), before);
 }
+
+#[test]
+fn hand_edited_session_with_overlong_short_label_fails_validation() {
+    use ariadne_domain::validation::ValidationErrorKind;
+    let project = ProjectDir::new();
+    let store = project.store();
+    let mut edited = seed();
+    edited.items.0.get_mut(&item("1")).unwrap().short = Some("x".repeat(41));
+    fs::write(project.live(), serde_json::to_vec(&edited).unwrap()).unwrap();
+    match store.read(&id(2)) {
+        Err(StoreError::Validation(error)) => assert_eq!(
+            error.kind,
+            ValidationErrorKind::TooManyChars { maximum_chars: 40 }
+        ),
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+}

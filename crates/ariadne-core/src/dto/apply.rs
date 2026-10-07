@@ -6,7 +6,8 @@ use ts_rs::TS;
 
 /// Schema description of the optional `short` label on created topics and items
 /// (ADR-0084). Field doc comments are avoided: ts-rs renders them with trailing spaces.
-const SHORT_LABEL: &str = "Optional 2-4 word label; trimmed, one line, at most 40 characters.";
+const SHORT_LABEL: &str =
+    "Optional 2-4 word label; trimmed, one line, at most 40 characters, measured after trimming.";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]

@@ -1242,7 +1242,10 @@ fn short_labels_are_stored_trimmed_and_absent_keeps_null_clears() {
     let revision = |setup: &Setup| setup.saved().items.0[&item("1")].revision.value();
     let mut set = guarded(11, "1", revision(&setup));
     set.operations = vec![short_patch(Some(Some("Owner choice")))];
+    let before = revision(&setup);
     setup.execute(&set).unwrap();
+    // A `short`-only edit still bumps the item revision.
+    assert_eq!(revision(&setup), before + 1);
     // A patch without `short` (the JSON omits the key) keeps the label.
     let mut keep = guarded(12, "1", revision(&setup));
     keep.operations = vec![serde_json::from_value(serde_json::json!({
