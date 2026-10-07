@@ -347,6 +347,7 @@ fn snapshot(item: &Item) -> ItemSnapshot {
         topic_id: item.topic_id.clone(),
         parent: item.parent.clone(),
         question: item.question.clone(),
+        short: item.short.clone(),
         item_type: item.item_type.clone(),
         status: item.status.clone(),
         owner: item.owner.clone(),

@@ -68,6 +68,14 @@
         }
       ]
     },
+    "short": {
+      "description": "Optional 2-4 word label; trimmed, one line, at most 40 characters, measured after trimming.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 40
+    },
     "source_round_id": {
       "anyOf": [
         {

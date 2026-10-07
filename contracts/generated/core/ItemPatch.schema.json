@@ -24,6 +24,14 @@
         "null"
       ]
     },
+    "short": {
+      "description": "Absent keeps the label, null clears it, a string replaces it (trimmed).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 40
+    },
     "type": {
       "anyOf": [
         {

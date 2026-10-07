@@ -83,6 +83,7 @@ fn add(name: &str, topic: UuidRef, parent: Option<EntityRef>, waiting: bool) -> 
         topic,
         parent,
         question: "Complete new question?".into(),
+        short: None,
         item_type: ItemType::Question,
         status: if waiting {
             ItemStatus::WaitingOnMe
@@ -302,6 +303,7 @@ fn ordered_local_topics_children_and_replies_commit_one_batch_activity() {
         Operation::TopicAdd {
             r#ref: RequestRef::new("topic").unwrap(),
             name: "New topic".into(),
+            short: None,
         },
         add("parent", uuid_local("topic"), None, false),
         add("child", uuid_local("topic"), Some(local("parent")), true),
@@ -344,6 +346,7 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
                 item_type: None,
                 note: Some(Some("First".into())),
                 links: None,
+                short: None,
             },
         },
         add("one", uuid(5), Some(existing("1")), false),
@@ -355,6 +358,7 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
                 item_type: None,
                 note: Some(None),
                 links: Some(vec![]),
+                short: None,
             },
         },
     ];
@@ -378,6 +382,7 @@ fn late_invalid_operation_rolls_back_all_allocations_messages_counters_and_recei
         Operation::TopicAdd {
             r#ref: RequestRef::new("topic").unwrap(),
             name: "Never saved".into(),
+            short: None,
         },
         add("new", uuid_local("topic"), None, false),
         reply(local("missing"), "reply", "No forward references"),
@@ -394,22 +399,26 @@ fn refs_are_ordered_unique_and_kind_checked() {
             Operation::TopicAdd {
                 r#ref: RequestRef::new("later").unwrap(),
                 name: "Later".into(),
+                short: None,
             },
         ],
         vec![
             Operation::TopicAdd {
                 r#ref: RequestRef::new("x").unwrap(),
                 name: "First".into(),
+                short: None,
             },
             Operation::TopicAdd {
                 r#ref: RequestRef::new("x").unwrap(),
                 name: "Second".into(),
+                short: None,
             },
         ],
         vec![
             Operation::TopicAdd {
                 r#ref: RequestRef::new("x").unwrap(),
                 name: "Topic".into(),
+                short: None,
             },
             reply(local("x"), "reply", "Wrong kind"),
         ],
@@ -1183,5 +1192,102 @@ fn separate_writers_preserve_different_item_updates_and_reject_same_item_conflic
             .any(|m| m.body == "Writer 100 preserved full body"));
         assert_eq!(s.items.0[&item("1")].revision, p(2));
         assert_eq!(s.items.0[&item("2")].revision, p(if same { 1 } else { 2 }));
+    }
+}
+
+fn short_patch(short: Option<Option<&str>>) -> Operation {
+    Operation::ItemEdit {
+        item: existing("1"),
+        patch: ItemPatch {
+            question: None,
+            item_type: None,
+            note: None,
+            links: None,
+            short: short.map(|value| value.map(Into::into)),
+        },
+    }
+}
+
+#[test]
+fn short_labels_are_stored_trimmed_and_absent_keeps_null_clears() {
+    let setup = Setup::new(&seed());
+    let mut r = request(10);
+    let mut child = add("item", uuid_local("topic"), None, false);
+    if let Operation::ItemAdd(draft) = &mut child {
+        draft.short = Some("  Fallback merge test ".into());
+    }
+    r.operations = vec![
+        Operation::TopicAdd {
+            r#ref: RequestRef::new("topic").unwrap(),
+            name: "SDK cache pull request".into(),
+            short: Some(" SDK cache PR".into()),
+        },
+        child,
+    ];
+    r.validate_wire().unwrap();
+    setup.execute(&r).unwrap();
+    let s = setup.saved();
+    let topic = s
+        .topics
+        .0
+        .values()
+        .find(|t| t.name.starts_with("SDK"))
+        .unwrap();
+    assert_eq!(topic.short.as_deref(), Some("SDK cache PR"));
+    assert_eq!(
+        s.items.0[&item("3")].short.as_deref(),
+        Some("Fallback merge test")
+    );
+
+    let revision = |setup: &Setup| setup.saved().items.0[&item("1")].revision.value();
+    let mut set = guarded(11, "1", revision(&setup));
+    set.operations = vec![short_patch(Some(Some("Owner choice")))];
+    let before = revision(&setup);
+    setup.execute(&set).unwrap();
+    // A `short`-only edit still bumps the item revision.
+    assert_eq!(revision(&setup), before + 1);
+    // A patch without `short` (the JSON omits the key) keeps the label.
+    let mut keep = guarded(12, "1", revision(&setup));
+    keep.operations = vec![serde_json::from_value(serde_json::json!({
+        "op":"item.edit","item":{"id":"1"},
+        "patch":{"question":null,"type":null,"note":"Kept label","links":null}
+    }))
+    .unwrap()];
+    setup.execute(&keep).unwrap();
+    assert_eq!(
+        setup.saved().items.0[&item("1")].short.as_deref(),
+        Some("Owner choice")
+    );
+    // An explicit `null` clears it.
+    let mut clear = guarded(13, "1", revision(&setup));
+    clear.operations = vec![serde_json::from_value(serde_json::json!({
+        "op":"item.edit","item":{"id":"1"},
+        "patch":{"question":null,"type":null,"links":null,"short":null}
+    }))
+    .unwrap()];
+    assert_eq!(clear.operations[0], short_patch(Some(None)));
+    setup.execute(&clear).unwrap();
+    assert_eq!(setup.saved().items.0[&item("1")].short, None);
+
+    // Too long, multi-line or blank labels fail on the wire and in the batch.
+    for bad in ["x".repeat(41), "two\nlines".into(), "  ".into()] {
+        let mut r = guarded(14, "1", revision(&setup));
+        r.operations = vec![short_patch(Some(Some(&bad)))];
+        assert_eq!(
+            r.validate_wire().unwrap_err().code,
+            CoreErrorCode::InvalidArgument
+        );
+        setup.rejected(&r, CoreErrorCode::InvalidArgument);
+        let mut r = request(15);
+        r.operations = vec![Operation::TopicAdd {
+            r#ref: RequestRef::new("topic").unwrap(),
+            name: "Topic".into(),
+            short: Some(bad.clone()),
+        }];
+        assert_eq!(
+            r.validate_wire().unwrap_err().code,
+            CoreErrorCode::InvalidArgument
+        );
+        setup.rejected(&r, CoreErrorCode::InvalidArgument);
     }
 }

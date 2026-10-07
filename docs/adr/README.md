@@ -58,3 +58,7 @@ PATH or launches a host.
 items, topics, sessions and projects. Each removal writes a `pre-remove-…` backup
 first and returns its path; item and topic removal queue one `removed` notice for
 the agent. Conversations and files outside Ariadne's store are never changed.
+
+[ADR-0084](ADR-0084-short-labels.md) adds an optional agent-written `short` label
+(2-4 words, at most 40 characters) to items and topics for the graph and breadcrumbs.
+An absent label in `item.edit` keeps it, `null` clears it; older stores load unchanged.
