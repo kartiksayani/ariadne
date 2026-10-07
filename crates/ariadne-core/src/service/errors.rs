@@ -77,6 +77,18 @@ pub struct ErrorDetails {
     pub blocking_item_ids: Vec<ItemRef>,
     pub blocking_input_ids: Vec<UuidV4>,
     pub dispatch_must_pause: bool,
+    // Set when a topic removal committed to some sessions but not all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub partial_removal: Option<PartialRemoval>,
+}
+
+/// The sessions a partial topic removal already left and still has to leave.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct PartialRemoval {
+    pub removed: Vec<UuidV4>,
+    pub remaining: Vec<UuidV4>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

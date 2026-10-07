@@ -250,6 +250,8 @@ fn actual_registered_command_names_and_request_envelopes_match_canonical_invento
             OwnerCommand::ProjectRegister { .. }
                 | OwnerCommand::BindingConnect { .. }
                 | OwnerCommand::PreferencesPatch { .. }
+                | OwnerCommand::SessionRemove { .. }
+                | OwnerCommand::ProjectRemove { .. }
         );
         let target = if let OwnerCommand::TopicContinue { params, .. } = &command {
             params.target.clone()
@@ -800,4 +802,122 @@ fn discovery_ipc_exposes_typed_failure_without_calling_core_or_persisting() {
         .unwrap_err()["code"],
         "host_unreachable"
     );
+}
+
+#[test]
+fn topic_removal_hints_every_other_family_session_at_its_listed_revision() {
+    let uuid = |n: u64| UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap();
+    let page: Page<SessionSummary> = serde_json::from_str(include_str!(
+        "../../../../../../fixtures/domain/projections/sessions.json"
+    ))
+    .unwrap();
+    let summary = |session: u64, revision: u64| {
+        let mut summary = page.items[0].clone();
+        summary.session_id = uuid(session);
+        summary.revision = PositiveSafeInteger::new(revision).unwrap();
+        summary
+    };
+    let list = |items: Vec<SessionSummary>, next: Option<QueryCursor>| {
+        let counts = page.items[0].counts.clone();
+        QueryResult::SessionList(SessionListResult {
+            sessions: Page {
+                items,
+                next_cursor: next,
+                snapshot_revision: page.snapshot_revision,
+            },
+            active_total: NonnegativeSafeInteger::new(3).unwrap(),
+            closed_total: NonnegativeSafeInteger::new(0).unwrap(),
+            counts,
+        })
+    };
+    let member = |session: u64, topic: u64| RemovalTarget {
+        session_id: uuid(session),
+        id: uuid(topic),
+    };
+    let receipt = SavedReceipt {
+        operation_id: uuid(100),
+        session_id: uuid(1),
+        revision: PositiveSafeInteger::new(5).unwrap(),
+        data: SavedReceiptData::Removal {
+            item_ids: vec![],
+            topic_ids: vec![uuid(10)],
+            input_ids: vec![],
+            family: vec![member(1, 10), member(2, 11), member(2, 12), member(3, 13)],
+            notice: None,
+            backup: "/backup".into(),
+        },
+    };
+    // Members span two list pages; the route session is never re-hinted.
+    let cursor = QueryCursor {
+        schema: SchemaVersion::new(1).unwrap(),
+        view: QueryView::Sessions,
+        filter_digest: Sha256::new("0".repeat(64)).unwrap(),
+        after: None,
+        revision: page.snapshot_revision,
+    };
+    let mut pages = vec![
+        list(vec![summary(1, 5), summary(2, 7)], Some(cursor)),
+        list(vec![summary(4, 2), summary(3, 9)], None),
+    ]
+    .into_iter();
+    let mut calls = 0;
+    let hints = family_hints(&receipt, |request| {
+        calls += 1;
+        assert!(request.session.is_none());
+        Ok(pages.next().unwrap())
+    });
+    assert_eq!(calls, 2);
+    let pairs: Vec<_> = hints
+        .iter()
+        .map(|hint| (hint.session_id.clone(), hint.revision.value()))
+        .collect();
+    assert_eq!(pairs, vec![(uuid(2), 7), (uuid(3), 9)]);
+
+    // Item removal has no family: no list read and no extra hints.
+    let mut single = receipt.clone();
+    single.data = SavedReceiptData::Removal {
+        item_ids: vec![],
+        topic_ids: vec![],
+        input_ids: vec![],
+        family: vec![],
+        notice: None,
+        backup: "/backup".into(),
+    };
+    assert!(family_hints(&single, |_| panic!("no list read")).is_empty());
+    // A failed list read is best effort.
+    assert!(family_hints(&receipt, |_| Err(CoreError::new(
+        CoreErrorCode::IoError,
+        "down",
+        "retry"
+    )))
+    .is_empty());
+
+    // A partial removal error hints the sessions it already removed from.
+    let mut partial = CoreError::new(CoreErrorCode::IoError, "partial removal: down", "retry");
+    partial.details = Some(Box::new(ErrorDetails {
+        reason: None,
+        binding_id: None,
+        input_id: None,
+        attempt_id: None,
+        blocking_item_ids: vec![],
+        blocking_input_ids: vec![],
+        dispatch_must_pause: false,
+        partial_removal: Some(PartialRemoval {
+            removed: vec![uuid(1), uuid(2)],
+            remaining: vec![uuid(3)],
+        }),
+    }));
+    let hints = partial_removal_hints(&partial, |_| {
+        Ok(list(
+            vec![summary(1, 5), summary(2, 7), summary(3, 9)],
+            None,
+        ))
+    });
+    let pairs: Vec<_> = hints
+        .iter()
+        .map(|hint| (hint.session_id.clone(), hint.revision.value()))
+        .collect();
+    assert_eq!(pairs, vec![(uuid(1), 5), (uuid(2), 7)]);
+    let other = CoreError::new(CoreErrorCode::IoError, "down", "retry");
+    assert!(partial_removal_hints(&other, |_| panic!("no list read")).is_empty());
 }

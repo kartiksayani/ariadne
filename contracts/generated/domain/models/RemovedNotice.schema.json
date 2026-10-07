@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RemovedNotice",
+  "description": "The owner's removal notice. Removed refs no longer exist in Ariadne.",
+  "type": "object",
+  "properties": {
+    "note": {
+      "type": "string"
+    },
+    "refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RemovedRef"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "refs",
+    "note"
+  ],
+  "$defs": {
+    "ItemRef": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])"
+    },
+    "RemovedRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "item"
+            },
+            "question": {
+              "type": "string"
+            },
+            "ref": {
+              "$ref": "#/$defs/ItemRef"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ref",
+            "question"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "topic"
+            },
+            "name": {
+              "type": "string"
+            },
+            "topic_id": {
+              "$ref": "#/$defs/UuidV4"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topic_id",
+            "name"
+          ]
+        }
+      ]
+    },
+    "UuidV4": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])"
+    }
+  }
+}

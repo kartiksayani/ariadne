@@ -330,6 +330,7 @@ fn barrier(
             .map(|i| i.id.clone())
             .collect(),
         dispatch_must_pause: true,
+        partial_removal: None,
     }));
     e
 }

@@ -722,6 +722,7 @@ fn queued_input(mut session: Session) -> Session {
                 round_id: Some(round_id.clone()),
                 continuation_operation_id: None,
             },
+            removed: None,
         },
         state: InputState::Queued,
         attempts: vec![],

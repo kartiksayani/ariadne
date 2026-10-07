@@ -243,6 +243,42 @@
           }
         ]
       }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "item_remove",
+      "params": {
+        "item_id": "1",
+        "expected_revision": 2
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "topic_remove",
+      "params": {
+        "topic_id": "00000000-0000-4000-8000-000000000010",
+        "expected_revision": 1
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "session_remove",
+      "params": {
+        "project_id": "00000000-0000-4000-8000-000000000001",
+        "session_id": "00000000-0000-4000-8000-000000000002",
+        "expected_revision": 21
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "project_remove",
+      "params": {
+        "project_id": "00000000-0000-4000-8000-000000000001"
+      }
     }
   ],
   "query_requests": [

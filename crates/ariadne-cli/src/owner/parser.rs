@@ -96,6 +96,10 @@ pub(super) fn command(noun: &str, verb: &str) -> Option<&'static str> {
         ("topic", "continue-preview") => "topic_continue_preview",
         ("preferences", "get") => "preferences_get",
         ("preferences", "patch") => "preferences_patch",
+        ("remove", "item") => "item_remove",
+        ("remove", "topic") => "topic_remove",
+        ("remove", "session") => "session_remove",
+        ("remove", "project") => "project_remove",
         _ => return None,
     })
 }
@@ -141,6 +145,10 @@ fn mutation_name(command: &OwnerCommand) -> &'static str {
         OwnerCommand::SessionReopen { .. } => "session_reopen",
         OwnerCommand::TopicContinue { .. } => "topic_continue",
         OwnerCommand::PreferencesPatch { .. } => "preferences_patch",
+        OwnerCommand::ItemRemove { .. } => "item_remove",
+        OwnerCommand::TopicRemove { .. } => "topic_remove",
+        OwnerCommand::SessionRemove { .. } => "session_remove",
+        OwnerCommand::ProjectRemove { .. } => "project_remove",
     }
 }
 fn read_stdin(input: &mut dyn Read) -> Result<Vec<u8>, CoreError> {

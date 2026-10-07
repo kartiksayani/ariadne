@@ -190,6 +190,51 @@ fn bound_agent_item_flags_keep_the_original_agent_route() {
     ]));
     assert!(owner::handles(&["item", "messages", "--json-stdin"]));
     assert!(owner::handles(&["binding", "connect", "--json-stdin"]));
+    assert!(owner::handles(&["remove", "item", "--json-stdin"]));
+}
+
+#[test]
+fn remove_nouns_map_to_their_own_command_tags_only() {
+    let core = ScriptedCoreService::new([]);
+    let item = json!({"session":{"project_id":id(1),"session_id":id(2)},
+        "command":{"command":"item_remove","api_version":1,"op_id":id(3),
+        "params":{"item_id":"1","expected_revision":1}}});
+    let project = json!({"session":null,
+        "command":{"command":"project_remove","api_version":1,"op_id":id(3),
+        "params":{"project_id":id(1)}}});
+    for (args, wire) in [
+        (vec!["remove", "topic", "--json-stdin"], &item),
+        (vec!["remove", "session", "--json-stdin"], &project),
+        (vec!["remove", "item", "--json"], &item),
+        (vec!["remove", "everything", "--json-stdin"], &item),
+    ] {
+        let (exit, result) = call(&core, &args, &serde_json::to_vec(wire).unwrap());
+        assert_eq!(exit, 2);
+        assert_eq!(result["ok"], false);
+    }
+    assert!(core.history().unwrap().is_empty());
+    let receipt = MutationReceipt::Removed(RemovedReceipt {
+        operation_id: id(3),
+        scope: RemovedScope::Project,
+        project_id: id(1),
+        session_ids: vec![id(2)],
+        backup: "/data/backups/pre-remove-1-x".into(),
+    });
+    let core = ScriptedCoreService::new([ScriptStep {
+        request: RecordedRequest::Owner(
+            OwnerContext::from_trusted_entrypoint(OwnerScope::Registry),
+            Box::new(serde_json::from_value(project["command"].clone()).unwrap()),
+        ),
+        response: ScriptedResponse::Owner(Box::new(Ok(receipt.clone()))),
+    }]);
+    let (exit, result) = call(
+        &core,
+        &["remove", "project", "--json-stdin"],
+        &serde_json::to_vec(&project).unwrap(),
+    );
+    assert_eq!(exit, 0);
+    assert_eq!(result["data"], serde_json::to_value(receipt).unwrap());
+    assert_eq!(result["data"]["backup"], "/data/backups/pre-remove-1-x");
 }
 
 #[test]

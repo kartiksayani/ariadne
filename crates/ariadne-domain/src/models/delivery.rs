@@ -194,6 +194,8 @@ pub enum InputKind {
     Reopen,
     Drop,
     Continue,
+    /// The owner removed items or topics; the agent stops work on them.
+    Removed,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -222,6 +224,26 @@ pub struct InputPayload {
     pub target_snapshot: InputTargetSnapshot,
     pub selected_option_id: Option<String>,
     pub context: InputContext,
+    // Present exactly on `removed` inputs: what the owner removed. A plain
+    // comment, so the generated TypeScript stays on one line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub removed: Option<RemovedNotice>,
+}
+
+/// The owner's removal notice. Removed refs no longer exist in Ariadne.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct RemovedNotice {
+    pub refs: Vec<RemovedRef>,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemovedRef {
+    Item { r#ref: ItemRef, question: String },
+    Topic { topic_id: UuidV4, name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]

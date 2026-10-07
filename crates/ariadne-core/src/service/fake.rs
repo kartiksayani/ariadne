@@ -117,6 +117,7 @@ impl CoreService for ScriptedCoreService {
                     MutationReceipt::Session(value) => &value.operation_id,
                     MutationReceipt::ProjectRegistered(value) => &value.operation_id,
                     MutationReceipt::PreferencesPatched(value) => &value.operation_id,
+                    MutationReceipt::Removed(value) => &value.operation_id,
                 };
                 let session_matches = match (&value, context.scope()) {
                     (MutationReceipt::Session(receipt), OwnerScope::Session(session)) => {
