@@ -274,6 +274,20 @@ describe('ordinary desktop composition', () => {
     expect(await screen.findByText(/No sentences match these filters/)).toBeTruthy();
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
+  it('clears filters with Esc only when no detail is open, keeping the archive view', async () => {
+    const { transport } = setup();
+    transport.preferences.sessions[0].filters.owners = [{ kind: 'me' }];
+    await openSession();
+    const tree = screen.getByRole('tree', { name: 'Sentences' });
+    fireEvent.click(tree.querySelector('[data-item-id="1"]')!); await waitFor(() => expect(document.querySelector('.shell-detail')).not.toBeNull());
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    const count = mutations(transport, 'preferences_patch').length;
+    fireEvent.keyDown(tree.querySelector('[data-item-id="1"]')!, { key: 'Escape' });
+    expect(document.querySelector('.shell-detail')).toBeNull();
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(count);
+    fireEvent.keyDown(tree.querySelector('[data-item-id="1"]')!, { key: 'Escape' });
+    await waitFor(() => expect(transport.preferences.sessions[0].filters).toMatchObject({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: false }));
+  });
   it.each(['confirmed', 'reconciled'])('retains an unsubmitted tree search until the shared preference write is %s', async completion => {
     const { transport } = setup();
     transport.preferences.sessions[0].filters.owners = [{ kind: 'me' }];

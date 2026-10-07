@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
 import { useSession, type SessionState, type SessionStore } from './data/session-store';
@@ -23,6 +23,7 @@ import { EdgeState, SessionNotice } from './components/edge-states/EdgeState';
 import { agentName, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import type { ViewTab } from './ui/shell/Header';
+import { useWorkspaceKeys, type WorkspaceHandlers, type WorkspaceIntent } from './ui/keys';
 
 const adapters: readonly AdapterChoice[] = [
   { adapter_id: 'claude_code_mod', label: 'Claude Code Mod', configuration: { namespace: 'claude_code_mod', values: {} } },
@@ -49,6 +50,61 @@ function sessionFacts(state: SessionState | null, projectName: (projectId: strin
     agent: binding ? agentName(binding.adapter_id) : null,
     connection: !binding ? 'none' : binding.connection_state === 'connected' ? 'connected' : binding.connection_state === 'reconnecting' ? 'reconnecting' : 'not_running',
     lastMessage: last ? { number: last.number, createdAt: Date.parse(last.created_at) } : null };
+}
+const clearedFilters = (filters: { readonly archived: boolean }): SessionPreferences['filters'] =>
+  ({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: filters.archived });
+const filtering = (filters: { readonly search: string; readonly statuses: readonly unknown[]; readonly owners: readonly unknown[];
+  readonly topic_id: string | null; readonly hide_later: boolean }) => !!filters.search || filters.statuses.length > 0 || filters.owners.length > 0
+  || filters.topic_id !== null || filters.hide_later;
+interface FocusedItem { readonly item: { readonly id: string; readonly status: string; readonly topic_id: string }; readonly target: ItemRoute }
+/** The App's share of the workspace keymap: actions on the focused or selected item, views and Esc. */
+function workspaceKeys(app: {
+  readonly store: boolean;
+  readonly focused: (event: KeyboardEvent<HTMLDivElement>) => FocusedItem | null;
+  readonly oldestWaiting: () => ItemRoute | undefined;
+  readonly focusOwner: (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => void;
+  readonly queueBring: (target: ItemRoute) => Promise<void>;
+  readonly toggleLater: (target: ItemRoute, itemId: string) => boolean;
+  readonly archiveTopic: (topicId: string) => boolean;
+  readonly toggleGraph: () => void;
+  readonly toggleRail: () => void;
+  readonly closeDetail: () => void;
+  readonly clearFilters?: () => void;
+}): WorkspaceHandlers<HTMLDivElement> {
+  const closed = ['done', 'decided', 'dropped'];
+  const onItem = (act: (focused: FocusedItem, intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => boolean | void) =>
+    (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => { const focused = app.focused(event); return focused ? act(focused, intent, event) : false; };
+  const search = () => {
+    if (!app.store) return false;
+    document.querySelector<HTMLInputElement>('[data-shell-search]')?.focus(); return true;
+  };
+  return {
+    search,
+    // Esc closes the answer box first (the editor stops it), then detail, then clears filters.
+    escape: () => { app.closeDetail(); app.clearFilters?.(); return false; },
+    answer: (_intent, event) => {
+      const focused = app.focused(event);
+      const question = focused && focused.item.status === 'waiting_on_me' ? focused.target : app.oldestWaiting();
+      if (!question) return false;
+      app.focusOwner({ ...question }, 'answer'); return true;
+    },
+    bring: onItem(({ target }, _intent, event) => { if (!event.repeat) void app.queueBring(target); return true; }),
+    respond: onItem(({ item, target }) => {
+      app.focusOwner(target, [...closed, 'replaced'].includes(item.status) ? 'followup' : item.status === 'in_progress' ? 'note' : 'reply'); return true;
+    }),
+    drop: onItem(({ target }) => { app.focusOwner(target, 'drop'); return true; }),
+    reopen: onItem(({ item, target }) => { if (!closed.includes(item.status)) return false; app.focusOwner(target, 'reopen'); return true; }),
+    choose: onItem(({ item, target }, intent) => {
+      if (item.status !== 'waiting_on_me' || intent.kind !== 'choose') return false;
+      app.focusOwner(target, 'answer', intent.index); return true;
+    }),
+    later: onItem(({ item, target }) => app.toggleLater(target, item.id)),
+    archive: onItem(({ item }) => app.archiveTopic(item.topic_id)),
+    graph: () => { if (!app.store) return false; app.toggleGraph(); return true; },
+    messages: () => { if (!app.store) return false; app.toggleRail(); return true; },
+    // TODO(WP6): ask, then remove the selected item or topic. A no-op until the remove command lands.
+    remove: () => false,
+  };
 }
 function SessionCenter({ application, view, graph, onReveal, revealItem, switchToTree, highlightedItemIds, onHoverItem }: {
   application: Application; view: OpenedSessionView; graph: boolean; onReveal: (result: RevealedItem) => void;
@@ -223,36 +279,27 @@ function Workspace({ application }: { application: Application }) {
     { label: 'Graph', icon: 'ph ph-graph', title: 'Graph (g)', on: graph && !archived, onSelect: () => showView('graph') },
     { label: archivedTopics ? `Archive ${archivedTopics}` : 'Archive', icon: 'ph ph-archive', title: 'Archived topics', on: archived, onSelect: () => showView('archive') },
   ] : null;
-  return <div className="product-app" onKeyDown={event => {
-    if (event.defaultPrevented || event.target instanceof HTMLElement && event.target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"],[role="dialog"]')) return;
-    if (store && event.key.toLowerCase() === 'f' && event.metaKey && !event.ctrlKey && !event.altKey) {
-      event.preventDefault(); document.querySelector<HTMLInputElement>('[data-shell-search]')?.focus(); return;
-    }
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (event.key === 'Escape') closeDetail();
-    const focusedId = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-item-id]')?.dataset.itemId : undefined;
-    const item = sessionState?.snapshot?.session.items[focusedId ?? selectedId ?? ''];
-    const target = route && item ? { ...route, item_id: item.id } : null;
-    if (event.key === 'a') {
-      const question = target && item?.status === 'waiting_on_me' ? target : application.waiting.getSnapshot().waiting[0]?.route;
-      if (question) { event.preventDefault(); focusOwner({ ...question }, 'answer'); }
-    }
-    if (target && item) {
-      if (event.key === 'b') { event.preventDefault(); if (!event.repeat) void queueBring(target); }
-      const intent = event.key === 'r' ? ['done', 'decided', 'dropped', 'replaced'].includes(item.status) ? 'followup' : item.status === 'in_progress' ? 'note' : 'reply'
-        : event.key === 'd' ? 'drop' : event.key === 'o' && ['done', 'decided', 'dropped'].includes(item.status) ? 'reopen' : null;
-      if (intent) { event.preventDefault(); focusOwner(target, intent); }
-      if (/^[1-9]$/.test(event.key) && item.status === 'waiting_on_me') { event.preventDefault(); focusOwner(target, 'answer', Number(event.key) - 1); }
-      if (event.key === 'z' && preferences) { event.preventDefault(); void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === item.id), preferences.revision); }
-      if (event.key === 'e') {
-        const control = document.querySelector<HTMLButtonElement>(`[data-shortcut-archive-topic="${item.topic_id}"]`);
-        if (control && !control.disabled) { event.preventDefault(); control.focus(); control.click(); }
-      }
-    }
-    if (store && event.key === 'g') { event.preventDefault(); setGraphModes(previous => ({ ...previous, [key]: !graph })); }
-    if (store && event.key === 'm') { event.preventDefault(); toggleRail(); }
-    if (store && event.key === '/') { event.preventDefault(); document.querySelector<HTMLInputElement>('[data-shell-search]')?.focus(); }
-  }}>
+  const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({
+    store: !!store, closeDetail, focusOwner, queueBring, archiveTopic: topicId => {
+      const control = document.querySelector<HTMLButtonElement>(`[data-shortcut-archive-topic="${topicId}"]`);
+      if (!control || control.disabled) return false;
+      control.focus(); control.click(); return true;
+    },
+    focused: event => {
+      const focusedId = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-item-id]')?.dataset.itemId : undefined;
+      const item = sessionState?.snapshot?.session.items[focusedId ?? selectedId ?? ''];
+      return route && item ? { item, target: { ...route, item_id: item.id } } : null;
+    },
+    oldestWaiting: () => application.waiting.getSnapshot().waiting[0]?.route,
+    toggleLater: (target, itemId) => {
+      if (!preferences) return false;
+      void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === itemId), preferences.revision); return true;
+    },
+    toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })), toggleRail,
+    clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) ? undefined
+      : () => saveView({ filters: clearedFilters(view.filters) }),
+  }), { scope: 'workspace' });
+  return <div className="product-app" onKeyDown={keys}>
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery}
       session={store ? sessionFacts(sessionState, projectName) : undefined}
       chrome={{ query, views, railOn: !!store && !!view && view.rail !== 'hidden', theme: shown,
