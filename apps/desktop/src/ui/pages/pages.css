@@ -1,0 +1,629 @@
+/* Paperwhite pages, ported from Ariadne.dc.html:115-129 and 201-320 with the same values. */
+.pw-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.pw-dot-8 {
+  width: 8px;
+  height: 8px;
+}
+
+/* — titles — */
+.pw-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.pw-projects {
+  gap: 14px;
+  padding: 16px 20px 24px;
+}
+
+.pw-session-lists {
+  gap: 24px;
+  max-width: 1100px;
+  padding: 14px 20px 24px;
+}
+
+.pw-page-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+/* Headings keep the prototype's span metrics. */
+.pw-page-name,
+.pw-group-name,
+.pw-group-label,
+.pw-archive-name {
+  margin: 0;
+  line-height: inherit;
+}
+
+.pw-page-name {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.pw-page-sub {
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.pw-page-tools {
+  display: flex;
+  gap: 4px;
+  margin-left: -6px;
+}
+
+.pw-page .btn.pw-small {
+  padding: 2px 6px;
+  font-size: 12.5px;
+}
+
+.pw-page-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.pw-page-note[role="alert"] { color: var(--a-danger); }
+
+/* Catalogue notes above a page: errors, stale and partial counts. */
+.pw-page-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px 0;
+}
+
+.pw-page-notes:empty { display: none; }
+
+.pw-page-notes > p { margin: 0; }
+
+.pw-discover-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.pw-discover-note i {
+  font-size: 14px;
+  color: var(--a-acc-text);
+}
+
+.pw-discover-note span { text-wrap: pretty; }
+
+.pw-discover {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* — project cards — */
+.pw-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.pw-project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: var(--a-card);
+}
+
+.pw-project-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pw-project-icon {
+  flex: none;
+  margin-top: 1px;
+  font-size: 20px;
+  color: var(--color-accent);
+}
+
+.pw-project-remove {
+  order: 2;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.pw-project-remove:hover {
+  color: var(--a-danger);
+  background: color-mix(in srgb, var(--a-danger) 10%, transparent);
+}
+
+.pw-project-remove i { font-size: 15px; }
+
+.pw-project-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pw-project-name {
+  font-size: 15.5px;
+  font-weight: 500;
+}
+
+.pw-project-path,
+.pw-group-path {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.pw-project-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pw-project-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 80%, transparent);
+}
+
+.pw-project-facts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pw-project-facts i { font-size: 14px; }
+.pw-fact-icon { color: color-mix(in srgb, var(--color-text) 60%, transparent); }
+
+.pw-project-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pw-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.pw-agent-chip i { font-size: 12px; }
+
+/* — session groups — */
+.pw-page .btn.pw-back {
+  padding: 2px 6px;
+  font-size: 13px;
+}
+
+.pw-session-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pw-group-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.pw-group-icon {
+  font-size: 17px;
+  color: var(--color-accent);
+}
+
+.pw-group-name {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.pw-group-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.pw-page .btn.pw-group-link,
+.pw-page .btn.pw-group-remove {
+  padding: 2px 6px;
+  font-size: 12.5px;
+}
+
+.pw-page .btn.pw-group-remove { color: color-mix(in srgb, var(--color-text) 70%, transparent); }
+
+.pw-group-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.pw-group-label-closed { margin-top: 6px; }
+
+.pw-session-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 1px var(--color-divider), var(--a-lift);
+}
+
+.pw-session-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.pw-session-icon {
+  font-size: 18px;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+.pw-session-text {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pw-session-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.pw-session-meta {
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.pw-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pw-run:hover { text-decoration: underline; }
+
+.pw-session-actions,
+.pw-archive-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn.pw-card-button {
+  height: 30px;
+  font-size: 13px;
+}
+
+.pw-topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 30px;
+}
+
+.pw-topic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.pw-topic-chip i {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.pw-topic-chip-counts { color: color-mix(in srgb, var(--color-text) 58%, transparent); }
+
+/* — archive — */
+
+/* The archive keeps its own padding (8px 20px), not the session content's. */
+.nav-session-content:has(.pw-archive) { padding: 0; }
+
+.pw-archive {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 880px;
+  padding: 8px 20px 24px;
+}
+
+.pw-archive-name {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.pw-archive-empty {
+  font-size: 13.5px;
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.pw-archive-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: var(--a-card);
+  box-shadow: 0 0 0 1px var(--color-divider), var(--a-lift);
+}
+
+.pw-archive-head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pw-archive-icon {
+  flex: none;
+  margin-top: 3px;
+  font-size: 16px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.pw-archive-text {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pw-archive-title {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.pw-archive-meta {
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.pw-archive-actions { flex: none; }
+
+.pw-archive-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 26px;
+}
+
+.pw-archive-line {
+  display: flex;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-text) 82%, transparent);
+}
+
+.pw-archive-line > span:last-child { text-wrap: pretty; }
+
+.pw-archive-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 20px;
+}
+
+.pw-archive-status i {
+  display: block;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.pw-archive-more {
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+/* — empty and loading — */
+.pw-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 500px;
+  padding: 72px 44px;
+}
+
+.pw-empty-icon {
+  font-size: 34px;
+  color: var(--color-accent);
+}
+
+.pw-empty-title {
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.012em;
+}
+
+.pw-empty-text {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.pw-empty-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.pw-loading {
+  display: flex;
+  flex-direction: column;
+  padding-top: 6px;
+}
+
+.pw-skel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 16px;
+  padding-bottom: 12px;
+}
+
+.pw-skel-dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--a-skel);
+}
+
+.pw-skel-bar {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--a-skel);
+}
+
+.pw-skel-badge {
+  flex: none;
+  height: 20px;
+  margin-left: auto;
+  border-radius: 6px;
+  background: var(--a-skel);
+}
+
+.pw-loading-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 40px;
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.pw-loading-text i { font-size: 14px; }
+
+/* — notes above the main column — */
+.pw-notices {
+  display: flex;
+  flex-direction: column;
+  padding-top: 10px;
+}
+
+.pw-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 8px;
+  padding: 6px 8px 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.pw-note > i {
+  font-size: 14px;
+  color: color-mix(in srgb, var(--color-text) 65%, transparent);
+}
+
+.pw-note-text {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+.pw-note .btn.pw-note-action {
+  padding: 3px 8px;
+  font-size: 12.5px;
+}
+
+.pw-note .btn.pw-note-dismiss {
+  width: 24px;
+  height: 24px;
+  color: color-mix(in srgb, var(--color-text) 65%, transparent);
+}
+
+.pw-note-dismiss i { font-size: 13px; }
+
+/* — dialogs opened from the pages — */
+.pw-dialog-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pw-dialog-step {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Kept last: more specific than the icon rules above. */
+.pw-page .btn i { font-size: 13px; }
+.btn.pw-card-button i { font-size: 13px; }

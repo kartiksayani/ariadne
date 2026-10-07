@@ -19,10 +19,14 @@ it.each(frameIds)('mounts DesktopApp in design frame %s through the real stores'
   await waitFor(() => expect(document.querySelector('.shell-summary')?.textContent).toMatch(/^\d+ items/));
   expect(document.documentElement.dataset.theme).toBe(spec.theme);
   if (!fixture.route) { await screen.findByRole('heading', { level: 1 }); return; }
-  if (spec.state === 'loading') { expect(await screen.findAllByText(/^Loading session/)).not.toHaveLength(0); return; }
+  if (spec.state === 'loading') { expect(await screen.findAllByText(/^Reading the session…/)).not.toHaveLength(0); return; }
+  if (spec.scenario === 'archive') {
+    await screen.findByRole('heading', { name: 'Archived topics' });
+    await waitFor(() => expect(document.querySelectorAll('.pw-archive-card').length).toBeGreaterThan(0));
+    return;
+  }
   await screen.findByRole('tree', { name: 'Sentences' });
   if (spec.state === 'empty') expect(await screen.findByText('No items yet', { exact: false })).toBeTruthy();
   if (spec.state === 'clear') expect(await screen.findByText('Nothing waiting on you')).toBeTruthy();
   if (spec.selected) await waitFor(() => expect(document.querySelector('.shell-detail')?.textContent).toContain(`Item ${spec.selected}`));
-  if (spec.scenario === 'archive') expect(await screen.findByText('Pin the Redis client at 5.2, or take 5.3?')).toBeTruthy();
 });

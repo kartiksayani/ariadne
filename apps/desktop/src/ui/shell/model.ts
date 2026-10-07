@@ -114,10 +114,11 @@ export interface SessionTabFacts {
   readonly on: boolean;
 }
 
-/** "Today 14:02 – now", "Yesterday 16:40 – 17:25". */
+/** "Today 14:02 – now", "Yesterday 16:40 – 17:25", "Last week · Tue 15:30 – 16:45". */
 export function sessionRange(createdAt: number, endedAt: number | null, running: boolean, now: number): string {
   const start = sessionWhen(createdAt, now), day = daysBefore(createdAt, now);
-  const head = day === 1 ? `Yesterday ${clock(createdAt)}` : day > 1 ? `${start} · ${clock(createdAt)}` : start;
+  const weekday = day >= 7 && day < 14 ? `${new Date(createdAt).toLocaleDateString('en-GB', { weekday: 'short' })} ` : '';
+  const head = day === 1 ? `Yesterday ${clock(createdAt)}` : day > 1 ? `${start} · ${weekday}${clock(createdAt)}` : start;
   return `${head} – ${running || endedAt === null ? 'now' : clock(endedAt)}`;
 }
 

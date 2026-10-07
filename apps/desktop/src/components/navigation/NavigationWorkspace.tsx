@@ -1,17 +1,22 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AdapterConfig, ProjectSummary, SessionSummary, SummaryCounts } from '../../generated/domain/models';
 import type { NavigationSelection, SessionPreferences, SessionRef } from '../../generated/core';
 import { CoreFailure } from '../../data/service';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import { NavigationStore, useNavigation, type NavigationState } from '../../state/navigation/store';
-import { ProjectCard, SessionCard } from '../reference/ProjectSessionCard';
 import { GlobalWaitingPanel, type GlobalWaitingPanelProps } from '../reference/GlobalWaitingPanel';
+import { SessionActionControllers } from '../bindings/actions';
 import { RegisterProject, BindSession } from './Registration';
-import { DiscoverProjects } from './Discovery';
 import type { DiscoveryController } from '../../data/discovery';
 import { Shell } from '../../ui/shell/Shell';
 import type { HeaderProps } from '../../ui/shell/Header';
 import { agentName, footerSummary, headerText, tabModels, type HeaderInput, type SessionFacts } from '../../ui/shell/model';
+import type { RemoveHandler } from '../../ui/dialogs/remove';
+import { ProjectsPage } from '../../ui/pages/ProjectsPage';
+import { SessionLists, type SessionGroup } from '../../ui/pages/SessionLists';
+import { LoadingSession } from '../../ui/pages/SessionStates';
+import { Notices } from '../../ui/pages/notices';
+import { useSessionSnapshots } from '../../ui/pages/snapshots';
 import '../../styles/navigation.css';
 
 export interface AdapterChoice { readonly adapter_id: string; readonly label: string; readonly configuration: AdapterConfig;
@@ -35,40 +40,22 @@ export interface NavigationWorkspaceProps {
   /** Facts for the selected session tab's header; null while it opens. */
   readonly session?: SessionFacts | null;
   readonly onCloseDetail?: () => void;
+  /** The detail column's trash button. */
   readonly onRemove?: () => void;
+  /** Runs after the owner confirms a project or session Remove on the pages. Required: the triggers always render. */
+  readonly onRemoveTarget: RemoveHandler;
+  /** Session dispatch and lifecycle actions for the project page; one per app. */
+  readonly actions?: SessionActionControllers;
   /** Clock for relative times; tests pin it. */
   readonly now?: () => number;
   readonly adapterChoices: readonly AdapterChoice[];
   readonly renderSession: (view: OpenedSessionView) => ReactNode;
 }
-const text = 'var(--color-text)';
-const muted = 'color-mix(in srgb, var(--color-text) 62%, transparent)';
-const accent = 'var(--color-accent)';
 const key = (route: SessionRef) => JSON.stringify([route.project_id, route.session_id]);
 const projectName = (project: Immutable<ProjectSummary>) => project.project?.display_name ?? 'Unavailable project';
 const partial = (counts: Immutable<SummaryCounts>) => counts.completeness === 'partial';
 const running = (session: Immutable<SessionSummary>) => session.state === 'active' && session.active_binding?.connection_state === 'connected';
 const defaultChrome: Omit<HeaderProps, 'text' | 'disabled'> ={ query: '', views: null, railOn: false, theme: 'dark' };
-
-export function bindingLabel(session: Immutable<SessionSummary>): string {
-  if (session.state === 'closed') return 'Closed';
-  const binding = session.active_binding;
-  if (!binding) return 'Unbound';
-  if (binding.owner_paused) return 'Bound · owner paused';
-  if (binding.dispatch_state === 'recovery_required') return 'Bound · recovery required';
-  if (binding.connection_state === 'disconnected') return 'Bound · host unavailable';
-  const presence = binding.presence;
-  if (!presence || presence.generation !== binding.generation || presence.freshness !== 'fresh'
-      || presence.connection_state !== 'connected') return 'Bound · execution unknown';
-  if (presence.execution_state === 'running') return 'Bound · running';
-  if (presence.execution_state === 'waiting_for_approval') return 'Bound · waiting for approval';
-  if (presence.execution_state === 'idle') return 'Bound · idle';
-  return 'Bound · execution unknown';
-}
-
-function countsText(counts: Immutable<SummaryCounts>): string {
-  return `${counts.waiting_unanswered} waiting · ${counts.sent_inputs.queued} queued · ${counts.sent_inputs.in_flight} in flight · ${counts.sent_inputs.needs_attention} need attention${partial(counts) ? ' · incomplete' : ''}`;
-}
 
 /** Saved binding-connect receipt: what to give the host, plus capabilities the owner cannot rely on. */
 function SetupCard({ setup, adapterId }: { setup: NonNullable<NavigationState['setup']>; adapterId: string | null }) {
@@ -116,8 +103,9 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   const preferences = navigation.preferences?.sessions.find(view => key(view.session) === key(session.route)) ?? null;
   const reveal = navigation.reveal;
   const matchingReveal = reveal?.store === store ? reveal : null;
+  // 1h: the skeleton stands in for the session until its first snapshot.
+  if (session.status === 'loading' && !session.snapshot) return <LoadingSession />;
   return <>
-    {session.status === 'loading' && <p role="status">Loading session…</p>}
     {session.error && <p role="alert">{session.error.message}</p>}
     {session.snapshot?.session.state === 'closed' && <p className="nav-banner">Closed session · opening this tab does not resume dispatch.</p>}
     {matchingReveal?.kind === 'missing_item' && <p className="nav-banner" role="status">{matchingReveal.banner}</p>}
@@ -126,8 +114,11 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, waiting, waitingContent, detail, railContent, chrome, session, onCloseDetail, onRemove, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
+export function NavigationWorkspace({ store, discovery, waiting, waitingContent, detail, railContent, chrome, session, onCloseDetail, onRemove, onRemoveTarget,
+  actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
+  const ownActions = useMemo(() => injectedActions ? null : new SessionActionControllers(store.service), [injectedActions, store]);
+  const actions = injectedActions ?? ownActions!;
   const [registering, setRegistering] = useState(false);
   const [registrationRoot, setRegistrationRoot] = useState('');
   const [binding, setBinding] = useState<Immutable<ProjectSummary> | null>(null);
@@ -173,53 +164,57 @@ export function NavigationWorkspace({ store, discovery, waiting, waitingContent,
     : selection.kind === 'session' ? { kind: 'session', facts: session ?? null, fallbackAgent: selectedSession?.active_binding ? agentName(selectedSession.active_binding.adapter_id) : null }
       : { kind: 'projects', projectCount: projects.length, runningAgents: sessions.filter(running).length, projectPath: selectedProject?.canonical_root ?? null };
   const global = state.projects?.counts;
-  const showSessions = selection.kind === 'all_sessions' || selection.kind === 'project';
-  const groups = selection.kind === 'project' ? selectedProject ? [selectedProject] : [] : projects;
-  const sessionCard = (session: Immutable<SessionSummary>) => <SessionCard key={key(session)} title={session.title}
-    meta={`${session.active_binding?.adapter_id ?? 'No binding'} · updated ${session.updated_at} · ${countsText(session.counts)}`}
-    titleColor={text} background="var(--color-surface)" run={bindingLabel(session)} runColor={muted} runDot="currentColor" runRing="none"
-    topics={[]} actions={[{ label: 'Open', icon: 'ph ph-arrow-square-out', kind: 'secondary',
-      disabled, sessionId: session.session_id, onClick: () => select({ kind: 'session', session: { project_id: session.project_id, session_id: session.session_id } }) }]} />;
+  const listing = selection.kind !== 'session';
+  // Message counts, topic chips and remove counts come from each listed session's snapshot.
+  const snapshots = useSessionSnapshots(listing ? store.service : null, listing ? sessions : []);
   const counts = selection.kind === 'projects' ? state.projects?.counts : matchingSessions?.counts;
   // The connect card sits directly under the project header; other views keep it at the end.
   const setupCard = state.setup?.data.kind === 'binding_connect' ? <SetupCard setup={state.setup} adapterId={state.setupAdapterId} /> : null;
-  const setupInGroup = selection.kind === 'project' && groups.length === 1;
-  const center = <div className={`nav-content${selection.kind === 'session' ? ' nav-session-content' : ''}`}>
+  const setupInGroup = selection.kind === 'project' && !!selectedProject;
+  const openTabs = new Set(openViews.map(view => key(view.session)));
+  const register = (root: string) => { setRegistrationRoot(root); setRegistering(true); };
+  const openSession = (route: SessionRef) => select({ kind: 'session', session: route });
+  const openProject = (id: string) => select({ kind: 'project', project_id: id });
+  // All sessions (1z) lists the projects that have open tabs, in tab order.
+  const openProjectIds = [...new Set(openViews.map(view => view.session.project_id))];
+  const groups: readonly SessionGroup[] = selection.kind === 'project'
+    ? selectedProject ? [{ project: selectedProject, openLink: false, extra: setupCard,
+      tools: <button type="button" className="btn btn-ghost pw-group-link" disabled={disabled || selectedProject.availability !== 'available' || adapterChoices.length === 0}
+        onClick={() => setBinding(selectedProject)}><i className="ph ph-plugs-connected" aria-hidden="true" />Connect existing session</button> }] : []
+    : openProjectIds.flatMap(id => { const project = projects.find(value => value.project_id === id); return project ? [{ project, openLink: true }] : []; });
+  const notes = <>
     {state.error && <div className="nav-banner" role="alert"><p>{state.error.message}</p>
       {state.error instanceof CoreFailure && <p>{state.error.error.hint}</p>}
       {state.pendingOperationId ? <><p>Completion is unknown. Reconcile operation {state.pendingOperationId} with its original request.</p>
-        <button type="button" className="ref-button ref-secondary" disabled={state.writing} onClick={() => { void store.retryMutation(); }}>Reconcile operation</button></>
-        : <button type="button" className="ref-button ref-secondary" disabled={mutationDisabled} onClick={() => { void refresh(); }}>{refreshPending ? 'Refreshing…' : 'Refresh'}</button>}
+        <button type="button" className="btn btn-secondary" disabled={state.writing} onClick={() => { void store.retryMutation(); }}>Reconcile operation</button></>
+        : <button type="button" className="btn btn-secondary" disabled={mutationDisabled} onClick={() => { void refresh(); }}>{refreshPending ? 'Refreshing…' : 'Refresh'}</button>}
     </div>}
-    {state.status === 'loading' && <p role="status">Loading registered projects and sessions…</p>}
-    {state.status === 'stale' && <p className="nav-banner" role="status">Showing the last complete catalogue. Refresh failed.</p>}
-    {counts && partial(counts) && <div className="nav-banner" role="status">Counts are incomplete. Unavailable sessions: {counts.unavailable_session_ids.join(', ') || 'not individually identified'}.</div>}
-    {selection.kind === 'session' ? <SelectedSession navigation={store} renderSession={renderSession} /> : <>
-      <div className="ref-page-heading"><div><h1>{selection.kind === 'projects' ? 'Projects' : selection.kind === 'all_sessions' ? 'All sessions' : selectedProject ? projectName(selectedProject) : 'Unavailable project'}</h1>
-        <p>{selection.kind === 'projects' ? 'Register a local root, then explicitly connect an existing host session.' : selection.kind === 'project' ? selectedProject?.canonical_root : 'Registered sessions, grouped by project.'}</p></div>
-        <button type="button" className="ref-button ref-secondary" disabled={mutationDisabled} onClick={() => { setRegistrationRoot(''); setRegistering(true); }}>Register project</button>
-      </div>
-      {counts && <p className="nav-counts">{countsText(counts)}</p>}
-      {discovery && <DiscoverProjects controller={discovery} visible={selection.kind === 'projects'} register={root => { setRegistrationRoot(root); setRegistering(true); }} />}
-      {showSessions && matchingSessions && <p className="nav-counts">{matchingSessions.active_total} active · {matchingSessions.closed_total} closed</p>}
-      {showSessions && !matchingSessions && <p role="status">{state.error ? 'Sessions are unavailable for this view.' : 'Loading sessions…'}</p>}
-      {selection.kind === 'projects' && <div className="ref-project-grid">{projects.map(project => <ProjectCard key={project.project_id}
-        name={projectName(project)} path={project.canonical_root} sessionsText={`${Object.values(project.counts.items_by_status).reduce((sum, count) => sum + count, 0)} items`}
-        runText={project.availability === 'available' ? 'Registered' : 'Unavailable'} runColor={muted} runDot="currentColor" runRing="none"
-        waitText={`${project.counts.waiting_unanswered} waiting`} waitColor={accent} last="Registered root" agents={[]} ring="none"
-        incomplete={partial(project.counts)} disabled={disabled} onOpen={() => select({ kind: 'project', project_id: project.project_id })} />)}</div>}
-      {state.status === 'ready' && projects.length === 0 && <p className="nav-empty">No registered projects. Register a project to connect an existing session.</p>}
-      {showSessions && groups.map(project => <section className="ref-session-group" key={project.project_id} aria-label={projectName(project)}>
-        <div className="nav-group-heading"><div><h2>{projectName(project)}</h2><p>{project.canonical_root}</p></div>
-          {selection.kind === 'project' && <button type="button" className="ref-button ref-primary" disabled={disabled || project.availability !== 'available' || adapterChoices.length === 0} onClick={() => setBinding(project)}>Connect existing session</button>}</div>
-        {setupInGroup && setupCard}
-        {project.availability === 'unavailable' && <p className="nav-banner">This registered project is unavailable. Check local access and refresh.</p>}
-        <h3>Active</h3>{sessions.filter(session => session.project_id === project.project_id && session.state === 'active').map(sessionCard)}
-        <h3>Closed</h3>{sessions.filter(session => session.project_id === project.project_id && session.state === 'closed').map(sessionCard)}
-      </section>)}
-    </>}
-    {!setupInGroup && setupCard}
-  </div>;
+    {state.status === 'loading' && <p className="pw-page-note" role="status">Loading registered projects and sessions…</p>}
+    {state.status === 'stale' && <p className="pw-page-note" role="status">Showing the last complete catalogue. Refresh failed.</p>}
+    {counts && partial(counts) && <p className="pw-page-note" role="status">Counts are incomplete. Unavailable sessions: {counts.unavailable_session_ids.join(', ') || 'not individually identified'}.</p>}
+  </>;
+  const sessionNote = selection.kind !== 'projects' && !matchingSessions
+    && <p className="pw-page-note" role="status">{state.error ? 'Sessions are unavailable for this view.' : 'Loading sessions…'}</p>;
+  const page = selection.kind === 'session' ? null : selection.kind === 'projects'
+    ? <ProjectsPage projects={projects} sessions={sessions} snapshots={snapshots} now={at} discovered={state.status === 'ready' && state.preferences?.sessions.length === 0 && projects.length > 0}
+      disabled={mutationDisabled} discovery={discovery} onOpen={openProject} onRegister={register} onRemove={onRemoveTarget}>
+      {state.status === 'ready' && projects.length === 0 && <p className="pw-page-note">No registered projects. Register a project to connect an existing session.</p>}
+      {setupCard}
+    </ProjectsPage>
+    : <SessionLists navigation={store} actions={actions} groups={groups} sessions={sessions} snapshots={snapshots} openTabs={openTabs} now={at} disabled={disabled}
+      onBack={selection.kind === 'project' ? () => select({ kind: 'projects' }) : undefined}
+      overview={selection.kind === 'all_sessions' ? { sub: openProjectIds.length
+        ? `Every session in ${openProjectIds.map(projectNameOf).join(' and ')}` : 'Open a session from Projects to see it here.' } : undefined}
+      onOpenProject={openProject} onOpenSession={openSession} onRemove={onRemoveTarget}>
+      {sessionNote}
+      {selection.kind === 'project' && !selectedProject && state.status === 'ready' && <p className="pw-page-note">This project is no longer registered.</p>}
+      {!setupInGroup && setupCard}
+    </SessionLists>;
+  const center = <>
+    <Notices />
+    {page && <div className="pw-page-notes">{notes}</div>}
+    {page ?? <div className="nav-content nav-session-content">{notes}<SelectedSession navigation={store} renderSession={renderSession} />{setupCard}</div>}
+  </>;
   return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
     tabs={{ tabs, disabled, onSelect: selectTab, onClose: closeTab }}
     body={{ waiting: waitingContent ?? <GlobalWaitingPanel {...(waiting ?? { count: '—', emptyText: 'Reading registered sessions…', waiting: [], sent: [] })} />,

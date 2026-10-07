@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import type { DesktopDiscoveryCandidate } from '../../generated/core';
 import { candidateIdentity, useDiscovery, type DiscoveryController } from '../../data/discovery';
 
@@ -29,12 +28,4 @@ export function CandidateList({ controller, root, select, selected }: { controll
       <button type="button" className="ref-button ref-secondary" disabled={candidate.freshness !== 'fresh' || state.error !== null || (!!root && candidate.compatibility === 'incompatible')} aria-pressed={selected === candidateIdentity(candidate)} onClick={() => select(candidate)}>{root ? 'Use host session' : 'Register this project'}</button>
     </article>)}</section>)}
   </div>;
-}
-export function DiscoverProjects({ controller, visible, register }: { controller: DiscoveryController; visible: boolean; register: (root: string) => void }) {
-  const [expanded, setExpanded] = useState(false);
-  useEffect(() => expanded && visible ? controller.acquire() : undefined, [controller, expanded, visible]);
-  return <section className="nav-banner" aria-label="Discover host sessions" hidden={!visible}>
-    <button type="button" className="ref-button ref-secondary" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>Discover host sessions</button>
-    {expanded && visible && <CandidateList controller={controller} select={candidate => register(candidate.cwd)} />}
-  </section>;
 }

@@ -3,6 +3,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { alive, delay, identity, listeners, json, proveQuit } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
+import { openSessionButton } from './session-button.mjs';
 import { runAccessibilityAcceptance } from './accessibility.spec.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
 import { runHistoryActionsAcceptance } from './history-actions.spec.mjs';
@@ -55,9 +56,7 @@ async function openSession(sessionId, itemId) {
       await wait(selectedCatalogue, 'Explicit refreshed All sessions choice did not persist');
       await json(join(evidence, 'navigation-recovery.json'), { rejected, recovered: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')) });
     }
-    const session = await browser.$(`[data-session-id="${sessionId}"]`);
-    await session.waitForDisplayed();
-    await session.waitForEnabled();
+    const session = await openSessionButton(sessionId);
     // Session cards can extend beyond the nested catalogue viewport.
     await session.scrollIntoView({ block: 'center', inline: 'center' }); await session.waitForClickable(); await session.click();
     await wait(async () => {

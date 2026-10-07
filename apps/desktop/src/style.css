@@ -90,7 +90,3 @@ body {
 .product-app .shell-detail-scroll .owner-input {
   padding: 16px;
 }
-
-.product-app .message-history-rail {
-  border-left: 1px solid var(--color-divider);
-}
