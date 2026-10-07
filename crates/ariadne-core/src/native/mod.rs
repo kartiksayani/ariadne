@@ -83,7 +83,7 @@ impl NativeCoreService {
             .resolve_project(&route.project_id)
             .map_err(errors::registry)?;
         let session = ariadne_store::session::Store::read_registered(
-            &project.root,
+            &self.registry.project_dir(&project.project_id),
             &route.project_id,
             &route.session_id,
         )

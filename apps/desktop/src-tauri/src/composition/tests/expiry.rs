@@ -25,10 +25,9 @@ impl Setup {
         let root = config.claude.take().unwrap().project_root;
         fs::create_dir_all(&config.home).unwrap();
         fs::set_permissions(&config.home, fs::Permissions::from_mode(0o700)).unwrap();
-        Registry::open_data_directory(&config.home)
-            .unwrap()
-            .register(&root, &id(99), || id(1))
-            .unwrap();
+        let registry = Registry::open_data_directory(&config.home).unwrap();
+        registry.register(&root, &id(99), || id(1)).unwrap();
+        let root = registry.project_dir(&id(1));
         let store = Store::open_registered(&root, id(1)).unwrap();
         let source = include_str!("../../../../../../fixtures/domain/history/seed.json");
         for (session, binding, generation) in [(2, 3, 4), (20, 30, 40)] {

@@ -42,8 +42,11 @@ impl<'a> QueryService<'a> {
             _ => {
                 let route = visibility::route(context)?;
                 let project = self.registry.resolve_project(route.project_id())?;
-                let session =
-                    Store::read_registered(&project.root, route.project_id(), route.session_id())?;
+                let session = Store::read_registered(
+                    &self.registry.project_dir(&project.project_id),
+                    route.project_id(),
+                    route.session_id(),
+                )?;
                 visibility::check(&session, context)?;
                 session_query(&session, context, request)?
             }

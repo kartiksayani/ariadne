@@ -16,7 +16,7 @@ test('native journey seed and result requests reach the real CLI/Core dispatch b
     const env = { ...process.env, ARIADNE_HOME: home };
     const demo = await cliRequest(cli, ['demo', '--root', project, '--json'], undefined, env);
     assert.equal(demo.code, 0);
-    const path = join(project, '.ariadne/sessions', `${demo.value.data.session_id}.json`), before = await readFile(path);
+    const path = join(home, 'projects', demo.value.data.project_id, 'sessions',`${demo.value.data.session_id}.json`), before = await readFile(path);
     const session = JSON.parse(before), binding = session.bindings[session.active_binding_id];
     const input = Object.values(session.inputs).find(input => input.binding_id === binding.id && input.attempts.length > 0);
     assert.ok(input); const attempt = input.attempts[0];

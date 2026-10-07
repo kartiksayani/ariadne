@@ -9,6 +9,10 @@ use ariadne_store::{registry::Registry, session::Store};
 use std::fs;
 use tempfile::TempDir;
 
+/// Project store directory under a data-root home, as `Registry::project_dir` derives it.
+fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
+    home.join(".ariadne/projects").join(id(project).as_str())
+}
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -195,7 +199,7 @@ fn error(result: Result<MutationReceipt, HistoryActionError>) -> CoreError {
 }
 struct Setup {
     _home: TempDir,
-    root: TempDir,
+    _root: TempDir,
     registry: Registry,
 }
 impl Setup {
@@ -204,26 +208,22 @@ impl Setup {
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::open(home.path()).unwrap();
         registry.register(root.path(), &id(99), || id(1)).unwrap();
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&store_dir(home.path(), 1), id(1))
             .unwrap()
             .create(session)
             .unwrap();
         Self {
             _home: home,
-            root,
+            _root: root,
             registry,
         }
     }
     fn store(&self) -> Store {
-        Store::open_registered(self.root.path(), id(1)).unwrap()
+        Store::open_registered(&store_dir(self._home.path(), 1), id(1)).unwrap()
     }
     fn bytes(&self) -> Vec<u8> {
-        fs::read(
-            self.root
-                .path()
-                .join(format!(".ariadne/sessions/{}.json", id(2).as_str())),
-        )
-        .unwrap()
+        fs::read(store_dir(self._home.path(), 1).join(format!("sessions/{}.json", id(2).as_str())))
+            .unwrap()
     }
 }
 
@@ -449,10 +449,7 @@ fn continuation(receipt: MutationReceipt) -> ContinuationReceipt {
     continuation
 }
 fn session_path(setup: &Setup, session: u64) -> std::path::PathBuf {
-    setup
-        .root
-        .path()
-        .join(format!(".ariadne/sessions/{}.json", id(session).as_str()))
+    store_dir(setup._home.path(), 1).join(format!("sessions/{}.json", id(session).as_str()))
 }
 
 #[test]
@@ -714,10 +711,9 @@ fn target_publication_failure_preserves_both_sessions_and_saves_no_continuation(
         .unwrap();
     let source_bytes = setup.bytes();
     let target_bytes = fs::read(session_path(&setup, 20)).unwrap();
-    fs::create_dir(setup.root.path().join(format!(
-        ".ariadne/backups/{}.previous.json",
-        id(20).as_str()
-    )))
+    fs::create_dir(
+        store_dir(setup._home.path(), 1).join(format!("backups/{}.previous.json", id(20).as_str())),
+    )
     .unwrap();
     assert!(matches!(
         service.continue_topic(
@@ -1241,7 +1237,7 @@ fn continuation_crosses_registered_projects_without_copying_source_binding_autho
         .unwrap();
     let mut target = target_seed();
     target.project_id = id(30);
-    let target_store = Store::open_registered(target_root.path(), id(30)).unwrap();
+    let target_store = Store::open_registered(&store_dir(setup._home.path(), 30), id(30)).unwrap();
     target_store.create(&target).unwrap();
     let owner = OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
         RegisteredSession::from_trusted_entrypoint(id(30), id(20)),

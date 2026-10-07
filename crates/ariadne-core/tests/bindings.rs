@@ -10,6 +10,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tempfile::TempDir;
 
+/// Project store directory under a data-root home, as `Registry::project_dir` derives it.
+fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
+    home.join(".ariadne/projects").join(id(project).as_str())
+}
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -91,7 +95,7 @@ fn core_code(error: BindingError) -> CoreErrorCode {
 }
 struct Setup {
     home: TempDir,
-    roots: Vec<TempDir>,
+    _roots: Vec<TempDir>,
     registry: Registry,
     next: AtomicU64,
 }
@@ -109,7 +113,7 @@ impl Setup {
         }
         Self {
             home,
-            roots,
+            _roots: roots,
             registry,
             next: AtomicU64::new(1000),
         }
@@ -121,7 +125,7 @@ impl Setup {
         BindingService::new(&self.registry)
     }
     fn store(&self, project: u64) -> Store {
-        Store::open_registered(self.roots[project as usize - 1].path(), id(project)).unwrap()
+        Store::open_registered(&store_dir(self.home.path(), project), id(project)).unwrap()
     }
     fn connect(&self, command: &OwnerCommand) -> SavedReceipt {
         receipt(
@@ -140,9 +144,7 @@ impl Setup {
         self.store(1).create(&seed()).unwrap();
     }
     fn live(&self, project: u64, session: &UuidV4) -> std::path::PathBuf {
-        self.roots[project as usize - 1]
-            .path()
-            .join(format!(".ariadne/sessions/{}.json", session.as_str()))
+        store_dir(self.home.path(), project).join(format!("sessions/{}.json", session.as_str()))
     }
     fn edit(&self, session: &UuidV4, op: u64, change: impl FnOnce(&mut Session)) {
         self.store(1)
@@ -201,7 +203,7 @@ fn registration_uses_canonical_receipt_and_preserves_metadata_name() {
         },
     };
     let first = service.register(&owner(), &cmd, || id(1)).unwrap();
-    let path = root.path().join(".ariadne/project.json");
+    let path = store_dir(home.path(), 1).join("project.json");
     let mut p: Project = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     assert_eq!(
         p.display_name,
@@ -641,8 +643,8 @@ fn session_commit_survives_invalid_index_and_exact_retry_repairs_only_missing_in
 fn unavailable_registered_root_blocks_new_uniqueness_without_treating_it_absent() {
     let s = Setup::new(2);
     fs::rename(
-        s.roots[1].path().join(".ariadne"),
-        s.roots[1].path().join("unavailable"),
+        store_dir(s.home.path(), 2),
+        s.home.path().join("unavailable"),
     )
     .unwrap();
     let err = s

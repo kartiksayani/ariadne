@@ -10,6 +10,10 @@ use std::{
 };
 use tempfile::TempDir;
 
+/// Project store directory under a data-root home, as `Registry::project_dir` derives it.
+fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
+    home.join(".ariadne/projects").join(id(project).as_str())
+}
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -25,7 +29,7 @@ fn owner() -> OwnerContext {
 
 struct Setup {
     _home: TempDir,
-    root: TempDir,
+    _root: TempDir,
     native: NativeCoreService,
     next: Arc<AtomicU64>,
     attempt: PreparedAttempt,
@@ -39,7 +43,7 @@ impl Setup {
         let session: Session =
             serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json"))
                 .unwrap();
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&store_dir(home.path(), 1), id(1))
             .unwrap()
             .create(&session)
             .unwrap();
@@ -90,23 +94,22 @@ impl Setup {
             .unwrap();
         Self {
             _home: home,
-            root,
+            _root: root,
             native,
             next,
             attempt,
         }
     }
     fn saved(&self) -> Session {
-        Store::open_registered(self.root.path(), id(1))
+        Store::open_registered(&store_dir(self._home.path(), 1), id(1))
             .unwrap()
             .read(&id(2))
             .unwrap()
     }
     fn bytes(&self) -> Vec<u8> {
         fs::read(
-            self.root
-                .path()
-                .join(".ariadne/sessions")
+            store_dir(self._home.path(), 1)
+                .join("sessions")
                 .join(format!("{}.json", id(2).as_str())),
         )
         .unwrap()

@@ -176,7 +176,7 @@ test('2,000-item / 5,000-message corpus requests pass real CLI wire validation a
     const env = { ...process.env, ARIADNE_HOME: home };
     const demo = await cliRequest(cli, ['demo', '--root', project, '--json'], undefined, env);
     assert.equal(demo.code, 0);
-    const sessionPath = join(project, '.ariadne/sessions', `${demo.value.data.session_id}.json`);
+    const sessionPath = join(home, 'projects', demo.value.data.project_id, 'sessions',`${demo.value.data.session_id}.json`);
     const read = async () => JSON.parse(await readFile(sessionPath, 'utf8'));
     const beforeBytes = await readFile(sessionPath), before = await read(), binding = before.bindings[before.active_binding_id];
     const publish = async (operations, summary = '') => {

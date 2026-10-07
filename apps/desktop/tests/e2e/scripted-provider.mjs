@@ -201,7 +201,9 @@ export async function seedJourney(configuration, env = process.env) {
   const receipt = connected.value.data;
   assert.equal(receipt.data.kind, 'binding_connect');
   const bindingId = receipt.data.binding_id, generation = receipt.data.generation, sessionId = receipt.session_id;
-  const sessionPath = join(configuration.project, '.ariadne/sessions', `${sessionId}.json`);
+  // ADR-0082: the store lives under the data root, never inside the project.
+  const home = env.ARIADNE_HOME ?? process.env.ARIADNE_HOME;
+  const sessionPath = join(home, 'projects', projectId, 'sessions', `${sessionId}.json`);
   const versionsPath = join(configuration.provider, 'versions.jsonl');
   const beforeVersions = await readFile(versionsPath);
   const replay = await cliRequest(configuration.cli, ['binding', 'connect', '--json-stdin'], request, env);
@@ -233,7 +235,7 @@ export async function seedJourney(configuration, env = process.env) {
   const demoProject = join(configuration.project, '..', 'canonical-demo'); await mkdir(demoProject);
   const demo = await cliRequest(configuration.cli, ['demo', '--root', demoProject, '--json'], undefined, env);
   assert.equal(demo.code, 0);
-  const demoPath = join(demoProject, '.ariadne/sessions', `${demo.value.data.session_id}.json`);
+  const demoPath = join(home, 'projects', demo.value.data.project_id, 'sessions', `${demo.value.data.session_id}.json`);
   Object.assign(configuration, { projectId, sessionId, bindingId, generation, sessionPath, itemId: '1', question, ask, options,
     demo: { ...demo.value.data, sessionPath: demoPath, before: JSON.parse(await readFile(demoPath, 'utf8')) } });
   const session = await snapshot(configuration);

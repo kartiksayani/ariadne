@@ -21,7 +21,7 @@ fn seed() -> Session {
 }
 struct Setup {
     home: TempDir,
-    root: TempDir,
+    _root: TempDir,
     registry: Registry,
 }
 impl Setup {
@@ -30,13 +30,13 @@ impl Setup {
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::open(home.path()).unwrap();
         registry.register(root.path(), &id(99), || id(1)).unwrap();
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&registry.project_dir(&id(1)), id(1))
             .unwrap()
             .create(session)
             .unwrap();
         Self {
             home,
-            root,
+            _root: root,
             registry,
         }
     }
@@ -44,12 +44,12 @@ impl Setup {
         self.home.path().join(".ariadne")
     }
     fn store(&self) -> Store {
-        Store::open_registered(self.root.path(), id(1)).unwrap()
+        Store::open_registered(&self.registry.project_dir(&id(1)), id(1)).unwrap()
     }
     fn path(&self) -> std::path::PathBuf {
-        self.root
-            .path()
-            .join(format!(".ariadne/sessions/{}.json", id(2).as_str()))
+        self.registry
+            .project_dir(&id(1))
+            .join(format!("sessions/{}.json", id(2).as_str()))
     }
     fn bytes(&self) -> Vec<u8> {
         fs::read(self.path()).unwrap()
@@ -572,7 +572,7 @@ fn duplicate_retained_binding_and_unavailable_other_registered_root_are_not_igno
         .registry
         .register(unavailable.path(), &id(400), || id(401))
         .unwrap();
-    fs::remove_file(unavailable.path().join(".ariadne/project.json")).unwrap();
+    fs::remove_file(setup.registry.project_dir(&id(401)).join("project.json")).unwrap();
     let error = envelope(&setup.agent(&["read"], &["--json"], None), 4);
     assert_eq!(error["error"]["code"], "io_error");
     assert!(error["error"]["message"]
@@ -598,7 +598,7 @@ fn future_corrupt_and_ordinary_io_failures_have_canonical_exit_and_preserve_byte
         "corrupt_session"
     );
     assert_eq!(setup.bytes(), b"bad snapshot");
-    fs::remove_file(setup.root.path().join(".ariadne/project.json")).unwrap();
+    fs::remove_file(setup.registry.project_dir(&id(1)).join("project.json")).unwrap();
     assert_eq!(
         envelope(&setup.agent(&["read"], &["--json"], None), 4)["error"]["code"],
         "io_error"

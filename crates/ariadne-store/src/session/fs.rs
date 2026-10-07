@@ -103,6 +103,20 @@ impl Directory {
         })
     }
 
+    /// Open an existing directory whose final component must not be a link: the
+    /// parent is canonicalized, the last name is opened relative to it with
+    /// `O_NOFOLLOW`. Used for a project's store directory under the data root.
+    pub fn existing(path: &Path) -> Result<Self, StoreError> {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| StoreError::UnsafePath { path: path.into() })?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| StoreError::UnsafePath { path: path.into() })?;
+        Self::root(parent)?.child(name, false)
+    }
+
     pub fn child(&self, name: &str, create: bool) -> Result<Self, StoreError> {
         let path = self.path.join(name);
         component(name, &path)?;

@@ -14,6 +14,10 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 use tempfile::TempDir;
+/// Project store directory under a data-root home, as `Registry::project_dir` derives it.
+fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
+    home.join(".ariadne/projects").join(id(project).as_str())
+}
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -38,7 +42,7 @@ impl Setup {
         let s: Session =
             serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json"))
                 .unwrap();
-        Store::open_registered(root.path(), id(1))
+        Store::open_registered(&store_dir(home.path(), 1), id(1))
             .unwrap()
             .create(&s)
             .unwrap();
@@ -53,16 +57,15 @@ impl Setup {
         id(self.next.fetch_add(1, Ordering::SeqCst))
     }
     fn store(&self) -> Store {
-        Store::open_registered(self.root.path(), id(1)).unwrap()
+        Store::open_registered(&store_dir(self._home.path(), 1), id(1)).unwrap()
     }
     fn saved(&self) -> Session {
         self.store().read(&id(2)).unwrap()
     }
     fn bytes(&self) -> Vec<u8> {
         fs::read(
-            self.root
-                .path()
-                .join(".ariadne/sessions")
+            store_dir(self._home.path(), 1)
+                .join("sessions")
                 .join(format!("{}.json", id(2).as_str())),
         )
         .unwrap()
@@ -966,9 +969,9 @@ fn sealed_redundant_facts_are_unchanged_contradictions_pause_binding_without_rew
 
 #[test]
 fn writer_child() {
-    let Ok(root) = std::env::var("ARIADNE_DELIVERY_TEST_ROOT") else {
+    if std::env::var("ARIADNE_DELIVERY_TEST_ROOT").is_err() {
         return;
-    };
+    }
     let home = std::env::var("ARIADNE_DELIVERY_TEST_HOME").unwrap();
     let output = std::env::var("ARIADNE_DELIVERY_TEST_OUTPUT").unwrap();
     let action = std::env::var("ARIADNE_DELIVERY_TEST_ACTION").unwrap();
@@ -977,7 +980,7 @@ fn writer_child() {
         .parse()
         .unwrap();
     let registry = Registry::open(std::path::Path::new(&home)).unwrap();
-    let store = Store::open_registered(std::path::Path::new(&root), id(1)).unwrap();
+    let store = Store::open_registered(&registry.project_dir(&id(1)), id(1)).unwrap();
     let s = store.read(&id(2)).unwrap();
     let generation = s.bindings.0[&id(3)].generation.clone();
     if action == "claim" {
@@ -1178,10 +1181,8 @@ fn definite_commit_failure_and_stale_conflicting_context_never_claim_barrier_per
         CoreErrorCode::StaleGeneration
     );
     assert_eq!(before, t.bytes());
-    let backup = t
-        .root
-        .path()
-        .join(".ariadne/backups")
+    let backup = store_dir(t._home.path(), 1)
+        .join("backups")
         .join(format!("{}.previous.json", id(2).as_str()));
     fs::remove_file(&backup).unwrap();
     let outside = t.root.path().join("ordinary-outside-test-file");
@@ -1605,10 +1606,8 @@ fn invalid_persisted_attempt_is_never_overwritten_or_claimed_as_valid() {
     bad.inputs.0.get_mut(&input).unwrap().attempts[0]
         .formatted_payload
         .push('x');
-    let file = t
-        .root
-        .path()
-        .join(".ariadne/sessions")
+    let file = store_dir(t._home.path(), 1)
+        .join("sessions")
         .join(format!("{}.json", id(2).as_str()));
     let bytes = serde_json::to_vec_pretty(&bad).unwrap();
     fs::write(&file, &bytes).unwrap();

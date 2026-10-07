@@ -234,8 +234,10 @@ fn quit_preserves_running_external_turn_and_queued_input_with_real_native_runtim
     assert_eq!(before.inputs.0[&queued].state, InputState::Queued);
     assert!(before.inputs.0[&queued].attempts.is_empty());
     let path = fixture
-        .root
-        .join(".ariadne/sessions")
+        .home
+        .join("projects")
+        .join(route.project_id.as_str())
+        .join("sessions")
         .join(format!("{}.json", route.session_id.as_str()));
     let original_bytes = fs::read(&path).unwrap();
     assert!(fixture.home.join("run/control.sock").exists());

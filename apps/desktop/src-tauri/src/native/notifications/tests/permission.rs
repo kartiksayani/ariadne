@@ -61,7 +61,11 @@ fn denied_permission_completes_with_diagnostic_and_in_app_answer_still_saves() {
     let session = waiting_session();
     let registry = Registry::open(home.path()).unwrap();
     registry.register(root.path(), &id(99), || id(1)).unwrap();
-    let store = Store::open_registered(root.path(), session.project_id.clone()).unwrap();
+    let store = Store::open_registered(
+        &registry.project_dir(&session.project_id),
+        session.project_id.clone(),
+    )
+    .unwrap();
     store.create(&session).unwrap();
     let core = Arc::new(NativeCoreService::new(
         registry,

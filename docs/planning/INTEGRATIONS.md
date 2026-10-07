@@ -52,7 +52,8 @@ A generated Codex skill is installed beside it and linked once at
 Provider CLIs remain user-installed and retain their own authentication and
 settings.
 
-Project setup creates `.ariadne/` and registers the canonical project root.
+Project setup registers the canonical project root and creates its store under
+`~/.ariadne/projects/<project-id>/`; the project folder is not written to.
 `setup --agent claude|codex|both` installs the selected Ariadne-owned resources
 and prints any host steps the owner needs to run. It preserves history and all
 foreign host settings. Setup does not change tool permissions, enable

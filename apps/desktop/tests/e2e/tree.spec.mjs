@@ -52,7 +52,7 @@ async function captureBusy(configuration) {
   try {
     const owned = await readJson(join(process.env.ARIADNE_E2E_ROOT, 'observed.json')), current = identity(owned.pid);
     assert.equal(current.exe, process.env.ARIADNE_E2E_BINARY); assert.equal(current.birth, owned.birth); facts.owned = owned;
-    const lock = join(configuration.projectRoot, '.ariadne/locks', `${configuration.sessionId}.lock`);
+    const lock = join(process.env.ARIADNE_HOME, 'projects', configuration.projectId, 'locks', `${configuration.sessionId}.lock`);
     try { facts.lockHolder = execFileSync('/usr/sbin/lsof', ['-nP', lock], { encoding: 'utf8', timeout: 5000 }); }
     catch (error) { facts.lockHolderError = error.message; }
     execFileSync('/usr/bin/sample', [String(owned.pid), '1', '-file', join(evidence, 'native-app-busy-sample.txt')], { encoding: 'utf8', timeout: 5000 });
@@ -108,7 +108,7 @@ async function seedTree(configuration) {
   const receipt = connected.value.data;
   const tree = { ...selected, cli: configuration.cli, projectId, sessionId: receipt.session_id,
     bindingId: receipt.data.binding_id, generation: receipt.data.generation,
-    sessionPath: join(selected.projectRoot, '.ariadne/sessions', `${receipt.session_id}.json`) };
+    sessionPath: join(process.env.ARIADNE_HOME, 'projects', projectId, 'sessions', `${receipt.session_id}.json`) };
   await awaitConnected(tree);
   const publication = [await apply(tree, [{ op: 'topic.add', ref: 'native_tree_topic', name: 'Native tree acceptance' }], {}, '', true)];
   const topic = Object.values((await snapshot(tree)).topics).find(topic => topic.name === 'Native tree acceptance'); assert.ok(topic);

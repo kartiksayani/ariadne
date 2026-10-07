@@ -70,7 +70,7 @@ impl HistoryActionService<'_> {
     pub(super) fn snapshot(&self, route: &SessionRef) -> Result<Session, HistoryActionError> {
         let project = self.registry.resolve_project(&route.project_id)?;
         Ok(Store::read_registered(
-            &project.root,
+            &self.registry.project_dir(&project.project_id),
             &project.project_id,
             &route.session_id,
         )?)

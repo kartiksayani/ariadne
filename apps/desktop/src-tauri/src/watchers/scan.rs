@@ -1,7 +1,7 @@
 use super::Emit;
 use ariadne_core::{SessionChangedHint, SessionRef};
 use ariadne_domain::models::{PositiveSafeInteger, Session};
-use ariadne_store::registry::RegisteredProject;
+use ariadne_store::registry::{RegisteredProject, Registry};
 use ariadne_store::session::Store;
 use std::collections::BTreeMap;
 
@@ -12,6 +12,7 @@ pub(super) struct Scan {
 impl Scan {
     pub(super) fn reconcile(
         &mut self,
+        registry: &Registry,
         projects: &[RegisteredProject],
         selected: Option<&SessionRef>,
         emit: &Emit,
@@ -23,16 +24,20 @@ impl Scan {
         });
         if let Some(route) = selected {
             if let Some(project) = projects.iter().find(|p| p.project_id == route.project_id) {
-                if let Ok(session) =
-                    Store::read_registered(&project.root, &project.project_id, &route.session_id)
-                {
+                if let Ok(session) = Store::read_registered(
+                    &registry.project_dir(&project.project_id),
+                    &project.project_id,
+                    &route.session_id,
+                ) {
                     self.observe(&session, emit);
                 }
             }
         }
         for registered in projects {
-            let Ok(project) = Store::inspect_registered(&registered.root, &registered.project_id)
-            else {
+            let Ok(project) = Store::inspect_registered(
+                &registry.project_dir(&registered.project_id),
+                &registered.project_id,
+            ) else {
                 continue;
             };
             let Ok(sessions) = project.sessions else {
