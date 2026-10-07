@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { delay, json } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, cliRequest, completeTurn, journeyResultRequest, publishResult, snapshot } from './scripted-provider.mjs';
-import { sendDetailReply } from './owner-reply.mjs';
+import { folded, openOwnerReply, sendDetailReply } from './owner-reply.mjs';
 import { openSessionButton } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
@@ -79,16 +79,8 @@ async function openDispatch(configuration) {
   await wait(async () => (await dialog().getText()).includes('dispatch and connection'), 'Dispatch dialog did not open');
 }
 
-export async function openRecoveryReply(afterSaved = false) {
-  const another = await browser.$('.owner-input').$('button=Write another input');
-  // A successive Reply has already saved on disk; its renderer receipt may still
-  // be arriving. Await that acknowledgement before choosing the next form.
-  if (afterSaved || await another.isExisting()) await click(another);
-  await click(await browser.$('[aria-label="Item actions"]').$('button=Reply'));
-}
-
 async function ownerReply(configuration, text, afterSaved = false) {
-  await openRecoveryReply(afterSaved);
+  await openOwnerReply(afterSaved);
   await sendDetailReply(configuration, text);
 }
 
@@ -211,8 +203,9 @@ export async function runRecoveryAcceptance(configuration) {
   assert.deepEqual(await readFile(configuration.demo.sessionPath), demoBefore);
   await (await browser.$('.item-detail [aria-label="Timeline"]')).waitForDisplayed();
   await wait(async () => {
-    const text = await browser.$('[aria-label="Item detail"]').getText();
-    return [workText, replyText, successorText, successorReply].every(body => text.includes(body));
+    // The timeline lays a multi-line body out as one paragraph: compare with white space folded.
+    const text = folded(await browser.$('[aria-label="Item detail"]').getText());
+    return [workText, replyText, successorText, successorReply].every(body => text.includes(folded(body)));
   }, 'Native detail lost retained original work/reply or the FIFO successor');
   await browser.saveScreenshot(join(evidence, 'native-recovery-completed.png'));
   await json(join(evidence, 'recovery-acceptance.json'), { original, successor, reply, completed, expired, prepared, resolution, receipt,

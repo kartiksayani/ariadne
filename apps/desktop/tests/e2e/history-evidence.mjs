@@ -5,9 +5,10 @@ export function historyFailureFacts() {
   const all = selector => [...document.querySelectorAll(selector)];
   const control = node => node ? { text: text(node), disabled: Boolean(node.disabled), ariaPressed: node.getAttribute('aria-pressed') } : null;
   const titled = document.querySelector('button[title="Messages (m)"]');
-  const owner = document.querySelector('.owner-input');
+  // The detail's owner input: the answer slot of a waiting item, else the open action box.
+  const owner = document.querySelector('[data-owner-input]');
   const editor = owner?.querySelector('textarea') ?? null;
-  const send = owner?.querySelector('.answer-send-row button') ?? null;
+  const send = owner?.querySelector('.answer-send, .detail-box-row .btn-primary') ?? null;
   const search = document.querySelector('[data-shell-search]');
   const stateButtons = /^(Refresh|Refreshing…|Reconcile operation|Register project|Connect existing session|Retry saving draft preferences|Retry saved input|Write another input)$/;
   const active = document.activeElement;
@@ -25,8 +26,8 @@ export function historyFailureFacts() {
     selected: { treeItemIds: all('[data-item-id][aria-selected="true"], [data-item-id][aria-current]').map(node => node.getAttribute('data-item-id')),
       detailHeader: text(document.querySelector('.item-detail .detail-reference code')),
       detailQuestion: text(document.querySelector('.item-detail .detail-question')),
-      sourceRounds: all('.item-detail .history-meta').map(text) },
-    ownerInput: { present: Boolean(owner), label: owner?.getAttribute('aria-label') ?? null,
+      rounds: all('.item-detail .detail-round').map(node => node.getAttribute('aria-label')) },
+    ownerInput: { present: Boolean(owner), itemId: owner?.getAttribute('data-owner-input') ?? null,
       textarea: editor ? { disabled: editor.disabled, valueLength: editor.value.length } : null,
       send: control(send), buttons: owner ? [...owner.querySelectorAll('button')].map(control) : [],
       alerts: owner ? [...owner.querySelectorAll('[role="alert"]')].map(text) : [],

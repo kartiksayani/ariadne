@@ -29,7 +29,7 @@ export async function runAccessibilityAcceptance(configuration) {
   const row = '[role="treeitem"][data-item-id="2"]';
   await (await browser.$(row)).waitForDisplayed(); await focus(row);
   await browser.keys('r');
-  const editor = '.shell-detail-scroll .owner-input textarea';
+  const editor = '.shell-detail-scroll [data-owner-input] textarea';
   await wait(() => active(editor), 'Reply shortcut did not focus ordinary native editor');
   const draft = `Native keyboard retained draft ${process.env.ARIADNE_E2E_NONCE}`;
   await (await browser.$(editor)).setValue(draft);

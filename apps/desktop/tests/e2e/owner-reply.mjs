@@ -3,8 +3,36 @@ import { join } from 'node:path';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
 import { snapshot } from './scripted-provider.mjs';
 
+// The detail's owner input for one item: the answer slot of a waiting item, else the open Reply box.
+// Both write in a textarea and send with "Send reply".
+const ownerInput = itemId => `[data-owner-input="${itemId}"]`;
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.scrollIntoView({ block: 'center' }); await control.click(); }
+
+/** Rendered text with white space folded: the detail lays multi-line stored text out as one paragraph. */
+export const folded = value => value.replace(/\s+/g, ' ').trim();
+
+/**
+ * Opens the selected item's reply editor. A waiting item answers in its answer slot, whose saved
+ * receipt offers "Write another input"; any other item replies in the Reply box of its Item actions,
+ * which closes once it sends. `afterSaved`: a previous reply has saved on disk and its renderer
+ * acknowledgement may still be arriving; await it before choosing the next editor.
+ */
+export async function openOwnerReply(afterSaved = false) {
+  if (await browser.$('.item-detail .detail-answer-slot').isExisting()) {
+    const another = await browser.$('.item-detail .detail-answer-slot').$('button=Write another input');
+    if (afterSaved || await another.isExisting()) await click(another);
+    return;
+  }
+  if (afterSaved) await wait(async () => !(await browser.$('.item-detail .detail-box').isExisting()), 'The sent Reply box did not close');
+  if (!(await browser.$('.item-detail .detail-box textarea').isExisting())) {
+    // Item actions carry their key hint ("Reply r"), so the button matches by contained text.
+    await click(await browser.$('[aria-label="Item actions"]').$('button*=Reply'));
+  }
+}
+
 export function replyControlState(itemId) {
-  const form = document.querySelector(`[aria-label="Owner input for #${itemId}"]`);
+  const form = document.querySelector(`[data-owner-input="${itemId}"]`);
   const editor = form?.querySelector('textarea');
   const send = [...(form?.querySelectorAll('button') ?? [])].find(button => button.textContent.trim() === 'Send reply');
   return { formPresent: Boolean(form), editorPresent: Boolean(editor), value: editor?.value ?? null,
@@ -15,7 +43,7 @@ export function replyControlState(itemId) {
 export async function sendDetailReply(configuration, text) {
   let stage = 'editor', clickRequested = false;
   try {
-    const selector = `[aria-label="Owner input for #${configuration.itemId}"]`;
+    const selector = ownerInput(configuration.itemId);
     const editor = await browser.$(`${selector} textarea`);
     await editor.waitForDisplayed(); await editor.waitForEnabled(); await editor.setValue(text);
     const send = await (await browser.$(selector)).$('button=Send reply');

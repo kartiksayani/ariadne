@@ -11,7 +11,7 @@ import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
 import { runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
 import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
-import { sendDetailReply } from './owner-reply.mjs';
+import { folded, openOwnerReply, sendDetailReply } from './owner-reply.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
 const nonce = process.env.ARIADNE_E2E_NONCE;
@@ -75,11 +75,12 @@ async function openSession(sessionId, itemId) {
   }
 }
 async function showHistory(texts) {
-  const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline');
-  await timeline.waitForDisplayed(); await timeline.click();
+  // The Timeline is a section of the detail panel; it lays multi-line bodies out as one paragraph.
+  const timeline = await browser.$('.item-detail [aria-label="Timeline"]');
+  await timeline.waitForDisplayed(); await timeline.scrollIntoView();
   await wait(async () => {
-    const detail = await browser.$('[aria-label="Item detail"]').getText();
-    return texts.every(text => detail.includes(text));
+    const detail = folded(await browser.$('[aria-label="Item detail"]').getText());
+    return texts.every(text => detail.includes(folded(text)));
   }, 'Complete saved history was not visible in native item detail');
 }
 async function nativeCard(kind, question) {
@@ -146,10 +147,7 @@ async function delivery(configuration) {
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
 
   for (const text of ownerTexts.slice(1)) {
-    const another = await browser.$('.owner-input').$('button=Write another input');
-    await another.waitForDisplayed(); await another.waitForEnabled(); await another.click();
-    const actions = await browser.$('[aria-label="Item actions"]'); await actions.waitForDisplayed();
-    const reply = await actions.$('button=Reply'); await reply.waitForDisplayed(); await reply.waitForEnabled(); await reply.click();
+    await openOwnerReply(true);
     await sendDetailReply(configuration, text);
   }
   const held = await snapshot(configuration), inputs = orderedInputs(held), savedReceipts = receipts(held, inputs);
