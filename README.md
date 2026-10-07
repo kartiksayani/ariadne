@@ -6,10 +6,10 @@ Questions, replies and decisions stay as a history you can follow, like a thread
 through a labyrinth. Local only: no account, no cloud, no telemetry.
 
 ![The Ariadne window, dark theme: the Waiting list on the left, the tree of
-topics and items in the middle with one item selected, its detail and the
-Messages rail on the right](docs/planning/assets/screenshot-dark-tree.png)
+topics and items in the middle, and the Messages rail on the right](docs/planning/assets/paperwhite-tree.png)
 
-*The running app showing the built-in demo session (`ariadne demo`), 1600×960.*
+*The app in the Paperwhite design (frame 1a of the design harness, `npm run test:design`), 1600×960.
+More: [graph](docs/planning/assets/paperwhite-graph.png), [item detail](docs/planning/assets/paperwhite-detail.png).*
 
 ## Why
 
