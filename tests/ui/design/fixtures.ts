@@ -167,6 +167,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
     const binding = session.bindings[session.active_binding_id!]!, running = world.sessions[index].running;
     return { project_id: session.project_id, session_id: session.id, title: session.title, state: session.state, revision: session.revision,
       created_at: session.created_at, updated_at: session.updated_at, closed_at: session.closed_at, counts: counts([session]),
+      topic_count: Object.keys(session.topics).length,
       active_binding: { id: binding.id, adapter_id: binding.adapter_id, external_session_id: binding.external_session_id, generation: binding.generation,
         dispatch_state: binding.dispatch_state, owner_paused: false, pause_reason: null, connection_state: binding.connection_state,
         presence: running ? { instance_id: uuid('f', 100 + index), generation: binding.generation, connection_state: 'connected', execution_state: 'running',

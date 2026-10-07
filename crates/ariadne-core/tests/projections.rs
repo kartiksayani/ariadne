@@ -461,6 +461,16 @@ fn item_status_filter_remains_literal_and_global_counts_match_session_counts() {
     );
     assert_eq!(global.counts, local.counts);
     assert_eq!(local.counts, local.sessions.items[0].counts);
+    // Every topic counts, archived included; archived_topics is the subset.
+    let seeded = seed();
+    assert_eq!(
+        local.sessions.items[0].topic_count.value(),
+        seeded.topics.0.len() as u64
+    );
+    assert!(
+        local.sessions.items[0].counts.archived_topics.value()
+            <= local.sessions.items[0].topic_count.value()
+    );
     let QueryResult::SessionRead(SessionReadResult::Items(items)) = setup
         .query(
             &owner(),

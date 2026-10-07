@@ -148,6 +148,7 @@ impl Fixture {
                 api_version: 1,
             },
             binding_scope: scope,
+            host_location: None,
         }
     }
 }

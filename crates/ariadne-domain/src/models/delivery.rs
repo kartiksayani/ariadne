@@ -74,6 +74,11 @@ pub struct Binding {
     pub active_input_id: Option<UuidV4>,
     pub issued_through_message_number: NonnegativeSafeInteger,
     pub adapter_config: AdapterConfig,
+    // Where the agent's terminal runs ("iTerm window 1"), from the agent-side
+    // environment at connect (ADR-0085). Display text only; absent in older stores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub host_location: Option<String>,
 }
 
 impl Binding {

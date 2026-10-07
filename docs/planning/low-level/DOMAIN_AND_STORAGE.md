@@ -262,7 +262,8 @@ See [ADR-0022](../../adr/ADR-0022-record-pure-item-history.md).
 
 Binding: `{id,adapter_id,adapter_version,protocol_major,config_version,
 external_session_id,endpoint,endpoint_fingerprint,generation,created_at,
-dispatch_state,owner_paused,pause_reason,connection_state,capabilities,active_input_id,issued_through_message_number,adapter_config}`.
+dispatch_state,owner_paused,pause_reason,connection_state,capabilities,active_input_id,issued_through_message_number,adapter_config,host_location?}`.
+`host_location` is an optional one-line label of at most 60 characters ("iTerm window 1"), written on connect and reconnect from the agent-side terminal environment; older stores omit it (ADR-0085).
 `dispatch_state=enabled|paused|recovery_required|disconnected`.
 `owner_paused` persists independently of automatic pause_reason; no result or
 reconnect can clear it. Dispatch state is recomputed with disconnected/recovery

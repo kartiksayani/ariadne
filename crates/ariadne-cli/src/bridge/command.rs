@@ -102,9 +102,15 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
         if bytes.len() > control_limit() {
             return Err(invalid("Bridge announcement JSON exceeds 1MiB."));
         }
-        let announcement = serde_json::from_slice(&bytes).map_err(|_| {
-            invalid("Announcement stdin must contain one strict SDK session announcement.")
-        })?;
+        let mut announcement: ariadne_runtime::discovery::SessionAnnouncement =
+            serde_json::from_slice(&bytes).map_err(|_| {
+                invalid("Announcement stdin must contain one strict SDK session announcement.")
+            })?;
+        // This process runs inside Claude Code and inherits its terminal environment.
+        if announcement.host_location.is_none() {
+            announcement.host_location =
+                ariadne_agent_protocol::host_location::host_location_from_environment();
+        }
         return serde_json::to_value(announce(
             home_from_environment()?,
             request_id,

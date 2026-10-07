@@ -244,6 +244,7 @@ impl Setup {
                     availability: Availability::Available,
                     connection_state: ConnectionState::Connected,
                     cli_invocation: "ariadne".into(),
+                    host_location: None,
                     setup_instruction: "Fixture qualified host; no live process.".into(),
                 })
             },
