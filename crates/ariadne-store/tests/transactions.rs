@@ -756,3 +756,52 @@ fn hand_edited_session_with_overlong_short_label_fails_validation() {
         other => panic!("expected a validation error, got {other:?}"),
     }
 }
+
+#[test]
+fn binding_host_location_is_optional_and_hand_edits_must_stay_one_bounded_line() {
+    use ariadne_domain::validation::ValidationErrorKind;
+    // The seed fixture predates host locations; it loads and gains no key.
+    let fixture = include_str!("../../../fixtures/domain/history/seed.json");
+    assert!(!fixture.contains("\"host_location\""));
+    let project = ProjectDir::new();
+    let store = project.store();
+    assert!(store
+        .read(&id(2))
+        .unwrap()
+        .bindings
+        .0
+        .values()
+        .all(|binding| binding.host_location.is_none()));
+    let write = |value: &str| {
+        let mut edited = seed();
+        for binding in edited.bindings.0.values_mut() {
+            binding.host_location = Some(value.into());
+        }
+        fs::write(project.live(), serde_json::to_vec(&edited).unwrap()).unwrap();
+        store.read(&id(2))
+    };
+    let saved = write("iTerm window 1").unwrap();
+    assert!(saved
+        .bindings
+        .0
+        .values()
+        .all(|binding| binding.host_location.as_deref() == Some("iTerm window 1")));
+    for (value, kind) in [
+        ("a\nb", ValidationErrorKind::Multiline),
+        (" iTerm", ValidationErrorKind::InvalidState),
+        ("x\u{1b}y", ValidationErrorKind::InvalidState),
+        (" ", ValidationErrorKind::Blank),
+    ] {
+        match write(value) {
+            Err(StoreError::Validation(error)) => assert_eq!(error.kind, kind, "{value:?}"),
+            other => panic!("expected a validation error for {value:?}, got {other:?}"),
+        }
+    }
+    match write(&"x".repeat(61)) {
+        Err(StoreError::Validation(error)) => assert_eq!(
+            error.kind,
+            ValidationErrorKind::TooManyChars { maximum_chars: 60 }
+        ),
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+}

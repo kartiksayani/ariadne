@@ -4,6 +4,7 @@ use ariadne_adapter_claude::{
     ClaudeOptions, LoadedModIdentity, ModEvidenceSlot, QualifiedClaudeHost, SUPPORTED_HOST_VERSION,
 };
 use ariadne_agent_protocol::{
+    host_location::normalize_host_location,
     host_version::{classify_host_version, HostVersionStatus},
     Availability, Compatibility, EndpointRef,
 };
@@ -117,6 +118,11 @@ impl Discovery {
         };
         announcement.cwd = canonical(&announcement.cwd)?;
         announcement.plugin.root = canonical(&announcement.plugin.root)?;
+        // Display text only: an unusable label is dropped, never a refusal.
+        announcement.host_location = announcement
+            .host_location
+            .as_deref()
+            .and_then(normalize_host_location);
         if let Some(binding) = &binding {
             if binding.canonical_root != std::path::Path::new(&announcement.cwd) {
                 return Err(CoreError::new(
@@ -562,6 +568,7 @@ mod tests {
                 api_version: 1,
             },
             binding_scope: None,
+            host_location: None,
         }
     }
     fn admit(d: &Discovery, a: SessionAnnouncement) -> Result<AnnouncementAck, CoreError> {
@@ -607,6 +614,33 @@ mod tests {
         assert!(c.binding.is_none());
         assert!(!c.loaded);
         assert_eq!(c.announcement().unwrap().plugin.name, "ariadne");
+        assert_eq!(c.announcement().unwrap().host_location, None);
+    }
+    #[test]
+    fn host_location_is_optional_display_text_normalized_at_intake() {
+        let root = tempfile::tempdir().unwrap();
+        let a = announcement(root.path());
+        // Older helpers omit the key; it is never serialized when absent.
+        let value = serde_json::to_value(&a).unwrap();
+        assert!(value.get("host_location").is_none());
+        assert_eq!(
+            serde_json::from_value::<SessionAnnouncement>(value).unwrap(),
+            a
+        );
+        for (sent, kept) in [
+            (Some("  iTerm window 2 "), Some("iTerm window 2")),
+            (Some("Warp\nsecond line"), Some("Warp")),
+            (Some(" \t"), None),
+            (None, None),
+        ] {
+            let d = discovery();
+            let mut labelled = a.clone();
+            labelled.host_location = sent.map(Into::into);
+            admit(&d, labelled).unwrap();
+            let snap = d.snapshot().unwrap();
+            let announced = snap.candidates[0].announcement().unwrap();
+            assert_eq!(announced.host_location.as_deref(), kept);
+        }
     }
     #[test]
     fn metadata_is_strict_bounded_and_never_truncated_or_caller_freshness() {

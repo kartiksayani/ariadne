@@ -62,3 +62,7 @@ the agent. Conversations and files outside Ariadne's store are never changed.
 [ADR-0084](ADR-0084-short-labels.md) adds an optional agent-written `short` label
 (2-4 words, at most 40 characters) to items and topics for the graph and breadcrumbs.
 An absent label in `item.edit` keeps it, `null` clears it; older stores load unchanged.
+
+[ADR-0085](ADR-0085-host-location.md) records where the agent's terminal runs
+("iTerm window 1") on the binding, parsed from the agent-side `TERM_PROGRAM` and
+`ITERM_SESSION_ID` by the Claude helper, and adds `topic_count` to `SessionSummary`.

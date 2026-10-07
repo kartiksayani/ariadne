@@ -66,6 +66,7 @@ fn facts(params: &BindingConnectParams) -> VerifiedHost {
         availability: Availability::Available,
         connection_state: ConnectionState::Connected,
         cli_invocation: "ariadne".into(),
+        host_location: Some("iTerm window 1".into()),
         setup_instruction: "Use the saved binding and generation for this explicit host thread."
             .into(),
     }
@@ -259,12 +260,11 @@ fn new_connect_creates_revision_one_and_exact_replay_skips_provider_and_ids() {
     assert_eq!(first, again);
     assert_eq!(fs::read(s.live(1, &first.session_id)).unwrap(), before);
     let (binding, generation) = handle(&first);
-    assert_eq!(
-        s.store(1).read(&first.session_id).unwrap().bindings.0[&binding]
-            .issued_through_message_number
-            .value(),
-        0
-    );
+    let session = s.store(1).read(&first.session_id).unwrap();
+    let saved = &session.bindings.0[&binding];
+    assert_eq!(saved.issued_through_message_number.value(), 0);
+    // The verified host's terminal label is stored on the new binding (ADR-0085).
+    assert_eq!(saved.host_location.as_deref(), Some("iTerm window 1"));
     let route = s.registry.resolve_binding(&binding).unwrap();
     assert_eq!(route.session_id, first.session_id);
     assert_eq!(route.generation, generation);
@@ -314,6 +314,7 @@ fn same_host_reconnect_preserves_history_pause_and_old_receipt_before_closed_gua
         let b = v.bindings.0.get_mut(&id(3)).unwrap();
         b.owner_paused = true;
         b.dispatch_state = DispatchState::Paused;
+        b.host_location = Some("Terminal".into());
     });
     let cmd = command(1, "existing-thread", 10, None);
     let first = s.connect(&cmd);
@@ -331,6 +332,11 @@ fn same_host_reconnect_preserves_history_pause_and_old_receipt_before_closed_gua
     assert_eq!(after.messages, before.messages);
     assert_eq!(after.items, before.items);
     assert!(after.bindings.0[&id(3)].owner_paused);
+    // A reconnect replaces the label with the newly verified host's.
+    assert_eq!(
+        after.bindings.0[&id(3)].host_location.as_deref(),
+        Some("iTerm window 1")
+    );
     assert_eq!(
         after.bindings.0[&id(3)].dispatch_state,
         DispatchState::Paused
@@ -571,6 +577,7 @@ fn failed_qualification_mismatched_facts_or_uuid_reuse_has_no_session_effect() {
         ("identity", CoreErrorCode::BindingMismatch),
         ("fingerprint", CoreErrorCode::InvalidArgument),
         ("observation", CoreErrorCode::InvalidArgument),
+        ("location", CoreErrorCode::InvalidArgument),
     ] {
         let err = s
             .service()
@@ -585,6 +592,7 @@ fn failed_qualification_mismatched_facts_or_uuid_reuse_has_no_session_effect() {
                         "identity" => f.external_session_id = "other".into(),
                         "fingerprint" => f.endpoint_fingerprint.0 = "x".repeat(4097),
                         "observation" => f.connection_state = ConnectionState::Reconnecting,
+                        "location" => f.host_location = Some("two\nlines".into()),
                         _ => unreachable!(),
                     };
                     Ok(f)

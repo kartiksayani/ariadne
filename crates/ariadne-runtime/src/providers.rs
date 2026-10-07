@@ -165,6 +165,9 @@ impl ProviderFactory {
                     connection_state: ConnectionState::Unknown,
                     setup_instruction: self.instructions.codex.clone(),
                     cli_invocation: self.instructions.cli_invocation.clone(),
+                    // The desktop talks to the Codex daemon; no agent-side
+                    // process reports its terminal on this path (ADR-0085).
+                    host_location: None,
                 };
                 within(deadline)?;
                 Ok(QualifiedProvider {
@@ -243,6 +246,9 @@ impl ProviderFactory {
         }).ok_or_else(|| CoreError::new(CoreErrorCode::HostUnreachable,
             "No fresh matching native Claude announcement is available.",
             "Refresh the original conversation's announcement; saved routing IDs alone grant no readiness."))?;
+        let host_location = candidate
+            .announcement()
+            .and_then(|announcement| announcement.host_location.clone());
         let qualified = self.discovery.qualify_claude_host_matching_before(
             candidate,
             options.clone(),
@@ -269,6 +275,7 @@ impl ProviderFactory {
             connection_state: ConnectionState::Unknown,
             setup_instruction: self.instructions.claude.clone(),
             cli_invocation: self.instructions.cli_invocation.clone(),
+            host_location,
         };
         Ok(QualifiedProvider {
             host,

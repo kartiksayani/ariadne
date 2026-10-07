@@ -94,6 +94,7 @@ fn host(params: &BindingConnectParams) -> VerifiedHost {
         availability: Availability::Available,
         connection_state: ConnectionState::Unknown,
         cli_invocation: "ariadne".into(),
+        host_location: None,
         setup_instruction: "fixture instructions".into(),
     }
 }

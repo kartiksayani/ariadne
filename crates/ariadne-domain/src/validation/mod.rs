@@ -136,6 +136,38 @@ pub(crate) fn optional_short_label(
         .map_or(Ok(()), |value| short_label(value, path))
 }
 
+/// Most Unicode characters a binding's `host_location` may hold (ADR-0085).
+pub const HOST_LOCATION_MAX_CHARS: usize = 60;
+
+/// A stored host location is nonblank, trimmed, free of control characters
+/// (so one line) and at most [`HOST_LOCATION_MAX_CHARS`] characters.
+pub(crate) fn optional_host_location(
+    value: &Option<String>,
+    path: &str,
+) -> Result<(), ValidationError> {
+    let Some(value) = value.as_deref() else {
+        return Ok(());
+    };
+    text(value, path, true, None)?;
+    require(
+        !value.contains(['\n', '\r']),
+        path,
+        ValidationErrorKind::Multiline,
+    )?;
+    require(
+        value.trim() == value && !value.contains(char::is_control),
+        path,
+        ValidationErrorKind::InvalidState,
+    )?;
+    require(
+        value.chars().count() <= HOST_LOCATION_MAX_CHARS,
+        path,
+        ValidationErrorKind::TooManyChars {
+            maximum_chars: HOST_LOCATION_MAX_CHARS,
+        },
+    )
+}
+
 pub(crate) fn distinct<T: Ord>(
     values: impl IntoIterator<Item = T>,
     path: &str,

@@ -84,6 +84,11 @@ pub(super) fn session(session: &Session) -> Result<SummaryCounts, CoreError> {
     }
     Ok(result)
 }
+/// Every topic in the session, archived included (`SessionSummary.topic_count`).
+pub(super) fn topics(session: &Session) -> Result<NonnegativeSafeInteger, CoreError> {
+    let count = u64::try_from(session.topics.0.len()).map_err(|_| capacity())?;
+    NonnegativeSafeInteger::new(count).map_err(|_| capacity())
+}
 pub(super) fn merge(target: &mut SummaryCounts, value: &SummaryCounts) -> Result<(), CoreError> {
     macro_rules! fields { ($($field:ident).+) => { add(&mut target.$($field).+, value.$($field).+.value())? }; }
     fields!(items_by_status.open);

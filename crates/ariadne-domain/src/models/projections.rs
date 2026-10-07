@@ -263,6 +263,9 @@ pub struct SessionSummary {
     pub closed_at: Option<UtcMillis>,
     pub active_binding: Option<BindingSummary>,
     pub counts: SummaryCounts,
+    // Every topic in the session, archived included; `counts.archived_topics`
+    // is the archived subset.
+    pub topic_count: NonnegativeSafeInteger,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -277,4 +280,8 @@ pub struct BindingSummary {
     pub pause_reason: Option<PauseReason>,
     pub connection_state: ConnectionState,
     pub presence: Option<PresenceObservation>,
+    // The binding's `host_location` (ADR-0085).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub host_location: Option<String>,
 }

@@ -450,6 +450,8 @@ fn status(core: &dyn CoreService, lease: &BindingLease) -> Result<ControlResult,
         pause_reason: binding.pause_reason.clone(),
         connection_state: binding.connection_state.clone(),
         presence: None,
+        // Owner display text; the Mod's status check accepts the exact earlier keys.
+        host_location: None,
     }))
 }
 /// Native client. One absolute timeout includes validation, connect and complete frame IO.

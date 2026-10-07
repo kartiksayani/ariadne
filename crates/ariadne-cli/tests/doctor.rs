@@ -596,6 +596,7 @@ fn control_status_is_read_only_generation_scoped_and_reports_fresh_and_stale() {
                     process_identity: None,
                     freshness,
                 }),
+                host_location: None,
             };
             let response = serde_json::to_vec(
                 &serde_json::json!({"v":1,"kind":"response","id":request["id"],"result":status}),

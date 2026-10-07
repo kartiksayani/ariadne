@@ -306,9 +306,12 @@ Canonical P0.3b records make those projections explicit:
 - `ProjectSummary={project_id,project:Project|null,canonical_root,availability:available|unavailable,
   counts:SummaryCounts}`. `SessionSummary={project_id,session_id,title,state,
   revision,created_at,updated_at,closed_at,active_binding:BindingSummary|null,
-  counts:SummaryCounts}`. `BindingSummary={id,adapter_id,external_session_id,
+  counts:SummaryCounts,topic_count}`. `BindingSummary={id,adapter_id,external_session_id,
   generation,dispatch_state,owner_paused,pause_reason,connection_state,
-  presence:PresenceObservation|null}`. Closed time and pause reason are nullable.
+  presence:PresenceObservation|null,host_location?}`. Closed time and pause reason are nullable.
+  `topic_count` counts every topic in the session, archived included
+  (`counts.archived_topics` is the subset); `host_location` is the binding's
+  terminal label, omitted when unknown and never in `bridge connection-status` (ADR-0085).
 
 Available project summaries require verified metadata matching project_id.
 Unavailable registered roots retain their trusted ID/path; metadata may be null
