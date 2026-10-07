@@ -18,6 +18,10 @@ export interface FrameSpec {
   readonly view?: 'graph';
   readonly openMode?: 'reply' | 'followup';
   readonly hoverMsg?: number;
+  /** A harness state of another board frame: the frame whose card is drawn, then put in this state. */
+  readonly design?: string;
+  /** The tree row the pointer rests on (Item Row.dc.html: hover band, row actions and the id). */
+  readonly hoverItem?: string;
   /** Topic names the frame shows folded (the review scenario folds t1-t3). */
   readonly collapseTopics?: readonly string[];
 }
@@ -54,7 +58,13 @@ const specs: readonly FrameSpec[] = [
   { ...base, id: '1ab', scenario: 'projects' },
   { ...base, id: '1ac', scenario: 'projectpage' },
   { ...base, id: '1ad', scenario: 'notrunning', selected: '5.3', detail: true },
+  // 1b with the pointer on a row: a plain row gets the hover band; the selected row keeps its own band.
+  { ...base, id: '1b-hover', design: '1b', selected: '1.3.1.2', detail: true, rail: true, hoverItem: '1.3.1' },
+  { ...base, id: '1b-hover-selected', design: '1b', selected: '1.3.1.2', detail: true, rail: true, hoverItem: '1.3.1.2' },
 ];
+
+/** Harness states drawn from another board frame's card (FrameSpec.design). */
+export const variantIds: readonly string[] = specs.filter(spec => spec.design).map(spec => spec.id);
 
 /** The fixed wall clock of the handoff page: 7 Oct 2026 15:10 UTC, after the last message of every frame (1i answers until 15:10). */
 export const designNow = Date.UTC(2026, 9, 7, 15, 10);

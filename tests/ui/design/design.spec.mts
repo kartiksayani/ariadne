@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { designNow, frameNow, frameSpec, graphFrame, type FrameSpec } from './frames';
+import { designNow, frameNow, frameSpec, graphFrame, variantIds, type FrameSpec } from './frames';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 
@@ -212,14 +212,31 @@ async function compare(page: Page, design: Buffer, app: Buffer, regions: readonl
 interface Region { readonly name: string; readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 
 test.describe.configure({ mode: 'parallel' });
-for (const id of designFrames) {
+/** The tree row of item `itemId` in a board card: the Item Row whose id label reads it (Item Row.dc.html). */
+const designRow = (designPage: Page, card: string, itemId: string) => designPage.locator(`[id="${card}"] .dv-card [role="treeitem"]`)
+  .filter({ has: designPage.locator('span', { hasText: new RegExp(`^${itemId.replace(/\./g, '\\.')}$`) }) }).first();
+
+for (const id of [...designFrames, ...variantIds]) {
   test(`frame ${id}`, async ({ page, origin, designPage }) => {
     let spec: FrameSpec;
     try { spec = frameSpec(id); } catch (error) { test.skip(true, (error as Error).message); return; }
+    const card = spec.design ?? id;
     const denied: string[] = [];
     await route(page.context(), origin, denied);
     await openApp(page, origin, spec);
-    if (spec.rail) await matchRail(page, designPage, id);
+    if (spec.rail) await matchRail(page, designPage, card);
+    // The pointer rests on a row in both: the prototype's hoverItem and the app's :hover. Moved off again after the capture.
+    if (spec.hoverItem) {
+      await designRow(designPage, card, spec.hoverItem).hover();
+      await page.locator(`.tree-item[data-item-id="${spec.hoverItem}"]`).hover();
+      await settle(page); await settle(designPage);
+    }
+    try { await capture(page, designPage, spec, id, card, denied); } finally { if (spec.hoverItem) await designPage.mouse.move(0, 0); }
+  });
+}
+
+async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string, card: string, denied: readonly string[]) {
+  {
     const shell = await page.evaluate(() => {
       const height = (selector: string) => document.querySelector(selector)?.getBoundingClientRect().height ?? null;
       const columns = [...document.querySelector('.shell-body')!.children].map(child => ({
@@ -235,7 +252,7 @@ for (const id of designFrames) {
     }
     const app = await page.screenshot({ animations: 'disabled' });
     // The card sits at a fractional page offset; clip the frame's exact size at the rounded origin.
-    const box = await designPage.locator(`[id="${id}"] .dv-card`).evaluate(node => {
+    const box = await designPage.locator(`[id="${card}"] .dv-card`).evaluate(node => {
       const rect = node.getBoundingClientRect(); return { x: rect.x + window.scrollX, y: rect.y + window.scrollY };
     });
     const design = await designPage.screenshot({ animations: 'disabled', fullPage: true,
@@ -258,5 +275,5 @@ for (const id of designFrames) {
       size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }, null, 2)}\n`);
     expect(denied).toEqual([]);
     expect(result.ratio, `${id} mismatch ratio`).toBeLessThanOrEqual(threshold);
-  });
+  }
 }
