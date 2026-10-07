@@ -7,7 +7,7 @@ import { sendDetailReply } from './owner-reply.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
-const bindingControls = () => browser.$('[aria-label="Binding lifecycle"]');
+const sessionPresence = () => browser.$('.tree-session-bar .tree-run');
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.scrollIntoView({ block: 'center' }); await control.click(); }
 
 export function originalReplyRequest(configuration, admission, session, text) {
@@ -67,7 +67,7 @@ async function openPrimary(configuration) {
   }, 'Recovery did not open the restored primary session');
   // Graph mode can be retained from the preceding acceptance; choose Tree explicitly.
   await click(await browser.$('button[title="Tree (g)"]'));
-  await click(await browser.$(`.ref-tree-row[data-item-id="${configuration.itemId}"]`));
+  await click(await browser.$(`.tree-item[data-item-id="${configuration.itemId}"]`));
   await wait(async () => await browser.$('.history-header strong').getText() === `Item ${configuration.itemId}`, 'Recovery selected a different item');
 }
 
@@ -129,8 +129,11 @@ export async function runRecoveryAcceptance(configuration) {
   assert.equal(expired.bindings[configuration.bindingId].pause_reason, 'result_missing');
   const row = await browser.$(`[aria-label="Delivery recovery"] [data-input-id="${input.id}"][data-attempt-id="${original.attemptId}"]`);
   await wait(async () => await row.isExisting() && (await row.getText()).includes('Missing result'), 'Missing result was not visible in real recovery UI');
-  await wait(async () => (await bindingControls().getText()).includes('Host idle · fresh host poll'), 'Recovery requires genuine provider-qualified idle');
-  const resume = await bindingControls().$('button=Resume dispatch');
+  // The session bar carries the qualified presence. Resume dispatch left the
+  // tree in P8.3: WP5 puts it on the project page's session rows and must route
+  // this lookup there; until then this journey has no Resume control to reach.
+  await wait(async () => await sessionPresence().getAttribute('title') === 'Host idle · fresh host poll', 'Recovery requires genuine provider-qualified idle');
+  const resume = await browser.$('button=Resume dispatch');
   assert.equal(await resume.isEnabled(), false, 'Missing result must block Resume');
   await browser.saveScreenshot(join(evidence, 'native-result-missing.png'));
   await click(await row.$('button=Review recovery'));

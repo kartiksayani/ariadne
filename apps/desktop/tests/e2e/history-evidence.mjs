@@ -8,7 +8,7 @@ export function historyFailureFacts() {
   const owner = document.querySelector('.owner-input');
   const editor = owner?.querySelector('textarea') ?? null;
   const send = owner?.querySelector('.ref-send-row button') ?? null;
-  const search = document.querySelector('.sentence-search input');
+  const search = document.querySelector('[data-shell-search]');
   const stateButtons = /^(Refresh|Refreshing…|Reconcile operation|Register project|Connect existing session|Retry saving draft preferences|Retry saved input|Write another input)$/;
   const active = document.activeElement;
   return {

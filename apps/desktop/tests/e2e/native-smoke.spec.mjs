@@ -64,7 +64,7 @@ async function openSession(sessionId, itemId) {
       const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
       return selected.kind === 'session' && selected.session.session_id === sessionId && await catalogue.isEnabled();
     }, 'Selected session navigation did not finish its saved preference update');
-    const item = await browser.$(`.ref-tree-row[data-item-id="${itemId}"]`);
+    const item = await browser.$(`.tree-item[data-item-id="${itemId}"]`);
     await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
     await wait(async () => await browser.$('.history-header strong').getText() === `Item ${itemId}`, 'Selected item detail did not load');
   } catch (error) {

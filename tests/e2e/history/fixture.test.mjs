@@ -10,12 +10,12 @@ import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySee
 
 test('unpin proves pin removal independently, while deliberate rail Close requires cleared references', async t => {
   const dom = new JSDOM(`<aside class="message-history-rail"><div class="rail-messages"><article data-message-id="message" class="history-pinned"></article></div></aside>
-    <div role="treeitem" data-item-id="1"><span class="ref-tree-mark" style="background: blue"></span></div>
+    <div class="tree-rows"><div role="treeitem" data-item-id="1" data-highlight="strong"></div></div>
     <div class="history-timeline"><article data-message-id="message" class="history-highlight"></article></div>`);
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
   t.after(() => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); });
   globalThis.document = dom.window.document;
-  const article = document.querySelector('.rail-messages article'), mark = document.querySelector('.ref-tree-mark');
+  const article = document.querySelector('.rail-messages article'), item = document.querySelector('[role="treeitem"]');
   const detail = document.querySelector('.history-timeline article');
   let pressed = 'true', pinWait = true;
   const actions = [], admitted = [];
@@ -45,20 +45,19 @@ test('unpin proves pin removal independently, while deliberate rail Close requir
       } else {
         assert.deepEqual(actions, ['scroll', 'unpin', 'close enabled', 'close']);
         admitted.push(await condition()); // A clicked but still mounted rail cannot pass.
-        mark.style.background = 'transparent'; detail.classList.remove('history-highlight');
+        item.removeAttribute('data-highlight'); detail.classList.remove('history-highlight');
         admitted.push(await condition()); // Even cleared references cannot excuse a rail that never closed.
-        mark.style.background = 'blue'; detail.classList.add('history-highlight');
+        item.setAttribute('data-highlight', 'strong'); detail.classList.add('history-highlight');
         document.querySelector('.message-history-rail').remove();
         admitted.push(await condition()); // Unmount alone cannot excuse stale highlights.
-        mark.style.background = 'transparent';
+        item.setAttribute('data-highlight', 'weak');
+        admitted.push(await condition()); // A weak (folded) highlight is still a highlight.
+        item.removeAttribute('data-highlight');
         admitted.push(await condition()); // A cleared tree cannot excuse stale detail highlighting.
         detail.classList.remove('history-highlight');
-        mark.remove(); admitted.push(Boolean(await condition())); // A missing marker cannot prove cleanup.
-        document.querySelector('[role="treeitem"]').append(mark);
-        for (const background of ['transparent', 'none', 'rgba(0, 0, 0, 0)']) {
-          mark.style.background = background;
-          admitted.push(await condition()); // Equivalent transparent shorthands share one computed color.
-        }
+        item.remove(); admitted.push(Boolean(await condition())); // A missing row cannot prove cleanup.
+        document.querySelector('.tree-rows').append(item);
+        admitted.push(await condition());
       }
       assert.equal(admitted.at(-1), true);
     },
@@ -68,7 +67,7 @@ test('unpin proves pin removal independently, while deliberate rail Close requir
   assert.equal(detail.classList.contains('history-highlight'), true, 'Unpin must not claim clearing a separate hover highlight');
   await closeHistoryRailReferences({ id: 'message' });
   assert.deepEqual(actions, ['scroll', 'unpin', 'close enabled', 'close']);
-  assert.deepEqual(admitted, [false, true, false, false, false, false, false, true, true, true]);
+  assert.deepEqual(admitted, [false, true, false, false, false, false, false, false, true]);
 });
 
 test('fork links and parent references cannot admit a different selected history item', async t => {
