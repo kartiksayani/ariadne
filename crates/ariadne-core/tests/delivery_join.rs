@@ -1454,6 +1454,7 @@ fn explicit_claude_reconnect_rotates_generation_past_the_prior_terminal_receipt(
                     availability: Availability::Available,
                     connection_state: ConnectionState::Unknown,
                     cli_invocation: "ariadne".into(),
+                    host_location: None,
                     setup_instruction: "Retain saved IDs.".into(),
                 })
             },

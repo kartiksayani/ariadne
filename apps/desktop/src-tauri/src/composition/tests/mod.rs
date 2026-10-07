@@ -124,6 +124,7 @@ impl Fixture {
                 api_version: 1,
             },
             binding_scope: scope,
+            host_location: None,
         }
     }
     fn call(&self, n: u64, method: ControlMethod) -> Result<ControlResult, CoreError> {

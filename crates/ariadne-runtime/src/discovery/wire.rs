@@ -26,6 +26,10 @@ pub struct SessionAnnouncement {
     pub descriptor: ModDescriptor,
     #[serde(deserialize_with = "nullable_scope")]
     pub binding_scope: Option<BindingScope>,
+    /// Where the agent's terminal runs. `ariadne bridge announce` fills it from
+    /// its own environment (inherited from Claude Code); intake normalizes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_location: Option<String>,
 }
 fn nullable_scope<'de, D: serde::Deserializer<'de>>(
     deserializer: D,

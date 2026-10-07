@@ -508,6 +508,12 @@
         "generation": {
           "$ref": "#/$defs/UuidV4"
         },
+        "host_location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "$ref": "#/$defs/UuidV4"
         },

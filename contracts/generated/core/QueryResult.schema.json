@@ -557,6 +557,12 @@
         "generation": {
           "$ref": "#/$defs/UuidV4"
         },
+        "host_location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "$ref": "#/$defs/UuidV4"
         },
@@ -619,6 +625,12 @@
         },
         "generation": {
           "$ref": "#/$defs/UuidV4"
+        },
+        "host_location": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "id": {
           "$ref": "#/$defs/UuidV4"
@@ -4843,6 +4855,9 @@
         "title": {
           "type": "string"
         },
+        "topic_count": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
         "updated_at": {
           "$ref": "#/$defs/UtcMillis"
         }
@@ -4858,7 +4873,8 @@
         "updated_at",
         "closed_at",
         "active_binding",
-        "counts"
+        "counts",
+        "topic_count"
       ]
     },
     "Sha256": {

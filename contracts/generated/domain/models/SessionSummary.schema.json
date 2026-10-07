@@ -44,6 +44,9 @@
     "title": {
       "type": "string"
     },
+    "topic_count": {
+      "$ref": "#/$defs/NonnegativeSafeInteger"
+    },
     "updated_at": {
       "$ref": "#/$defs/UtcMillis"
     }
@@ -59,7 +62,8 @@
     "updated_at",
     "closed_at",
     "active_binding",
-    "counts"
+    "counts",
+    "topic_count"
   ],
   "$defs": {
     "BindingSummary": {
@@ -79,6 +83,12 @@
         },
         "generation": {
           "$ref": "#/$defs/UuidV4"
+        },
+        "host_location": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "id": {
           "$ref": "#/$defs/UuidV4"

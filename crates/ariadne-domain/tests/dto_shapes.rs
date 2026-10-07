@@ -406,6 +406,10 @@ fn summaries_preserve_incompleteness_and_all_seven_status_counts() {
     );
     assert_wire::<SessionSummary>(
         json!({"project_id":ID,"session_id":ID,"title":"Historical session","state":"closed",
+        "revision":2,"created_at":TIME,"updated_at":TIME,"closed_at":TIME,"active_binding":null,"counts":counts(),"topic_count":3}),
+    );
+    reject_wire::<SessionSummary>(
+        json!({"project_id":ID,"session_id":ID,"title":"Historical session","state":"closed",
         "revision":2,"created_at":TIME,"updated_at":TIME,"closed_at":TIME,"active_binding":null,"counts":counts()}),
     );
     let mut missing = counts();
