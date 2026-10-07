@@ -16,6 +16,17 @@ async function confirm(label) {
   await click(await dialog().$(`button=${label}`));
   await wait(async () => !(await dialog().isExisting()), `${label} confirmation did not close`);
 }
+// The item and topic notes stay listed (dismissible, no timeout), so the × is scoped to the note's own text.
+async function dismissNote(matches, description) {
+  let note;
+  await wait(async () => {
+    for (const candidate of await notices().$$('.pw-note')) {
+      if (matches(await candidate.$('.pw-note-text').getText())) { note = candidate; return true; }
+    }
+    return false;
+  }, `No note read ${description}`);
+  await click(await note.$('button[aria-label="Dismiss"]'));
+}
 async function projectPage(projectId) {
   await click(await browser.$('button[data-shell-tab="projects"]'));
   await click(await browser.$(`.pw-project-card[data-project-id="${projectId}"] .pw-project-open`));
@@ -71,18 +82,19 @@ export async function runRemoveAcceptance(configuration) {
   await confirm('Remove session');
   await wait(async () => !(await browser.$(card).isExisting()), 'The removed session card stayed listed');
   assert.ok(await exists(sessionPath), 'Session remove ran before Dismiss');
-  await click(await notices().$('button[aria-label="Dismiss"]'));
-  await wait(async () => !(await exists(sessionPath)), 'Session remove did not delete the session file after Dismiss');
+  await dismissNote(text => /^Removed the .+ session from .+\.$/.test(text), 'the session removal');
+  await wait(async () => !(await exists(sessionPath)),'Session remove did not delete the session file after Dismiss');
 
   // Project: the Projects page card trash.
   await click(await browser.$('button[data-shell-tab="projects"]'));
   const projectCard = `.pw-project-card[data-project-id="${projectId}"]`;
+  const projectName = await browser.$(projectCard).$('.pw-project-name').getText();
   await click(await browser.$(projectCard).$('button[aria-label="Remove project"]'));
   await confirm('Remove project');
   await wait(async () => !(await browser.$(projectCard).isExisting()), 'The removed project card stayed listed');
   assert.ok(await exists(store), 'Project remove ran before Dismiss');
-  await click(await notices().$('button[aria-label="Dismiss"]'));
-  await wait(async () => !(await exists(store)), 'Project remove did not delete the project store after Dismiss');
+  await dismissNote(text => text === `Removed ${projectName}.`, `“Removed ${projectName}.”`);
+  await wait(async () => !(await exists(store)),'Project remove did not delete the project store after Dismiss');
 
   assert.deepEqual(await readFile(configuration.demo.sessionPath), demoBytes, 'Remove changed the canonical demo');
   assert.deepEqual(await snapshot(configuration), mainBefore, 'Remove changed the main journey');

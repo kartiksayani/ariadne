@@ -107,6 +107,11 @@
   gap: 10px;
 }
 
+/* Groups the action box with its warning for tests; it adds no box of its own. */
+.detail-owner-input {
+  display: contents;
+}
+
 .detail-stepper {
   display: flex;
   align-items: flex-start;

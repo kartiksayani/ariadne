@@ -11,12 +11,12 @@ import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySee
 test('unpin proves pin removal independently, while deliberate rail Close requires cleared references', async t => {
   const dom = new JSDOM(`<aside class="pw-rail"><div class="pw-rail-list"><button data-message-id="message" class="pw-excerpt pw-excerpt-active" aria-pressed="true"></button></div></aside>
     <div class="tree-rows"><div role="treeitem" data-item-id="1" data-highlight="strong"></div></div>
-    <div class="history-timeline"><article data-message-id="message" class="history-highlight"></article></div>`);
+    <section class="detail-timeline"><div data-message-id="message" class="excerpt-timeline excerpt-highlighted"></div></section>`);
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
   t.after(() => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); });
   globalThis.document = dom.window.document;
   const excerpt = document.querySelector('.pw-rail-list [data-message-id]'), item = document.querySelector('[role="treeitem"]');
-  const detail = document.querySelector('.history-timeline article');
+  const detail = document.querySelector('.detail-timeline [data-message-id]');
   let pinWait = true;
   const actions = [], admitted = [];
   const card = {
@@ -45,16 +45,16 @@ test('unpin proves pin removal independently, while deliberate rail Close requir
       } else {
         assert.deepEqual(actions, ['scroll', 'unpin', 'close enabled', 'close']);
         admitted.push(await condition()); // A clicked but still mounted rail cannot pass.
-        item.removeAttribute('data-highlight'); detail.classList.remove('history-highlight');
+        item.removeAttribute('data-highlight'); detail.classList.remove('excerpt-highlighted');
         admitted.push(await condition()); // Even cleared references cannot excuse a rail that never closed.
-        item.setAttribute('data-highlight', 'strong'); detail.classList.add('history-highlight');
+        item.setAttribute('data-highlight', 'strong'); detail.classList.add('excerpt-highlighted');
         document.querySelector('.pw-rail').remove();
         admitted.push(await condition()); // Unmount alone cannot excuse stale highlights.
         item.setAttribute('data-highlight', 'weak');
         admitted.push(await condition()); // A weak (folded) highlight is still a highlight.
         item.removeAttribute('data-highlight');
         admitted.push(await condition()); // A cleared tree cannot excuse stale detail highlighting.
-        detail.classList.remove('history-highlight');
+        detail.classList.remove('excerpt-highlighted');
         item.remove(); admitted.push(Boolean(await condition())); // A missing row cannot prove cleanup.
         document.querySelector('.tree-rows').append(item);
         admitted.push(await condition());
@@ -64,7 +64,7 @@ test('unpin proves pin removal independently, while deliberate rail Close requir
   };
   await unpinHistoryMessage(card, { id: 'message', number: 4 });
   assert.deepEqual(actions, ['scroll', 'unpin']);
-  assert.equal(detail.classList.contains('history-highlight'), true, 'Unpin must not claim clearing a separate hover highlight');
+  assert.equal(detail.classList.contains('excerpt-highlighted'), true, 'Unpin must not claim clearing a separate hover highlight');
   await closeHistoryRailReferences({ id: 'message' });
   assert.deepEqual(actions, ['scroll', 'unpin', 'close enabled', 'close']);
   assert.deepEqual(admitted, [false, false, true, false, false, false, false, false, false, true]);
@@ -77,15 +77,17 @@ test('fork links and parent references cannot admit a different selected history
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
   t.after(() => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); });
   globalThis.document = dom.window.document;
-  const view = (header, question, metadata, nested) => `<article class="item-detail"><div class="detail-head"><h2 class="detail-question">${question}</h2></div>
-    <p class="history-meta">${metadata}</p>${nested}<div class="detail-reference"><span>Agent reference</span><code>${header}</code></div></article>`;
+  // The Paperwhite detail names the item by its agent reference and question only;
+  // a fork's source round is its fork link inside the parent's round (proveRounds).
+  const view = (header, question, nested) => `<article class="item-detail"><div class="detail-head"><h2 class="detail-question">${question}</h2></div>
+    ${nested}<div class="detail-reference"><span>Agent reference</span><code>${header}</code></div></article>`;
   const views = [
-    view(parent.id, parent.question, '', `<section aria-label="Child items"><button class="detail-kid">${child.question}</button></section>
-      <section aria-label="Back and forth"><div aria-label="Round 1"><button class="detail-fork">${child.question}</button></div></section>`),
-    view(child.id, parent.question, `Source round · ${child.source_round_id}`, ''),
-    view(child.id, child.question, 'Source round · wrong-round', ''),
-    view(child.id, child.question, '', `<section><p class="history-meta">Source round · ${child.source_round_id}</p></section>`),
-    view(child.id, child.question, `Source round · ${child.source_round_id}`, ''),
+    view(parent.id, parent.question, `<section aria-label="Child items"><button class="detail-kid">${child.question}</button></section>
+      <section class="detail-rounds" aria-label="Back and forth"><div class="detail-round" aria-label="Round 1"><button class="detail-fork">${child.question}</button></div></section>`),
+    view(child.id, parent.question, ''),
+    view(parent.id, child.question, ''),
+    view(child.id, child.question.split('\n')[0], ''),
+    view(child.id, child.question, ''),
   ];
   const admitted = [];
   globalThis.browser = {
@@ -100,52 +102,59 @@ test('fork links and parent references cannot admit a different selected history
   assert.deepEqual(admitted, [false, false, false, false, true]);
   admitted.length = 0;
   views.splice(0, views.length,
-    view(child.id, child.question, `Source round · ${child.source_round_id}`, `<nav aria-label="Item location"><button>${parent.question}</button></nav><section>${parent.question}</section>`),
-    view(parent.id, parent.question, '', ''));
+    view(child.id, child.question, `<nav aria-label="Item location"><button>${parent.question}</button></nav><section>${parent.question}</section>`),
+    view(parent.id, parent.question, ''));
   await waitForHistoryItem(parent);
   assert.deepEqual(admitted, [false, true]);
 });
 
+// A Back and forth round renders its ask, the owner's answer and the result's explanation
+// as one-paragraph lines (Ariadne.dc.html); its explanation alone proves the closed result.
+const roundText = (ask, you, result = null) => ['Round 5', ask, you, result].filter(Boolean).join('\n');
+const roundAsk = 'History round 5: choose and explain. Full ask line 5.';
+const roundChoice = 'You chose “Use round 5 choice”';
+
 test('five existing round sections do not admit assertions before the final closed result reaches native detail', async t => {
   const round = { ordinal: 5, closed_at: '2026-10-05T11:51:57.000Z' };
-  const reply = 'Explicit native round 5 result\nFull correlated agent reply for the saved answer.';
   const explanation = 'Explicit native result 5\nComplete stored explanation for answer #5.';
-  const initial = 'Round 5Current round\nFull owner explanation for round 5.';
-  const closed = `Round 5Closed · ${round.closed_at}\n${reply}`;
-  const completed = `${closed}\n${explanation}`;
-  let text = initial;
+  const absent = { async isExisting() { return false; }, getText: async () => assert.fail('An absent round has no text') };
+  const states = [absent, roundText(roundAsk, roundChoice), roundText(roundAsk, roundChoice, 'Explicit native result 5'),
+    roundText(roundAsk, roundChoice, 'Explicit native result 5 Complete stored explanation for answer #5.')];
+  let state;
   const admitted = [];
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; });
   globalThis.browser = {
-    $(selector) { assert.equal(selector, '[aria-label="Round 5"]'); return { getText: async () => text }; },
+    $(selector) {
+      assert.equal(selector, '.detail-rounds [aria-label="Round 5"]');
+      return typeof state === 'string' ? { isExisting: async () => true, getText: async () => state } : state;
+    },
     async waitUntil(condition, options) {
       assert.equal(options.timeout, 20000);
-      for (text of [initial, closed, completed]) admitted.push(await condition());
+      for (state of states) admitted.push(await condition());
       assert.equal(admitted.at(-1), true);
     },
   };
-  await waitForRoundResult(round, reply, explanation);
-  assert.deepEqual(admitted, [false, false, true]);
+  await waitForRoundResult(round, explanation);
+  assert.deepEqual(admitted, [false, false, false, true]);
 });
 
 test('a permanently omitted or truncated final result remains a native acceptance failure', async t => {
   const round = { ordinal: 5, closed_at: '2026-10-05T11:51:57.000Z' };
-  const reply = 'Explicit native round 5 result\nFull correlated agent reply for the saved answer.';
   const explanation = 'Explicit native result 5\nComplete stored explanation for answer #5.';
   let text;
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; });
   globalThis.browser = {
-    $() { return { getText: async () => text }; },
+    $() { return { isExisting: async () => true, getText: async () => text }; },
     async waitUntil(condition, options) {
-      for (text of [`Round 5Closed · ${round.closed_at}\n${reply}`, `Round 5Closed · ${round.closed_at}\n${reply}\nExplicit native result 5`]) {
+      for (text of [roundText(roundAsk, roundChoice), roundText(roundAsk, roundChoice, 'Explicit native result 5\nComplete stored')]) {
         assert.equal(await condition(), false);
       }
       throw new Error(options.timeoutMsg);
     },
   };
-  await assert.rejects(waitForRoundResult(round, reply, explanation), /did not publish the final closed round and its complete correlated result/);
+  await assert.rejects(waitForRoundResult(round, explanation), /did not publish the final closed round and its complete correlated result/);
 });
 
 test('complete native history batches deserialize through the real CLI/Core dispatch barrier', { timeout: 15000 }, async () => {

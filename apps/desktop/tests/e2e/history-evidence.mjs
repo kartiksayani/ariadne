@@ -5,7 +5,7 @@ export function historyFailureFacts() {
   const all = selector => [...document.querySelectorAll(selector)];
   const control = node => node ? { text: text(node), disabled: Boolean(node.disabled), ariaPressed: node.getAttribute('aria-pressed') } : null;
   const titled = document.querySelector('button[title="Messages (m)"]');
-  // The detail's owner input: the answer slot of a waiting item, else the open action box.
+  // The detail's owner input: the answer slot of a waiting item, else the open action box with its changed-target warning.
   const owner = document.querySelector('[data-owner-input]');
   const editor = owner?.querySelector('textarea') ?? null;
   const send = owner?.querySelector('.answer-send, .detail-box-row .btn-primary') ?? null;

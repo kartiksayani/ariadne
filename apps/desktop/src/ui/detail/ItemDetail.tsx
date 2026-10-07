@@ -157,9 +157,11 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         </button>)}
       </div>
       <div className="detail-hint">{model.open.hint}</div>
+      {/* data-owner-input marks the action box with its changed-target warning, like the answer slot (native tests). */}
+      {(stale || mode) && <div className="detail-owner-input" data-owner-input={itemId}>
       {stale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
         <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked(stale)} onClick={() => submit.review(stale)}>Review current target</button></div>}
-      {text && mode && <div className="detail-box" data-owner-input={itemId}>
+      {text && mode && <div className="detail-box">
         <textarea ref={box} className="input" rows={3} aria-label={text.label} placeholder={text.placeholder} value={submit.text(mode)} disabled={submit.locked(mode)}
           onChange={event => submit.edit(mode, event.target.value)} onKeyDown={boxKey} />
         <div className="detail-box-row">
@@ -169,7 +171,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
           <span className="detail-box-hint">{text.hint}</span>
         </div>
       </div>}
-      {mode === 'drop' && <div className="detail-box" data-owner-input={itemId}>
+      {mode === 'drop' && <div className="detail-box">
         <input ref={box} className="input" aria-label="Drop reason" placeholder="Reason (optional), e.g. the metric already covers it" value={reason}
           disabled={submit.locked('drop')} onChange={event => setReason(event.target.value)} onKeyDown={boxKey} />
         <div className="detail-box-row">
@@ -178,6 +180,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
           <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button>
           <span className="detail-box-hint">Enter drops · the agent confirms</span>
         </div>
+      </div>}
       </div>}
       {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
       {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
