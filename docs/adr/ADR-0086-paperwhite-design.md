@@ -51,6 +51,9 @@ by eye also missed the drift between the app and the frames.
 - The detail panel summarises each round (the ask, the choice or reply, and the
   result) and shows the item's own messages in its Timeline. A round's full option
   list and the former `why` of a reopened item are no longer displayed.
+- Remove hides the item optimistically and shows Undo until 5 s pass, Dismiss is
+  pressed or the next remove starts; the removal's `expected_revision` is read when
+  it runs, not when it was queued.
 - Frames still above 0.02 are listed in the P8.3 finish PR with their causes. The
   largest is 1m, where the app keeps its recovery panel above the tree.
 
