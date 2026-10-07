@@ -142,6 +142,40 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     if (spec.selected && !spec.detail) await page.keyboard.press('Escape');
     await page.keyboard.press('g');
   }
+  // hover-msg (1a): the rail message is hovered, so the items it touched are highlighted. A dispatched
+  // mouseover is React's mouseenter and leaves the rail's scroll position and the pointer alone.
+  if (spec.hoverMsg) await railMessage(page, spec.hoverMsg).dispatchEvent('mouseover');
+  await settle(page);
+}
+
+const railMessage = (page: Page, number: number) => page.locator('.pw-rail-list [data-message-id]').filter({
+  has: page.locator('.pw-excerpt-number', { hasText: new RegExp(`^#${number}$`) }) });
+
+/**
+ * Puts the app's rail where the design's rail sits. The prototype scrolls its rail to the bottom 60 ms after
+ * mount (Ariadne.dc.html:988), before its fonts settle; in some frames the reflow leaves it above the bottom,
+ * showing "Follow latest" (Ariadne.dc.html:2196). The app's rail is scrolled to the same message and offset.
+ */
+async function matchRail(page: Page, designPage: Page, id: string) {
+  const aside = designPage.locator(`[id="${id}"] .dv-card aside[aria-label="Messages"]`);
+  if (!await aside.count()) return;
+  const position = await aside.evaluate(element => {
+    const list = element.children[1] as HTMLElement;
+    if (list.scrollHeight - list.scrollTop - list.clientHeight < 24) return null;
+    const top = list.getBoundingClientRect().top;
+    for (const card of list.children) {
+      const rect = card.getBoundingClientRect(), number = /^\s*#(\d+)/.exec(card.textContent ?? '')?.[1];
+      if (number && rect.bottom > top) return { number: Number(number), offset: rect.top - top };
+    }
+    return null;
+  });
+  if (!position) return;
+  const card = railMessage(page, position.number);
+  await card.evaluate((element, offset) => {
+    const list = element.closest<HTMLElement>('.pw-rail-list')!;
+    list.scrollTop += element.getBoundingClientRect().top - list.getBoundingClientRect().top - offset;
+  }, position.offset);
+  await expect(page.locator('.pw-rail-follow')).toHaveText('Follow latest');
   await settle(page);
 }
 
@@ -185,6 +219,7 @@ for (const id of designFrames) {
     const denied: string[] = [];
     await route(page.context(), origin, denied);
     await openApp(page, origin, spec);
+    if (spec.rail) await matchRail(page, designPage, id);
     const shell = await page.evaluate(() => {
       const height = (selector: string) => document.querySelector(selector)?.getBoundingClientRect().height ?? null;
       const columns = [...document.querySelector('.shell-body')!.children].map(child => ({
