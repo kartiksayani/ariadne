@@ -241,6 +241,14 @@ impl Setup {
     ) -> Result<MutationReceipt, HistoryActionError> {
         HistoryActionService::new(&self.registry).remove(context, command, || self.uuid(), at())
     }
+    fn remove_at(
+        &self,
+        context: &OwnerContext,
+        command: &OwnerCommand,
+        at: UtcMillis,
+    ) -> Result<MutationReceipt, HistoryActionError> {
+        HistoryActionService::new(&self.registry).remove(context, command, || self.uuid(), at)
+    }
     /// The data root's own `backups/` directory.
     fn data_backups(&self) -> PathBuf {
         fs::canonicalize(self.home.path())
@@ -699,6 +707,36 @@ fn session_remove_keeps_shared_topic_copies_and_refuses_in_flight_inputs() {
         core_error(t.remove(&registry_scope(), &item_remove("2", p(2), 104))).code,
         CoreErrorCode::PermissionDenied
     );
+}
+
+#[test]
+fn session_remove_retry_at_a_later_time_reuses_the_first_backup() {
+    let t = Setup::new(&[(1, &[demo()]), (0x901, &[source()])]);
+    let live = t.file(0x901, 0x902);
+    let bytes = fs::read(&live).unwrap();
+    let first = removed(
+        t.remove(&registry_scope(), &session_remove(0x901, 0x902, p(12), 100))
+            .unwrap(),
+    );
+    // A crash after the backup but before the unlink leaves the file in place.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::write(&live, &bytes).unwrap();
+        fs::set_permissions(&live, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let later = UtcMillis::new("2026-10-04T12:00:05.000Z").unwrap();
+    let retry = removed(
+        t.remove_at(
+            &registry_scope(),
+            &session_remove(0x901, 0x902, p(12), 100),
+            later,
+        )
+        .unwrap(),
+    );
+    assert_eq!(retry.backup, first.backup);
+    assert_eq!(removal_backups(&t.dir(0x901).join("backups")).len(), 1);
+    assert_eq!(fs::read(&first.backup).unwrap(), bytes);
+    assert!(!live.exists());
 }
 
 #[test]

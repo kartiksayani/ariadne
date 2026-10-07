@@ -69,7 +69,9 @@ sends the command.
   op_id. A crash or a failing member in between leaves some copies; the error
   names the sessions that still hold one. An exact retry finishes them.
 - A registered project whose sessions cannot be read blocks every topic
-  removal, because it may hold a copy.
+  removal, because it may hold a copy. Topic removal refuses when any
+  registered project's store or session cannot be read, because any of them may
+  hold a copy.
 - The `removed` notice is text to an agent, not enforcement. An agent that ignores
   it can still mention removed work in the terminal; it can no longer write to the
   removed items because they do not exist.

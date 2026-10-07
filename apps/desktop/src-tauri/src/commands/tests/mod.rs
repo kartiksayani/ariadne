@@ -891,4 +891,29 @@ fn topic_removal_hints_every_other_family_session_at_its_listed_revision() {
         "retry"
     )))
     .is_empty());
+
+    // A partial removal error hints the sessions it already removed from.
+    let partial = CoreError::new(
+        CoreErrorCode::IoError,
+        format!(
+            "The topic was removed from session(s) {}, {} but is still in session(s) {}: down",
+            uuid(1).as_str(),
+            uuid(2).as_str(),
+            uuid(3).as_str()
+        ),
+        "retry",
+    );
+    let hints = partial_removal_hints(&partial, |_| {
+        Ok(list(
+            vec![summary(1, 5), summary(2, 7), summary(3, 9)],
+            None,
+        ))
+    });
+    let pairs: Vec<_> = hints
+        .iter()
+        .map(|hint| (hint.session_id.clone(), hint.revision.value()))
+        .collect();
+    assert_eq!(pairs, vec![(uuid(1), 5), (uuid(2), 7)]);
+    let other = CoreError::new(CoreErrorCode::IoError, "down", "retry");
+    assert!(partial_removal_hints(&other, |_| panic!("no list read")).is_empty());
 }

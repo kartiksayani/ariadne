@@ -337,7 +337,7 @@ impl Store {
                 return Ok(saved);
             }
             let digest = self.digest(session_id, actor, normalized_command)?;
-            let name = removal_backup_name(stamp, operation_id, session_id)?;
+            let name = self.removal_name(stamp, operation_id, session_id)?;
             let mut candidate = live.clone();
             let data = apply(&mut candidate, &self.backups.path.join(&name))
                 .map_err(TransactionError::Command)?;
@@ -389,7 +389,7 @@ impl Store {
             }
             let (live, previous) = self.live(session_id)?;
             guard(&live).map_err(TransactionError::Command)?;
-            let name = removal_backup_name(stamp, operation_id, session_id)?;
+            let name = self.removal_name(stamp, operation_id, session_id)?;
             self.write_removal_backup(&name, &previous)?;
             if !self.sessions.remove_if_unchanged(&file, &previous)? {
                 return Err(StoreError::Busy.into());
@@ -462,6 +462,20 @@ impl Store {
             self.backups.temp(name, previous)?.create(name)?;
         }
         self.backups.sync()
+    }
+
+    /// The backup name for this operation: an earlier attempt's name when one
+    /// exists (so a retry with a new stamp reuses it), else a fresh one.
+    fn removal_name(
+        &self,
+        stamp: &str,
+        operation_id: &UuidV4,
+        session_id: &UuidV4,
+    ) -> Result<String, StoreError> {
+        match self.find_removal_backup(operation_id, session_id)? {
+            Some(name) => Ok(name),
+            None => removal_backup_name(stamp, operation_id, session_id),
+        }
     }
 
     fn find_removal_backup(

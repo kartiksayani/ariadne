@@ -53,6 +53,14 @@ impl Registry {
                     self.finish_removal(project_id, operation_id)?;
                     return Ok(Ok(saved));
                 }
+                // No record yet: the directory may be reused only if its
+                // copied `project.json`, when present, names this project.
+                if backup.verify_target("project.json")? {
+                    let metadata: Project = read_data(backup, "project.json")?;
+                    if &metadata.id != project_id {
+                        return Err(StoreError::OperationReused.into());
+                    }
+                }
             }
             let Some(project) = self
                 .projects()?

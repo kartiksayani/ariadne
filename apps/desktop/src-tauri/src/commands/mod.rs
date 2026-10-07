@@ -447,16 +447,42 @@ fn notify_native_preferences(
 /// Best effort: a failed or inconsistent list read yields fewer hints.
 fn family_hints(
     receipt: &SavedReceipt,
-    mut query: impl FnMut(OwnerQueryRequest) -> Result<QueryResult, CoreError>,
+    query: impl FnMut(OwnerQueryRequest) -> Result<QueryResult, CoreError>,
 ) -> Vec<SessionChangedHint> {
     let SavedReceiptData::Removal { family, .. } = &receipt.data else {
         return vec![];
     };
-    let mut wanted: BTreeSet<UuidV4> = family
+    let wanted: BTreeSet<UuidV4> = family
         .iter()
         .map(|member| member.session_id.clone())
         .filter(|id| id != &receipt.session_id)
         .collect();
+    listed_hints(wanted, query)
+}
+/// Revision hints after a partial topic removal. The error names the sessions
+/// the topic was already removed from; those changed even though no receipt
+/// was returned. Best effort, like `family_hints`.
+fn partial_removal_hints(
+    error: &CoreError,
+    query: impl FnMut(OwnerQueryRequest) -> Result<QueryResult, CoreError>,
+) -> Vec<SessionChangedHint> {
+    const LEAD: &str = "The topic was removed from session(s) ";
+    let Some(rest) = error.message.strip_prefix(LEAD) else {
+        return vec![];
+    };
+    let Some((done, _)) = rest.split_once(" but is still in session(s) ") else {
+        return vec![];
+    };
+    let wanted: BTreeSet<UuidV4> = done
+        .split(", ")
+        .filter_map(|id| UuidV4::new(id).ok())
+        .collect();
+    listed_hints(wanted, query)
+}
+fn listed_hints(
+    mut wanted: BTreeSet<UuidV4>,
+    mut query: impl FnMut(OwnerQueryRequest) -> Result<QueryResult, CoreError>,
+) -> Vec<SessionChangedHint> {
     let mut hints = vec![];
     let mut cursor = None;
     while !wanted.is_empty() {
@@ -508,6 +534,12 @@ macro_rules! mutations {
                 }
                 if let Some(tray) = app.try_state::<crate::native::tray::NativeTray>() {
                     tray.refresh();
+                }
+            }
+            // A partial topic removal fails, yet some sessions already changed.
+            if let ApplicationEnvelope::Failure(FailureEnvelope { error, .. }) = &envelope.0 {
+                for hint in partial_removal_hints(error, |request| service.native_query(request)) {
+                    let _ = app.emit("ariadne://session_changed", hint);
                 }
             }
             // A removed session or project has no revision to hint; the caller
