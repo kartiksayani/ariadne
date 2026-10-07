@@ -2,7 +2,7 @@
 // to <dc-import name="Ariadne"> in Ariadne Mockups.dc.html. Kept free of app
 // imports so the Playwright spec can read it in Node.
 
-export type Scenario = 'default' | 'project' | 'archive' | 'sessions' | 'session' | 'projects' | 'projectpage';
+export type Scenario = 'default' | 'project' | 'archive' | 'sessions' | 'session' | 'projects' | 'projectpage' | 'sent' | 'failed' | 'reconnecting';
 export interface FrameSpec {
   readonly id: string;
   readonly width: number;
@@ -30,6 +30,9 @@ const specs: readonly FrameSpec[] = [
   { ...base, ...narrow, id: '1g', state: 'empty', rail: true },
   { ...base, ...narrow, id: '1h', state: 'loading', rail: true },
   { ...base, ...narrow, id: '1i', theme: 'light', state: 'clear' },
+  { ...base, id: '1l', scenario: 'sent', selected: '2.1.1', detail: true, rail: true },
+  { ...base, id: '1m', scenario: 'failed', selected: '3.1', detail: true },
+  { ...base, ...narrow, id: '1o', scenario: 'reconnecting', selected: '3.1', detail: true },
   { ...base, id: '1q', selected: '1.4', detail: true, rail: true },
   { ...base, ...narrow, id: '1v', selected: '1.3.1', detail: true, openMode: 'followup' },
   { ...base, id: '1w', scenario: 'project', selected: '5.3', detail: true, rail: true },
@@ -40,8 +43,18 @@ const specs: readonly FrameSpec[] = [
   { ...base, id: '1ac', scenario: 'projectpage' },
 ];
 
-/** The fixed wall clock of both sides: 7 Oct 2026 15:10 UTC, after the last message of every frame (1i answers until 15:10). */
+/** The fixed wall clock of the handoff page: 7 Oct 2026 15:10 UTC, after the last message of every frame (1i answers until 15:10). */
 export const designNow = Date.UTC(2026, 9, 7, 15, 10);
+
+/**
+ * The app's clock for one frame: the prototype's own clock (Ariadne.dc.html:915),
+ * 15:06, advanced by the messages its scenario adds (1i's answers until 15:10,
+ * 1l's answer at 15:07). "Waiting N min" is measured from it.
+ */
+export function frameNow(spec: FrameSpec): number {
+  const minutes = spec.state === 'clear' ? 10 : spec.scenario === 'sent' ? 7 : 6;
+  return Date.UTC(2026, 9, 7, 15, minutes);
+}
 
 /** Frame ids with a written fixture. */
 export const frameIds: readonly string[] = specs.map(spec => spec.id);

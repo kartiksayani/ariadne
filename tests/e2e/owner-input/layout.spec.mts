@@ -153,7 +153,7 @@ test('keeps saved owner controls below complete history in the ordinary App', as
     const detail = page.locator('.shell-detail-scroll'), history = detail.locator('.item-history');
     await expect(history.getByRole('heading', { name: 'Which native delivery window should we use?', level: 3 })).toBeVisible();
     await detail.getByLabel('Reply in your own words').fill('Use the saved native delivery option.');
-    await detail.getByRole('button', { name: 'Send answer', exact: true }).click();
+    await detail.getByRole('button', { name: 'Send reply', exact: true }).click();
     const receipt = detail.getByRole('status').filter({ hasText: 'Saved · Queue position' });
     const another = detail.getByRole('button', { name: 'Write another input' });
     await expect(receipt).toBeVisible(); await expect(another).toBeEnabled();

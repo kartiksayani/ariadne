@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { designNow, frameSpec, graphFrame, type FrameSpec } from './frames';
+import { designNow, frameNow, frameSpec, graphFrame, type FrameSpec } from './frames';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 
@@ -101,7 +101,7 @@ async function settle(page: Page) {
 /** Opens the frame in the app and puts it in the frame's state. */
 async function openApp(page: Page, origin: string, spec: FrameSpec) {
   await page.setViewportSize({ width: spec.width, height: spec.height });
-  await page.clock.setFixedTime(designNow);
+  await page.clock.setFixedTime(frameNow(spec));
   await page.goto(`${origin}/tests/ui/design/gallery.html?frame=${spec.id}`);
   await page.waitForFunction(() => (window as { __designError?: string }).__designError
     || /\d+ items/.test(document.querySelector('.shell-summary')?.textContent ?? ''), null, { timeout: 60_000 });

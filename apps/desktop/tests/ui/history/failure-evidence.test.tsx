@@ -12,7 +12,7 @@ describe('native history failure evidence', () => {
       <label class="sentence-search"><input disabled value="needle"></label><p role="status">Search preview · save pending</p>
       <div role="treeitem" data-item-id="1.1" aria-selected="true"></div>
       <div class="owner-input" aria-label="Owner input for #1"><textarea disabled>abc</textarea>
-        <div class="ref-send-row"><button disabled>Saving…</button></div><p role="status">Save completion is unknown.</p></div>`;
+        <div class="answer-send-row"><button disabled>Send reply</button></div><p role="status">Save completion is unknown.</p></div>`;
     const facts = historyFailureFacts();
     expect(facts.messagesToggle).toMatchObject({ titled: { disabled: true }, ariaLabel: 'Messages (m)', railOpen: false });
     expect(facts.navigation.banners).toEqual([{ role: 'alert', text: 'Preferences revision changed' }]);
@@ -22,7 +22,7 @@ describe('native history failure evidence', () => {
     expect(facts.search).toMatchObject({ present: true, disabled: true, value: 'needle', statusLabel: 'Search preview · save pending' });
     expect(facts.selected.treeItemIds).toEqual(['1.1']);
     expect(facts.ownerInput.textarea).toEqual({ disabled: true, valueLength: 3 });
-    expect(facts.ownerInput.send).toMatchObject({ text: 'Saving…', disabled: true });
+    expect(facts.ownerInput.send).toMatchObject({ text: 'Send reply', disabled: true });
     expect(facts.ownerInput.statuses).toEqual(['Save completion is unknown.']);
     expect(facts.ownerInput).toHaveProperty('innerText');
   });
