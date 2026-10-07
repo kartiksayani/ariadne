@@ -151,7 +151,10 @@ async function answer(history, ordinal, text) {
   const another = await browser.$(ownerInput('1')).$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
   // The answer slot locks a draft written against an older target until "Review current target" re-bases it.
-  const editor = await browser.$(`${ownerInput('1')} textarea`); await editor.waitForDisplayed();
+  const editor = await browser.$(`${ownerInput('1')} textarea`);
+  await failureEvidence(`owner-input-editor-round-${ordinal}`, async () => {
+    try { await editor.waitForDisplayed(); } catch (error) { await browser.saveScreenshot(join(evidence(), `owner-input-editor-round-${ordinal}.png`)); throw error; }
+  }, { ordinal, text });
   await wait(async () => await editor.isEnabled() || await reviewCurrentTarget(), 'The answer editor neither enabled nor offered Review current target');
   await editor.waitForEnabled();
   // Odd rounds send the chosen option alone; even rounds send a reply in the owner's own words.
