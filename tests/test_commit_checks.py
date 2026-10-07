@@ -86,7 +86,7 @@ class ScopeTests(unittest.TestCase):
             (["designs/reference.md"], True),
             (["apps/desktop/public/icon.svg"], True),
             (["docs/example.png"], True),
-            (["tests/ui/reference/capture.spec.mts"], True),
+            (["tests/ui/design/design.spec.mts"], True),
             (["package.json"], True),
             (["package-lock.json"], True),
             (["apps/desktop/vite.config.ts"], True),

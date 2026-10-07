@@ -33,7 +33,7 @@ if name == "python" and sys.argv[1:2] == ["scripts/check-commit.py"]:
 if name == "node" and sys.argv[1:] == ["node_modules/playwright/cli.js", "install", "chromium"]:
     assert Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]).resolve() == Path.cwd() / "target/reference-browser"
     sys.exit(int(os.environ["PROVISION_EXIT"]))
-if name == "npm" and sys.argv[1:] == ["run", "capture:reference"]:
+if name == "npm" and sys.argv[1:] == ["run", "test:design"]:
     sys.exit(int(os.environ["CAPTURE_EXIT"]))
 '''
 
@@ -164,7 +164,7 @@ class QualityWorkflowTests(unittest.TestCase):
                     gate_ok = not (setup_status or status)
                     self.assertEqual(calls.count(gate), int(runs_gate and not setup_status))
                     provisioning = ["node", "node_modules/playwright/cli.js", "install", "chromium"]
-                    capture = ["npm", "run", "capture:reference"]
+                    capture = ["npm", "run", "test:design"]
                     self.assertEqual(calls.count(provisioning), int(reference and gate_ok))
                     self.assertEqual(calls.count(capture), int(reference and gate_ok and not provision_status))
                     if reference and gate_ok and not provision_status:
