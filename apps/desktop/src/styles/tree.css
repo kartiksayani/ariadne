@@ -59,7 +59,8 @@
 
 .sentence-rows .ref-tree-question,
 .sentence-rows .ref-tree-outcome {
-  white-space: pre-wrap;
+  min-width: 0;
+  white-space: pre-line;
   overflow-wrap: anywhere;
 }
 
