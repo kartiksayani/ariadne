@@ -31,6 +31,7 @@ const specs: readonly FrameSpec[] = [
   { ...base, id: '1c', selected: '2.1.1', answering: '2.1.1' },
   { ...base, id: '1d', view: 'graph', selected: '1.3.1.2' },
   { ...base, id: '1e', theme: 'light', selected: '3.1', detail: true },
+  { ...base, id: '1f', theme: 'light', view: 'graph', selected: '1.2.2.1', rail: true },
   { ...base, ...narrow, id: '1g', state: 'empty', rail: true },
   { ...base, ...narrow, id: '1h', state: 'loading', rail: true },
   { ...base, ...narrow, id: '1i', theme: 'light', state: 'clear' },

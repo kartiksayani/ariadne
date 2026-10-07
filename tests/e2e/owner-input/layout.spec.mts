@@ -117,12 +117,17 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
       expect(completeRow.top).toBeGreaterThanOrEqual(completeRow.viewportTop);
       expect(completeRow.bottom).toBeLessThanOrEqual(completeRow.viewportBottom);
     }
-    // Graph mode renders inside the tree column, which keeps its own scroller.
-    // Catalogue routes retain the centre pane scroller, including complete
-    // setup content below the catalogue.
+    // Graph renders in the tree column under the session bar and owns its
+    // scrolling there. Catalogue routes retain the centre pane scroller,
+    // including complete setup content below the catalogue.
     await page.getByRole('button', { name: 'Graph', exact: true }).click();
-    await expect(page.getByRole('region', { name: 'Topic graph' }).first()).toBeVisible();
-    expect(await page.locator('.tree-scroll').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+    await expect(page.getByRole('tree', { name: / graph$/ }).first()).toBeVisible();
+    expect(await page.locator('.graph-scroll').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+    expect(await page.locator('.shell-center').evaluate(element => getComputedStyle(element).overflowY)).toBe('hidden');
+    const graphBox = (await page.locator('.graph-scroll').boundingBox())!, centerBox = (await page.locator('.shell-center').boundingBox())!;
+    expect(graphBox.y + graphBox.height).toBeLessThanOrEqual(centerBox.y + centerBox.height + 1);
+    // Nothing in the session column is clipped: banners and controls shrink and scroll themselves.
+    expect(await page.locator('.nav-session-content').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
     await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
     await setup.evaluate(element => element.scrollIntoView({ block: 'end' }));

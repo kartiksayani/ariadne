@@ -8,7 +8,7 @@ import { NavigationStore, useNavigation } from './state/navigation/store';
 import { OwnerDraftStore } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
-import { NavigationTopicGraph } from './components/graph/NavigationTopicGraph';
+import { NavigationGraph } from './ui/graph/NavigationGraph';
 import type { OwnerFocusRequest } from './ui/answer/useSubmit';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import { WaitingColumn } from './ui/waiting/WaitingColumn';
@@ -108,17 +108,15 @@ interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean; readonly railOpen: boolean;
   readonly highlightedItems: ReadonlySet<string>; readonly highlightedMessages: ReadonlySet<string>;
-  readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem) => void;
+  readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
   readonly onClearFilters: () => void; readonly onShowArchive: () => void; readonly revealItem: (route: ItemRoute) => void;
-  readonly switchToTree: () => void; readonly onRemove: () => void;
+  readonly onRemove: () => void;
 }
-function SessionCenter({ application, view, graph, switchToTree, reveal, ...props }: CenterProps) {
+function SessionCenter({ application, view, graph, reveal, ...props }: CenterProps) {
   const state = useSession(view.store), session = state.snapshot?.session;
   const navigation = useNavigation(application.navigation);
   const actions = application.actions.forSession(view.store);
-  const topics = Object.values(session?.topics ?? {}).filter((topic): topic is NonNullable<typeof topic> => !!topic && (view.preferences?.filters.archived ? topic.archived_at !== null : topic.archived_at === null)
-    && (!view.preferences?.filters.topic_id || topic.id === view.preferences.filters.topic_id)).sort((a, b) => a.order - b.order);
   const summaries = navigation.sessions?.sessions.items ?? [];
   const recovering = session ? recoveryTargets(session).length > 0 : false;
   const notice = state.status !== 'loading' && <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />;
@@ -128,8 +126,8 @@ function SessionCenter({ application, view, graph, switchToTree, reveal, ...prop
     actionsForTarget={target => application.actions.forSession(application.navigation.opened.open(target))}
     openSession={target => { void application.navigation.navigate({ kind: 'session', session: target }); }}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
-    graph={graph ? <div className="tree-graphs">{topics.map(topic => <NavigationTopicGraph key={topic.id} navigation={application.navigation} store={view.store}
-      topicId={topic.id} onReveal={props.onSelected} onSwitchToTree={switchToTree} />)}</div> : null} />;
+    graph={graph && !view.preferences?.filters.archived ? <NavigationGraph navigation={application.navigation} store={view.store}
+      tight={props.detailOpen || props.railOpen} onReveal={props.onSelected} onHoverItem={props.onHoverItem} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
@@ -217,7 +215,11 @@ function Workspace({ application }: { application: Application }) {
     return request;
   };
   // Tree and graph already save their own selection through navigation.
-  const selected = (result: RevealedItem) => { invalidateOwnerRequest(); detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true); };
+  // The graph's ↑/↓ and "−" move the selection without opening detail (Ariadne.dc.html `select`).
+  const selected = (result: RevealedItem, openDetail = true) => {
+    invalidateOwnerRequest(); setLocalReveal(result);
+    if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); }
+  };
   const revealItem = (target: ItemRoute) => {
     setRouteError(null);
     void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
@@ -268,7 +270,6 @@ function Workspace({ application }: { application: Application }) {
     if (current.writing || current.pendingOperationId !== null) return;
     saveView({ rail: view?.rail === 'hidden' ? 'activity' : 'hidden' });
   };
-  const switchToTree = () => setGraphModes(previous => ({ ...previous, [key]: false }));
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
   const shown = useAppliedTheme(theme);
   const projectName = (projectId: string) => state.projects?.projects.items.find(project => project.project_id === projectId)?.project?.display_name ?? 'Unavailable project';
@@ -342,7 +343,7 @@ function Workspace({ application }: { application: Application }) {
           else if (intent === 'later') toggleLater(target, target.item_id);
           else focusOwner(target, intent);
         }}
-        onClearFilters={clearFilters} onShowArchive={() => showView('archive')} revealItem={revealItem} switchToTree={switchToTree}
+        onClearFilters={clearFilters} onShowArchive={() => showView('archive')} revealItem={revealItem}
         // TODO(WP6): remove the item or topic after asking; a no-op until the remove command lands.
         onRemove={() => {}} />} />
   </div>;

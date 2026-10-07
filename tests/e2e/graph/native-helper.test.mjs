@@ -1,27 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertCulled, assertFullFit, corpusBounds } from '../../../apps/desktop/tests/e2e/graph.spec.mjs';
+import { assertCentered, assertGraph, visibleIds } from '../../../apps/desktop/tests/e2e/graph.spec.mjs';
 
-test('native Fit assertion rejects culled bounds and reports the full 20-tree corpus', () => {
-  assert.deepEqual(corpusBounds, { width: 444, height: 186700 });
-  const fitted = { width: 800, height: 420, x: 344.5, y: -23127.5, scale: 0.25 };
-  assertFullFit(fitted);
-  assert.throws(() => assertFullFit({ ...fitted, y: -100 }), /all vertical bounds/);
-  assert.throws(() => assertFullFit({ ...fitted, scale: 1 }), /minimum zoom/);
+const session = { items: {
+  10: { id: '10', question: 'Complete root\nSecond line', parent: null },
+  '10.80': { id: '10.80', question: 'Complete child\nSecond line', parent: '10' },
+  11: { id: '11', question: 'Other root', parent: null },
+  '11.1': { id: '11.1', question: 'Hidden child', parent: '11' },
+} };
+
+test('visible ids follow the saved expansion', () => {
+  assert.deepEqual(visibleIds(session, ['10']).sort(), ['10', '10.80', '11']);
+  assert.deepEqual(visibleIds(session, []).sort(), ['10', '11']);
 });
 
-test('native culling assertions reject lost selection, duplicate identities and corrupted canonical counts', () => {
-  const session = { items: { 10: { question: 'Complete root\nSecond line', parent: null }, '10.80': { question: 'Complete child\nSecond line', parent: '10' } } };
-  const sample = { x: 0, y: 0, scale: 1, width: 800, height: 420, footer: '2000 matching · 2000 in this topic', nodes: [
-    { id: '10', x: 0, y: 0, width: 190, height: 66, title: session.items['10'].question },
-    { id: '10.80', x: 254, y: 0, width: 190, height: 66, title: session.items['10.80'].question },
-  ], edges: [{ id: 'parent:10:10.80', path: 'M 190 33 C 222 33, 222 33, 254 33' }] };
-  assertCulled(sample, session, '10.80');
-  assert.throws(() => assertCulled({ ...sample, nodes: sample.nodes.slice(0, 1) }, session, '10.80'), /selected node/);
-  assert.throws(() => assertCulled({ ...sample, nodes: [...sample.nodes, sample.nodes[0]] }, session, '10.80'), /duplicate node IDs/);
-  assert.throws(() => assertCulled({ ...sample, edges: [...sample.edges, sample.edges[0]] }, session, '10.80'), /duplicate edge IDs/);
-  assert.throws(() => assertCulled({ ...sample, footer: '2 matching · 2 in this topic' }, session, '10.80'), /canonical counts/);
-  assert.throws(() => assertCulled({ ...sample, nodes: sample.nodes.map(node => ({ ...node, title: 'Truncated…' })) }, session, '10.80'), /complete stored sentence/);
-  assert.throws(() => assertCulled({ ...sample, edges: [{ ...sample.edges[0], id: 'parent:11:10.80' }] }, session, '10.80'), /canonical ancestry/);
-  assert.throws(() => assertCulled({ ...sample, nodes: sample.nodes.map(node => ({ ...node, y: 1000 })) }, session, '10.80'), /200-screen-pixel margin/);
+test('native graph assertions reject lost selection, duplicates, wrong membership, truncated titles and broken ancestry', () => {
+  const node = (id, top) => ({ id, top, left: 0, width: 190, height: 66, title: session.items[id].question, selected: id === '10.80', below: null });
+  const sample = { width: 800, height: 420, focused: '10.80', counts: ['2 open'], nodes: [node('10', 0), node('10.80', 177), node('11', 300)],
+    edges: [{ id: 'topic:10', path: 'M2 33 C24 33 24 33 46 33' }, { id: 'parent:10:10.80', path: 'M236 33 C249 33 249 210 262 210' }] };
+  const expected = ['10', '10.80', '11'];
+  assertGraph(sample, session, '10.80', expected);
+  assertCentered(sample, '10.80');
+  assert.throws(() => assertCentered(sample, '10'), /centred/);
+  assert.throws(() => assertGraph({ ...sample, nodes: sample.nodes.filter(value => value.id !== '10.80') }, session, '10.80', expected.slice(0, 1).concat('11')), /selected node/);
+  assert.throws(() => assertGraph({ ...sample, nodes: [...sample.nodes, sample.nodes[0]] }, session, '10.80', expected), /duplicate node IDs/);
+  assert.throws(() => assertGraph({ ...sample, edges: [...sample.edges, sample.edges[0]] }, session, '10.80', expected), /duplicate edge IDs/);
+  assert.throws(() => assertGraph(sample, session, '10.80', ['10', '10.80']), /saved expansion/);
+  assert.throws(() => assertGraph({ ...sample, nodes: sample.nodes.map(value => ({ ...value, title: 'Truncated…' })) }, session, '10.80', expected), /complete stored sentence/);
+  assert.throws(() => assertGraph({ ...sample, edges: [{ id: 'parent:11:10.80', path: sample.edges[1].path }] }, session, '10.80', expected), /canonical ancestry/);
+  assert.throws(() => assertGraph({ ...sample, nodes: sample.nodes.map(value => ({ ...value, selected: true })) }, session, '10.80', expected), /marked selected/);
 });

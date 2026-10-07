@@ -375,7 +375,7 @@ export function TreeView(props: TreeViewProps) {
         <span className="tree-skeleton-badge" style={{ width: row.badge }} /></div>)}
       <div className="tree-loading-text" role="status"><i className="ph ph-circle-notch" />Reading the session…</div>
     </div>;
-  } else if (graph) body = graph;
+  } else if (graph) body = null;
   else if (model?.empty && !archivedMode) {
     body = <div className="tree-empty" role="status">
       <i className="ph ph-spiral" />
@@ -408,7 +408,8 @@ export function TreeView(props: TreeViewProps) {
       The saved {lifecycle.pending} is not confirmed. Reconcile it before another change.</Banner>}
     {lifecycle.error && <Banner icon="ph ph-warning-circle" alert>{lifecycle.error}</Banner>}
     {notices}
-    <div ref={scroller} className="tree-scroll">{body}</div>
+    {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}
+    {graph && !loading ? graph : <div ref={scroller} className="tree-scroll">{body}</div>}
     {lifecycle.dialog}
     {continuing && <ContinueDialog actions={actions} topicId={continuing} targets={continueTargets} actionsForTarget={actionsForTarget}
       revealItem={revealItem} onCancel={() => setContinuing(null)} />}

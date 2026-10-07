@@ -19,7 +19,7 @@ body {
   height: 100%;
 }
 
-/* The tree column owns its scrolling; catalogue pages keep pane scrolling. */
+/* The tree column owns its scrolling, Graph included (it renders inside the column); catalogue pages keep pane scrolling. */
 .product-app .shell-center:has(.nav-session-content .tree-column) {
   overflow: hidden;
 }
