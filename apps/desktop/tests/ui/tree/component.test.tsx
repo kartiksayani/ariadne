@@ -11,6 +11,7 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { TreeView, type RowIntent, type TreeViewProps } from '../../../src/ui/tree/TreeView';
+import type { PendingSubmission } from '../../../src/ui/answer/useSubmit';
 import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
 
@@ -358,6 +359,24 @@ describe('session tree inline answering', () => {
     fireEvent.keyDown(row('2'), { key: 'a' });
     await waitFor(() => expect((within(control()!).getByLabelText('Reply in your own words') as HTMLTextAreaElement).value).toBe('Neither, ship tomorrow.'));
     fireEvent.keyDown(row('2'), { key: 'Escape' }); expect(control()).toBeNull();
+  });
+  it('asks before sending when the agent is not running, and queues only on request', async () => {
+    const held: PendingSubmission[] = [];
+    const { transport, drafts } = await mount({ props: { onAgentNotRunning: submission => { held.push(submission); } }, configure: transport => {
+      options(transport);
+      const binding = transport.sessions.get(route.session_id)!.bindings[transport.sessions.get(route.session_id)!.active_binding_id!]!;
+      binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected';
+    } });
+    row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
+    await waitFor(() => expect(control()).not.toBeNull());
+    await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
+    await waitFor(() => expect((within(control()!).getByRole('button', { name: /Send “Afternoon”/ }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.keyDown(row('2'), { key: 'Enter' });
+    await waitFor(() => expect(held).toHaveLength(1));
+    expect(held[0]).toMatchObject({ route: { ...route, item_id: '2' }, intent: 'answer', label: 'Afternoon', question: transport.sessions.get(route.session_id)!.items['2']!.question });
+    expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
+    expect(await held[0].queue()).toBe(true);
+    expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(true);
   });
   it('answers the oldest waiting question when a is pressed elsewhere', async () => {
     await mount({ configure: options });

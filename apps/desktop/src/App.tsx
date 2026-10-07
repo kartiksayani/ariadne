@@ -9,7 +9,8 @@ import { OwnerDraftStore } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationGraph } from './ui/graph/NavigationGraph';
-import type { OwnerFocusRequest } from './ui/answer/useSubmit';
+import type { OwnerFocusRequest, PendingSubmission } from './ui/answer/useSubmit';
+import { agentNotRunning } from './ui/answer/notRunning';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import { WaitingColumn } from './ui/waiting/WaitingColumn';
 import { MessageRail } from './ui/rail/MessageRail';
@@ -130,6 +131,7 @@ interface CenterProps {
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
   readonly onClearFilters: () => void; readonly onShowArchive: () => void; readonly revealItem: (route: ItemRoute) => void;
   readonly onRemove: () => void; readonly onRemoveTarget: RemoveHandler;
+  readonly onAgentNotRunning: (submission: PendingSubmission) => void;
 }
 function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...props }: CenterProps) {
   const state = useSession(view.store), session = state.snapshot?.session;
@@ -244,6 +246,10 @@ function Workspace({ application }: { application: Application }) {
     void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
       .catch((error: unknown) => setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'));
   };
+  // Send while the session's agent isn't running asks first (1ad); see ui/answer/notRunning.
+  const onAgentNotRunning = (submission: PendingSubmission) => {
+    void agentNotRunning({ navigation, drafts: application.drafts, reveal: revealItem })(submission);
+  };
   const focusOwner = (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => {
     const token = ++shortcutSequence.current, navigationRequest = navigation.getNavigationRequest();
     setOwnerFocus(null);
@@ -341,7 +347,7 @@ function Workspace({ application }: { application: Application }) {
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
       // TODO(WP6): remove the selected item or topic after asking; the trash button is a no-op until then.
       onRemove={() => {}}
-      waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={revealItem}
+      waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={revealItem} onAgentNotRunning={onAgentNotRunning}
         selected={route && selectedId ?{ ...route, item_id: selectedId } : null}
         notice={routeError && <p className="waiting-notice waiting-notice-warn" role="alert">{routeError}</p>}
         openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} />}
@@ -349,7 +355,7 @@ function Workspace({ application }: { application: Application }) {
       detail={store && selectedId && detailOpen && route ? <><ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
-        highlightedMessageIds={highlightedMessages} later={later}
+        highlightedMessageIds={highlightedMessages} later={later} onAgentNotRunning={onAgentNotRunning}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} />
         <CopiedProvenance key={`source:${key}:${selectedId}`} store={store} itemId={selectedId} revealItem={async target => {
           const result = await navigation.routes.revealItem(target); if (result) reveal(result);
@@ -368,7 +374,7 @@ function Workspace({ application }: { application: Application }) {
         }}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')} revealItem={revealItem}
         // TODO(WP6): remove the item or topic after asking; a no-op until the remove command lands.
-        onRemove={() => {}} onRemoveTarget={removeTarget} />} />
+        onRemove={() => {}} onRemoveTarget={removeTarget} onAgentNotRunning={onAgentNotRunning} />} />
     <ContinueTopicHost navigation={navigation} actions={application.actions} onSent={target => {
       // The continued topic now lives in the target session: show it there in the tree.
       if (route && routeKey(target) === key && archived) showView('tree');

@@ -13,6 +13,7 @@ import type { SessionActions } from '../../components/bindings/actions';
 import { ContinueDialog, type ContinueTarget } from '../../components/history-actions/ContinueDialog';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { AnswerControl } from '../answer/AnswerControl';
+import type { PendingSubmission } from '../answer/useSubmit';
 import { CHIPS, collapsedNote, oldestWaiting, parentKey, sessionBar, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
@@ -55,6 +56,8 @@ export interface TreeViewProps {
   readonly onShowArchive: () => void;
   readonly revealItem: (route: ItemRoute) => void;
   readonly openSession: (route: SessionRef) => void;
+  /** Called instead of sending when the agent is not running; without it the send queues. */
+  readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   /** TODO(WP6): ask, then remove. A no-op until the remove command lands. */
   readonly onRemove: () => void;
 }
@@ -70,7 +73,7 @@ const SKELETON = [
 export function TreeView(props: TreeViewProps) {
   const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, railOpen, graph, notices, highlightedItems, highlightedMessages,
     summaries, continueTargets, actionsForTarget, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onShowArchive,
-    revealItem, openSession, onRemove } = props;
+    revealItem, openSession, onAgentNotRunning, onRemove } = props;
   const state = useSession(store), session = state.snapshot?.session ?? null;
   const nav = useNavigation(navigation), preferences = nav.preferences;
   const route = state.route, routeId = `${route.project_id}/${route.session_id}`;
@@ -178,13 +181,19 @@ export function TreeView(props: TreeViewProps) {
   const focusRow = (key: string) => { setFocusKey(key); elements.current.get(key)?.focus({ preventScroll: true }); };
   const send = (change: { selected_option_id: string | null; text: string }) => {
     if (!entry || entry.saving || blocked) return;
-    const id = entry.draft.op_id, itemKey = answering;
+    const id = entry.draft.op_id, itemKey = answering, item = answerRow?.item;
     drafts.edit(id, change);
-    void drafts.submit(id).then(saved => {
-      if (!saved || !mounted.current) return;
-      setAnswering(current => current === itemKey ? null : current);
-      if (itemKey) focusRow(itemKey);
+    const submit = () => drafts.submit(id).then(saved => {
+      if (saved && mounted.current) {
+        setAnswering(current => current === itemKey ? null : current);
+        if (itemKey) focusRow(itemKey);
+      }
+      return saved;
     });
+    if (item && binding?.connection_state !== 'connected' && onAgentNotRunning) {
+      const label = change.selected_option_id ? item.options.find(option => option.id === change.selected_option_id)?.label ?? '' : change.text;
+      onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', queue: submit });
+    } else void submit();
   };
   const sendOption = (index: number) => { const option = options[index]; if (option) send({ selected_option_id: option.id, text: '' }); };
   const answerControl = answerRow ? <AnswerControl variant="full" selected={chosen} draft={entry?.draft.text ?? ''}

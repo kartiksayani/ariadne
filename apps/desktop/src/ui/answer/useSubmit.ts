@@ -15,6 +15,8 @@ export interface OwnerFocusRequest { intent: OwnerIntent; token: number; optionI
 export interface PendingSubmission {
   readonly route: ItemRoute;
   readonly intent: OwnerIntent;
+  /** The item's question, quoted in the dialog. */
+  readonly question: string;
   /** The chosen option's label or the message text. */
   readonly label: string;
   /** The agent that is not running, e.g. "codex". */
@@ -30,7 +32,7 @@ export interface SubmitOptions {
   readonly current: boolean;
   readonly itemId: string;
   readonly intent: OwnerIntent;
-  /** Called instead of sending when the agent is not running; without it the send queues. */
+  /** Called instead of sending when the agent is not running; without it the send queues. See ./notRunning. */
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   /** Called after a validated input receipt. */
   readonly onSaved?: () => void;
@@ -93,7 +95,7 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   const submit = () => entry ? drafts.submit(entry.draft.op_id).then(saved => { if (saved) onSaved?.(); return saved; }) : Promise.resolve(false);
   const dispatch = (label: string) => {
     if (!route) return;
-    if (connection !== 'connected' && onAgentNotRunning) onAgentNotRunning({ route: { ...route, item_id: itemId }, intent, label, agent, queue: submit });
+    if (connection !== 'connected' && onAgentNotRunning) onAgentNotRunning({ route: { ...route, item_id: itemId }, intent, question: item?.question ?? '', label, agent, queue: submit });
     else void submit();
   };
   const ready = () => !!entry && !locked && !changed && !blocked;

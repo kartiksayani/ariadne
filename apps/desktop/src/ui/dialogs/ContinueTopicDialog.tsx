@@ -20,6 +20,8 @@ export interface ContinueRequest {
   readonly topicId: string;
   /** The session that continues it. */
   readonly target: SessionRef;
+  /** Runs once after this request's topic was sent, before the host's onSent. */
+  readonly onSent?: (target: SessionRef) => void;
 }
 
 let current: ContinueRequest | null = null;
@@ -131,6 +133,7 @@ export function ContinueTopicHost({ navigation, actions, onSent }: {
 }) {
   const request = useSyncExternalStore(subscribe, snapshot, snapshot);
   if (!request) return null;
-  return <ContinueTopicDialog key={JSON.stringify(request)} request={request} navigation={navigation} actions={actions} onSent={onSent}
+  return <ContinueTopicDialog key={JSON.stringify(request)} request={request} navigation={navigation} actions={actions}
+    onSent={target => { request.onSent?.(target); onSent?.(target); }}
     onClose={() => { if (current === request) publish(null); }} />;
 }
