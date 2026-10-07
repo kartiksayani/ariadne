@@ -137,10 +137,11 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         created_at: messageTimes.get(message.number)!, item_id: message.author === 'me' ? items[0] ?? null : null, topic_id: first ? topicIds.get(first.topic)! : null,
         items_touched: items, binding_id: bindingId, input_id: null, attempt_id: null, host_turn_id: null, round_id: null, origin: null };
     });
-    const items = Object.fromEntries(protoItems.map((proto): [string, Item] => {
+    // `short` is the handoff's Item.short (not yet a domain field); views read it through their itemShort accessor.
+    const items = Object.fromEntries(protoItems.map((proto): [string, Item & { short: string }] => {
       const siblings = protoItems.filter(item => item.parent === proto.parent && item.topic === proto.topic);
       const created = messageTimes.get(proto.created) ?? times.created, status = statusOf[proto.status];
-      return [proto.id, { id: proto.id, ordinal: siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
+      return [proto.id, { id: proto.id, short: proto.short, ordinal: siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
         type: proto.type, status, owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
         revision: 1 + proto.updated.length, question_revision: 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
         ask: proto.ask || null, note: proto.note || null,

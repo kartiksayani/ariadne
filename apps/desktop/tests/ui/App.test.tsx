@@ -93,11 +93,11 @@ describe('ordinary desktop composition', () => {
     await screen.findByRole('group', { name: 'Owner actions' });
     expect(screen.getAllByLabelText('Item detail')).not.toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
-    await screen.findAllByRole('region', { name: /Topic graph/ });
+    await screen.findAllByRole('tree', { name: / graph$/ });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
     fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
     expect(screen.queryByRole('group', { name: 'Owner actions' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /^Item 1:/ }));
+    fireEvent.click(document.querySelector('.graph-node[data-item-id="1"]')!);
     expect(await screen.findByRole('group', { name: 'Owner actions' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     expect(await screen.findByRole('tree', { name: 'Sentences' })).toBeTruthy();
@@ -149,7 +149,7 @@ describe('ordinary desktop composition', () => {
     await waitFor(() => expect(mark.style.background).toBe('transparent')); unchanged();
     fireEvent.mouseEnter(row); expect(card.classList.contains('history-highlight')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
-    await screen.findAllByRole('region', { name: /Topic graph/ });
+    await screen.findAllByRole('tree', { name: / graph$/ });
     expect(card.classList.contains('history-highlight')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     const restored = await screen.findByRole('tree', { name: 'Sentences' });
@@ -157,7 +157,7 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(card.querySelector('.history-body')!);
     expect(card.classList.contains('history-pinned')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
-    await screen.findAllByRole('region', { name: /Topic graph/ });
+    await screen.findAllByRole('tree', { name: / graph$/ });
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     const returned = await screen.findByRole('tree', { name: 'Sentences' });
     expect(returned.querySelector<HTMLElement>('[data-item-id="2"] .ref-tree-mark')!.style.background).toContain('75%');

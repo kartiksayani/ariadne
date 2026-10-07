@@ -10,7 +10,7 @@ const data = prototypeData(handoffMembers()['Ariadne.dc.html']);
 afterEach(cleanup);
 
 it('refuses handoff frames without a fixture', () => {
-  expect(() => designFixture('1f', data)).toThrow('fixture not written: 1f');
+  expect(() => designFixture('1s', data)).toThrow('fixture not written: 1s');
 });
 
 it.each(frameIds)('mounts DesktopApp in design frame %s through the real stores', async id => {

@@ -9,7 +9,7 @@ import { OwnerDraftStore } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationSentenceTree } from './components/tree/NavigationSentenceTree';
-import { NavigationTopicGraph } from './components/graph/NavigationTopicGraph';
+import { NavigationGraph } from './ui/graph/NavigationGraph';
 import type { OwnerFocusRequest } from './components/inputs/OwnerInput';
 import { OwnerItemDetail } from './components/inputs/OwnerItemDetail';
 import { OwnerWaitingPanel } from './components/inputs/OwnerWaitingPanel';
@@ -106,16 +106,14 @@ function workspaceKeys(app: {
     remove: () => false,
   };
 }
-function SessionCenter({ application, view, graph, onReveal, revealItem, switchToTree, highlightedItemIds, onHoverItem }: {
-  application: Application; view: OpenedSessionView; graph: boolean; onReveal: (result: RevealedItem) => void;
-  revealItem: (route: ItemRoute) => void; switchToTree: () => void;
+function SessionCenter({ application, view, graph, tight, onReveal, revealItem, highlightedItemIds, onHoverItem }: {
+  application: Application; view: OpenedSessionView; graph: boolean; tight: boolean; onReveal: (result: RevealedItem, openDetail?: boolean) => void;
+  revealItem: (route: ItemRoute) => void;
   highlightedItemIds: ReadonlySet<string>; onHoverItem: (itemId: string | null) => void;
 }) {
   const state = useSession(view.store), session = state.snapshot?.session;
   const navigation = useNavigation(application.navigation);
   const actions = application.actions.forSession(view.store);
-  const topics = Object.values(session?.topics ?? {}).filter((topic): topic is NonNullable<typeof topic> => !!topic && (view.preferences?.filters.archived ? topic.archived_at !== null : topic.archived_at === null)
-    && (!view.preferences?.filters.topic_id || topic.id === view.preferences.filters.topic_id)).sort((a, b) => a.order - b.order);
   return <section className="app-session" aria-label="Session workspace">
     <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />
     <BindingControls actions={actions} />
@@ -125,8 +123,8 @@ function SessionCenter({ application, view, graph, onReveal, revealItem, switchT
     }))} actionsForTarget={target => application.actions.forSession(application.navigation.opened.open(target))}
       revealItem={revealItem} openSession={target => { void application.navigation.navigate({ kind: 'session', session: target }); }} />
     {session && Object.keys(session.items).length === 0 && <EdgeState kind="empty" />}
-    {graph ? topics.map(topic => <NavigationTopicGraph key={topic.id} navigation={application.navigation} store={view.store}
-      topicId={topic.id} onReveal={onReveal} onSwitchToTree={switchToTree} />)
+    {graph && !view.preferences?.filters.archived
+      ? <NavigationGraph navigation={application.navigation} store={view.store} tight={tight} onReveal={onReveal} onHoverItem={onHoverItem} />
       : <NavigationSentenceTree navigation={application.navigation} store={view.store} onReveal={onReveal} highlightedItemIds={highlightedItemIds} onHoverItem={onHoverItem} />}
   </section>;
 }
@@ -213,7 +211,11 @@ function Workspace({ application }: { application: Application }) {
     return request;
   };
   // Tree and graph already save their own selection through navigation.
-  const selected = (result: RevealedItem) => { invalidateOwnerRequest(); detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true); };
+  // The graph's ↑/↓ and "−" move the selection without opening detail (Ariadne.dc.html `select`).
+  const selected = (result: RevealedItem, openDetail = true) => {
+    invalidateOwnerRequest(); setLocalReveal(result);
+    if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); }
+  };
   const revealItem = (target: ItemRoute) => {
     setRouteError(null);
     void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
@@ -264,7 +266,6 @@ function Workspace({ application }: { application: Application }) {
     if (current.writing || current.pendingOperationId !== null) return;
     saveView({ rail: view?.rail === 'hidden' ? 'activity' : 'hidden' });
   };
-  const switchToTree = () => setGraphModes(previous => ({ ...previous, [key]: false }));
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
   const shown = useAppliedTheme(theme);
   const projectName = (projectId: string) => state.projects?.projects.items.find(project => project.project_id === projectId)?.project?.display_name ?? 'Unavailable project';
@@ -319,7 +320,8 @@ function Workspace({ application }: { application: Application }) {
       onCloseDetail={closeDetail}
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} routes={navigation.routes}
         selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onReveal={reveal} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} /> : undefined}
-      renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} onReveal={selected} revealItem={revealItem} switchToTree={switchToTree} highlightedItemIds={highlightedItems} onHoverItem={hoverItem} />} />
+      renderSession={opened => <SessionCenter application={application} view={opened} graph={graph}
+        tight={!!(selectedId && detailOpen) || (!!view && view.rail !== 'hidden')} onReveal={selected} revealItem={revealItem} highlightedItemIds={highlightedItems} onHoverItem={hoverItem} />} />
   </div>;
 }
 
