@@ -21,6 +21,9 @@ import { TopicRow, type TopicAction } from './TopicRow';
 import { Banner, SessionBar } from './SessionBar';
 import { FilterBar } from './FilterBar';
 import { useLifecycle } from './Lifecycle';
+import type { RemoveTarget } from '../dialogs/remove';
+import { useHidden } from '../remove/queue';
+import { visibleSession } from '../remove/model';
 import './tree.css';
 
 export type RowIntent = 'bring' | 'reply' | 'drop' | 'note' | 'followup' | 'reopen' | 'later';
@@ -59,8 +62,8 @@ export interface TreeViewProps {
   readonly openSession: (route: SessionRef) => void;
   /** Called instead of sending when the agent is not running; without it the send queues. */
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
-  /** TODO(WP6): ask, then remove. A no-op until the remove command lands. */
-  readonly onRemove: () => void;
+  /** Asks to remove an item (and everything below it) or a topic: row trash, topic Remove, ⌫/Delete. */
+  readonly onRemove: (target: Extract<RemoveTarget, { kind: 'item' | 'topic' }>) => void;
 }
 
 // Topic collapse is presentation only and is not persisted; it lasts for the app run.
@@ -75,9 +78,12 @@ export function TreeView(props: TreeViewProps) {
   const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, railOpen, graph, notices, highlightedItems, highlightedMessages,
     summaries, continueTargets, actionsForTarget, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onShowArchive,
     revealItem, openSession, onAgentNotRunning, onRemove } = props;
-  const state = useSession(store), session = state.snapshot?.session ?? null;
+  const state = useSession(store), raw = state.snapshot?.session ?? null;
   const nav = useNavigation(navigation), preferences = nav.preferences;
   const route = state.route, routeId = `${route.project_id}/${route.session_id}`;
+  // Rows of a pending removal are gone at once; Undo brings them back.
+  const hidden = useHidden();
+  const session = useMemo(() => raw && visibleSession(raw, route, hidden), [raw, route, hidden]);
   const view = preferences?.sessions.find(value => value.session.project_id === route.project_id && value.session.session_id === route.session_id) ?? null;
   const busy = nav.writing || nav.pendingOperationId !== null || state.status !== 'ready';
   const archivedMode = view?.filters.archived ?? false;
@@ -261,6 +267,10 @@ export function TreeView(props: TreeViewProps) {
       return true;
     }),
     bring: topicOnly, respond: topicOnly, drop: topicOnly, reopen: topicOnly, later: topicOnly,
+    remove: onRow(row => {
+      onRemove(row.kind === 'topic' ? { kind: 'topic', session: route, topic_id: row.topic.id } : { kind: 'item', item: { ...route, item_id: row.item.id } });
+      return true;
+    }),
   }, { scope: 'row' });
 
   // ------------------------------------------------------------ focus and scroll
@@ -349,7 +359,7 @@ export function TreeView(props: TreeViewProps) {
         if (item.status !== 'replaced') list.push({ icon: 'ph ph-arrow-counter-clockwise', title: 'Back to Open (o)', run: act('reopen') });
       }
     }
-    list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: onRemove });
+    list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: () => onRemove({ kind: 'item', item: target }) });
     return list;
   };
   const topicActions = (row: Extract<Row, { kind: 'topic' }>): TopicAction[] => {
@@ -361,7 +371,7 @@ export function TreeView(props: TreeViewProps) {
       // not only earlier-session ones as the prototype draws (main, P8.3 WP1).
       ...!row.topic.origin ? [{ icon: 'ph ph-arrow-bend-down-right', label: 'Continue here', title: `Continue this topic with ${bar?.agent ?? 'this session'}`, run: () => setContinuing(id) }] : [],
       { icon: 'ph ph-archive', label: 'Archive', title: 'Archive topic (e)', run: () => lifecycle.archive(id), archive: true },
-      { icon: 'ph ph-trash', label: 'Remove', title: 'Remove topic (⌫)', run: onRemove },
+      { icon: 'ph ph-trash', label: 'Remove', title: 'Remove topic (⌫)', run: () => onRemove({ kind: 'topic', session: route, topic_id: id }) },
     ];
   };
   const tree = model && rows.length > 0 && <div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>

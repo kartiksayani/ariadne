@@ -23,7 +23,11 @@ import { ArchivePage } from './ui/pages/ArchivePage';
 import { useSessionSnapshots } from './ui/pages/snapshots';
 import { AgentNotRunningHost } from './ui/dialogs/AgentNotRunning';
 import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
-import type { RemoveHandler } from './ui/dialogs/remove';
+import type { RemoveHandler, RemoveSubject, RemoveTarget } from './ui/dialogs/remove';
+import { RemoveDialog } from './ui/dialogs/RemoveDialog';
+import { notices } from './ui/pages/notices';
+import { RemovalContext, RemovalQueue } from './ui/remove/queue';
+import { nextSelection, removeSubject, subtree, targetSession } from './ui/remove/model';
 import { agentName, hostApp, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import type { ViewTab } from './ui/shell/Header';
@@ -43,7 +47,10 @@ interface Application {
   drafts: OwnerDraftStore;
   actions: SessionActionControllers;
   discovery: DiscoveryController;
+  removals: RemovalQueue;
 }
+type TreeRemoveTarget = Extract<RemoveTarget, { kind: 'item' | 'topic' }>;
+const sameSession = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
 /** Header facts for the selected session, from its loaded snapshot. */
 function sessionFacts(state: SessionState | null, projectName: (projectId: string) => string): SessionFacts | null {
   const session = state?.snapshot?.session;
@@ -74,6 +81,7 @@ function workspaceKeys(app: {
   readonly toggleRail: () => void;
   readonly closeDetail: () => void;
   readonly clearFilters?: () => void;
+  readonly askRemove: (target: TreeRemoveTarget) => boolean;
 }): WorkspaceHandlers<HTMLDivElement> {
   const closed = ['done', 'decided', 'dropped'];
   const onItem = (act: (focused: FocusedItem, intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => boolean | void) =>
@@ -106,8 +114,8 @@ function workspaceKeys(app: {
     archive: onItem(({ item }) => app.archiveTopic(item.topic_id)),
     graph: () => { if (!app.store) return false; app.toggleGraph(); return true; },
     messages: () => { if (!app.store) return false; app.toggleRail(); return true; },
-    // TODO(WP6): ask, then remove the selected item or topic. A no-op until the remove command lands.
-    remove: () => false,
+    // ⌫/Delete away from a row: ask to remove the focused or selected item (rows handle their own).
+    remove: onItem(({ target }) => app.askRemove({ kind: 'item', item: target })),
   };
 }
 /** The archive (1x): archived topics of every session in the project. */
@@ -130,7 +138,7 @@ interface CenterProps {
   readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
   readonly onClearFilters: () => void; readonly onShowArchive: () => void; readonly revealItem: (route: ItemRoute) => void;
-  readonly onRemove: () => void; readonly onRemoveTarget: RemoveHandler;
+  readonly onRemove: (target: TreeRemoveTarget) => void; readonly onRemoveTarget: RemoveHandler;
   readonly onAgentNotRunning: (submission: PendingSubmission) => void;
 }
 function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...props }: CenterProps) {
@@ -301,8 +309,47 @@ function Workspace({ application }: { application: Application }) {
   const archived = view?.filters.archived ?? false;
   // The archive is kept per project (1x), so the label counts the project's archived topics.
   const archivedTopics = route ? state.projects?.projects.items.find(project => project.project_id === route.project_id)?.counts.archived_topics ?? 0 : 0;
-  // TODO(WP6b): remove the confirmed project, session, topic or item (RendererService.remove*, PR #125).
-  const removeTarget: RemoveHandler = () => {};
+  // Remove (handoff README "Remove"): ask, then hide at once and run after the undo window (ui/remove/queue).
+  const removals = application.removals;
+  const hidden = useSyncExternalStore(removals.subscribe, removals.getSnapshot, removals.getSnapshot);
+  const [asking, setAsking] = useState<{ target: RemoveTarget; subject: RemoveSubject } | null>(null);
+  const askRemove = (target: TreeRemoveTarget): boolean => {
+    const at = targetSession(target), session = navigation.opened.open(at).getSnapshot().snapshot?.session;
+    if (!session) return false;
+    if (target.kind === 'item' ? hidden.item(at, session, target.item.item_id) : hidden.topic(at, target.topic_id)) return false;
+    const subject = removeSubject(session, target);
+    if (!subject) return false;
+    setAsking({ target, subject }); return true;
+  };
+  // The selection moves to the next row, else the parent, else none; detail closes when it showed what goes.
+  const moveSelection = (at: SessionRef, next: string | null) => {
+    if (!view || !preferences || !sameSession(at, view.session)) return;
+    setLocalReveal(null);
+    if (next) void navigation.routes.revealItem({ ...at, item_id: next }).then(result => { if (result?.kind === 'item') selected(result, false); }).catch(() => {});
+    saveView({ selected_item_id: next });
+  };
+  const removeTarget: RemoveHandler = (target, subject) => {
+    let restore: (() => void) | undefined;
+    if (target.kind === 'item' || target.kind === 'topic') {
+      const at = targetSession(target), session = navigation.opened.open(at).getSnapshot().snapshot?.session;
+      const shown = route && sameSession(at, route) && selectedId ? selectedId : null;
+      const gone = !!session && !!shown && (target.kind === 'item'
+        ? subtree(session, target.item.item_id).some(item => item.id === shown) : session.items[shown]?.topic_id === target.topic_id);
+      if (gone && session && view && shown) {
+        const wasOpen = detailOpen;
+        closeDetail();
+        moveSelection(at, target.kind === 'item' ? nextSelection(session, view, target.item.item_id) : null);
+        restore = () => { const back = { ...at, item_id: shown }; if (wasOpen) revealItem(back); else moveSelection(at, shown); };
+      }
+    } else if (target.kind === 'project') {
+      const current = state.preferences?.global.selected_navigation;
+      if (current?.kind === 'project' && current.project_id === target.project_id) {
+        void navigation.navigate({ kind: 'projects' });
+        restore = () => { void navigation.navigate({ kind: 'project', project_id: target.project_id }); };
+      }
+    }
+    removals.schedule(target, subject, { restore });
+  };
   const showView = (mode: 'tree' | 'graph' | 'archive') => {
     setGraphModes(previous => ({ ...previous, [key]: mode === 'graph' }));
     if (view && archived !== (mode === 'archive')) saveView({ filters: { ...structuredClone(view.filters), archived: mode === 'archive' } } as Partial<SessionPreferences>);
@@ -329,15 +376,16 @@ function Workspace({ application }: { application: Application }) {
     },
     focused: event => {
       const focusedId = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-item-id]')?.dataset.itemId : undefined;
-      const item = sessionState?.snapshot?.session.items[focusedId ?? selectedId ?? ''];
-      return route && item ? { item, target: { ...route, item_id: item.id } } : null;
+      const session = sessionState?.snapshot?.session, item = session?.items[focusedId ?? selectedId ?? ''];
+      return route && session && item && !hidden.item(route, session, item.id) ? { item, target: { ...route, item_id: item.id } } : null;
     },
+    askRemove,
     oldestWaiting: () => application.waiting.getSnapshot().waiting[0]?.route,
     toggleLater,
     toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })), toggleRail,
     clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
   }), { scope: 'workspace' });
-  return <div className="product-app" onKeyDown={keys}>
+  return <RemovalContext.Provider value={removals}><div className="product-app" onKeyDown={keys}>
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget}
       session={store ? sessionFacts(sessionState, projectName) : undefined}
@@ -345,8 +393,7 @@ function Workspace({ application }: { application: Application }) {
         onQueryChange: view ? text => setSearchEdit({ route: key, text, attempted: false }) : undefined,
         onToggleRail: view ? toggleRail : undefined,
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
-      // TODO(WP6): remove the selected item or topic after asking; the trash button is a no-op until then.
-      onRemove={() => {}}
+      onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
       waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={revealItem} onAgentNotRunning={onAgentNotRunning}
         selected={route && selectedId ?{ ...route, item_id: selectedId } : null}
         notice={routeError && <p className="waiting-notice waiting-notice-warn" role="alert">{routeError}</p>}
@@ -373,14 +420,14 @@ function Workspace({ application }: { application: Application }) {
           else focusOwner(target, intent);
         }}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')} revealItem={revealItem}
-        // TODO(WP6): remove the item or topic after asking; a no-op until the remove command lands.
-        onRemove={() => {}} onRemoveTarget={removeTarget} onAgentNotRunning={onAgentNotRunning} />} />
+        onRemove={target => { askRemove(target); }} onRemoveTarget={removeTarget} onAgentNotRunning={onAgentNotRunning} />} />
+    {asking && <RemoveDialog subject={asking.subject} onCancel={() => setAsking(null)} onConfirm={() => removeTarget(asking.target, asking.subject)} />}
     <ContinueTopicHost navigation={navigation} actions={application.actions} onSent={target => {
       // The continued topic now lives in the target session: show it there in the tree.
       if (route && routeKey(target) === key && archived) showView('tree');
     }} />
     <AgentNotRunningHost navigation={navigation} />
-  </div>;
+  </div></RemovalContext.Provider>;
 }
 
 // Construction happens in an effect, so StrictMode's discarded render creates
@@ -389,11 +436,32 @@ function Workspace({ application }: { application: Application }) {
 export function DesktopApp({ service }: { service: RendererService }) {
   const [application, setApplication] = useState<Application | null>(null);
   useEffect(() => {
-    const navigation = new NavigationStore(service);
-    const next: Application = { service, navigation, waiting: new WaitingStore(service, navigation.opened),
+    const navigation = new NavigationStore(service), waiting = new WaitingStore(service, navigation.opened);
+    const removals = new RemovalQueue({ service, notices,
+      read: async route => {
+        const store = navigation.opened.open(route);
+        await store.refresh();
+        const current = store.getSnapshot();
+        if (!current.snapshot && current.error) throw current.error;
+        return current.snapshot?.session ?? null;
+      },
+      // After the command: the tree drops the rows, removed sessions lose their tabs, the pages recount.
+      removed: async target => {
+        if (target.kind === 'item' || target.kind === 'topic') await navigation.opened.open(targetSession(target)).refresh();
+        else {
+          const views = navigation.getSnapshot().preferences?.sessions.filter(view => view.tab_open && (target.kind === 'project'
+            ? view.session.project_id === target.project_id : sameSession(view.session, target.session))) ?? [];
+          for (const view of views) await navigation.closeTab(view.session);
+        }
+        await navigation.refresh();
+        void waiting.refresh();
+      } });
+    const next: Application = { service, navigation, waiting, removals,
       drafts: new OwnerDraftStore(service), actions: new SessionActionControllers(service), discovery: new DiscoveryController(service) };
+    const detach = removals.attach();
     setApplication(next);
-    return () => { next.discovery.dispose(); next.waiting.stop(); next.navigation.stop(); };
+    // Leaving the app runs the removals still in their window rather than dropping them.
+    return () => { detach(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); next.navigation.stop(); };
   }, [service]);
   return application ? <Workspace application={application} /> : <p role="status">Opening Ariadne…</p>;
 }

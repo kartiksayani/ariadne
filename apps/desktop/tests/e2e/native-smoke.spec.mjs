@@ -11,6 +11,7 @@ import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
 import { runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
 import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
+import { runRemoveAcceptance } from './remove.spec.mjs';
 import { sendDetailReply } from './owner-reply.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
@@ -245,6 +246,7 @@ describe('native owner FIFO and real process restoration', () => {
       await runHistoryAcceptance(configuration);
       await runHistoryActionsAcceptance(configuration);
       await runAccessibilityAcceptance(configuration);
+      await runRemoveAcceptance(configuration);
     }
     else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); await restoreTreeAcceptance(configuration); await runGraphAcceptance(configuration); await restoreHistoryAcceptance(configuration); await runRecoveryAcceptance(configuration); }
 

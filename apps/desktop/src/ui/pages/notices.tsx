@@ -12,6 +12,8 @@ export interface Notice {
   readonly actions?: readonly NoticeAction[];
   /** Shows the × button. */
   readonly dismissible?: boolean;
+  /** Runs when the owner presses ×, before the note goes. */
+  readonly onDismiss?: () => void;
 }
 export type NoticeInput = Omit<Notice, 'id'> & { readonly id?: string };
 
@@ -51,7 +53,7 @@ export function Notices({ store = notices }: { readonly store?: NoticeStore }) {
       <span className="pw-note-text">{notice.text}</span>
       {notice.actions?.map(action => <button key={action.label} type="button" className="btn btn-ghost pw-note-action" onClick={action.run}>{action.label}</button>)}
       {notice.dismissible && <button type="button" className="btn btn-ghost btn-icon pw-note-dismiss" title="Dismiss" aria-label="Dismiss"
-        onClick={() => store.dismiss(notice.id)}><i className="ph ph-x" aria-hidden="true" /></button>}
+        onClick={() => { notice.onDismiss?.(); store.dismiss(notice.id); }}><i className="ph ph-x" aria-hidden="true" /></button>}
     </div>)}
   </div>;
 }

@@ -79,6 +79,6 @@ export function ProjectsPage({ projects, sessions, snapshots, now, discovered, d
     {children}
     {discovering && discovery && <Discover controller={discovery} register={onRegister} />}
     {removing && <RemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)}
-      onConfirm={() => onRemove({ kind: 'project', project_id: removing.id })} />}
+      onConfirm={() => onRemove({ kind: 'project', project_id: removing.id }, removing.subject)} />}
   </div>;
 }

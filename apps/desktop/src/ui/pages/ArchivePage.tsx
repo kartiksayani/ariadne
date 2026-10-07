@@ -11,6 +11,7 @@ import { RemoveDialog } from '../dialogs/RemoveDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from '../dialogs/remove';
 import { archivedTopics, ICON, STATUS_LABEL, type ArchivedTopic } from './model';
 import { notices } from './notices';
+import { useHidden } from '../remove/queue';
 import './pages.css';
 
 export interface ArchivePageProps {
@@ -30,7 +31,8 @@ export interface ArchivePageProps {
 export function ArchivePage({ navigation, actions, projectName, sessions, snapshots, target, query, now, onRemove }: ArchivePageProps) {
   const [removing, setRemoving] = useState<{ subject: RemoveSubject; target: RemoveTarget } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const all = archivedTopics(sessions, snapshots, '', now), shown = query.trim() ? archivedTopics(sessions, snapshots, query, now) : all;
+  const hidden = useHidden(), kept = (topic: ArchivedTopic) => !hidden.topic(topic.source, topic.topic.id);
+  const all = archivedTopics(sessions, snapshots, '', now).filter(kept), shown = query.trim() ? archivedTopics(sessions, snapshots, query, now).filter(kept) : all;
   const restore = async (topic: ArchivedTopic) => {
     if (busy) return;
     setBusy(topic.topic.id);
@@ -77,6 +79,6 @@ export function ArchivePage({ navigation, actions, projectName, sessions, snapsh
         {topic.more && <div className="pw-archive-more">{topic.more}</div>}
       </div>
     </div>)}
-    {removing && <RemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)} onConfirm={() => onRemove(removing.target)} />}
+    {removing && <RemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)} onConfirm={() => onRemove(removing.target, removing.subject)} />}
   </div>;
 }
