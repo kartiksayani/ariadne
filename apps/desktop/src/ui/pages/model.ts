@@ -5,6 +5,7 @@ import type { Immutable } from '../../data/session-store';
 import type { ContinuePreview, SessionRef } from '../../generated/core';
 import type { Item, ItemStatus, ProjectSummary, Session, SessionSummary, Topic } from '../../generated/domain/models';
 import { agentName, clock, sessionRange, sessionWhen } from '../shell/model';
+import { agentRunning, connectionOf } from '../shared/connection';
 
 export type VisualStatus = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
 export const ICON: Readonly<Record<VisualStatus, string>> = {
@@ -43,8 +44,8 @@ export function lastActivity(at: number, now: number): string {
   return day === 'today' || day === 'yesterday' ? `${day} ${clock(at)}` : day;
 }
 
-/** The agent of a session is running: active in Ariadne and its binding is connected. */
-export const isRunning = (session: Immutable<SessionSummary>) => session.state === 'active' && session.active_binding?.connection_state === 'connected';
+/** The agent of a session is running: active in Ariadne and its binding connected or reconnecting (ui/shared/connection). */
+export const isRunning = (session: Immutable<SessionSummary>) => session.state === 'active' && agentRunning(connectionOf(session.active_binding));
 export const agentOf = (session: Immutable<SessionSummary>) => session.active_binding ? agentName(session.active_binding.adapter_id) : 'No agent';
 
 export interface Run { readonly run: string; readonly runColor: string; readonly runDot: string; readonly runRing: string }

@@ -69,7 +69,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const [reason, setReason] = useState('');
   const box = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
   const handled = useRef<number | null>(null);
-  const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving }) : null;
+  const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
+  const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence }) : null;
   const item = session?.items[itemId];
 
   const openBox = (next: OpenMode) => { setMode(next); setFocusBox(value => value + 1); };

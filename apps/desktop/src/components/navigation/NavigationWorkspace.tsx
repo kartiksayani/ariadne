@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { AdapterConfig, ProjectSummary, SessionSummary, SummaryCounts } from '../../generated/domain/models';
+import type { AdapterConfig, ProjectSummary, SummaryCounts } from '../../generated/domain/models';
 import type { NavigationSelection, SessionPreferences, SessionRef } from '../../generated/core';
 import { CoreFailure } from '../../data/service';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
@@ -17,6 +17,7 @@ import { SessionLists, type SessionGroup } from '../../ui/pages/SessionLists';
 import { LoadingSession } from '../../ui/pages/SessionStates';
 import { Notices } from '../../ui/pages/notices';
 import { useSessionSnapshots } from '../../ui/pages/snapshots';
+import { isRunning } from '../../ui/pages/model';
 import '../../styles/navigation.css';
 
 export interface AdapterChoice { readonly adapter_id: string; readonly label: string; readonly configuration: AdapterConfig;
@@ -55,7 +56,7 @@ export interface NavigationWorkspaceProps {
 const key = (route: SessionRef) => JSON.stringify([route.project_id, route.session_id]);
 const projectName = (project: Immutable<ProjectSummary>) => project.project?.display_name ?? 'Unavailable project';
 const partial = (counts: Immutable<SummaryCounts>) => counts.completeness === 'partial';
-const running = (session: Immutable<SessionSummary>) => session.state === 'active' && session.active_binding?.connection_state === 'connected';
+const running = isRunning;
 const defaultChrome: Omit<HeaderProps, 'text' | 'disabled'> ={ query: '', views: null, railOn: false, theme: 'dark' };
 
 /** Saved binding-connect receipt: what to give the host, plus capabilities the owner cannot rely on. */

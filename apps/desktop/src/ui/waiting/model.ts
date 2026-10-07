@@ -10,6 +10,7 @@ import type { WaitingState } from '../../selectors/waiting/store';
 import type { DraftEntry } from '../../state/drafts/store';
 import { deliveryLine, deliveryStage, draftStage, quote, type DeliveryLine, type DeliveryStage } from '../answer/delivery';
 import { agentName, dayWord } from '../shell/model';
+import { connectionOf } from '../shared/connection';
 import { shortLabel } from '../shared/short';
 
 /** How the card's Retry resolves: prepare a revised draft of a rejected save, or open the item's recovery review. */
@@ -167,7 +168,10 @@ export function waitingModel({ state, draft, presence, now }: ModelInput): Waiti
   const order = (value: WaitingCardModel) => value.item.waiting_since ?? '';
   cards.sort((a, b) => order(a).localeCompare(order(b)));
   const loading = state.status === 'loading', first = !loading && state.status === 'ready' && state.sessions.length === 0;
-  const reconnecting = state.sessions.some(captured => binding(captured.session, captured.session.active_binding_id)?.connection_state === 'reconnecting');
+  const reconnecting = state.sessions.some(captured => {
+    const bound = binding(captured.session, captured.session.active_binding_id), route = { project_id: captured.session.project_id, session_id: captured.session.id };
+    return connectionOf(bound, bound ? presence(route, bound.id) : null) === 'reconnecting';
+  });
   const blank = state.sessions.length > 0 && state.sessions.every(captured => Object.keys(captured.session.items).length === 0);
   return {
     cards, sent, count: loading || first ? '–' : String(cards.length),

@@ -3,7 +3,8 @@
 // operation; this hook adds the guards and wording the controls show.
 import { useEffect } from 'react';
 import type { ItemRoute } from '../../generated/core';
-import type { ConnectionState, Session } from '../../generated/domain/models';
+import type { PresenceObservation, Session } from '../../generated/domain/models';
+import { connectionOf, reconnectingNote, type Connection } from '../shared/connection';
 import type { Immutable } from '../../data/session-store';
 import { blockedDraft, emptyDraft, ownerActions, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
 import { agentName } from '../shell/model';
@@ -36,6 +37,8 @@ export interface SubmitOptions {
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   /** Called after a validated input receipt. */
   readonly onSaved?: () => void;
+  /** The host presence of the session's binding, when observed (a stale host is "Reconnecting"). */
+  readonly presence?: Immutable<PresenceObservation> | null;
 }
 
 export interface Submit {
@@ -46,7 +49,7 @@ export interface Submit {
   readonly blocked: string | null;
   /** A send or a save is in flight or must be reconciled first. */
   readonly locked: boolean;
-  readonly connection: ConnectionState | null;
+  readonly connection: Connection;
   readonly agent: string;
   readonly preferenceUncertain: boolean;
   readonly error: string | null;
@@ -68,7 +71,7 @@ export interface Submit {
 
 const stale = 'The session is unavailable or stale. Refresh before sending.';
 
-export function useSubmit({ drafts, session, current, itemId, intent, onAgentNotRunning, onSaved }: SubmitOptions): Submit {
+export function useSubmit({ drafts, session, current, itemId, intent, onAgentNotRunning, onSaved, presence }: SubmitOptions): Submit {
   const state = useOwnerDrafts(drafts);
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const entry = route ? drafts.find(route, itemId, intent) : undefined;
@@ -79,7 +82,7 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
     if (session && eligible && state.ready && !entry) drafts.begin(session, itemId, intent);
   }, [drafts, session, eligible, itemId, intent, state.ready, entry]);
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
-  const connection = binding?.connection_state ?? null, agent = binding ? agentName(binding.adapter_id) : 'the agent';
+  const connection = connectionOf(binding, presence), agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const draft = entry?.draft;
   const changed = !!draft && !!item && !!session && (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision
     || session.active_binding_id !== draft.binding_id);
@@ -89,7 +92,7 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   const guard = draft && session ? blockedDraft(draft, session) : null;
   const blocked = !session || !draft ? null : !current ? stale
     : session.state !== 'active' && intent === 'answer' ? 'This session is closed. Reopen it to answer.'
-      : connection === 'reconnecting' ? `Reconnecting to ${agent}. Your choice is kept; sending resumes when the connection is back.`
+      : connection === 'reconnecting' ? reconnectingNote(agent)
         : guard === emptyDraft ? null : guard;
   const locked = !entry || entry.saving || entry.uncertain || state.preferenceUncertain;
   const submit = () => entry ? drafts.submit(entry.draft.op_id).then(saved => { if (saved) onSaved?.(); return saved; }) : Promise.resolve(false);

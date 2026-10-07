@@ -29,7 +29,8 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
   const live = current.status === 'ready' && !current.error;
-  const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning });
+  const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
+  const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning, presence });
   const { entry } = submit;
   // Keyboard requests (a, 1–9) arrive as focus requests; a number is a deliberate choice.
   useEffect(() => {
