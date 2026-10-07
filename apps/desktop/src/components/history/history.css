@@ -1,26 +1,8 @@
-.message-history-rail {
-  color: var(--color-text);
-  background: var(--a-card);
-  border-left: 1px solid var(--color-divider);
-  height: 100%;
-  min-height: 0;
-  overflow: auto;
-  padding: 16px;
-  box-sizing: border-box;
-
-}
-
-.history-header, .history-meta, .history-links {
+.history-meta, .history-links {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-
-}
-
-.history-header {
-  justify-content: space-between;
-  margin-bottom: 16px;
 
 }
 
@@ -58,17 +40,6 @@
 
 .history-pinned {
   box-shadow: inset 3px 0 var(--color-accent);
-
-}
-
-.message-history-rail button {
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  border: 1px solid var(--color-divider);
-  background: transparent;
-  border-radius: 5px;
-  padding: 5px 8px;
 
 }
 

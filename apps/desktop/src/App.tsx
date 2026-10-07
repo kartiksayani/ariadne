@@ -12,12 +12,17 @@ import { NavigationGraph } from './ui/graph/NavigationGraph';
 import type { OwnerFocusRequest } from './ui/answer/useSubmit';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import { WaitingColumn } from './ui/waiting/WaitingColumn';
-import { MessageRail } from './components/rail/MessageRail';
+import { MessageRail } from './ui/rail/MessageRail';
 import { SessionActionControllers } from './components/bindings/actions';
 import { RecoveryPanel, recoveryTargets } from './components/recovery/RecoveryPanel';
 import { CopiedProvenance } from './components/history-actions/CopiedProvenance';
 import { SessionNotice } from './components/edge-states/EdgeState';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
+import { ArchivePage } from './ui/pages/ArchivePage';
+import { useSessionSnapshots } from './ui/pages/snapshots';
+import { AgentNotRunningHost } from './ui/dialogs/AgentNotRunning';
+import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
+import type { RemoveHandler } from './ui/dialogs/remove';
 import { agentName, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import type { ViewTab } from './ui/shell/Header';
@@ -104,6 +109,19 @@ function workspaceKeys(app: {
     remove: () => false,
   };
 }
+/** The archive (1x): archived topics of every session in the project. */
+function SessionArchive({ application, view, onRemove }: { application: Application; view: OpenedSessionView; onRemove: RemoveHandler }) {
+  const state = useSession(view.store), navigation = useNavigation(application.navigation);
+  const route = state.route;
+  const sessions = (navigation.sessions?.sessions.items ?? []).filter(summary => summary.project_id === route.project_id);
+  const snapshots = useSessionSnapshots(application.service, sessions);
+  const project = navigation.projects?.projects.items.find(value => value.project_id === route.project_id);
+  return <section className="app-session" aria-label="Session workspace">
+    <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />
+    <ArchivePage navigation={application.navigation} actions={application.actions} projectName={project?.project?.display_name ?? 'this project'}
+      sessions={sessions} snapshots={snapshots} target={route} query={view.preferences?.filters.search ?? ''} now={Date.now()} onRemove={onRemove} />
+  </section>;
+}
 interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean; readonly railOpen: boolean;
@@ -111,12 +129,13 @@ interface CenterProps {
   readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
   readonly onClearFilters: () => void; readonly onShowArchive: () => void; readonly revealItem: (route: ItemRoute) => void;
-  readonly onRemove: () => void;
+  readonly onRemove: () => void; readonly onRemoveTarget: RemoveHandler;
 }
-function SessionCenter({ application, view, graph, reveal, ...props }: CenterProps) {
+function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...props }: CenterProps) {
   const state = useSession(view.store), session = state.snapshot?.session;
   const navigation = useNavigation(application.navigation);
   const actions = application.actions.forSession(view.store);
+  if (view.preferences?.filters.archived) return <SessionArchive application={application} view={view} onRemove={onRemoveTarget} />;
   const summaries = navigation.sessions?.sessions.items ?? [];
   const recovering = session ? recoveryTargets(session).length > 0 : false;
   const notice = state.status !== 'loading' && <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />;
@@ -274,7 +293,10 @@ function Workspace({ application }: { application: Application }) {
   const shown = useAppliedTheme(theme);
   const projectName = (projectId: string) => state.projects?.projects.items.find(project => project.project_id === projectId)?.project?.display_name ?? 'Unavailable project';
   const archived = view?.filters.archived ?? false;
-  const archivedTopics = Object.values(sessionState?.snapshot?.session.topics ?? {}).filter(topic => topic && topic.archived_at !== null).length;
+  // The archive is kept per project (1x), so the label counts the project's archived topics.
+  const archivedTopics = route ? state.projects?.projects.items.find(project => project.project_id === route.project_id)?.counts.archived_topics ?? 0 : 0;
+  // TODO(WP6b): remove the confirmed project, session, topic or item (RendererService.remove*, PR #125).
+  const removeTarget: RemoveHandler = () => {};
   const showView = (mode: 'tree' | 'graph' | 'archive') => {
     setGraphModes(previous => ({ ...previous, [key]: mode === 'graph' }));
     if (view && archived !== (mode === 'archive')) saveView({ filters: { ...structuredClone(view.filters), archived: mode === 'archive' } } as Partial<SessionPreferences>);
@@ -310,7 +332,8 @@ function Workspace({ application }: { application: Application }) {
     clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
   }), { scope: 'workspace' });
   return <div className="product-app" onKeyDown={keys}>
-    <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery}
+    <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
+      onRemoveTarget={removeTarget}
       session={store ? sessionFacts(sessionState, projectName) : undefined}
       chrome={{ query, views, railOn: !!store && !!view && view.rail !== 'hidden', theme: shown,
         onQueryChange: view ? text => setSearchEdit({ route: key, text, attempted: false }) : undefined,
@@ -332,8 +355,8 @@ function Workspace({ application }: { application: Application }) {
           const result = await navigation.routes.revealItem(target); if (result) reveal(result);
         }} /></> : undefined}
       onCloseDetail={closeDetail}
-      railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} routes={navigation.routes}
-        selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onReveal={reveal} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} /> : undefined}
+      railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store}
+        selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} /> : undefined}
       renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
         selectedId={selectedId} detailOpen={detailOpen && !!selectedId} railOpen={!!view && view.rail !== 'hidden'}
         highlightedItems={highlightedItems} highlightedMessages={highlightedMessages} onHoverItem={hoverItem} onSelected={selected}
@@ -345,7 +368,12 @@ function Workspace({ application }: { application: Application }) {
         }}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')} revealItem={revealItem}
         // TODO(WP6): remove the item or topic after asking; a no-op until the remove command lands.
-        onRemove={() => {}} />} />
+        onRemove={() => {}} onRemoveTarget={removeTarget} />} />
+    <ContinueTopicHost navigation={navigation} actions={application.actions} onSent={target => {
+      // The continued topic now lives in the target session: show it there in the tree.
+      if (route && routeKey(target) === key && archived) showView('tree');
+    }} />
+    <AgentNotRunningHost navigation={navigation} />
   </div>;
 }
 

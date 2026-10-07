@@ -3,15 +3,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route, secondId } from '../app/transport';
+import { sessionButton } from '../app/open';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function setup(configure?: (transport: AppTransport) => void) {
   const transport = new AppTransport(); configure?.(transport); render(<DesktopApp service={createDesktopService(transport)} />);
-  const button = await waitFor(() => {
-    const button = document.querySelector<HTMLButtonElement>(`[data-session-id="${route.session_id}"]`)!;
-    expect(button).not.toBeNull(); expect(button.disabled).toBe(false); return button;
-  });
-  fireEvent.click(button); await screen.findByRole('tree', { name: 'Session items' });
+  fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
   return transport;
 }

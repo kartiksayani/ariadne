@@ -57,7 +57,7 @@ const editableSelector = 'input,textarea,select,[contenteditable="true"],[role="
 const inside = (target: EventTarget, selector: string) => target instanceof Element && !!target.closest(selector);
 
 export function accepts(scope: KeyScope, event: Pick<KeyboardEvent<Element>, 'target' | 'currentTarget' | 'defaultPrevented'>, intent: WorkspaceIntent): boolean {
-  if (scope === 'workspace') return !event.defaultPrevented && !inside(event.target, `${editableSelector},[role="dialog"]`);
+  if (scope === 'workspace') return !event.defaultPrevented && !inside(event.target, `${editableSelector},[role="dialog"],[role="alertdialog"]`);
   if (scope === 'row') return event.target === event.currentTarget && !inside(event.target, editableSelector);
   if (intent.kind === 'escape' || intent.kind === 'send') return true;
   return !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement);

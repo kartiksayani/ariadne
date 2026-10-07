@@ -31,7 +31,7 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     await expect(page.getByRole('region', { name: 'Session setup' }).getByRole('button', { name: 'Copy instruction' })).toBeVisible();
     expect(await page.evaluate(() => {
       const card = document.querySelector('[aria-label="Session setup"]');
-      const active = [...document.querySelectorAll('h3')].find(heading => heading.textContent === 'Active');
+      const active = [...document.querySelectorAll('h3')].find(heading => heading.textContent?.startsWith('Active sessions · '));
       return !!card && !!active && !!(card.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING);
     })).toBe(true);
     await page.locator('button[data-session-id]').first().click();
@@ -148,6 +148,10 @@ test('keeps a sent answer between the item question and its timeline in the ordi
     const origin = `http://127.0.0.1:${address.port}`;
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
     await page.goto(`${origin}/tests/e2e/owner-input/fixture.html`);
+    // All sessions lists only sessions with an open tab; a fresh App opens the
+    // session from its project page.
+    await page.locator('[data-shell-tab="projects"]').click();
+    await page.locator('.pw-project-open').first().click();
     const session = page.locator('button[data-session-id]').first();
     await expect(session).toBeEnabled(); await session.click();
     await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();

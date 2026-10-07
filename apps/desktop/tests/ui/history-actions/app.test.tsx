@@ -3,15 +3,12 @@ import { afterEach, expect, it } from 'vitest';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { route } from '../app/transport';
+import { sessionButton } from '../app/open';
 import { HistoryTransport } from './fixture';
 
 afterEach(cleanup);
 async function openSource() {
-  const button = await waitFor(() => {
-    const control = document.querySelector<HTMLButtonElement>(`button[data-session-id="${route.session_id}"]`);
-    expect(control?.disabled).toBe(false); return control!;
-  });
-  fireEvent.click(button); await screen.findByRole('tree', { name: 'Session items' });
+  fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
 }
 it('opens guarded history in ordinary App and sends an approved Continue into the explicitly selected target', async () => {

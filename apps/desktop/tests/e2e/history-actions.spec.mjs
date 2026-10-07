@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { cliRequest, admissions, snapshot } from './scripted-provider.mjs';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
+import { openSessionButton } from './session-button.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
@@ -14,7 +15,7 @@ const topicBand = name => browser.$(`.tree-rows [role="treeitem"][aria-label="${
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 async function openSession(sessionId) {
   await click(await browser.$('button[data-shell-tab="all_sessions"]'));
-  await click(await browser.$(`[data-session-id="${sessionId}"]`));
+  await click(await openSessionButton(sessionId));
   await sessionBar().waitForDisplayed();
 }
 // A topic band shows its actions while it holds focus (the prototype's hover).

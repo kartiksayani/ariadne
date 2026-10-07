@@ -2,7 +2,8 @@
 // to <dc-import name="Ariadne"> in Ariadne Mockups.dc.html. Kept free of app
 // imports so the Playwright spec can read it in Node.
 
-export type Scenario = 'default' | 'project' | 'archive' | 'sessions' | 'session' | 'projects' | 'projectpage' | 'review' | 'thread' | 'reveal' | 'sent' | 'failed' | 'reconnecting';
+export type Scenario = 'default' | 'project' | 'archive' | 'sessions' | 'session' | 'projects' | 'projectpage' | 'review' | 'thread' | 'reveal' | 'sent' | 'failed'
+  | 'reconnecting' | 'first' | 'continue' | 'notrunning';
 export interface FrameSpec {
   readonly id: string;
   readonly width: number;
@@ -39,6 +40,7 @@ const specs: readonly FrameSpec[] = [
   { ...base, id: '1m', scenario: 'failed', selected: '3.1', detail: true },
   { ...base, id: '1n', scenario: 'reveal', selected: '1.3.1.2', detail: true },
   { ...base, ...narrow, id: '1o', scenario: 'reconnecting', selected: '3.1', detail: true },
+  { ...base, ...narrow, id: '1p', scenario: 'first' },
   { ...base, id: '1q', selected: '1.4', detail: true, rail: true },
   { ...base, ...narrow, id: '1r', theme: 'light', selected: '1.4', detail: true, openMode: 'reply' },
   { ...base, id: '1t', scenario: 'review', selected: '4.4', detail: true, rail: true, collapseTopics: reviewFolds },
@@ -46,10 +48,12 @@ const specs: readonly FrameSpec[] = [
   { ...base, ...narrow, id: '1v', selected: '1.3.1', detail: true, openMode: 'followup' },
   { ...base, id: '1w', scenario: 'project', selected: '5.3', detail: true, rail: true },
   { ...base, id: '1x', scenario: 'archive' },
+  { ...base, id: '1y', scenario: 'continue', rail: true },
   { ...base, id: '1z', scenario: 'sessions' },
   { ...base, id: '1aa', scenario: 'session' },
   { ...base, id: '1ab', scenario: 'projects' },
   { ...base, id: '1ac', scenario: 'projectpage' },
+  { ...base, id: '1ad', scenario: 'notrunning', selected: '5.3', detail: true },
 ];
 
 /** The fixed wall clock of the handoff page: 7 Oct 2026 15:10 UTC, after the last message of every frame (1i answers until 15:10). */

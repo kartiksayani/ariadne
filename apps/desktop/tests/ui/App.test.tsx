@@ -5,17 +5,18 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import App, { DesktopApp } from '../../src/App';
 import { createDesktopService } from '../../src/data/service';
 import { WaitingStore } from '../../src/selectors/waiting/store';
-import { MessageRail } from '../../src/components/rail/MessageRail';
+import { MessageRail } from '../../src/ui/rail/MessageRail';
 import { TreeView } from '../../src/ui/tree/TreeView';
 import { AppTransport, route, secondId } from './app/transport';
+import { sessionButton } from './app/open';
 import { page, projections } from './history/fixtures';
 
 vi.mock('react-dom/client', async importOriginal => {
   const actual = await importOriginal<typeof ReactDOM>();
   return { ...actual, createRoot: vi.fn(actual.createRoot) };
 });
-vi.mock('../../src/components/rail/MessageRail', async importOriginal => {
-  const actual = await importOriginal<typeof import('../../src/components/rail/MessageRail')>();
+vi.mock('../../src/ui/rail/MessageRail', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/ui/rail/MessageRail')>();
   return { ...actual, MessageRail: vi.fn(actual.MessageRail) };
 });
 vi.mock('../../src/ui/tree/TreeView', async importOriginal => {
@@ -25,11 +26,7 @@ vi.mock('../../src/ui/tree/TreeView', async importOriginal => {
 
 const mutations = (transport: AppTransport, command: string) => transport.mutations.filter(request => request.command.command === command);
 async function openSession(id = route.session_id, pending = false) {
-  const control = await waitFor(() => {
-    const button = document.querySelector<HTMLButtonElement>(`button[data-session-id="${id}"]`);
-    expect(button).not.toBeNull(); expect(button?.disabled).toBe(false); return button!;
-  });
-  fireEvent.click(control);
+  fireEvent.click(await sessionButton({ project_id: route.project_id, session_id: id }));
   await screen.findByRole('region', { name: 'Session tree' });
   if (!pending) await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
 }
@@ -105,7 +102,7 @@ describe('ordinary desktop composition', () => {
     // The icon-only toggle carries its own accessible name, not only a tooltip title.
     expect(screen.getByRole('button', { name: 'Messages (m)' }).getAttribute('aria-label')).toBe('Messages (m)');
     fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
-    await screen.findByRole('log', { name: 'Complete session messages' });
+    await screen.findByRole('log', { name: 'Session messages' });
     await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
     fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
     expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull();
@@ -116,7 +113,7 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
     await screen.findByRole('group', { name: 'Item actions' });
     fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
-    const log = await screen.findByRole('log', { name: 'Complete session messages' });
+    const log = await screen.findByRole('log', { name: 'Session messages' });
     const session = transport.sessions.get(route.session_id)!;
     await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(session.messages.length));
     await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
@@ -137,34 +134,35 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Follow up' }));
     const editor = await screen.findByLabelText('Follow-up message'); editor.focus();
     fireEvent.mouseEnter(row);
-    for (const message of linked) expect(log.querySelector(`[data-message-id="${message.id}"]`)!.classList.contains('history-highlight')).toBe(true);
+    for (const message of linked) expect(log.querySelector(`[data-message-id="${message.id}"]`)!.classList.contains('pw-excerpt-highlight')).toBe(true);
     expect(document.activeElement).toBe(editor); unchanged();
     fireEvent.mouseLeave(row);
-    expect(card.classList.contains('history-highlight')).toBe(false);
+    expect(card.classList.contains('pw-excerpt-highlight')).toBe(false);
     fireEvent.mouseEnter(card);
     await waitFor(() => expect(lit()).toBe('strong'));
     expect(row.getAttribute('aria-selected')).toBe('false'); expect(document.activeElement).toBe(editor); unchanged();
-    fireEvent.click(card.querySelector('.history-body')!); fireEvent.mouseLeave(card);
-    expect(card.classList.contains('history-pinned')).toBe(true); expect(lit()).toBe('strong'); unchanged();
-    fireEvent.click(within(card).getByRole('button', { name: `Unpin message ${message.number}` }));
+    // Clicking pins without moving focus; the editor keeps it.
+    fireEvent.click(card); editor.focus(); fireEvent.mouseLeave(card);
+    expect(card.classList.contains('pw-excerpt-active')).toBe(true); expect(lit()).toBe('strong'); unchanged();
+    fireEvent.click(card); editor.focus();
     await waitFor(() => expect(lit()).toBeNull()); unchanged();
-    fireEvent.mouseEnter(row); expect(card.classList.contains('history-highlight')).toBe(true);
+    fireEvent.mouseEnter(row); expect(card.classList.contains('pw-excerpt-highlight')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
     await screen.findAllByRole('tree', { name: / graph$/ });
-    expect(card.classList.contains('history-highlight')).toBe(false);
+    expect(card.classList.contains('pw-excerpt-highlight')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     const restored = await screen.findByRole('tree', { name: 'Session items' });
     expect(lit(restored.querySelector('[data-item-id="2"]')!)).toBeNull();
-    fireEvent.click(card.querySelector('.history-body')!);
-    expect(card.classList.contains('history-pinned')).toBe(true);
+    fireEvent.click(card);
+    expect(card.classList.contains('pw-excerpt-active')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
     await screen.findAllByRole('tree', { name: / graph$/ });
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     const returned = await screen.findByRole('tree', { name: 'Session items' });
     expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBe('strong');
-    expect(card.classList.contains('history-pinned')).toBe(true);
+    expect(card.classList.contains('pw-excerpt-active')).toBe(true);
     expect(transport.preferences).toEqual(before); expect(transport.mutations).toHaveLength(writes);
-    fireEvent.click(screen.getByRole('button', { name: 'Close message rail' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide messages' }));
     await waitFor(() => expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBeNull());
   });
   it('keeps the selected tree and complete rail idle when another session publishes presence', async () => {
@@ -177,7 +175,7 @@ describe('ordinary desktop composition', () => {
     await openSession();
     const waiting = starts.mock.contexts[0] as WaitingStore;
     fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
-    const log = await screen.findByRole('log', { name: 'Complete session messages' });
+    const log = await screen.findByRole('log', { name: 'Session messages' });
     await waitFor(() => {
       expect(waiting.getSnapshot().status).toBe('ready');
       expect(transport.preferences.sessions[0].rail).toBe('activity');
@@ -650,7 +648,7 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
     await screen.findByLabelText('Detail of #1');
     fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
-    await screen.findByRole('log', { name: 'Complete session messages' });
+    await screen.findByRole('log', { name: 'Session messages' });
     await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
     let release!: () => void, entered = false;
     const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
@@ -663,11 +661,11 @@ describe('ordinary desktop composition', () => {
     });
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="2"]')!);
     await waitFor(() => expect(entered).toBe(true));
-    const close = screen.getByRole('button', { name: 'Close message rail' });
+    const close = screen.getByRole('button', { name: 'Hide messages' });
     expect(close.hasAttribute('disabled')).toBe(true);
     const writes = mutations(transport, 'preferences_patch').length;
     fireEvent.click(close); fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'm' });
-    expect(screen.getByRole('log', { name: 'Complete session messages' })).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Session messages' })).toBeTruthy();
     expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
     if (completion === 'reconciled') transport.failNext = 'preferences_patch';
     await act(async () => { release(); await gate; });
@@ -679,7 +677,7 @@ describe('ordinary desktop composition', () => {
       fireEvent.click(reconcile);
     }
     await waitFor(() => expect(close.hasAttribute('disabled')).toBe(false)); fireEvent.click(close);
-    await waitFor(() => expect(screen.queryByRole('log', { name: 'Complete session messages' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('log', { name: 'Session messages' })).toBeNull());
     expect(transport.preferences.sessions[0].rail).toBe('hidden');
   });
   it('cancels the reply box with Escape, then closes detail with Escape, and keeps the draft for reopening', async () => {

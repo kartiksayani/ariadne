@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { historyFailureFacts, withFailureEvidence } from './history-evidence.mjs';
 import { admissions, awaitConnected, cliRequest, completeTurn, journeyResultRequest, snapshot } from './scripted-provider.mjs';
+import { openSessionButton } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
@@ -99,7 +100,7 @@ async function open(history, itemId = '1') {
     await wait(selectedCatalogue, 'Fresh history catalogue navigation did not persist after Refresh');
     await writeFile(join(evidence(), 'history-navigation-recovery.json'), JSON.stringify({ rejected, recovered: await preferencesSnapshot() }, null, 2));
   }
-  const session = await browser.$(`[data-session-id="${history.sessionId}"]`); await session.waitForDisplayed(); await session.waitForEnabled(); await session.scrollIntoView(); await session.click();
+  const session = await openSessionButton(history.sessionId); await session.scrollIntoView(); await session.click();
   await wait(async () => {
     const selected = (await preferencesSnapshot()).global.selected_navigation;
     return selected.kind === 'session' && selected.session.session_id === history.sessionId && await catalogue.isEnabled();
@@ -174,7 +175,7 @@ async function result(history, ordinal, body, extra = []) {
 }
 async function renderedBodies(selector) {
   return browser.execute(selector => [...document.querySelectorAll(selector)].map(card => ({
-    id: card.dataset.messageId, body: card.querySelector('.history-body')?.textContent,
+    id: card.dataset.messageId, body: card.querySelector('.history-body, .pw-excerpt-text')?.textContent,
   })), selector);
 }
 export async function waitForRoundResult(round, reply, explanation) {
@@ -229,43 +230,44 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
 
 async function railState() {
   return browser.execute(() => {
-    const rail = document.querySelector('.rail-messages'), editor = document.querySelector('.owner-input textarea');
+    const rail = document.querySelector('.pw-rail-list'), editor = document.querySelector('.owner-input textarea');
     return { top: rail.scrollTop, height: rail.scrollHeight, viewport: rail.clientHeight,
       focused: document.activeElement === editor, draft: editor?.value };
   });
 }
 export async function unpinHistoryMessage(card, message) {
-  await card.scrollIntoView(); await card.$(`button[aria-label="Unpin message ${message.number}"]`).click();
-  await wait(async () => !(await card.getAttribute('class')).includes('history-pinned')
-    && await card.$(`button[aria-label="Pin message ${message.number}"]`).getAttribute('aria-pressed') === 'false',
-  'Native unpin did not remove the actual message pin');
+  // The rail excerpt is its own pin toggle: a second click unpins it.
+  await card.scrollIntoView(); await card.click();
+  await wait(async () => !(await card.getAttribute('class')).includes('pw-excerpt-active')
+    && await card.getAttribute('aria-pressed') === 'false',
+  `Native unpin did not remove the actual message pin #${message.number}`);
 }
 export async function closeHistoryRailReferences(message) {
   // Unpin does not clear a separate hover source. This embedded driver cannot
   // produce hover transitions; deliberate Close proves the rail cleanup instead.
-  const close = await browser.$('button[aria-label="Close message rail"]');
+  const close = await browser.$('button[aria-label="Hide messages"]');
   await close.waitForEnabled(); await close.click();
   await wait(async () => browser.execute(id => {
     const item = document.querySelector('[role="treeitem"][data-item-id="1"]');
     const message = document.querySelector(`.history-timeline [data-message-id="${id}"]`);
-    return !document.querySelector('.message-history-rail')
+    return !document.querySelector('.pw-rail')
       && item && !item.hasAttribute('data-highlight')
       && message && !message.classList.contains('history-highlight');
   }, message.id), 'Native rail Close did not clear transient tree and detail references');
 }
 async function rail(history, saved, paged) {
   const toggle = await browser.$('button[title="Messages (m)"]');
-  if (!(await browser.$('.rail-messages').isExisting())) {
+  if (!(await browser.$('.pw-rail-list').isExisting())) {
     await failureEvidence('rail-messages-toggle', () => toggle.waitForEnabled()); await toggle.scrollIntoView(); await toggle.click();
   }
-  await wait(async () => (await browser.$$('.rail-messages [data-message-id]')).length === saved.messages.length, 'Rail did not load every actual canonical message page');
-  const visible = await renderedBodies('.rail-messages [data-message-id]');
+  await wait(async () => (await browser.$$('.pw-rail-list [data-message-id]')).length === saved.messages.length, 'Rail did not load every actual canonical message page');
+  const visible = await renderedBodies('.pw-rail-list [data-message-id]');
   assert.equal(new Set(visible.map(value => value.id)).size, saved.messages.length);
   for (const message of saved.messages) assert.equal(visible.find(value => value.id === message.id).body, message.body);
   const parentMessage = saved.messages.find(message => message.body === paged[0].text);
-  let card = await browser.$(`.rail-messages [data-message-id="${parentMessage.id}"]`);
+  let card = await browser.$(`.pw-rail-list [data-message-id="${parentMessage.id}"]`);
   await card.scrollIntoView();
-  await card.$(`button[aria-label="Pin message ${parentMessage.number}"]`).click();
+  await card.click();
   await wait(async () => browser.execute(id => {
     const tree = document.querySelector('[role="treeitem"][data-item-id="1"]');
     const detail = document.querySelector(`.history-timeline [data-message-id="${id}"]`);
@@ -280,8 +282,8 @@ async function rail(history, saved, paged) {
   await (await browser.$('[data-shell-search]')).waitForEnabled();
   const child = await row('1.1'); await child.waitForDisplayed(); await child.scrollIntoView(); await child.click();
   await waitForHistoryItem(saved.items['1.1']);
-  await wait(async () => browser.execute(id => document.querySelector(`.rail-messages [data-message-id="${id}"]`)?.classList.contains('history-highlight'), childMessage.id), 'Native tree selection did not highlight its canonical rail backlink');
-  assert.ok((await card.getAttribute('class')).includes('history-pinned'));
+  await wait(async () => browser.execute(id => document.querySelector(`.pw-rail-list [data-message-id="${id}"]`)?.classList.contains('pw-excerpt-highlight'), childMessage.id), 'Native tree selection did not highlight its canonical rail backlink');
+  assert.ok((await card.getAttribute('class')).includes('pw-excerpt-active'));
   await selectParent(saved.items['1']);
   const timeline = await browser.$('[aria-label="Item history view"]').$('button*=Timeline'); await timeline.waitForEnabled(); await timeline.scrollIntoView(); await timeline.click();
   await wait(async () => browser.execute(id => document.querySelector(`.history-timeline [data-message-id="${id}"]`)?.classList.contains('history-highlight'), parentMessage.id), 'Pinned canonical detail reference was lost after registered child navigation');
@@ -295,11 +297,11 @@ async function rail(history, saved, paged) {
   assert.deepEqual(await preferences(), beforeUnpin, 'Unpin must not write saved navigation or selection');
   await closeHistoryRailReferences(parentMessage);
   await toggle.waitForEnabled(); await toggle.click();
-  await wait(async () => (await browser.$$('.rail-messages [data-message-id]')).length === saved.messages.length, 'Reopened rail did not reload the complete canonical history');
+  await wait(async () => (await browser.$$('.pw-rail-list [data-message-id]')).length === saved.messages.length, 'Reopened rail did not reload the complete canonical history');
   // WebdriverIO's scrollIntoView injects a wheel gesture sized for the window, which may not move
   // this nested rail on a CI runner. Scroll the DOM element directly; the rail's reaction is ours.
   const domScroll = (element, block) => browser.execute((node, position) => node.scrollIntoView({ behavior: 'instant', block: position }), element, block);
-  const latest = await browser.$(`.rail-messages [data-message-id="${saved.messages.at(-1).id}"]`); await domScroll(latest, 'end');
+  const latest = await browser.$(`.pw-rail-list [data-message-id="${saved.messages.at(-1).id}"]`); await domScroll(latest, 'end');
   // Wait for the rail to settle, then scroll up; a late refresh that re-pins the rail is retried.
   let previous = null, beforeUp = null, lastState = null;
   await failureEvidence('rail-older-navigation', async () => {
@@ -310,7 +312,7 @@ async function rail(history, saved, paged) {
         previous = state;
         if (!stable) { beforeUp = null; return false; }
         if (!beforeUp) beforeUp = state;
-        const target = await browser.$(`.rail-messages [data-message-id="${parentMessage.id}"]`);
+        const target = await browser.$(`.pw-rail-list [data-message-id="${parentMessage.id}"]`);
         await domScroll(target, 'start');
         const after = lastState = await railState();
         if (after.top < beforeUp.top - 100) return true;
@@ -333,7 +335,7 @@ async function rail(history, saved, paged) {
   await apply(history, additions, revisions);
   const live = await snapshot(history), count = live.messages.length - before.messages.length;
   assert.ok(count >= additions.length, 'Count includes real Activity messages, not only explicit replies');
-  const jump = await browser.$(`button=${count} new messages · Jump to latest`); await jump.waitForDisplayed({ timeout: 20000 });
+  const jump = await browser.$(`button=${count} new message${count === 1 ? '' : 's'} · Jump to latest`); await jump.waitForDisplayed({ timeout: 20000 });
   const held = await railState(); assert.equal(held.focused, true); assert.equal(held.draft, draft); assert.ok(Math.abs(held.top - paused.top) <= 1);
   assert.equal(inputs(live).length, 7, 'Live history publication cannot manufacture an owner submission');
   await jump.click();
@@ -343,7 +345,7 @@ async function rail(history, saved, paged) {
   await apply(history, [{ op: 'reply', ref: 'history_followed', item: { id: '1' }, round_id: null,
     text: 'Following native rail reply\nThe genuine subsequent message remains visible.' }], { '1': live.items['1'].revision });
   const final = await snapshot(history);
-  await wait(async () => (await browser.$$('.rail-messages [data-message-id]')).length === final.messages.length, 'Following rail did not load the next genuine message');
+  await wait(async () => (await browser.$$('.pw-rail-list [data-message-id]')).length === final.messages.length, 'Following rail did not load the next genuine message');
   const followed = await railState(); assert.ok(followed.height - followed.viewport - followed.top <= 2);
   assert.equal(followed.focused, true); assert.equal(followed.draft, draft);
   assert.equal(await browser.$('button*=Jump to latest').isExisting(), false);

@@ -108,7 +108,7 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   expect(await page.evaluate(() => (window as { __designError?: string }).__designError)).toBeUndefined();
   await expect(page.locator('html')).toHaveAttribute('data-theme', spec.theme);
   if (spec.state !== 'loading') await expect(page.getByText(/^(Loading|Opening)\b/)).toHaveCount(0, { timeout: 30_000 });
-  else await expect(page.getByText(/^Reading the session/).first()).toBeVisible();
+  else await expect(page.getByText(/^Reading the session…/).first()).toBeVisible();
   const row = (id?: string) => id ? page.locator(`[data-item-id="${id}"]`) : page.locator('[data-item-id]').first();
   // The prototype folds these topics on load (Ariadne.dc.html:940); the app keeps topic folds local.
   for (const name of spec.collapseTopics ?? []) {
