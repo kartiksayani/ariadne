@@ -322,6 +322,7 @@ impl Setup {
             Operation::TopicAdd {
                 r#ref: reference("topic"),
                 name: format!("{name} topic"),
+                short: None,
             },
             Operation::ItemAdd(Box::new(ItemAddOperation {
                 r#ref: reference("item"),
@@ -330,6 +331,7 @@ impl Setup {
                 }),
                 parent: None,
                 question: format!("{name} question"),
+                short: None,
                 item_type: ItemType::Question,
                 status: ItemStatus::Open,
                 owner: ItemOwner::Agent {

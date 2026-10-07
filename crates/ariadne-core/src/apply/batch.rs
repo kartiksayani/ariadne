@@ -305,7 +305,8 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
     }
     fn operation(&mut self, session: &mut Session, op: &Operation) -> Result<(), CoreError> {
         match op {
-            Operation::TopicAdd { r#ref, name } => {
+            Operation::TopicAdd { r#ref, name, short } => {
+                let short = short_label(short.as_deref())?;
                 let id = self.fresh()?;
                 let order = session.counters.next_topic_order;
                 session.counters.next_topic_order = increment(order)?;
@@ -314,6 +315,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                     Topic {
                         id: id.clone(),
                         name: name.clone(),
+                        short,
                         order,
                         revision: one(),
                         created_at: self.at.clone(),
@@ -335,6 +337,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                         item_type: patch.item_type.clone(),
                         note: patch.note.clone(),
                         links: patch.links.clone(),
+                        short: patch.short.clone(),
                     },
                 )?;
             }
@@ -529,6 +532,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             topic_id,
             parent,
             question: draft.question.clone(),
+            short: short_label(draft.short.as_deref())?,
             item_type: draft.item_type.clone(),
             status: draft.status.clone(),
             owner: draft.owner.clone(),
@@ -597,4 +601,17 @@ pub(super) fn increment(value: PositiveSafeInteger) -> Result<PositiveSafeIntege
 }
 fn one() -> PositiveSafeInteger {
     PositiveSafeInteger::new(1).unwrap()
+}
+/// A new topic or item stores the trimmed label; `None` stores no label.
+fn short_label(value: Option<&str>) -> Result<Option<String>, CoreError> {
+    value
+        .map(|value| {
+            ariadne_domain::validation::normalize_short_label(value, "short").map_err(|e| {
+                core(
+                    CoreErrorCode::InvalidArgument,
+                    format!("Invalid short label: {e}"),
+                )
+            })
+        })
+        .transpose()
 }

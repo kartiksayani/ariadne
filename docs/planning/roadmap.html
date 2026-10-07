@@ -2219,6 +2219,52 @@
         "prs": [],
         "note": "PR pending; the owner asked for the store out of the project folder (watcher noise, gitignore reliance, sync)."
       }
+    },
+    {
+      "id": "P8.12",
+      "title": "Short labels on items and topics",
+      "phase": "M8",
+      "depends_on": [
+        "P8.6"
+      ],
+      "paths": [
+        "crates/ariadne-domain/src/models/*",
+        "crates/ariadne-domain/src/validation/*",
+        "crates/ariadne-domain/src/transitions/mod.rs",
+        "crates/ariadne-core/src/dto/apply.rs",
+        "crates/ariadne-core/src/apply/batch.rs",
+        "crates/ariadne-core/src/service/validation.rs",
+        "crates/ariadne-core/src/queries/items.rs",
+        "integrations/rules/source.md",
+        "contracts/generated/*",
+        "apps/desktop/src/generated/*",
+        "docs/adr/ADR-0084-short-labels.md",
+        "docs/planning/low-level/DOMAIN_AND_STORAGE.md",
+        "docs/planning/low-level/API_AND_MCP.md"
+      ],
+      "spec": [
+        "docs/adr/ADR-0084-short-labels.md"
+      ],
+      "acceptance": [
+        "`Topic`, `Item` and `ItemSnapshot` carry optional `short`; a store written before it loads unchanged and an unlabelled record re-serializes without the key.",
+        "A label is trimmed on write and rejected when blank, multi-line or longer than 40 characters, on the apply wire and in stored-session validation.",
+        "`topic.add` and `item.add` accept `short`; `item.edit.patch.short` keeps the label when absent, clears it on null and replaces it with a string.",
+        "The shared rules tell agents to label every topic and item they create and keep it stable; every rule example that creates one carries a label; the MCP `apply` schema offers `short`; generated TypeScript has `short?: string | null`."
+      ],
+      "checks": [
+        "rtk proxy cargo test --workspace --locked",
+        "rtk proxy cargo clippy --workspace --all-targets -- -D warnings",
+        "rtk proxy cargo xtask gen-rules --check",
+        "rtk proxy cargo xtask gen-contracts --check",
+        "rtk proxy npm run check",
+        "rtk proxy python3 scripts/regenerate-roadmap.py --check"
+      ],
+      "estimate_days": 1,
+      "progress": {
+        "state": "in_progress",
+        "prs": [],
+        "note": "PR pending; the owner's UI redesign shows an agent-written 2-4 word label as the graph node title and in breadcrumbs."
+      }
     }
   ]
 }</script>

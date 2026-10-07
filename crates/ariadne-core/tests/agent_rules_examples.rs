@@ -42,6 +42,14 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
         for operation in &request.operations {
             let value = serde_json::to_value(operation).unwrap();
             ops.insert(value["op"].as_str().unwrap().to_owned());
+            if value["op"] == "topic.add" || value["op"] == "item.add" {
+                // The rules tell agents to label everything they create.
+                let short = value["short"].as_str().unwrap_or_else(|| {
+                    panic!("{} example has no short label\n{block}", value["op"])
+                });
+                let words = short.split_whitespace().count();
+                assert!((1..=4).contains(&words) && short.chars().count() <= 40);
+            }
             if value["op"] == "item.add" {
                 owners.insert(value["owner"]["kind"].as_str().unwrap().to_owned());
                 child |= !value["parent"].is_null();
@@ -70,6 +78,7 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
     for op in [
         "topic.add",
         "item.add",
+        "item.edit",
         "item.ask",
         "item.status",
         "reply",
@@ -92,6 +101,8 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
         "`handled_through_message_number`",
         "[ARIADNE_INPUT:",
         "SAME `op_id`",
+        "`short` label",
+        "at most 40 characters",
     ] {
         assert!(RULES.contains(needle), "{needle}");
     }

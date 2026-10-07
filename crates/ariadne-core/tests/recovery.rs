@@ -239,6 +239,7 @@ impl Setup {
                         id: ItemRef::new("1").unwrap(),
                     })),
                     question: "Review original durable child?".into(),
+                    short: None,
                     item_type: ItemType::Question,
                     status: ItemStatus::Open,
                     owner: ItemOwner::Agent { binding_id: id(3) },

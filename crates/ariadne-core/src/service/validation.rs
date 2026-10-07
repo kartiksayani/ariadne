@@ -110,6 +110,16 @@ fn text(value: &str, max: usize, required: bool) -> Result<(), CoreError> {
         Ok(())
     }
 }
+/// The wire accepts surrounding whitespace (it is trimmed on write) but not a
+/// label that is blank, spans lines or exceeds 40 characters after trimming.
+fn short_label(value: Option<&str>) -> Result<(), CoreError> {
+    match value {
+        Some(value) => ariadne_domain::validation::normalize_short_label(value, "short")
+            .map(|_| ())
+            .map_err(|_| invalid("Short label must be 1-40 characters on one line after trimming")),
+        None => Ok(()),
+    }
+}
 fn size(value: &impl Serialize, max: usize) -> Result<(), CoreError> {
     if serde_json::to_vec(value)
         .map_err(|_| invalid("Cannot serialize contract value"))?
@@ -173,10 +183,14 @@ impl ApplyRequest {
         text(&self.summary, 4096, false)?;
         for operation in &self.operations {
             match operation {
-                Operation::TopicAdd { name, .. } => text(name, 4096, true)?,
+                Operation::TopicAdd { name, short, .. } => {
+                    text(name, 4096, true)?;
+                    short_label(short.as_deref())?;
+                }
                 Operation::ItemAdd(value) => {
                     let ItemAddOperation {
                         question,
+                        short,
                         ask,
                         options: opts,
                         note,
@@ -186,6 +200,7 @@ impl ApplyRequest {
                         ..
                     } = &**value;
                     text(question, 4096, true)?;
+                    short_label(short.as_deref())?;
                     for value in [ask, outcome, why].into_iter().flatten() {
                         text(value, 4096, true)?;
                     }
@@ -205,6 +220,9 @@ impl ApplyRequest {
                     }
                     if let Some(Some(value)) = &patch.note {
                         text(value, 4096, false)?;
+                    }
+                    if let Some(value) = &patch.short {
+                        short_label(value.as_deref())?;
                     }
                     if let Some(values) = &patch.links {
                         links(values)?;

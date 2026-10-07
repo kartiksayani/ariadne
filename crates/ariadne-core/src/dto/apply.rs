@@ -4,6 +4,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Schema description of the optional `short` label on created topics and items
+/// (ADR-0084). Field doc comments are avoided: ts-rs renders them with trailing spaces.
+const SHORT_LABEL: &str = "Optional 2-4 word label; trimmed, one line, at most 40 characters.";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyRequest {
@@ -50,7 +54,14 @@ pub struct ExistingUuidRef {
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Operation {
     #[serde(rename = "topic.add")]
-    TopicAdd { r#ref: RequestRef, name: String },
+    TopicAdd {
+        r#ref: RequestRef,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(length(max = 40), description = SHORT_LABEL)]
+        #[ts(optional = nullable)]
+        short: Option<String>,
+    },
     #[serde(rename = "item.add")]
     ItemAdd(Box<ItemAddOperation>),
     #[serde(rename = "item.edit")]
@@ -102,6 +113,17 @@ pub struct ItemPatch {
     #[ts(optional, type = "string | null")]
     pub note: Option<Option<String>>,
     pub links: Option<Vec<ItemLinkTarget>>,
+    #[serde(
+        default,
+        deserialize_with = "crate::wire::nullable_patch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(
+        length(max = 40),
+        description = "Absent keeps the label, null clears it, a string replaces it (trimmed)."
+    )]
+    #[ts(optional, type = "string | null")]
+    pub short: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -121,6 +143,10 @@ pub struct ItemAddOperation {
     pub topic: UuidRef,
     pub parent: Option<EntityRef>,
     pub question: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(max = 40), description = SHORT_LABEL)]
+    #[ts(optional = nullable)]
+    pub short: Option<String>,
     #[serde(rename = "type")]
     pub item_type: ItemType,
     pub status: ItemStatus,

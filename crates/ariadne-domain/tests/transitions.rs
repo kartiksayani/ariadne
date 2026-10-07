@@ -55,6 +55,7 @@ fn item(id: &str, parent: Option<&str>, ordinal: u64) -> Item {
         topic_id: uuid(1),
         parent: parent.map(reference),
         question: "Which approach?\nPreserve this exact text.".into(),
+        short: None,
         item_type: ItemType::Question,
         status: ItemStatus::Open,
         owner: ItemOwner::Agent {
@@ -146,6 +147,7 @@ fn session() -> Session {
                 Topic {
                     id: uuid(1),
                     name: "Topic".into(),
+                    short: None,
                     order: positive(1),
                     revision: positive(1),
                     created_at: time(),
@@ -256,6 +258,7 @@ fn edit() -> ItemChange {
         item_type: None,
         note: Some(Some("Progress".into())),
         links: None,
+        short: None,
     }
 }
 fn insert_round(session: &mut Session, item: &Item) {
@@ -727,6 +730,7 @@ fn asks_create_new_question_revisions_while_replies_notes_children_do_not() {
             item_type: Some(ItemType::Decision),
             note: Some(None),
             links: Some(vec![]),
+            short: None,
         },
     );
     assert_eq!(edited.question_revision.value(), 4);
@@ -739,6 +743,7 @@ fn asks_create_new_question_revisions_while_replies_notes_children_do_not() {
             item_type: None,
             note: None,
             links: None,
+            short: None,
         },
     );
     assert_eq!(same.question_revision, edited.question_revision);
@@ -879,6 +884,14 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
             item_type: None,
             note: None,
             links: None,
+            short: None,
+        },
+        ItemChange::Edit {
+            question: None,
+            item_type: None,
+            note: None,
+            links: None,
+            short: Some(Some("x".repeat(41))),
         },
         ItemChange::Ask {
             ask: String::new(),
@@ -1430,4 +1443,87 @@ fn copied_item_history_preserves_source_binding_but_new_transitions_require_targ
     let mut unqualified = s.clone();
     unqualified.items.0.get_mut(&reference("1")).unwrap().origin = None;
     invalid(&unqualified, ValidationErrorKind::MissingReference);
+}
+
+fn short_edit(short: Option<Option<&str>>) -> ItemChange {
+    ItemChange::Edit {
+        question: None,
+        item_type: None,
+        note: None,
+        links: None,
+        short: short.map(|value| value.map(Into::into)),
+    }
+}
+
+#[test]
+fn short_labels_are_trimmed_one_line_and_at_most_forty_characters() {
+    assert_eq!(
+        normalize_short_label("  SDK cache PR \t", "short").unwrap(),
+        "SDK cache PR"
+    );
+    let forty = "é".repeat(SHORT_LABEL_MAX_CHARS);
+    assert_eq!(normalize_short_label(&forty, "short").unwrap(), forty);
+    for (value, kind) in [
+        (
+            "x".repeat(41),
+            ValidationErrorKind::TooManyChars { maximum_chars: 40 },
+        ),
+        ("two\nlines".into(), ValidationErrorKind::Multiline),
+        ("carriage\rreturn".into(), ValidationErrorKind::Multiline),
+        ("   ".into(), ValidationErrorKind::Blank),
+        ("nul\0".into(), ValidationErrorKind::Nul),
+    ] {
+        let error = normalize_short_label(&value, "short").unwrap_err();
+        assert_eq!(error.kind, kind, "{value:?}");
+        assert_eq!(error.path, "short");
+    }
+    // Stored labels are checked too, including a value that skipped trimming.
+    let mut s = session();
+    s.topics.0.get_mut(&uuid(1)).unwrap().short = Some("x".repeat(41));
+    invalid(&s, ValidationErrorKind::TooManyChars { maximum_chars: 40 });
+    let mut s = session();
+    s.items.0.get_mut(&reference("1")).unwrap().short = Some(" padded".into());
+    invalid(&s, ValidationErrorKind::InvalidState);
+    let mut s = session();
+    s.items.0.get_mut(&reference("1")).unwrap().short = Some("a\nb".into());
+    invalid(&s, ValidationErrorKind::Multiline);
+}
+
+#[test]
+fn short_label_edit_keeps_when_absent_sets_trimmed_and_clears_on_null() {
+    let mut s = session();
+    let set = apply(&mut s, &short_edit(Some(Some("  Fallback merge test  "))));
+    assert_eq!(set.short.as_deref(), Some("Fallback merge test"));
+    let kept = apply(&mut s, &edit());
+    assert_eq!(kept.short.as_deref(), Some("Fallback merge test"));
+    let kept = apply(&mut s, &short_edit(None));
+    assert_eq!(kept.short.as_deref(), Some("Fallback merge test"));
+    let cleared = apply(&mut s, &short_edit(Some(None)));
+    assert_eq!(cleared.short, None);
+    assert!(matches!(
+        reject(&s, &short_edit(Some(Some(""))), &context(&s)),
+        TransitionError::Validation(ValidationError {
+            kind: ValidationErrorKind::Blank,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn stored_records_without_short_load_and_serialize_unchanged() {
+    let topic = json!({"id":uuid(1),"name":"Topic","order":1,"revision":1,
+        "created_at":TIME,"archived_at":null,"origin":null});
+    let parsed: Topic = serde_json::from_value(topic.clone()).unwrap();
+    assert_eq!(parsed.short, None);
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), topic);
+    let mut labelled = parsed;
+    labelled.short = Some("Security".into());
+    assert_eq!(
+        serde_json::to_value(&labelled).unwrap()["short"],
+        "Security"
+    );
+    let mut item = serde_json::to_value(item("1", None, 1)).unwrap();
+    assert!(item.get("short").is_none());
+    item["short"] = json!(null);
+    assert_eq!(serde_json::from_value::<Item>(item).unwrap().short, None);
 }

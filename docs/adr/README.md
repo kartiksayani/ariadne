@@ -53,3 +53,7 @@ stores automatically, with a byte-for-byte check before the old copy is removed.
 Mod itself) and makes `ariadne setup` record the Codex path in `providers.json`, so
 the app finds both when opened normally. Flags still override; the app never searches
 PATH or launches a host.
+
+[ADR-0084](ADR-0084-short-labels.md) adds an optional agent-written `short` label
+(2-4 words, at most 40 characters) to items and topics for the graph and breadcrumbs.
+An absent label in `item.edit` keeps it, `null` clears it; older stores load unchanged.

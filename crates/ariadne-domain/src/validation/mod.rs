@@ -25,6 +25,8 @@ pub enum ValidationErrorKind {
     Blank,
     Nul,
     TooLong { maximum_bytes: usize },
+    TooManyChars { maximum_chars: usize },
+    Multiline,
     TooMany { maximum: usize },
     Duplicate,
     MissingReference,
@@ -89,6 +91,49 @@ pub(crate) fn optional_text(
         text(value, path, required_when_present, limit)?;
     }
     Ok(())
+}
+
+/// Most Unicode characters an item or topic short label may hold (ADR-0084).
+pub const SHORT_LABEL_MAX_CHARS: usize = 40;
+
+/// Trim a proposed short label and check it; returns the form to store.
+/// A label that is blank after trimming, spans lines or exceeds
+/// [`SHORT_LABEL_MAX_CHARS`] is rejected.
+pub fn normalize_short_label(value: &str, path: &str) -> Result<String, ValidationError> {
+    let trimmed = value.trim();
+    short_label(trimmed, path)?;
+    Ok(trimmed.to_owned())
+}
+
+/// A stored short label is already trimmed, nonblank, one line and bounded.
+pub(crate) fn short_label(value: &str, path: &str) -> Result<(), ValidationError> {
+    text(value, path, true, None)?;
+    require(
+        !value.contains(['\n', '\r']),
+        path,
+        ValidationErrorKind::Multiline,
+    )?;
+    require(
+        value.trim() == value,
+        path,
+        ValidationErrorKind::InvalidState,
+    )?;
+    require(
+        value.chars().count() <= SHORT_LABEL_MAX_CHARS,
+        path,
+        ValidationErrorKind::TooManyChars {
+            maximum_chars: SHORT_LABEL_MAX_CHARS,
+        },
+    )
+}
+
+pub(crate) fn optional_short_label(
+    value: &Option<String>,
+    path: &str,
+) -> Result<(), ValidationError> {
+    value
+        .as_deref()
+        .map_or(Ok(()), |value| short_label(value, path))
 }
 
 pub(crate) fn distinct<T: Ord>(

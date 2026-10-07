@@ -8,7 +8,7 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 4ff2bd9 (#122: Mod rules working method). Roadmap: 53/55 with this branch's P8.7 pending; main alone is 52/54.** The open tasks are P8.7 (in flight) and P8.3 (UX review and theme refresh, held for the owner). P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
+**Main: 4ff2bd9 (#122: Mod rules working method). Roadmap: 53/55 with this branch's P8.7 pending; main alone is 52/54.** The open tasks are P8.7 (in flight), P8.12 (short labels, PR pending) and P8.3 (UX review and theme refresh, held for the owner). P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
 No open PRs. The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
@@ -140,6 +140,10 @@ Follow-ups the run surfaced:
   open fails until the owner compares them. Native e2e was not run
   locally; CI's native stage is the proof for the rewritten fixtures.
   Follow-up: `registered_projects` runs migration from the desktop watcher tick; consider moving it to an explicit open.
+- P8.12 Short labels on items and topics (ADR-0084, PR pending): `Topic` and `Item` carry an
+  optional agent-written `short` (2-4 words, at most 40 characters, trimmed, one line) for the
+  redesigned graph and breadcrumbs. `item.edit` without `short` keeps it, `null` clears it.
+  UI components do not read it yet. Follow-up: there is no topic edit, so an older topic cannot be labelled.
 
 ## Next steps
 

@@ -106,6 +106,7 @@ pub(super) fn validate_candidate_indexed(
         true,
         Some(4096),
     )?;
+    optional_short_label(&item.short, &format!("{path}.short"))?;
     optional_text(&item.ask, &format!("{path}.ask"), true, Some(4096))?;
     optional_text(&item.note, &format!("{path}.note"), false, Some(4096))?;
     optional_text(&item.outcome, &format!("{path}.outcome"), true, Some(4096))?;
