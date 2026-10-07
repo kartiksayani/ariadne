@@ -11,7 +11,8 @@ import type { Page, ProjectSummary, QueryCursor, Session, SessionSummary, Summar
 import { createDesktopService, type DesktopTransport, type HintPayloads } from '../../../src/data/service';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import * as catalogue from '../../../src/state/navigation/catalogue';
-import { bindingLabel, NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
+import { NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
+import { sessionCardText } from '../../../src/ui/pages/model';
 import { BindSession, RegisterProject } from '../../../src/components/navigation/Registration';
 import { NavigationSentenceTree } from '../../../src/components/tree/NavigationSentenceTree';
 
@@ -518,7 +519,7 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences();
     prefs.global.selected_navigation = kind === 'project' ? { kind, project_id: projectId } : { kind };
     read(transport, prefs);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={store} waiting={waiting} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => null} />);
     const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     const conflict: CoreError = { ...error, code: 'revision_conflict', message: 'Preferences revision changed.', current_revision: 3 };
@@ -540,25 +541,27 @@ describe('source-backed navigation views and explicit registration', () => {
     transport.enqueue('project_list', projectRead.promise);
     transport.enqueue('session_list', success('session_list', sessionResult()));
     const readCount = transport.calls.filter(call => call.name === 'preferences_get').length;
+    // The listing pages read each session's snapshot for its card; Refresh must not open a session.
+    const sessionReads = () => transport.calls.filter(call => call.name === 'session_get').length;
+    const snapshotReads = sessionReads();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect((screen.getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled).toBe(true);
     const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
     within(tabs).getAllByRole('button').forEach(button => {
       expect((button as HTMLButtonElement).disabled).toBe(true); fireEvent.click(button);
     });
-    expect((screen.getByRole('button', { name: 'Register project' }) as HTMLButtonElement).disabled).toBe(true);
     if (kind === 'projects') {
-      screen.getAllByRole('button', { name: /Registered root/ }).forEach(card => {
-        expect(card.getAttribute('aria-disabled')).toBe('true'); fireEvent.click(card); fireEvent.keyDown(card, { key: 'Enter' });
-      });
+      expect((screen.getByRole('button', { name: 'Register project' }) as HTMLButtonElement).disabled).toBe(true);
+      const cards = [...document.querySelectorAll<HTMLButtonElement>('.pw-project-open')]; expect(cards).not.toHaveLength(0);
+      cards.forEach(card => { expect(card.disabled).toBe(true); fireEvent.click(card); fireEvent.click(card.closest('.pw-project-card')!); });
     } else {
-      expect((screen.getByRole('button', { name: 'Open' }) as HTMLButtonElement).disabled).toBe(true);
-      fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+      const open = document.querySelector<HTMLButtonElement>(`button[data-session-id="${demo.id}"]`)!;
+      expect(open.disabled).toBe(true); fireEvent.click(open);
       if (kind === 'project') expect((screen.getByRole('button', { name: 'Connect existing session' }) as HTMLButtonElement).disabled).toBe(true);
     }
     fireEvent.click(screen.getByRole('button', { name: 'Refreshing…' }));
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
-    expect(transport.calls.some(call => call.name === 'session_get')).toBe(false);
+    expect(sessionReads()).toBe(snapshotReads);
     await waitFor(() => expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(readCount + 1));
     await act(async () => { preferenceRead.resolve(success('preferences_get', fresh)); });
     expect(store.getSnapshot().preferences).toEqual(native);
@@ -585,7 +588,7 @@ describe('source-backed navigation views and explicit registration', () => {
   it('clears explicit Refresh progress after a failed read and keeps failure visible without changing navigation', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
     read(transport, prefs);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={store} waiting={waiting} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
     const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error });
@@ -613,16 +616,17 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'all_sessions' };
     const result = sessionResult(); result.sessions.items.push({ ...result.sessions.items[0], session_id: '00000000-0000-4000-8000-000000000003', title: 'Closed work', state: 'closed', closed_at: demo.updated_at });
     read(transport, prefs, projectResult(), result);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} waiting={waiting} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     expect(await screen.findByRole('heading', { name: 'All sessions', level: 1 })).toBeTruthy();
-    expect(screen.getByText('9 active · 3 closed')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Unavailable project' })).toBeTruthy();
-    expect(screen.getByText('/fixtures/unavailable-demo')).toBeTruthy();
-    expect(screen.getByText('Closed work')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /^Closed · \d+$/, level: 3 })).toBeTruthy();
+    const closed = document.querySelector('[data-session-card="00000000-0000-4000-8000-000000000003"]')!;
+    expect(within(closed as HTMLElement).getByRole('button', { name: 'Reopen' })).toBeTruthy();
     const next = preferences(2); transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Projects' })); });
     expect(await screen.findByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
-    expect(screen.getByText('0 waiting · incomplete')).toBeTruthy();
+    expect(screen.getByText(/^Counts are incomplete\./)).toBeTruthy();
+    expect(screen.getByText('Unavailable project')).toBeTruthy();
+    expect(screen.getByText('/fixtures/unavailable-demo')).toBeTruthy();
   });
   it('registers the exact root under canonical Registry scope', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
@@ -660,7 +664,7 @@ describe('source-backed navigation views and explicit registration', () => {
   ])('tells the owner how to give the saved setup instruction to a %s host', async (adapterId, wording, frequency, showsInstruction) => {
     const { transport, store } = setup(); read(transport);
     const binding = Object.values((demo as Session).bindings)[0]!;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} waiting={waiting} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
@@ -680,7 +684,7 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
     read(transport, prefs);
     const binding = Object.values((demo as Session).bindings)[0]!;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} waiting={waiting} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
@@ -688,7 +692,7 @@ describe('source-backed navigation views and explicit registration', () => {
     await act(async () => { await store.bind({ project_id: projectId, adapter_id: 'codex', configuration: adapter.configuration,
       external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
     const card = await screen.findByLabelText('Session setup');
-    const active = await screen.findByRole('heading', { name: 'Active', level: 3 });
+    const active = await screen.findByRole('heading', { name: /^Active sessions · \d+$/, level: 3 });
     expect(card.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(card).queryByRole('list')).toBeNull();
     expect(within(card).getByText('Unavailable capabilities: domain mcp, streaming output.')).toBeTruthy();
@@ -701,7 +705,7 @@ describe('source-backed navigation views and explicit registration', () => {
     const binding = Object.values((demo as Session).bindings)[0]!;
     const capabilities = structuredClone(binding.capabilities);
     for (const value of Object.values(capabilities)) if (typeof value === 'object') value.supported = true;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} waiting={waiting} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities,
@@ -736,18 +740,18 @@ describe('source-backed navigation views and explicit registration', () => {
     render(<BindSession store={store} project={projectsFixture.items[0] as ProjectSummary} sessions={sessionsFixture.items as SessionSummary[]} adapters={[adapter]} disabled={false} close={() => {}} />);
     expect(screen.getByRole('alert').textContent).toContain('Resolve its queued inputs before rebinding.');
   });
-  it('qualifies running labels by fresh current-generation observation and preserves closed/unbound/paused states', () => {
+  it('labels a session running only while it is active and its binding is connected', () => {
     const session = structuredClone(sessionsFixture.items[0]) as SessionSummary;
-    expect(bindingLabel(session)).toBe('Bound · running');
-    session.active_binding!.presence!.freshness = 'stale'; expect(bindingLabel(session)).toBe('Bound · execution unknown');
-    session.active_binding!.presence!.freshness = 'fresh'; session.active_binding!.presence!.generation = 'another'; expect(bindingLabel(session)).toBe('Bound · execution unknown');
-    session.active_binding!.owner_paused = true; expect(bindingLabel(session)).toBe('Bound · owner paused');
-    session.state = 'closed'; expect(bindingLabel(session)).toBe('Closed');
-    session.state = 'active'; session.active_binding = null; expect(bindingLabel(session)).toBe('Unbound');
+    session.active_binding!.connection_state = 'connected';
+    expect(sessionCardText(session, null, Date.now()).run).toBe('Agent running');
+    session.active_binding!.connection_state = 'disconnected'; expect(sessionCardText(session, null, Date.now()).run).toBe('Agent not running');
+    session.active_binding!.connection_state = 'connected'; session.state = 'closed';
+    expect(sessionCardText(session, null, Date.now())).toMatchObject({ run: 'Agent not running', closed: true });
+    session.state = 'active'; session.active_binding = null; expect(sessionCardText(session, null, Date.now())).toMatchObject({ agent: 'No agent', run: 'Agent not running' });
   });
   it('offers tab close separately from session lifecycle controls', async () => {
     const { transport, store } = setup(); read(transport);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} waiting={waiting} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => <p>Session workspace</p>} />);
     const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
     const close = /^Close .* tab$/;
     await waitFor(() => expect(within(tabs).getByRole('button', { name: close })).toBeTruthy());
@@ -764,7 +768,7 @@ describe('source-backed navigation views and explicit registration', () => {
       <p>Selected item {view.preferences?.selected_item_id}</p><p>{view.preferences?.filters.search}</p>
       <p>Scroll {view.preferences?.scroll?.offset}</p><p>{view.store.getSnapshot().snapshot?.session.title}</p>
     </div>;
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={received} />);
+    render(<NavigationWorkspace store={store} waiting={waiting} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={received} />);
     expect(await screen.findByText('Selected item 1.1')).toBeTruthy();
     expect(screen.getByText('Scroll 124')).toBeTruthy();
     expect(await screen.findByText('Canonical domain v1 demo', { selector: 'p' })).toBeTruthy();
@@ -772,7 +776,7 @@ describe('source-backed navigation views and explicit registration', () => {
   });
   it('reuses the source dialog focus trap, Escape and focus return', async () => {
     const { transport, store } = setup(); read(transport);
-    render(<NavigationWorkspace store={store} waiting={waiting} adapterChoices={[]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={store} waiting={waiting} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
     await screen.findByRole('heading', { name: 'Projects', level: 1 });
     const opener = screen.getByRole('button', { name: 'Register project' }); opener.focus(); fireEvent.click(opener);
     const dialog = screen.getByRole('dialog', { name: 'Register project' });

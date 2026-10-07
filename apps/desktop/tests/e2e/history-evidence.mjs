@@ -14,7 +14,7 @@ export function historyFailureFacts() {
   return {
     // Messages (m) is an icon-only button: the spec selects it by title and it is named by aria-label.
     messagesToggle: { titled: control(titled), ariaLabel: titled?.getAttribute('aria-label') ?? null,
-      railOpen: Boolean(document.querySelector('.rail-messages')), railMessageCount: all('.rail-messages [data-message-id]').length },
+      railOpen: Boolean(document.querySelector('.pw-rail-list')), railMessageCount: all('.pw-rail-list [data-message-id]').length },
     // chromeDisabled follows writing / refreshPending / missing preferences; these labels expose that state.
     navigation: { banners: all('.nav-banner').map(node => ({ role: node.getAttribute('role'), text: text(node) })),
       alerts: all('[role="alert"]').map(text), statuses: all('[role="status"]').map(text),

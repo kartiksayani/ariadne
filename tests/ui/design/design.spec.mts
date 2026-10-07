@@ -108,7 +108,7 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   expect(await page.evaluate(() => (window as { __designError?: string }).__designError)).toBeUndefined();
   await expect(page.locator('html')).toHaveAttribute('data-theme', spec.theme);
   if (spec.state !== 'loading') await expect(page.getByText(/^(Loading|Opening)\b/)).toHaveCount(0, { timeout: 30_000 });
-  else await expect(page.getByText(/^Loading session/).first()).toBeVisible();
+  else await expect(page.getByText(/^Reading the session…/).first()).toBeVisible();
   const row = (id?: string) => id ? page.locator(`[data-item-id="${id}"]`) : page.locator('[data-item-id]').first();
   if (spec.answering) { await row(spec.answering).focus(); await page.keyboard.press('a'); }
   if (graphFrame(spec)) {

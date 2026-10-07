@@ -67,7 +67,7 @@ const bind = (context: ReturnType<typeof setup>, strict = false) => {
 describe('explicit discovery registration and binding', () => {
   it('expansion reads without persistence; Register only prefills and submit opens the returned canonical project', async () => {
     const context = setup(); await context.store.start();
-    render(<NavigationWorkspace store={context.store} discovery={context.controller} adapterChoices={[adapter]} renderSession={() => null} />);
+    render(<NavigationWorkspace store={context.store} discovery={context.controller} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => null} />);
     expect(context.opens).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Discover host sessions' }));
     await screen.findByText('Discovered conversation'); expect(context.mutations).toHaveLength(0);

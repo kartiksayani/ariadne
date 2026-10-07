@@ -5,6 +5,7 @@ import type { OwnerItemDetail } from '../../../src/components/inputs/OwnerItemDe
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route } from '../app/transport';
+import { sessionButton } from '../app/open';
 
 // Hold acknowledgments at the component boundary to reproduce an older editor
 // reporting completion after a newer ordinary App request has been published.
@@ -18,11 +19,7 @@ vi.mock('../../../src/components/inputs/OwnerItemDetail', () => ({
 afterEach(() => { cleanup(); editor.acknowledgments.clear(); });
 it('an older editor acknowledgment cannot clear the newer owner request', async () => {
   const transport = new AppTransport(); render(<DesktopApp service={createDesktopService(transport)} />);
-  const session = await waitFor(() => {
-    const button = document.querySelector<HTMLButtonElement>(`[data-session-id="${route.session_id}"]`)!;
-    expect(button).not.toBeNull(); expect(button.disabled).toBe(false); return button;
-  });
-  fireEvent.click(session); await screen.findByRole('tree', { name: 'Sentences' });
+  fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Sentences' });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Pause dispatch' }).hasAttribute('disabled')).toBe(false));
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'r' });

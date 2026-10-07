@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { delay, json } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, cliRequest, completeTurn, journeyResultRequest, publishResult, snapshot } from './scripted-provider.mjs';
 import { sendDetailReply } from './owner-reply.mjs';
+import { openSessionButton } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
@@ -59,7 +60,7 @@ async function openPrimary(configuration) {
     const selected = JSON.parse(await readFile(join(process.env.ARIADNE_HOME, 'ui.json'), 'utf8')).snapshot.global.selected_navigation;
     return selected.kind === 'all_sessions' && await browser.$('button[data-shell-tab="all_sessions"]').isEnabled();
   }, 'Recovery All sessions navigation did not finish');
-  await click(await browser.$(`[data-session-id="${configuration.sessionId}"]`));
+  await click(await openSessionButton(configuration.sessionId));
   await wait(async () => {
     const selected = JSON.parse(await readFile(join(process.env.ARIADNE_HOME, 'ui.json'), 'utf8')).snapshot.global.selected_navigation;
     return selected.kind === 'session' && selected.session.session_id === configuration.sessionId

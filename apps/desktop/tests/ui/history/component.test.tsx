@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { useState } from 'react';
 import type { QueryResult } from '../../../src/generated/core';
 import { ItemDetail, itemTimeline } from '../../../src/components/history/ItemDetail';
-import { MessageRail } from '../../../src/components/rail/MessageRail';
+import { MessageRail } from '../../../src/ui/rail/MessageRail';
 import { immutable } from '../../../src/data/session-store';
 import { deferred, extraMessage, page, projections, setup } from './fixtures';
 
@@ -127,7 +127,7 @@ describe('complete message rail', () => {
       ++renders;
       return <><button type="button" onClick={() => setGeneration(current => current + 1)}>New parent callback</button>
         <output aria-label="Parent highlights">{generation}:{[...selection.items].join(',')}:{[...selection.messages].join(',')}</output>
-        <MessageRail {...value} onReveal={vi.fn()} onHighlight={(items, messages) => {
+        <MessageRail {...value} onHighlight={(items, messages) => {
           ++calls;
           if (generation === 2) cleanupCalls.push(messages);
           setSelection({ items: new Set(items), messages: new Set(messages) });
@@ -146,37 +146,54 @@ describe('complete message rail', () => {
     expect(screen.getByLabelText('Parent highlights').textContent).toBe(`2:1:${message.id}`);
     expect(calls).toBe(before + 1);
     expect(cleanupCalls.at(-1)).toEqual(new Set([message.id]));
-    fireEvent.click(card.querySelector('.history-body')!);
+    fireEvent.click(card);
     fireEvent.mouseLeave(card);
-    expect(card.classList.contains('history-pinned')).toBe(true);
+    expect(card.classList.contains('pw-excerpt-active')).toBe(true);
+    expect(card.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByLabelText('Parent highlights').textContent).toBe(`2:1:${message.id}`);
     const beforeUnmount = calls;
     rendered.unmount();
     expect(calls).toBe(beforeUnmount + 1);
     expect(cleanupCalls.at(-1)).toEqual(new Set());
   });
-  it('cross-highlights canonical item links on hover/pin and selected item, preserving registered reveal', async () => {
-    const value = await ready(), highlight = vi.fn(), reveal = vi.fn();
-    const rendered = render(<MessageRail {...value} selectedItemId="2" onHighlight={highlight} onReveal={reveal} />);
+  it('cross-highlights the items a message touched on hover and pin, and the messages of the selected or hovered item', async () => {
+    const value = await ready(), highlight = vi.fn();
+    const rendered = render(<MessageRail {...value} selectedItemId="2" onHighlight={highlight} />);
     const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(value.transport.session.messages.length));
     const message = value.transport.session.messages.find(message => message.item_id === '1')!;
     const card = log.querySelector(`[data-message-id="${message.id}"]`)!;
     fireEvent.mouseEnter(card);
     expect(highlight).toHaveBeenLastCalledWith(new Set(['1']), new Set([message.id]));
-    fireEvent.click(card.querySelector('.history-body')!); fireEvent.mouseLeave(card);
-    expect(card.classList.contains('history-pinned')).toBe(true);
+    fireEvent.click(card); fireEvent.mouseLeave(card);
+    expect(card.classList.contains('pw-excerpt-active')).toBe(true);
     expect(highlight).toHaveBeenLastCalledWith(new Set(['1']), new Set([message.id]));
     const selected = value.transport.session.messages.find(message => message.item_id === '2')!;
-    expect(log.querySelector(`[data-message-id="${selected.id}"]`)!.classList.contains('history-highlight')).toBe(true);
-    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'Item 1' }));
-    await waitFor(() => expect(reveal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'item' })));
-    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: `Unpin message ${message.number}` }));
+    expect(log.querySelector(`[data-message-id="${selected.id}"]`)!.classList.contains('pw-excerpt-highlight')).toBe(true);
+    // A hovered item takes over from the selected one (Ariadne.dc.html:2082).
+    rendered.rerender(<MessageRail {...value} selectedItemId="2" hoveredItemId="1" onHighlight={highlight} />);
+    expect(log.querySelector(`[data-message-id="${selected.id}"]`)!.classList.contains('pw-excerpt-highlight')).toBe(false);
+    fireEvent.click(card);
+    expect(card.getAttribute('aria-pressed')).toBe('false');
     expect(highlight).toHaveBeenLastCalledWith(new Set(), new Set());
     rendered.unmount(); expect(highlight).toHaveBeenLastCalledWith(new Set(), new Set());
   });
+  it('shows the handoff header, follow state and excerpt meta', async () => {
+    const value = await ready(), close = vi.fn();
+    render(<MessageRail {...value} onHighlight={vi.fn()} onClose={close} />);
+    const rail = screen.getByRole('complementary', { name: 'Messages' });
+    await waitFor(() => expect(rail.querySelectorAll('[data-message-id]')).toHaveLength(value.transport.session.messages.length));
+    expect(within(rail).getByText(String(value.transport.session.messages.length), { selector: '.pw-rail-count' })).toBeTruthy();
+    expect(within(rail).getByRole('button', { name: 'Following latest' })).toBeTruthy();
+    const first = value.transport.session.messages[0]!;
+    const card = rail.querySelector(`[data-message-id="${first.id}"]`)!;
+    expect(card.querySelector('.pw-excerpt-number')!.textContent).toBe(`#${first.number}`);
+    expect(card.querySelector('.pw-excerpt-who')!.textContent).toBe(first.author === 'owner' ? 'You' : first.author === 'agent' ? 'Agent' : 'System');
+    fireEvent.click(within(rail).getByRole('button', { name: 'Hide messages' }));
+    expect(close).toHaveBeenCalledOnce();
+  });
   it('an update landing before the scroll event is delivered does not yank a reader scrolled up', async () => {
     const value = await ready();
-    render(<MessageRail {...value} onHighlight={vi.fn()} onReveal={vi.fn()} />);
+    render(<MessageRail {...value} onHighlight={vi.fn()} />);
     const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(15));
     Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
     log.scrollTop = 800; fireEvent.scroll(log);
@@ -184,12 +201,12 @@ describe('complete message rail', () => {
     value.transport.session.messages.push(extraMessage(value.transport.session, 16));
     value.transport.session.revision = 22;
     await act(() => value.store.refresh());
-    await screen.findByRole('button', { name: '1 new messages · Jump to latest' });
+    await screen.findByRole('button', { name: '1 new message · Jump to latest' });
     expect(log.scrollTop).toBe(250);
   });
   it('upward scrolling pauses follow; new messages count without changing focus/scroll until an explicit jump', async () => {
     const value = await ready();
-    render(<><input aria-label="Unsent draft" defaultValue="exact draft  " /><MessageRail {...value} onHighlight={vi.fn()} onReveal={vi.fn()} /></>);
+    render(<><input aria-label="Unsent draft" defaultValue="exact draft  " /><MessageRail {...value} onHighlight={vi.fn()} /></>);
     const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(15));
     Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
     log.scrollTop = 800; fireEvent.scroll(log); log.scrollTop = 250; fireEvent.scroll(log);
@@ -209,14 +226,14 @@ describe('complete message rail', () => {
   });
   it('a scrollTop that shrank only because the viewport grew keeps following after a jump', async () => {
     const value = await ready();
-    render(<MessageRail {...value} onHighlight={vi.fn()} onReveal={vi.fn()} />);
+    render(<MessageRail {...value} onHighlight={vi.fn()} />);
     const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(15));
     Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, writable: true, value: 200 } });
     log.scrollTop = 800; fireEvent.scroll(log); log.scrollTop = 250; fireEvent.scroll(log);
     value.transport.session.messages.push(extraMessage(value.transport.session, 16));
     value.transport.session.revision = 22;
     await act(() => value.store.refresh());
-    fireEvent.click(await screen.findByRole('button', { name: '1 new messages · Jump to latest' }));
+    fireEvent.click(await screen.findByRole('button', { name: '1 new message · Jump to latest' }));
     expect(log.scrollTop).toBe(1000);
     // The Jump button unmounted; the viewport grew, so the browser clamped scrollTop but it is still at the bottom.
     Object.defineProperty(log, 'clientHeight', { configurable: true, value: 240 });

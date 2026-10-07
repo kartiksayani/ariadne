@@ -59,7 +59,7 @@ test('persisted discovery registration cannot pass when its completed form never
 test('discovery failure retains scoped view facts and an App screenshot without changing the candidate wait', async t => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-discovery-evidence-'));
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document, previousEvidence = process.env.ARIADNE_E2E_EVIDENCE;
-  const dom = new JSDOM(`<div class="ref-page-heading"><h1>Projects</h1></div><p role="alert">Unrelated owner error</p>
+  const dom = new JSDOM(`<div class="pw-page-title"><h1 class="pw-page-name">Projects</h1></div><p role="alert">Unrelated owner error</p>
     <section aria-label="Discover host sessions"><button aria-expanded="true">Discover host sessions</button>
       <p role="status">Reading host sessions…</p><p role="alert">Discovery could not refresh.</p>
       <article data-discovery-id="exact-thread"></article></section><article data-discovery-id="unrelated-thread"></article>`);

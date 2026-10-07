@@ -5,6 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, awaitConnected, cliRequest, snapshot } from './scripted-provider.mjs';
 import { installSearchTimingObservation, takeSearchTimingObservation } from './search-timing-observation.mjs';
+import { openSessionButton } from './session-button.mjs';
 import { activateOwned, identity } from '../../../../scripts/run-native-e2e.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
@@ -285,8 +286,7 @@ async function readySessionButton(tree) {
   await activateOwned(process.env.ARIADNE_E2E_ROOT, process.env.ARIADNE_E2E_BINARY, process.env.ARIADNE_E2E_NONCE);
   await wait(() => browser.execute(() => document.visibilityState === 'visible' && !document.hidden && document.hasFocus()),
     'Owned native App did not become visible and focused');
-  const selector = `[data-session-id="${tree.sessionId}"]`, button = await browser.$(selector);
-  await button.waitForDisplayed(); await button.waitForEnabled();
+  const selector = `[data-session-id="${tree.sessionId}"]`, button = await openSessionButton(tree.sessionId);
   await browser.execute(observeTreeClickReadiness, button, null, null, null, selector);
   let failure;
   try {
