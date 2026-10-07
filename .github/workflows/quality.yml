@@ -100,7 +100,7 @@ jobs:
           if [[ "$STAGE" == "static" && "$SCOPE" == *" reference=true" ]]; then
             export PLAYWRIGHT_BROWSERS_PATH="$GITHUB_WORKSPACE/target/reference-browser"
             node node_modules/playwright/cli.js install chromium
-            npm run capture:reference
+            npm run test:design
           fi
       - name: Preserve native and coverage evidence
         if: always() && (contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static')

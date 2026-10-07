@@ -10,7 +10,7 @@ No provider or external network is used.
 
 ```sh
 npm run test:ui -- apps/desktop/tests/ui/graph-culling
-npm run capture:reference -- --project graph-2000
+npm run test:design -- --project graph-2000
 ```
 
 The browser project runs once at 1000×700 in the existing reference capture
