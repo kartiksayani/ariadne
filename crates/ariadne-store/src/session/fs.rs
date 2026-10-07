@@ -273,6 +273,82 @@ impl Directory {
         Ok(true)
     }
 
+    /// File type of one direct entry without following a final symlink.
+    fn entry_type(&self, name: &str) -> Result<Option<libc::mode_t>, StoreError> {
+        let path = self.path.join(name);
+        component(name, &path)?;
+        let c = c_name(name.as_bytes(), &path)?;
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: live anchored directory, checked name and writable stat.
+        let result = unsafe {
+            libc::fstatat(
+                self.file.as_raw_fd(),
+                c.as_ptr(),
+                stat.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        if result == -1 {
+            let error = io::Error::last_os_error();
+            return if error.kind() == io::ErrorKind::NotFound {
+                Ok(None)
+            } else {
+                Err(StoreError::io("stat", &path, error))
+            };
+        }
+        // SAFETY: fstatat succeeded and initialized stat.
+        Ok(Some(unsafe { stat.assume_init() }.st_mode & libc::S_IFMT))
+    }
+
+    /// Unlink one direct non-directory entry (a symlink itself, never its target).
+    /// Missing entries are already removed.
+    pub fn remove_entry(&self, name: &str) -> Result<(), StoreError> {
+        let path = self.path.join(name);
+        match self.entry_type(name)? {
+            None => Ok(()),
+            Some(libc::S_IFDIR) => Err(StoreError::UnsafePath { path }),
+            Some(_) => {
+                let c = c_name(name.as_bytes(), &path)?;
+                // SAFETY: checked single-component name anchored to this live directory.
+                os_result(
+                    unsafe { libc::unlinkat(self.file.as_raw_fd(), c.as_ptr(), 0) },
+                    "unlink",
+                    &path,
+                )
+            }
+        }
+    }
+
+    /// Remove one private child directory and everything below it. Every step is
+    /// anchored to an opened descriptor; symlinks are unlinked, never followed, so
+    /// the walk cannot leave this child. Missing children are already removed.
+    pub fn remove_tree(&self, name: &str) -> Result<(), StoreError> {
+        let path = self.path.join(name);
+        match self.entry_type(name)? {
+            None => return Ok(()),
+            Some(libc::S_IFDIR) => {}
+            Some(_) => return Err(StoreError::UnsafePath { path }),
+        }
+        let child = self.child(name, false)?;
+        for entry in child.names()? {
+            if child.entry_type(&entry)? == Some(libc::S_IFDIR) {
+                child.remove_tree(&entry)?;
+            } else {
+                child.remove_entry(&entry)?;
+            }
+        }
+        child.sync()?;
+        drop(child);
+        let c = c_name(name.as_bytes(), &path)?;
+        // SAFETY: checked single-component name anchored to this live directory.
+        os_result(
+            unsafe { libc::unlinkat(self.file.as_raw_fd(), c.as_ptr(), libc::AT_REMOVEDIR) },
+            "rmdir",
+            &path,
+        )?;
+        self.sync()
+    }
+
     pub fn verify_target(&self, name: &str) -> Result<bool, StoreError> {
         match self.open(name, false) {
             Ok(_) => Ok(true),
@@ -603,6 +679,39 @@ mod tests {
             })
         ));
         assert!(!directory.path.join("registry.lock").exists());
+    }
+
+    #[test]
+    fn remove_tree_stays_inside_its_child_and_never_follows_links() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = root.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), b"keep").unwrap();
+        let directory = Directory::root(root.path()).unwrap();
+        let store = directory.child("store", true).unwrap();
+        let nested = store.child("sessions", true).unwrap();
+        nested
+            .temp("a.json", b"{}")
+            .unwrap()
+            .create("a.json")
+            .unwrap();
+        symlink(&outside, nested.path.join("escape")).unwrap();
+        symlink(outside.join("keep.txt"), store.path.join("file-link")).unwrap();
+        drop((nested, store));
+        directory.remove_tree("store").unwrap();
+        assert!(!root.path().join("store").exists());
+        assert_eq!(std::fs::read(outside.join("keep.txt")).unwrap(), b"keep");
+        // Already removed is success; a file is never treated as a tree.
+        directory.remove_tree("store").unwrap();
+        std::fs::write(root.path().join("plain"), b"x").unwrap();
+        assert!(matches!(
+            directory.remove_tree("plain"),
+            Err(StoreError::UnsafePath { .. })
+        ));
+        assert!(matches!(
+            directory.remove_tree(".."),
+            Err(StoreError::UnsafePath { .. })
+        ));
     }
 
     #[test]

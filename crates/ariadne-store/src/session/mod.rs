@@ -318,6 +318,157 @@ impl Store {
         })
     }
 
+    /// Owner removal: like `transact`, but the callback may hard-delete records.
+    /// The live bytes are first saved as `backups/pre-remove-<stamp>-<op>-<session>.json`;
+    /// the callback receives that path. Delivery receipts that name a removed
+    /// input are dropped, so the replay index never points at deleted work.
+    pub fn transact_removal<E>(
+        &self,
+        session_id: &UuidV4,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        normalized_command: &Value,
+        stamp: &str,
+        apply: impl FnOnce(&mut Session, &Path) -> Result<SavedReceiptData, E>,
+    ) -> Result<SavedReceipt, TransactionError<E>> {
+        self.with_lock(session_id, || {
+            let (live, previous) = self.live(session_id)?;
+            if let Some(saved) = self.saved(&live, actor, operation_id, normalized_command)? {
+                return Ok(saved);
+            }
+            let digest = self.digest(session_id, actor, normalized_command)?;
+            let name = removal_backup_name(stamp, operation_id, session_id)?;
+            let mut candidate = live.clone();
+            let data = apply(&mut candidate, &self.backups.path.join(&name))
+                .map_err(TransactionError::Command)?;
+            if candidate.operation_receipts != live.operation_receipts {
+                return Err(StoreError::IdentityMismatch.into());
+            }
+            let removed: std::collections::BTreeSet<_> = live
+                .inputs
+                .0
+                .keys()
+                .filter(|id| !candidate.inputs.0.contains_key(*id))
+                .cloned()
+                .collect();
+            let mut baseline = live.clone();
+            for session in [&mut baseline, &mut candidate] {
+                prune_delivery_receipts(session, &removed);
+            }
+            self.backups.temp(&name, &previous)?.create(&name)?;
+            self.backups.sync()?;
+            self.save_effect(
+                &baseline,
+                &previous,
+                candidate,
+                actor,
+                operation_id,
+                digest,
+                data,
+            )
+            .map_err(TransactionError::Store)
+        })
+    }
+
+    /// Owner session removal. Saves the live bytes as a `pre-remove-…` backup,
+    /// then unlinks the session file if it is unchanged. Returns the backup path.
+    /// An exact retry after the file is gone finds the same backup by its op id;
+    /// `None` means the session never existed here.
+    pub fn remove_session<E>(
+        &self,
+        session_id: &UuidV4,
+        operation_id: &UuidV4,
+        stamp: &str,
+        guard: impl FnOnce(&Session) -> Result<(), E>,
+    ) -> Result<Option<PathBuf>, TransactionError<E>> {
+        self.with_lock(session_id, || {
+            let file = format!("{}.json", session_id.as_str());
+            if !self.sessions.verify_target(&file)? {
+                return Ok(self
+                    .find_removal_backup(operation_id, session_id)?
+                    .map(|name| self.backups.path.join(name)));
+            }
+            let (live, previous) = self.live(session_id)?;
+            guard(&live).map_err(TransactionError::Command)?;
+            let name = removal_backup_name(stamp, operation_id, session_id)?;
+            self.backups.temp(&name, &previous)?.create(&name)?;
+            self.backups.sync()?;
+            if !self.sessions.remove_if_unchanged(&file, &previous)? {
+                return Err(StoreError::Busy.into());
+            }
+            Ok(Some(self.backups.path.join(name)))
+        })
+    }
+
+    /// Project removal: move every session file into `into`, each under its own
+    /// lock, refusing a session with an input in flight. Returns the session IDs.
+    pub(crate) fn evict_all(&self, into: &Directory) -> Result<Vec<UuidV4>, StoreError> {
+        let mut removed = Vec::new();
+        for name in self.sessions.names()? {
+            if name.starts_with('.') || !name.ends_with(".json") {
+                continue;
+            }
+            let id = UuidV4::new(name.strip_suffix(".json").expect("filtered suffix")).map_err(
+                |_| StoreError::UnsafePath {
+                    path: self.sessions.path.join(&name),
+                },
+            )?;
+            self.with_lock(&id, || {
+                let (live, previous) = self.live(&id)?;
+                if live
+                    .inputs
+                    .0
+                    .values()
+                    .any(|input| input.state == InputState::InFlight)
+                {
+                    return Err(StoreError::Busy);
+                }
+                if into.verify_target(&name)? {
+                    into.temp(&name, &previous)?.replace(&name)?;
+                } else {
+                    into.temp(&name, &previous)?.create(&name)?;
+                }
+                into.sync()?;
+                if !self.sessions.remove_if_unchanged(&name, &previous)? {
+                    return Err(StoreError::Busy);
+                }
+                Ok(())
+            })?;
+            removed.push(id);
+        }
+        Ok(removed)
+    }
+
+    /// Project removal: copy the store's own earlier backups into `into`, so
+    /// deleting the store keeps every `pre-…` copy the owner may still need.
+    pub(crate) fn copy_backups(&self, into: &Directory) -> Result<(), StoreError> {
+        for name in self.backups.names()? {
+            if name.starts_with('.') {
+                continue;
+            }
+            let bytes = self.backups.read(&name)?;
+            if into.verify_target(&name)? {
+                into.temp(&name, &bytes)?.replace(&name)?;
+            } else {
+                into.temp(&name, &bytes)?.create(&name)?;
+            }
+        }
+        into.sync()
+    }
+
+    fn find_removal_backup(
+        &self,
+        operation_id: &UuidV4,
+        session_id: &UuidV4,
+    ) -> Result<Option<String>, StoreError> {
+        let suffix = format!("-{}-{}.json", operation_id.as_str(), session_id.as_str());
+        Ok(self
+            .backups
+            .names()?
+            .into_iter()
+            .find(|name| name.starts_with("pre-remove-") && name.ends_with(&suffix)))
+    }
+
     /// Shared transaction bookkeeping, called only while the session lock is held.
     #[allow(clippy::too_many_arguments)]
     fn save_effect(
@@ -465,6 +616,49 @@ impl Store {
             .sync()
             .map_err(|_| StoreError::CommitUncertain { operation_id })
     }
+}
+
+/// `stamp` is a caller-supplied time stamp made only of ASCII letters and digits.
+pub fn removal_backup_name(
+    stamp: &str,
+    operation_id: &UuidV4,
+    session_id: &UuidV4,
+) -> Result<String, StoreError> {
+    removal_stamp(stamp)?;
+    Ok(format!(
+        "pre-remove-{stamp}-{}-{}.json",
+        operation_id.as_str(),
+        session_id.as_str()
+    ))
+}
+
+pub(crate) fn removal_stamp(stamp: &str) -> Result<(), StoreError> {
+    if stamp.is_empty() || stamp.len() > 32 || !stamp.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err(StoreError::UnsafePath {
+            path: PathBuf::from(stamp),
+        });
+    }
+    Ok(())
+}
+
+/// Drop delivery receipts (claim, expiry, event) that name a removed input.
+fn prune_delivery_receipts(session: &mut Session, removed: &std::collections::BTreeSet<UuidV4>) {
+    if removed.is_empty() {
+        return;
+    }
+    session.operation_receipts.0.retain(|_, bucket| {
+        bucket.retain(|receipt| {
+            let input = match &receipt.result.data {
+                SavedReceiptData::Claim { input_id, .. }
+                | SavedReceiptData::DeliveryExpiry { input_id, .. } => Some(input_id),
+                SavedReceiptData::Event { input_id, .. }
+                | SavedReceiptData::EventConflict { input_id, .. } => input_id.as_ref(),
+                _ => None,
+            };
+            input.is_none_or(|id| !removed.contains(id))
+        });
+        !bucket.is_empty()
+    });
 }
 
 pub(crate) fn encode(value: &impl serde::Serialize) -> Result<Vec<u8>, StoreError> {

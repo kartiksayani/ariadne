@@ -8,6 +8,8 @@ use sha2::{Digest, Sha256 as Hasher};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
+mod remove;
+pub use remove::ProjectRemoval;
 
 pub use crate::migrate::{
     legacy_store_path, parked_copy_differences, parked_copy_matches, parked_legacy_paths,

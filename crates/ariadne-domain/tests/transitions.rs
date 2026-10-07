@@ -214,6 +214,7 @@ fn add_owner_input(session: &mut Session, id: u64, number: u64, state: InputStat
                     round_id: None,
                     continuation_operation_id: None,
                 },
+                removed: None,
             },
             state,
             attempts: vec![],

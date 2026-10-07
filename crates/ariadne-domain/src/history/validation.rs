@@ -421,10 +421,15 @@ fn owner(session: &Session, message: &Message) -> Result<(), HistoryError> {
         .as_ref()
         .and_then(|id| session.inputs.0.get(id))
         .ok_or(HistoryError::MissingReference)?;
+    let removed = input.kind == InputKind::Removed;
     require(
         input.message_id == message.id
             && input.target.item_id == message.item_id
-            && message.topic_id.as_ref() == Some(&input.target.topic_id)
+            && if removed {
+                message.topic_id.is_none()
+            } else {
+                message.topic_id.as_ref() == Some(&input.target.topic_id)
+            }
             && message.binding_id.as_ref() == Some(&input.binding_id)
             && message.body == input.payload.text
             && message.created_at == input.created_at
@@ -436,7 +441,7 @@ fn owner(session: &Session, message: &Message) -> Result<(), HistoryError> {
     )?;
     if message.item_id.is_none() {
         require(
-            input.kind == InputKind::Continue
+            matches!(input.kind, InputKind::Continue | InputKind::Removed)
                 && input.answer_id.is_none()
                 && input.payload.selected_option_id.is_none()
                 && message.round_id.is_none()
@@ -562,13 +567,15 @@ pub(super) fn result_rounds(
     }
     distinct(result.reply_message_ids.iter())?;
     distinct(result.followup_item_ids.iter())?;
+    // A removal notice is acknowledged without replies: its subject is gone.
     require(
-        match result.outcome {
-            ResultOutcome::Answered => {
-                !result.reply_message_ids.is_empty() || !result.followup_item_ids.is_empty()
-            }
-            _ => !result.reply_message_ids.is_empty(),
-        },
+        input.kind == InputKind::Removed
+            || match result.outcome {
+                ResultOutcome::Answered => {
+                    !result.reply_message_ids.is_empty() || !result.followup_item_ids.is_empty()
+                }
+                _ => !result.reply_message_ids.is_empty(),
+            },
         HistoryError::InvalidProvenance,
     )?;
     for id in &result.reply_message_ids {
