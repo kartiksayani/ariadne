@@ -22,7 +22,7 @@ export async function waitForDiscoveredCandidate(candidate) {
           const texts = selector => [...(section?.querySelectorAll(selector) ?? [])]
             .slice(0, 16).map(element => element.textContent.slice(0, 4096));
           return {
-            navigation_heading: document.querySelector('.ref-page-heading h1')?.textContent.slice(0, 4096) ?? null,
+            navigation_heading: document.querySelector('h1.pw-page-name')?.textContent.slice(0, 4096) ?? null,
             section_present: section !== null, section_hidden: section?.hidden ?? null,
             expanded: section?.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded') ?? null,
             status: texts('[role="status"]'), alerts: texts('[role="alert"]'),
@@ -87,7 +87,7 @@ export async function runDiscoveryAcceptance(configuration) {
   }, { timeout: 15000, timeoutMsg: 'Explicit Register did not persist the discovered project and dismiss its completed form' });
   const metadata = JSON.parse(await readFile(await projectPath(), 'utf8'));
   await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
-  const connect = await browser.$('.nav-group-heading').$('button=Connect existing session');
+  const connect = await browser.$('.pw-group-head').$('button=Connect existing session');
   await connect.waitForDisplayed(); await connect.waitForEnabled(); await connect.click();
   const dialog = await browser.$('[role="dialog"][aria-label="Connect existing session"]');
   const chosen = await dialog.$(`[data-discovery-id="${externalSessionId}"]`).$('button=Use host session');

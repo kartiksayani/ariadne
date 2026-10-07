@@ -3,16 +3,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route, secondId } from '../app/transport';
+import { sessionButton } from '../app/open';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function setup(configure?: (transport: AppTransport) => void) {
   const transport = new AppTransport(); configure?.(transport); render(<DesktopApp service={createDesktopService(transport)} />);
-  const button = await waitFor(() => {
-    const button = document.querySelector<HTMLButtonElement>(`[data-session-id="${route.session_id}"]`)!;
-    expect(button).not.toBeNull(); expect(button.disabled).toBe(false); return button;
-  });
-  fireEvent.click(button); await screen.findByRole('tree', { name: 'Sentences' });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Pause dispatch' }).hasAttribute('disabled')).toBe(false));
+  fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
   return transport;
 }
 it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts inside modal controls', async () => {
@@ -22,14 +19,17 @@ it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts
   fireEvent.keyDown(search, { key: 'g' }); expect(screen.getByRole('tree')).toBeTruthy();
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!; row.focus();
   expect(fireEvent.keyDown(row, { key: '/' })).toBe(false); expect(document.activeElement).toBe(search);
-  row.focus(); expect(fireEvent.keyDown(row, { key: 'Backspace' })).toBe(true); expect(document.activeElement).toBe(row);
-  fireEvent.click(document.querySelector('[data-item-id="1"]')!); await screen.findByRole('group', { name: 'Owner actions' });
-  const pause = screen.getByRole('button', { name: 'Pause dispatch' }); pause.focus(); fireEvent.click(pause);
+  // ⌫ on a row asks to remove it (handoff README "Keyboard"); Cancel leaves everything as it was.
+  row.focus(); expect(fireEvent.keyDown(row, { key: 'Backspace' })).toBe(false);
+  const asking = screen.getByRole('alertdialog'); expect(within(asking).getByRole('button', { name: /^Remove/ })).toBeTruthy();
+  fireEvent.click(within(asking).getByRole('button', { name: 'Cancel' })); expect(screen.queryByRole('alertdialog')).toBeNull();
+  fireEvent.click(document.querySelector('[data-item-id="1"]')!); await screen.findByRole('group', { name: 'Item actions' });
+  const pause = screen.getByRole('button', { name: 'Close session' }); pause.focus(); fireEvent.click(pause);
   const dialog = screen.getByRole('dialog'), cancel = within(dialog).getByRole('button', { name: 'Cancel' });
   fireEvent.keyDown(cancel, { key: 'g' }); fireEvent.keyDown(cancel, { key: 'm' }); fireEvent.keyDown(cancel, { key: '/' });
   expect(screen.getByRole('tree')).toBeTruthy(); expect(screen.queryByRole('log')).toBeNull(); expect(document.activeElement?.closest('[role="dialog"]')).toBe(dialog);
   fireEvent.keyDown(cancel, { key: 'Escape' });
-  expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.getByRole('group', { name: 'Owner actions' })).toBeTruthy(); expect(document.activeElement).toBe(pause);
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.getByRole('group', { name: 'Item actions' })).toBeTruthy(); expect(document.activeElement).toBe(pause);
 });
 it('announces a new waiting episode and committed input resolution once without stealing editor focus', async () => {
   const transport = await setup(), session = transport.sessions.get(route.session_id)!;
@@ -65,36 +65,52 @@ it('tracks OS appearance changes only while the saved theme is System', async ()
   } finally { vi.unstubAllGlobals(); }
 });
 
-it('routes owner shortcuts from roving rows, repeats focus requests and never submits option/drop/reopen/archive implicitly', async () => {
-  const transport = await setup(transport => { transport.sessions.get(route.session_id)!.items['2']!.options = [
-    { id: 'morning', label: 'Morning', consequence: 'Deliver before lunch.', recommended: true },
-    { id: 'afternoon', label: 'Afternoon', consequence: 'Deliver after lunch.', recommended: false },
-  ]; });
+it('routes owner shortcuts from roving rows, repeats focus requests and never submits option/drop/archive implicitly', async () => {
+  const transport = await setup(transport => {
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.options = [
+      { id: 'morning', label: 'Morning', consequence: 'Deliver before lunch.', recommended: true },
+      { id: 'afternoon', label: 'Afternoon', consequence: 'Deliver after lunch.', recommended: false },
+    ];
+    // Item 3's in-flight reply would hide its actions while the agent has it.
+    for (const input of Object.values(session.inputs)) if (input?.target.item_id === '3' && input.state === 'in_flight') input.state = 'cancelled';
+  });
   const press = (id: string, key: string) => {
     const row = document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
     row.focus(); fireEvent.keyDown(row, { key });
   };
+  // a answers inline in the tree (frame 1c); the number keys then change the picked option.
   press('2', 'a');
-  await waitFor(() => expect(document.activeElement?.closest('[aria-label="Owner input for #2"]')).not.toBeNull());
+  await waitFor(() => expect(document.querySelector('[role="treeitem"][data-item-id="2"] .answer')).not.toBeNull());
   press('2', '2');
   await waitFor(() => expect(transport.preferences.drafts.some(value => value.target.item_id === '2' && value.selected_option_id === transport.sessions.get(route.session_id)!.items['2']!.options[1].id)).toBe(true));
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
-  press('4', 'r'); await screen.findByLabelText('Reply message'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Reply message')));
+  press('8', 'r'); await screen.findByLabelText('Reply message'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Reply message')));
   screen.getByRole('button', { name: 'Switch to light' }).focus(); fireEvent.keyDown(document.activeElement!, { key: 'r' });
   await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Reply message')));
   fireEvent.keyDown(screen.getByLabelText('Reply message'), { key: 'g' }); expect(screen.getByRole('tree')).toBeTruthy();
   press('3', 'r'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Note message')));
-  press('7', 'r'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Follow up message')));
-  press('7', 'o'); expect(screen.queryByLabelText('Reopen message')).toBeNull();
-  press('1', 'o'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Reopen message')));
-  press('4', 'd'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Drop message')));
-  press('4', 'e'); expect(await screen.findByRole('dialog', { name: 'Confirm topic archive' })).toBeTruthy();
+  press('6', 'r'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Follow-up message')));
+  // A replaced item stays replaced, so o on #7 sends nothing.
+  press('7', 'o'); await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+  press('8', 'd'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Drop reason')));
+  press('8', 'e'); expect(await screen.findByRole('dialog', { name: 'Confirm topic archive' })).toBeTruthy();
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
+});
+it('sends Back to Open as one press from the o shortcut (Ariadne.dc.html:1207)', async () => {
+  const transport = await setup();
+  const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
+  row.focus(); fireEvent.keyDown(row, { key: 'o' });
+  await waitFor(() => expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(1));
+  expect(transport.mutations.find(value => value.command.command === 'input_submit')!.command)
+    .toMatchObject({ params: { kind: 'reopen', text: 'Let’s reopen this: Keep the full reply history?', target: { item_id: '1' } } });
 });
 it('answers the oldest waiting item when the focused item is not waiting', async () => {
   await setup(); const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'a' });
-  await waitFor(() => expect(document.activeElement?.closest('[aria-label="Owner input for #2"]')).not.toBeNull());
+  const waiting = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
+  await waitFor(() => expect(waiting.querySelector('.answer')).not.toBeNull());
+  expect(document.activeElement).toBe(waiting);
 });
 
 it('queues a fresh Bring once with its visible fixed text and reveals its receipt on repeat', async () => {
@@ -102,12 +118,12 @@ it('queues a fresh Bring once with its visible fixed text and reveals its receip
   row.focus(); fireEvent.keyDown(row, { key: 'b' }); fireEvent.keyDown(row, { key: 'b' }); fireEvent.keyDown(row, { key: 'b', repeat: true });
   await waitFor(() => expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(1));
   expect(transport.mutations.find(value => value.command.command === 'input_submit')!.command).toMatchObject({ params: { kind: 'bring', text: 'Bring this up.', target: { item_id: '4' } } });
-  await screen.findByText(/Saved · Queue position/);
+  await waitFor(() => expect(within(screen.getByLabelText('Detail of #4')).getByRole('region', { name: 'Your request' })).toBeTruthy());
   row.focus(); fireEvent.keyDown(row, { key: 'b' });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(1);
 });
-it.each([false, true])('reveals an existing Bring draft without editing/submitting/retrying it (attempted %s)', async attempted => {
+it.each([false, true])('opens the item over an existing Bring draft without editing/submitting/retrying it (attempted %s)', async attempted => {
   const transport = await setup(transport => {
     const session = transport.sessions.get(route.session_id)!, item = session.items['4']!;
     transport.preferences.drafts.push({ op_id: '00000000-0000-4000-8000-000000001234', session: route, binding_id: session.active_binding_id!,
@@ -116,7 +132,8 @@ it.each([false, true])('reveals an existing Bring draft without editing/submitti
   });
   const before = structuredClone(transport.preferences.drafts[0]);
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!; row.focus(); fireEvent.keyDown(row, { key: 'b' });
-  expect((await screen.findByLabelText('Bring up message') as HTMLTextAreaElement).value).toBe(before.text);
+  // Bring it up is one press in the handoff; the detail has no Bring editor to reveal the draft in.
+  expect(await screen.findByLabelText('Detail of #4')).toBeTruthy();
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(transport.preferences.drafts[0]).toEqual(before); expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
 });
@@ -131,7 +148,8 @@ async function delayedReveal(transport: AppTransport) {
   });
   return { started: () => started, release: async () => { await act(async () => { release(); await gate; }); } };
 }
-it.each(['r', 'a', 'b'])('rejects delayed %s before it can undo newer All sessions navigation or mutate Bring', async key => {
+// a answers inline in the tree without a reveal, so only r and b can be delayed.
+it.each(['r', 'b'])('rejects delayed %s before it can undo newer All sessions navigation or mutate Bring', async key => {
   const transport = await setup(), pending = await delayedReveal(transport);
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key }); await waitFor(() => expect(pending.started()).toBe(true));
@@ -146,7 +164,7 @@ it.each(['r', 'a', 'b'])('rejects delayed %s before it can undo newer All sessio
 });
 it('rejects delayed Reply after detail dismissal', async () => {
   const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!);
-  await screen.findByLabelText('Reply message'); const pending = await delayedReveal(transport);
+  await screen.findByLabelText('Detail of #4'); const pending = await delayedReveal(transport);
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'r' }); await waitFor(() => expect(pending.started()).toBe(true));
   fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
@@ -166,7 +184,7 @@ it.each(['item', 'question', 'binding'])('preserves retained option until explic
   const detail = within(document.querySelector('.shell-detail-scroll')!);
   expect(detail.getByRole('button', { name: /^2Afternoon/ }).hasAttribute('disabled')).toBe(true);
   expect(detail.getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
-  fireEvent.keyDown(detail.getByRole('button', { name: 'Answer' }), { key: '2' });
+  fireEvent.keyDown(detail.getByRole('group', { name: 'Answer' }), { key: '2' });
   expect(transport.preferences.drafts[0].selected_option_id).toBe('morning');
   fireEvent.click(detail.getByRole('button', { name: 'Review current target' }));
   await waitFor(() => expect(transport.preferences.drafts[0].selected_option_id).toBeNull());
@@ -183,10 +201,12 @@ it('consumes a numeric request so detail remount preserves the owner’s later c
   row.focus(); fireEvent.keyDown(row, { key: '2' });
   const saved = () => transport.preferences.drafts.find(value => value.intent === 'answer' && value.target.item_id === '2')!;
   await waitFor(() => expect(saved().selected_option_id).toBe('afternoon'));
-  const editor = document.querySelector<HTMLElement>('.shell-detail-scroll .owner-input')!;
+  const editor = document.querySelector<HTMLElement>('.shell-detail-scroll .detail-answer-slot .answer')!;
   fireEvent.click(within(editor).getByRole('button', { name: /^1Morning/ })); await waitFor(() => expect(saved().selected_option_id).toBe('morning'));
-  fireEvent.keyDown(editor, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
-  fireEvent.click(row); await waitFor(() => expect(document.querySelector('.shell-detail-scroll .owner-input')).not.toBeNull());
+  // Esc in the answer returns focus to the row (Ariadne.dc.html:1412); Esc there closes detail.
+  fireEvent.keyDown(editor, { key: 'Escape' }); expect(document.activeElement).toBe(row);
+  fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
+  fireEvent.click(row); await waitFor(() => expect(document.querySelector('.shell-detail-scroll .detail-answer-slot .answer')).not.toBeNull());
   expect(within(document.querySelector('.shell-detail-scroll')!).getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
   expect(saved().selected_option_id).toBe('morning');
 });
@@ -207,7 +227,7 @@ it.each(['r', 'b'])('failed preference navigation cannot authorize %s focus or B
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
 });
 it.each([{ key: 'r', id: '4' }, { key: 'b', id: '4' }, { key: 'r', id: '3' }, { key: 'b', id: '3' }])('keeps a dismissed detail closed when dispatched $key selects #$id', async ({ key, id }) => {
-  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Reply message');
+  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Detail of #4');
   await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('4'));
   const invoke = transport.invoke.bind(transport); let dispatched = false, release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; }), beforeRevision = transport.preferences.revision;
@@ -227,10 +247,10 @@ it.each([{ key: 'r', id: '4' }, { key: 'b', id: '4' }, { key: 'r', id: '3' }, { 
   expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
   expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe(id);
   expect(transport.mutations.slice(beforeMutations)).toHaveLength(1); expect(transport.preferences.drafts).toEqual([]);
-  fireEvent.click(row); expect(await screen.findByLabelText(`Owner input for #${id}`)).toBeTruthy();
+  fireEvent.click(row); expect(await screen.findByLabelText(`Detail of #${id}`)).toBeTruthy();
 });
 it('keeps detail dismissed when shortcut navigation session read completes afterward', async () => {
-  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Reply message');
+  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Detail of #4');
   const invoke = transport.invoke.bind(transport); let reads = 0, resolving = false, release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
@@ -250,7 +270,7 @@ it('keeps detail dismissed after a dispatched oldest-waiting shortcut changes se
     second.id = secondId; second.title = 'Separate session'; value.sessions.set(secondId, second);
     first.items['2']!.status = 'open';
   });
-  fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Reply message');
+  fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Detail of #4');
   await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('4'));
   const invoke = transport.invoke.bind(transport); let dispatched = false, release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -269,5 +289,5 @@ it('keeps detail dismissed after a dispatched oldest-waiting shortcut changes se
   expect(transport.preferences.drafts).toEqual([]);
   const tab = document.querySelector<HTMLButtonElement>(`[data-session-tab="${CSS.escape(JSON.stringify([route.project_id, route.session_id]))}"]`)!;
   await waitFor(() => expect(tab.hasAttribute('disabled')).toBe(false)); fireEvent.click(tab);
-  expect(await screen.findByLabelText('Owner input for #4')).toBeTruthy();
+  expect(await screen.findByLabelText('Detail of #4')).toBeTruthy();
 });

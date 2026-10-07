@@ -59,7 +59,7 @@ test('persisted discovery registration cannot pass when its completed form never
 test('discovery failure retains scoped view facts and an App screenshot without changing the candidate wait', async t => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-discovery-evidence-'));
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document, previousEvidence = process.env.ARIADNE_E2E_EVIDENCE;
-  const dom = new JSDOM(`<div class="ref-page-heading"><h1>Projects</h1></div><p role="alert">Unrelated owner error</p>
+  const dom = new JSDOM(`<div class="pw-page-title"><h1 class="pw-page-name">Projects</h1></div><p role="alert">Unrelated owner error</p>
     <section aria-label="Discover host sessions"><button aria-expanded="true">Discover host sessions</button>
       <p role="status">Reading host sessions…</p><p role="alert">Discovery could not refresh.</p>
       <article data-discovery-id="exact-thread"></article></section><article data-discovery-id="unrelated-thread"></article>`);
@@ -614,7 +614,7 @@ test('release proof rejects activated dependencies, inline permissions, globals 
   assert.throws(() => verifyGraph([], config, {}, {}, []));
 });
 test('reference isolation excludes only test mounts/runtime and allows reusable product primitives', () => {
-  const modules = ['/node_modules/react/index.js', '/apps/desktop/src/components/reference/StatusBadge.tsx', '/apps/desktop/src/components/reference/TreeRow.tsx', '/apps/desktop/src/components/reference/AnswerControl.tsx', '/apps/desktop/src/components/reference/MessageExcerpt.tsx'];
+  const modules = ['/node_modules/react/index.js', '/apps/desktop/src/components/reference/StatusBadge.tsx', '/apps/desktop/src/ui/answer/AnswerControl.tsx', '/apps/desktop/src/components/reference/MessageExcerpt.tsx'];
   const files = ['index.html', 'assets/main.js', 'fonts/jetbrains-mono-latin-400-normal.woff2', 'styles/design-tokens.css', 'styles/paperwhite.css'];
   verifyReferenceIsolation(modules, files);
   for (const path of ['/tests/ui/design/gallery.tsx', '/tests/ui/design/fixtures.ts', '/tests/ui/reference/cases.tsx', '/tests/ui/design/runtime/node_modules/react/umd/react.production.min.js', '/node_modules/@babel/standalone/babel.min.js', '/node_modules/@playwright/test/index.js', '/node_modules/playwright-core/lib/index.js', '/designs/Ariadne UI mockups.zip', '/designs/Ariadne-UI-mockups-v2.zip']) assert.throws(() => verifyReferenceIsolation([...modules, path], files), /production modules/);

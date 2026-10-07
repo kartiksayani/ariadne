@@ -1,0 +1,218 @@
+/* Shared handoff components (README Components): Status Badge and both
+   Message Excerpt variants. */
+
+/* — Status Badge — */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px 0 7px;
+  border-radius: 6px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.status-badge > i {
+  font-size: 14px;
+}
+
+.status-badge-icon {
+  display: block;
+  line-height: 1;
+}
+
+/* — Message Excerpt, timeline variant (detail panel) — */
+.excerpt-timeline {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 10px;
+}
+
+.excerpt-rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.excerpt-dot {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--a-bg, var(--color-bg));
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
+
+.excerpt-created .excerpt-dot {
+  background: var(--color-accent);
+}
+
+.excerpt-origin .excerpt-dot {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-text) 40%, transparent);
+}
+
+.excerpt-line {
+  position: absolute;
+  top: 18px;
+  bottom: -2px;
+  left: 7.5px;
+  width: 1px;
+  background: var(--color-divider);
+}
+
+.excerpt-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 16px;
+  min-width: 0;
+}
+
+.excerpt-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  font-size: 12px;
+  line-height: 18px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.excerpt-mark {
+  font-weight: 500;
+  color: var(--a-acc-text, var(--color-accent-300));
+}
+
+.excerpt-origin .excerpt-mark {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.excerpt-number {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+}
+
+.excerpt-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.excerpt-who > i {
+  font-size: 12px;
+}
+
+.excerpt-body {
+  font-size: 13.5px;
+  line-height: 1.55;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+}
+
+.excerpt-origin .excerpt-body {
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.excerpt-highlighted .excerpt-content {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.excerpt-note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+/* — Message Excerpt, rail variant (message rail) — */
+.pw-excerpt {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px 9px 14px;
+  border: 0;
+  border-radius: 6px;
+  font-family: var(--font-body);
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pw-excerpt:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.pw-excerpt-bar {
+  position: absolute;
+  left: 4px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.pw-excerpt-highlight {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.pw-excerpt-highlight .pw-excerpt-bar {
+  background: color-mix(in srgb, var(--color-accent) 65%, transparent);
+}
+
+.pw-excerpt-active {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+
+.pw-excerpt-active .pw-excerpt-bar {
+  background: var(--color-accent);
+}
+
+.pw-excerpt-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.pw-excerpt-meta i {
+  font-size: 12px;
+}
+
+.pw-excerpt-number {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+}
+
+.pw-excerpt-who {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-text) 85%, transparent);
+}
+
+.pw-excerpt-when {
+  margin-left: auto;
+}
+
+.pw-excerpt-text {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+  text-wrap: pretty;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}

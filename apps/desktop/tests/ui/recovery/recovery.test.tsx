@@ -6,7 +6,7 @@ import type { CoreError, MutationEnvelope, OwnerMutationRequest } from '../../..
 import type { Binding, Input, PresenceObservation, SavedReceipt, Session } from '../../../src/generated/domain/models';
 import { createDesktopService, CoreFailure, OpenSessions, type DesktopTransport, type HintPayloads } from '../../../src/data';
 import { SessionActions, SessionActionControllers } from '../../../src/components/bindings/actions';
-import { BindingControls } from '../../../src/components/bindings/BindingControls';
+import { DispatchDialog } from '../../../src/ui/pages/SessionDialogs';
 import { qualifiedPresence } from '../../../src/components/bindings/presence';
 import { RecoveryPanel, recoveryTargets } from '../../../src/components/recovery/RecoveryPanel';
 import { EdgeState, SessionNotice, type EdgeKind } from '../../../src/components/edge-states/EdgeState';
@@ -82,35 +82,29 @@ function chooseRecovery(choice: string) {
   fireEvent.change(dialog().getByLabelText('Reason'), { target: { value: 'Reviewed terminal and prior effects.' } });
 }
 
+// The session card's dispatch dialog (WP5) replaced BindingControls: each button is the deliberate action.
+const dispatch = (actions: SessionActions) => <DispatchDialog store={actions.session} actions={actions} agent="claude-code" onClose={() => {}} />;
 describe('explicit binding lifecycle', () => {
-  it('confirms persisted pause without sending, and keeps a refreshed owner pause visible', async () => {
+  it('sends a generation-fenced pause and keeps a refreshed owner pause visible', async () => {
     const { actions, transport, store } = await setup();
-    render(<BindingControls actions={actions} />); fireEvent.click(screen.getByRole('button', { name: 'Pause dispatch' }));
-    expect(transport.mutations).toHaveLength(0);
+    render(dispatch(actions));
     transport.replies.push(transport.receipt('binding_state')); currentBinding(transport.session).owner_paused = true;
     currentBinding(transport.session).dispatch_state = 'paused'; transport.session.revision += 1;
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm pause' })); });
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Pause dispatch' })); });
     expect(transport.mutations).toEqual([{ session: route, command: { command: 'binding_pause', api_version: 1, op_id: opId,
       params: { binding_id: currentBinding(transport.session).id, expected_generation: currentBinding(transport.session).generation } } }]);
     expect(screen.getByText(/paused by you/)).toBeDefined(); await act(async () => { await store.refresh(); });
     expect(transport.mutations).toHaveLength(1); expect(screen.queryByRole('button', { name: /stop agent|approve|retarget/i })).toBeNull();
   });
-  it('same-host Connect preserves endpoint/config and requires a deliberate generation review', async () => {
-    const { actions, transport } = await setup(); render(<BindingControls actions={actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' })); const binding = currentBinding(transport.session);
+  it('same-host Reconnect preserves endpoint and configuration', async () => {
+    const { actions, transport } = await setup(); render(dispatch(actions));
+    const binding = currentBinding(transport.session);
     transport.replies.push(transport.receipt('binding_connect'));
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm connect' })); });
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Reconnect' })); });
     expect(transport.mutations[0].command).toEqual({ command: 'binding_connect', api_version: 1, op_id: opId, params: {
       project_id: route.project_id, existing_session_id: route.session_id, adapter_id: binding.adapter_id,
       external_session_id: binding.external_session_id, endpoint: binding.endpoint, configuration: binding.adapter_config } });
     expect(transport.mutations).toHaveLength(1);
-  });
-  it('does not apply an old confirmation to a changed session', async () => {
-    const { actions, transport, store } = await setup(); render(<BindingControls actions={actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' })); transport.session.revision += 1;
-    await act(async () => { await store.refresh(); });
-    expect((dialog().getByRole('button', { name: 'Confirm disconnect' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(dialog().getByRole('button', { name: 'Confirm disconnect' })); expect(transport.mutations).toHaveLength(0);
   });
 });
 
@@ -228,9 +222,9 @@ describe('receipt uncertainty across navigation', () => {
     transport.replies.push(new Error('Lost acknowledgement'));
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Save recovery decision' })); });
     const request = structuredClone(transport.mutations[0]); view.unmount(); transport.session.revision += 1;
-    currentBinding(transport.session).generation = opId; await store.refresh(); view = render(<BindingControls actions={actions} />);
+    currentBinding(transport.session).generation = opId; await store.refresh(); view = render(dispatch(actions));
     expect(transport.mutations).toHaveLength(1); expect(actions.getSnapshot().pending).toEqual(request);
-    expect((screen.getByRole('button', { name: 'Connect' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Reconnect' }) as HTMLButtonElement).disabled).toBe(true);
     transport.replies.push(transport.receipt('input_resolve'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
     expect(transport.mutations).toEqual([request, request]); expect(actions.getSnapshot().pending).toBeNull(); view.unmount();
@@ -279,7 +273,7 @@ describe('receipt uncertainty across navigation', () => {
   it('new app controller reloads persisted pause and uncertain attempt without automatic retry/resume', async () => {
     const { actions, transport, store } = await setup(); currentBinding(transport.session).owner_paused = true; transport.session.revision += 1; await store.refresh();
     const restarted = new SessionActions(actions.service, store, () => opId);
-    render(<><BindingControls actions={restarted} /><RecoveryPanel actions={restarted} /></>);
+    render(<>{dispatch(restarted)}<RecoveryPanel actions={restarted} /></>);
     expect(screen.getByText(/paused by you/)).toBeDefined(); expect(screen.getByRole('button', { name: 'Review recovery' })).toBeDefined();
     expect(restarted.getSnapshot().pending).toBeNull(); expect(transport.mutations).toHaveLength(0);
   });
@@ -324,52 +318,26 @@ describe('edge states preserve mounted content', () => {
 
 describe('binding lifecycle surface (P4.7 acceptance gaps)', () => {
   it('Resume is blocked by a recovery pause reason, then sends a generation-fenced binding_resume once cleared', async () => {
-    const { actions, transport, store } = await setup(); render(<BindingControls actions={actions} />);
-    const resume = () => screen.getByRole('button', { name: 'Resume dispatch' }) as HTMLButtonElement;
+    const { actions, transport, store } = await setup(); render(dispatch(actions));
+    const resume = () => dialog().getByRole('button', { name: 'Resume dispatch' }) as HTMLButtonElement;
     expect(resume().disabled).toBe(true);
     currentBinding(transport.session).pause_reason = null; currentBinding(transport.session).owner_paused = true;
     currentInput(transport.session).state = 'queued'; transport.session.revision += 1;
     await act(async () => { await store.refresh(); });
     expect(resume().disabled).toBe(false);
-    fireEvent.click(resume()); expect(transport.mutations).toHaveLength(0);
     transport.replies.push(transport.receipt('binding_state'));
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm resume' })); });
+    await act(async () => { fireEvent.click(resume()); });
     const binding = currentBinding(transport.session);
     expect(transport.mutations).toEqual([{ session: route, command: { command: 'binding_resume', api_version: 1, op_id: opId,
       params: { binding_id: binding.id, expected_generation: binding.generation } } }]);
   });
-  it('Disconnect sends a generation-fenced binding_disconnect only after confirmation', async () => {
-    const { actions, transport } = await setup(); render(<BindingControls actions={actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' })); expect(transport.mutations).toHaveLength(0);
+  it('Disconnect sends a generation-fenced binding_disconnect', async () => {
+    const { actions, transport } = await setup(); render(dispatch(actions));
     transport.replies.push(transport.receipt('binding_state'));
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm disconnect' })); });
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Disconnect' })); });
     const binding = currentBinding(transport.session);
     expect(transport.mutations).toEqual([{ session: route, command: { command: 'binding_disconnect', api_version: 1, op_id: opId,
       params: { binding_id: binding.id, expected_generation: binding.generation } } }]);
-  });
-  it('shows the binding generation and qualified host freshness, and downgrades unqualified observations', async () => {
-    const { actions, transport } = await setup(); const binding = currentBinding(transport.session);
-    const view = render(<BindingControls actions={actions} />);
-    expect(view.container.querySelector('.lifecycle-muted code')?.textContent).toBe(binding.generation);
-    expect(screen.getByText('Host state unknown')).toBeDefined();
-    act(() => { transport.presence(); });
-    expect(screen.getByText('Host idle · fresh host poll')).toBeDefined();
-    act(() => { transport.presence({ freshness: 'stale' }); });
-    expect(screen.getByText('Host state stale · unqualified')).toBeDefined();
-    act(() => { transport.presence({ generation: opId }); });
-    expect(screen.queryByText('Host idle · fresh host poll')).toBeNull();
-  });
-  it('shows a distinct Reconnecting state only while a Connect write is in flight', async () => {
-    const { actions, transport } = await setup(); render(<BindingControls actions={actions} />);
-    expect(document.querySelector('[data-edge-state="reconnecting"]')).toBeNull();
-    let release!: (value: MutationEnvelope) => void;
-    transport.replies.push(new Promise<MutationEnvelope>(resolve => { release = resolve; }));
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm connect' })); });
-    expect(document.querySelector('[data-edge-state="reconnecting"]')).not.toBeNull();
-    expect(screen.getByText('Reconnecting')).toBeDefined();
-    await act(async () => { release(transport.receipt('binding_connect')); });
-    expect(document.querySelector('[data-edge-state="reconnecting"]')).toBeNull();
   });
   it('maps each non-ready session status to its own edge state and renders nothing when ready', async () => {
     const { store } = await setup(); const base = store.getSnapshot();

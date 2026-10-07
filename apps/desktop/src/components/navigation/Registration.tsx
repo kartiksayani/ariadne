@@ -4,7 +4,7 @@ import type { Immutable } from '../../data/session-store';
 import { useNavigation, type NavigationStore } from '../../state/navigation/store';
 import { CoreFailure } from '../../data/service';
 import type { AdapterChoice } from './NavigationWorkspace';
-import { ReferenceDialog } from '../reference/ReferenceDialog';
+import { Dialog } from '../../ui/dialogs/Dialog';
 import { candidateIdentity, useDiscovery, type DiscoveryController } from '../../data/discovery';
 import { CandidateList } from './Discovery';
 
@@ -13,7 +13,7 @@ function RegistrationFailure({ store }: { store: NavigationStore }) {
   if (!state.error) return null;
   return <div className="nav-banner" role="alert"><p>{state.error.message}</p>
     {state.error instanceof CoreFailure && <p>{state.error.error.hint}</p>}
-    {state.pendingOperationId && <button type="button" className="ref-button ref-secondary" disabled={state.writing}
+    {state.pendingOperationId && <button type="button" className="btn btn-secondary" disabled={state.writing}
       onClick={() => { void store.retryMutation(); }}>Reconcile operation</button>}
   </div>;
 }
@@ -21,13 +21,13 @@ function RegistrationFailure({ store }: { store: NavigationStore }) {
 export function RegisterProject({ store, disabled, close, initialRoot = '' }: { store: NavigationStore; disabled: boolean; close: () => void; initialRoot?: string }) {
   const [root, setRoot] = useState(initialRoot);
   const submit = async (event: FormEvent) => { event.preventDefault(); if (await store.register(root)) close(); };
-  return <ReferenceDialog title="Register project" onCancel={close} width={520} actions={null}><div className="nav-registration">
+  return <Dialog label="Register project" width={520} onCancel={close}><div className="dialog-title">Register project</div><div className="nav-registration">
     <p>Choose the existing local project root.</p>
     <RegistrationFailure store={store} />
     <form onSubmit={event => { void submit(event); }}><fieldset disabled={disabled}><label>Project root<input required value={root} onChange={event => setRoot(event.target.value)} placeholder="/path/to/project" /></label>
-      <div className="nav-dialog-actions"><button type="button" className="ref-button ref-secondary" onClick={close}>Cancel</button>
-        <button type="submit" className="ref-button ref-primary">Register project</button></div></fieldset></form>
-  </div></ReferenceDialog>;
+      <div className="nav-dialog-actions"><button type="button" className="btn btn-ghost" onClick={close}>Cancel</button>
+        <button type="submit" className="btn btn-primary">Register project</button></div></fieldset></form>
+  </div></Dialog>;
 }
 
 export function BindSession({ store, project, sessions, adapters, disabled, close, discovery }: { store: NavigationStore; project: Immutable<ProjectSummary>;
@@ -56,7 +56,7 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
       endpoint: kind === 'unix_socket' ? { kind, path: endpoint } : { kind, name: endpoint }, configuration: structuredClone(adapter.configuration),
       existing_session_id: sessionChoice === 'existing' ? existingSession : null })) close();
   };
-  return <ReferenceDialog title="Connect existing session" onCancel={close} width={520} actions={null}><div className="nav-registration">
+  return <Dialog label="Connect existing session" width={520} onCancel={close}><div className="dialog-title">Connect existing session</div><div className="nav-registration">
     <p>{project.project?.display_name ?? 'Unavailable project'} · {project.canonical_root}</p>
     <p>Choose an existing host session explicitly. The backend verifies its identity and capabilities before connecting.</p>
     {discovery && <CandidateList controller={discovery} root={project.canonical_root} selected={selected} select={candidate => {
@@ -83,8 +83,8 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
       {sessionChoice === 'existing' && <><label>Registered Ariadne session<select tabIndex={0} required value={existingSession} onChange={event => setExistingSession(event.target.value)}><option value="">Choose a session</option>
         {sessions.map(session => <option key={session.session_id} value={session.session_id}>{session.title} · {session.state}</option>)}</select></label>
         <p>Ariadne keeps this session’s topics, items and history. Follow the saved setup instruction to attach this host conversation.</p></>}
-      <div className="nav-dialog-actions"><button type="button" className="ref-button ref-secondary" onClick={close}>Cancel</button>
-        <button type="submit" className="ref-button ref-primary" disabled={invalidSelection}>Connect existing session</button></div>
+      <div className="nav-dialog-actions"><button type="button" className="btn btn-ghost" onClick={close}>Cancel</button>
+        <button type="submit" className="btn btn-primary" disabled={invalidSelection}>Connect existing session</button></div>
     </fieldset></form>
-  </div></ReferenceDialog>;
+  </div></Dialog>;
 }

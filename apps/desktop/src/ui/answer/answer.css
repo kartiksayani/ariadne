@@ -1,0 +1,206 @@
+/* Answer control: values from the handoff's "Answer Control.dc.html". */
+.answer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: var(--font-body);
+}
+
+.answer-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--a-warn);
+  background: color-mix(in srgb, var(--a-warn) 12%, transparent);
+}
+
+.answer-warn > i,
+.answer-blocked > i {
+  flex: none;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.answer-warn > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.answer-warn-action {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 12.5px;
+}
+
+.answer-options {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.answer-full .answer-options { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+.answer-option {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 3px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px 9px;
+  text-align: left;
+  font-weight: 400;
+  background: transparent;
+}
+
+.answer-full .answer-option { padding: 10px 12px 11px; }
+
+.answer-option-on,
+.answer-option-on:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  box-shadow: 0 0 0 1px var(--color-accent), 0 0 18px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.answer-option-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.answer-key {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.answer-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--color-text);
+}
+
+.answer-full .answer-label { font-size: 14px; }
+.answer-option-rec .answer-label { color: var(--a-acc-text); }
+
+.answer-picked {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--a-bg);
+}
+
+.answer-picked > i { font-size: 11px; }
+
+.answer-consequence {
+  padding-left: 26px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 68%, transparent);
+}
+
+.answer-full .answer-consequence { font-size: 13px; }
+
+.answer-recommended {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 6px;
+  font-weight: 500;
+  color: var(--a-acc-text);
+}
+
+.answer-recommended > i { font-size: 11px; }
+
+.answer-send-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.answer-send {
+  height: 32px;
+  max-width: 100%;
+}
+
+.answer-send > i { font-size: 14px; }
+
+.answer-send-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.answer-enter {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+.answer-hint {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.answer-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+textarea.answer-text {
+  min-height: 56px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.answer-reply-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.answer-reply-send {
+  height: 30px;
+  font-size: 13px;
+}
+
+.answer-blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}

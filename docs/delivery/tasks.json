@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": {
     "updated_at": "2026-10-07T01:00:00Z",
-    "headline": "56/58 done; P8.13 host location and topic counts in progress; P8.3 UX review held for the owner.",
+    "headline": "58/58 done; P8.3 Paperwhite redesign done on feat/paperwhite-integration (integration PR #138 pending); P8.13 host location and topic counts merged in #133 and #134.",
     "notes": [
       "P7.3 live Codex run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md). Codex onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7), and docs/GUIDE.md documents the fixed behaviour; D7 is task P8.3; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
       "P7.2 live Claude run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md, ADR-0076, PR #114); remaining coverage rows deferred by owner ruling 2026-10-06. Follow-ups: queued inputs stay bound to a retired binding after rebind; no confirm-completed resolution for committed-result/unknown-turn attempts; a session with a Disconnected binding cannot be closed; delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill; rules source.md should say option consequence is required; Claude Mod uses undocumented $.plugin.root.",
@@ -1933,9 +1933,20 @@
       ],
       "estimate_days": 2,
       "progress": {
-        "state": "queued",
-        "prs": [],
-        "note": "Held: the owner will steer the UX review and brainstorm; runs after P8.1 per owner ruling 2026-10-06."
+        "state": "done",
+        "prs": [
+          126,
+          127,
+          128,
+          129,
+          130,
+          132,
+          135,
+          136,
+          137,
+          138
+        ],
+        "note": "Delivered as the Paperwhite redesign (ADR-0086) in work packages #126-#132 on feat/paperwhite-integration; the finish (#136) adds fidelity thresholds of measured + 0.01 and native spec selectors. Integration PR to main pending."
       }
     },
     {
@@ -2255,10 +2266,16 @@
         "rtk proxy python3 scripts/regenerate-roadmap.py --check"
       ],
       "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/134"
+      },
       "progress": {
-        "state": "in_progress",
-        "prs": [],
-        "note": "PR pending; the owner's UI redesign shows where the agent runs (\"iTerm window 1\") in the session bar and \"N topics\" on session cards."
+        "state": "done",
+        "prs": [
+          133,
+          134
+        ],
+        "note": "Merged in #133 and #134; the owner's UI redesign shows where the agent runs (\"iTerm window 1\") in the session bar and \"N topics\" on session cards."
       }
     }
   ]

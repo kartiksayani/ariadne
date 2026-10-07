@@ -17,6 +17,11 @@ export function agentName(adapterId: string): string {
   return adapterId;
 }
 
+/** The terminal app of a binding's host location: "iTerm window 1" → "iTerm" (ADR-0085). Null when the host reports none. */
+export function hostApp(location: string | null | undefined): string | null {
+  return location ? location.replace(/ window \d+$/, '') : null;
+}
+
 /** Local wall-clock time, "15:04". */
 export function clock(at: number): string {
   const date = new Date(at);
@@ -75,11 +80,14 @@ export function headerText(input: HeaderInput, now: number): HeaderText {
     return { sessionText: 'Opening session…', connText: agent ? `Connecting to ${agent}…` : 'Not connected', connColor: agent ? 'var(--st-progress)' : 'var(--st-open)' };
   }
   const started = sessionWhen(facts.createdAt, now).replace(/^Today /, '');
-  const sessionText = `${facts.projectName} · started ${started}${facts.messageCount ? ` · ${facts.messageCount} messages` : ''}`;
+  const messages = facts.messageCount ? ` · ${facts.messageCount} messages` : '';
+  const sessionText = `${facts.projectName} · started ${started}${messages}`;
+  // Without a live connection the prototype keeps its default "Session started …" (Ariadne.dc.html:2133 vs 1683).
+  const unlinked = `Session started ${started}${messages}`;
   const last = facts.lastMessage;
-  if (!agent || facts.connection === 'none') return { sessionText, connText: 'Not connected', connColor: 'var(--st-open)' };
+  if (!agent || facts.connection === 'none') return { sessionText: unlinked, connText: 'Not connected', connColor: 'var(--st-open)' };
   if (facts.connection === 'reconnecting') {
-    return { sessionText, connText: `Reconnecting to ${agent}… · last synced ${last ? clock(last.createdAt) : '–'}`, connColor: 'var(--st-progress)' };
+    return { sessionText: unlinked, connText: `Reconnecting to ${agent}… · last synced ${last ? clock(last.createdAt) : '–'}`, connColor: 'var(--st-progress)' };
   }
   if (facts.connection === 'connected') {
     return { sessionText, connText: `Connected · ${agent}${facts.where ? ` in ${facts.where}` : ''}${last ? ` · last message #${last.number} at ${clock(last.createdAt)}` : ''}`,
@@ -114,10 +122,11 @@ export interface SessionTabFacts {
   readonly on: boolean;
 }
 
-/** "Today 14:02 – now", "Yesterday 16:40 – 17:25". */
+/** "Today 14:02 – now", "Yesterday 16:40 – 17:25", "Last week · Tue 15:30 – 16:45". */
 export function sessionRange(createdAt: number, endedAt: number | null, running: boolean, now: number): string {
   const start = sessionWhen(createdAt, now), day = daysBefore(createdAt, now);
-  const head = day === 1 ? `Yesterday ${clock(createdAt)}` : day > 1 ? `${start} · ${clock(createdAt)}` : start;
+  const weekday = day >= 7 && day < 14 ? `${new Date(createdAt).toLocaleDateString('en-GB', { weekday: 'short' })} ` : '';
+  const head = day === 1 ? `Yesterday ${clock(createdAt)}` : day > 1 ? `${start} · ${weekday}${clock(createdAt)}` : start;
   return `${head} – ${running || endedAt === null ? 'now' : clock(endedAt)}`;
 }
 

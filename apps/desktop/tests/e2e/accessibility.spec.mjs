@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
+import { openSessionButton } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const focus = selector => browser.execute(selector => document.querySelector(selector).focus(), selector);
@@ -24,27 +25,22 @@ export async function runAccessibilityAcceptance(configuration) {
     'Ordinary native window must reach minimum outer size 1300×760');
   const before = await readFile(configuration.demo.sessionPath);
   const catalogue = await browser.$('button[data-shell-tab="all_sessions"]'); await catalogue.waitForEnabled(); await catalogue.click();
-  const session = await browser.$(`[data-session-id="${configuration.demo.session_id}"]`);
-  try { await session.waitForDisplayed(); } catch (error) {
-    await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'accessibility-catalogue-failure.json'), { error: error.message,
-      observed: await browser.execute(() => ({ body: document.body.innerText,
-        sessions: Array.from(document.querySelectorAll('[data-session-id]')).map(element => element.dataset.sessionId),
-        tabs: Array.from(document.querySelectorAll('.shell-tabs button')).map(element => element.outerHTML) })) });
-    await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'accessibility-catalogue-failure.png')); throw error;
-  }
-  await session.waitForEnabled(); await session.click();
+  const session = await openSessionButton(configuration.demo.session_id); await session.click();
   const row = '[role="treeitem"][data-item-id="2"]';
   await (await browser.$(row)).waitForDisplayed(); await focus(row);
   await browser.keys('r');
-  const editor = '.shell-detail-scroll .owner-input textarea';
+  const editor = '.shell-detail-scroll [data-owner-input] textarea';
   await wait(() => active(editor), 'Reply shortcut did not focus ordinary native editor');
   const draft = `Native keyboard retained draft ${process.env.ARIADNE_E2E_NONCE}`;
   await (await browser.$(editor)).setValue(draft);
   await browser.keys('g');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   assert.equal(await active(editor), true, 'Editor typing must not switch workspace');
+  // Esc in the answer returns focus to the row; Esc on the row closes detail.
   await browser.keys('Escape');
-  await wait(async () => !(await browser.$('.shell-detail').isExisting()), 'Editor Escape did not close detail');
+  await wait(() => active(row), 'Editor Escape did not return focus to the item row');
+  await browser.keys('Escape');
+  await wait(async () => !(await browser.$('.shell-detail').isExisting()), 'Row Escape did not close detail');
   // Draft saves patch preferences; the navigation store re-reads them only every
   // 2 s. Let the saved file stay unchanged past one refresh so Reply is not
   // issued with a stale preferences revision.
@@ -58,8 +54,8 @@ export async function runAccessibilityAcceptance(configuration) {
   await focus(row); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-retained-editor.png'));
-  const lifecycle = await browser.$('[aria-label="Binding lifecycle"]');
-  const pauseButton = await lifecycle.$('button=Pause dispatch'); await pauseButton.waitForEnabled(); await pauseButton.click();
+  // Close session in the session bar opens the guarded review dialog.
+  const closeButton = await browser.$('.tree-session-bar').$('button*=Close session'); await closeButton.waitForEnabled(); await closeButton.click();
   await (await browser.$('[role="dialog"]')).waitForDisplayed();
   await focus('[role="dialog"] button');
   await browser.keys(['Shift', 'Tab']);
@@ -70,7 +66,7 @@ export async function runAccessibilityAcceptance(configuration) {
   await browser.keys('Escape');
   await wait(async () => !(await browser.$('[role="dialog"]').isExisting()), 'Dialog Escape did not close overlay');
   assert.equal(await (await browser.$('.shell-detail')).isExisting(), true, 'Dialog Escape must preserve selected detail');
-  assert.equal(await browser.execute(() => document.activeElement?.textContent === 'Pause dispatch'), true, 'Dialog restores opener');
+  assert.equal(await browser.execute(() => document.activeElement?.textContent === 'Close session'), true, 'Dialog restores opener');
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-dialog-return.png'));
   assert.deepEqual(await readFile(configuration.demo.sessionPath), before, 'Keyboard focus/draft/modal checks leave durable demo domain unchanged');
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'keyboard-accessibility.json'), { ordinaryApp: true, actualCoreStore: true,

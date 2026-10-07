@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import type { DesktopDiscoveryCandidate } from '../../generated/core';
 import { candidateIdentity, useDiscovery, type DiscoveryController } from '../../data/discovery';
 
@@ -14,7 +13,7 @@ export function CandidateList({ controller, root, select, selected }: { controll
   return <div className="nav-discovery">
     <p>Host facts are advisory. Loaded means daemon membership; freshness does not prove execution readiness.</p>
     {state.error && <p role="alert">{state.error}</p>}
-    <button type="button" className="ref-button ref-secondary" disabled={state.reading} onClick={() => { void controller.refresh(); }}>Refresh host sessions</button>
+    <button type="button" className="btn btn-secondary" disabled={state.reading} onClick={() => { void controller.refresh(); }}>Refresh host sessions</button>
     {!state.snapshot && <p role="status">{state.reading ? 'Reading host sessions…' : 'Waiting for host discovery…'}</p>}
     {state.snapshot && candidates.length === 0 && <p>No discovered host sessions{root ? ' for this project' : ''}. Manual entry remains available.</p>}
     {Array.from(new Set(candidates.map(candidate => candidate.cwd))).map(cwd => <section key={cwd} aria-label={`Discovered project ${cwd}`}>
@@ -26,15 +25,7 @@ export function CandidateList({ controller, root, select, selected }: { controll
       {root && candidate.compatibility === 'incompatible' && <p role="note">{/^\d+\.\d+\.\d+$/.test(candidate.host_version)
         ? 'This Claude Code version is older than Ariadne requires.'
         : 'This Claude Code version could not be read; Ariadne requires a minimum version or newer.'}</p>}
-      <button type="button" className="ref-button ref-secondary" disabled={candidate.freshness !== 'fresh' || state.error !== null || (!!root && candidate.compatibility === 'incompatible')} aria-pressed={selected === candidateIdentity(candidate)} onClick={() => select(candidate)}>{root ? 'Use host session' : 'Register this project'}</button>
+      <button type="button" className="btn btn-secondary" disabled={candidate.freshness !== 'fresh' || state.error !== null || (!!root && candidate.compatibility === 'incompatible')} aria-pressed={selected === candidateIdentity(candidate)} onClick={() => select(candidate)}>{root ? 'Use host session' : 'Register this project'}</button>
     </article>)}</section>)}
   </div>;
-}
-export function DiscoverProjects({ controller, visible, register }: { controller: DiscoveryController; visible: boolean; register: (root: string) => void }) {
-  const [expanded, setExpanded] = useState(false);
-  useEffect(() => expanded && visible ? controller.acquire() : undefined, [controller, expanded, visible]);
-  return <section className="nav-banner" aria-label="Discover host sessions" hidden={!visible}>
-    <button type="button" className="ref-button ref-secondary" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>Discover host sessions</button>
-    {expanded && visible && <CandidateList controller={controller} select={candidate => register(candidate.cwd)} />}
-  </section>;
 }

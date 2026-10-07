@@ -1,0 +1,139 @@
+// One owner submission for one item and intent: answer, reply, note, followup,
+// drop, bring or reopen. The durable draft store keeps the draft and the exact
+// operation; this hook adds the guards and wording the controls show.
+import { useEffect } from 'react';
+import type { ItemRoute } from '../../generated/core';
+import type { PresenceObservation, Session } from '../../generated/domain/models';
+import { connectionOf, reconnectingNote, type Connection } from '../shared/connection';
+import type { Immutable } from '../../data/session-store';
+import { blockedDraft, emptyDraft, ownerActions, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
+import { agentName } from '../shell/model';
+
+/** A keyboard request to open the input for an intent, optionally choosing option `optionIndex`. */
+export interface OwnerFocusRequest { intent: OwnerIntent; token: number; optionIndex?: number }
+
+/** The text and option a send puts into the draft. */
+export interface DraftChange { readonly text: string; readonly selected_option_id: string | null }
+
+/** A send held because the session's agent is not running (handoff 1ad). */
+export interface PendingSubmission {
+  readonly route: ItemRoute;
+  readonly intent: OwnerIntent;
+  /** The item's question, quoted in the dialog. */
+  readonly question: string;
+  /** The chosen option's label or the message text. */
+  readonly label: string;
+  /** The agent that is not running, e.g. "codex". */
+  readonly agent: string;
+  /** What the owner chose to send. It is saved into the draft only on Queue or Send, so Cancel keeps the draft as it was. */
+  readonly change: DraftChange;
+  /** Saves `change` into the draft and queues it for that agent; resolves true once the input is saved. */
+  readonly queue: () => Promise<boolean>;
+}
+
+export interface SubmitOptions {
+  readonly drafts: OwnerDraftStore;
+  readonly session: Immutable<Session> | null | undefined;
+  /** False while the session read is stale or failed: sending is blocked. */
+  readonly current: boolean;
+  readonly itemId: string;
+  readonly intent: OwnerIntent;
+  /** Called instead of sending when the agent is not running; without it the send queues. See ./notRunning. */
+  readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
+  /** Called after a validated input receipt. */
+  readonly onSaved?: () => void;
+  /** The host presence of the session's binding, when observed (a stale host is "Reconnecting"). */
+  readonly presence?: Immutable<PresenceObservation> | null;
+}
+
+export interface Submit {
+  readonly entry: DraftEntry | undefined;
+  /** The item changed since the draft was written; it must be reviewed first. */
+  readonly changed: boolean;
+  /** Why the draft cannot be sent now, in the handoff's words where it has them. */
+  readonly blocked: string | null;
+  /** A send or a save is in flight or must be reconciled first. */
+  readonly locked: boolean;
+  readonly connection: Connection;
+  readonly agent: string;
+  readonly preferenceUncertain: boolean;
+  readonly error: string | null;
+  select: (optionId: string | null) => void;
+  write: (text: string) => void;
+  /** Sends the option only. */
+  sendOption: (optionId: string) => void;
+  /** Sends the text only, never with an option. */
+  sendText: (text: string) => void;
+  /** Sends the draft as written (non-answer intents). */
+  send: () => void;
+  /** Replays the exact attempted operation, or resends after a definite failure. */
+  retry: () => Promise<boolean>;
+  review: () => void;
+  prepareRevised: () => void;
+  another: () => void;
+  retryPreferences: () => void;
+}
+
+const stale = 'The session is unavailable or stale. Refresh before sending.';
+
+export function useSubmit({ drafts, session, current, itemId, intent, onAgentNotRunning, onSaved, presence }: SubmitOptions): Submit {
+  const state = useOwnerDrafts(drafts);
+  const route = session ? { project_id: session.project_id, session_id: session.id } : null;
+  const entry = route ? drafts.find(route, itemId, intent) : undefined;
+  const item = session?.items[itemId];
+  const eligible = !!item && ownerActions(item).includes(intent);
+  useEffect(() => { if (!drafts.getSnapshot().ready) void drafts.load(); }, [drafts]);
+  useEffect(() => {
+    if (session && eligible && state.ready && !entry) drafts.begin(session, itemId, intent);
+  }, [drafts, session, eligible, itemId, intent, state.ready, entry]);
+  const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
+  const connection = connectionOf(binding, presence), agent = binding ? agentName(binding.adapter_id) : 'the agent';
+  const draft = entry?.draft;
+  const changed = !!draft && !!item && !!session && (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision
+    || session.active_binding_id !== draft.binding_id);
+  // An untouched draft follows a revised question; only owner content needs a deliberate review.
+  // Only a newer item moves it: the detail and Waiting stores read the same session at different
+  // moments, and a stale view re-basing the draft backwards would loop with the fresh one.
+  const newer = !!draft && !!item && (item.revision > draft.target_revision || item.question_revision > (draft.question_revision ?? 0));
+  const pristine = newer && !!entry && !entry.saving && !entry.uncertain && !entry.receipt && !draft!.text && draft!.selected_option_id === null;
+  useEffect(() => { if (pristine && session && entry) drafts.review(entry.draft.op_id, session); }, [pristine, session, entry, drafts]);
+  const guard = draft && session ? blockedDraft(draft, session) : null;
+  const blocked = !session || !draft ? null : !current ? stale
+    : session.state !== 'active' && intent === 'answer' ? 'This session is closed. Reopen it to answer.'
+      : connection === 'reconnecting' ? reconnectingNote(agent)
+        : guard === emptyDraft ? null : guard;
+  const locked = !entry || entry.saving || entry.uncertain || state.preferenceUncertain;
+  const submit = () => entry ? drafts.submit(entry.draft.op_id).then(saved => { if (saved) onSaved?.(); return saved; }) : Promise.resolve(false);
+  // The change is saved only when the input goes out: a cancelled "not running" dialog keeps the draft as typed.
+  const dispatch = (label: string, change: DraftChange) => {
+    if (!route || !entry) return;
+    const id = entry.draft.op_id;
+    const apply = () => { const saved = drafts.getSnapshot().entries[id]?.draft;
+      if (saved && (saved.text !== change.text || saved.selected_option_id !== change.selected_option_id)) drafts.edit(id, change); };
+    const queue = () => { apply(); return submit(); };
+    if (connection !== 'connected' && onAgentNotRunning) onAgentNotRunning({ route: { ...route, item_id: itemId }, intent, question: item?.question ?? '', label, agent, change, queue });
+    else void queue();
+  };
+  const ready = () => !!entry && !locked && !changed && !blocked;
+  return {
+    entry, changed, blocked, locked, connection, agent, preferenceUncertain: state.preferenceUncertain,
+    error: entry?.error?.message ?? state.error?.message ?? null,
+    select: optionId => { if (entry && !locked) drafts.edit(entry.draft.op_id, { selected_option_id: optionId }); },
+    write: text => { if (entry && !locked) drafts.edit(entry.draft.op_id, { text }); },
+    sendOption: optionId => {
+      const option = item?.options.find(value => value.id === optionId);
+      if (!entry || !option || !ready()) return;
+      dispatch(option.label, { selected_option_id: option.id, text: '' });
+    },
+    sendText: text => {
+      if (!entry || !text.trim() || !ready()) return;
+      dispatch(text, { selected_option_id: null, text });
+    },
+    send: () => { if (entry && ready() && guard !== emptyDraft) dispatch(entry.draft.text, { text: entry.draft.text, selected_option_id: entry.draft.selected_option_id }); },
+    retry: () => entry && !entry.saving && !state.preferenceUncertain && (entry.uncertain || entry.error) ? submit() : Promise.resolve(false),
+    review: () => { if (entry && session) drafts.review(entry.draft.op_id, session); },
+    prepareRevised: () => { if (entry && session) drafts.prepareRevised(entry.draft.op_id, session); },
+    another: () => { if (entry && session) drafts.another(entry.draft.op_id, session); },
+    retryPreferences: () => { void drafts.retryPreferences(); },
+  };
+}

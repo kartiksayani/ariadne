@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { MutationEnvelope } from '../../../src/generated/core';
 import { createDesktopService, CoreFailure } from '../../../src/data/service';
 import { OpenSessions } from '../../../src/data/session-store';
-import { SessionActionControllers } from '../../../src/components/bindings/actions';
-import { HistoryActions } from '../../../src/components/history-actions/HistoryActions';
+import { useSession } from '../../../src/data';
+import type { ItemRoute, SessionRef } from '../../../src/generated/core';
+import { SessionActionControllers, type SessionActions } from '../../../src/components/bindings/actions';
+import { useLifecycle } from '../../../src/ui/tree/Lifecycle';
 import { ContinueDialog } from '../../../src/components/history-actions/ContinueDialog';
 import { CopiedProvenance } from '../../../src/components/history-actions/CopiedProvenance';
 import { dispatchQuiesced, lifecycleBlockers } from '../../../src/components/history-actions/selectors';
@@ -34,6 +36,23 @@ async function setup(terminal = false) {
   return { transport, service, sessions, store, actions, targetActions, topic, reveal, props };
 }
 const dialog = () => within(screen.getByRole('dialog'));
+// The tree's session bar, topic actions and banners reduced to plain buttons over the same useLifecycle.
+function HistoryActions({ actions, revealItem, openSession }: {
+  actions: SessionActions; revealItem: (route: ItemRoute) => void; openSession: (route: SessionRef) => void;
+}) {
+  const lifecycle = useLifecycle(actions, { revealItem, openSession }), session = useSession(actions.session).snapshot?.session;
+  if (!session) return null;
+  return <section aria-label="History actions">
+    <button type="button" disabled={lifecycle.busy} onClick={lifecycle.session}>{session.state === 'closed' ? 'Reopen session' : 'Close session'}</button>
+    {Object.values(session.topics).map(topic => topic && <button key={topic.id} type="button" disabled={lifecycle.busy}
+      onClick={() => { if (topic.archived_at) lifecycle.restore(topic.id); else lifecycle.archive(topic.id); }}>{topic.archived_at ? 'Restore' : 'Archive'} {topic.name}</button>)}
+    {lifecycle.archived && <p role="status">Archived {lifecycle.archived.name}<button type="button" onClick={lifecycle.undo}>Undo</button>
+      <button type="button" onClick={lifecycle.dismiss}>Dismiss</button></p>}
+    {lifecycle.pending && <button type="button" onClick={lifecycle.reconcile}>Reconcile saved action</button>}
+    {lifecycle.error && <p role="alert">{lifecycle.error}</p>}
+    {lifecycle.dialog}
+  </section>;
+}
 
 describe('guarded history controls', () => {
   it('shows navigable active-item and pending-input blockers without archiving', async () => {
@@ -93,24 +112,50 @@ describe('guarded history controls', () => {
     const { props, topic, transport } = await setup(true), items = structuredClone(transport.source.items), messages = structuredClone(transport.source.messages);
     const binding = transport.source.bindings[transport.source.active_binding_id!]!; binding.dispatch_state = 'paused'; binding.owner_paused = true;
     await props.actions.session.refresh(); render(<HistoryActions {...props} />);
-    for (const [button, confirm] of [[`Archive ${topic.name}`, 'topic archive'], [`Restore ${topic.name}`, 'topic restore'], ['Close session', 'session close'], ['Reopen session', 'session reopen']]) {
+    // Nothing blocks a terminal topic, so Archive runs at once and Undo restores it.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
+    expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.getByRole('status').textContent).toContain(`Archived ${topic.name}`);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
+    expect(screen.queryByRole('status')).toBeNull(); expect(topic.archived_at).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Restore ${topic.name}` })); });
+    for (const [button, confirm] of [['Close session', 'session close'], ['Reopen session', 'session reopen']]) {
       fireEvent.click(screen.getByRole('button', { name: button }));
       await act(async () => { fireEvent.click(dialog().getByRole('button', { name: `Confirm ${confirm}` })); });
     }
+    expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore', 'topic_archive', 'topic_restore', 'session_close', 'session_reopen']);
     expect(transport.source.items).toEqual(items); expect(transport.source.messages).toEqual(messages);
     expect(binding.dispatch_state).toBe('paused'); expect(transport.source.state).toBe('active');
   });
   it('requires revised review after a session change and keeps uncertain requests after unmount', async () => {
-    const { props, topic, transport, store, actions } = await setup(true); const view = render(<HistoryActions {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` }));
+    const { props, topic, transport, store, actions } = await setup(true);
+    const binding = transport.source.bindings[transport.source.active_binding_id!]!; binding.dispatch_state = 'paused'; binding.owner_paused = true;
+    await store.refresh(); const view = render(<HistoryActions {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
     ++transport.source.revision; await act(async () => { await store.refresh(); });
-    expect((dialog().getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((dialog().getByRole('button', { name: 'Confirm session close' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(dialog().getByRole('button', { name: 'Review current state' })); transport.replies.push(new Error('Lost acknowledgement'));
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm topic archive' })); });
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm session close' })); });
     const request = structuredClone(transport.mutations[0]); view.unmount(); render(<HistoryActions {...props} />);
     expect(actions.getSnapshot().pending).toEqual(request); expect(transport.mutations).toHaveLength(1);
+    // The column offers the reconcile while an uncertain action holds every other change.
+    expect((screen.getByRole('button', { name: `Archive ${topic.name}` }) as HTMLButtonElement).disabled).toBe(true);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
     expect(transport.mutations).toEqual([request, request]);
+    expect(screen.queryByRole('button', { name: 'Reconcile saved action' })).toBeNull();
+  });
+  it('keeps an uncertain direct archive for an exact reconcile and reports a failed one', async () => {
+    const { props, topic, transport } = await setup(true); render(<HistoryActions {...props} />);
+    transport.replies.push(new Error('Lost acknowledgement'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
+    expect(screen.getByRole('alert').textContent).not.toBe(''); expect(screen.queryByRole('dialog')).toBeNull();
+    const request = structuredClone(transport.mutations[0]); transport.replies.push(new Error('Still lost'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
+    expect(transport.mutations).toEqual([request, request]); expect(screen.getByRole('alert').textContent).not.toBe('');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
+    expect(transport.mutations).toEqual([request, request, request]); expect(screen.queryByRole('alert')).toBeNull();
+    expect(transport.source.topics[topic.id]!.archived_at).not.toBeNull();
   });
   it('recomputes blockers after deliberately reviewing resolved canonical state', async () => {
     const { props, topic, transport, store, actions } = await setup(true); render(<HistoryActions {...props} />);
@@ -119,15 +164,14 @@ describe('guarded history controls', () => {
     if (rejected.ok) throw new Error('test rejection');
     rejected.error.details = { reason: null, binding_id: null, input_id: null, attempt_id: null,
       blocking_item_ids: [item.id], blocking_input_ids: [], dispatch_must_pause: false };
-    fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` }));
-    item.status = 'open'; ++transport.source.revision;
+    // The core knows a blocker the snapshot does not show yet: the direct archive opens the review with it.
     transport.replies.push(rejected);
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm topic archive' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
     expect(dialog().getByRole('button', { name: `Item ${item.id} · ${item.question}` })).toBeDefined();
     expect((dialog().getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(true);
     expect(actions.getSnapshot().pending).toBeNull();
     const previousError = actions.getSnapshot().error;
-    item.status = 'done'; ++transport.source.revision; await act(async () => { await store.refresh(); });
+    ++transport.source.revision; await act(async () => { await store.refresh(); });
     fireEvent.click(dialog().getByRole('button', { name: 'Review current state' }));
     expect(dialog().queryByRole('button', { name: `Item ${item.id} · ${item.question}` })).toBeNull();
     expect(dialog().queryByText('Rejected topic_not_archivable')).toBeNull();
@@ -145,18 +189,17 @@ describe('guarded history controls', () => {
     if (rejected.ok) throw new Error('test rejection');
     rejected.error.details = { reason: null, binding_id: null, input_id: null, attempt_id: null,
       blocking_item_ids: ['999'], blocking_input_ids: [], dispatch_must_pause: false };
-    fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); transport.replies.push(rejected);
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm topic archive' })); });
+    transport.replies.push(rejected);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
     expect(dialog().getByRole('button', { name: 'Item 999 · Active item' })).toBeDefined();
     fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
     const chosen = selection === 'same topic' ? topic : other;
-    fireEvent.click(screen.getByRole('button', { name: `Archive ${chosen.name}` }));
     expect(actions.getSnapshot().error).toBeInstanceOf(CoreFailure); expect(actions.getSnapshot().pending).toBeNull();
-    expect(dialog().queryByRole('button', { name: 'Item 999 · Active item' })).toBeNull();
-    expect(dialog().queryByText('Rejected topic_not_archivable')).toBeNull();
-    expect((dialog().getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(false);
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm topic archive' })); });
+    // The earlier rejection is not reused: nothing blocks locally, so the archive runs again at once.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${chosen.name}` })); });
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(transport.mutations[1].command).toMatchObject({ command: 'topic_archive', params: { topic_id: chosen.id } });
+    expect(screen.getByRole('status').textContent).toContain(`Archived ${chosen.name}`);
   });
 });
 
