@@ -8,7 +8,7 @@ export function StatusBadge({ status, label, variant = 'pill', size = 17 }: {
   readonly status: StatusKey; readonly label?: string; readonly variant?: 'pill' | 'text' | 'icon'; readonly size?: number;
 }) {
   const entry = STATUS[status], text = label || entry.label, color = statusColor(status);
-  if (variant === 'icon') return <i className={`${entry.icon} status-badge-icon`} title={text} aria-label={text} style={{ fontSize: `${size}px`, color }} />;
+  if (variant === 'icon') return <i className={`${entry.icon} status-badge-icon`} role="img" title={text} aria-label={text} style={{ fontSize: `${size}px`, color }} />;
   return <span className="status-badge" title={text} style={{ color, background: `color-mix(in srgb, ${color} 14%, transparent)` }}>
     {variant === 'pill' && <i className={entry.icon} aria-hidden="true" />}<span>{text}</span>
   </span>;
