@@ -250,6 +250,8 @@ fn actual_registered_command_names_and_request_envelopes_match_canonical_invento
             OwnerCommand::ProjectRegister { .. }
                 | OwnerCommand::BindingConnect { .. }
                 | OwnerCommand::PreferencesPatch { .. }
+                | OwnerCommand::SessionRemove { .. }
+                | OwnerCommand::ProjectRemove { .. }
         );
         let target = if let OwnerCommand::TopicContinue { params, .. } = &command {
             params.target.clone()

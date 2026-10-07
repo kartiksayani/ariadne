@@ -4,7 +4,8 @@ import type { Item, InputKind, SavedReceipt, Session } from '../../generated/dom
 import { immutable, type Immutable } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService } from '../../data/service';
 
-export type OwnerIntent = Exclude<InputKind, 'continue'>;
+// Continue and removed inputs are created by their own commands, never typed.
+export type OwnerIntent = Exclude<InputKind, 'continue' | 'removed'>;
 type Failure = CoreFailure | ServiceFailure;
 export interface DraftEntry {
   readonly draft: Immutable<OwnerDraft>;

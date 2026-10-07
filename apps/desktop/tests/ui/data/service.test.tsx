@@ -158,6 +158,31 @@ describe('canonical desktop transport', () => {
     transport.script.push(invalid);
     await expect(service.executeOwner({ session: route, command: step.request } as OwnerMutationRequest)).rejects.toBeInstanceOf(ServiceFailure);
   });
+  it('sends removals on their own commands and checks the scope and backup', async () => {
+    const { transport, service } = setup();
+    const op = '00000000-0000-4000-8000-000000000400', topic = Object.keys(demo.topics)[0];
+    const removal = { operation_id: op, session_id: demo.id, revision: 22, data: { kind: 'removal' as const,
+      item_ids: ['1.1'], topic_ids: [], input_ids: [], family: [], notice: null, backup: 'backups/pre-remove-1.json' } };
+    transport.script.push({ api_version: 1, ok: true, data: removal });
+    expect(await service.removeItem(route, { item_id: '1.1', expected_revision: 21 }, op)).toEqual(removal);
+    expect(transport.calls.at(-1)).toEqual({ name: 'item_remove', request: { session: route,
+      command: { command: 'item_remove', api_version: 1, op_id: op, params: { item_id: '1.1', expected_revision: 21 } } } });
+    transport.script.push({ api_version: 1, ok: true, data: { ...removal, data: { ...removal.data, item_ids: [], topic_ids: [topic] } } });
+    await service.removeTopic(route, { topic_id: topic, expected_revision: 1 }, op);
+    expect(transport.calls.at(-1)?.name).toBe('topic_remove');
+    const removed = { operation_id: op, scope: 'session' as const, project_id: route.project_id, session_ids: [route.session_id], backup: '/data/backups/pre-remove-1.json' };
+    transport.script.push({ api_version: 1, ok: true, data: removed });
+    const params = { project_id: route.project_id, session_id: route.session_id, expected_revision: 21 };
+    expect(await service.removeSession(params, op)).toEqual(removed);
+    expect(transport.calls.at(-1)).toMatchObject({ name: 'session_remove', request: { session: null } });
+    transport.script.push({ api_version: 1, ok: true, data: { ...removed, scope: 'project' } });
+    expect((await service.removeProject({ project_id: route.project_id }, op)).scope).toBe('project');
+    // A receipt naming a different scope or lacking its backup is never accepted.
+    transport.script.push({ api_version: 1, ok: true, data: { ...removed, scope: 'project' } },
+      { api_version: 1, ok: true, data: { ...removed, backup: '' } });
+    await expect(service.removeSession(params, op)).rejects.toEqual(new ServiceFailure('invalid_response'));
+    await expect(service.removeSession(params, op)).rejects.toEqual(new ServiceFailure('invalid_response'));
+  });
 });
 
 describe('opened session synchronization', () => {

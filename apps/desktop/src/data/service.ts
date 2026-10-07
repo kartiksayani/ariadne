@@ -1,10 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
-  CoreError, DesktopDiscoverySnapshot, ItemRoute, MutationEnvelope, MutationReceipt, OpenRoute,
-  OwnerMutationRequest, OwnerQueryRequest, PresenceChangedHint, QueryEnvelope,
-  QueryRequest, QueryResult, SessionChangedHint,
+  CoreError, DesktopDiscoverySnapshot, ItemRemoveParams, ItemRoute, MutationEnvelope, MutationReceipt, OpenRoute,
+  OwnerMutationRequest, OwnerQueryRequest, PresenceChangedHint, ProjectRemoveParams, QueryEnvelope,
+  QueryRequest, QueryResult, RemovedReceipt, SessionChangedHint, SessionRef, SessionRemoveParams,
+  TopicLifecycleParams,
 } from '../generated/core';
+import type { SavedReceipt } from '../generated/domain/models';
 
 export type QueryCommand = QueryRequest['command'];
 export type QueryData<C extends QueryCommand> = Extract<QueryResult, { kind: C }>['data'];
@@ -27,6 +29,12 @@ export interface RendererService {
   codexDefaultEndpoint?(): Promise<string | null>;
   query<C extends QueryCommand>(request: QueryCall<C>): Promise<QueryData<C>>;
   executeOwner(request: OwnerMutationRequest): Promise<MutationReceipt>;
+  // Remove is permanent in Ariadne; the 5-second undo lives in the caller, which
+  // sends only after it lapses. Keep opId for exact retries after uncertainty.
+  removeItem(route: SessionRef, params: ItemRemoveParams, opId: string): Promise<SavedReceipt>;
+  removeTopic(route: SessionRef, params: TopicLifecycleParams, opId: string): Promise<SavedReceipt>;
+  removeSession(params: SessionRemoveParams, opId: string): Promise<RemovedReceipt>;
+  removeProject(params: ProjectRemoveParams, opId: string): Promise<RemovedReceipt>;
   subscribe<E extends keyof HintPayloads>(event: E, receive: (hint: HintPayloads[E]) => void): Promise<Unsubscribe>;
 }
 
@@ -98,7 +106,29 @@ export function createDesktopService(transport: DesktopTransport = tauriTranspor
       throw new ServiceFailure('transport');
     }
   }
-  return {
+  async function removeIn(route: SessionRef, command: OwnerMutationRequest['command']): Promise<SavedReceipt> {
+    const receipt = await service.executeOwner({ session: route, command });
+    if (!('data' in receipt) || receipt.data.kind !== 'removal' || !receipt.data.backup) {
+      throw new ServiceFailure('invalid_response');
+    }
+    return receipt;
+  }
+  async function removeAll(command: OwnerMutationRequest['command'], projectId: string, sessionId?: string): Promise<RemovedReceipt> {
+    const receipt = await service.executeOwner({ session: null, command });
+    if (!('scope' in receipt) || receipt.project_id !== projectId || !receipt.backup
+        || receipt.scope !== (sessionId === undefined ? 'project' : 'session')
+        || (sessionId !== undefined && (receipt.session_ids.length !== 1 || receipt.session_ids[0] !== sessionId))) {
+      throw new ServiceFailure('invalid_response');
+    }
+    return receipt;
+  }
+  const service: RendererService = {
+    removeItem: (route, params, opId) => removeIn(route, { command: 'item_remove', api_version: 1, op_id: opId, params }),
+    removeTopic: (route, params, opId) => removeIn(route, { command: 'topic_remove', api_version: 1, op_id: opId, params }),
+    removeSession: (params, opId) => removeAll({ command: 'session_remove', api_version: 1, op_id: opId, params },
+      params.project_id, params.session_id),
+    removeProject: (params, opId) => removeAll({ command: 'project_remove', api_version: 1, op_id: opId, params },
+      params.project_id),
     async discovery() {
       let snapshot: DesktopDiscoverySnapshot;
       try {
@@ -168,6 +198,7 @@ export function createDesktopService(transport: DesktopTransport = tauriTranspor
       }
     },
   };
+  return service;
 }
 
 export function validateDiscovery(snapshot: DesktopDiscoverySnapshot): void {

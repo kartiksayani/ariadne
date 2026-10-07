@@ -463,6 +463,13 @@ macro_rules! mutations {
                     tray.refresh();
                 }
             }
+            // A removed session or project has no revision to hint; the caller
+            // reloads its lists from the receipt. Only the tray counts change.
+            if let ApplicationEnvelope::Success(SuccessEnvelope { data: MutationReceipt::Removed(_), .. }) = &envelope.0 {
+                if let Some(tray) = app.try_state::<crate::native::tray::NativeTray>() {
+                    tray.refresh();
+                }
+            }
             // OS reconciliation cannot change an already saved receipt. Read
             // current global preferences rather than reapplying captured values.
             notify_native_preferences(&request.command, &envelope, || {
@@ -491,6 +498,8 @@ mutations! {
     input_submit => InputSubmit, input_cancel => InputCancel, input_resolve => InputResolve,
     topic_archive => TopicArchive, topic_restore => TopicRestore, session_close => SessionClose,
     session_reopen => SessionReopen, topic_continue => TopicContinue, preferences_patch => PreferencesPatch,
+    item_remove => ItemRemove, topic_remove => TopicRemove,
+    session_remove => SessionRemove, project_remove => ProjectRemove,
 }
 
 #[cfg(test)]
