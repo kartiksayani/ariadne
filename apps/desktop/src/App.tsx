@@ -30,6 +30,7 @@ import { RemovalContext, RemovalQueue } from './ui/remove/queue';
 import { nextSelection, removeSubject, subtree, targetSession } from './ui/remove/model';
 import { agentName, hostApp, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
+import { connectionOf } from './ui/shared/connection';
 import type { ViewTab } from './ui/shell/Header';
 import { useWorkspaceKeys, type WorkspaceHandlers, type WorkspaceIntent } from './ui/keys';
 
@@ -59,7 +60,7 @@ function sessionFacts(state: SessionState | null, projectName: (projectId: strin
   const last = session.messages.at(-1);
   return { projectName: projectName(session.project_id), createdAt: Date.parse(session.created_at), messageCount: session.messages.length,
     agent: binding ? agentName(binding.adapter_id) : null, where: hostApp(binding?.host_location),
-    connection: !binding ? 'none' : binding.connection_state === 'connected' ? 'connected' : binding.connection_state === 'reconnecting' ? 'reconnecting' : 'not_running',
+    connection: connectionOf(binding, binding ? state.presence[binding.id] : null),
     lastMessage: last ? { number: last.number, createdAt: Date.parse(last.created_at) } : null };
 }
 const clearedFilters = (filters: { readonly archived: boolean }): SessionPreferences['filters'] =>

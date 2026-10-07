@@ -8,7 +8,7 @@ export function SessionBar({ bar, busy, onClose }: { bar: Bar; busy: boolean; on
     <i className="ph ph-terminal-window" />
     <span className="tree-session-title">{bar.title}</span>
     <span className="tree-session-meta">{bar.meta}</span>
-    <span className="tree-run" data-running={bar.running || undefined} title={bar.host ?? undefined}><span className="tree-run-dot" />{bar.running ? 'Agent running' : 'Agent not running'}</span>
+    <span className="tree-run" data-running={bar.running || undefined} data-connection={bar.connection}><span className="tree-run-dot" />{bar.running ? 'Agent running' : 'Agent not running'}</span>
     {bar.closed
       ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={onClose}
         title="Mark this session Active in Ariadne again. Dispatch stays paused."><i className="ph ph-arrow-counter-clockwise" />Reopen session</button>

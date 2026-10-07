@@ -17,10 +17,10 @@ export function RailExcerpt({ id, view, active, highlight, onHover, onPin }: {
   </button>;
 }
 
-export function TimelineExcerpt({ message, mark, label, note, last, highlighted = false }: {
-  readonly message: ExcerptView; readonly mark: Mark; readonly label: string; readonly note: string; readonly last: boolean; readonly highlighted?: boolean;
+export function TimelineExcerpt({ id, message, mark, label, note, last, highlighted = false }: {
+  readonly id?: string; readonly message: ExcerptView; readonly mark: Mark; readonly label: string; readonly note: string; readonly last: boolean; readonly highlighted?: boolean;
 }) {
-  return <div className={`excerpt-timeline excerpt-${mark}${highlighted ? ' excerpt-highlighted' : ''}`}>
+  return <div className={`excerpt-timeline excerpt-${mark}${highlighted ? ' excerpt-highlighted' : ''}`} data-message-id={id}>
     <div className="excerpt-rail"><div className="excerpt-dot" />{!last && <div className="excerpt-line" />}</div>
     <div className="excerpt-content">
       <div className="excerpt-meta">

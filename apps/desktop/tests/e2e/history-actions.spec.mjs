@@ -5,10 +5,16 @@ import { join, resolve } from 'node:path';
 import { cliRequest, admissions, snapshot } from './scripted-provider.mjs';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
 import { openSessionButton } from './session-button.mjs';
+import { folded } from './owner-reply.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
+// The detail names its item by the agent reference at its foot.
+const detailReference = async () => {
+  const code = await browser.$('.item-detail .detail-reference code');
+  return await code.isExisting() ? code.getText() : null;
+};
 // Close/Reopen sit in the tree's session bar; Archive and Continue on each topic band.
 const sessionBar = () => browser.$('.tree-session-bar');
 const topicBand = name => browser.$(`.tree-rows [role="treeitem"][aria-label="${name}"]`);
@@ -117,7 +123,7 @@ export async function runHistoryActionsAcceptance(configuration) {
   const blocker = await dialog().$('button*=Item ');
   const blockerId = (await blocker.getText()).match(/^Item ([0-9.]+)/)[1];
   await click(blocker);
-  await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(`Item ${blockerId}`), 'Guard blocker did not reveal its registered item');
+  await wait(async () => await detailReference() === blockerId, 'Guard blocker did not reveal its registered item');
   assert.deepEqual(await readFile(sourcePath), sourceBytes);
 
   const targetBytes = await readFile(targetPath), targetBefore = JSON.parse(targetBytes);
@@ -171,11 +177,11 @@ export async function runHistoryActionsAcceptance(configuration) {
   const copiedItemId = copied.item_id_map[originalItem.id];
   await openSession(finalTarget.id);
   await click(await browser.$(`.tree-item[data-item-id="${copiedItemId}"]`));
-  await click(await browser.$('[aria-label="Item history view"]').$('button*=Timeline'));
+  await (await browser.$('.item-detail [aria-label="Timeline"]')).waitForDisplayed();
   const copiedBodies = source.messages.filter(message => message.item_id === originalItem.id).map(message => message.body);
   await wait(async () => {
-    const text = await browser.$('[aria-label="Item detail"]').getText();
-    return copiedBodies.every(body => text.includes(body));
+    const text = folded(await browser.$('[aria-label="Item detail"]').getText());
+    return copiedBodies.every(body => text.includes(folded(body)));
   }, 'Copied full conversation was not readable');
   const unavailableProject = `${sourceProject}.unavailable-${randomUUID()}`;
   await rename(sourceProject, unavailableProject);
@@ -186,11 +192,11 @@ export async function runHistoryActionsAcceptance(configuration) {
     assert.ok(unavailableReason.includes(sourceProject), 'The registered source failure must retain its actual project path');
     assert.ok(unavailableReason.includes('NotFound'), 'The registered source failure must retain the actual missing-directory reason');
     await click(await browser.$('.copied-provenance').$(`button=Open copied item ${copiedItemId}`));
-    await wait(async () => (await browser.$('[aria-label="Item detail"]').getText()).includes(`Item ${copiedItemId}`), 'Copied provenance fallback did not use the local registered item');
-    await click(await browser.$('[aria-label="Item history view"]').$('button*=Timeline'));
+    await wait(async () => await detailReference() === copiedItemId, 'Copied provenance fallback did not use the local registered item');
+    await (await browser.$('.item-detail [aria-label="Timeline"]')).waitForDisplayed();
     await wait(async () => {
-      const text = await browser.$('[aria-label="Item detail"]').getText();
-      return copiedBodies.every(body => text.includes(body));
+      const text = folded(await browser.$('[aria-label="Item detail"]').getText());
+      return copiedBodies.every(body => text.includes(folded(body)));
     }, 'Original project failure lost copied full bodies');
   } finally { await rename(unavailableProject, sourceProject); }
   assert.deepEqual(await readFile(sourcePath), sourceBytes); assert.deepEqual(await snapshot(configuration), mainBefore);

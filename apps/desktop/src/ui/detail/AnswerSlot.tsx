@@ -30,7 +30,8 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
   const live = current.status === 'ready' && !current.error;
-  const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning });
+  const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
+  const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning, presence });
   const { entry } = submit;
   // Keyboard requests (a, 1–9) arrive as focus requests; a number is a deliberate choice.
   useEffect(() => {
@@ -47,10 +48,11 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
     root.current?.querySelector<HTMLElement>('[data-answer-option]:not(:disabled),textarea:not(:disabled)')?.focus();
   }, [focusRequest, entry, item, drafts, state.preferenceUncertain, onFocusRequestConsumed]);
   if (!item) return null;
-  if (!state.ready || !entry) return <div className="detail-answer-slot" role="status">Loading saved drafts…{state.error && <p role="alert">{state.error.message}</p>}</div>;
+  // data-owner-input marks every owner input of the detail (this slot and the action box) for native tests.
+  if (!state.ready || !entry) return <div className="detail-answer-slot" data-owner-input={itemId} role="status">Loading saved drafts…{state.error && <p role="alert">{state.error.message}</p>}</div>;
   const preferences = state.preferenceUncertain && <button type="button" className="btn btn-secondary" onClick={submit.retryPreferences}>Retry saving draft preferences</button>;
   // Saved: the input is queued; the stepper above follows it once the session shows it.
-  if (entry.receipt?.data.kind === 'input_submit') return <div className="detail-answer-slot">
+  if (entry.receipt?.data.kind === 'input_submit') return <div className="detail-answer-slot" data-owner-input={itemId}>
     <p role="status">Saved · Queue position #{entry.receipt.data.input_seq}</p>
     <div className="detail-actions"><button type="button" className="btn btn-secondary" disabled={state.preferenceUncertain || entry.saving || !live} onClick={submit.another}>Write another input</button></div>
     {state.error && <p className="detail-error" role="alert">{state.error.message}</p>}
@@ -60,7 +62,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   // The frozen choice of an attempted answer, else the draft's or the recommended one.
   const selected = entry.uncertain ? options.findIndex(option => option.id === draft.selected_option_id) : defaultSelection(options, draft.selected_option_id);
   const review = { label: 'Review current target', onAction: submit.review };
-  return <div ref={root} className="detail-answer-slot">
+  return <div ref={root} className="detail-answer-slot" data-owner-input={itemId}>
     <AnswerControl variant="full" options={options} selected={selected} draft={draft.text} label="Answer"
       locked={submit.locked || submit.changed || !live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}

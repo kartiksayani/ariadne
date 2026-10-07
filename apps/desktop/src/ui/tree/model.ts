@@ -12,7 +12,7 @@ import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery'
 import { agentName, dayWord, hostApp, sessionRange } from '../shell/model';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
 import { continuedLabel } from '../shared/continued';
-import { qualifiedPresence } from '../../components/bindings/presence';
+import { agentRunning, connectionOf, type Connection } from '../shared/connection';
 
 export const visual = (status: ItemStatus): StatusKey => statusKey[status];
 const CLOSED: ReadonlySet<ItemStatus> = new Set(['decided', 'done', 'dropped', 'replaced']);
@@ -93,8 +93,8 @@ export interface SessionBar {
   readonly where: string | null;
   readonly meta: string;
   readonly running: boolean;
-  /** The binding's qualified host presence, as the binding controls word it ("Host running · fresh host event"). */
-  readonly host: string | null;
+  /** The agent connection (ui/shared/connection): a stale host reads "Reconnecting", the agent still running. */
+  readonly connection: Connection;
   readonly closed: boolean;
 }
 /** "claude-code", "Today 14:02 – now · 3 topics", running or not (Ariadne.dc.html:1722). */
@@ -104,9 +104,8 @@ export function sessionBar(session: Immutable<Session> | null, summary: Immutabl
   const binding = session ? bound : summary?.active_binding ?? null;
   const created = session?.created_at ?? summary?.created_at, ended = session ? session.closed_at ?? session.updated_at : summary?.closed_at ?? summary?.updated_at ?? null;
   if (!created) return null;
-  // A qualified presence observation outranks the binding's stored connection state.
-  const host = bound ? qualifiedPresence(bound, presence ?? undefined) : null;
-  const running = !!binding && (host?.qualified ? presence!.connection_state === 'connected' : binding.connection_state === 'connected');
+  // A fresh presence observation outranks the binding's stored connection state; a stale one is "Reconnecting".
+  const connection = connectionOf(binding, bound ? presence : null), running = agentRunning(connection);
   // Before the snapshot loads, the summary's topic count stands in (archived topics excluded, like the loaded count).
   const topics = session ? topicList(session).filter(topic => topic.archived_at === null).length
     : summary ? summary.topic_count - summary.counts.archived_topics : null;
@@ -114,7 +113,7 @@ export function sessionBar(session: Immutable<Session> | null, summary: Immutabl
   const agent = binding ? agentName(binding.adapter_id) : 'No agent', location = binding?.host_location ?? null;
   return { title: location ? `${agent} · ${location}` : agent, agent, where: hostApp(location),
     meta: topics === null ? range : `${range} · ${plural(topics, 'topic')}`,
-    running, host: host?.label ?? null, closed: (session?.state ?? summary?.state) === 'closed' };
+    running, connection, closed: (session?.state ?? summary?.state) === 'closed' };
 }
 
 // ---------------------------------------------------------------- rows

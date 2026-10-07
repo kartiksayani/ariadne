@@ -82,8 +82,10 @@ describe('ordinary desktop composition', () => {
     await waitFor(() => expect(document.querySelector('.shell-context')?.textContent).toContain('Ariadne canonical demo · started'));
     expect(document.querySelector('.shell-context')?.textContent).not.toMatch(/Host unknown|heartbeat/);
     // No presence hint is emitted: opening after the host event must seed its canonical observation.
-    await waitFor(() => expect(document.querySelector('.tree-run')?.getAttribute('title')).toBe('Host running · fresh host event'));
+    // The handoff words the run state only ("Agent running"); host-freshness phrases stay out of the session bar.
+    await waitFor(() => expect(document.querySelector('.tree-run')?.getAttribute('data-connection')).toBe('connected'));
     expect(document.querySelector('.tree-run')?.textContent).toBe('Agent running');
+    expect(document.querySelector('.tree-run')?.getAttribute('title')).toBeNull();
     expect(transport.queries).toContainEqual({ session: null, request: { command: 'session_list', params: {
       project_id: route.project_id, state: null, cursor: null, limit: 100,
     } } });

@@ -24,6 +24,7 @@ import { useLifecycle } from './Lifecycle';
 import type { RemoveTarget } from '../dialogs/remove';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
+import { reconnectingNote } from '../shared/connection';
 import './tree.css';
 
 export type RowIntent = 'bring' | 'reply' | 'drop' | 'note' | 'followup' | 'reopen' | 'later';
@@ -188,7 +189,7 @@ export function TreeView(props: TreeViewProps) {
   const pickedIndex = entry?.draft.selected_option_id ? options.findIndex(option => option.id === entry.draft.selected_option_id) : -1;
   const chosen = pickedIndex >= 0 ? pickedIndex : options.findIndex(option => option.recommended);
   const blocked = session?.state !== 'active' ? 'This session is closed. Reopen it to answer.'
-    : binding?.connection_state === 'reconnecting' ? `Reconnecting to ${bar?.agent ?? 'the agent'}. Your choice is kept; sending resumes when the connection is back.` : null;
+    : bar?.connection === 'reconnecting' ? reconnectingNote(bar.agent) : null;
   const focusRow = (key: string) => { setFocusKey(key); elements.current.get(key)?.focus({ preventScroll: true }); };
   const send = (change: { selected_option_id: string | null; text: string }) => {
     if (!entry || entry.saving || blocked) return;
@@ -201,7 +202,7 @@ export function TreeView(props: TreeViewProps) {
       }
       return saved;
     }); };
-    if (item && binding?.connection_state !== 'connected' && onAgentNotRunning) {
+    if (item && bar?.connection !== 'connected' && onAgentNotRunning) {
       const label = change.selected_option_id ? item.options.find(option => option.id === change.selected_option_id)?.label ?? '' : change.text;
       onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', change, queue: submit });
     } else void submit();

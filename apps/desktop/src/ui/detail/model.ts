@@ -2,7 +2,8 @@
 // lines 324-464 and 1953-2079), built from the session snapshot the store
 // already holds. Strings are the prototype's; nothing here is invented copy.
 import type { Immutable } from '../../data/session-store';
-import type { Input, InputKind, Item, ItemOption, Message, Round, Session } from '../../generated/domain/models';
+import type { Input, InputKind, Item, ItemOption, Message, PresenceObservation, Round, Session } from '../../generated/domain/models';
+import { connectionOf, reconnectingNote } from '../shared/connection';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentName } from '../shell/model';
 import { shortLabel } from '../shared/short';
@@ -18,8 +19,6 @@ const LINKICON: Readonly<Record<string, string>> = { pr: 'ph ph-git-pull-request
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
 
 export type OpenMode = 'reply' | 'drop' | 'note' | 'followup';
-/** Which box `r` opens for an item (Ariadne.dc.html:1401). */
-export const replyMode = (status: StatusKey): OpenMode => status === 'open' ? 'reply' : status === 'progress' ? 'note' : 'followup';
 
 export interface Crumb { readonly label: string; readonly itemId: string | null }
 export interface Step { readonly label: string; readonly dotBg: string; readonly dotRing: string; readonly color: string; readonly weight: number; readonly line: boolean; readonly lineBg: string }
@@ -77,6 +76,8 @@ export interface DetailInput {
   readonly later: boolean;
   /** An owner input for this item is being saved right now. */
   readonly saving: InputKind | null;
+  /** The host presence of the session's binding, when observed. */
+  readonly presence?: Immutable<PresenceObservation> | null;
 }
 
 const ACTIVE_INPUT = new Set<Input['state']>(['queued', 'in_flight', 'needs_attention']);
@@ -149,7 +150,7 @@ export function detailPath(session: Immutable<Session>, itemId: string): Crumb[]
 }
 
 /** The detail panel for one item, or null when the item is not in the snapshot. */
-export function detailModel({ session, itemId, now, mode, later, saving }: DetailInput): DetailModel | null {
+export function detailModel({ session, itemId, now, mode, later, saving, presence = null }: DetailInput): DetailModel | null {
   const item = session.items[itemId];
   if (!item) return null;
   const items = Object.values(session.items).filter((value): value is Immutable<Item> => !!value);
@@ -161,7 +162,7 @@ export function detailModel({ session, itemId, now, mode, later, saving }: Detai
   const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const readOnly = session.state !== 'active' || !topic || topic.archived_at !== null;
-  const offline = binding?.connection_state === 'reconnecting';
+  const offline = connectionOf(binding, presence) === 'reconnecting';
   const sub = submission(session, item, saving);
   const pending = !!sub?.stage && sub.stage !== 'failed';
   const outLabel = status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
@@ -203,7 +204,7 @@ export function detailModel({ session, itemId, now, mode, later, saving }: Detai
   const answerable = status === 'waiting' && !pending;
   const recommended = item.options.findIndex(option => option.recommended);
   const blocked = session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
-    : offline ? `Reconnecting to ${agent}. Your choice is kept; sending resumes when the connection is back.` : null;
+    : offline ? reconnectingNote(agent) : null;
 
   const parent = item.parent ? session.items[item.parent] : undefined;
   const entries = new Map<number, { message: Immutable<Message>; roles: Mark[]; note: string }>();

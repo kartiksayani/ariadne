@@ -8,7 +8,7 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
-**Main: 527131b (#131: short labels). Roadmap: 56/58 done; P8.11 (remove commands) merged in #125 and P8.12 (short labels) in #131; P8.13 (host location and topic counts) is pending.** The open tasks are P8.13 and P8.3 (UX review and theme refresh, held for the owner). P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
+**Main: 527131b (#131: short labels). Roadmap: 57/58 done; P8.11 (remove commands) merged in #125 and P8.12 (short labels) in #131; P8.13 (host location and topic counts) is pending.** P8.3 is done as the Paperwhite redesign (ADR-0086): work packages #126-#132 and the finish #136 sit on `feat/paperwhite-integration`, and its integration PR to main is pending. `npm run test:design` is the fidelity gate (thresholds = measured + 0.01). Follow-ups: one Continue dialog with a target picker (the tree still uses `components/history-actions/ContinueDialog`), frame 1m (the recovery panel above the tree), and topic folds that live only in memory. P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
 No open PRs. The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
@@ -152,10 +152,11 @@ Follow-ups the run surfaced:
 
 ## Next steps
 
-1. P8.13 (in flight, above), then P8.3 UX review and theme refresh (held for the owner;
-   owner ruling 2026-10-06; see tasks.json).
-2. README screenshot is a real capture of the demo session (`docs/planning/assets/
-   screenshot-dark-tree.png`, 1600×960, dark). The capture tooling is uncommitted in
+1. P8.13 (in flight, above). P8.3 is done as the Paperwhite redesign (ADR-0086) on
+   `feat/paperwhite-integration`; its integration PR to main is pending.
+2. README screenshots are the design harness's app renders of frames 1a, 1d and 1b
+   (`docs/planning/assets/paperwhite-{tree,graph,detail}.png`, 1600×960, dark). The
+   former demo capture (`screenshot-dark-tree.png`) is removed. The capture tooling is uncommitted in
    `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,
    `apps/desktop/wdio.screenshot.conf.mjs`, `apps/desktop/tests/e2e/screenshot.spec.mjs`):
    it reuses the native e2e build, moves the window onto the larger display through

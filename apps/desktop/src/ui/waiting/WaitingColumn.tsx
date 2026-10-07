@@ -3,7 +3,8 @@
 // control, then the Sent inputs the agent has not picked up yet.
 import { useEffect, useMemo, type MouseEvent, type ReactNode } from 'react';
 import type { ItemRoute, SessionRef } from '../../generated/core';
-import { CoreFailure } from '../../data';
+import { CoreFailure, type Immutable } from '../../data';
+import type { PresenceObservation } from '../../generated/domain/models';
 import { QueueAnnouncements } from '../../components/accessibility/QueueAnnouncements';
 import { useWaiting, type WaitingStore } from '../../selectors/waiting/store';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
@@ -82,7 +83,8 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
       <div className="waiting-empty-text">{model.emptyText}</div>
     </div>}
     {model.cards.map(card => <WaitingCard key={card.id} card={card} drafts={drafts} current={current} selected={same(selected, card.route)}
-      revealItem={revealItem} onAgentNotRunning={onAgentNotRunning} onSaved={() => { void store.refresh(); }} />)}
+      revealItem={revealItem} onAgentNotRunning={onAgentNotRunning} onSaved={() => { void store.refresh(); }}
+      presence={card.session.active_binding_id ? store.sessionState(card.route)?.presence[card.session.active_binding_id] ?? null : null} />)}
     {model.sent.length > 0 && <>
       <div className="waiting-sent-label">Sent<span>· waiting for the agent to pick up</span></div>
       {model.sent.map(row => <SentRow key={row.id} row={row} open={() => { if (row.item) revealItem({ ...row.item }); else openSession({ ...row.session }); }} />)}
@@ -90,12 +92,13 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
   </WaitingFrame>;
 }
 
-function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRunning, onSaved }: {
+function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRunning, onSaved, presence }: {
   readonly card: WaitingCardModel; readonly drafts: OwnerDraftStore; readonly current: boolean; readonly selected: boolean;
   readonly revealItem: (route: ItemRoute) => void; readonly onAgentNotRunning?: (submission: PendingSubmission) => void; readonly onSaved: () => void;
+  readonly presence: Immutable<PresenceObservation> | null;
 }) {
   const { item, delivery } = card;
-  const submit = useSubmit({ drafts, session: card.session, current, itemId: item.id, intent: 'answer', onAgentNotRunning, onSaved });
+  const submit = useSubmit({ drafts, session: card.session, current, itemId: item.id, intent: 'answer', onAgentNotRunning, onSaved, presence });
   const entry = submit.entry, { another } = submit;
   // A receipt whose captured input answered an earlier round: start this round's draft.
   // The receipt of the current round stays for the detail panel's "Saved" view.

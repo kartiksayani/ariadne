@@ -69,7 +69,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const [reason, setReason] = useState('');
   const box = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
   const handled = useRef<number | null>(null);
-  const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving }) : null;
+  const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
+  const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence }) : null;
   const item = session?.items[itemId];
 
   const openBox = (next: OpenMode) => { setMode(next); setFocusBox(value => value + 1); };
@@ -158,7 +159,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       <div className="detail-hint">{model.open.hint}</div>
       {stale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
         <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked(stale)} onClick={() => submit.review(stale)}>Review current target</button></div>}
-      {text && mode && <div className="detail-box">
+      {text && mode && <div className="detail-box" data-owner-input={itemId}>
         <textarea ref={box} className="input" rows={3} aria-label={text.label} placeholder={text.placeholder} value={submit.text(mode)} disabled={submit.locked(mode)}
           onChange={event => submit.edit(mode, event.target.value)} onKeyDown={boxKey} />
         <div className="detail-box-row">
@@ -168,7 +169,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
           <span className="detail-box-hint">{text.hint}</span>
         </div>
       </div>}
-      {mode === 'drop' && <div className="detail-box">
+      {mode === 'drop' && <div className="detail-box" data-owner-input={itemId}>
         <input ref={box} className="input" aria-label="Drop reason" placeholder="Reason (optional), e.g. the metric already covers it" value={reason}
           disabled={submit.locked('drop')} onChange={event => setReason(event.target.value)} onKeyDown={boxKey} />
         <div className="detail-box-row">
@@ -238,7 +239,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     <section className="detail-section detail-timeline" aria-label="Timeline">
       {sectionLabel('Timeline')}
-      <div className="detail-timeline-list">{model.timeline.map(entry => <TimelineExcerpt key={entry.id} message={entry.message} mark={entry.mark} label={entry.label}
+      <div className="detail-timeline-list">{model.timeline.map(entry => <TimelineExcerpt key={entry.id} id={entry.id} message={entry.message} mark={entry.mark} label={entry.label}
         note={entry.note} last={entry.last} highlighted={highlightedMessageIds?.has(entry.id)} />)}</div>
     </section>
 
