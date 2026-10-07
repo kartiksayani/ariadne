@@ -18,8 +18,6 @@ const LINKICON: Readonly<Record<string, string>> = { pr: 'ph ph-git-pull-request
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
 
 export type OpenMode = 'reply' | 'drop' | 'note' | 'followup';
-/** Which box `r` opens for an item (Ariadne.dc.html:1401). */
-export const replyMode = (status: StatusKey): OpenMode => status === 'open' ? 'reply' : status === 'progress' ? 'note' : 'followup';
 
 export interface Crumb { readonly label: string; readonly itemId: string | null }
 export interface Step { readonly label: string; readonly dotBg: string; readonly dotRing: string; readonly color: string; readonly weight: number; readonly line: boolean; readonly lineBg: string }
