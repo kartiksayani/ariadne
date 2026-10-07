@@ -15,7 +15,7 @@ export interface FrameSpec {
   readonly detail?: boolean;
   readonly answering?: string;
   readonly view?: 'graph';
-  readonly openMode?: 'followup';
+  readonly openMode?: 'reply' | 'followup';
   readonly hoverMsg?: number;
   /** Topic names the frame shows folded (the review scenario folds t1-t3). */
   readonly collapseTopics?: readonly string[];
@@ -39,6 +39,7 @@ const specs: readonly FrameSpec[] = [
   { ...base, id: '1n', scenario: 'reveal', selected: '1.3.1.2', detail: true },
   { ...base, ...narrow, id: '1o', scenario: 'reconnecting', selected: '3.1', detail: true },
   { ...base, id: '1q', selected: '1.4', detail: true, rail: true },
+  { ...base, ...narrow, id: '1r', theme: 'light', selected: '1.4', detail: true, openMode: 'reply' },
   { ...base, id: '1t', scenario: 'review', selected: '4.4', detail: true, rail: true, collapseTopics: reviewFolds },
   { ...base, id: '1u', scenario: 'thread', selected: '4.1', detail: true, rail: true, collapseTopics: reviewFolds },
   { ...base, ...narrow, id: '1v', selected: '1.3.1', detail: true, openMode: 'followup' },

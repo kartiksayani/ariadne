@@ -46,23 +46,6 @@ body {
   padding: 4px 16px 0;
 }
 
-.product-app .shell-detail-scroll {
-  padding: 0;
-}
-
-.product-app .item-history {
-  flex-shrink: 0;
-  width: 100%;
-  min-width: 0;
-  height: auto;
-  border: 0;
-  overflow: visible;
-}
-
-.product-app .shell-detail-scroll .owner-input {
-  padding: 16px;
-}
-
 .product-app .message-history-rail {
   border-left: 1px solid var(--color-divider);
 }

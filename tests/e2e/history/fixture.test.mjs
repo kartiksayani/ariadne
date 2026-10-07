@@ -77,11 +77,11 @@ test('fork links and parent references cannot admit a different selected history
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
   t.after(() => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); });
   globalThis.document = dom.window.document;
-  const view = (header, question, metadata, nested) => `<aside class="item-history"><header class="history-header"><strong>Item ${header}</strong></header>
-    <h2>${question}</h2><p class="history-meta">${metadata}</p>${nested}</aside>`;
+  const view = (header, question, metadata, nested) => `<article class="item-detail"><div class="detail-head"><h2 class="detail-question">${question}</h2></div>
+    <p class="history-meta">${metadata}</p>${nested}<div class="detail-reference"><span>Agent reference</span><code>${header}</code></div></article>`;
   const views = [
-    view(parent.id, parent.question, '', `<section aria-label="Child items">Item ${child.id} · ${child.question}</section>
-      <section aria-label="Round 1"><button class="history-fork">Fork · Item ${child.id} · ${child.question}</button></section>`),
+    view(parent.id, parent.question, '', `<section aria-label="Child items"><button class="detail-kid">${child.question}</button></section>
+      <section aria-label="Back and forth"><div aria-label="Round 1"><button class="detail-fork">${child.question}</button></div></section>`),
     view(child.id, parent.question, `Source round · ${child.source_round_id}`, ''),
     view(child.id, child.question, 'Source round · wrong-round', ''),
     view(child.id, child.question, '', `<section><p class="history-meta">Source round · ${child.source_round_id}</p></section>`),
@@ -100,7 +100,7 @@ test('fork links and parent references cannot admit a different selected history
   assert.deepEqual(admitted, [false, false, false, false, true]);
   admitted.length = 0;
   views.splice(0, views.length,
-    view(child.id, child.question, `Source round · ${child.source_round_id}`, `<button>Parent · Item ${parent.id}</button><section>${parent.question}</section>`),
+    view(child.id, child.question, `Source round · ${child.source_round_id}`, `<nav aria-label="Item location"><button>${parent.question}</button></nav><section>${parent.question}</section>`),
     view(parent.id, parent.question, '', ''));
   await waitForHistoryItem(parent);
   assert.deepEqual(admitted, [false, true]);

@@ -129,7 +129,13 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     await row(spec.answering).focus();
     if (!spec.detail) await page.keyboard.press('Escape');
     await page.keyboard.press('a');
-    await expect(page.locator('.answer-control')).toBeVisible();
+    await expect(page.locator(`[data-item-id="${spec.answering}"] .answer`)).toBeVisible();
+  }
+  // open-mode opens the reply or follow-up box; r opens either (Ariadne.dc.html:1490). The frame draws it unfocused.
+  if (spec.openMode) {
+    await row(spec.selected).first().focus(); await page.keyboard.press('r');
+    await page.locator('.detail-box textarea').waitFor();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   }
   if (graphFrame(spec)) {
     await row(spec.selected).focus();
@@ -140,8 +146,8 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
 }
 
 /** Pixel diff in the browser canvas: mismatch ratio and a diff image (mismatches red over the dimmed app). */
-async function compare(page: Page, design: Buffer, app: Buffer, centre: { x: number; width: number }) {
-  return page.evaluate(async ({ design, app, tolerance, centre }) => {
+async function compare(page: Page, design: Buffer, app: Buffer, regions: readonly Region[] = []) {
+  return page.evaluate(async ({ design, app, tolerance, regions }) => {
     const load = (base64: string) => new Promise<HTMLImageElement>((done, fail) => {
       const image = new Image(); image.onload = () => done(image); image.onerror = fail; image.src = `data:image/png;base64,${base64}`;
     });
@@ -153,19 +159,23 @@ async function compare(page: Page, design: Buffer, app: Buffer, centre: { x: num
     };
     const a = pixels(left), b = pixels(right), canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const context = canvas.getContext('2d')!, out = context.createImageData(width, height);
-    let mismatched = 0, centreMismatched = 0;
-    const left0 = Math.round(centre.x), right0 = Math.round(centre.x + centre.width);
+    let mismatched = 0;
+    const inRegion = regions.map(() => 0);
     for (let index = 0; index < a.length; index += 4) {
       const differs = [0, 1, 2, 3].some(channel => Math.abs(a[index + channel] - b[index + channel]) > tolerance);
-      const x = (index / 4) % width;
-      if (differs) { mismatched++; if (x >= left0 && x < right0) centreMismatched++; out.data.set([255, 0, 64, 255], index); }
-      else out.data.set([b[index] * 0.3, b[index + 1] * 0.3, b[index + 2] * 0.3, 255], index);
+      if (differs) {
+        mismatched++;
+        const x = (index / 4) % width, y = Math.floor(index / 4 / width);
+        regions.forEach((region, at) => { if (x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height) inRegion[at]++; });
+        out.data.set([255, 0, 64, 255], index);
+      } else out.data.set([b[index] * 0.3, b[index + 1] * 0.3, b[index + 2] * 0.3, 255], index);
     }
     context.putImageData(out, 0, 0);
-    return { ratio: mismatched / (width * height), centreRatio: centreMismatched / Math.max(1, (right0 - left0) * height), width, height,
+    return { ratio: mismatched / (width * height), regions: regions.map((region, at) => inRegion[at] / Math.max(1, region.width * region.height)), width, height,
       png: canvas.toDataURL('image/png').split(',')[1] };
-  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance, centre });
+  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance, regions });
 }
+interface Region { readonly name: string; readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 
 test.describe.configure({ mode: 'parallel' });
 for (const id of designFrames) {
@@ -195,16 +205,21 @@ for (const id of designFrames) {
     });
     const design = await designPage.screenshot({ animations: 'disabled', fullPage: true,
       clip: { x: Math.round(box.x), y: Math.round(box.y), width: spec.width, height: spec.height } });
+    // Each body column's own ratio, so a view can be followed apart from the columns around it.
+    const columns = await page.evaluate(() => [...document.querySelector('.shell-body')!.children].map(child => {
+      const rect = child.getBoundingClientRect();
+      return { name: ['waiting', 'center', 'detail'].find(name => child.classList.contains(`shell-${name}`)) ?? 'rail',
+        x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
+    }));
     const canvas = await page.context().newPage();
-    // The centre column's own ratio isolates the session view from the side columns.
-    const result = await compare(canvas, design, app, shell.columns.find(column => column.name === 'center') ?? { x: 0, width: spec.width });
+    const result = await compare(canvas, design, app, columns);
     await canvas.close();
     writeFileSync(resolve(output, `${id}-design.png`), design);
     writeFileSync(resolve(output, `${id}-app.png`), app);
     writeFileSync(resolve(output, `${id}-diff.png`), Buffer.from(result.png, 'base64'));
     const threshold = (thresholds as Record<string, number>)[id] ?? 0;
-    writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ ratio: Number(result.ratio.toFixed(4)),
-      centreRatio: Number(result.centreRatio.toFixed(4)), threshold, tolerance,
+    writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ ratio: Number(result.ratio.toFixed(4)), threshold, tolerance,
+      columns: Object.fromEntries(columns.map((column, at) => [column.name, Number(result.regions[at].toFixed(4))])),
       size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }, null, 2)}\n`);
     expect(denied).toEqual([]);
     expect(result.ratio, `${id} mismatch ratio`).toBeLessThanOrEqual(threshold);

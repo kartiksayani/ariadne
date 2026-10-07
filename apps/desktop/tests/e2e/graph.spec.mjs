@@ -78,7 +78,7 @@ async function zoom(direction) {
   return sample();
 }
 async function detail(session, id) {
-  await wait(async () => await browser.execute(id => document.querySelector('.item-history h2')?.textContent === id, session.items[id].question), `Registered detail did not show the complete item ${id}`);
+  await wait(async () => await browser.execute(id => document.querySelector('.item-detail .detail-question')?.textContent === id, session.items[id].question), `Registered detail did not show the complete item ${id}`);
 }
 async function revealed(session, id) {
   await detail(session, id);

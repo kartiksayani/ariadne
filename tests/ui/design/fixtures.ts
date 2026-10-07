@@ -77,7 +77,8 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     : review ? [...data.ITEMS, ...data.REVIEW_ITEMS, ...(thread ? data.THREAD_KIDS : [])] : data.ITEMS);
   const msgs: ProtoMessage[] = blank ? [] : structuredClone(project ? [...data.EARLIER_MSGS, ...data.CHARGE_MSGS, ...data.MSGS]
     : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
-  if (thread) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
+  // The thread scenario: the backoff finding on its third round (Ariadne.dc.html:914).
+  if (thread && !blank) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
   let clock = 15 * 60 + 6;
   if (spec.state === 'clear') {
     items.filter(item => item.status === 'waiting').sort((a, b) => a.created - b.created).forEach(item => {
@@ -134,6 +135,47 @@ const counts = (sessions: readonly Session[]): SummaryCounts => {
   return value;
 };
 
+interface RoundContext {
+  readonly rounds: Record<string, Round>; readonly answers: Answer[]; readonly inputs: Record<string, Input>;
+  readonly messageIds: ReadonlyMap<number, string>; readonly messageTimes: ReadonlyMap<number, string>;
+  readonly bindingId: string; readonly topicId: string; readonly topicName: string; readonly authorOf: (number: number) => ProtoMessage['author'] | undefined;
+}
+const demoAnswerInput = demo.inputs['00000000-0000-4000-8000-000000000070'] as unknown as Input;
+
+/**
+ * One prototype round (THREAD_PATCH.rounds) as a domain round: the owner's
+ * answer is an Answer with its handled input, whose committed result carries the
+ * round's result text and forks. Returns the round id.
+ */
+function protoRound(item: ProtoItem, round: ProtoRound, context: RoundContext): string {
+  const ordinal = Object.values(context.rounds).filter(value => value.item_id === item.id).length + 1, n = Object.keys(context.rounds).length + 1;
+  const id = uuid('c', 500 + n), [opened, ...rest] = round.msgs;
+  const ids = (numbers: number[]) => numbers.flatMap(number => context.messageIds.get(number) ?? []);
+  const owner = rest.filter(number => context.authorOf(number) === 'me'), agent = rest.filter(number => context.authorOf(number) === 'agent');
+  const options = round.you?.chosen ? [{ id: `round-${ordinal}`, label: round.you.text, consequence: '', recommended: false }] : [];
+  const answered = round.you ? context.messageIds.get(owner.at(-1)!)! : null, closed = round.result ? context.messageTimes.get(round.msgs.at(-1)!)! : null;
+  const resultInputs: string[] = [];
+  if (round.you && answered) {
+    const answerId = uuid('c', 600 + n), inputId = uuid('c', 700 + n), at = context.messageTimes.get(owner.at(-1)!)!;
+    const target = { topic_id: context.topicId, item_id: item.id };
+    context.answers.push({ id: answerId, seq: context.answers.length + 1, item_id: item.id, question_revision: 1, question_snapshot: item.q, ask_snapshot: round.ask,
+      options_snapshot: options, selected_option_id: options[0]?.id ?? null, text: round.you.text, message_id: answered, input_id: inputId, supersedes_answer_id: null, created_at: at });
+    const input = structuredClone(demoAnswerInput), attempt = structuredClone(demoAnswerInput.attempts.at(-1)!);
+    context.inputs[inputId] = { ...input, id: inputId, seq: Object.keys(context.inputs).length + 1, binding_id: context.bindingId, target, message_id: answered, answer_id: answerId, created_at: at,
+      payload: { ...input.payload, text: round.you.text, selected_option_id: options[0]?.id ?? null,
+        target_snapshot: { ...input.payload.target_snapshot, topic_name: context.topicName, item_question: item.q, ask: round.ask, options },
+        context: { ...input.payload.context, message_ids: ids([opened]), item_ids: [item.id], round_id: id } },
+      attempts: [{ ...attempt, id: uuid('c', 800 + n), repair_for_attempt_id: null, purpose: 'work',
+        domain_result: { ...attempt.domain_result!, explanation: round.result ?? '', reply_message_ids: ids(agent), followup_item_ids: round.forks ?? [], committed_at: closed ?? at } }],
+      active_attempt_id: null, resolution_history: [] };
+    if (round.result) resultInputs.push(inputId);
+  }
+  context.rounds[id] = { id, item_id: item.id, ordinal, opened_message_id: context.messageIds.get(opened)!, question_snapshot: item.q, ask_snapshot: round.ask,
+    options_snapshot: options, question_revision: 1, owner_message_ids: ids(owner), agent_message_ids: ids(agent), result_input_ids: resultInputs,
+    fork_item_ids: round.forks ?? [], closed_at: closed, origin: null };
+  return id;
+}
+
 export interface DesignFixture {
   readonly spec: FrameSpec;
   /** The session tab the frame shows, or null for Projects and All sessions. */
@@ -167,43 +209,37 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         items_touched: items, binding_id: bindingId, input_id: null, attempt_id: null, host_turn_id: null, round_id: null, origin: null };
     });
     // Only the thread scenario writes rounds (THREAD_PATCH); every other item has none, as in the prototype.
-    const threadRounds = protoItems.flatMap(proto => (proto.rounds ?? []).map((round, index): Round => {
-      const ids = (author: ProtoMessage['author']) => round.msgs.filter(number => protoMessages.find(message => message.number === number)?.author === author)
-        .map(number => messageIds.get(number)!);
-      return { id: uuid('f', 1000 + protoItems.indexOf(proto) * 10 + index), item_id: proto.id, ordinal: index + 1, opened_message_id: messageIds.get(round.msgs[0])!, question_snapshot: proto.q,
-        ask_snapshot: round.ask, options_snapshot: [], question_revision: 1, owner_message_ids: ids('me'), agent_message_ids: ids('agent'), result_input_ids: [],
-        fork_item_ids: round.forks ?? [], closed_at: round.you ? messageTimes.get(round.msgs.at(-1)!)! : null, origin: null };
-    }));
+    const rounds: Record<string, Round> = {}, answers: Answer[] = [], inputs: Record<string, Input> = {};
     const items = Object.fromEntries(protoItems.map((proto): [string, Item] => {
       const siblings = protoItems.filter(item => item.parent === proto.parent && item.topic === proto.topic);
       const created = messageTimes.get(proto.created) ?? times.created, status = statusOf[proto.status];
-      // `short` is the planned backend label (P8.3 follow-up); the views read it when present.
-      const short = { short: proto.short };
-      return [proto.id, { ...short, id: proto.id, ordinal:siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
+      const roundIds = (proto.rounds ?? []).map(round => protoRound(proto, round, { rounds, answers, inputs, messageIds, messageTimes, bindingId, topicId: topicIds.get(proto.topic)!,
+        topicName: topics.find(topic => topic.id === proto.topic)!.name, authorOf: number => protoMessages.find(message => message.number === number)?.author }));
+      const waiting = status === 'waiting_on_me' ? messageTimes.get(proto.waitingSince ?? -1) ?? created : null;
+      return [proto.id, { id: proto.id, ordinal: siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
+        // The backend has no short label yet (Topic.short / Item.short); the views read it when present.
+        ...{ short: proto.short },
         type: proto.type, status, owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
         revision: 1 + proto.updated.length, question_revision: 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
         ask: proto.ask || null, note: proto.note || null,
         options: (proto.options ?? []).map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: !!option.rec })),
-        // ItemLinkTarget has no display meta; the label is the path or PR it names.
-        links: proto.links.map(link => ({ kind: link.kind, label: link.label, target: link.label })),
+        // ItemLinkTarget has no display meta yet; the label is the path or PR it names and meta rides along for the views.
+        links: proto.links.map(link => ({ kind: link.kind, label: link.label, target: link.label, ...(link.meta ? { meta: link.meta } : {}) })),
         outcome: proto.outcome || null, why: proto.why || null, replaced_by: proto.replacedBy ?? null,
         created_at: created, updated_at: messageTimes.get(proto.updated.at(-1) ?? -1) ?? created,
         created_message_id: messageIds.get(proto.created) ?? uuid('d', 0), updated_message_ids: proto.updated.flatMap(number => messageIds.get(number) ?? []),
-        status_history: [], waiting_since: status === 'waiting_on_me' ? messageTimes.get(proto.waitingSince ?? -1) ?? created : null,
-        recipient_binding_id: status === 'waiting_on_me' ? bindingId : null,
+        status_history: [], waiting_since: waiting, recipient_binding_id: status === 'waiting_on_me' ? bindingId : null,
         // A waiting question is the open round of its item; answers bind to it.
-        current_round_id: threadRounds.find(round => round.item_id === proto.id && round.closed_at === null)?.id
-          ?? (status === 'waiting_on_me' ? uuid('f', 200 + world.items.indexOf(proto)) : null), source_round_id: null, origin: null }];
+        current_round_id: roundIds.at(-1) ?? (status === 'waiting_on_me' ? uuid('f', 200 + world.items.indexOf(proto)) : null), source_round_id: null, origin: null }];
     }));
-    const threadRoundIds = new Set(threadRounds.map(round => round.id));
-    const rounds = Object.fromEntries(threadRounds.map((round): [string, Round] => [round.id, round]));
-    Object.assign(rounds, Object.fromEntries(Object.values(items).filter(item => item.current_round_id && !threadRoundIds.has(item.current_round_id)).map((item): [string, Round] => [item.current_round_id!, {
-      id: item.current_round_id!, item_id: item.id, ordinal: 1, opened_message_id: item.created_message_id, question_snapshot: item.question, ask_snapshot: item.ask,
-      options_snapshot: item.options, question_revision: item.question_revision, owner_message_ids: [], agent_message_ids: [], result_input_ids: [], fork_item_ids: [],
-      closed_at: null, origin: null }])));
-    const inputs: Record<string, Input> = {}, answers: Answer[] = [];
-    world.submissions.filter(submission => items[submission.item]).forEach((submission, index) => {
-      const item = items[submission.item]!, option = item.options[submission.choice]!, round = rounds[item.current_round_id!]!, seq = index + 1;
+    for (const item of Object.values(items)) {
+      if (!item.current_round_id || rounds[item.current_round_id]) continue;
+      rounds[item.current_round_id] = { id: item.current_round_id, item_id: item.id, ordinal: 1, opened_message_id: item.created_message_id, question_snapshot: item.question,
+        ask_snapshot: item.ask, options_snapshot: item.options, question_revision: item.question_revision, owner_message_ids: [], agent_message_ids: [], result_input_ids: [],
+        fork_item_ids: [], closed_at: null, origin: null };
+    }
+    world.submissions.filter(submission => items[submission.item]).forEach(submission => {
+      const item = items[submission.item]!, option = item.options[submission.choice]!, round = rounds[item.current_round_id!]!, seq = answers.length + 1;
       const inputId = uuid('f', 300 + seq), answerId = uuid('f', 400 + seq), attemptId = uuid('f', 500 + seq), marker = `[ARIADNE_INPUT:${inputId}:${attemptId}]`;
       const messageId = submission.message ? messageIds.get(submission.message)! : uuid('d', 900 + seq);
       const created = submission.message ? messageTimes.get(submission.message)! : at(0, '15:04');
@@ -231,7 +267,8 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
       counters: { next_root: protoItems.filter(item => item.parent === null).length + 1, next_topic_order: topics.length + 1,
         next_message: Math.max(0, ...messages.map(message => message.number)) + 1, next_input: answers.length + 1, next_answer: answers.length + 1 },
       active_binding_id: bindingId,
-      topics: Object.fromEntries(topics.map((topic, order): [string, Topic] => [topicIds.get(topic.id)!, { ...{ short: topic.short }, id: topicIds.get(topic.id)!, name: topic.name,
+      topics: Object.fromEntries(topics.map((topic, order): [string, Topic] => [topicIds.get(topic.id)!, { id: topicIds.get(topic.id)!, name: topic.name,
+        ...{ short: topic.short },
         order: order + 1, revision: 1, created_at: times.created, archived_at: topic.archived ? times.created : null, origin: null }])),
       items, messages, rounds, answers, bindings: { [bindingId]: binding }, inputs, operation_receipts: {}, continuations: {} };
   });

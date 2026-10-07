@@ -307,13 +307,13 @@
   min-width: 0;
 }
 
-.shell-detail-action {
+.shell-detail-head > .shell-detail-action {
   width: 28px;
   height: 28px;
   color: color-mix(in srgb, var(--color-text) 65%, transparent);
 }
 
-.shell-detail-action > i {
+.shell-detail-head > .shell-detail-action > i {
   font-size: 15px;
 }
 

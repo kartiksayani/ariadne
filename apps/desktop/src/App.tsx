@@ -9,8 +9,8 @@ import { OwnerDraftStore } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationTopicGraph } from './components/graph/NavigationTopicGraph';
-import type { OwnerFocusRequest } from './ui/answer/Composer';
-import { OwnerItemDetail } from './components/inputs/OwnerItemDetail';
+import type { OwnerFocusRequest } from './ui/answer/useSubmit';
+import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import { WaitingColumn } from './ui/waiting/WaitingColumn';
 import { MessageRail } from './components/rail/MessageRail';
 import { SessionActionControllers } from './components/bindings/actions';
@@ -321,9 +321,12 @@ function Workspace({ application }: { application: Application }) {
         selected={route && selectedId ?{ ...route, item_id: selectedId } : null}
         notice={routeError && <p className="waiting-notice waiting-notice-warn" role="alert">{routeError}</p>}
         openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} />}
-      detail={store && selectedId && detailOpen ? <><OwnerItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} service={application.service} store={store}
-        itemId={selectedId} onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined} routes={navigation.routes} onReveal={reveal} onClose={closeDetail} highlightedMessageIds={highlightedMessages} later={later}
-        onLater={value => route && preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} />
+      detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
+      detail={store && selectedId && detailOpen && route ? <><ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
+        onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
+        onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
+        highlightedMessageIds={highlightedMessages} later={later}
+        onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} />
         <CopiedProvenance key={`source:${key}:${selectedId}`} store={store} itemId={selectedId} revealItem={async target => {
           const result = await navigation.routes.revealItem(target); if (result) reveal(result);
         }} /></> : undefined}

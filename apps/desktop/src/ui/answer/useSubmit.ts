@@ -8,6 +8,9 @@ import type { Immutable } from '../../data/session-store';
 import { blockedDraft, emptyDraft, ownerActions, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
 import { agentName } from '../shell/model';
 
+/** A keyboard request to open the input for an intent, optionally choosing option `optionIndex`. */
+export interface OwnerFocusRequest { intent: OwnerIntent; token: number; optionIndex?: number }
+
 /** A send held because the session's agent is not running (handoff 1ad). */
 export interface PendingSubmission {
   readonly route: ItemRoute;
