@@ -3,7 +3,7 @@
 // the collapsed note, the inline answer box, the round tag, hover actions, the
 // id and the text badge.
 import type { KeyboardEvent, ReactNode } from 'react';
-import { StatusIcon, StatusText } from './StatusBadge';
+import { StatusBadge } from '../shared/StatusBadge';
 import { closed, visual, type Guide, type ItemRow as Row } from './model';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void }
@@ -30,7 +30,7 @@ function supporting(row: Row, jump: () => void): ReactNode {
   if (item.status === 'replaced' && row.replacedBy) {
     return <div className="tree-line" style={{ color: neutral(66) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
       <button type="button" className="tree-jump" onClick={event => { event.stopPropagation(); jump(); }}>{row.replacedBy.question}</button>
-      <StatusText status={visual(row.replacedBy.status)} /></div>;
+      <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div>;
   }
   if (closed(item.status) && item.outcome) {
     return <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} /><span>{item.outcome}</span></div>;
@@ -72,7 +72,7 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
       ? <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse"
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
       : <span className="tree-chevron-space" />}
-    <span className="tree-icon"><StatusIcon status={status} /></span>
+    <span className="tree-icon"><StatusBadge status={status} variant="icon" /></span>
     <div className="tree-body">
       <div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
@@ -88,7 +88,7 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
         className="tree-action" title={action.title} aria-label={action.title}
         onClick={event => { event.stopPropagation(); action.run(); }}><i className={action.icon} /></button>)}</span>}
       <span className="tree-id">{item.id}</span>
-      <StatusText status={status} label={row.badge} />
+      <StatusBadge status={status} label={row.badge} variant="text" />
     </div>
   </div>;
 }

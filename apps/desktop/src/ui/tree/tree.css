@@ -431,11 +431,6 @@
   height: 22px;
 }
 
-.tree-status-icon {
-  display: block;
-  line-height: 1;
-}
-
 .tree-body {
   flex: 1;
   min-width: 0;
@@ -624,19 +619,6 @@
   opacity: 1;
 }
 
-.tree-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px 0 7px;
-  border-radius: 6px;
-  font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-}
 
 /* ---------------------------------------------------------------- states */
 

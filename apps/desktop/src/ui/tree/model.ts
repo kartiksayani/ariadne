@@ -10,20 +10,10 @@ import { normalizeSearch, sameOwner } from '../../selectors/tree/rows';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
 import { agentName, dayWord, hostApp, sessionRange } from '../shell/model';
+import { STATUS, statusKey, type StatusKey } from '../shared/status';
 import { qualifiedPresence } from '../../components/bindings/presence';
 
-export type Visual = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
-export const visual = (status: ItemStatus): Visual => status === 'waiting_on_me' ? 'waiting' : status === 'in_progress' ? 'progress' : status;
-export const STATUS: Readonly<Record<Visual, { readonly label: string; readonly icon: string }>> = {
-  open: { label: 'Open', icon: 'ph ph-circle' },
-  waiting: { label: 'Waiting on me', icon: 'ph-fill ph-question' },
-  progress: { label: 'In progress', icon: 'ph ph-circle-half' },
-  decided: { label: 'Decided', icon: 'ph ph-check-circle' },
-  done: { label: 'Done', icon: 'ph-fill ph-check-circle' },
-  dropped: { label: 'Dropped', icon: 'ph ph-x-circle' },
-  replaced: { label: 'Replaced', icon: 'ph ph-arrow-circle-right' },
-};
-export const statusColor = (status: Visual) => `var(--st-${status})`;
+export const visual = (status: ItemStatus): StatusKey => statusKey[status];
 const CLOSED: ReadonlySet<ItemStatus> = new Set(['decided', 'done', 'dropped', 'replaced']);
 export const closed = (status: ItemStatus) => CLOSED.has(status);
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;

@@ -2,17 +2,15 @@
 // lines 324-464 and 1953-2079), built from the session snapshot the store
 // already holds. Strings are the prototype's; nothing here is invented copy.
 import type { Immutable } from '../../data/session-store';
-import type { Input, InputKind, Item, ItemOption, ItemStatus, Message, Round, Session } from '../../generated/domain/models';
+import type { Input, InputKind, Item, ItemOption, Message, Round, Session } from '../../generated/domain/models';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
-import { agentName, clock, dayWord } from '../shell/model';
+import { agentName } from '../shell/model';
 import { shortLabel } from '../shared/short';
+import { excerptView, type ExcerptView, type Mark } from '../shared/excerpt';
+import { statusKey, type StatusKey } from '../shared/status';
 import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
 
-/** The prototype's status keys; they name the `--st-*` colour tokens. */
-export type StatusKey = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
-export const statusKey: Readonly<Record<ItemStatus, StatusKey>> = {
-  open: 'open', waiting_on_me: 'waiting', in_progress: 'progress', decided: 'decided', done: 'done', dropped: 'dropped', replaced: 'replaced',
-};
+export { statusKey, type StatusKey };
 export const closedStatus: ReadonlySet<StatusKey> = new Set(['decided', 'done', 'dropped', 'replaced']);
 const TYPE: Readonly<Record<Item['type'], string>> = { question: 'Question', decision: 'Decision', finding: 'Finding', task: 'Task', explanation: 'Explanation' };
 const OUTLBL: Readonly<Partial<Record<StatusKey, string>>> = { decided: 'Decided', done: 'Done', dropped: 'Dropped', replaced: 'Replaced' };
@@ -40,9 +38,7 @@ export interface RoundView {
   readonly you: { readonly chosen: boolean; readonly text: string } | null; readonly result: string;
   readonly forks: readonly Kid[];
 }
-export interface ExcerptMessage { readonly tag: string; readonly author: 'me' | 'agent'; readonly when: string; readonly excerpt: string }
-export type Mark = 'created' | 'updated' | 'origin';
-export interface TimelineEntry { readonly id: string; readonly message: ExcerptMessage; readonly mark: Mark; readonly label: string; readonly note: string; readonly last: boolean }
+export interface TimelineEntry { readonly id: string; readonly message: ExcerptView; readonly mark: Mark; readonly label: string; readonly note: string; readonly last: boolean }
 /** The props the shared Answer Control takes in full mode (README Components, Answer Control). */
 export interface AnswerModel { readonly options: readonly Immutable<ItemOption>[]; readonly recommended: number; readonly blocked: string | null }
 
@@ -87,10 +83,6 @@ const ACTIVE_INPUT = new Set<Input['state']>(['queued', 'in_flight', 'needs_atte
 const TRACKED = new Set<InputKind>(['answer', 'bring', 'reply', 'drop', 'reopen']);
 
 export const messageTag = (message: Immutable<Message>) => `#${message.number}`;
-export function excerptMessage(message: Immutable<Message>, now: number): ExcerptMessage {
-  const at = Date.parse(message.created_at), day = dayWord(at, now);
-  return { tag: messageTag(message), author: message.author === 'owner' ? 'me' : 'agent', when: day ? `${day} ${clock(at)}` : clock(at), excerpt: message.body };
-}
 
 /** The submission whose delivery the stepper follows: one being saved, else the latest unresolved input. */
 function submission(session: Immutable<Session>, item: Immutable<Item>, saving: InputKind | null) {
@@ -231,7 +223,7 @@ export function detailModel({ session, itemId, now, mode, later, saving }: Detai
   const roleLabel = (role: Mark, me: boolean) => role === 'origin' ? 'Parent raised here' : role === 'created' ? (me ? 'You asked here' : 'Agent raised this') : (me ? 'You replied' : 'Agent updated');
   const ordered = [...entries.values()].sort((a, b) => a.message.number - b.message.number);
   const timeline = ordered.map((entry, index): TimelineEntry => ({
-    id: entry.message.id, message: excerptMessage(entry.message, now), mark: entry.roles.includes('created') ? 'created' : entry.roles[0],
+    id: entry.message.id, message: excerptView(entry.message, now), mark: entry.roles.includes('created') ? 'created' : entry.roles[0],
     label: entry.roles.map(role => roleLabel(role, entry.message.author === 'owner')).join(' · '),
     note: entry.note, last: index === ordered.length - 1 }));
 

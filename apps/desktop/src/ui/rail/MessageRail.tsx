@@ -4,12 +4,13 @@
 // until the owner scrolls up, then offers "N new messages · Jump to latest".
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RendererService } from '../../data/service';
-import type { Immutable, SessionStore } from '../../data/session-store';
-import type { Message } from '../../generated/domain/models';
+import type { SessionStore } from '../../data/session-store';
 import { loadMessages } from '../../components/history/load';
 import { useHistory } from '../../components/history/useHistory';
 import { messageItems } from '../../components/history/MessageCard';
-import { followButton, jumpText, messageExcerpt } from './model';
+import { excerptView } from '../shared/excerpt';
+import { RailExcerpt } from '../shared/MessageExcerpt';
+import { followButton, jumpText } from './model';
 import './rail.css';
 
 const load = (service: RendererService, route: Parameters<typeof loadMessages>[1], revision: number, _selection: string, signal: AbortSignal) =>
@@ -25,20 +26,6 @@ export interface MessageRailProps {
   readonly closeDisabled?: boolean;
   /** Clock for day words; tests pin it. */
   readonly now?: () => number;
-}
-
-function Excerpt({ message, active, highlight, now, onHover, onPin }: {
-  readonly message: Immutable<Message>; readonly active: boolean; readonly highlight: boolean; readonly now: number;
-  readonly onHover: (on: boolean) => void; readonly onPin: () => void;
-}) {
-  const view = messageExcerpt(message, now);
-  return <button type="button" className={`pw-excerpt${active ? ' pw-excerpt-active' : highlight ? ' pw-excerpt-highlight' : ''}`} aria-pressed={active}
-    data-message-id={message.id} onMouseEnter={() => onHover(true)} onMouseLeave={() => onHover(false)} onClick={onPin}>
-    <span className="pw-excerpt-bar" aria-hidden="true" />
-    <span className="pw-excerpt-meta"><span className="pw-excerpt-number">{view.number}</span><i className={view.icon} aria-hidden="true" />
-      <span className="pw-excerpt-who">{view.who}</span><span className="pw-excerpt-when">{view.when}</span></span>
-    <span className="pw-excerpt-text">{message.body}</span>
-  </button>;
 }
 
 export function MessageRail({ service, store, selectedItemId = null, hoveredItemId = null, onHighlight, onClose, closeDisabled = false, now = Date.now }: MessageRailProps) {
@@ -104,7 +91,7 @@ export function MessageRail({ service, store, selectedItemId = null, hoveredItem
       {history.session.status !== 'ready' && history.session.status !== 'loading' && <div className="pw-rail-note" role="status">
         {history.session.error?.message ?? 'The session is out of date.'}</div>}
       {(!messages || messages.length === 0) && <div className="pw-rail-note">{loading ? 'Loading messages…' : 'No messages yet.'}</div>}
-      {messages?.map(message => <Excerpt key={message.id} message={message} now={at} active={message.id === hovered || message.id === pinned}
+      {messages?.map(message => <RailExcerpt key={message.id} id={message.id} view={excerptView(message, at)} active={message.id === hovered || message.id === pinned}
         highlight={focus !== null && messageItems(message).includes(focus)}
         onHover={on => setHovered(previous => on ? message.id : previous === message.id ? null : previous)}
         onPin={() => setPinned(previous => previous === message.id ? null : message.id)} />)}
