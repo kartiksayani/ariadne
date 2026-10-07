@@ -44,6 +44,11 @@ terminal.
 
 - The label is display text and grants nothing. A stale label stays until the next
   connect or reconnect; re-announcements (heartbeats) do not rewrite the store.
+- A reconnect whose announcement carries no `host_location` clears the stored label
+  to `None` rather than keeping the old one.
+- A newer helper announcing to an older app is rejected, because `SessionAnnouncement`
+  is `deny_unknown_fields`; helper and app versions must match, as the bundle already
+  requires.
 - Inside a terminal multiplexer the label is whatever `TERM_PROGRAM` the agent
   process sees, shown verbatim.
 - Codex sessions show no location until a Codex-side source exists.
