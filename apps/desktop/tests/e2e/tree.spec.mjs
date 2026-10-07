@@ -143,7 +143,7 @@ async function roving() {
   assert.equal(await browser.execute(() => [...document.querySelectorAll('.sentence-rows [role="treeitem"]')].filter(element => element.tabIndex === 0).length), 1);
 }
 async function catalogue() {
-  const button = await browser.$('button[title="All sessions"]'); await button.waitForDisplayed(); await button.waitForEnabled(); await button.click();
+  const button = await browser.$('button[data-shell-tab="all_sessions"]'); await button.waitForDisplayed(); await button.waitForEnabled(); await button.click();
   await wait(async () => await button.getAttribute('aria-current') === 'page' && await button.isEnabled(), 'Tree catalogue navigation did not finish its actual preference write');
 }
 async function open(tree) {
@@ -422,7 +422,7 @@ async function treeAcceptance(configuration) {
   });
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-window.json'), JSON.stringify({ viewport, nativeWindow }, null, 2));
   assert.equal(nativeWindow.ok, true, nativeWindow.message);
-  assert.ok(nativeWindow.logical.width >= 1000 && nativeWindow.logical.height >= 700,
+  assert.ok(nativeWindow.logical.width >= 1300 && nativeWindow.logical.height >= 760,
     'Native tree acceptance must use the supported minimum outer-window size');
   const original = await snapshot(configuration), journal = await admissions(configuration), demoBytes = await readFile(configuration.demo.sessionPath);
   const { tree, publication, initialSession } = await seedTree(configuration);

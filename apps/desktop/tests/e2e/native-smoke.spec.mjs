@@ -34,7 +34,7 @@ async function navigationRejection() {
 async function openSession(sessionId, itemId) {
   const before = await readJson(join(process.env.ARIADNE_HOME, 'ui.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   try {
-    const catalogue = await browser.$('button[title="All sessions"]');
+    const catalogue = await browser.$('button[data-shell-tab="all_sessions"]');
     await catalogue.waitForDisplayed(); await catalogue.waitForEnabled();
     await catalogue.click();
     const selectedCatalogue = async () => {
@@ -71,7 +71,7 @@ async function openSession(sessionId, itemId) {
     await json(join(evidence, `navigation-failure-${sessionId}.json`), { before,
       after: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
       frame: await browser.execute(() => ({ origin: window.performance.timeOrigin, ready: document.readyState,
-        body: document.body.textContent, tabs: Array.from(document.querySelectorAll('.ref-tabs button')).map(element => element.outerHTML) })) });
+        body: document.body.textContent, tabs: Array.from(document.querySelectorAll('.shell-tabs button')).map(element => element.outerHTML) })) });
     await browser.saveScreenshot(join(evidence, `navigation-failure-${sessionId}.png`)); throw error;
   }
 }

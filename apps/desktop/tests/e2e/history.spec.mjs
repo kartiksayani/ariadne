@@ -72,7 +72,7 @@ async function apply(history, operations, revisions = {}, frozen = null) {
   return { request: value, receipt: result.value };
 }
 async function open(history, itemId = '1') {
-  const catalogue = await browser.$('button=All sessions'); await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
+  const catalogue = await browser.$('button[data-shell-tab="all_sessions"]'); await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
   const selectedCatalogue = async () => (await preferencesSnapshot()).global.selected_navigation.kind === 'all_sessions'
     && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
   let rejectedNavigation = false;

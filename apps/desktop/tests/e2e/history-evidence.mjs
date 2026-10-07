@@ -19,7 +19,7 @@ export function historyFailureFacts() {
     navigation: { banners: all('.nav-banner').map(node => ({ role: node.getAttribute('role'), text: text(node) })),
       alerts: all('[role="alert"]').map(text), statuses: all('[role="status"]').map(text),
       stateButtons: all('button').filter(button => stateButtons.test(text(button) ?? '')).map(control),
-      disabledHeaderButtons: all('.ref-header button').filter(button => button.disabled).map(button => button.title || text(button)) },
+      disabledHeaderButtons: all('.shell-header button').filter(button => button.disabled).map(button => button.title || text(button)) },
     search: { present: Boolean(search), disabled: search ? search.disabled : null, value: search?.value ?? null,
       statusLabel: all('[role="status"]').map(text).find(label => label?.startsWith('Search preview')) ?? null },
     selected: { treeItemIds: all('[data-item-id][aria-selected="true"], [data-item-id][aria-current]').map(node => node.getAttribute('data-item-id')),

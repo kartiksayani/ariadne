@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { OwnerDraftStore, blockedDraft, ownerActions, useOwnerDrafts, type OwnerIntent } from '../../state/drafts/store';
+import { useWorkspaceKeys } from '../../ui/keys';
 import '../../styles/reference.css';
 import './inputs.css';
 
@@ -49,6 +50,20 @@ export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'an
     consume();
     control?.focus();
   }, [focusRequest, entry, state.preferenceUncertain, activeIntent, item, drafts, onFocusRequestConsumed]);
+  // The answer box's share of the workspace keymap. The form below fills in
+  // what ⌘↵ and 1–9 act on; Esc closes the box before detail closes.
+  const form = useRef<{ readonly submit: () => void; readonly choose: (index: number) => boolean } | null>(null);
+  const key = useWorkspaceKeys<HTMLDivElement>({
+    escape: (_intent, event) => { event.stopPropagation(); onEscape?.(); return false; },
+    send: (_intent, event) => {
+      if (!event.currentTarget.contains(document.activeElement)) return false;
+      event.stopPropagation(); form.current?.submit(); return true;
+    },
+    choose: (intent, event) => {
+      if (intent.kind !== 'choose' || !form.current?.choose(intent.index)) return false;
+      event.stopPropagation(); return true;
+    },
+  }, { scope: 'editor' });
   if (!session || !item) return <p role="status">The current item is unavailable. Refresh its registered session.</p>;
   if (!state.ready || !entry) return <div role="status">Loading saved drafts…{state.error && <p role="alert">{state.error.message}</p>}</div>;
   const retained = Object.values(state.entries).filter(value => value.uncertain && !value.receipt && value.draft.intent !== activeIntent
@@ -65,17 +80,11 @@ export function OwnerInput({ drafts, session: store, itemId, initialIntent = 'an
   const locked = entry.saving || entry.uncertain || state.preferenceUncertain;
   const optionsDisabled = locked || changed || current.status !== 'ready' || !!current.error;
   const submit = () => { if (!entry.saving && !state.preferenceUncertain && (!blocked || entry.uncertain)) void drafts.submit(draft.op_id); };
-  const key = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') { event.stopPropagation(); onEscape?.(); }
-    if (event.key === 'Enter' && event.metaKey && event.currentTarget.contains(document.activeElement)) {
-      event.preventDefault(); event.stopPropagation(); submit(); return;
-    }
-    if (event.metaKey || event.ctrlKey || event.altKey || locked || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) return;
-    const index = Number(event.key) - 1;
-    if (activeIntent === 'answer' && !optionsDisabled && /^[1-9]$/.test(event.key) && item.options[index]) {
-      event.preventDefault(); event.stopPropagation(); drafts.edit(draft.op_id, { selected_option_id: item.options[index].id });
-    }
-  };
+  form.current = { submit, choose: index => {
+    const choice = item.options[index];
+    if (locked || activeIntent !== 'answer' || optionsDisabled || !choice) return false;
+    drafts.edit(draft.op_id, { selected_option_id: choice.id }); return true;
+  } };
   const changeLater = async () => { try { setLaterError(!await onLater?.(!later)); } catch { setLaterError(true); } };
   return <div ref={editor} className="ariadne-reference owner-input ref-answer" onKeyDown={key} aria-label={`Owner input for #${item.id}`}>
     {retainedControls}

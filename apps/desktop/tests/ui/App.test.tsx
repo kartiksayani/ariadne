@@ -34,7 +34,7 @@ async function openSession(id = route.session_id, pending = false) {
   if (!pending) await waitFor(() => expect(screen.getByRole('button', { name: 'Pause dispatch' }).hasAttribute('disabled')).toBe(false));
 }
 async function allSessions() {
-  const button = screen.getByRole('button', { name: 'All sessions' });
+  const button = screen.getByRole('button', { name: /^All sessions/ });
   await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false)); fireEvent.click(button);
   await screen.findByRole('heading', { name: 'All sessions' });
 }
@@ -82,9 +82,10 @@ describe('ordinary desktop composition', () => {
   });
   it('shows seeded presence to a late reader, shares tree/graph selection and opens complete detail and the message rail', async () => {
     const { transport } = setup(); await openSession();
-    expect(document.querySelector('.ref-header-context')?.textContent).toContain('Payments review');
+    await waitFor(() => expect(document.querySelector('.shell-context')?.textContent).toContain('Ariadne canonical demo · started'));
+    expect(document.querySelector('.shell-context')?.textContent).not.toMatch(/Host unknown|heartbeat/);
     // No presence hint is emitted: opening after the host event must seed its canonical observation.
-    await waitFor(() => expect(document.querySelector('.ref-header-context')?.textContent).toContain('Host running · fresh host event'));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Binding lifecycle' }).textContent).toContain('Host running · fresh host event'));
     expect(transport.queries).toContainEqual({ session: null, request: { command: 'session_list', params: {
       project_id: route.project_id, state: null, cursor: null, limit: 100,
     } } });
@@ -273,6 +274,20 @@ describe('ordinary desktop composition', () => {
     expect(await screen.findByText(/No sentences match these filters/)).toBeTruthy();
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
+  it('clears filters with Esc only when no detail is open, keeping the archive view', async () => {
+    const { transport } = setup();
+    transport.preferences.sessions[0].filters.owners = [{ kind: 'me' }];
+    await openSession();
+    const tree = screen.getByRole('tree', { name: 'Sentences' });
+    fireEvent.click(tree.querySelector('[data-item-id="1"]')!); await waitFor(() => expect(document.querySelector('.shell-detail')).not.toBeNull());
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    const count = mutations(transport, 'preferences_patch').length;
+    fireEvent.keyDown(tree.querySelector('[data-item-id="1"]')!, { key: 'Escape' });
+    expect(document.querySelector('.shell-detail')).toBeNull();
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(count);
+    fireEvent.keyDown(tree.querySelector('[data-item-id="1"]')!, { key: 'Escape' });
+    await waitFor(() => expect(transport.preferences.sessions[0].filters).toMatchObject({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: false }));
+  });
   it.each(['confirmed', 'reconciled'])('retains an unsubmitted tree search until the shared preference write is %s', async completion => {
     const { transport } = setup();
     transport.preferences.sessions[0].filters.owners = [{ kind: 'me' }];
@@ -290,7 +305,7 @@ describe('ordinary desktop composition', () => {
     const writes = mutations(transport, 'preferences_patch').length;
     const search = screen.getByLabelText('Search sentences') as HTMLInputElement;
     fireEvent.change(search, { target: { value: 'missing pending needle' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Theme: system' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(entered).toBe(true));
     expect(search.disabled).toBe(true);
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
@@ -518,7 +533,7 @@ describe('ordinary desktop composition', () => {
       if (hold) completed = true;
       return response;
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Theme: system' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(writing).toBe(true));
     await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Item 1\.1/ })); });
     expect(screen.getByLabelText('Search sentences').hasAttribute('disabled')).toBe(true);
@@ -689,12 +704,12 @@ describe('ordinary desktop composition', () => {
   it('writes theme through navigation with exact explicit reconciliation while retaining unrelated global and draft preferences', async () => {
     const { transport } = setup(); await screen.findByRole('heading', { name: 'All sessions' });
     const before = structuredClone(transport.preferences); transport.failNext = 'preferences_patch';
-    fireEvent.click(screen.getByRole('button', { name: 'Theme: system' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await screen.findByRole('button', { name: 'Reconcile operation' });
     const request = structuredClone(mutations(transport, 'preferences_patch')[0]);
     expect(request.command).toMatchObject({ params: { entries: [{ kind: 'set_global', preferences: { ...before.global, theme: 'light' } }] } });
     fireEvent.click(screen.getByRole('button', { name: 'Reconcile operation' }));
-    await screen.findByRole('button', { name: 'Theme: light' });
+    await screen.findByRole('button', { name: 'Switch to dark' });
     expect(mutations(transport, 'preferences_patch')[1]).toEqual(request);
     expect(transport.preferences.drafts).toEqual(before.drafts);
     expect(transport.preferences.global.selected_navigation).toEqual(before.global.selected_navigation);
