@@ -9,7 +9,7 @@ export function replyControlState(itemId) {
   const send = [...(form?.querySelectorAll('button') ?? [])].find(button => button.textContent.trim() === 'Send reply');
   return { formPresent: Boolean(form), editorPresent: Boolean(editor), value: editor?.value ?? null,
     editorEnabled: Boolean(editor && !editor.disabled), sendPresent: Boolean(send), sendEnabled: Boolean(send && !send.disabled),
-    alerts: [...(form?.querySelectorAll('[role="alert"], .ref-blocked, [role="status"]') ?? [])].map(node => node.textContent.trim()) };
+    alerts: [...(form?.querySelectorAll('[role="alert"], .answer-blocked, [role="status"]') ?? [])].map(node => node.textContent.trim()) };
 }
 
 export async function sendDetailReply(configuration, text) {

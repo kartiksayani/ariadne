@@ -147,9 +147,10 @@ async function answer(history, ordinal, text) {
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
   const editor = await browser.$('[aria-label="Owner input for #1"] textarea'); await editor.waitForEnabled();
   await reviewCurrentTarget();
+  // Odd rounds send the chosen option alone; even rounds send a reply in the owner's own words.
   if (ordinal % 2) { const choice = await browser.$('.owner-input').$(`button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.scrollIntoView(); await choice.click(); }
-  await editor.scrollIntoView(); await editor.setValue(text);
-  const send = await browser.$('.owner-input .ref-send-row button'); await failureEvidence(`owner-input-send-${ordinal}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
+  else { await editor.scrollIntoView(); await editor.setValue(text); }
+  const send = await browser.$(ordinal % 2 ? '.owner-input .answer-send' : '.owner-input .answer-reply-send'); await failureEvidence(`owner-input-send-${ordinal}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
   await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal,
     'A genuine native round answer did not persist and reach its isolated host');
 }
@@ -370,7 +371,7 @@ export async function runHistoryAcceptance(configuration) {
       publication.push(await apply(history, [historyAsk(history.bindingId, ordinal)], { '1': saved.items['1'].revision }));
     }
     await wait(async () => (await detail().getText()).includes(`History round ${ordinal}: choose and explain.`), 'Real next-round ask did not reach native detail');
-    const text = `Native history answer ${ordinal} ${process.env.ARIADNE_E2E_NONCE}\nFull owner explanation for round ${ordinal}.`;
+    const text = ordinal % 2 ? '' : `Native history answer ${ordinal} ${process.env.ARIADNE_E2E_NONCE}\nFull owner explanation for round ${ordinal}.`;
     ownerTexts.push(text); await answer(history, ordinal, text);
     let saved = await snapshot(history), input = inputs(saved)[ordinal - 1];
     const roundId = input.payload.context.round_id; assert.ok(roundId); roundIds.push(roundId);
@@ -420,7 +421,7 @@ export async function runHistoryAcceptance(configuration) {
     reviewedTarget[intent] = await reviewCurrentTarget();
     const text = `Native ${intent} after closed history\nThe owner's deliberate request leaves the status unchanged.`;
     await editor.scrollIntoView(); await editor.setValue(text);
-    const send = await browser.$('.owner-input .ref-send-row button'); await failureEvidence(`owner-input-send-${intent}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
+    const send = await browser.$('.owner-input .answer-send-row button'); await failureEvidence(`owner-input-send-${intent}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
     await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal, 'Closed-item deliberate owner intent did not reach its isolated host');
     saved = await snapshot(history); assert.equal(saved.items['1'].status, 'done'); assert.equal(inputs(saved)[ordinal - 1].kind, intent);
     const extra = intent === 'reopen' ? [{ op: 'item.status', item: { id: '1' }, status: 'open', outcome: null, why: null, reason: 'The owner explicitly requested native reopening.' }] : [];

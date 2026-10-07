@@ -10,8 +10,8 @@ import type { OwnerDraft, OwnerMutationRequest, PreferencesSnapshot, SessionPref
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { OpenSessions } from '../../../src/data/session-store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
-import { OwnerInput } from '../../../src/components/inputs/OwnerInput';
-import { OwnerWaitingPanel } from '../../../src/components/inputs/OwnerWaitingPanel';
+import { Composer } from '../../../src/ui/answer/Composer';
+import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
 import { OwnerItemDetail } from '../../../src/components/inputs/OwnerItemDetail';
 import { SentenceTree } from '../../../src/components/tree/SentenceTree';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
@@ -90,7 +90,7 @@ async function setup(saved: OwnerDraft[] = []) {
   return { session, prefs, calls, writes, drafts, store, service, sessions, outcome: (value: typeof outcome) => { outcome = value; },
     preferenceOutcome: (value: typeof preferenceOutcome) => { preferenceOutcome = value; }, unavailable: () => { readError = true; }, conflictDeletes: (count: number) => { deleteConflicts = count; },
     gate: () => { let resolve!: () => void; submitGate = new Promise<void>(done => { resolve = done; }); return resolve; },
-    render: (itemId = '2', props: Partial<Parameters<typeof OwnerInput>[0]> = {}) => render(<OwnerInput drafts={drafts} session={store} itemId={itemId} {...props} />),
+    render: (itemId = '2', props: Partial<Parameters<typeof Composer>[0]> = {}) => render(<Composer drafts={drafts} session={store} itemId={itemId} {...props} />),
     restart: async () => { const restored = new OwnerDraftStore(service, () => uuid(++counter)); await restored.load(); return restored; } };
 }
 const editor = () => screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -145,18 +145,20 @@ describe('owner input component and durable draft controller', () => {
     expect(document.activeElement).toBe(textarea);
     expect((textarea as HTMLTextAreaElement).value).toBe('Retain this draft'); expect(value.calls).toHaveLength(0);
   });
-  it('has no default choice; number selects only; focused Cmd+Enter and duplicate clicks submit once after durable draft save', async () => {
+  it('pre-selects the recommendation; numbers select only; focused Cmd+Enter and duplicate clicks send the reply once after durable draft save', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox');
-    expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(true);
-    const choice = screen.getByRole('button', { name: new RegExp(value.session.items['2']!.options[0].label) });
-    expect(choice.getAttribute('aria-pressed')).toBe('false'); choice.focus(); fireEvent.keyDown(choice, { key: '1' });
+    expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(true);
+    const [first, second] = screen.getAllByRole('button').filter(button => button.hasAttribute('data-answer-option'));
+    expect(first!.getAttribute('aria-pressed')).toBe('true'); expect(screen.getByRole('button', { name: 'Send “Keep the design”' })).toBeTruthy();
+    second!.focus(); fireEvent.keyDown(second!, { key: '2' });
+    await waitFor(() => expect(second!.getAttribute('aria-pressed')).toBe('true'));
     expect(value.calls).toHaveLength(0);
     fireEvent.change(editor(), { target: { value: ' Exact owner bytes \n' } });
     const finish = value.gate(); editor().focus(); fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
-    const send = screen.getByRole('button', { name: 'Saving…' }); fireEvent.click(send); fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
+    const send = screen.getByRole('button', { name: 'Send reply' }); fireEvent.click(send); fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
     await waitFor(() => expect(value.calls).toHaveLength(1));
     expect(value.prefs.drafts[0]?.submission_attempted).toBe(true);
-    expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params.text).toBe(' Exact owner bytes \n');
+    expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params).toMatchObject({ text: ' Exact owner bytes \n', selected_option_id: null });
     await act(async () => { finish(); });
     await screen.findByText('Saved · Queue position #4'); expect(value.calls).toHaveLength(1); expect(value.prefs.drafts).toEqual([]);
     expect(value.session.items['2']!.status).toBe('waiting_on_me');
@@ -165,11 +167,11 @@ describe('owner input component and durable draft controller', () => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox');
     fireEvent.change(editor(), { target: { value: 'Keep this draft' } });
     await waitFor(() => expect(value.prefs.drafts[0]?.text).toBe('Keep this draft'));
-    view.rerender(<OwnerInput drafts={value.drafts} session={value.store} itemId="4" />); await screen.findByRole('textbox');
+    view.rerender(<Composer drafts={value.drafts} session={value.store} itemId="4" />); await screen.findByRole('textbox');
     value.prefs.global.theme = 'dark'; value.prefs.revision++;
-    view.rerender(<OwnerInput drafts={value.drafts} session={value.store} itemId="2" />); expect(editor().value).toBe('Keep this draft');
+    view.rerender(<Composer drafts={value.drafts} session={value.store} itemId="2" />); expect(editor().value).toBe('Keep this draft');
     await act(async () => { await value.store.refresh(); }); expect(editor().value).toBe('Keep this draft');
-    const restored = await value.restart(); view.rerender(<OwnerInput drafts={restored} session={value.store} itemId="2" />);
+    const restored = await value.restart(); view.rerender(<Composer drafts={restored} session={value.store} itemId="2" />);
     expect(editor().value).toBe('Keep this draft'); expect(editor().disabled).toBe(false); expect(value.calls).toHaveLength(0);
   });
   it('persists the latest logical edits queued behind an uncertain preference operation after explicit reconciliation', async () => {
@@ -191,11 +193,11 @@ describe('owner input component and durable draft controller', () => {
   it.each(['in_progress', 'replaced'] as const)('keeps a restored attempted answer reachable and exactly retryable after the item becomes %s', async status => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome('uncertain');
     fireEvent.change(editor(), { target: { value: 'Frozen original answer' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send answer' })); await screen.findByRole('button', { name: 'Retry saved input' });
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); await screen.findByRole('button', { name: 'Retry saved input' });
     const original = structuredClone(value.calls[0]), restored = await value.restart();
     value.session.items['2']!.status = status; value.session.items['2']!.revision++; value.session.revision++;
     await act(async () => { await value.store.refresh(); });
-    view.rerender(<OwnerInput drafts={restored} session={value.store} itemId="2" />);
+    view.rerender(<Composer drafts={restored} session={value.store} itemId="2" />);
     expect(screen.getByRole('button', { name: 'Retry saved input' }).hasAttribute('disabled')).toBe(false);
     expect(editor().value).toBe('Frozen original answer'); expect(editor().disabled).toBe(true); expect(value.calls).toHaveLength(1);
     value.outcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Retry saved input' }));
@@ -204,21 +206,21 @@ describe('owner input component and durable draft controller', () => {
   it('lets a different preferred form reveal a retained attempted answer without submitting either intent', async () => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome('uncertain');
     fireEvent.change(editor(), { target: { value: 'Retained answer while viewing reply' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send answer' })); await screen.findByRole('button', { name: 'Retry saved input' });
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); await screen.findByRole('button', { name: 'Retry saved input' });
     const restored = await value.restart(); value.session.items['2']!.status = 'in_progress'; value.session.items['2']!.revision++; value.session.revision++;
     await act(async () => { await value.store.refresh(); });
-    view.rerender(<OwnerInput key="reply-form" drafts={restored} session={value.store} itemId="2" initialIntent="reply" />);
+    view.rerender(<Composer key="reply-form" drafts={restored} session={value.store} itemId="2" initialIntent="reply" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Review saved answer input' }));
     expect(screen.getByRole('button', { name: 'Retry saved input' })).toBeTruthy();
     expect(editor().value).toBe('Retained answer while viewing reply'); expect(editor().disabled).toBe(true); expect(value.calls).toHaveLength(1);
   });
   it.each(['uncertain', 'malformed'] as const)('freezes exact op/body after %s receipt and explicitly replays it across restart and a changed target', async outcome => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome(outcome);
-    fireEvent.change(editor(), { target: { value: 'Exact untrimmed bytes  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    fireEvent.change(editor(), { target: { value: 'Exact untrimmed bytes  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
     await screen.findByRole('button', { name: 'Retry saved input' }); expect(value.prefs.drafts[0]?.submission_attempted).toBe(true);
     const original = structuredClone(value.calls[0]); expect(editor().disabled).toBe(true);
     const restored = await value.restart(); value.session.items['2']!.question_revision++; value.session.items['2']!.revision++; value.session.revision++;
-    await act(async () => { await value.store.refresh(); }); view.rerender(<OwnerInput drafts={restored} session={value.store} itemId="2" />);
+    await act(async () => { await value.store.refresh(); }); view.rerender(<Composer drafts={restored} session={value.store} itemId="2" />);
     expect(value.calls).toHaveLength(1); value.outcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Retry saved input' }));
     await screen.findByText('Saved · Queue position #4'); expect(value.calls[1]).toEqual(original); expect(value.prefs.drafts).toEqual([]);
   });
@@ -228,9 +230,9 @@ describe('owner input component and durable draft controller', () => {
     value.session.items['2']!.revision++; value.session.items['2']!.question_revision++; value.session.revision++;
     value.session.rounds[value.session.items['2']!.current_round_id!]!.question_revision++;
     await act(async () => { await value.store.refresh(); });
-    fireEvent.click(screen.getByRole('button', { name: 'Send answer' })); expect(value.calls).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); expect(value.calls).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Review current target' })); expect(editor().value).toBe('Retain explanation');
-    fireEvent.click(screen.getByRole('button', { name: 'Send answer' })); await screen.findByText('Saved · Queue position #4');
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); await screen.findByText('Saved · Queue position #4');
     expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params.expected_question_revision).toBe(value.session.items['2']!.question_revision);
   });
   it('never sends before an uncertain preference save is explicitly reconciled', async () => {
@@ -243,22 +245,22 @@ describe('owner input component and durable draft controller', () => {
   it('preserves content and disables mutation after session read failure', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); fireEvent.change(editor(), { target: { value: 'Survives failure' } });
     value.unavailable(); await act(async () => { await value.store.refresh(); });
-    expect(editor().value).toBe('Survives failure'); fireEvent.click(screen.getByRole('button', { name: 'Send answer' })); expect(value.calls).toHaveLength(0);
+    expect(editor().value).toBe('Survives failure'); fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); expect(value.calls).toHaveLength(0);
   });
   it('prepares a separate reviewed draft only after definitive question rejection, retaining the old frozen record', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('question_changed');
-    fireEvent.change(editor(), { target: { value: 'Owner explanation remains exact' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    fireEvent.change(editor(), { target: { value: 'Owner explanation remains exact' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
     await screen.findByRole('button', { name: 'Prepare revised input' }); const original = structuredClone(value.prefs.drafts[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Prepare revised input' }));
     await screen.findByRole('button', { name: 'Review current target' }); expect(value.calls).toHaveLength(1); expect(editor().value).toBe('Owner explanation remains exact');
     await waitFor(() => expect(value.prefs.drafts).toHaveLength(2)); expect(value.prefs.drafts[0]).toEqual(original);
     fireEvent.click(screen.getByRole('button', { name: 'Review current target' })); value.outcome('ok');
-    fireEvent.click(screen.getByRole('button', { name: 'Send answer' })); await screen.findByText('Saved · Queue position #4');
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); await screen.findByText('Saved · Queue position #4');
     expect(value.calls[1]?.command.op_id).not.toBe(value.calls[0]?.command.op_id); expect(value.prefs.drafts).toEqual([original]);
   });
   it('never permits changed-payload recovery for operation reuse or restored unknown attempts', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('operation_reused');
-    fireEvent.change(editor(), { target: { value: 'Keep operation identity' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    fireEvent.change(editor(), { target: { value: 'Keep operation identity' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
     await screen.findByRole('button', { name: 'Retry saved input' }); expect(screen.queryByRole('button', { name: 'Prepare revised input' })).toBeNull();
     expect(editor().disabled).toBe(true); const restored = await value.restart();
     expect(Object.values(restored.getSnapshot().entries)[0]?.rejected).toBe(false); expect(value.calls).toHaveLength(1);
@@ -291,33 +293,38 @@ describe('owner input component and durable draft controller', () => {
     expect(value.drafts.getSnapshot().entries[id]!.draft).toEqual(before);
     if (guard === 'saving') { await act(async () => { finish!(); await submission; }); expect(value.calls[0]?.command).toMatchObject({ params: { selected_option_id: 'yes', text: before.text } }); }
     if (guard === 'preferences') { value.preferenceOutcome('ok'); await act(async () => { await value.drafts.retryPreferences(); }); expect(value.drafts.getSnapshot().entries[id]!.draft).toEqual(before); }
-    view.rerender(<OwnerInput drafts={value.drafts} session={value.store} itemId="2" focusRequest={{ intent: 'answer', token: 1, optionIndex: 1 }} onFocusRequestConsumed={consumed} />);
+    view.rerender(<Composer drafts={value.drafts} session={value.store} itemId="2" focusRequest={{ intent: 'answer', token: 1, optionIndex: 1 }} onFocusRequestConsumed={consumed} />);
     expect(consumed).toHaveBeenCalledTimes(1);
     if (guard !== 'saving') expect(value.drafts.getSnapshot().entries[id]!.draft).toEqual(before);
   });
-  it('connects the actual Waiting control to the same durable draft store and registered reveal callback', async () => {
+  it('connects the Waiting card to the same durable draft store and registered reveal callback', async () => {
     const value = await setup(), queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue);
     await queue.start(); let revealed: string | undefined;
-    render(<OwnerWaitingPanel drafts={value.drafts} store={queue} revealItem={route => { revealed = route.item_id; }} openSession={() => {}} />);
-    const textarea = await screen.findByRole('textbox');
-    fireEvent.change(textarea, { target: { value: 'Waiting module owner input' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    render(<WaitingColumn drafts={value.drafts} store={queue} revealItem={target => { revealed = target.item_id; }} openSession={() => {}} />);
+    const send = await screen.findByRole('button', { name: 'Send answer' });
+    expect(screen.queryByRole('textbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' })); expect(revealed).toBe('2'); revealed = undefined;
+    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(send);
     await waitFor(() => expect(value.calls).toHaveLength(1));
-    expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params.text).toBe('Waiting module owner input');
-    fireEvent.click(screen.getByRole('button', { name: 'Details' })); expect(revealed).toBe('2');
+    expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params).toMatchObject({ selected_option_id: 'yes', text: '' });
+    fireEvent.click(await screen.findByText('Sending “Keep the design”…')); expect(revealed).toBe('2');
+    expect(screen.getByText('Nothing waiting on you')).toBeTruthy();
   });
-  it('keeps an unknown Waiting answer visible and frozen with an explicit exact-operation retry', async () => {
+  it('moves an unknown Waiting answer to Sent as Checking and retries the exact operation from detail', async () => {
     const value = await setup(), queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue); await queue.start(); value.outcome('uncertain');
-    render(<OwnerWaitingPanel drafts={value.drafts} store={queue} revealItem={() => {}} openSession={() => {}} />);
-    fireEvent.change(await screen.findByRole('textbox'), { target: { value: 'Frozen waiting payload' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); await screen.findByRole('button', { name: 'Retry saved input · 2' });
-    expect(screen.queryByRole('textbox')).toBeNull(); expect(screen.getByText('Frozen waiting payload')).toBeTruthy(); const original = structuredClone(value.calls[0]);
-    value.outcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Retry saved input · 2' }));
+    let revealed: string | undefined;
+    render(<WaitingColumn drafts={value.drafts} store={queue} revealItem={target => { revealed = target.item_id; }} openSession={() => {}} />);
+    const send = await screen.findByRole('button', { name: 'Send answer' });
+    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(send); fireEvent.click(await screen.findByText('Checking whether “Keep the design” was delivered…')); expect(revealed).toBe('2');
+    expect(screen.queryByRole('button', { name: 'Send answer' })).toBeNull(); const original = structuredClone(value.calls[0]);
+    cleanup(); value.render(); value.outcome('ok'); fireEvent.click(await screen.findByRole('button', { name: 'Retry saved input' }));
     await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls[1]).toEqual(original);
   });
   it('reconciles uncertain cleanup after a validated input receipt without re-submitting or losing durable draft recovery', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Already durably submitted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    fireEvent.change(editor(), { target: { value: 'Already durably submitted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.preferenceOutcome('uncertain'); await act(async () => { finish(); });
     await screen.findByText('Saved · Queue position #4'); await screen.findByRole('button', { name: 'Retry saving draft preferences' });
     expect(value.prefs.drafts[0]?.submission_attempted).toBe(true); expect(value.calls).toHaveLength(1);
@@ -326,7 +333,7 @@ describe('owner input component and durable draft controller', () => {
   });
   it('retries draft cleanup after a saved input when an interleaved navigation patch bumped the revision', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Saved then conflicted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    fireEvent.change(editor(), { target: { value: 'Saved then conflicted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.conflictDeletes(1); await act(async () => { finish(); });
     await screen.findByText('Saved · Queue position #4');
     await waitFor(() => expect(value.prefs.drafts).toEqual([]));
@@ -336,7 +343,7 @@ describe('owner input component and durable draft controller', () => {
   });
   it('surfaces draft cleanup failure after three revision conflicts without further retries', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Conflicted thrice' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    fireEvent.change(editor(), { target: { value: 'Conflicted thrice' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.conflictDeletes(5); await act(async () => { finish(); });
     await screen.findByText('Saved · Queue position #4');
     await waitFor(() => expect(value.drafts.getSnapshot().error).not.toBeNull());
@@ -345,7 +352,7 @@ describe('owner input component and durable draft controller', () => {
   });
   it('never retries cleanup on commit_uncertain and keeps the draft recoverable as uncertain', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Uncertain cleanup' } }); fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    fireEvent.change(editor(), { target: { value: 'Uncertain cleanup' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.preferenceOutcome('uncertain'); await act(async () => { finish(); });
     await screen.findByRole('button', { name: 'Retry saving draft preferences' });
     expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(1);

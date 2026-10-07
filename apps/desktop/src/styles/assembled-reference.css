@@ -98,129 +98,7 @@
   padding-left: 30px;
 }
 
-.ref-waiting {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  background: var(--a-side);
-  border-right: 1px solid var(--color-divider);
-}
-
-.ref-waiting-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 16px 14px 10px 16px;
-}
-
-.ref-waiting-count {
-  min-width: 22px;
-  height: 20px;
-  display: inline-grid;
-  place-items: center;
-  padding: 0 6px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--a-acc-text);
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-}
-
-.ref-waiting-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 0 10px 16px;
-}
-
-.ref-waiting-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border-radius: var(--radius-md);
-  background: var(--a-card);
-}
-
-.ref-waiting-path {
-  font-size: 12px;
-  line-height: 17px;
-  text-wrap: pretty;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
-}
-
-.ref-waiting-question {
-  font-size: 14.5px;
-  line-height: 21px;
-  text-wrap: pretty;
-}
-
-.ref-waiting-ask {
-  font-size: 13.5px;
-  line-height: 20px;
-  color: var(--a-acc-text);
-}
-
-.ref-waiting-context {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: 12.5px;
-  line-height: 18px;
-  color: color-mix(in srgb, var(--color-text) 64%, transparent);
-}
-
-.ref-waiting-age {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
-}
-
-.ref-delivery {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 7px;
-  font-size: 12.5px;
-  line-height: 18px;
-}
-
-.ref-sent-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 6px 0;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-
-.ref-sent-card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  box-shadow: 0 0 0 1px var(--color-divider);
-}
-
-.ref-waiting-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 10px 6px;
-}
-
+/* Edge-state loading placeholder; the Waiting column has its own (ui/waiting). */
 .ref-waiting-skeleton {
   display: flex;
   flex-direction: column;
@@ -402,68 +280,6 @@
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
-.ref-waiting-context > i {
-  flex: none;
-  margin-top: 2px;
-  font-size: 13px;
-}
-
-.ref-waiting-context > span {
-  text-wrap: pretty;
-}
-
-.ref-waiting-age > i {
-  font-size: 13px;
-}
-
-.ref-waiting-age > button {
-  margin-left: auto;
-  padding: 2px 6px;
-  font-size: 12px;
-}
-
-.ref-delivery > i {
-  font-size: 13px;
-}
-
-.ref-delivery > span {
-  flex: 1;
-  min-width: 0;
-}
-
-.ref-delivery > button {
-  padding: 3px 10px;
-  font-size: 12.5px;
-}
-
-.ref-sent-label > span {
-  letter-spacing: 0;
-  text-transform: none;
-  font-weight: 400;
-}
-
-.ref-sent-card i {
-  font-size: 13px;
-}
-
-.ref-waiting-empty > i {
-  font-size: 22px;
-  color: var(--st-done);
-}
-
-.ref-waiting-empty > div {
-  font-size: 14.5px;
-  font-weight: 500;
-}
-
-.ref-waiting-empty > p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  text-wrap: pretty;
-  color: color-mix(in srgb, var(--color-text) 64%, transparent);
-}
-
 .ref-waiting-skeleton > span {
   width: 70%;
   height: 10px;
@@ -520,10 +336,6 @@
   text-wrap: pretty;
 }
 
-.ref-sent-card:hover {
-  background: color-mix(in srgb, var(--color-text) 4%, transparent);
-}
-
 .shell .ariadne-reference {
   font-size: 14px;
   line-height: 1.5;
@@ -531,37 +343,6 @@
 
 .ref-project-stats .ph-fill {
   color: inherit;
-}
-
-.ref-waiting-heading > span:first-child {
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-
-.ref-waiting-heading > span:last-child {
-  margin-left: auto;
-  font-size: 12px;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
-}
-
-.ref-sent-card > div:first-child {
-  font-size: 13.5px;
-  line-height: 20px;
-  text-wrap: pretty;
-  color: color-mix(in srgb, var(--color-text) 80%, transparent);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.ref-sent-card > div:last-child {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  line-height: 18px;
 }
 
 .ref-waiting-skeleton > span:first-child {

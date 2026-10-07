@@ -10,9 +10,9 @@ import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationSentenceTree } from './components/tree/NavigationSentenceTree';
 import { NavigationTopicGraph } from './components/graph/NavigationTopicGraph';
-import type { OwnerFocusRequest } from './components/inputs/OwnerInput';
+import type { OwnerFocusRequest } from './ui/answer/Composer';
 import { OwnerItemDetail } from './components/inputs/OwnerItemDetail';
-import { OwnerWaitingPanel } from './components/inputs/OwnerWaitingPanel';
+import { WaitingColumn } from './ui/waiting/WaitingColumn';
 import { MessageRail } from './components/rail/MessageRail';
 import { SessionActionControllers } from './components/bindings/actions';
 import { BindingControls } from './components/bindings/BindingControls';
@@ -308,8 +308,10 @@ function Workspace({ application }: { application: Application }) {
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
       // TODO(WP6): remove the selected item or topic after asking; the trash button is a no-op until then.
       onRemove={() => {}}
-      waitingContent={<div className="app-waiting">{routeError && <p role="alert">{routeError}</p>}<OwnerWaitingPanel drafts={application.drafts} store={application.waiting} revealItem={revealItem}
-        openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} /></div>}
+      waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={revealItem}
+        selected={route && selectedId ?{ ...route, item_id: selectedId } : null}
+        notice={routeError && <p className="waiting-notice waiting-notice-warn" role="alert">{routeError}</p>}
+        openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} />}
       detail={store && selectedId && detailOpen ? <><OwnerItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} service={application.service} store={store}
         itemId={selectedId} onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined} routes={navigation.routes} onReveal={reveal} onClose={closeDetail} highlightedMessageIds={highlightedMessages} later={later}
         onLater={value => route && preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} />

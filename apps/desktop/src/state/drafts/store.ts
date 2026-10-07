@@ -13,6 +13,8 @@ export interface DraftEntry {
   readonly error: Failure | null;
   readonly receipt: Immutable<SavedReceipt> | null;
   readonly rejected: boolean;
+  /** What a saved input carried; the draft itself is cleared once the receipt arrives. */
+  readonly sent?: { readonly text: string; readonly selected_option_id: string | null } | null;
 }
 export interface DraftState {
   readonly entries: Readonly<Record<string, DraftEntry>>;
@@ -33,6 +35,8 @@ export function ownerActions(item: Immutable<Item>): OwnerIntent[] {
   return ['bring', ...(item.status === 'waiting_on_me' ? ['answer' as const] : []), 'reply', 'note', 'followup', 'drop',
     ...(terminal(item) && item.status !== 'replaced' ? ['reopen' as const] : [])];
 }
+/** The guard text for a draft with neither a choice nor a message; controls show their own Send state instead. */
+export const emptyDraft = 'Choose an option or enter a message before sending.';
 export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
   const item = draft.target.item_id ? session.items[draft.target.item_id] : null;
   if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !item || item.topic_id !== draft.target.topic_id) return 'The saved target is unavailable. Open its registered session.';
@@ -47,7 +51,7 @@ export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Se
     if (!round || round.closed_at !== null || round.question_revision !== item.question_revision) return 'The current question is no longer open for an answer.';
     if (draft.selected_option_id && !item.options.some(option => option.id === draft.selected_option_id)) return 'Choose one of the current options.';
   }
-  if (!draft.selected_option_id && !draft.text.trim()) return 'Choose an option or enter a message before sending.';
+  if (!draft.selected_option_id && !draft.text.trim()) return emptyDraft;
   if (new TextEncoder().encode(draft.text).length > 16 * 1024) return 'Keep the message within 16 KiB.';
   return null;
 }
@@ -228,7 +232,8 @@ export class OwnerDraftStore {
       if (!('session_id' in receipt) || receipt.operation_id !== id || receipt.session_id !== entry.draft.session.session_id
         || !Number.isSafeInteger(receipt.revision) || receipt.revision <= 0 || receipt.data.kind !== 'input_submit'
         || !receipt.data.input_id || !receipt.data.message_id || receipt.data.input_seq <= 0 || receipt.data.message_number <= 0) throw new ServiceFailure('invalid_response');
-      this.pendingInputs.delete(id); this.entry(id, { receipt: immutable(receipt), uncertain: false, error: null,
+      this.pendingInputs.delete(id); this.entry(id, { receipt: immutable(receipt), uncertain: false, error: null, sent: request.command.command === 'input_submit'
+        ? { text: request.command.params.text, selected_option_id: request.command.params.selected_option_id } : null,
         draft: immutable({ ...structuredClone(entry.draft), text: '', selected_option_id: null } as OwnerDraft) });
       // A failed cleanup leaves the durable draft recoverable. A validated input
       // receipt, never local button acceptance, authorizes its removal.
