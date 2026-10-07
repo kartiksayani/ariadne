@@ -35,7 +35,7 @@
   width: 20px;
   height: 20px;
   flex: none;
-  color: var(--color-text, currentColor);
+  color: var(--color-accent, currentColor);
 }
 
 .shell-brand > span {
