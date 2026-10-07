@@ -300,8 +300,9 @@ export function TreeView(props: TreeViewProps) {
     if (centered.current || !rows.length || graph) return;
     centered.current = true;
     const key = revealId ?? selectedId, saved = latest.current.view?.scroll, box = scroller.current;
-    const restored = !key && saved?.item_id ? elements.current.get(saved.item_id) : undefined;
-    if (box && restored) box.scrollTop += restored.getBoundingClientRect().top - box.getBoundingClientRect().top - saved!.offset;
+    // A saved reading position wins over centring the selection; only a reveal overrides it.
+    const restored = !revealId && saved?.item_id ? elements.current.get(saved.item_id) : undefined;
+    if (box && restored) { box.scrollTop += restored.getBoundingClientRect().top - box.getBoundingClientRect().top - saved!.offset; return; }
     center(key); setAnchor(key);
     void document.fonts?.ready.then(() => { if (mounted.current && !settled.current) center(key); });
     // Only the first rows of this session view centre; later changes keep the reading position.
