@@ -84,7 +84,7 @@ function SetupCard({ setup, adapterId }: { setup: NonNullable<NavigationState['s
         ? 'Run /ariadne-connect in the selected Claude conversation. Nothing to paste: the Mod reports the binding and the installed Ariadne skill holds the rules.'
         : 'Paste this setup instruction into the selected host conversation once per binding so the agent has the Ariadne rules.'}</p>
     {adapterId !== 'claude_code_mod' && <>
-      <button type="button" className="ref-button ref-secondary" onClick={copy}>Copy instruction</button>
+      <button type="button" className="btn btn-secondary" onClick={copy}>Copy instruction</button>
       <span role="status" className="nav-copied">{copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : ''}</span>
       <pre>{instruction}</pre></>}
     <p>Session {setup.session_id}</p>

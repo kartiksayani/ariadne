@@ -1,12 +1,11 @@
 // Close session, archive and restore topics: the guarded review flow ported
 // from the old HistoryActions strip. Archive without blockers runs at once and
 // leaves an "Archived" banner with Undo; anything guarded opens the review.
-// The dialog is the existing ReferenceDialog until WP5's Paperwhite Dialog.
 import { useState, type ReactNode } from 'react';
 import { CoreFailure, useSession, type ServiceFailure } from '../../data';
 import type { ItemRoute, OwnerCommand, SessionRef } from '../../generated/core';
 import { SessionActions, useSessionActions } from '../../components/bindings/actions';
-import { ReferenceDialog } from '../../components/reference/ReferenceDialog';
+import { Dialog } from '../dialogs/Dialog';
 import { dispatchQuiesced, lifecycleBlockers } from '../../components/history-actions/selectors';
 import '../../components/history-actions/history-actions.css';
 
@@ -118,9 +117,10 @@ export function useLifecycle(actions: SessionActions, { revealItem, openSession 
         setPauseReview(false);
       } else recordFailure(review, previousError);
     };
-    dialog = <ReferenceDialog title={pauseReview ? 'Confirm Pause dispatch' : `Confirm ${label}`} onCancel={() => { if (!operation.writing) resetReview(); }} actions={<>
-      <button type="button" className="ref-button ref-secondary" disabled={operation.writing} onClick={resetReview}>Cancel</button>
-      {operation.pending ? <button type="button" className="ref-button ref-primary" disabled={operation.writing} onClick={() => {
+    const title = pauseReview ? 'Confirm Pause dispatch' : `Confirm ${label}`;
+    const buttons = <>
+      <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={resetReview}>Cancel</button>
+      {operation.pending ? <button type="button" className="btn btn-primary" disabled={operation.writing} onClick={() => {
         const previousError = actions.getSnapshot().error;
         void actions.retry().then(saved => {
           if (!saved) { recordFailure(review, previousError); return; }
@@ -131,10 +131,12 @@ export function useLifecycle(actions: SessionActions, { revealItem, openSession 
           } else resetReview();
         });
       }}>Reconcile saved action</button> : pauseReview
-        ? <button type="button" className="ref-button ref-primary" disabled={disabled || changing} onClick={() => { void pause(); }}>Confirm Pause dispatch</button>
-        : mustPause ? <button type="button" className="ref-button ref-primary" disabled={disabled || changing} onClick={() => setPauseReview(true)}>Pause dispatch</button>
-          : <button type="button" className="ref-button ref-primary" disabled={disabled || changing || blockers.length > 0} onClick={() => { void confirm(); }}>Confirm {label}</button>}
-    </>}><div className="history-action-dialog">
+        ? <button type="button" className="btn btn-primary" disabled={disabled || changing} onClick={() => { void pause(); }}>Confirm Pause dispatch</button>
+        : mustPause ? <button type="button" className="btn btn-primary" disabled={disabled || changing} onClick={() => setPauseReview(true)}>Pause dispatch</button>
+          : <button type="button" className="btn btn-primary" disabled={disabled || changing || blockers.length > 0} onClick={() => { void confirm(); }}>Confirm {label}</button>}
+    </>;
+    dialog = <Dialog label={title} width={580} onCancel={() => { if (!operation.writing) resetReview(); }}>
+      <div className="dialog-title">{title}</div><div className="history-action-dialog">
       <p>{session.title}{review.topicId && ` · ${session.topics[review.topicId]?.name}`}</p>
       <p>{pauseReview ? 'Persist an owner pause first. Already delivered host work can continue. Close requires a separate confirmation afterward.'
         : 'This changes Ariadne metadata and retains IDs, binding and complete history. The external host keeps running.'}</p>
@@ -142,15 +144,15 @@ export function useLifecycle(actions: SessionActions, { revealItem, openSession 
       {mustPause && !pauseReview && <p>Pause dispatch, wait for persisted paused state, then confirm Close separately.</p>}
       {alreadyStopped && !pauseReview && <p>Dispatch is already stopped (binding not connected). Confirm Close.</p>}
       {blockers.length > 0 && <p>{review.kind === 'topic_archive' ? 'Archive needs every item in this topic closed and every sent input settled first:' : 'Close needs every item closed and every sent input settled first:'}</p>}
-      {blockers.map(blocker => <button key={blocker.key} type="button" className="ref-button ref-secondary" onClick={() => {
+      {blockers.map(blocker => <button key={blocker.key} type="button" className="btn btn-secondary" onClick={() => {
         resetReview(); if (blocker.item) revealItem(blocker.item); else openSession(route);
       }}>{blocker.label}</button>)}
       {changing && <p role="alert">The session changed. Review the current state before confirming.</p>}
-      {changing && !operation.pending && <button type="button" className="ref-button ref-secondary" onClick={() => {
+      {changing && !operation.pending && <button type="button" className="btn btn-secondary" onClick={() => {
         prepare(review.kind, review.topicId); setPauseReview(false);
       }}>Review current state</button>}
       {(review.error || operation.pending && operation.error) && <p role="alert">{(review.error ?? operation.error)?.message} {operation.pending && 'Completion is unknown. Reconcile the saved action before a new confirmation.'}</p>}
-    </div></ReferenceDialog>;
+    </div><div className="dialog-actions">{buttons}</div></Dialog>;
   }
   return {
     session: () => { if (session) prepare(session.state === 'closed' ? 'session_reopen' : 'session_close'); },

@@ -777,7 +777,8 @@ describe('source-backed navigation views and explicit registration', () => {
     await screen.findByRole('heading', { name: 'Projects', level: 1 });
     const opener = screen.getByRole('button', { name: 'Register project' }); opener.focus(); fireEvent.click(opener);
     const dialog = screen.getByRole('dialog', { name: 'Register project' });
-    expect(document.activeElement).toBe(within(dialog).getByLabelText('Project root'));
+    // The Paperwhite dialog holds focus on its card first (ui/dialogs/Dialog).
+    expect(document.activeElement).toBe(dialog);
     const input = within(dialog).getByLabelText('Project root'); input.focus(); fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Register project' }));
     fireEvent.keyDown(dialog, { key: 'Escape' });

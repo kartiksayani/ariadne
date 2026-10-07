@@ -38,10 +38,3 @@ body {
   margin: 10px 16px 0;
   overflow: auto;
 }
-
-.product-app .tree-graphs {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 4px 16px 0;
-}
