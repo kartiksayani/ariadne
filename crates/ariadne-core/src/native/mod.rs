@@ -203,7 +203,8 @@ impl CoreService for NativeCoreService {
             OwnerCommand::TopicArchive { .. }
             | OwnerCommand::TopicRestore { .. }
             | OwnerCommand::SessionClose { .. }
-            | OwnerCommand::SessionReopen { .. } => HistoryActionService::new(&self.registry)
+            | OwnerCommand::SessionReopen { .. }
+            | OwnerCommand::SessionLabelSet { .. } => HistoryActionService::new(&self.registry)
                 .execute(&context, &command, (self.now)())
                 .map_err(errors::history),
             OwnerCommand::TopicContinue { .. } => HistoryActionService::new(&self.registry)
@@ -249,5 +250,26 @@ impl CoreService for NativeCoreService {
         DeliveryService::new(&self.registry)
             .report(&context, &event, || (self.allocate)())
             .map_err(errors::delivery)
+    }
+
+    fn unknown_binding_error(&self, binding_id: &UuidV4) -> Result<Option<CoreError>, CoreError> {
+        let catalogue = self.registry.catalogue().map_err(errors::registry)?;
+        for project in &catalogue.projects {
+            // An unreadable project or session may hold it: not provably removed.
+            let Ok(project) = &project.result else {
+                return Ok(None);
+            };
+            let Ok(sessions) = &project.sessions else {
+                return Ok(None);
+            };
+            for read in sessions {
+                match &read.result {
+                    Ok(session) if session.bindings.0.contains_key(binding_id) => return Ok(None),
+                    Ok(_) => {}
+                    Err(_) => return Ok(None),
+                }
+            }
+        }
+        Ok(Some(agent::session_removed(binding_id)))
     }
 }

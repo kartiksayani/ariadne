@@ -3,6 +3,13 @@
   "title": "SessionPreferences",
   "type": "object",
   "properties": {
+    "collapsed_topic_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UuidV4"
+      },
+      "maxItems": 256
+    },
     "expanded_item_ids": {
       "type": "array",
       "items": {

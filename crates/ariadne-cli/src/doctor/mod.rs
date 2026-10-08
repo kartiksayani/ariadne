@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::{io::Write, path::PathBuf};
 pub mod inspect;
 
-pub const HELP: &str = "Diagnostics: ariadne doctor [--project /absolute/project] [--claude-bin /absolute/claude] [--codex-bin /absolute/codex] [--json]\nProvider paths are explicit: the flags override the paths `ariadne setup` recorded in providers.json. CODEX_HOME/default selects only the existing endpoint. Read-only checks never repair data, resend work, enable host trust or launch a provider session. Unknown/stale observations never grant dispatch readiness.\n";
+pub const HELP: &str = "Diagnostics: ariadne doctor [--project /absolute/project] [--claude-bin /absolute/claude] [--codex-bin /absolute/codex] [--json]\nChecks Ariadne's install, data, app and agent connections. It only reads: it never repairs data, resends messages, approves anything or starts an agent.\n--claude-bin and --codex-bin override the paths `ariadne setup` recorded. Codex is reached through its running app-server (CODEX_HOME, or the default folder).\n";
 
 pub(crate) fn parse(args: &[&str]) -> Result<inspect::Options, CoreError> {
     let mut options = inspect::Options::default();
@@ -169,8 +169,8 @@ pub fn run(args: &[&str], output: &mut dyn Write, errors: &mut dyn Write) -> i32
                 let checked_at = report["checked_at"].clone();
                 report["checks"].as_array_mut().expect("checks").push(json!({
                     "status":"error", "code":"installation.invalid", "checked_at":checked_at,
-                    "message":"The existing personal package failed the shared install descriptor validation.",
-                    "hint":"Install the matching app/helper package; no resource path was guessed or repaired.",
+                    "message":"Ariadne's installed package is damaged or doesn't match this version.",
+                    "hint":"Install the matching Ariadne package again. Doctor didn't change anything.",
                     "facts":{"error_code":error.code}
                 }));
                 report["status"] = json!("error");

@@ -506,7 +506,7 @@ describe('canonical preference mutations', () => {
     transport.emit('ariadne://route', { ...route, item_id: '999' });
     await waitFor(() => expect(store.getSnapshot().preferences?.revision).toBe(2));
     expect(store.getSnapshot().preferences?.sessions[0].selected_item_id).toBe('1.1');
-    expect(store.getSnapshot().reveal).toMatchObject({ kind: 'missing_item', requestedItemId: '999', banner: 'The item was deleted.' });
+    expect(store.getSnapshot().reveal).toMatchObject({ kind: 'missing_item', requestedItemId: '999', banner: 'Ariadne can’t find that any more. It may have been removed.' });
   });
 });
 
@@ -529,7 +529,7 @@ describe('source-backed navigation views and explicit registration', () => {
     read(transport, first); read(transport, native);
     await act(async () => { fireEvent.click(allSessions); });
     expect(store.getSnapshot().preferences).toEqual(native);
-    expect(screen.getByRole('alert').textContent).toContain(conflict.message);
+    expect(screen.getByRole('alert').textContent).toContain('This changed while you were working. Look at it as it is now, then try again.');
     expect((allSessions as HTMLButtonElement).disabled).toBe(false);
 
     const fresh = structuredClone(native); fresh.revision = 4; fresh.global.notification_watermark = demo.updated_at;
@@ -568,7 +568,7 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(store.getSnapshot().preferences).toEqual(fresh);
     expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(false);
     expect((allSessions as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByRole('alert').textContent).toContain(conflict.message);
+    expect(screen.getByRole('alert').textContent).toContain('This changed while you were working. Look at it as it is now, then try again.');
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
     expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(readCount + 1);
 
@@ -599,8 +599,9 @@ describe('source-backed navigation views and explicit registration', () => {
     await act(async () => { pending.resolve({ api_version: 1, ok: false, error: failure }); });
     expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(false);
     expect((allSessions as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByRole('alert').textContent).toContain(failure.message);
-    expect(screen.getByRole('alert').textContent).toContain(failure.hint);
+    expect(screen.getByRole('alert').textContent).toContain('This changed while you were working. Look at it as it is now, then try again.');
+    expect(screen.getByRole('alert').textContent).not.toContain(failure.message);
+    expect(screen.getByRole('alert').textContent).not.toContain(failure.hint);
     expect(screen.getByText('Showing the last complete catalogue. Refresh failed.')).toBeTruthy();
     expect(store.getSnapshot().preferences).toBe(before.preferences);
     expect(store.getSnapshot().projects).toBe(before.projects);
@@ -635,6 +636,19 @@ describe('source-backed navigation views and explicit registration', () => {
       api_version: 1, command: 'project_register', op_id: operationId, params: { canonical_root: '/registered/café project' },
     } }); expect(close).toHaveBeenCalledOnce();
   });
+  it('sends a home-relative root as typed and shows a missing folder in plain words', async () => {
+    const { transport, store } = setup(); read(transport); await store.start();
+    transport.enqueue('project_register', { api_version: 1, ok: false, error: { code: 'not_found', message: 'Folder not found: /Users/owner/missing',
+      hint: 'Check the folder path, then register again.', retryable: false, field_errors: [] } });
+    const close = vi.fn(); render(<RegisterProject store={store} disabled={false} close={close} />);
+    expect(screen.getByLabelText('Project root').getAttribute('placeholder')).toBe('~/path/to/project');
+    fireEvent.change(screen.getByLabelText('Project root'), { target: { value: '~/missing' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Register project' })); });
+    expect(transport.calls.find(call => call.name === 'project_register')?.request).toMatchObject({ command: { params: { canonical_root: '~/missing' } } });
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('Folder not found: /Users/owner/missing Check the folder path, then register again.');
+    expect(close).not.toHaveBeenCalled();
+  });
   it('explicitly attaches a fresh host to a registered unfinished session and displays only saved setup', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
     const binding = Object.values((demo as Session).bindings)[0]!;
@@ -655,17 +669,18 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(close).toHaveBeenCalledOnce();
   });
   it.each([
-    ['codex', /Paste this setup instruction into the selected Codex thread.*Ariadne skill for Codex unless its link was skipped/, /once per binding/, true],
+    ['codex', /Paste this setup instruction into the selected Codex thread.*connects and uses the Ariadne skill.*Ariadne skill for Codex unless its link was skipped/, /once per binding/, true],
     ['claude_code_mod', /Run \/ariadne-connect in the selected Claude conversation/, /Nothing to paste/, false],
-    ['demo.local', /Paste this setup instruction into the selected host conversation/, /once per binding/, true],
+    ['demo.local', /Paste this setup instruction into the selected host conversation.*connects and uses the Ariadne skill/, /once per binding/, true],
   ])('tells the owner how to give the saved setup instruction to a %s host', async (adapterId, wording, frequency, showsInstruction) => {
-    const { transport, store } = setup(); read(transport);
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
+    read(transport, prefs);
     const binding = Object.values((demo as Session).bindings)[0]!;
     render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
-        setup_instruction: 'Saved Ariadne rules.' } } }); read(transport);
+        setup_instruction: 'Saved Ariadne rules.' } } }); read(transport, prefs);
     await act(async () => { await store.bind({ project_id: projectId, adapter_id: adapterId, configuration: adapter.configuration,
       external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
     const banner = await screen.findByLabelText('Session setup');
@@ -698,7 +713,8 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(within(card).getByText('Copied')).toBeTruthy();
   });
   it('omits the unavailable line when every capability is supported and keeps the Claude Mod variant free of an instruction', async () => {
-    const { transport, store } = setup(); read(transport);
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
+    read(transport, prefs);
     const binding = Object.values((demo as Session).bindings)[0]!;
     const capabilities = structuredClone(binding.capabilities);
     for (const value of Object.values(capabilities)) if (typeof value === 'object') value.supported = true;
@@ -706,13 +722,76 @@ describe('source-backed navigation views and explicit registration', () => {
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities,
-        setup_instruction: 'Saved Ariadne rules.' } } }); read(transport);
+        setup_instruction: 'Saved Ariadne rules.' } } }); read(transport, prefs);
     await act(async () => { await store.bind({ project_id: projectId, adapter_id: 'claude_code_mod', configuration: adapter.configuration,
       external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
     const card = await screen.findByLabelText('Session setup');
     expect(within(card).queryByText(/Unavailable capabilities/)).toBeNull();
     expect(within(card).queryByRole('button', { name: 'Copy instruction' })).toBeNull();
     expect(card.querySelector('pre')).toBeNull();
+  });
+  it('saves the Waiting column fold and the detail width with the global preferences and applies them at once', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs);
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} detail={<p>Detail</p>} renderSession={() => <p>Session workspace</p>} />);
+    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    transport.enqueue('preferences_patch', patchReceipt(2));
+    const folded = structuredClone(prefs); folded.revision = 2; folded.global.waiting_collapsed = true; read(transport, folded);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Hide Waiting on me' })); });
+    const patches = () => transport.calls.filter(call => call.name === 'preferences_patch');
+    expect(patches()[0].request).toMatchObject({ command: { params: { expected_preferences_revision: 1,
+      entries: [{ kind: 'set_global', preferences: { ...prefs.global, waiting_collapsed: true } }] } } });
+    expect(screen.getByRole('button', { name: /^Show Waiting on me/ })).toBeTruthy();
+    await waitFor(() => expect(store.getSnapshot().preferences?.revision).toBe(2));
+    transport.enqueue('preferences_patch', patchReceipt(3));
+    const resized = structuredClone(folded); resized.revision = 3; resized.global.detail_width = 416; read(transport, resized);
+    const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
+    vi.useFakeTimers();
+    try {
+      fireEvent.keyDown(edge, { key: 'ArrowLeft' });
+      await act(async () => { vi.advanceTimersByTime(600); });
+    } finally { vi.useRealTimers(); }
+    await waitFor(() => expect(patches()).toHaveLength(2));
+    expect(patches()[1].request).toMatchObject({ command: { params: { expected_preferences_revision: 2,
+      entries: [{ kind: 'set_global', preferences: { ...folded.global, detail_width: 416 } }] } } });
+    expect(edge.getAttribute('aria-valuenow')).toBe('416');
+  });
+  it('keeps the setup card on its own project page, collapsed, without a session ID, until dismissed or its session is gone', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
+    read(transport, prefs);
+    const binding = Object.values((demo as Session).bindings)[0]!;
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    const connect = async () => {
+      transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
+        data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
+          setup_instruction: 'Saved Ariadne rules.' } } }); read(transport, prefs);
+      await act(async () => { await store.bind({ project_id: projectId, adapter_id: 'codex', configuration: adapter.configuration,
+        external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
+      return screen.findByLabelText('Session setup');
+    };
+    let card = await connect();
+    // The instruction sits in a collapsed code box; the card names no internal ID.
+    expect(card.querySelector('details')?.open).toBe(false);
+    expect(within(card).getByText('Show instruction')).toBeTruthy();
+    expect(card.textContent).not.toContain(demo.id);
+    // Another page never shows it.
+    const other = preferences(2); other.global.selected_navigation = { kind: 'projects' }; read(transport, other);
+    await act(async () => { await store.refresh(); });
+    expect(screen.queryByLabelText('Session setup')).toBeNull();
+    const back = preferences(3); back.global.selected_navigation = { kind: 'project', project_id: projectId }; read(transport, back);
+    await act(async () => { await store.refresh(); });
+    card = await screen.findByLabelText('Session setup');
+    // Dismiss closes it.
+    fireEvent.click(within(card).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByLabelText('Session setup')).toBeNull();
+    expect(store.getSnapshot().setup).toBeNull();
+    // A removed session takes its card with it at the next complete capture.
+    prefs.revision = 3; await connect();
+    const gone = sessionResult(); gone.sessions.items = gone.sessions.items.filter(session => session.session_id !== demo.id);
+    read(transport, back, projectResult(), gone);
+    await act(async () => { await store.refresh(); });
+    expect(screen.queryByLabelText('Session setup')).toBeNull();
+    expect(store.getSnapshot().setup).toBeNull();
   });
   it('prefills the Codex socket path from the adapter default without overwriting an edited path', () => {
     const { store } = setup();
@@ -737,14 +816,26 @@ describe('source-backed navigation views and explicit registration', () => {
     render(<BindSession store={store} project={projectsFixture.items[0] as ProjectSummary} sessions={sessionsFixture.items as SessionSummary[]} adapters={[adapter]} disabled={false} close={() => {}} />);
     expect(screen.getByRole('alert').textContent).toContain('Resolve its queued inputs before rebinding.');
   });
-  it('labels a session running only while it is active and its binding is connected', () => {
+  it('words the card like the session bar: sending, paused, not sending with a reason, disconnected', () => {
     const session = structuredClone(sessionsFixture.items[0]) as SessionSummary;
-    session.active_binding!.connection_state = 'connected';
-    expect(sessionCardText(session, null, Date.now()).run).toBe('Agent running');
-    session.active_binding!.connection_state = 'disconnected'; expect(sessionCardText(session, null, Date.now()).run).toBe('Agent not running');
-    session.active_binding!.connection_state = 'connected'; session.state = 'closed';
-    expect(sessionCardText(session, null, Date.now())).toMatchObject({ run: 'Agent not running', closed: true });
-    session.state = 'active'; session.active_binding = null; expect(sessionCardText(session, null, Date.now())).toMatchObject({ agent: 'No agent', run: 'Agent not running' });
+    const binding = session.active_binding!, text = () => sessionCardText(session, null, Date.now());
+    binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; binding.owner_paused = false; binding.pause_reason = null;
+    binding.presence = null; session.counts.sent_inputs.needs_attention = 0;
+    expect(text()).toMatchObject({ run: 'Sending', runColor: 'var(--st-done)', runDot: 'var(--st-done)' });
+    // Paused or blocked is never the green "running" state, and its dot is a ring.
+    binding.owner_paused = true; binding.dispatch_state = 'paused';
+    expect(text()).toMatchObject({ run: 'Paused (by you)', runDot: 'transparent' }); expect(text().dispatch.action).toBe('resume');
+    binding.owner_paused = false; binding.dispatch_state = 'enabled'; session.counts.sent_inputs.needs_attention = 1;
+    expect(text()).toMatchObject({ run: 'Not sending: a message needs your decision', runDot: 'transparent' });
+    session.counts.sent_inputs.needs_attention = 0; binding.pause_reason = 'result_missing'; binding.dispatch_state = 'recovery_required';
+    expect(text().run).toBe('Not sending: the agent finished without saving its answer');
+    binding.pause_reason = null; binding.dispatch_state = 'enabled';
+    expect(sessionCardText(session, null, Date.now(), null, { binding_id: binding.id, generation: binding.generation, state: 'backing_off',
+      reason: 'codex exited', retry_in_seconds: 4.2, updated_at: new Date().toISOString() }).run).toBe('Not sending: codex exited · retrying in 5s');
+    binding.connection_state = 'disconnected'; expect(text().run).toBe('Disconnected');
+    binding.connection_state = 'connected'; session.state = 'closed';
+    expect(text()).toMatchObject({ run: 'Session closed', closed: true });
+    session.state = 'active'; session.active_binding = null; expect(text()).toMatchObject({ agent: 'No agent', run: 'No agent connected' });
   });
   it('offers tab close separately from session lifecycle controls', async () => {
     const { transport, store } = setup(); read(transport);

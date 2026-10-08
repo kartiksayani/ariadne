@@ -27,20 +27,34 @@ fn overlap(window: &WindowGeometry, area: &WorkArea) -> f64 {
     width.min(f64::MAX.sqrt()) * height.min(f64::MAX.sqrt())
 }
 
+/// The smallest whole-frame size the window may take, in logical pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MinimumSize {
+    pub width: f64,
+    pub height: f64,
+}
+
 /// Keep the whole saved window reachable after monitor removal or resize.
 /// The native caller orders the primary monitor first; ties preserve that order.
+/// A saved size below `minimum` (one saved while minimized or mid-transition)
+/// grows to it: macOS applies a restored size even under the window's minimum.
+/// A work area smaller than `minimum` pins the window to its top-left corner.
 pub fn clamp_geometry(
     saved: &WindowGeometry,
     areas: &[WorkArea],
+    minimum: MinimumSize,
 ) -> Result<WindowGeometry, CoreError> {
     if !valid_rectangle(saved.x, saved.y, saved.width, saved.height)
+        || ![minimum.width, minimum.height]
+            .into_iter()
+            .all(|value| value.is_finite() && value >= 0.0)
         || areas.iter().any(|area| {
             !valid_rectangle(area.x, area.y, area.width, area.height) || area.monitor_id.is_empty()
         })
     {
         return Err(CoreError::new(
             CoreErrorCode::InvalidArgument,
-            "Window and monitor geometry must be finite with positive dimensions.",
+            "Window and monitor geometry must be finite with positive dimensions, and the minimum size finite and non-negative.",
             "Read the current native monitor work areas before restoring the window.",
         ));
     }
@@ -63,11 +77,19 @@ pub fn clamp_geometry(
                 }
             })
         });
-    let width = saved.width.min(area.width);
-    let height = saved.height.min(area.height);
+    let width = saved.width.min(area.width).max(minimum.width);
+    let height = saved.height.min(area.height).max(minimum.height);
+    // `f64::clamp` panics when the window outgrows the area (min > max).
+    let place = |saved: f64, start: f64, span: f64, size: f64| {
+        if size >= span {
+            start
+        } else {
+            saved.clamp(start, start + span - size)
+        }
+    };
     Ok(WindowGeometry {
-        x: saved.x.clamp(area.x, area.x + area.width - width),
-        y: saved.y.clamp(area.y, area.y + area.height - height),
+        x: place(saved.x, area.x, area.width, width),
+        y: place(saved.y, area.y, area.height, height),
         width,
         height,
         monitor_id: Some(area.monitor_id.clone()),

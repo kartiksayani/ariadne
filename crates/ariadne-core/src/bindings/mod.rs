@@ -2,6 +2,7 @@
 //! The synchronous CoreService contract is unchanged; composition delegates its
 //! binding commands here. Runtime owns active provider connect/report/lease wiring.
 mod error;
+mod register_path;
 mod verified;
 pub use error::BindingError;
 pub use verified::VerifiedHost;
@@ -12,7 +13,6 @@ use ariadne_store::registry::{BindingSetup, HostIdentity, LocatedSession, Regist
 use ariadne_store::session::{Store, StoreError};
 use serde_json::Value;
 use std::collections::BTreeSet;
-use std::path::Path;
 
 pub struct BindingService<'a> {
     registry: &'a Registry,
@@ -34,9 +34,8 @@ impl<'a> BindingService<'a> {
         let OwnerCommand::ProjectRegister { op_id, params, .. } = command else {
             return Err(invalid("Expected project registration"));
         };
-        let saved = self
-            .registry
-            .register(Path::new(&params.canonical_root), op_id, allocate)?;
+        let root = register_path::resolve(&params.canonical_root)?;
+        let saved = self.registry.register(&root, op_id, allocate)?;
         Ok(MutationReceipt::ProjectRegistered(
             ProjectRegisteredReceipt {
                 operation_id: saved.operation_id,
@@ -449,6 +448,70 @@ fn unresolved(session: &Session) -> bool {
         )
     })
 }
+/// Rebind: the session's pending inputs follow it to the new binding.
+/// - Queued work never sent (or only sent by sealed attempts) waits there for
+///   delivery to the new conversation.
+/// - Work whose attempt committed its result is handled.
+/// - Other sent work needs the owner's "Send again / Mark as done" on the new
+///   binding, which then holds it as its active input.
+fn carry_inputs(session: &mut Session, new_id: &UuidV4, at: &UtcMillis) {
+    let pending: Vec<UuidV4> = session
+        .inputs
+        .0
+        .values()
+        .filter(|input| {
+            &input.binding_id != new_id
+                && matches!(
+                    input.state,
+                    InputState::Queued | InputState::InFlight | InputState::NeedsAttention
+                )
+        })
+        .map(|input| input.id.clone())
+        .collect();
+    let mut retired = BTreeSet::new();
+    let mut attention = false;
+    for input_id in pending {
+        let input = &session.inputs.0[&input_id];
+        retired.insert(input.binding_id.clone());
+        let unsealed = input
+            .attempts
+            .iter()
+            .find(|attempt| attempt.sealed_at.is_none());
+        if let Some(attempt) = unsealed.filter(|attempt| {
+            attempt.result_state == ResultState::Committed && attempt.domain_result.is_some()
+        }) {
+            let attempt_id = attempt.id.clone();
+            crate::delivery_join::handle_committed(session, &input_id, &attempt_id, at);
+            continue;
+        }
+        let sent = unsealed.is_some() || input.state != InputState::Queued;
+        let active = input.active_attempt_id.is_some();
+        let old_id = input.binding_id.clone();
+        if let Some(old) = session.bindings.0.get_mut(&old_id) {
+            if old.active_input_id.as_ref() == Some(&input_id) {
+                old.active_input_id = None;
+            }
+        }
+        let input = session.inputs.0.get_mut(&input_id).expect("listed input");
+        input.binding_id = new_id.clone();
+        if sent {
+            input.state = InputState::NeedsAttention;
+            attention = true;
+            let binding = session.bindings.0.get_mut(new_id).expect("new binding");
+            if active && binding.active_input_id.is_none() {
+                binding.active_input_id = Some(input_id);
+            }
+        }
+    }
+    for old_id in &retired {
+        crate::delivery_join::release_barrier(session, old_id);
+    }
+    let binding = session.bindings.0.get_mut(new_id).expect("new binding");
+    if attention && binding.pause_reason.is_none() {
+        binding.pause_reason = Some(PauseReason::Uncertain);
+    }
+    binding.dispatch_state = dispatch(binding, attention);
+}
 pub(crate) fn dispatch(binding: &Binding, needs_recovery: bool) -> DispatchState {
     if binding.connection_state != ConnectionState::Connected {
         DispatchState::Disconnected
@@ -492,6 +555,8 @@ fn new_session(id: UuidV4, project_id: UuidV4, binding: Binding, at: &UtcMillis)
         id,
         project_id,
         title: binding.external_session_id.clone(),
+        name: None,
+        description: None,
         state: SessionState::Active,
         created_at: at.clone(),
         updated_at: at.clone(),
@@ -564,17 +629,19 @@ fn connect_existing(
                             .any(|attempt| attempt.sealed_at.is_none())))
             })
     });
-    if !same
-        && (has_unresolved
-            || existing.is_some_and(|binding| {
-                !matches!(
-                    binding.dispatch_state,
-                    DispatchState::Paused | DispatchState::Disconnected
-                )
-            }))
-    {
+    // A rebind replaces a disconnected binding, or one of the same adapter (a
+    // fresh conversation after /clear), whatever its inputs. Only a live
+    // conversation of another adapter is a real conflict; a paused one with
+    // nothing pending may still be replaced.
+    let live_elsewhere = !same
+        && existing.is_some_and(|old| {
+            old.connection_state == ConnectionState::Connected
+                && old.adapter_id != host.adapter_id
+                && (has_unresolved || old.dispatch_state != DispatchState::Paused)
+        });
+    if live_elsewhere {
         return Err(conflict(
-            "Rebind requires resolved inputs and a paused or disconnected old binding",
+            "This session is connected to another live conversation; disconnect it first",
         ));
     }
     let generation = fresh(occupied, allocate)?;
@@ -614,8 +681,11 @@ fn connect_existing(
                 .unwrap_or(0),
         )
         .expect("validated persisted message numbers");
+        // The owner's pause belongs to the session, not to the conversation.
+        binding.owner_paused = existing.is_some_and(|old| old.owner_paused);
         session.bindings.0.insert(binding_id.clone(), binding);
         session.active_binding_id = Some(binding_id.clone());
+        carry_inputs(session, &binding_id, at);
         if let Some(retired) = &selected {
             for item in session.items.0.values_mut() {
                 let owner_matches = matches!(&item.owner,

@@ -51,6 +51,7 @@ impl<'a> PreferencesService<'a> {
                 "Expected preferences_patch",
             ));
         };
+        params.entries.iter().try_for_each(layout_bounds)?;
         let normalized = crate::receipts::normalized("preferences_patch", params)?;
         // Global preferences have one native owner scope, without session routing.
         let digest = Sha256::new(format!("{:x}", Hasher::digest(serde_json::to_vec(
@@ -165,6 +166,8 @@ fn defaults() -> PreferencesSnapshot {
             notification_watermark: None,
             notification_ledger: vec![],
             notification_preview: false,
+            detail_width: None,
+            waiting_collapsed: false,
         },
         sessions: vec![],
         later: vec![],
@@ -290,7 +293,45 @@ fn validate(record: &Record) -> Result<(), CoreError> {
     }
     Ok(())
 }
+/// Bounds of the renderer layout preferences: detail panel width and folded topic bands.
+fn layout_bounds(entry: &PreferencesPatchEntry) -> Result<(), CoreError> {
+    match entry {
+        PreferencesPatchEntry::SetGlobal { preferences } => {
+            if preferences
+                .detail_width
+                .is_some_and(|width| !(DETAIL_WIDTH_MIN..=DETAIL_WIDTH_MAX).contains(&width))
+            {
+                return Err(errors::local(
+                    CoreErrorCode::InvalidArgument,
+                    format!("Detail panel width must be {DETAIL_WIDTH_MIN} to {DETAIL_WIDTH_MAX} pixels"),
+                ));
+            }
+        }
+        PreferencesPatchEntry::SetSessionView { preferences } => {
+            if preferences.collapsed_topic_ids.len() > COLLAPSED_TOPICS_CAPACITY {
+                return Err(errors::local(
+                    CoreErrorCode::CapacityExceeded,
+                    format!("Folded topics exceed the {COLLAPSED_TOPICS_CAPACITY} entry bound"),
+                ));
+            }
+            let mut topics = BTreeSet::new();
+            if !preferences
+                .collapsed_topic_ids
+                .iter()
+                .all(|topic| topics.insert(topic))
+            {
+                return Err(errors::local(
+                    CoreErrorCode::InvalidArgument,
+                    "Duplicate folded topic",
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
 fn entry_valid(entry: PreferencesPatchEntry) -> Result<(), CoreError> {
+    layout_bounds(&entry)?;
     OwnerCommand::PreferencesPatch {
         api_version: one(),
         op_id: UuidV4::new("00000000-0000-4000-8000-000000000001").expect("literal"),

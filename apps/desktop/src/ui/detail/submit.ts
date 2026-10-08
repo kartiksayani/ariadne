@@ -3,6 +3,7 @@
 // hook without changing ItemDetail.
 import { useEffect } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
+import { plainFailure } from '../../data/plain';
 import type { InputKind } from '../../generated/domain/models';
 import { useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
 
@@ -45,6 +46,8 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
   const changed = (intent: DetailIntent): boolean => {
     const entry = find(intent), item = session?.items[itemId];
     if (!session || !item || !entry || entry.receipt || entry.saving || entry.uncertain) return false;
+    // An untouched draft holds no owner content: it follows the current item and binding on send.
+    if (!entry.draft.text && entry.draft.selected_option_id === null) return false;
     return item.revision !== entry.draft.target_revision || item.question_revision !== entry.draft.question_revision
       || session.active_binding_id !== entry.draft.binding_id;
   };
@@ -61,8 +64,11 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
     changed, review,
     send: async (intent, text) => {
       if (!ready) return false;
-      // An empty stale draft holds no owner content, so it follows the current item; otherwise the owner reviews first.
-      if (changed(intent)) { if (find(intent)?.draft.text) return false; review(intent); }
+      // A stale draft with owner content waits for a review; an empty one follows the current item and binding.
+      if (changed(intent)) return false;
+      const stored = find(intent), item = session?.items[itemId];
+      if (session && item && stored && !stored.receipt && !stored.saving && !stored.uncertain && (item.revision !== stored.draft.target_revision
+        || item.question_revision !== stored.draft.question_revision || session.active_binding_id !== stored.draft.binding_id)) review(intent);
       const id = open(intent);
       if (!id) return false;
       const entry = drafts.getSnapshot().entries[id];
@@ -70,6 +76,6 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
       return drafts.submit(id);
     },
     saving: (mine.find(entry => entry.saving)?.draft.intent as InputKind | undefined) ?? null,
-    error: failed?.error?.message ?? state.error?.message ?? null,
+    error: failed?.error ? plainFailure(failed.error) : state.error ? plainFailure(state.error) : null,
   };
 }

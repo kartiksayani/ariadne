@@ -147,6 +147,7 @@ fn prepare_owner(
         attempts: vec![],
         active_attempt_id: None,
         resolution_history: vec![],
+        cancel_cause: None,
     };
     let message = Message {
         id: input.message_id.clone(),

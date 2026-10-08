@@ -371,7 +371,12 @@ facts remain incomplete. Empty requests/results are valid. This response
 completeness proves neither delivery nor outcome; partial facts never prove
 non-delivery.
 Repeated consistent facts are no-ops. Conflicting turn IDs or outcomes pause
-with `protocol_conflict`; arrival order must not regress progress.
+with `protocol_conflict`; arrival order must not regress progress. New facts
+about a sealed or settled attempt, or a handled, skipped or cancelled input, are
+unchanged (ADR-0088). A changed fact under a known event ID is still saved as a
+conflict but adds no barrier. The supervisor drops an attempt fact answered with
+`attempt_sealed` or a `protocol_conflict` that carries a revision (Core already
+saved it, first answer or replay) instead of retrying it.
 
 Provider frames max8MiB; private control JSON frames max1MiB. The deferred
 executable plugin draft uses JSONL with the same 1MiB bound. Drain
@@ -435,12 +440,18 @@ in the injected envelope. The canonical persisted submitted payload begins with
 that exact marker line and LF, then safely encoded owner/context data; the digest
 covers the entire exact payload. A provider must not add the marker after hashing.
 P2.2 owns the production claim formatter; P2.5 owns MCP transport.
-Payload contains exact owner text, kind, item path,
-question revision/snapshot, references to bounded recent item messages, and
-instructions for `apply.input_result`. Escape owner content as a JSON value or
-clearly delimited data block; it cannot change envelope routing. Total prompt
-content≤64KiB; include recent context≤16KiB and tool read references for older
-history. Owner text is never silently shortened.
+The payload is the slim envelope of [ADR-0089](../../adr/ADR-0089-slim-input-envelope.md):
+the echo IDs (`source_input_id`, `attempt_id`, `binding_id`, `generation`,
+`owner_message_number`), `input_kind`, the target (`item_id` with the item's
+current `item_revision` and `question_revision`, or `topic_id`), the selected
+option (`selected_option_id`, `selected_option_label`) when present, and `text`.
+It carries no instruction, item body, snapshot, recent context or tool list; the
+rules live in the Ariadne skill and the agent pulls context with `ariadne read`
+and `ariadne item messages|rounds`. Owner content is a JSON value; it cannot
+change envelope routing. Total prompt content≤64KiB. Owner text is never
+silently shortened. Claim never delivers a queued item input whose saved
+`question_revision` is behind the item's (`delivery::held_for_review`); it stays
+queued for the owner and later inputs are claimed past it.
 
 Helpers may fail; retain unsaved events in a bounded memory retry queue and stop
 new claims. If the host exits before evidence can persist, core remains uncertain.

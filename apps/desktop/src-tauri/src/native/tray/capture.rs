@@ -33,6 +33,37 @@ pub struct WaitingCapture {
     pub counts: SummaryCounts,
     pub rows: Vec<WaitingRow>,
     pub diagnostics: Vec<String>,
+    /// Session labels by active binding ID, for lifecycle notes about a binding.
+    pub labels: BTreeMap<String, String>,
+}
+
+/// The owner-facing name of a session, as the session bar shows it:
+/// "claude-code · iTerm window 1", "claude-code", or "No agent". Never an ID.
+pub fn session_label(binding: Option<&BindingSummary>) -> String {
+    let Some(binding) = binding else {
+        return "No agent".into();
+    };
+    let agent = match binding.adapter_id.as_str() {
+        "claude_code_mod" => "claude-code",
+        other => other,
+    };
+    match binding.host_location.as_deref() {
+        Some(location) if !location.is_empty() => format!("{agent} · {location}"),
+        _ => agent.into(),
+    }
+}
+
+/// A plain word for a binding that is not simply connected, or None.
+pub fn binding_status(binding: &BindingSummary) -> Option<&'static str> {
+    if binding.owner_paused || binding.pause_reason.is_some() {
+        return Some("paused");
+    }
+    match binding.connection_state {
+        ConnectionState::Connected => None,
+        ConnectionState::Disconnected => Some("not connected"),
+        ConnectionState::Reconnecting => Some("reconnecting"),
+        ConnectionState::Unknown => Some("connection not confirmed"),
+    }
 }
 
 pub(crate) fn inconsistent() -> CoreError {
@@ -124,11 +155,10 @@ pub fn capture(
     }
     let mut rows = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut labels = BTreeMap::new();
     if counts.completeness == Completeness::Partial {
-        diagnostics.push(
-            "Some registered roots or sessions are unavailable; Waiting count is incomplete."
-                .into(),
-        );
+        diagnostics
+            .push("Some projects or sessions could not be read, so the count may be low.".into());
     }
     let expected: BTreeMap<_, _> = summaries
         .iter()
@@ -141,20 +171,11 @@ pub fn capture(
         .collect();
     for summary in summaries {
         let project = projects.get(&summary.project_id).ok_or_else(inconsistent)?;
+        let session_label = session_label(summary.active_binding.as_ref());
         if let Some(binding) = &summary.active_binding {
-            if binding.owner_paused
-                || binding.pause_reason.is_some()
-                || binding.connection_state != ConnectionState::Connected
-            {
-                diagnostics.push(format!(
-                    "{}: {}",
-                    summary.title,
-                    if binding.owner_paused || binding.pause_reason.is_some() {
-                        "binding paused".into()
-                    } else {
-                        format!("binding {:?}", binding.connection_state)
-                    }
-                ));
+            labels.insert(binding.id.as_str().to_owned(), session_label.clone());
+            if let Some(status) = binding_status(binding) {
+                diagnostics.push(format!("{session_label}: {status}"));
             }
         }
         // The authoritative summary already proves there are no Waiting rows.
@@ -204,7 +225,7 @@ pub fn capture(
                     .as_ref()
                     .map_or("Unavailable project", |project| &project.display_name)
                     .into(),
-                session_label: summary.title.clone(),
+                session_label: session_label.clone(),
                 question: item.question.clone(),
             });
         }
@@ -273,6 +294,7 @@ pub fn capture(
         counts,
         rows,
         diagnostics,
+        labels,
     })
 }
 
@@ -304,4 +326,56 @@ fn item_order(a: &ItemRef, b: &ItemRef) -> std::cmp::Ordering {
                 .split('.')
                 .map(|part| part.parse::<u64>().expect("validated item ordinal")),
         )
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    fn binding() -> BindingSummary {
+        let page: Page<SessionSummary> = serde_json::from_str(include_str!(
+            "../../../../../../fixtures/domain/projections/sessions.json"
+        ))
+        .unwrap();
+        page.items[0].active_binding.clone().unwrap()
+    }
+
+    #[test]
+    fn session_label_reads_like_the_session_bar_and_never_shows_an_id() {
+        let mut binding = binding();
+        binding.adapter_id = "claude_code_mod".into();
+        assert_eq!(
+            session_label(Some(&binding)),
+            "claude-code · iTerm window 1"
+        );
+        binding.host_location = None;
+        assert_eq!(session_label(Some(&binding)), "claude-code");
+        binding.host_location = Some(String::new());
+        assert_eq!(session_label(Some(&binding)), "claude-code");
+        binding.adapter_id = "codex".into();
+        binding.host_location = Some("Terminal window 2".into());
+        assert_eq!(session_label(Some(&binding)), "codex · Terminal window 2");
+        assert_eq!(session_label(None), "No agent");
+        let label = session_label(Some(&binding));
+        assert!(
+            !label.contains(binding.id.as_str()) && !label.contains(&binding.external_session_id)
+        );
+    }
+
+    #[test]
+    fn binding_status_uses_plain_words() {
+        let mut binding = binding();
+        assert_eq!(binding_status(&binding), None);
+        for (state, word) in [
+            (ConnectionState::Disconnected, "not connected"),
+            (ConnectionState::Reconnecting, "reconnecting"),
+            (ConnectionState::Unknown, "connection not confirmed"),
+        ] {
+            binding.connection_state = state;
+            assert_eq!(binding_status(&binding), Some(word));
+        }
+        // Paused wins over the connection state.
+        binding.owner_paused = true;
+        assert_eq!(binding_status(&binding), Some("paused"));
+    }
 }

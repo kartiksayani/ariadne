@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
-import { CoreFailure, ServiceFailure, type SessionState } from '../../data';
+import { CoreFailure, plainFailure, ServiceFailure, type SessionState } from '../../data';
 import { SessionActions, useSessionActions } from '../bindings/actions';
+import { agentName } from '../../ui/shell/model';
+import { unconfirmedText } from '../bindings/unconfirmed';
 import '../bindings/controls.css';
 
 export type EdgeKind = 'empty' | 'loading' | 'all_clear' | 'no_results' | 'stale' | 'unavailable' | 'malformed' | 'write_failure' | 'reconnecting';
@@ -9,10 +11,10 @@ const copy: Record<EdgeKind, readonly [string, string, string]> = {
   loading: ['Loading session', 'Reading the registered session. Your saved drafts remain available.', 'ph ph-hourglass'],
   all_clear: ['Nothing waiting on you', 'All registered sessions are up to date.', 'ph ph-check-circle'],
   no_results: ['No matching items', 'Adjust the search or filters to see more items.', 'ph ph-magnifying-glass'],
-  stale: ['Showing last valid data', 'Current data is stale. Refresh to reconcile before taking an action.', 'ph ph-clock'],
+  stale: ['Showing last valid data', 'Current data is out of date. Refresh before making a change.', 'ph ph-clock'],
   unavailable: ['Session unavailable', 'Restore access and refresh. Unavailable data is not an empty session.', 'ph ph-warning'],
   malformed: ['Session cannot be read', 'Stored data is malformed or uses an unsupported schema. The last valid view and drafts are retained.', 'ph ph-warning'],
-  write_failure: ['Save not confirmed', 'Your text is retained. Reconcile the same operation before starting another action.', 'ph ph-warning'],
+  write_failure: ['Save not confirmed', 'Your text is kept. Check whether your last change was saved before making another.', 'ph ph-warning'],
   reconnecting: ['Reconnecting', 'The session and unsent drafts remain visible while the host connection is verified.', 'ph ph-plugs'],
 };
 export function EdgeState({ kind, children, detail, onRetry, retryLabel = 'Refresh' }: {
@@ -26,19 +28,20 @@ export function EdgeState({ kind, children, detail, onRetry, retryLabel = 'Refre
     </div>{children}
   </div>;
 }
-/** The saved action whose completion is unknown, with its reviewed parameters and a deliberate Reconcile. */
+const decisionWords: Readonly<Record<string, string>> = { resend: 'send again', skip: 'mark as done', accept_result: 'mark as handled',
+  retry_unexecuted: 'retry', request_result_repair: 'ask for the missing answer', confirm_evidence: 'confirm what happened' };
+/** The saved action whose completion is unknown, in plain words, with a deliberate "Check again". */
 export function ActionFailure({ actions }: { actions: SessionActions }) {
   const state = useSessionActions(actions);
   const command = state.pending?.command;
-  return state.error && <EdgeState kind="write_failure" detail={<><p>{state.error.message}
-    {state.error instanceof CoreFailure && ` ${state.error.error.hint}`}</p>
-    {command?.command === 'input_resolve' && <p>Pending {command.params.decision.replace(/_/g, ' ')} for input <code>{command.params.input_id}</code>
-      {' · '}attempt <code>{command.params.attempt_id}</code> · reviewed revision {command.params.expected_revision}.</p>}
+  return state.error && <EdgeState kind="write_failure" detail={<><p>{plainFailure(state.error)}</p>
+    {command?.command === 'input_resolve' && <p>Ariadne isn’t sure your decision ({decisionWords[command.params.decision] ?? 'recovery'}) was saved.</p>}
     {command && (command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect')
-      && <p>Pending {command.command.replace('binding_', '')} · reviewed generation <code>{command.params.expected_generation}</code>.</p>}
-    {command?.command === 'binding_connect' && <p>Pending connection to {command.params.adapter_id} · {command.params.external_session_id}.</p>}
+      && <p>Ariadne isn’t sure {command.command === 'binding_pause' ? 'pausing' : command.command === 'binding_resume' ? 'resuming' : 'disconnecting'} was saved.</p>}
+    {command?.command === 'binding_connect' && <p>Ariadne isn’t sure reconnecting to {agentName(command.params.adapter_id)} was saved.</p>}
+    {command && (command.command === 'input_cancel' || command.command === 'session_label_set') && <p>{unconfirmedText(command.command)}.</p>}
     </>}
-    onRetry={state.pending && !state.writing ? () => { void actions.retry(); } : undefined} retryLabel="Reconcile saved action" />;
+    onRetry={state.pending && !state.writing ? () => { void actions.retry(); } : undefined} retryLabel="Check again" />;
 }
 export function SessionNotice({ state, refresh }: { state: SessionState; refresh: () => void }) {
   const error = state.error;
@@ -47,5 +50,5 @@ export function SessionNotice({ state, refresh }: { state: SessionState; refresh
   const kind: EdgeKind | null = malformed ? 'malformed' : state.status === 'loading' ? 'loading'
     : state.status === 'inaccessible' || state.status === 'closed' ? 'unavailable' : state.status === 'stale' ? 'stale' : null;
   return kind && <EdgeState kind={kind} onRetry={refresh}
-    detail={error instanceof CoreFailure ? <p>{error.error.message} {error.error.hint}</p> : undefined} />;
+    detail={error instanceof CoreFailure ? <p>{plainFailure(error)}</p> : undefined} />;
 }

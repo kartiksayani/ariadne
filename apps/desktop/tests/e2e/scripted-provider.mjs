@@ -73,6 +73,15 @@ export async function completeTurn(configuration, admission) {
   assert.ok(!completed.some(entry => entry.attemptId === admission.attemptId), 'Host completion is explicit and occurs once');
   await atomicJson(configuration.completePath, [...completed, admission]);
 }
+/** The slim envelope carries the owner's exact text and target IDs, never the saved payload or item body. */
+export function assertSlimEnvelope(admission, input) {
+  const envelope = JSON.parse(admission.payload.slice(admission.payload.indexOf('\n') + 1));
+  assert.equal(envelope.source_input_id, input.id); assert.equal(envelope.text, input.payload.text);
+  assert.equal(envelope.selected_option_id ?? null, input.payload.selected_option_id);
+  assert.equal(envelope.item_id ?? null, input.target.item_id);
+  for (const absent of ['saved_input', 'current_item', 'recent_context', 'instruction']) assert.equal(Object.hasOwn(envelope, absent), false, absent);
+  return envelope;
+}
 export function journeyResultRequest(configuration, admission, session, reply) {
   const input = session.inputs[admission.inputId];
   assert.equal(input.binding_id, configuration.bindingId);

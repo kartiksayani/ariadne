@@ -26,17 +26,24 @@ export function deferred() {
 }
 // Transport/SDK seam only: canned claim/owner replies and canonical event receipts.
 // No eligibility, mutation, history, persistence or join state machine.
-export function host({claim = null, submit = () => Promise.resolve({text:claim.formatted_payload}), handler = null, version = '2.1.287'} = {}) {
-  const calls = [], events = [], prompts = [], logs = [], commands = [];
+// `store` stands in for the plugin's own persistent data (shared across processes).
+// `append` stands in for $.session.append: a meta row the model reads, not a prompt.
+export function host({claim = null, submit = () => Promise.resolve({text:claim.formatted_payload}), handler = null, version = '2.1.287', store = new Map(),
+  append = async () => ({uuid:'appended-row'})} = {}) {
+  const calls = [], events = [], prompts = [], logs = [], commands = [], appended = [];
   const waiters = [];
   let timer = null;
   const timers = [];
   let external = binding.external_session_id;
   const $ = {
-    plugin:{name:'ariadne',root:'/sdk-reported/plugin'},session:{id:async () => external,cwd:async () => '/project/original',version:async () => ({version})},
+    plugin:{name:'ariadne',root:'/sdk-reported/plugin'},session:{id:async () => external,cwd:async () => '/project/original',version:async () => ({version}),
+      append:async args => {const result = await append(args);appended.push(args);return result;}},
     ui:{log:text => logs.push(text)},command:{register:async spec => {commands.push(spec);}},
     clock:{every:(ms,callback) => {timer={ms,callback,cancelled:false,cancel(){this.cancelled=true;}};timers.push(timer);return timer;}},
     prompt:{submit:args => {prompts.push(args);return submit(args);}},
+    // Values round-trip as JSON, as the SDK store does.
+    store:{get:async key => store.has(key) ? JSON.parse(JSON.stringify(store.get(key))) : undefined,set:async (key,value) => {store.set(key,JSON.parse(JSON.stringify(value)));},
+      delete:async key => {store.delete(key);},keys:async () => [...store.keys()]},
     process:{run:async (argv,options) => {
       calls.push({argv,options});
       if (handler) {const response = await handler(argv,options);if (response !== undefined) return response;}
@@ -65,7 +72,7 @@ export function host({claim = null, submit = () => Promise.resolve({text:claim.f
       throw new Error('Unexpected fixture helper argv');
     }},
   };
-  return {$,calls,events,prompts,logs,commands,timer:() => timers.find(timer => timer.ms === 1000) ?? null,timers:() => timers,switchSession:value => {external=value;},
+  return {$,calls,events,prompts,logs,commands,store,appended,timer:() => timers.find(timer => timer.ms === 1000) ?? null,timers:() => timers,switchSession:value => {external=value;},
     reported:kind => events.find(event => event.kind === kind) ? Promise.resolve(events.find(event => event.kind === kind))
       : new Promise(resolve => waiters.push({kind,resolve}))};
 }

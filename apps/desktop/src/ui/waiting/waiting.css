@@ -43,6 +43,31 @@
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
+.waiting-head > .waiting-fold {
+  width: 24px;
+  height: 24px;
+  margin: -4px -6px -4px -2px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* Folded: a strip with the unfold button and the count. */
+.waiting-unfold {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 4px;
+  padding: 8px 0;
+}
+
+.waiting-unfold > i {
+  font-size: 15px;
+}
+
+.waiting-scroll[hidden] {
+  display: none;
+}
+
 .waiting-scroll {
   flex: 1;
   min-height: 0;
@@ -106,9 +131,11 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   padding: 12px;
   border-radius: var(--radius-md);
   cursor: pointer;
+  overflow-wrap: anywhere;
   background: var(--a-card);
 }
 
@@ -185,8 +212,11 @@
 
 .waiting-foot > i { font-size: 13px; }
 
+/* The card wraps long tokens anywhere; its own button label stays whole. */
 .waiting-details {
+  flex: none;
   margin-left: auto;
+  white-space: nowrap;
   padding: 2px 6px;
   font-size: 12px;
 }
@@ -241,6 +271,15 @@
 }
 
 .waiting-sent-line > i { font-size: 13px; }
+
+.waiting-sent-what {
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--a-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Skeleton bars last: their nth-child selectors outrank the `> span` rules above. */
 .waiting-skeleton > span {

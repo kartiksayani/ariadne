@@ -606,6 +606,18 @@
         "created_at": {
           "$ref": "#/$defs/UtcMillis"
         },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "project_id": {
           "$ref": "#/$defs/UuidV4"
         },

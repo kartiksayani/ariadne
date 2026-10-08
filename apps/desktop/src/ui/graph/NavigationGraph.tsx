@@ -1,6 +1,6 @@
 import { GraphView } from './GraphView';
 import { sessionChip } from './model';
-import { agentName, sessionWhen } from '../shell/model';
+import { agentName, ownerName, sessionWhen } from '../shell/model';
 import { continuedLabel } from '../shared/continued';
 import { NavigationStore, useNavigation } from '../../state/navigation/store';
 import { useSession, type SessionStore } from '../../data/session-store';
@@ -18,7 +18,7 @@ export function NavigationGraph({ navigation, store, tight, onReveal, onHoverIte
   if (!preferences || !view) return <p role="status">The saved view preferences are unavailable. Refresh registered navigation.</p>;
   const later = new Set(preferences.later.filter(item => item.project_id === route.project_id && item.session_id === route.session_id).map(item => item.item_id));
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
-  const label = session ? sessionChip(binding ? agentName(binding.adapter_id) : null, sessionWhen(Date.parse(session.created_at), now())) : null;
+  const label = session ? sessionChip(ownerName(session) ?? (binding ? agentName(binding.adapter_id) : null), sessionWhen(Date.parse(session.created_at), now())) : null;
   const summaries = state.sessions?.sessions.items ?? [];
   return <GraphView store={store} routes={navigation.routes} view={view} later={later} reveal={state.reveal} tight={tight} sessionLabel={label}
     continuedFrom={topic => topic.origin ? continuedLabel(topic.origin, summaries, now()) : null}

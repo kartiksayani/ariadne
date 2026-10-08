@@ -4,8 +4,13 @@
 import type { Immutable } from '../../data/session-store';
 import type { ContinuePreview, SessionRef } from '../../generated/core';
 import type { Item, ItemStatus, ProjectSummary, Session, SessionSummary, Topic } from '../../generated/domain/models';
-import { agentName, clock, sessionRange, sessionWhen } from '../shell/model';
+import { agentLine, agentName, clock, ownerName, sessionLabel, sessionRange, sessionWhen } from '../shell/model';
 import { agentRunning, connectionOf } from '../shared/connection';
+import { shortLabel } from '../shared/short';
+import type { SupervisorHealth } from '../../data/service';
+import { dispatchStatus, type DispatchStatus } from '../../components/bindings/dispatch';
+import { unsentOf } from '../remove/model';
+import { displayStatus } from '../../selectors/waiting/replied';
 
 export type VisualStatus = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
 export const ICON: Readonly<Record<VisualStatus, string>> = {
@@ -48,10 +53,16 @@ export function lastActivity(at: number, now: number): string {
 export const isRunning = (session: Immutable<SessionSummary>) => session.state === 'active' && agentRunning(connectionOf(session.active_binding));
 export const agentOf = (session: Immutable<SessionSummary>) => session.active_binding ? agentName(session.active_binding.adapter_id) : 'No agent';
 
-export interface Run { readonly run: string; readonly runColor: string; readonly runDot: string; readonly runRing: string }
-export function runOf(running: boolean): Run {
-  return { run: running ? 'Agent running' : 'Agent not running', runColor: running ? 'var(--st-done)' : neutral(60),
-    runDot: running ? 'var(--st-done)' : 'transparent', runRing: running ? 'none' : `inset 0 0 0 1.5px ${neutral(50)}` };
+/** The card's sending state, read like the session bar's chip (components/bindings/dispatch). */
+export function cardDispatch(summary: Immutable<SessionSummary>, health: SupervisorHealth | null = null, now = Date.now()): DispatchStatus {
+  return dispatchStatus({ binding: summary.active_binding, closed: summary.state === 'closed', presence: summary.active_binding?.presence ?? null,
+    needsDecision: summary.counts.sent_inputs.needs_attention > 0, health, agent: agentOf(summary), now });
+}
+export interface Run { readonly run: string; readonly runColor: string; readonly runDot: string; readonly runRing: string; readonly dispatch: DispatchStatus }
+/** A filled dot only while inputs reach the agent; paused, blocked and disconnected show a ring. */
+export function runOf(dispatch: DispatchStatus): Run {
+  return { run: dispatch.label, runColor: dispatch.color, dispatch,
+    runDot: dispatch.live ? dispatch.color : 'transparent', runRing: dispatch.live ? 'none' : `inset 0 0 0 1.5px ${dispatch.color}` };
 }
 
 export interface ProjectCardModel {
@@ -105,33 +116,45 @@ export function continuationLinks(sessions: readonly Immutable<Session>[]): { re
 const topicItems = (session: Immutable<Session>, topicId: string) => Object.values(session.items).filter((item): item is Immutable<Item> => !!item && item.topic_id === topicId);
 export const sortedTopics = (session: Immutable<Session>) => Object.values(session.topics).filter((topic): topic is Immutable<Topic> => !!topic).sort((a, b) => a.order - b.order);
 
-export interface TopicChip { readonly id: string; readonly name: string; readonly counts: string; readonly icon: string; readonly color: string }
+/** `name` is the short label the chip shows; `full` is the topic's whole name, for the tooltip. */
+export interface TopicChip { readonly id: string; readonly name: string; readonly full: string; readonly counts: string; readonly icon: string; readonly color: string }
 export function topicChips(session: Immutable<Session>, movedOn: ReadonlySet<string>): TopicChip[] {
   return sortedTopics(session).map(topic => {
     const items = topicItems(session, topic.id), moved = movedOn.has(`${session.id}:${topic.id}`);
-    const waiting = items.filter(item => item.status === 'waiting_on_me').length;
-    const open = items.filter(item => item.status === 'open' || item.status === 'in_progress').length;
+    // A question the owner already replied to waits on the agent, not on them: it counts as open, like everywhere else.
+    const shown = items.map(item => ({ item, status: displayStatus(session, item) }));
+    const waiting = shown.filter(({ status }) => status === 'waiting_on_me').length;
+    const open = shown.filter(({ status }) => status === 'open' || status === 'in_progress' || status === 'waiting_on_agent').length;
     const closed = items.filter(item => closedStatuses.has(item.status)).length;
     const counts = topic.archived_at !== null ? 'archived' : moved ? 'continued later'
       : [waiting && `${waiting} waiting`, open && `${open} open`, closed && `${closed} closed`].filter(Boolean).join(' · ');
-    return { id: topic.id, name: topic.name, counts, icon: topic.archived_at !== null ? 'ph ph-archive' : moved ? 'ph ph-arrow-bend-down-right' : 'ph ph-folder-simple',
+    return { id: topic.id, name: shortLabel(topic), full: topic.name, counts, icon: topic.archived_at !== null ? 'ph ph-archive' : moved ? 'ph ph-arrow-bend-down-right' : 'ph ph-folder-simple',
       color: topic.archived_at !== null ? neutral(64) : 'var(--color-text)' };
   });
 }
 
 export interface SessionCardText extends Run {
   readonly agent: string;
+  /** The owner's name for the session; unnamed, "claude-code · iTerm window 1" as before. */
   readonly title: string;
+  /** The agent line kept quietly under a name; null while unnamed. */
+  readonly secondary: string | null;
+  /** The owner's description, or null. */
+  readonly description: string | null;
+  readonly named: boolean;
   readonly meta: string;
   readonly titleColor: string;
   readonly background: string;
   readonly closed: boolean;
 }
-export function sessionCardText(summary: Immutable<SessionSummary>, snapshot: Immutable<Session> | null, now: number, where: string | null = null): SessionCardText {
+export function sessionCardText(summary: Immutable<SessionSummary>, snapshot: Immutable<Session> | null, now: number, where: string | null = null,
+  health: SupervisorHealth | null = null): SessionCardText {
   const closed = summary.state === 'closed', running = isRunning(summary), agent = agentOf(summary);
   const range = sessionRange(Date.parse(summary.created_at), Date.parse(summary.closed_at ?? summary.updated_at), running, now);
   const messages = snapshot ? ` · ${plural(snapshot.messages.length, 'message')}` : '';
-  return { ...runOf(running), agent, closed, title: where ? `${agent} · ${where}` : agent, meta: `${range}${messages}${closed ? ' · read-only' : ''}`,
+  const label = sessionLabel(summary, agentLine(agent, where));
+  return { ...runOf(cardDispatch(summary, health, now)), agent, closed, title: label.title, secondary: label.secondary, description: label.description, named: label.named,
+    meta: `${range}${messages}${closed ? ' · read-only' : ''}`,
     titleColor: closed ? neutral(74) : 'var(--color-text)', background: closed ? 'transparent' : 'var(--a-card)' };
 }
 
@@ -158,7 +181,7 @@ export function archivedTopics(summaries: readonly Immutable<SessionSummary>[], 
   return summaries.flatMap(summary => {
     const session = snapshots.get(sessionKey(summary));
     if (!session) return [];
-    const from = `${agentOf(summary)} · ${sessionWhen(Date.parse(summary.created_at), now).toLowerCase()}`;
+    const from = `${ownerName(summary) ? `“${ownerName(summary)}”` : agentOf(summary)} · ${sessionWhen(Date.parse(summary.created_at), now).toLowerCase()}`;
     return sortedTopics(session).filter(topic => topic.archived_at !== null).flatMap(topic => {
       const items = topicItems(session, topic.id).sort(byId);
       if (needle && !`${topic.name} ${items.map(item => `${item.question} ${item.outcome ?? ''}`).join(' ')}`.toLowerCase().includes(needle)) return [];
@@ -196,12 +219,13 @@ export function sessionRemoval(session: Immutable<Session> | null, shared: Reado
   const topics = sortedTopics(session), own = topics.filter(topic => !shared.has(`${session.id}:${topic.id}`));
   const ownIds = new Set(own.map(topic => topic.id));
   const items = Object.values(session.items).filter(item => item && ownIds.has(item.topic_id));
-  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => item?.status === 'waiting_on_me').length };
+  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => item?.status === 'waiting_on_me').length,
+    unsent: unsentOf([session]) };
 }
 
 /** Project counts for the Remove dialog of a project. */
 export function projectRemoval(sessions: readonly Immutable<Session>[]) {
   const items = sessions.flatMap(session => Object.values(session.items).filter(item => !!item));
   return { topics: sessions.reduce((sum, session) => sum + Object.keys(session.topics).length, 0), items: items.length,
-    waiting: items.filter(item => item?.status === 'waiting_on_me').length };
+    waiting: items.filter(item => item?.status === 'waiting_on_me').length, unsent: unsentOf(sessions) };
 }

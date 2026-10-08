@@ -146,13 +146,13 @@ describe('session graph view', () => {
     const value = await setup(); render(<value.Composition />);
     value.writeWith(async () => false);
     fireEvent.click(node('2'));
-    expect((await screen.findByRole('alert')).textContent).toBe('The view change was not confirmed. Reconcile its preferences.');
+    expect((await screen.findByRole('alert')).textContent).toBe('Ariadne isn’t sure that view change was saved. Try it again.');
     value.writeWith(async () => { throw new Error('Preferences are read-only.'); });
     fireEvent.click(node('8'));
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Preferences are read-only.'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The view change could not be saved. Try again.'));
     value.writeWith(async () => true); value.failReveal();
     fireEvent.click(node('3'));
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The registered item could not be read.'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This item could not be opened.'));
   });
 
   it('reports hover and clears it on unmount; shows nothing for an empty session', async () => {

@@ -1,6 +1,7 @@
 //! Deliberate owner lifecycle controls and copied topic handoffs.
 mod continuation;
 mod error;
+mod label;
 mod lifecycle;
 mod preview;
 mod remove;
@@ -8,7 +9,10 @@ pub use error::HistoryActionError;
 
 use crate::*;
 use ariadne_domain::models::*;
-use ariadne_store::{registry::Registry, session::Store};
+use ariadne_store::{
+    registry::Registry,
+    session::{Store, StoreError, TransactionError},
+};
 
 pub struct HistoryActionService<'a> {
     registry: &'a Registry,
@@ -37,7 +41,8 @@ impl<'a> HistoryActionService<'a> {
             OwnerCommand::TopicArchive { api_version, .. }
             | OwnerCommand::TopicRestore { api_version, .. }
             | OwnerCommand::SessionClose { api_version, .. }
-            | OwnerCommand::SessionReopen { api_version, .. } => api_version,
+            | OwnerCommand::SessionReopen { api_version, .. }
+            | OwnerCommand::SessionLabelSet { api_version, .. } => api_version,
             _ => {
                 return Err(core(
                     CoreErrorCode::InvalidArgument,
@@ -63,6 +68,11 @@ impl<'a> HistoryActionService<'a> {
             OwnerCommand::SessionReopen { params, .. } => {
                 crate::receipts::normalized("session_reopen", params)?
             }
+            // Digest the stored form, so a retry typed with other spacing replays.
+            OwnerCommand::SessionLabelSet { params, .. } => {
+                let (name, description) = params.normalized()?;
+                crate::receipts::normalized("session_label_set", &(name, description))?
+            }
             _ => {
                 return Err(core(
                     CoreErrorCode::InvalidArgument,
@@ -82,12 +92,39 @@ impl<'a> HistoryActionService<'a> {
             command.operation_id(),
             &normalized,
             |session| {
+                // A rename is not session activity: `updated_at` stays put.
+                if matches!(command, OwnerCommand::SessionLabelSet { .. }) {
+                    return label::apply(session, command);
+                }
                 let data = lifecycle::apply(session, command, &at)?;
                 session.updated_at = at;
                 Ok::<_, CoreError>(data)
             },
-        )?;
-        Ok(MutationReceipt::Session(Box::new(receipt)))
+        );
+        match receipt {
+            Ok(receipt) => Ok(MutationReceipt::Session(Box::new(receipt))),
+            // A removed session has no file left: say so instead of an I/O error.
+            Err(TransactionError::Store(error))
+                if matches!(command, OwnerCommand::SessionLabelSet { .. })
+                    && is_missing(&error) =>
+            {
+                Err(CoreError::new(
+                    CoreErrorCode::NotFound,
+                    "This session was removed, so it can't be renamed.",
+                    "Go back to the project page and pick a session that is still there.",
+                )
+                .into())
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+fn is_missing(error: &StoreError) -> bool {
+    match error {
+        StoreError::Io { kind, .. } => *kind == std::io::ErrorKind::NotFound,
+        StoreError::SessionFile { source, .. } => is_missing(source),
+        _ => false,
     }
 }
 

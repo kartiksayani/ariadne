@@ -6,6 +6,12 @@ use super::*;
 /// immutable history, delivery/receipt consistency, lifecycle guards or actor scope.
 pub fn validate_session_items(session: &Session) -> Result<(), ValidationError> {
     text(&session.title, "title", true, None)?;
+    optional_owner_label(&session.name, "name", SESSION_NAME_MAX_CHARS)?;
+    optional_owner_label(
+        &session.description,
+        "description",
+        SESSION_DESCRIPTION_MAX_CHARS,
+    )?;
     distinct(
         session.topics.0.values().map(|topic| topic.order),
         "topics.order",

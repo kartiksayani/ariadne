@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CancelPurpose",
+  "description": "What an owner `input_cancel` is for.",
+  "oneOf": [
+    {
+      "description": "Delete the message: it is not sent.",
+      "type": "string",
+      "const": "delete"
+    },
+    {
+      "description": "Take the message back to edit: only a message still queued can be.",
+      "type": "string",
+      "const": "edit"
+    }
+  ]
+}

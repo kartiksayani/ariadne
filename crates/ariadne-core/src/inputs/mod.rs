@@ -65,7 +65,7 @@ impl<'a> InputService<'a> {
                     OwnerCommand::InputSubmit { params, .. } => {
                         submit(session, params, &mut allocate, &at)?
                     }
-                    OwnerCommand::InputCancel { params, .. } => cancel(session, params)?,
+                    OwnerCommand::InputCancel { params, .. } => cancel(session, params, &at)?,
                     _ => unreachable!("validated input command"),
                 };
                 session.updated_at = at;
@@ -82,6 +82,9 @@ fn submit(
     allocate: &mut impl FnMut() -> UuidV4,
     at: &UtcMillis,
 ) -> Result<SavedReceiptData, CoreError> {
+    if params.kind == InputKind::TopicReply {
+        return submit_topic_reply(session, params, allocate, at);
+    }
     if params.kind == InputKind::Continue || params.target.item_id.is_none() {
         return Err(core(
             CoreErrorCode::InvalidArgument,
@@ -158,19 +161,7 @@ fn submit(
             "Restore the archived topic before submitting an owner input",
         ));
     }
-    if session
-        .inputs
-        .0
-        .values()
-        .filter(|input| {
-            matches!(
-                input.state,
-                InputState::Queued | InputState::InFlight | InputState::NeedsAttention
-            )
-        })
-        .count()
-        >= 100
-    {
+    if pending_count(session) >= 100 {
         return Err(core(
             CoreErrorCode::QueueFull,
             "This session already has 100 pending inputs",
@@ -228,6 +219,7 @@ fn submit(
         attempts: vec![],
         active_attempt_id: None,
         resolution_history: vec![],
+        cancel_cause: None,
     };
     let message = Message {
         id: message_id.clone(),
@@ -285,11 +277,162 @@ fn submit(
     Ok(data)
 }
 
+/// The owner's instruction for a whole topic ("approve the PR"). It targets the
+/// topic alone, carries text only and sits in the topic's history; the agent
+/// finishes it with an input result like any other input.
+fn submit_topic_reply(
+    session: &mut Session,
+    params: &InputSubmitParams,
+    allocate: &mut impl FnMut() -> UuidV4,
+    at: &UtcMillis,
+) -> Result<SavedReceiptData, CoreError> {
+    if params.target.item_id.is_some()
+        || params.selected_option_id.is_some()
+        || params.expected_question_revision.is_some()
+        || params.supersedes_answer_id.is_some()
+    {
+        return Err(core(
+            CoreErrorCode::InvalidArgument,
+            "A topic reply targets the topic alone and carries text only",
+        ));
+    }
+    if session.state != SessionState::Active {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "Explicitly reopen the session before submitting an owner input",
+        ));
+    }
+    if session.active_binding_id.as_ref() != Some(&params.binding_id)
+        || !session.bindings.0.contains_key(&params.binding_id)
+    {
+        return Err(core(
+            CoreErrorCode::BindingMismatch,
+            "Submit to this session's selected binding",
+        ));
+    }
+    let topic = session
+        .topics
+        .0
+        .get(&params.target.topic_id)
+        .ok_or_else(|| core(CoreErrorCode::NotFound, "The target topic does not exist"))?;
+    if topic.archived_at.is_some() {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "Restore the archived topic before submitting an owner input",
+        ));
+    }
+    let topic_name = topic.name.clone();
+    if pending_count(session) >= 100 {
+        return Err(core(
+            CoreErrorCode::QueueFull,
+            "This session already has 100 pending inputs",
+        ));
+    }
+    let next_input = increment(session.counters.next_input)?;
+    let next_message = increment(session.counters.next_message)?;
+    let mut occupied = occupied_ids(session);
+    let input_id = fresh(&mut occupied, allocate)?;
+    let message_id = fresh(&mut occupied, allocate)?;
+    let seq = session.counters.next_input;
+    let number = session.counters.next_message;
+    let input = Input {
+        id: input_id.clone(),
+        seq,
+        binding_id: params.binding_id.clone(),
+        kind: InputKind::TopicReply,
+        target: params.target.clone(),
+        message_id: message_id.clone(),
+        answer_id: None,
+        created_at: at.clone(),
+        expected_question_revision: None,
+        payload: InputPayload {
+            text: params.text.clone(),
+            intent: InputKind::TopicReply,
+            target_snapshot: InputTargetSnapshot {
+                topic_name,
+                item_question: None,
+                question_revision: None,
+                ask: None,
+                options: vec![],
+            },
+            selected_option_id: None,
+            context: InputContext {
+                message_ids: vec![],
+                item_ids: vec![],
+                round_id: None,
+                continuation_operation_id: None,
+            },
+            removed: None,
+        },
+        state: InputState::Queued,
+        attempts: vec![],
+        active_attempt_id: None,
+        resolution_history: vec![],
+        cancel_cause: None,
+    };
+    session.counters.next_input = next_input;
+    session.counters.next_message = next_message;
+    session.messages.push(Message {
+        id: message_id.clone(),
+        number,
+        author: MessageAuthor::Owner,
+        kind: MessageKind::OwnerInput,
+        body: params.text.clone(),
+        created_at: at.clone(),
+        item_id: None,
+        topic_id: Some(params.target.topic_id.clone()),
+        items_touched: vec![],
+        binding_id: Some(params.binding_id.clone()),
+        input_id: Some(input_id.clone()),
+        attempt_id: None,
+        host_turn_id: None,
+        round_id: None,
+        origin: None,
+    });
+    session.inputs.0.insert(input_id.clone(), input);
+    // Capacity check only: a UUID-length stand-in sizes the future attempt id.
+    crate::delivery::format::body(session, &session.inputs.0[&input_id], &input_id)?;
+    Ok(SavedReceiptData::InputSubmit {
+        input_id,
+        message_id,
+        message_number: number,
+        answer_id: None,
+        input_seq: seq,
+    })
+}
+
+fn pending_count(session: &Session) -> usize {
+    session
+        .inputs
+        .0
+        .values()
+        .filter(|input| {
+            matches!(
+                input.state,
+                InputState::Queued | InputState::InFlight | InputState::NeedsAttention
+            )
+        })
+        .count()
+}
+
 fn cancel(
     session: &mut Session,
     params: &InputCancelParams,
+    at: &UtcMillis,
 ) -> Result<SavedReceiptData, CoreError> {
-    if session.revision != params.expected_revision {
+    let input = session
+        .inputs
+        .0
+        .get(&params.input_id)
+        .ok_or_else(|| core(CoreErrorCode::NotFound, "The input does not exist"))?;
+    let binding_id = input.binding_id.clone();
+    // An input still queued (or queued again for a retry) has not reached the
+    // agent: whether the session changed elsewhere (a report, an apply) does
+    // not matter, and it is decided here, in the transaction a claim also runs
+    // in, so a claim and a cancel cannot both win. Once a claim made it
+    // in-flight, or it needs attention, the owner's reviewed revision must
+    // still match: they were looking at an older state of the delivery.
+    if input.state != InputState::Queued && session.revision != params.expected_revision {
         let mut error = core(
             CoreErrorCode::RevisionConflict,
             "The session revision changed before cancellation",
@@ -297,24 +440,30 @@ fn cancel(
         error.current_revision = Some(session.revision);
         return Err(error);
     }
-    let input = session
-        .inputs
-        .0
-        .get_mut(&params.input_id)
-        .ok_or_else(|| core(CoreErrorCode::NotFound, "The input does not exist"))?;
-    if input.state != InputState::Queued
-        || !input.attempts.is_empty()
-        || input.active_attempt_id.is_some()
-    {
+    let purpose = params.purpose.unwrap_or(CancelPurpose::Delete);
+    // Edit puts the words back in the owner's editor, so only a message the
+    // agent cannot have seen is taken back: one still queued. A claim that won
+    // the race made it in-flight in an earlier transaction, so this refuses.
+    if purpose == CancelPurpose::Edit && input.state != InputState::Queued {
         return Err(core(
             CoreErrorCode::InvalidTransition,
-            "Only a queued, never-prepared input can be cancelled",
+            "Only a message that has not been sent yet can be taken back to edit",
         ));
     }
-    input.state = InputState::Cancelled;
+    // Queued, in-flight and needs-attention inputs cancel; an attempt the agent
+    // may still be running is abandoned and its late reports are ignored. One
+    // whose result already committed is handled instead: the result wins.
+    let Some(state) = crate::delivery_join::abandon(session, &params.input_id, purpose.cause(), at)
+    else {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "This input is already handled, skipped or cancelled",
+        ));
+    };
+    crate::delivery_join::release_barrier(session, &binding_id);
     Ok(SavedReceiptData::InputCancel {
-        input_id: input.id.clone(),
-        state: input.state.clone(),
+        input_id: params.input_id.clone(),
+        state,
     })
 }
 

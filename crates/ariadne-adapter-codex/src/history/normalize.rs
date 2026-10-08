@@ -27,6 +27,7 @@ pub(super) fn match_turn(
     scan: &mut HistoryScan,
     result: &mut ReconcileResult,
     observed_at: UtcMillis,
+    newer_turn_exists: bool,
 ) -> Result<(), AdapterError> {
     for attempt in &request.attempts {
         let mut matches = Vec::new();
@@ -190,8 +191,16 @@ pub(super) fn match_turn(
         let status = match turn.status {
             TurnStatus::Completed => Some(TurnFinishedStatus::Completed),
             TurnStatus::Failed => Some(TurnFinishedStatus::Failed),
-            TurnStatus::Interrupted => Some(TurnFinishedStatus::Interrupted),
-            TurnStatus::InProgress => None,
+            // The app-server also reports `interrupted` for a turn it is not
+            // running itself (a local TUI still running it, or one read back
+            // mid-write) with no end time. Only a recorded end, an error or a
+            // later turn proves it ended; otherwise it is still in progress.
+            TurnStatus::Interrupted
+                if turn.completed_at.is_some() || turn.error.is_some() || newer_turn_exists =>
+            {
+                Some(TurnFinishedStatus::Interrupted)
+            }
+            TurnStatus::Interrupted | TurnStatus::InProgress => None,
         };
         if let Some(status) = status {
             events.push(event(

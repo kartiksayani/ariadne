@@ -82,6 +82,21 @@ impl DeliveryService<'_> {
                         &event.observed_at,
                     ));
                 }
+                // The owner removed the work this input was about. Its late facts
+                // are ignored once the reporting binding is still the session's.
+                if event
+                    .input_id
+                    .as_ref()
+                    .is_some_and(|id| crate::delivery_join::removed_input(session, id))
+                {
+                    if session.active_binding_id.as_ref() != Some(context.binding_id()) {
+                        return Err(core(
+                            CoreErrorCode::StaleGeneration,
+                            "Reported binding was replaced by a newer conversation",
+                        ));
+                    }
+                    return Ok(EventMutation::Unchanged);
+                }
                 authorize(
                     session,
                     context,
@@ -167,9 +182,10 @@ pub(super) fn authorize(
             )
         })?;
     if session.active_binding_id.as_ref() != Some(context.binding_id()) {
+        // A rebind replaced this conversation: its late facts are stale.
         return Err(core(
-            CoreErrorCode::BindingMismatch,
-            "Reported binding is not selected",
+            CoreErrorCode::StaleGeneration,
+            "Reported binding was replaced by a newer conversation",
         ));
     }
     if &binding.generation != context.current_generation() {
@@ -248,22 +264,24 @@ fn conflict(
             .iter_mut()
             .find(|a| &a.id == attempt_id)
             .expect("authorized attempt");
-        if attempt.sealed_at.is_none()
-            && !matches!(
-                input.state,
-                InputState::Handled | InputState::Skipped | InputState::Cancelled
-            )
-        {
-            input.state = InputState::NeedsAttention;
-            if attempt.error.is_none() {
-                attempt.error = Some(AttemptError {
-                    code: "protocol_conflict".into(),
-                    reason: "Contradictory verified host facts; reconcile before owner recovery."
-                        .into(),
-                    retryable: false,
-                    observed_at: at.clone(),
-                });
-            }
+        // Settled by the owner or by a committed result: the contradiction is
+        // retained as a fact but never pauses dispatch.
+        if settled(&input.state, attempt) || committed(attempt) {
+            session.updated_at = at.clone();
+            return EventMutation::ProtocolConflict {
+                input_id: Some(input_id.clone()),
+                attempt_id: Some(attempt_id.clone()),
+            };
+        }
+        input.state = InputState::NeedsAttention;
+        if attempt.error.is_none() {
+            attempt.error = Some(AttemptError {
+                code: "protocol_conflict".into(),
+                reason: "Contradictory verified host facts; reconcile before owner recovery."
+                    .into(),
+                retryable: false,
+                observed_at: at.clone(),
+            });
         }
     }
     let binding = session
@@ -298,6 +316,50 @@ fn apply_attempt(
         .position(|a| &a.id == attempt_id)
         .expect("authorized attempt");
     let saved = &input.attempts[index];
+    // Settled work: the owner cancelled, skipped or resent it, or a committed
+    // result sealed it. Whatever the host still reports about it is ignored, so
+    // a late fact can neither rewrite it nor stall the reporter's queue.
+    if settled(&input.state, saved) {
+        return Ok(EventMutation::Unchanged);
+    }
+    // A committed result wins. While its attempt waits for the turn to end,
+    // any end of turn, doubt or rejection completes the input instead of
+    // raising a barrier; acceptance and start facts record as usual.
+    if committed(saved) && matches!(saved.turn_state, TurnState::Unknown | TurnState::Running) {
+        let status = match &event.event {
+            EventPayload::TurnFinished { status, .. } => Some(status),
+            EventPayload::Uncertain { .. } | EventPayload::Rejected { .. } => {
+                crate::delivery_join::handle_committed(
+                    session,
+                    input_id,
+                    attempt_id,
+                    &event.observed_at,
+                );
+                session.updated_at = event.observed_at.clone();
+                return Ok(EventMutation::Commit {
+                    input_id: Some(input_id.clone()),
+                    attempt_id: Some(attempt_id.clone()),
+                });
+            }
+            _ => None,
+        };
+        if let Some(status) = status {
+            let attempt = &mut session.inputs.0.get_mut(input_id).expect("input").attempts[index];
+            if attempt.host_turn_id.is_none() {
+                attempt.host_turn_id = event.host_turn_id.clone();
+            }
+            attempt.turn_state = turn(*status);
+            attempt.turn_observed_at = Some(event.observed_at.clone());
+            crate::delivery_join::join(session, input_id, attempt_id, &event.observed_at);
+            session.updated_at = event.observed_at.clone();
+            return Ok(EventMutation::Commit {
+                input_id: Some(input_id.clone()),
+                attempt_id: Some(attempt_id.clone()),
+            });
+        }
+    }
+    let input = &session.inputs.0[input_id];
+    let saved = &input.attempts[index];
     let contradictory_turn = event
         .host_turn_id
         .as_ref()
@@ -328,7 +390,6 @@ fn apply_attempt(
                     || saved.turn_state != TurnState::Unknown
                     || saved.domain_result.is_some()
             }
-            EventPayload::Uncertain { .. } => saved.sealed_at.is_some(),
             _ => false,
         };
     if contradictory {
@@ -338,39 +399,6 @@ fn apply_attempt(
             Some(input_id),
             Some(attempt_id),
             &event.observed_at,
-        ));
-    }
-    if saved.sealed_at.is_some()
-        || matches!(
-            input.state,
-            InputState::Handled | InputState::Skipped | InputState::Cancelled
-        )
-    {
-        let redundant = match &event.event {
-            EventPayload::Accepted { receipt } => {
-                saved.acceptance == AcceptanceState::Accepted
-                    && receipt.as_ref().is_none_or(|r| {
-                        saved
-                            .acceptance_receipt
-                            .as_ref()
-                            .is_some_and(|old| old.provider_reference == r.provider_reference)
-                    })
-            }
-            EventPayload::TurnStarted {} => {
-                saved.turn_state != TurnState::Unknown && saved.host_turn_id == event.host_turn_id
-            }
-            EventPayload::TurnFinished { status, .. } => {
-                saved.turn_state == turn(*status) && saved.host_turn_id == event.host_turn_id
-            }
-            EventPayload::VisibleOutput { .. } => true,
-            _ => false,
-        };
-        if redundant {
-            return Ok(EventMutation::Unchanged);
-        }
-        return Err(core(
-            CoreErrorCode::AttemptSealed,
-            "This attempt is sealed; new nonredundant facts cannot rewrite it",
         ));
     }
     if matches!(event.event, EventPayload::VisibleOutput { .. }) {
@@ -451,6 +479,19 @@ fn apply_attempt(
         attempt_id: Some(attempt_id.clone()),
     })
 }
+fn committed(attempt: &Attempt) -> bool {
+    attempt.result_state == ResultState::Committed && attempt.domain_result.is_some()
+}
+
+/// The input or this attempt of it is settled: no host fact can change it.
+fn settled(input_state: &InputState, attempt: &Attempt) -> bool {
+    attempt.sealed_at.is_some()
+        || matches!(
+            input_state,
+            InputState::Handled | InputState::Skipped | InputState::Cancelled
+        )
+}
+
 fn turn(status: TurnFinishedStatus) -> TurnState {
     match status {
         TurnFinishedStatus::Completed => TurnState::Completed,

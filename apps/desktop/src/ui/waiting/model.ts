@@ -4,12 +4,14 @@
 import type { ItemRoute, SessionRef } from '../../generated/core';
 import type { Input, Item, PresenceObservation, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data/session-store';
+import type { SupervisorHealth } from '../../data/service';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
+import { counted, stuckInput, type Stuck } from '../../selectors/waiting/stuck';
 import type { WaitingSession } from '../../selectors/waiting/rows';
 import type { WaitingState } from '../../selectors/waiting/store';
 import type { DraftEntry } from '../../state/drafts/store';
 import { deliveryLine, deliveryStage, draftStage, quote, type DeliveryLine, type DeliveryStage } from '../answer/delivery';
-import { agentName, dayWord } from '../shell/model';
+import { agentName, dayWord, ownerName } from '../shell/model';
 import { connectionOf } from '../shared/connection';
 import { shortLabel } from '../shared/short';
 
@@ -38,6 +40,12 @@ export interface SentRowModel {
   readonly id: string;
   readonly question: string;
   readonly line: DeliveryLine;
+  /** The saved message, once the session has it; a send still being saved has none. */
+  readonly input: Immutable<Input> | null;
+  /** Why it hasn't reached the agent, with its fixes (ui/answer/StuckNote); replaces `line`. */
+  readonly stuck: Stuck | null;
+  /** What was sent, quoted from the saved message ("“Old choice”"); shown with `stuck`. */
+  readonly what: string;
   readonly item: ItemRoute | null;
   readonly session: SessionRef;
 }
@@ -54,6 +62,8 @@ export interface ModelInput {
   readonly draft: (route: ItemRoute) => DraftEntry | undefined;
   /** Live presence for a binding from the shared session cache. */
   readonly presence: (session: SessionRef, bindingId: string) => Immutable<PresenceObservation> | null;
+  /** The desktop supervisor's health for a binding generation, when known. */
+  readonly health?: (bindingId: string, generation: string | null | undefined) => SupervisorHealth | null;
   readonly now: number;
 }
 
@@ -65,6 +75,8 @@ const agentOf = (session: Immutable<Session>, bindingId: string | null) => {
   const value = binding(session, bindingId ?? session.active_binding_id);
   return value ? agentName(value.adapter_id) : '';
 };
+/** What names an earlier session in a card: the owner's name for it, else its agent. */
+const earlierName = (session: Immutable<Session>, bindingId: string | null) => ownerName(session) ?? agentOf(session, bindingId);
 
 /** Minutes since `at`, as the card footer words it. */
 export function waitingAge(at: number, now: number): string {
@@ -87,7 +99,9 @@ export function pathText(session: Immutable<Session>, item: Immutable<Item>, pro
 /** "Round 3 · last time you replied “…”" when the open round follows an answered one. */
 export function lastRound(session: Immutable<Session>, item: Immutable<Item>): string | null {
   const rounds = Object.values(session.rounds).filter(round => !!round && round.item_id === item.id).sort((a, b) => a!.ordinal - b!.ordinal);
-  const answerOf = (ids: readonly string[]) => session.answers.filter(answer => answer.item_id === item.id && ids.includes(answer.message_id)).sort((a, b) => b.seq - a.seq)[0];
+  // An answer whose message archive or close cancelled never reached the agent: it is not "last time you replied".
+  const answerOf = (ids: readonly string[]) => session.answers.filter(answer => answer.item_id === item.id && ids.includes(answer.message_id)
+    && session.messages.every(message => message.id !== answer.message_id || counted(session, message))).sort((a, b) => b.seq - a.seq)[0];
   if (rounds.length < 2 || answerOf(rounds.at(-1)!.owner_message_ids)) return null;
   for (const round of rounds.slice(0, -1).reverse()) {
     const answer = answerOf(round!.owner_message_ids);
@@ -108,7 +122,7 @@ const draftLabel = (entry: DraftEntry, item: Immutable<Item>) => {
   return item.options.find(option => option.id === content.selected_option_id)?.label ?? content.text;
 };
 
-export function waitingModel({ state, draft, presence, now }: ModelInput): WaitingModel {
+export function waitingModel({ state, draft, presence, health, now }: ModelInput): WaitingModel {
   const sessions = new Map(state.sessions.map(captured => [key({ project_id: captured.session.project_id, session_id: captured.session.id }), captured]));
   const several = new Set(state.sessions.map(captured => captured.session.project_id)).size > 1;
   // The current session: the newest one whose agent is running. Messages of
@@ -121,15 +135,15 @@ export function waitingModel({ state, draft, presence, now }: ModelInput): Waiti
     const number = askedNumber(session, item), mine = !primary || primary.session.id === session.id;
     const runningHere = live.find(value => value.session.project_id === session.project_id);
     const earlier = !running(captured) && runningHere && runningHere !== captured
-      ? `Asked in an earlier ${agentOf(session, item.recipient_binding_id)} session. Your answer goes to ${agentOf(runningHere.session, null)}, with this item’s context.` : null;
+      ? `Asked in ${ownerName(session) ? `the “${ownerName(session)}”` : `an earlier ${agentOf(session, item.recipient_binding_id)}`} session. Your answer goes to ${agentOf(runningHere.session, null)}, with this item’s context.` : null;
     cards.push({ id, route, session, item, chosen, path: pathText(session, item, several ? captured.project.project?.display_name ?? 'Unavailable project' : null),
       ask: delivery ? null : item.ask, earlier, last: lastRound(session, item),
       age: item.waiting_since ? waitingAge(Date.parse(item.waiting_since), now) : '',
-      tag: number === null ? '' : mine ? `#${number}` : `${agentOf(session, item.recipient_binding_id)} #${number}`, delivery });
+      tag: number === null ? '' : mine ? `#${number}` : `${earlierName(session, item.recipient_binding_id)} #${number}`, delivery });
   };
   const pending = (stage: 'sending' | 'checking', entry: DraftEntry, item: Immutable<Item>, route: ItemRoute, session: Immutable<Session>) => sent.push({ id: entry.draft.op_id,
     question: item.question, line: deliveryLine(stage, 'answer', draftLabel(entry, item), agentOf(session, entry.draft.binding_id)),
-    item: route, session: { project_id: route.project_id, session_id: route.session_id } });
+    input: null, stuck: null, what: quote(draftLabel(entry, item)), item: route, session: { project_id: route.project_id, session_id: route.session_id } });
   for (const row of state.waiting) {
     const captured = sessions.get(key(row.route));
     if (!captured || captured.session.state !== 'active') continue;
@@ -147,22 +161,33 @@ export function waitingModel({ state, draft, presence, now }: ModelInput): Waiti
   for (const row of state.sent) {
     const captured = sessions.get(key(row.session));
     if (!captured) continue;
-    const evidence = deliveryEvidence(row.input, captured.summary.active_binding, captured.session.operation_receipts, presence(row.session, row.input.binding_id));
+    const observed = presence(row.session, row.input.binding_id);
+    const evidence = deliveryEvidence(row.input, captured.summary.active_binding, captured.session.operation_receipts, observed);
     const stage: DeliveryStage | null = deliveryStage(evidence.kind);
     if (!stage) continue;
     const line = deliveryLine(stage, row.input.kind, inputLabel(row.input), agentOf(captured.session, row.input.binding_id));
+    const stuck = stuckInput(captured.session, row.input, observed,
+      health?.(row.input.binding_id, captured.session.bindings[row.input.binding_id]?.generation) ?? null);
     if (stage === 'failed') {
       // A failed answer to the still-open question stays in Waiting with its
-      // delivery line; other failed inputs are in the session's recovery review.
+      // delivery line; other failed inputs stay in Sent, with Retry and Cancel.
       if (row.input.kind === 'answer' && row.currentItem?.status === 'waiting_on_me' && !row.changedQuestion && captured.session.state === 'active'
-        && captured.session.topics[row.currentItem.topic_id]?.archived_at === null) failed.push({ captured, item: row.currentItem, input: row.input, line });
-      continue;
+        && captured.session.topics[row.currentItem.topic_id]?.archived_at === null) { failed.push({ captured, item: row.currentItem, input: row.input, line }); continue; }
+      if (!stuck) continue;
     }
     const target = row.input.payload.target_snapshot;
-    sent.push({ id: row.id, question: target.item_question ?? target.topic_name, line, item: row.route ? { ...row.route } : null, session: { ...row.session } });
+    sent.push({ id: row.id, question: target.item_question ?? target.topic_name, line, input: row.input, stuck, what: quote(inputLabel(row.input)),
+      item: row.route ? { ...row.route } : null, session: { ...row.session } });
   }
   for (const { captured, item, input, line } of failed) {
-    if (cards.some(value => value.route.session_id === captured.session.id && value.item.id === item.id)) continue;
+    // The question is still the owner's (a failed answer reads Waiting on me),
+    // so its card is already here: it carries the failed delivery and its fix.
+    const at = cards.findIndex(value => value.route.session_id === captured.session.id && value.item.id === item.id);
+    if (at >= 0) {
+      const existing = cards[at]!;
+      if (!existing.delivery) cards[at] = { ...existing, ask: null, chosen: input.payload.selected_option_id, delivery: { ...line, retry: 'recovery' } };
+      continue;
+    }
     card(captured, item, `${captured.session.id}:${item.id}:${input.id}`, { ...line, retry: 'recovery' }, input.payload.selected_option_id);
   }
   const order = (value: WaitingCardModel) => value.item.waiting_since ?? '';

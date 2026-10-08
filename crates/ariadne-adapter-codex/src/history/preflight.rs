@@ -77,6 +77,23 @@ pub(super) struct SelectedThread {
 }
 
 impl CodexDaemonReader {
+    /// Read-only: whether the existing daemon has this exact thread loaded.
+    /// A thread it has not loaded (for example one a local TUI runs on its own,
+    /// without `--remote`) cannot receive Ariadne input or report its turns.
+    pub fn selected_thread_loaded(
+        &mut self,
+        thread_id: &str,
+        deadline: Instant,
+    ) -> Result<bool, AdapterError> {
+        let result = self.verify_identity().and_then(|()| {
+            let thread = self.read_thread_id(thread_id, deadline)?;
+            Ok(!matches!(
+                thread.status,
+                wire::thread_read_response::ThreadStatus::NotLoaded
+            ))
+        });
+        self.fence(result)
+    }
     /// Blocking native pre-ID verification. Initialize the selected endpoint first,
     /// then pass the same absolute admission deadline across both operations.
     /// Run outside executor and Registry/Store locks; no IDs are allocated here.

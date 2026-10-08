@@ -160,6 +160,13 @@ pub(super) struct Batch<'a, F> {
     activity: Option<UuidV4>,
 }
 impl<F: FnMut() -> UuidV4> Batch<'_, F> {
+    /// Agent writes to an archived topic refuse with the stable reason
+    /// `topic_archived`; the owner restores the topic to reopen it.
+    fn archived(&self, message: &str) -> CoreError {
+        let mut error = core(CoreErrorCode::InvalidTransition, message);
+        error.details = Some(scope::reason(self.context, BarrierReason::TopicArchived));
+        error
+    }
     fn fresh(&mut self) -> Result<UuidV4, CoreError> {
         let id = (self.allocate)();
         if !self.occupied.insert(id.clone()) {
@@ -211,9 +218,8 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             .get(id)
             .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Item does not exist"))?;
         if session.topics.0[&item.topic_id].archived_at.is_some() {
-            return Err(core(
-                CoreErrorCode::InvalidTransition,
-                "Restore the archived topic before applying changes",
+            return Err(self.archived(
+                "The owner archived this item's topic; leave it as it is unless they restore it",
             ));
         }
         if self.original_items.contains(id)
@@ -449,9 +455,8 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             .get(&topic_id)
             .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Topic does not exist"))?;
         if topic.archived_at.is_some() {
-            return Err(core(
-                CoreErrorCode::InvalidTransition,
-                "Restore the archived topic before adding an item",
+            return Err(self.archived(
+                "The owner archived this topic; add the item to an active topic instead",
             ));
         }
         let parent = draft

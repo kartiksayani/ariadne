@@ -79,6 +79,8 @@
   --a-danger: oklch(0.74 0.13 28);
   --st-open: var(--color-neutral-400);
   --st-waiting: var(--color-accent-400);
+  /* Waiting on agent (not a handoff role): derived from the themed waiting and open tokens, so both themes get it from here. */
+  --st-agent: color-mix(in srgb, var(--st-waiting) 55%, var(--st-open));
   --st-progress: oklch(0.82 0.09 78);
   --st-decided: oklch(0.8 0.075 178);
   --st-done: oklch(0.8 0.085 148);

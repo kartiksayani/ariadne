@@ -293,6 +293,9 @@ impl CodexHistoryClient {
             ));
         }
         let mut seen_turns = HashSet::new();
+        // Pages run newest first: every turn after the very first one has a
+        // later turn, which proves an `interrupted` turn really ended.
+        let mut newer_turn_exists = scan.cursor.is_some();
         for _ in 0..50 {
             let page = self.turn_page(scan.cursor.clone(), 20, deadline)?;
             for turn in &page.data {
@@ -316,7 +319,15 @@ impl CodexHistoryClient {
                     };
                     break;
                 }
-                normalize::match_turn(turn, request, scan, &mut result, observed_at.clone())?;
+                normalize::match_turn(
+                    turn,
+                    request,
+                    scan,
+                    &mut result,
+                    observed_at.clone(),
+                    newer_turn_exists,
+                )?;
+                newer_turn_exists = true;
             }
             if scan.progress.anchor_reached {
                 break;

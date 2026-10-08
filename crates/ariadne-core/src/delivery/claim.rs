@@ -61,9 +61,12 @@ impl DeliveryService<'_> {
                     );
                 }
                 if session.state != SessionState::Active {
-                    return Err(core(
+                    return Err(barrier(
+                        session,
+                        &request.binding_id,
                         CoreErrorCode::InvalidTransition,
-                        "A closed session cannot claim",
+                        "The owner closed this session; reopening it resumes dispatch",
+                        BarrierReason::SessionClosed,
                     )
                     .into());
                 }
@@ -117,7 +120,18 @@ impl DeliveryService<'_> {
                     .inputs
                     .0
                     .values()
-                    .filter(|i| i.binding_id == request.binding_id && i.state == InputState::Queued)
+                    .filter(|i| {
+                        i.binding_id == request.binding_id
+                            && i.state == InputState::Queued
+                            && !super::held_for_review(session, i)
+                            // Archive cancels its topic's inputs; never deliver
+                            // one for an archived topic regardless.
+                            && session
+                                .topics
+                                .0
+                                .get(&i.target.topic_id)
+                                .is_none_or(|topic| topic.archived_at.is_none())
+                    })
                     .min_by_key(|i| i.seq)
                     .cloned()
                 else {

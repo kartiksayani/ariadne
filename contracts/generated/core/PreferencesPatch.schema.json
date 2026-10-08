@@ -22,6 +22,15 @@
     "GlobalPreferences": {
       "type": "object",
       "properties": {
+        "detail_width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "maximum": 720,
+          "minimum": 320
+        },
         "notification_ledger": {
           "type": "array",
           "items": {
@@ -50,6 +59,9 @@
         },
         "theme": {
           "$ref": "#/$defs/Theme"
+        },
+        "waiting_collapsed": {
+          "type": "boolean"
         },
         "window": {
           "anyOf": [
@@ -90,6 +102,11 @@
           "description": "The owner removed items or topics; the agent stops work on them.",
           "type": "string",
           "const": "removed"
+        },
+        {
+          "description": "The owner's instruction for a whole topic (target has no item).",
+          "type": "string",
+          "const": "topic_reply"
         }
       ]
     },
@@ -495,6 +512,13 @@
     "SessionPreferences": {
       "type": "object",
       "properties": {
+        "collapsed_topic_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "maxItems": 256
+        },
         "expanded_item_ids": {
           "type": "array",
           "items": {

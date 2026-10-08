@@ -16,6 +16,8 @@ export function CandidateList({ controller, root, select, selected }: { controll
     <button type="button" className="btn btn-secondary" disabled={state.reading} onClick={() => { void controller.refresh(); }}>Refresh host sessions</button>
     {!state.snapshot && <p role="status">{state.reading ? 'Reading host sessions…' : 'Waiting for host discovery…'}</p>}
     {state.snapshot && candidates.length === 0 && <p>No discovered host sessions{root ? ' for this project' : ''}. Manual entry remains available.</p>}
+    {/* The candidates sit in their own framed list; in a dialog it scrolls inside the frame. */}
+    {candidates.length > 0 && <div className="nav-discovery-list" role="group" aria-label="Host sessions">
     {Array.from(new Set(candidates.map(candidate => candidate.cwd))).map(cwd => <section key={cwd} aria-label={`Discovered project ${cwd}`}>
     {!root && <h3>{cwd}</h3>}
     {candidates.filter(candidate => candidate.cwd === cwd).map(candidate => <article key={candidateIdentity(candidate)} className="nav-discovery-candidate" data-discovery-id={candidate.external_session_id}>
@@ -26,6 +28,6 @@ export function CandidateList({ controller, root, select, selected }: { controll
         ? 'This Claude Code version is older than Ariadne requires.'
         : 'This Claude Code version could not be read; Ariadne requires a minimum version or newer.'}</p>}
       <button type="button" className="btn btn-secondary" disabled={candidate.freshness !== 'fresh' || state.error !== null || (!!root && candidate.compatibility === 'incompatible')} aria-pressed={selected === candidateIdentity(candidate)} onClick={() => select(candidate)}>{root ? 'Use host session' : 'Register this project'}</button>
-    </article>)}</section>)}
+    </article>)}</section>)}</div>}
   </div>;
 }

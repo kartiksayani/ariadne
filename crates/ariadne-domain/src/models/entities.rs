@@ -19,6 +19,14 @@ pub struct Session {
     pub id: UuidV4,
     pub project_id: UuidV4,
     pub title: String,
+    // Owner-set name and one-line description (ADR-0091), absent in stores written
+    // before them. Not doc comments: ts-rs renders field docs with trailing spaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub description: Option<String>,
     pub state: SessionState,
     pub created_at: UtcMillis,
     pub updated_at: UtcMillis,

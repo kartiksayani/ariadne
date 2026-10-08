@@ -297,6 +297,58 @@ fn full_stdin_filters_and_cursor_continue_then_detect_snapshot_change() {
     );
 }
 #[test]
+fn an_archived_topic_stays_readable_and_refuses_agent_writes_with_topic_archived() {
+    let setup = Setup::new(&seed());
+    setup.change(|session| {
+        session.topics.0.get_mut(&id(5)).unwrap().archived_at =
+            Some(UtcMillis::new("2026-10-04T12:00:00.000Z").unwrap())
+    });
+    let read = |params: &Value| {
+        envelope(
+            &setup.agent(
+                &["read"],
+                &["--json-stdin", "--json"],
+                Some(&serde_json::to_vec(params).unwrap()),
+            ),
+            0,
+        )
+    };
+    let mut items = read_params("items", 100);
+    items["selection"]["filters"]["topic_id"] = json!(id(5));
+    items["selection"]["filters"]["archived"] = json!(true);
+    let items = read(&items);
+    let page = items["data"]["data"]["page"]["items"].as_array().unwrap();
+    assert_eq!(page.len(), 2, "{items}");
+    let mut messages = read_params("messages", 100);
+    messages["selection"]["filters"]["topic_id"] = json!(id(5));
+    let messages = read(&messages);
+    assert!(
+        !messages["data"]["data"]["page"]["items"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "{messages}"
+    );
+    let topics = envelope(
+        &setup.agent(&["read"], &["--view", "topics", "--json"], None),
+        0,
+    );
+    assert!(
+        !topics["data"]["data"]["page"]["items"][0]["archived_at"].is_null(),
+        "{topics}"
+    );
+    let mut reply = request(800);
+    reply["expected_item_revisions"] = json!({"1": 1});
+    reply["operations"] =
+        json!([{"op":"reply","ref":"r","item":{"id":"1"},"text":"Late note","round_id":null}]);
+    let before = setup.bytes();
+    let refused = envelope(&setup.apply(&reply), 3);
+    assert_eq!(refused["error"]["code"], "invalid_transition", "{refused}");
+    assert_eq!(refused["error"]["details"]["reason"], "topic_archived");
+    assert_eq!(setup.bytes(), before);
+}
+
+#[test]
 fn nested_history_stdin_and_parent_validation_are_preserved() {
     let session: Session =
         serde_json::from_str(include_str!("../../../fixtures/domain/demo/session.json")).unwrap();

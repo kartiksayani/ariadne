@@ -8,13 +8,16 @@ use std::sync::Arc;
 use std::time::Instant;
 use tauri::{Emitter, Manager};
 mod discovery;
+mod open_link;
 pub(crate) use discovery::project as project_discovery;
 pub use discovery::{
     __cmd__codex_default_endpoint, __cmd__discovery_snapshot, __cmd__discovery_ui_open,
-    __tauri_command_name_codex_default_endpoint, __tauri_command_name_discovery_snapshot,
-    __tauri_command_name_discovery_ui_open, codex_default_endpoint, discovery_snapshot,
-    discovery_ui_open,
+    __cmd__supervisor_health, __tauri_command_name_codex_default_endpoint,
+    __tauri_command_name_discovery_snapshot, __tauri_command_name_discovery_ui_open,
+    __tauri_command_name_supervisor_health, codex_default_endpoint, discovery_snapshot,
+    discovery_ui_open, supervisor_health,
 };
+pub use open_link::{__cmd__open_link, __tauri_command_name_open_link, open_link};
 
 type ResolveSession = dyn Fn(&SessionRef) -> Result<RegisteredSession, CoreError> + Send + Sync;
 type NativeConnect =
@@ -31,6 +34,8 @@ pub(crate) struct PreferencesChangedHint {
 type NativeDiscovery = dyn Fn() -> Result<DesktopDiscoverySnapshot, CoreError> + Send + Sync;
 type NativeDiscoveryOpen = dyn Fn(bool) -> Result<(), CoreError> + Send + Sync;
 type NativeCodexEndpoint = dyn Fn() -> Option<String> + Send + Sync;
+type NativeSupervisorHealth =
+    dyn Fn() -> Vec<ariadne_runtime::health::SupervisorHealth> + Send + Sync;
 
 #[derive(Clone, Default)]
 pub struct DesktopService {
@@ -47,6 +52,7 @@ struct Composition {
     discovery: Option<Arc<NativeDiscovery>>,
     discovery_open: Option<Arc<NativeDiscoveryOpen>>,
     codex_default_endpoint: Option<Arc<NativeCodexEndpoint>>,
+    supervisor_health: Option<Arc<NativeSupervisorHealth>>,
 }
 impl DesktopService {
     /// Trusted native consumers use the same validated owner envelope as IPC.
@@ -150,6 +156,7 @@ impl DesktopService {
                 discovery: None,
                 discovery_open: None,
                 codex_default_endpoint: None,
+                supervisor_health: None,
             }),
         }
     }
@@ -218,6 +225,25 @@ impl DesktopService {
         let composition = self.composition.as_mut().expect("trusted composition");
         composition.codex_default_endpoint = Some(Arc::new(read));
         self
+    }
+    pub(crate) fn with_supervisor_health(
+        mut self,
+        read: impl Fn() -> Vec<ariadne_runtime::health::SupervisorHealth> + Send + Sync + 'static,
+    ) -> Self {
+        let composition = self.composition.as_mut().expect("trusted composition");
+        composition.supervisor_health = Some(Arc::new(read));
+        self
+    }
+    /// Latest delivery-supervisor health per Codex binding; empty when none run.
+    pub(crate) fn supervisor_health(
+        &self,
+    ) -> Result<Vec<ariadne_runtime::health::SupervisorHealth>, CoreError> {
+        Ok(self
+            .composition()?
+            .supervisor_health
+            .as_ref()
+            .map(|read| read())
+            .unwrap_or_default())
     }
     /// The configured Codex app-server socket path, if Codex is configured.
     pub(crate) fn codex_default_endpoint(&self) -> Result<Option<String>, CoreError> {
@@ -576,6 +602,7 @@ mutations! {
     session_reopen => SessionReopen, topic_continue => TopicContinue, preferences_patch => PreferencesPatch,
     item_remove => ItemRemove, topic_remove => TopicRemove,
     session_remove => SessionRemove, project_remove => ProjectRemove,
+    session_label_set => SessionLabelSet,
 }
 
 #[cfg(test)]

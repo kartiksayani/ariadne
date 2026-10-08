@@ -3,9 +3,9 @@
 // label and the row selected after an item goes. Nothing here touches React.
 import { indexSession, type Immutable } from '../../data';
 import type { SessionPreferences, SessionRef } from '../../generated/core';
-import type { Item, Session, Topic } from '../../generated/domain/models';
-import type { RemoveSubject, RemoveTarget, RemoveTell } from '../dialogs/remove';
-import { agentName } from '../shell/model';
+import type { Input, Item, Session, Topic } from '../../generated/domain/models';
+import type { RemoveSubject, RemoveTarget, RemoveTell, RemoveUnsent } from '../dialogs/remove';
+import { agentName, sessionPhrase } from '../shell/model';
 import { shortLabel } from '../shared/short';
 
 const sessionPart = (route: SessionRef) => `${route.project_id}/${route.session_id}`;
@@ -72,18 +72,33 @@ export function tellOf(session: Immutable<Session>): NonNullable<RemoveTell> {
 const waitingCount = (items: readonly Immutable<Item>[]) => items.filter(item => item.status === 'waiting_on_me').length;
 const topicName = (topic: Immutable<Topic>) => topic.short?.trim() || topic.name;
 
+/** The owner's queued messages in `sessions` (those `within` keeps): removing cancels them. Named for their agent, or "the agent" when several. */
+export function unsentOf(sessions: readonly Immutable<Session>[], within: (input: Immutable<Input>) => boolean = () => true): RemoveUnsent {
+  const agents = new Set<string>();
+  let count = 0;
+  for (const session of sessions) for (const input of Object.values(session.inputs)) {
+    if (!input || input.state !== 'queued' || !within(input)) continue;
+    count++;
+    const binding = session.bindings[input.binding_id];
+    agents.add(binding ? agentName(binding.adapter_id) : 'the agent');
+  }
+  return { count, agent: agents.size === 1 ? [...agents][0]! : 'the agent' };
+}
+
 /** The Remove dialog subject of an item or topic in `session`; null when it is gone. */
 export function removeSubject(session: Immutable<Session>, target: Extract<RemoveTarget, { kind: 'item' | 'topic' }>): RemoveSubject | null {
   if (target.kind === 'item') {
     const item = session.items[target.item.item_id];
     if (!item) return null;
-    const items = subtree(session, item.id);
-    return { kind: 'item', short: shortLabel(item), items: items.length, waiting: waitingCount(items), tell: tellOf(session) };
+    const items = subtree(session, item.id), ids = new Set(items.map(value => value.id));
+    return { kind: 'item', short: shortLabel(item), items: items.length, waiting: waitingCount(items), tell: tellOf(session),
+      unsent: unsentOf([session], input => !!input.target.item_id && ids.has(input.target.item_id)) };
   }
   const topic = session.topics[target.topic_id];
   if (!topic) return null;
   const items = itemList(session).filter(item => item.topic_id === topic.id);
-  return { kind: 'topic', name: topicName(topic), items: items.length, waiting: waitingCount(items), tell: tellOf(session) };
+  return { kind: 'topic', name: topicName(topic), items: items.length, waiting: waitingCount(items), tell: tellOf(session),
+    unsent: unsentOf([session], input => input.target.topic_id === topic.id) };
 }
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -92,7 +107,7 @@ const capital = (text: string) => text ? text.charAt(0).toUpperCase() + text.sli
 export function removeLabel(subject: RemoveSubject): string {
   if (subject.kind === 'item') return `“${capital(subject.short)}”${subject.items > 1 ? ` and ${plural(subject.items - 1, 'item')} below it` : ''}`;
   if (subject.kind === 'topic') return `the topic “${subject.name}”`;
-  if (subject.kind === 'session') return `the ${subject.agent} session from ${subject.when.toLowerCase()}`;
+  if (subject.kind === 'session') return sessionPhrase({ name: subject.name }, subject.agent, subject.when);
   return subject.name;
 }
 

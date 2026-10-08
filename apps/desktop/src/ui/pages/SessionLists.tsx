@@ -5,11 +5,15 @@ import type { SessionRef } from '../../generated/core';
 import type { ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
 import type { NavigationStore } from '../../state/navigation/store';
 import type { SessionActionControllers } from '../../components/bindings/actions';
-import { dispatchQuiesced, lifecycleBlockers } from '../../components/history-actions/selectors';
 import { RemoveDialog } from '../dialogs/RemoveDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from '../dialogs/remove';
-import { sessionWhen } from '../shell/model';
-import { continuationLinks, projectName, projectRemoval, routeOf, sessionCardText, sessionKey, sessionRemoval, topicChips, type TopicChip } from './model';
+import { ownerName, sessionWhen } from '../shell/model';
+import { RenameButton, SessionRename, saveSessionLabel } from '../shared/SessionRename';
+import type { RendererService } from '../../data/service';
+import { plainFailure } from '../../data/plain';
+import { useSupervisorHealth } from '../../components/bindings/health';
+import '../../components/bindings/controls.css';
+import { cardDispatch, continuationLinks, projectName, projectRemoval, routeOf, runOf, sessionCardText, sessionKey, sessionRemoval, topicChips, type TopicChip } from './model';
 import { notices } from './notices';
 import { CloseSessionDialog, DispatchDialog } from './SessionDialogs';
 import './pages.css';
@@ -42,21 +46,32 @@ export interface SessionListsProps {
   readonly children?: ReactNode;
 }
 
-type Dialog = { kind: 'dispatch' | 'close'; store: SessionStore; agent: string; when: string; route: SessionRef }
+type Dialog = { kind: 'dispatch' | 'close'; store: SessionStore; agent: string; when: string; name: string | null }
   | { kind: 'remove'; subject: RemoveSubject; target: RemoveTarget };
 
 const failed = (error: unknown) => notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
-  text: error instanceof Error ? error.message : 'The session could not be changed.' });
+  text: plainFailure(error, 'The session could not be changed. Try again.') });
 
-function Chip({ chip }: { readonly chip: TopicChip }) {
-  return <span className="pw-topic-chip" style={{ color: chip.color }}><i className={chip.icon} aria-hidden="true" />{chip.name}
+export function Chip({ chip }: { readonly chip: TopicChip }) {
+  return <span className="pw-topic-chip" title={chip.full} style={{ color: chip.color }}><i className={chip.icon} aria-hidden="true" />{chip.name}
     {chip.counts && <span className="pw-topic-chip-counts">{chip.counts}</span>}</span>;
+}
+
+/** The card's sending state as a button that opens the sending and connection dialog. */
+function CardRun({ summary, service, onClick }: { readonly summary: Immutable<SessionSummary>; readonly service: RendererService; readonly onClick: () => void }) {
+  const binding = summary.active_binding;
+  const run = runOf(cardDispatch(summary, useSupervisorHealth(service, binding?.id, binding?.generation)));
+  return <button type="button" className="pw-run dispatch-card" data-dispatch={run.dispatch.kind} style={{ color: run.runColor }}
+    title="Sending and connection" onClick={onClick}>
+    <span className="pw-dot" style={{ background: run.runDot, boxShadow: run.runRing }} />{run.run}</button>;
 }
 
 export function SessionLists(props: SessionListsProps) {
   const { navigation, actions, groups, sessions, snapshots, openTabs, now, disabled, onBack, overview, onOpenProject, onOpenSession, onRemove, children } = props;
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  /** The key of the card whose name is being edited. */
+  const [renaming, setRenaming] = useState<string | null>(null);
   const links = continuationLinks([...snapshots.values()]);
   /** Opens the session's reader and waits for its snapshot. */
   const ready = async (route: SessionRef) => {
@@ -73,25 +88,34 @@ export function SessionLists(props: SessionListsProps) {
     setBusy(key);
     try {
       const { store, session, controller } = await ready(route);
-      const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
       const agent = sessionCardText(summary, null, now).agent, when = sessionWhen(Date.parse(summary.created_at), now);
-      if (kind === 'session_close' && (!dispatchQuiesced(binding) || lifecycleBlockers(session, null).length)) {
-        setDialog({ kind: 'close', store, agent, when, route }); return;
-      }
+      // Close is one confirmation in plain words; Reopen runs at once.
+      if (kind === 'session_close') { setDialog({ kind: 'close', store, agent, when, name: ownerName(session) }); return; }
       const done = await controller.execute({ command: kind, api_version: 1, op_id: '', params: { expected_revision: session.revision } }, session.revision);
-      if (!done) failed(controller.getSnapshot().error ?? new Error(kind === 'session_close' ? 'The session could not be closed.' : 'The session could not be reopened.'));
+      if (!done) failed(controller.getSnapshot().error ?? new Error('The session could not be reopened.'));
       await navigation.refresh();
     } catch (error: unknown) { failed(error); }
     finally { setBusy(null); }
   };
   const dispatch = (summary: Immutable<SessionSummary>) => {
     const route = routeOf(summary), store = navigation.opened.open(route);
-    setDialog({ kind: 'dispatch', store, route, agent: sessionCardText(summary, null, now).agent, when: sessionWhen(Date.parse(summary.created_at), now) });
+    setDialog({ kind: 'dispatch', store, agent: sessionCardText(summary, null, now).agent, when: sessionWhen(Date.parse(summary.created_at), now), name: ownerName(summary) });
+  };
+  /** Saves the owner's name and description through the session's write barrier; the error in plain words, or null once saved. */
+  const rename = async (summary: Immutable<SessionSummary>, name: string, description: string) => {
+    try {
+      const { session, controller } = await ready(routeOf(summary));
+      const failure = await saveSessionLabel(controller, session.revision, name, description);
+      await navigation.refresh();
+      if (failure === null) setRenaming(null);
+      return failure;
+    } catch (error: unknown) { return plainFailure(error, 'The name could not be saved. Try again.'); }
   };
   const removeSession = (summary: Immutable<SessionSummary>) => {
     const counts = sessionRemoval(snapshots.get(sessionKey(summary)) ?? null, links.shared);
     setDialog({ kind: 'remove', target: { kind: 'session', session: routeOf(summary) },
-      subject: { kind: 'session', agent: sessionCardText(summary, null, now).agent, when: sessionWhen(Date.parse(summary.created_at), now), ...counts } });
+      subject: { kind: 'session', agent: sessionCardText(summary, null, now).agent, when: sessionWhen(Date.parse(summary.created_at), now),
+        name: ownerName(summary), ...counts } });
   };
   const removeProject = (project: Immutable<ProjectSummary>) => {
     const own = sessions.filter(session => session.project_id === project.project_id);
@@ -102,14 +126,18 @@ export function SessionLists(props: SessionListsProps) {
   const card = (summary: Immutable<SessionSummary>) => {
     const key = sessionKey(summary), snapshot = snapshots.get(key) ?? null, text = sessionCardText(summary, snapshot, now, summary.active_binding?.host_location ?? null);
     const chips = snapshot ? topicChips(snapshot, links.movedOn) : [], open = openTabs.has(key), route = routeOf(summary);
-    const off = disabled || busy === key;
+    const off = disabled || busy === key, editing = renaming === key;
     return <div key={key} className="pw-session-card" style={{ background: text.background }} data-session-card={summary.session_id}>
       <div className="pw-session-row">
         <i className="ph ph-terminal-window pw-session-icon" aria-hidden="true" />
-        <div className="pw-session-text"><span className="pw-session-title" style={{ color: text.titleColor }}>{text.title}</span>
-          <span className="pw-session-meta">{text.meta}</span></div>
-        <button type="button" className="pw-run" style={{ color: text.runColor }} title="Dispatch and connection" onClick={() => dispatch(summary)}>
-          <span className="pw-dot" style={{ background: text.runDot, boxShadow: text.runRing }} />{text.run}</button>
+        {editing
+          ? <div className="pw-session-text"><SessionRename layout="card" naming={summary} onSave={(name, description) => rename(summary, name, description)}
+            onCancel={() => setRenaming(null)} /></div>
+          : <div className="pw-session-text"><span className="pw-session-title" style={{ color: text.titleColor }}>{text.title}</span>
+            {text.description && <span className="pw-session-description" style={{ color: text.titleColor }}>{text.description}</span>}
+            {text.secondary && <span className="pw-session-secondary">{text.secondary}</span>}
+            <span className="pw-session-meta">{text.meta}</span></div>}
+        <CardRun summary={summary} service={actions.service} onClick={() => dispatch(summary)} />
         <span className="pw-session-actions">
           {text.closed
             ? <button type="button" className="btn btn-secondary pw-card-button" disabled={off} onClick={() => { void lifecycle(summary, 'session_reopen'); }}>
@@ -121,6 +149,7 @@ export function SessionLists(props: SessionListsProps) {
               <button type="button" className="btn btn-ghost pw-card-button" disabled={off} title="Mark this session Closed in Ariadne. The agent process isn’t touched."
                 onClick={() => { void lifecycle(summary, 'session_close'); }}><i className="ph ph-x-circle" aria-hidden="true" />Close session</button>
             </>}
+          <RenameButton className="btn btn-ghost pw-card-button" disabled={editing || disabled} onClick={() => setRenaming(key)} />
           <button type="button" className="btn btn-ghost pw-card-button" onClick={() => removeSession(summary)}><i className="ph ph-trash" aria-hidden="true" />Remove</button>
         </span>
       </div>
@@ -151,8 +180,8 @@ export function SessionLists(props: SessionListsProps) {
     {children}
     {dialog?.kind === 'dispatch' && <DispatchDialog store={dialog.store} actions={actions.forSession(dialog.store)} agent={dialog.agent}
       onClose={() => { setDialog(null); void navigation.refresh(); }} />}
-    {dialog?.kind === 'close' && <CloseSessionDialog store={dialog.store} actions={actions.forSession(dialog.store)} agent={dialog.agent} when={dialog.when}
-      onOpenSession={() => onOpenSession(dialog.route)} onClose={() => { setDialog(null); void navigation.refresh(); }} />}
+    {dialog?.kind === 'close' && <CloseSessionDialog store={dialog.store} actions={actions.forSession(dialog.store)} agent={dialog.agent} when={dialog.when} name={dialog.name}
+      onClose={() => { setDialog(null); void navigation.refresh(); }} />}
     {dialog?.kind === 'remove' && <RemoveDialog subject={dialog.subject} onCancel={() => setDialog(null)} onConfirm={() => onRemove(dialog.target, dialog.subject)} />}
   </div>;
 }

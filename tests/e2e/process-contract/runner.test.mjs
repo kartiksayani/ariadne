@@ -155,7 +155,7 @@ test('scripted native provider uses an explicit UNIX endpoint, pinned version an
     await assert.rejects(readFile(join(config.history.projectRoot, '.ariadne/project.json')), { code: 'ENOENT' });
     assert.deepEqual((await rpc(3, 'thread/turns/list', { threadId: thread })).result.data, []);
     const inputId = '11111111-1111-4111-8111-111111111111', attemptId = '22222222-2222-4222-8222-222222222222';
-    const body = { source_input_id: inputId, binding_id: '33333333-3333-4333-8333-333333333333', generation: '44444444-4444-4444-8444-444444444444', saved_input: { text: 'Exact owner input\nComplete second line' } };
+    const body = { source_input_id: inputId, binding_id: '33333333-3333-4333-8333-333333333333', generation: '44444444-4444-4444-8444-444444444444', text: 'Exact owner input\nComplete second line' };
     const payload = `[ARIADNE_INPUT:${inputId}:${attemptId}]\n${JSON.stringify(body)}`;
     await command(config.executable, ['queue', '--remote', `unix://${config.socket}`, '--thread', thread, '--message', payload]);
     const [admitted] = await admissions(config); assert.equal(admitted.payload, payload); assert.equal(admitted.attemptId, attemptId);

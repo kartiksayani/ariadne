@@ -299,6 +299,8 @@ fn summary(
         project_id: session.project_id.clone(),
         session_id: session.id.clone(),
         title: session.title.clone(),
+        name: session.name.clone(),
+        description: session.description.clone(),
         state: session.state.clone(),
         revision: session.revision,
         created_at: session.created_at.clone(),

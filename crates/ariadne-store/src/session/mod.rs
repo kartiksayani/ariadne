@@ -399,7 +399,8 @@ impl Store {
     }
 
     /// Project removal: move every session file into `into`, each under its own
-    /// lock, refusing a session with an input in flight.
+    /// lock. Inputs in any state go with their session; a session that changes
+    /// under the move is `Busy`.
     pub(crate) fn evict_all(&self, into: &Directory) -> Result<(), StoreError> {
         for name in self.sessions.names()? {
             if name.starts_with('.') || !name.ends_with(".json") {
@@ -411,15 +412,7 @@ impl Store {
                 },
             )?;
             self.with_lock(&id, || {
-                let (live, previous) = self.live(&id)?;
-                if live
-                    .inputs
-                    .0
-                    .values()
-                    .any(|input| input.state == InputState::InFlight)
-                {
-                    return Err(StoreError::Busy);
-                }
+                let (_, previous) = self.live(&id)?;
                 if into.verify_target(&name)? {
                     into.temp(&name, &previous)?.replace(&name)?;
                 } else {

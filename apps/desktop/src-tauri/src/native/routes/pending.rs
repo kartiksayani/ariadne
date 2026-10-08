@@ -8,6 +8,10 @@ pub(crate) struct PendingRoute {
     next: u64,
     latest_valid: u64,
     ready: bool,
+    /// A startup route waits for the window's first show, so it never shows
+    /// the window before its saved size is restored.
+    held: bool,
+    shown: bool,
     pending: Option<(u64, OpenRoute)>,
 }
 impl PendingRoute {
@@ -30,8 +34,19 @@ impl PendingRoute {
     pub(crate) fn set_ready(&mut self, ready: bool) {
         self.ready = ready;
     }
+    /// Holds delivery until `shown`. Once the window has shown, there is
+    /// nothing to wait for.
+    pub(crate) fn hold_until_shown(&mut self) {
+        self.held = !self.shown;
+    }
+    pub(crate) fn shown(&mut self) {
+        self.shown = true;
+        self.held = false;
+    }
     pub(crate) fn current(&self) -> Option<(u64, OpenRoute)> {
-        self.ready.then(|| self.pending.clone()).flatten()
+        (self.ready && !self.held)
+            .then(|| self.pending.clone())
+            .flatten()
     }
     pub(crate) fn delivered(&mut self, ticket: u64) {
         if self.pending.as_ref().is_some_and(|(id, _)| *id == ticket) {

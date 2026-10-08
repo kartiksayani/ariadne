@@ -2,14 +2,17 @@
 // lines 324-464 and 1953-2079), built from the session snapshot the store
 // already holds. Strings are the prototype's; nothing here is invented copy.
 import type { Immutable } from '../../data/session-store';
+import type { SupervisorHealth } from '../../data/service';
 import type { Input, InputKind, Item, ItemOption, Message, PresenceObservation, Round, Session } from '../../generated/domain/models';
 import { connectionOf, reconnectingNote } from '../shared/connection';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentName } from '../shell/model';
 import { shortLabel } from '../shared/short';
-import { excerptView, type ExcerptView, type Mark } from '../shared/excerpt';
+import { excerptView, messageNumber, type ExcerptView, type Mark } from '../shared/excerpt';
 import { statusKey, type StatusKey } from '../shared/status';
 import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
+import { displayStatus } from '../../selectors/waiting/replied';
+import { counted, heldInput, notSent, stuckInput, withdrawn, type NotSent, type Stuck } from '../../selectors/waiting/stuck';
 
 export { statusKey, type StatusKey };
 export const closedStatus: ReadonlySet<StatusKey> = new Set(['decided', 'done', 'dropped', 'replaced']);
@@ -22,7 +25,7 @@ export type OpenMode = 'reply' | 'drop' | 'note' | 'followup';
 
 export interface Crumb { readonly label: string; readonly itemId: string | null }
 export interface Step { readonly label: string; readonly dotBg: string; readonly dotRing: string; readonly color: string; readonly weight: number; readonly line: boolean; readonly lineBg: string }
-export interface DeliveryLine { readonly icon: string; readonly text: string; readonly color: string; readonly retry: boolean }
+export interface DeliveryLine { readonly icon: string; readonly text: string; readonly color: string }
 export type ActionKey = 'bring' | 'reply' | 'drop' | 'later' | 'note' | 'followup' | 'reopen';
 export interface OpenAction {
   readonly action: ActionKey; readonly key: string; readonly label: string; readonly icon: string; readonly primary: boolean;
@@ -37,7 +40,11 @@ export interface RoundView {
   readonly you: { readonly chosen: boolean; readonly text: string } | null; readonly result: string;
   readonly forks: readonly Kid[];
 }
-export interface TimelineEntry { readonly id: string; readonly message: ExcerptView; readonly mark: Mark; readonly label: string; readonly note: string; readonly last: boolean }
+export interface TimelineEntry {
+  readonly id: string; readonly message: ExcerptView; readonly mark: Mark; readonly label: string; readonly note: string; readonly last: boolean;
+  /** Set on an owner message that archive or close cancelled before it went out: it stays, with why it wasn't sent. */
+  readonly unsent: NotSent | null;
+}
 /** The props the shared Answer Control takes in full mode (README Components, Answer Control). */
 export interface AnswerModel { readonly options: readonly Immutable<ItemOption>[]; readonly recommended: number; readonly blocked: string | null }
 
@@ -45,12 +52,16 @@ export interface DetailModel {
   readonly id: string;
   readonly question: string;
   readonly status: StatusKey;
+  /** The header badge: the status, or Waiting on agent once the owner replied. */
+  readonly display: StatusKey;
   readonly badgeLabel: string;
   readonly meta: string;
   readonly path: readonly Crumb[];
   readonly stepsTitle: string;
   readonly steps: readonly Step[] | null;
   readonly delivery: DeliveryLine | null;
+  /** The tracked message hasn't reached the agent: why, with its fixes (ui/answer/StuckNote). Replaces `delivery`. */
+  readonly stuck: { readonly input: Immutable<Input>; readonly note: Stuck } | null;
   readonly open: OpenSection | null;
   /** A waiting item whose input is in flight or queued: a reply queues behind it (owner FIFO). */
   readonly followUp: { readonly label: string; readonly hint: string; readonly disabled: boolean } | null;
@@ -80,12 +91,17 @@ export interface DetailInput {
   readonly saving: InputKind | null;
   /** The host presence of the session's binding, when observed. */
   readonly presence?: Immutable<PresenceObservation> | null;
+  /** The desktop supervisor's health for the session's binding, when known. */
+  readonly health?: SupervisorHealth | null;
+  /** The agent name an earlier session's messages carry (shared/excerpt earlierAgent). */
+  readonly earlierAgent?: string | null;
+  /** The follow-up box is open or holds a draft: it stays when its hold clears. */
+  readonly replyDraft?: boolean;
 }
 
 const ACTIVE_INPUT = new Set<Input['state']>(['queued', 'in_flight', 'needs_attention']);
 const TRACKED = new Set<InputKind>(['answer', 'bring', 'reply', 'drop', 'reopen']);
 
-export const messageTag = (message: Immutable<Message>) => `#${message.number}`;
 
 /** The submission whose delivery the stepper follows: one being saved, else the latest unresolved input. */
 function submission(session: Immutable<Session>, item: Immutable<Item>, saving: InputKind | null) {
@@ -119,16 +135,18 @@ function stepsOf(stage: DeliveryStage | null, status: StatusKey): Step[] | null 
   }) ?? null;
 }
 
-/** The shared delivery line; only a failed delivery offers Retry. */
+/** The shared delivery line. A stopped delivery shows its fix instead (`stuck`). */
 const deliveryOf = (stage: DeliveryStage, kind: InputKind, label: string, agent: string): DeliveryLine =>
-  ({ ...deliveryText(stage, kind, label || '…', agent), retry: stage === 'failed' });
+  deliveryText(stage, kind, label || '…', agent);
 
 function roundView(session: Immutable<Session>, item: Immutable<Item>, round: Immutable<Round>, last: boolean): RoundView {
-  const messages = (ids: readonly string[]) => ids.map(id => session.messages.find(message => message.id === id)).filter((message): message is Immutable<Message> => !!message);
+  // A message deleted before it was sent, or cancelled by archive or close, is not part of the round: the agent never got it.
+  const messages = (ids: readonly string[]) => ids.map(id => session.messages.find(message => message.id === id))
+    .filter((message): message is Immutable<Message> => !!message && counted(session, message));
   const owner = messages(round.owner_message_ids), agent = messages(round.agent_message_ids);
   const numbers = [...new Set([session.messages.find(message => message.id === round.opened_message_id)?.number, ...owner.map(value => value.number), ...agent.map(value => value.number)]
     .filter((value): value is number => value !== undefined))].sort((a, b) => a - b);
-  const answer = session.answers.filter(value => value.item_id === item.id && round.owner_message_ids.includes(value.message_id)).sort((a, b) => b.seq - a.seq)[0];
+  const answer = session.answers.filter(value => value.item_id === item.id && owner.some(message => message.id === value.message_id)).sort((a, b) => b.seq - a.seq)[0];
   const chosen = answer?.selected_option_id ? answer.options_snapshot.find(option => option.id === answer.selected_option_id)?.label ?? null : null;
   const you = chosen ? { chosen: true, text: chosen } : answer?.text.trim() ? { chosen: false, text: answer.text.trim() }
     : owner.length ? { chosen: false, text: owner.at(-1)!.body } : null;
@@ -152,7 +170,7 @@ export function detailPath(session: Immutable<Session>, itemId: string): Crumb[]
 }
 
 /** The detail panel for one item, or null when the item is not in the snapshot. */
-export function detailModel({ session, itemId, now, mode, later, saving, presence = null }: DetailInput): DetailModel | null {
+export function detailModel({ session, itemId, now, mode, later, saving, presence = null, health = null, earlierAgent = null, replyDraft = false }: DetailInput): DetailModel | null {
   const item = session.items[itemId];
   if (!item) return null;
   const items = Object.values(session.items).filter((value): value is Immutable<Item> => !!value);
@@ -166,7 +184,13 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const readOnly = session.state !== 'active' || !topic || topic.archived_at !== null;
   const offline = connectionOf(binding, presence) === 'reconnecting';
   const sub = submission(session, item, saving);
-  const pending = !!sub?.stage && sub.stage !== 'failed';
+  // The latest unsettled message to this item. A held one (written for an older question)
+  // doesn't hold the answer box: the newer ask wins and the owner answers it.
+  const tracked = Object.values(session.inputs).filter((input): input is Immutable<Input> => !!input && input.target.item_id === item.id
+    && ACTIVE_INPUT.has(input.state)).sort((a, b) => b.seq - a.seq)[0] ?? null;
+  const held = !saving && !!tracked && heldInput(session, tracked);
+  const stuck = !saving && tracked ? stuckInput(session, tracked, presence, health) : null;
+  const pending = !!sub?.stage && sub.stage !== 'failed' && !held;
   const outLabel = status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
   const ownerLabel = item.owner.kind === 'me' ? 'you' : item.owner.kind === 'agent' ? 'the agent' : item.owner.name;
   const showSteps = sub && (sub.stage !== null || (status !== 'waiting' && status !== 'open'));
@@ -205,7 +229,9 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
 
   const answerable = status === 'waiting' && !pending;
   // The answer slot hides while its input is pending; a follow-up reply still queues behind it.
-  const followUp = !readOnly && status === 'waiting' && pending ? { label: 'Add a follow-up', hint: 'Queued behind the answer in flight', disabled: offline } : null;
+  // A follow-up being written stays when the hold clears, next to the answer box.
+  const followUp = !readOnly && status === 'waiting' && (pending || replyDraft) ? { label: 'Add a follow-up',
+    hint: pending ? 'Queued behind the answer in flight' : 'Your follow-up is kept. Send it, or answer below.', disabled: offline } : null;
   const recommended = item.options.findIndex(option => option.recommended);
   const blocked = session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
     : offline ? reconnectingNote(agent) : null;
@@ -224,13 +250,14 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   add(item.created_message_id, 'created');
   item.updated_message_ids.forEach(id => add(id, 'updated'));
   // Owner messages join the timeline as replies (Ariadne.dc.html keeps them in `updated`).
-  session.messages.forEach(message => { if (message.author === 'owner' && message.item_id === item.id) add(message.id, 'updated'); });
+  // One deleted (or taken back to edit) before it was sent leaves the timeline; one that archive or close cancelled stays, marked not sent.
+  session.messages.forEach(message => { if (message.author === 'owner' && message.item_id === item.id && !withdrawn(session, message)) add(message.id, 'updated'); });
   const roleLabel = (role: Mark, me: boolean) => role === 'origin' ? 'Parent raised here' : role === 'created' ? (me ? 'You asked here' : 'Agent raised this') : (me ? 'You replied' : 'Agent updated');
   const ordered = [...entries.values()].sort((a, b) => a.message.number - b.message.number);
   const timeline = ordered.map((entry, index): TimelineEntry => ({
-    id: entry.message.id, message: excerptView(entry.message, now), mark: entry.roles.includes('created') ? 'created' : entry.roles[0],
+    id: entry.message.id, message: excerptView(entry.message, now, earlierAgent), mark: entry.roles.includes('created') ? 'created' : entry.roles[0],
     label: entry.roles.map(role => roleLabel(role, entry.message.author === 'owner')).join(' · '),
-    note: entry.note, last: index === ordered.length - 1 }));
+    note: entry.note, last: index === ordered.length - 1, unsent: notSent(session, entry.message) }));
 
   const rounds = Object.values(session.rounds).filter((round): round is Immutable<Round> => !!round && round.item_id === item.id).sort((a, b) => a.ordinal - b.ordinal);
   const roundViews = rounds.map((round, index) => roundView(session, item, round, index === rounds.length - 1));
@@ -239,12 +266,14 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const kids = items.filter(value => value.parent === item.id).sort((a, b) => a.ordinal - b.ordinal);
 
   return {
-    id: item.id, question: item.question, status, badgeLabel: outLabel ?? '',
-    meta: `${TYPE[item.type]} · next action: ${ownerLabel} · raised in ${created ? messageTag(created) : 'an earlier session'}`,
+    id: item.id, question: item.question, status, display: statusKey[displayStatus(session, item)], badgeLabel: outLabel ?? '',
+    meta: `${TYPE[item.type]} · next action: ${ownerLabel} · raised in ${created ? messageNumber(created, earlierAgent) : 'an earlier session'}`,
     path,
     stepsTitle: sub && sub.kind !== 'answer' ? 'Your request' : 'Your answer',
     steps: showSteps ? stepsOf(sub.stage, status) : null,
-    delivery: sub?.stage ? deliveryOf(sub.stage, sub.kind, sub.label, agent) : null,
+    // An in-flight message keeps its delivery line; the `sent` note only adds Cancel.
+    delivery: sub?.stage && (!stuck || stuck.kind === 'sent') ?deliveryOf(sub.stage, sub.kind, sub.label, agent) : null,
+    stuck: stuck && tracked ? { input: tracked, note: stuck } : null,
     open,
     followUp,
     answer: answerable ? { heading: !showSteps, ask: item.ask, options: item.options, recommended, blocked } : null,

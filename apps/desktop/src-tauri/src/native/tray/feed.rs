@@ -1,4 +1,9 @@
-use super::{capture, coalescing::Coalesced, diagnostics::Diagnostics, menu, TrayProjection};
+use super::{
+    capture,
+    coalescing::Coalesced,
+    diagnostics::{Diagnostics, LifecycleNote},
+    menu, TrayProjection,
+};
 use crate::{
     commands::DesktopService,
     native::notifications::{
@@ -142,7 +147,7 @@ impl NativeTray {
         self.stopped.store(true, Ordering::Release);
         self.callbacks_active.store(false, Ordering::Release);
     }
-    pub fn diagnostics(&self, rows: Vec<String>) {
+    pub fn diagnostics(&self, rows: Vec<LifecycleNote>) {
         if let Ok(mut snapshot) = self.diagnostics.lock() {
             snapshot.replace(rows, self.stopped.load(Ordering::Acquire));
         }
@@ -215,7 +220,10 @@ fn run<R: tauri::Runtime>(
         if pending.take_due(instant).is_some() && !stopped.load(Ordering::Acquire) {
             let result = (|| {
                 let captured = capture(|request| service.native_query(request))?;
-                let mut diagnostics = lifecycle.lock().map_err(|_| unavailable())?.rows().to_vec();
+                let mut diagnostics = lifecycle
+                    .lock()
+                    .map_err(|_| unavailable())?
+                    .render(&captured.labels);
                 let observation = (|| {
                     let mut plans = Vec::new();
                     if let Some(plan) =
@@ -238,14 +246,17 @@ fn run<R: tauri::Runtime>(
                 })();
                 match observation {
                     Ok(plans) => {
-                for plan in plans {
-                    if let Some(diagnostic) = plan.diagnostic {
-                        diagnostics.push(diagnostic.into());
+                        for plan in plans {
+                            if let Some(diagnostic) = plan.diagnostic {
+                                diagnostics.push(diagnostic.into());
+                            }
+                            burst.push(plan.arrivals, Instant::now());
+                        }
                     }
-                    burst.push(plan.arrivals, Instant::now());
-                }
-                    }
-                    Err(_) => diagnostics.push("Notifications await preference reconciliation; the Waiting queue remains usable.".into()),
+                    Err(_) => diagnostics.push(
+                        "Notifications are catching up; answer questions in Ariadne meanwhile."
+                            .into(),
+                    ),
                 }
                 burst.retain(
                     &captured.rows,
@@ -271,9 +282,9 @@ fn run<R: tauri::Runtime>(
             })();
             if result.is_err() {
                 if let Some(mut projection) = last_projection.clone() {
-                    projection.diagnostics.push(
-                        "Waiting refresh unavailable; showing the last valid snapshot.".into(),
-                    );
+                    projection
+                        .diagnostics
+                        .push("Could not refresh; showing the last list.".into());
                     menu::update(&app, projection, last_pinned, stopped.clone());
                 }
                 eprintln!(

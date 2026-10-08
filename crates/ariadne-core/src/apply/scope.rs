@@ -8,10 +8,12 @@ pub(super) fn authorize(
     request: &ApplyRequest,
 ) -> Result<(), CoreError> {
     if session.state != SessionState::Active {
-        return Err(core(
+        let mut error = core(
             CoreErrorCode::InvalidTransition,
-            "Explicitly reopen this session before applying new changes",
-        ));
+            "The owner closed this session; it takes no changes until reopened",
+        );
+        error.details = Some(reason(context, BarrierReason::SessionClosed));
+        return Err(error);
     }
     let binding = session
         .bindings
@@ -75,11 +77,16 @@ pub(super) fn authorize(
             if attempt.domain_result.is_some() || attempt.result_state == ResultState::Committed {
                 return Err(core(CoreErrorCode::ResultAlreadyCommitted, "This attempt already committed a result; only exact saved-operation replay remains valid"));
             }
+            if input.state == InputState::Cancelled {
+                let mut error = core(
+                    CoreErrorCode::AttemptSealed,
+                    "The owner cancelled this input; drop it and carry on",
+                );
+                error.details = Some(reason(context, BarrierReason::InputCancelled));
+                return Err(error);
+            }
             if attempt.sealed_at.is_some()
-                || matches!(
-                    input.state,
-                    InputState::Handled | InputState::Cancelled | InputState::Skipped
-                )
+                || matches!(input.state, InputState::Handled | InputState::Skipped)
             {
                 return Err(core(
                     CoreErrorCode::AttemptSealed,
@@ -152,6 +159,27 @@ pub(super) fn authorize(
     }
     Ok(())
 }
+pub(super) fn reason(context: &AgentContext, reason: BarrierReason) -> Box<ErrorDetails> {
+    let (input_id, attempt_id) = match context.read_scope() {
+        AgentReadScope::Dispatched {
+            source_input_id,
+            attempt_id,
+            ..
+        } => (Some(source_input_id.clone()), Some(attempt_id.clone())),
+        AgentReadScope::Terminal { .. } => (None, None),
+    };
+    Box::new(ErrorDetails {
+        reason: Some(reason),
+        binding_id: Some(context.binding_id().clone()),
+        input_id,
+        attempt_id,
+        blocking_item_ids: vec![],
+        blocking_input_ids: vec![],
+        dispatch_must_pause: false,
+        partial_removal: None,
+    })
+}
+
 pub(super) fn conflict(session: &Session, message: &str) -> CoreError {
     let mut error = core(CoreErrorCode::RevisionConflict, message);
     error.current_revision = Some(session.revision);

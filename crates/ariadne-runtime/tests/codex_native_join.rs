@@ -7,6 +7,7 @@ use ariadne_core::{
 use ariadne_domain::models::*;
 use ariadne_runtime::{
     discovery::Discovery,
+    health::{SupervisorHealth, SupervisorState},
     leases::DesktopOwner,
     providers::{PreparedProviderAdapter, ProviderFactory, ProviderInstructions},
     supervisor::*,
@@ -66,6 +67,8 @@ struct Setup {
     next: Arc<AtomicU64>,
     prepared: Option<PreparedProviderAdapter>,
     initial: Option<SupervisorHandle>,
+    /// Every supervisor health entry published by any started worker.
+    health: Arc<std::sync::Mutex<Vec<SupervisorHealth>>>,
 }
 impl Setup {
     async fn new(lose_receipt: bool) -> Self {
@@ -169,6 +172,7 @@ impl Setup {
             next,
             prepared: Some(qualified.unwrap().into_adapter(id(3)).unwrap()),
             initial: None,
+            health: Default::default(),
         };
         let initial_handle = setup.start().await;
         until(|| initial_handle.progress().borrow().reconciled).await;
@@ -315,6 +319,10 @@ impl Setup {
         )
         .await
         .unwrap()
+        .with_health_observer({
+            let sink = self.health.clone();
+            Arc::new(move |health| sink.lock().unwrap().push(health))
+        })
         .start(
             self.owner
                 .binding_lease_shared(self.route.clone(), binding.id, binding.generation)
@@ -441,11 +449,13 @@ async fn full_original_item_native_argv_unique_turn_and_explicit_result_join() {
     );
     let payload: serde_json::Value =
         serde_json::from_str(attempt.formatted_payload.split_once('\n').unwrap().1).unwrap();
+    // The slim envelope names the item; its question is read on demand, not shipped.
     assert_eq!(
-        payload["current_item"]["question"],
-        "Preserve this full item question and owner reply"
+        payload["item_id"],
+        original.target.item_id.as_ref().unwrap().as_str()
     );
-    assert_eq!(payload["saved_input"]["text"], original.payload.text);
+    assert!(payload.get("current_item").is_none());
+    assert_eq!(payload["text"], original.payload.text);
     assert_eq!(payload["source_input_id"], original.id.as_str());
     // A complete marker with altered bytes and an exact payload in agent output are not delivery evidence.
     let changed = Host::turn(
@@ -581,6 +591,66 @@ async fn lost_receipt_reconnect_and_later_exact_evidence_keep_uncertainty_withou
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn late_history_for_a_doubtful_send_whose_result_committed_never_stalls_the_queue() {
+    // The submit receipt is lost (uncertain), the agent still commits its
+    // result, so the attempt seals with an unknown turn. History then shows
+    // the turn ran: Core ignores that and the next input is still sent.
+    let mut setup = Setup::new(true).await;
+    let handle = setup.start().await;
+    until(|| setup.first().state == InputState::NeedsAttention).await;
+    let state = |command: fn(BindingStateParams) -> OwnerCommand| {
+        setup
+            .core
+            .execute_owner(
+                setup.owner_context(),
+                command(BindingStateParams {
+                    binding_id: setup.binding_id.clone(),
+                    expected_generation: setup.binding().generation,
+                }),
+            )
+            .unwrap();
+    };
+    // Paused, so the late history is read before input 2 can be claimed.
+    state(|params| OwnerCommand::BindingPause {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(900),
+        params,
+    });
+    setup.publish_result();
+    until(|| setup.first().state == InputState::Handled).await;
+    let handled = setup.first();
+    assert_eq!(handled.attempts[0].turn_state, TurnState::Unknown);
+    setup.health.lock().unwrap().clear();
+    setup.host.set_turns(vec![Host::turn(
+        "late-original-turn",
+        &handled.attempts[0].formatted_payload,
+        "completed",
+    )]);
+    for _ in 0..3 {
+        let reports = handle.progress().borrow().validated_reports;
+        until(|| handle.progress().borrow().validated_reports > reports).await;
+    }
+    assert_eq!(setup.first(), handled, "late history rewrites nothing");
+    state(|params| OwnerCommand::BindingResume {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(901),
+        params,
+    });
+    until(|| setup.host.sends() == 2).await;
+    assert!(
+        setup
+            .health
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|h| h.state == SupervisorState::Running),
+        "{:?}",
+        setup.health.lock().unwrap()
+    );
+    setup.stop(handle).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn two_exact_original_user_turns_on_restart_preserve_uncertainty_and_never_choose_or_resend()
 {
     let mut setup = Setup::new(true).await;
@@ -601,10 +671,25 @@ async fn two_exact_original_user_turns_on_restart_preserve_uncertainty_and_never
         ),
     ]);
     setup.reopen();
+    setup.health.lock().unwrap().clear();
     let handle = setup.start().await;
     let exit = tokio::time::timeout(Duration::from_secs(5), async {
-        // The worker exits on ambiguous matching evidence; stopping only joins that exact worker.
-        until(|| handle.progress().has_changed().is_err()).await;
+        // Ambiguous matching evidence never picks a turn: the worker keeps the
+        // gate closed, backs off in plain words, and stop hands back the cause.
+        until(|| {
+            setup
+                .health
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|h| h.state == SupervisorState::BackingOff)
+        })
+        .await;
+        assert!(
+            handle.progress().has_changed().is_ok(),
+            "worker stays alive"
+        );
+        assert!(!handle.progress().borrow().reconciled);
         handle.stop().await.unwrap()
     })
     .await
@@ -612,6 +697,12 @@ async fn two_exact_original_user_turns_on_restart_preserve_uncertainty_and_never
     assert_eq!(
         exit.error.as_ref().map(|e| e.code),
         Some(CoreErrorCode::ProtocolConflict)
+    );
+    let health = setup.health.lock().unwrap()[0].clone();
+    assert_eq!(health.state, SupervisorState::BackingOff);
+    assert_eq!(
+        health.reason.as_deref(),
+        Some("Codex answered in a way Ariadne didn't expect. It will check again.")
     );
     assert!(exit.pending.is_none());
     assert_eq!(setup.first().attempts[0].host_turn_id, None);

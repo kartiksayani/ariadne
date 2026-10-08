@@ -46,6 +46,10 @@ body {
   color: var(--color-text);
 }
 
+.root-failure > button {
+  margin-bottom: 16px;
+}
+
 .root-failure > pre {
   white-space: pre-wrap;
   user-select: text;

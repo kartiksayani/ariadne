@@ -181,6 +181,8 @@ fn desktop_handler<R: tauri::Runtime>(
         commands::discovery_snapshot,
         commands::discovery_ui_open,
         commands::codex_default_endpoint,
+        commands::supervisor_health,
+        commands::open_link,
         commands::reveal_item,
         commands::project_register,
         commands::binding_connect,
@@ -194,6 +196,7 @@ fn desktop_handler<R: tauri::Runtime>(
         commands::topic_restore,
         commands::session_close,
         commands::session_reopen,
+        commands::session_label_set,
         commands::topic_continue,
         commands::preferences_patch,
         commands::item_remove,
@@ -319,7 +322,15 @@ fn run_native(
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
-                    let _ = window.hide();
+                    // Hiding a full-screen window would leave its Space black.
+                    let hidden = window.clone();
+                    native::window::fullscreen::leave_then(window, move || {
+                        let _ = hidden.hide();
+                    });
+                }
+                #[cfg(target_os = "macos")]
+                tauri::WindowEvent::ThemeChanged(theme) => {
+                    native::window::dock::follow(*theme);
                 }
                 tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
                     if !window_quitting.load(Ordering::Acquire) {
@@ -332,6 +343,11 @@ fn run_native(
                         .reconcile(window.app_handle().clone(), true);
                 }
                 tauri::WindowEvent::Focused(true) if !window_quitting.load(Ordering::Acquire) => {
+                    // Activation (Cmd+Tab, Dock, a click on the title bar)
+                    // puts key focus in the page so shortcuts work at once.
+                    if let Some(main) = window.app_handle().get_webview_window("main") {
+                        native::window::focus_webview(&main);
+                    }
                     if let Some(runtime) = window.try_state::<Arc<composition::NativeRuntime>>() {
                         let _ = runtime.refresh_snapshots();
                     }
@@ -386,9 +402,17 @@ fn run_native(
                     )
                 })?;
             }
-            native::routes::receive_launch(app.handle().clone(), std::env::args().collect());
+            #[cfg(target_os = "macos")]
+            if let Some(theme) = app
+                .get_webview_window("main")
+                .and_then(|window| window.theme().ok())
+            {
+                native::window::dock::follow(theme);
+            }
+            native::routes::receive_startup(app.handle().clone(), std::env::args().collect());
+            // The window is created hidden; it first shows at its saved size.
             app.state::<native::window::NativeWindow>()
-                .reconcile(app.handle().clone(), true);
+                .launch(app.handle().clone());
             Ok(())
         });
     #[cfg(feature = "e2e")]
@@ -463,17 +487,28 @@ fn run_native(
                         let exiting = app.clone();
                         let allowed = exit_allowed.clone();
                         if app.run_on_main_thread(move || {
-                            #[cfg(target_os = "macos")]
-                            if show_note {
-                                native::window::quit_note::present();
+                            let main = exiting.get_webview_window("main");
+                            let finish = move || {
+                                #[cfg(target_os = "macos")]
+                                if show_note {
+                                    native::window::quit_note::present();
+                                }
+                                #[cfg(not(target_os = "macos"))]
+                                let _ = show_note;
+                                // The initial Quit fence stays set while the native
+                                // alert runs its event loop. Repeated Quit requests
+                                // cannot drain again or produce a second alert.
+                                allowed.store(true, Ordering::Release);
+                                exiting.exit(code.unwrap_or(0));
+                            };
+                            // Exiting from full screen would leave its Space black.
+                            match main {
+                                Some(main) => native::window::fullscreen::leave_then(
+                                    &main.as_ref().window(),
+                                    finish,
+                                ),
+                                None => finish(),
                             }
-                            #[cfg(not(target_os = "macos"))]
-                            let _ = show_note;
-                            // The initial Quit fence stays set while the native
-                            // alert runs its event loop. Repeated Quit requests
-                            // cannot drain again or produce a second alert.
-                            allowed.store(true, Ordering::Release);
-                            exiting.exit(code.unwrap_or(0));
                         }).is_err() {
                             eprintln!("Ariadne could not present its native Quit note after owning shutdown.");
                             exit_allowed.store(true, Ordering::Release);

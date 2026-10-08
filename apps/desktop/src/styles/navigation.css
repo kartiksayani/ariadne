@@ -20,6 +20,55 @@
   font: inherit;
 }
 
+.nav-setup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nav-setup-head > h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+/* The setup instruction: a collapsed, framed code box that scrolls inside its frame. */
+.nav-setup-code {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.nav-setup-code > details {
+  border: 1px solid var(--color-divider);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.nav-setup-code > details > summary {
+  padding: 6px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.nav-setup-code pre {
+  max-height: 160px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-top: 1px solid var(--color-divider);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+
+.nav-setup-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .nav-registration p {
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
   font-size: 13px;
@@ -87,7 +136,18 @@
   overflow-wrap: anywhere;
 }
 
-.nav-registration .nav-discovery {
-  max-height: 220px;
+/* In the Connect dialog the host sessions scroll inside a visible frame; the notice and Refresh stay above it. */
+.nav-registration .nav-discovery-list {
+  max-height: 240px;
+  margin-top: 12px;
+  padding: 0 10px;
   overflow: auto;
+  border: 1px solid var(--color-divider);
+  border-radius: 6px;
+  background: var(--a-bg);
+}
+
+.nav-registration .nav-discovery-candidate {
+  margin: 10px 0;
+  background: var(--color-surface, transparent);
 }

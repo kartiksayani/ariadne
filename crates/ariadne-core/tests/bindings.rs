@@ -50,6 +50,12 @@ fn command(project: u64, host: &str, op: u64, session: Option<UuidV4>) -> OwnerC
         },
     }
 }
+fn other_adapter(mut command: OwnerCommand) -> OwnerCommand {
+    if let OwnerCommand::BindingConnect { params, .. } = &mut command {
+        params.adapter_id = "other.local".into();
+    }
+    command
+}
 fn facts(params: &BindingConnectParams) -> VerifiedHost {
     let b = seed().bindings.0[&id(3)].clone();
     VerifiedHost {
@@ -159,6 +165,7 @@ impl Setup {
                     Ok::<_, &'static str>(SavedReceiptData::SessionLifecycle {
                         state: s.state.clone(),
                         closed_at: s.closed_at.clone(),
+                        cancelled_input_ids: vec![],
                     })
                 },
             )
@@ -761,6 +768,7 @@ fn queued_input(mut session: Session) -> Session {
         attempts: vec![],
         active_attempt_id: None,
         resolution_history: vec![],
+        cancel_cause: None,
     };
     let message = Message {
         id: message_id,
@@ -923,7 +931,11 @@ fn owner_pause_and_resume_preserve_healthy_queued_and_inflight_work() {
 }
 
 #[test]
-fn rebind_blocks_every_outstanding_state_then_preserves_history_and_frees_only_historical_route() {
+fn another_adapter_cannot_take_a_live_binding_then_rebind_preserves_history_and_frees_only_historical_route(
+) {
+    // Another adapter's conversation is a real conflict while the old one is
+    // live and has pending work, even paused. (Same-adapter /clear rebinds and
+    // disconnected bindings are covered in tests/rebind.rs.)
     for input_state in [
         InputState::Queued,
         InputState::InFlight,
@@ -942,7 +954,7 @@ fn rebind_blocks_every_outstanding_state_then_preserves_history_and_frees_only_h
                 s.service()
                     .connect(
                         &owner(),
-                        &command(1, "new-host", 10, Some(id(2))),
+                        &other_adapter(command(1, "new-host", 10, Some(id(2)))),
                         |p| Ok(facts(p)),
                         || panic!("guard before UUIDs"),
                         at()
@@ -955,7 +967,7 @@ fn rebind_blocks_every_outstanding_state_then_preserves_history_and_frees_only_h
     }
     let s = Setup::new(1);
     s.seed();
-    let cmd = command(1, "new-host", 10, Some(id(2)));
+    let cmd = other_adapter(command(1, "new-host", 10, Some(id(2))));
     assert_eq!(
         core_code(
             s.service()

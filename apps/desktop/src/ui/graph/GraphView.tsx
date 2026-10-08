@@ -6,6 +6,7 @@ import type { SessionPreferences } from '../../generated/core';
 import type { Topic } from '../../generated/domain/models';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
+import { plainFailure } from '../../data/plain';
 import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
@@ -140,8 +141,8 @@ export function GraphView({ store, routes, view, later, reveal, tight, sessionLa
     setPending(null); setInflight(change); setError(null);
     const next = applyChange(base, change);
     const write = next === base ? Promise.resolve(true) : latest.current.saveView(structuredClone(next) as SessionPreferences);
-    write.then(confirmed => { if (mounted.current && !confirmed) setError('The view change was not confirmed. Reconcile its preferences.'); },
-      (failure: unknown) => { if (mounted.current) setError(failure instanceof Error ? failure.message : 'The view change could not be saved.'); })
+    write.then(confirmed => { if (mounted.current && !confirmed) setError('Ariadne isn’t sure that view change was saved. Try it again.'); },
+      (failure: unknown) => { if (mounted.current) setError(plainFailure(failure, 'The view change could not be saved. Try again.')); })
       .finally(() => { if (mounted.current) setInflight(null); });
   }, [pending, inflight, preferencesBusy, state.status]);
 
@@ -155,7 +156,7 @@ export function GraphView({ store, routes, view, later, reveal, tight, sessionLa
     void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
       if (!mounted.current || call !== request.current || !result) return;
       setLocalReveal(result); latest.current.onReveal(result, options.openDetail);
-    }).catch((failure: unknown) => { if (mounted.current && call === request.current) setError(failure instanceof Error ? failure.message : 'This registered item could not be read.'); });
+    }).catch((failure: unknown) => { if (mounted.current && call === request.current) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change]);
   // Clicking a node selects it and opens detail; a collapsed node also opens its next tier (Ariadne.dc.html:1564).
   const open = useCallback((node: GraphNode) => {

@@ -94,6 +94,8 @@ Watch registered session-store parent directories, debounce changes, validate sn
 
 Global Waiting contains an item only when its status is `waiting_on_me` and it has no Answer for the current `question_revision` whose input is in any state other than `cancelled` or `skipped`. A handled answer continues to suppress that waiting episode until a new ask changes the question revision. Sort eligible rows by the current waiting-episode timestamp, then project/session and stable item order. Sent shows one row per input in `queued`, `in_flight`, or `needs_attention`, including generic non-answer requests, and links each row to its target question snapshot. A new ask on an item can appear in Waiting while an older input for that item remains in Sent.
 
+A message that hasn't been sent yet (`queued`) offers Edit and Delete wherever it shows: the item detail tracker, its topic band for a topic reply, and the Waiting rail's Sent row. Delete is `input_cancel`. Edit is `input_cancel` with `purpose: "edit"`, and it cancels first: only once core confirmed the cancel does the message's text and chosen option go into the owner's draft for that item (answer, reply, note or follow-up box; other kinds go to the reply box) or topic. The draft never holds a queued message's words while that message can still be sent, so the same words never go out twice. When the draft already holds different text, Edit cancels nothing and offers the old text to copy; a draft that gained other text during the cancel is never overwritten either. A refused cancel (the message already left the queue) says "This message was already sent, so it can't be edited."; an unconfirmed one changes nothing, says "Couldn't take this message back. Try again." and offers Check again. A held message labels Edit "Review and send again". In-flight messages keep Cancel, and stopped ones keep their recovery choices. An owner message the owner deleted before any delivery attempt leaves the timeline, the rounds and the message rail. One taken back to edit (`cancel_cause` `owner_edit`) stays, with "Taken back to edit" and "Put back in reply box" (which follows the same never-overwrite rule), until a later message carries the same words; one cancelled by archive or close keeps its "Not sent" line. None of these ever counts as an answer. Core never claims a cancelled input, and a cancel racing a claim gets `revision_conflict`.
+
 Use the API's `SummaryCounts` projection consistently: `waiting_unanswered` drives global/project Waiting counts and the tray; `sent_inputs` counts inputs by `queued`, `in_flight`, and `needs_attention`; `items_by_status` is the separate raw seven-status count. Topic/session chips count nonarchived items before local search/filter. Footer shows visible and total scope. Archived topic counts stay in Archive. Inaccessible roots make counts partial and display an incomplete marker, never zero. These counts are not recomputed from whatever rows happen to be visible after filtering.
 
 The early P4.3 read module publishes `WaitingStore`, `waitingRows`, `sentRows`,
@@ -226,10 +228,10 @@ and operation reuse remain retry-only. See ADR-0057.
 
 ## 6. Archive, sessions, and binding lifecycle
 
-Archive and close are guarded metadata operations. Render the returned blocking item/input IDs and dispatch state from guard errors, with actions to navigate to the blocker:
+Archive and close are confirmed one-step metadata operations:
 
-- `topic.archive` is enabled only when every topic item is terminal and no `queued`, `in_flight`, or `needs_attention` input targets an item in it. Waiting items therefore cannot leave the global queue through archive. Handled, cancelled, and explicitly skipped inputs do not block. Restore uses `topic.restore` and preserves IDs/history.
-- `session.close` requires every item terminal, no `queued`, `in_flight`, or `needs_attention` input, and quiesced dispatch (`Binding::dispatch_quiesced`: persisted state `paused`, or the active binding is not connected, or there is no active binding). A disconnected binding shows "Dispatch is already stopped" and goes straight to Confirm Close. If dispatch is enabled and connected, show an explicit Pause dispatch step; wait until the paused state is confirmed, then offer a separately confirmed Close action. Keep close disabled and show blockers while active items or inputs remain. Close also records an owner pause on the active binding, so a later reconnect and reopen never resumes dispatch. It marks Ariadne metadata only; it never signals or terminates the terminal process. `session.reopen` reactivates the record without changing its binding or implicitly resuming dispatch.
+- `topic.archive` is always offered (ADR-0090). The confirmation says, in plain words, how many open items stay as they are and how many of the owner's messages haven't reached the agent yet and are cancelled. Items in an archived topic leave every "Waiting on me" count and come back on restore. Restore uses `topic.restore` and preserves IDs/history; cancelled messages stay cancelled.
+- `session.close` is one confirmed step (ADR-0088). It records an owner pause on the active binding, cancels queued inputs, abandons in-flight and needs-attention inputs, and leaves items as they are. The receipt lists the cancelled inputs, so the confirmation can say how many unsent messages are dropped. It marks Ariadne metadata only; it never signals or terminates the terminal process. `session.reopen` reactivates the record and clears the owner pause, including an earlier explicit Pause.
 - Tab close changes navigation only. It does not close a session, remove its project registration, or discard drafts.
 
 ### Remove
@@ -263,8 +265,9 @@ exact patch for explicit same-operation reconciliation.
 Manual connection explicitly chooses a new Ariadne session or an existing
 registered session in that project. A fresh Claude conversation may attach to
 Session X while retaining its topics, items and history; unfinished topics/items
-do not block this choice. The native rebind guards still require an active target,
-paused/disconnected old binding and no pending/running/unresolved inputs. The
+do not block this choice. The native rebind guards require an active target and an
+old binding that is disconnected or of the same adapter; pending inputs follow the
+session to the new conversation (ADR-0088). The
 backend handoff follow-up must prove historical structured owner-context visibility
 at the connection snapshot and isolation of future unissued inputs; it does not
 transfer host transcript/memory, copy old host authority or resume dispatch.

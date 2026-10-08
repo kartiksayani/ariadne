@@ -3,6 +3,15 @@
   "title": "GlobalPreferences",
   "type": "object",
   "properties": {
+    "detail_width": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "maximum": 720,
+      "minimum": 320
+    },
     "notification_ledger": {
       "type": "array",
       "items": {
@@ -31,6 +40,9 @@
     },
     "theme": {
       "$ref": "#/$defs/Theme"
+    },
+    "waiting_collapsed": {
+      "type": "boolean"
     },
     "window": {
       "anyOf": [

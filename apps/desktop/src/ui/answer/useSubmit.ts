@@ -6,6 +6,7 @@ import type { ItemRoute } from '../../generated/core';
 import type { PresenceObservation, Session } from '../../generated/domain/models';
 import { connectionOf, reconnectingNote, type Connection } from '../shared/connection';
 import type { Immutable } from '../../data/session-store';
+import { plainFailure } from '../../data/plain';
 import { blockedDraft, emptyDraft, ownerActions, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
 import { agentName } from '../shell/model';
 
@@ -89,14 +90,21 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
   const connection = connectionOf(binding, presence), agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const draft = entry?.draft;
-  const changed = !!draft && !!item && !!session && (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision
-    || session.active_binding_id !== draft.binding_id);
-  // An untouched draft follows a revised question; only owner content needs a deliberate review.
-  // Only a newer item moves it: the detail and Waiting stores read the same session at different
-  // moments, and a stale view re-basing the draft backwards would loop with the fresh one.
-  const newer = !!draft && !!item && (item.revision > draft.target_revision || item.question_revision > (draft.question_revision ?? 0));
+  // An untouched draft follows a revised question or a rebind; only owner content needs a deliberate review.
+  // Only a newer view moves it: the detail and Waiting stores read the same session at different
+  // moments, and a stale view re-basing the draft backwards would loop with the fresh one. A view
+  // that knows the draft's binding yet has another active one is the newer one.
+  const rebound = !!draft && !!session && !!session.active_binding_id && session.active_binding_id !== draft.binding_id && !!session.bindings[draft.binding_id];
+  const newer = !!draft && !!item && (item.revision > draft.target_revision || item.question_revision > (draft.question_revision ?? 0) || rebound);
   const pristine = newer && !!entry && !entry.saving && !entry.uncertain && !entry.receipt && !draft!.text && draft!.selected_option_id === null;
+  // A pristine draft re-bases at once (below), so it never shows "Review current target".
+  // A rebind alone (same question, same revision) keeps the owner's text and option: the draft just moves to the new binding.
+  const follows = rebound && !pristine && !!entry && !entry.saving && !entry.uncertain && !entry.receipt && !!item
+    && item.revision === draft!.target_revision && item.question_revision === draft!.question_revision;
+  const changed = !pristine && !follows && !!draft && !!item && !!session && (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision
+    || session.active_binding_id !== draft.binding_id);
   useEffect(() => { if (pristine && session && entry) drafts.review(entry.draft.op_id, session); }, [pristine, session, entry, drafts]);
+  useEffect(() => { if (follows && session && entry) drafts.rebind(entry.draft.op_id, session); }, [follows, session, entry, drafts]);
   const guard = draft && session ? blockedDraft(draft, session) : null;
   const blocked = !session || !draft ? null : !current ? stale
     : session.state !== 'active' && intent === 'answer' ? 'This session is closed. Reopen it to answer.'
@@ -117,7 +125,7 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   const ready = () => !!entry && !locked && !changed && !blocked;
   return {
     entry, changed, blocked, locked, connection, agent, preferenceUncertain: state.preferenceUncertain,
-    error: entry?.error?.message ?? state.error?.message ?? null,
+    error: entry?.error ? plainFailure(entry.error) : state.error ? plainFailure(state.error) : null,
     select: optionId => { if (entry && !locked) drafts.edit(entry.draft.op_id, { selected_option_id: optionId }); },
     write: text => { if (entry && !locked) drafts.edit(entry.draft.op_id, { text }); },
     sendOption: optionId => {

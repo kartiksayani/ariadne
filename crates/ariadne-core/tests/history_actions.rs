@@ -67,7 +67,7 @@ fn closing_a_disconnected_enabled_binding_records_an_owner_pause() {
 }
 
 #[test]
-fn reconnect_then_reopen_never_resumes_dispatch() {
+fn reconnect_then_reopen_resumes_dispatch() {
     let mut session = terminal_seed();
     let binding = session.bindings.0.get_mut(&id(3)).unwrap();
     binding.dispatch_state = DispatchState::Disconnected;
@@ -109,21 +109,29 @@ fn reconnect_then_reopen_never_resumes_dispatch() {
     let live = setup.store().read(&id(2)).unwrap();
     assert_eq!(live.state, SessionState::Active);
     let binding = &live.bindings.0[&id(3)];
+    // Owner rule: reopen carries on; the pause close made is lifted.
     assert_eq!(binding.connection_state, ConnectionState::Connected);
-    assert!(binding.owner_paused);
-    assert_eq!(binding.dispatch_state, DispatchState::Paused);
+    assert!(!binding.owner_paused);
+    assert_eq!(binding.dispatch_state, DispatchState::Enabled);
 }
 
 #[test]
-fn connected_enabled_binding_is_still_not_closable_and_no_binding_closes() {
-    let blocked = error(close_with(|session| {
-        let binding = session.bindings.0.get_mut(&id(3)).unwrap();
-        binding.dispatch_state = DispatchState::Enabled;
-        binding.connection_state = ConnectionState::Connected;
-        binding.owner_paused = false;
-    }));
-    assert_eq!(blocked.code, CoreErrorCode::SessionNotClosable);
-    assert!(blocked.details.unwrap().dispatch_must_pause);
+fn connected_enabled_binding_closes_in_one_step_and_no_binding_closes() {
+    let session = terminal_seed();
+    let mut enabled = session.clone();
+    let binding = enabled.bindings.0.get_mut(&id(3)).unwrap();
+    binding.dispatch_state = DispatchState::Enabled;
+    binding.connection_state = ConnectionState::Connected;
+    binding.owner_paused = false;
+    let setup = Setup::new(&enabled);
+    HistoryActionService::new(&setup.registry)
+        .execute(&context(), &command("close", 1, 100), at())
+        .unwrap();
+    let closed = setup.store().read(&id(2)).unwrap();
+    assert_eq!(closed.state, SessionState::Closed);
+    let binding = &closed.bindings.0[&id(3)];
+    assert!(binding.owner_paused);
+    assert_eq!(binding.dispatch_state, DispatchState::Paused);
     close_with(|session| session.active_binding_id = None).unwrap();
 }
 
@@ -228,7 +236,7 @@ impl Setup {
 }
 
 #[test]
-fn archive_restore_close_reopen_preserve_entities_and_binding_without_resuming() {
+fn archive_restore_close_reopen_preserve_entities_and_reopen_lifts_the_owner_pause() {
     let original = terminal_seed();
     let setup = Setup::new(&original);
     let service = HistoryActionService::new(&setup.registry);
@@ -260,7 +268,16 @@ fn archive_restore_close_reopen_preserve_entities_and_binding_without_resuming()
     assert_eq!(live.rounds, original.rounds);
     assert_eq!(live.answers, original.answers);
     assert_eq!(live.inputs, original.inputs);
-    assert_eq!(live.bindings, original.bindings);
+    // Owner rule: reopen clears the owner pause, even an earlier explicit one.
+    let binding = &live.bindings.0[&id(3)];
+    assert!(original.bindings.0[&id(3)].owner_paused);
+    assert!(!binding.owner_paused);
+    assert_ne!(binding.dispatch_state, DispatchState::Paused);
+    let mut expected = original.bindings.clone();
+    let lifted = expected.0.get_mut(&id(3)).unwrap();
+    lifted.owner_paused = false;
+    lifted.dispatch_state = binding.dispatch_state.clone();
+    assert_eq!(live.bindings, expected);
     assert_eq!(live.active_binding_id, original.active_binding_id);
     assert!(live.topics.0[&id(5)].archived_at.is_none());
     assert_eq!(live.revision, p(5));
@@ -294,26 +311,55 @@ fn lifecycle_replay_precedes_stale_revision_and_restored_state_without_rewriting
 }
 
 #[test]
-fn archive_and_close_return_real_blocker_ids_and_never_mutate_rejected_snapshot() {
-    let setup = Setup::new(&seed());
-    let service = HistoryActionService::new(&setup.registry);
-    let bytes = setup.bytes();
-    let archive = error(service.execute(&context(), &command("archive", 1, 100), at()));
-    assert_eq!(archive.code, CoreErrorCode::TopicNotArchivable);
+fn archive_and_close_leave_open_items_as_they_are_and_restore_brings_the_topic_back() {
+    let original = seed();
     assert_eq!(
-        archive.details.unwrap().blocking_item_ids,
-        vec![ItemRef::new("1").unwrap()]
+        original.items.0[&ItemRef::new("1").unwrap()].status,
+        ItemStatus::Open
     );
-    let close = error(service.execute(&context(), &command("close", 1, 101), at()));
-    assert_eq!(close.code, CoreErrorCode::SessionNotClosable);
-    let details = close.details.unwrap();
-    assert_eq!(details.blocking_item_ids, vec![ItemRef::new("1").unwrap()]);
-    assert!(details.dispatch_must_pause);
-    assert_eq!(setup.bytes(), bytes);
+    let setup = Setup::new(&original);
+    let service = HistoryActionService::new(&setup.registry);
+    // Owner rule: archive always succeeds; open items keep their status.
+    let archived = saved(
+        service
+            .execute(&context(), &command("archive", 1, 100), at())
+            .unwrap(),
+    );
+    let SavedReceiptData::TopicLifecycle {
+        archived_at,
+        cancelled_input_ids,
+        ..
+    } = archived.data
+    else {
+        panic!("lifecycle receipt")
+    };
+    assert!(archived_at.is_some());
+    assert!(cancelled_input_ids.is_empty());
+    let live = setup.store().read(&id(2)).unwrap();
+    assert_eq!(live.items, original.items);
+    service
+        .execute(&context(), &command("restore", 2, 102), at())
+        .unwrap();
+    let restored = setup.store().read(&id(2)).unwrap();
+    assert_eq!(restored.items, original.items);
+    assert_eq!(restored.messages, original.messages);
+    assert!(restored.topics.0[&id(5)].archived_at.is_none());
+    // Owner rule: close is one step and never refused for open items.
+    service
+        .execute(
+            &context(),
+            &command("close", restored.revision.value(), 101),
+            at(),
+        )
+        .unwrap();
+    let closed = setup.store().read(&id(2)).unwrap();
+    assert_eq!(closed.state, SessionState::Closed);
+    assert_eq!(closed.items, original.items);
+    assert!(closed.bindings.0[&id(3)].owner_paused);
 }
 
 #[test]
-fn even_terminal_empty_queue_requires_persisted_paused_dispatch_and_owner_scope() {
+fn lifecycle_needs_owner_scope_and_close_needs_no_earlier_pause() {
     let mut session = terminal_seed();
     let binding = session.bindings.0.get_mut(&id(3)).unwrap();
     binding.dispatch_state = DispatchState::Enabled;
@@ -321,14 +367,18 @@ fn even_terminal_empty_queue_requires_persisted_paused_dispatch_and_owner_scope(
     let setup = Setup::new(&session);
     let service = HistoryActionService::new(&setup.registry);
     let bytes = setup.bytes();
-    let close_error = error(service.execute(&context(), &command("close", 1, 100), at()));
-    assert!(close_error.details.unwrap().dispatch_must_pause);
     let wrong = OwnerContext::from_trusted_entrypoint(OwnerScope::Registry);
     assert_eq!(
         error(service.execute(&wrong, &command("archive", 1, 101), at())).code,
         CoreErrorCode::PermissionDenied
     );
     assert_eq!(setup.bytes(), bytes);
+    service
+        .execute(&context(), &command("close", 1, 100), at())
+        .unwrap();
+    let binding = &setup.store().read(&id(2)).unwrap().bindings.0[&id(3)];
+    assert!(binding.owner_paused);
+    assert_ne!(binding.dispatch_state, DispatchState::Enabled);
 }
 
 fn rich_seed() -> Session {
@@ -671,6 +721,7 @@ fn source_revision_or_hash_change_rejects_stale_preview_without_target_effects()
                 Ok::<_, CoreError>(SavedReceiptData::SessionLifecycle {
                     state: s.state.clone(),
                     closed_at: s.closed_at.clone(),
+                    cancelled_input_ids: vec![],
                 })
             },
         )
@@ -883,6 +934,7 @@ fn preview_and_commit_require_distinct_active_explicitly_bound_target() {
                 Ok::<_, CoreError>(SavedReceiptData::SessionLifecycle {
                     state: s.state.clone(),
                     closed_at: s.closed_at.clone(),
+                    cancelled_input_ids: vec![],
                 })
             },
         )
@@ -908,7 +960,7 @@ fn preview_and_commit_require_distinct_active_explicitly_bound_target() {
 }
 
 #[test]
-fn pending_topic_inputs_block_archive_even_when_all_items_are_terminal() {
+fn archive_cancels_the_topics_unsent_inputs_and_restore_keeps_them_cancelled() {
     let setup = Setup::new(&terminal_seed());
     let submit = OwnerCommand::InputSubmit {
         api_version: SchemaVersion::new(1).unwrap(),
@@ -932,15 +984,45 @@ fn pending_topic_inputs_block_archive_even_when_all_items_are_terminal() {
     let SavedReceiptData::InputSubmit { input_id, .. } = saved(input).data else {
         unreachable!()
     };
-    let before = setup.bytes();
+    let items = setup.store().read(&id(2)).unwrap().items;
     let service = HistoryActionService::new(&setup.registry);
-    let rejected = error(service.execute(&context(), &command("archive", 1, 201), at()));
-    let details = rejected.details.unwrap();
-    assert!(details.blocking_item_ids.is_empty());
-    assert_eq!(details.blocking_input_ids, vec![input_id.clone()]);
-    let close = error(service.execute(&context(), &command("close", 2, 202), at()));
-    assert_eq!(close.details.unwrap().blocking_input_ids, vec![input_id]);
-    assert_eq!(setup.bytes(), before);
+    // Owner rule: archive cancels the topic's unsent input and lists it,
+    // as close does for the session.
+    let archived = saved(
+        service
+            .execute(&context(), &command("archive", 1, 201), at())
+            .unwrap(),
+    );
+    let SavedReceiptData::TopicLifecycle {
+        cancelled_input_ids,
+        ..
+    } = archived.data
+    else {
+        panic!("lifecycle receipt")
+    };
+    assert_eq!(cancelled_input_ids, vec![input_id.clone()]);
+    let live = setup.store().read(&id(2)).unwrap();
+    assert_eq!(live.inputs.0[&input_id].state, InputState::Cancelled);
+    // The owner's words stay recoverable: the input says archive cancelled it, not the owner.
+    assert_eq!(
+        live.inputs.0[&input_id].cancel_cause,
+        Some(CancelCause::TopicArchived)
+    );
+    assert_eq!(live.items, items);
+    // Restore brings the topic back; the cancelled input stays cancelled.
+    let restored = saved(
+        service
+            .execute(&context(), &command("restore", 2, 202), at())
+            .unwrap(),
+    );
+    assert!(matches!(
+        restored.data,
+        SavedReceiptData::TopicLifecycle { archived_at: None, ref cancelled_input_ids, .. }
+            if cancelled_input_ids.is_empty()
+    ));
+    let live = setup.store().read(&id(2)).unwrap();
+    assert_eq!(live.inputs.0[&input_id].state, InputState::Cancelled);
+    assert!(live.topics.0[&id(5)].archived_at.is_none());
 }
 
 #[test]
@@ -1043,6 +1125,7 @@ fn continuation_uses_validated_source_snapshot_when_source_changes_after_its_loc
                                     Ok::<_, CoreError>(SavedReceiptData::SessionLifecycle {
                                         state: s.state.clone(),
                                         closed_at: s.closed_at.clone(),
+                                        cancelled_input_ids: vec![],
                                     })
                                 },
                             )

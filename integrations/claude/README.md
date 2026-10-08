@@ -39,10 +39,43 @@ does not automatically submit a prompt. Native binding history issuance and quer
 tests cover the captured ceiling; actual helper/Core composition remains required.
 
 Claims use the original exact persisted prompt; the marker is its first line and
-SHA-256 covers all UTF8 bytes. Submission is detached and callbacks capture the
-original attempt and binding generation. The Mod retains exact pending lifecycle
-events until matching durable receipts, pauses new claims during failures, and
-reports session end best effort without stopping the external host.
+SHA-256 covers all UTF8 bytes. Submission is detached (`prompt.submit` asUser, so an
+idle Claude starts a turn) and callbacks capture the original attempt and binding
+generation. The Mod treats the payload as opaque: item- and topic-level inputs take
+the same path. A prompt Claude folds into a running turn has no `turn.start`; the
+running turn's `turn.complete` finishes it once the next turn starts without the
+prompt, or no turn starts within `FOLD_GRACE_MS`. If the next turn carries the
+prompt, Claude ran it as its own turn and that turn finishes it. When a
+conversation ends or changes before the prompt is seen starting a turn, the Mod
+reports it uncertain so the owner decides whether to send it again; a stopped loop
+only finishes a turn it saw start. The Mod retains exact pending lifecycle
+events until matching durable receipts and retries them, and a failed claim, with
+the same IDs on the next poll. A claim the app refused before saving it (paused,
+closed, needs attention, or no desktop lease after only refusals) drops its
+request ID; Core replays a saved claim before it checks those barriers. A new
+claim waits for those saves; the app's own
+refusals (paused, closed, needs attention) decide when dispatch resumes. Each such
+state prints one plain notice when it starts. A removed session or replaced
+connection stops the loop with one notice. Session end is reported best effort
+without stopping the external host.
+
+`/ariadne-connect` and `/ariadne-disconnect` first finish outstanding claims and
+reports, refuse in plain words only if that fails, and always reopen the claim
+loop afterwards.
+
+The Mod remembers, in the plugin's own SDK store (`$.store`, never `~/.ariadne`),
+which Ariadne session each Claude conversation ID was connected to. On start, a
+remembered conversation (`claude --resume`) reconnects automatically; a new one only
+announces itself and stays discoverable through its heartbeat while idle. `/clear`
+and `/resume` (`session.end` with that reason) end the conversation, not the
+process: the Mod reports the old conversation's end, follows the new conversation
+ID to the same Ariadne session and announces it at once (when Claude keeps the
+conversation ID, on the next poll tick). Each reconnect rotates the generation, so
+the Mod adds a note with the new routing to the conversation with
+`$.session.append` (a meta row Claude reads on its next turn, not a prompt) and
+retries it on the poll tick while the engine has no conversation to take it. If the app refuses the
+rebind because the session is live on another conversation, the Mod says so once
+and retries quietly. `/ariadne-disconnect` forgets the entry.
 
 Run focused contract consumers with
 `npm run test:integration -- --project claude-mod`. These inject SDK/helper seams;

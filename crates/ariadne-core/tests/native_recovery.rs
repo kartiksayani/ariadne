@@ -173,9 +173,12 @@ fn fresh_qualified_idle_recovers_without_attestation_or_another_attempt() {
     assert_eq!(input.active_attempt_id, None);
     assert_eq!(input.resolution_history.len(), 1);
     assert_eq!(input.resolution_history[0].evidence, None);
+    // Owner rule: settling the last input needing attention lifts the barrier
+    // and re-enables dispatch; resolve never adds an owner pause.
     let binding = &saved.bindings.0[&id(3)];
-    assert!(binding.owner_paused);
-    assert_eq!(binding.dispatch_state, DispatchState::Paused);
+    assert_eq!(binding.owner_paused, before.bindings.0[&id(3)].owner_paused);
+    assert_eq!(binding.pause_reason, None);
+    assert_ne!(binding.dispatch_state, DispatchState::RecoveryRequired);
     assert_eq!(binding.active_input_id, None);
     assert_eq!(saved.messages, before.messages);
     assert_eq!(s.next.load(Ordering::SeqCst), allocated);
@@ -331,8 +334,9 @@ fn native_recovery_rejects_other_commands_invalid_wire_and_wrong_owner_scope() {
     );
     assert_eq!(s.bytes(), before);
     let mut command = s.command(201, false);
+    // The reason may be empty (the owner need not explain) but stays bounded.
     if let OwnerCommand::InputResolve { params, .. } = &mut command {
-        params.reason.clear();
+        params.reason = "x".repeat(4097);
     }
     assert_eq!(
         s.native

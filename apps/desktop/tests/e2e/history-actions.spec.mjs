@@ -39,13 +39,15 @@ async function lifecycle(button, confirmation, path, predicate) {
 async function continuePreview(sourceSession, topicName, targetTitle) {
   await openSession(sourceSession);
   await topicAction(topicName, 'Continue here');
-  await click(await dialog().$(`button=${targetTitle}`));
-  const send = await dialog().$(`button=Send to ${targetTitle}`);
+  // The picker lists each other active session by title, with its agent and state under it.
+  await click(await dialog().$(`button*=${targetTitle}`));
+  const send = await dialog().$('button*=Send to');
   try { await send.waitForEnabled(); } catch (failure) {
     throw new Error(`${failure.message}\nDialog text: ${await dialog().getText().catch(() => '(unavailable)')}`, { cause: failure });
   }
   const text = await dialog().getText();
-  for (const label of ['Waiting (', 'Open (', 'Terminal (', 'Source revision', 'immutable source provenance']) assert.ok(text.includes(label), `Preview omitted ${label}`);
+  for (const label of [`Continue “${topicName}” in this session`, 'WAITING ON YOU ·', 'Item references stay the same'])
+    assert.ok(text.toUpperCase().includes(label.toUpperCase()), `Preview omitted ${label}`);
   return send;
 }
 
@@ -74,18 +76,23 @@ export async function runHistoryActionsAcceptance(configuration) {
   const bindingId = target.active_binding_id, generation = target.bindings[bindingId].generation;
 
   await openSession(target.id);
-  await click(await sessionBar().$('button*=Close session'));
-  await click(await dialog().$('button=Pause dispatch'));
-  assert.equal((await readJson(targetPath)).bindings[bindingId].owner_paused, false, 'Opening Pause confirmation cannot save');
-  await click(await dialog().$('button=Confirm Pause dispatch'));
-  await wait(async () => (await readJson(targetPath)).bindings[bindingId].dispatch_state === 'paused', 'Close did not await a persisted pause');
+  // The session bar's chip pauses sending in one click.
+  const pauseSending = async () => {
+    await click(await sessionBar().$('.dispatch-chip').$('button[aria-label="Pause"]'));
+    await wait(async () => (await readJson(targetPath)).bindings[bindingId].dispatch_state === 'paused', 'Pause was not persisted');
+    await wait(async () => (await sessionBar().$('.dispatch-chip').getText()).includes('Paused (by you)'), 'Chip did not show Paused (by you)');
+  };
+  await pauseSending();
   assert.equal((await readJson(targetPath)).state, 'active', 'Pause must not also close');
-  await click(await dialog().$('button=Confirm session close'));
-  await wait(async () => (await readJson(targetPath)).state === 'closed', 'Separate Close confirmation did not save');
-  await wait(async () => !(await dialog().isExisting()), 'Saved Close dialog remained open');
-  await lifecycle('Reopen session', 'Confirm session reopen', targetPath, value => value.state === 'active');
+  // Close is one confirmation in plain words; nothing has to be paused first.
+  await lifecycle('Close session', 'Close session', targetPath, value => value.state === 'closed');
+  await lifecycle('Reopen session', 'Reopen session', targetPath, value => value.state === 'active');
   target = await readJson(targetPath);
   assert.equal(target.active_binding_id, bindingId); assert.equal(target.bindings[bindingId].generation, generation);
+  assert.equal(target.bindings[bindingId].owner_paused, false, 'Reopen resumes sending');
+  // Later steps need queued work to stay put: pause again.
+  await pauseSending();
+  target = await readJson(targetPath);
   assert.equal(target.bindings[bindingId].dispatch_state, 'paused'); assert.equal(target.bindings[bindingId].owner_paused, true);
 
   const topicName = `Guarded native terminal history ${process.env.ARIADNE_E2E_NONCE}`;
@@ -117,18 +124,25 @@ export async function runHistoryActionsAcceptance(configuration) {
   await openSession(source.id);
   const sourceTopic = Object.values(source.topics).find(topic => Object.values(source.items).some(item => item.topic_id === topic.id && item.status === 'waiting_on_me'));
   assert.ok(sourceTopic);
+  // Archive never refuses a topic with open work: it asks once, in plain words, what stays and what is cancelled (ADR-0090).
   await topicAction(sourceTopic.name, 'Archive');
-  assert.equal(await dialog().$('button=Confirm topic archive').isEnabled(), false);
-  assert.ok((await dialog().getText()).includes('Input '));
-  const blocker = await dialog().$('button*=Item ');
-  const blockerId = (await blocker.getText()).match(/^Item ([0-9.]+)/)[1];
-  await click(blocker);
-  await wait(async () => await detailReference() === blockerId, 'Guard blocker did not reveal its registered item');
+  await dialog().waitForDisplayed();
+  const archiveText = await dialog().getText();
+  assert.ok(archiveText.includes(`Archive “${sourceTopic.name}”?`), 'Archive confirmation did not name the topic');
+  assert.match(archiveText, /open items? stays? as (it is|they are)\./);
+  assert.ok(archiveText.includes('You can restore it any time.'));
+  assert.doesNotMatch(archiveText, /[0-9a-f]{8}-[0-9a-f]{4}-/);
+  assert.equal(await dialog().$('button=Archive topic').isEnabled(), true);
+  // Cancel leaves it as it is; the source is continued below.
+  await click(await dialog().$('button=Cancel'));
+  await wait(async () => !(await dialog().isExisting()), 'Archive confirmation did not close on Cancel');
   assert.deepEqual(await readFile(sourcePath), sourceBytes);
 
   const targetBytes = await readFile(targetPath), targetBefore = JSON.parse(targetBytes);
   const send = await continuePreview(source.id, sourceTopic.name, targetBefore.title);
-  const approvedSummary = await dialog().$('details p').getProperty('textContent');
+  // The exact summary Send hands over, as the dialog holds it for review.
+  const approvedSummary = await dialog().$('[aria-label="Summary"]').getAttribute('data-summary');
+  assert.ok(approvedSummary, 'Preview did not hold a summary to send');
   assert.deepEqual(await readFile(targetPath), targetBytes, 'Preview must not allocate or persist a target copy');
   const backup = join(targetStore, 'backups',`${target.id}.previous.json`);
   const preservedBackup = `${backup}.preserved-${randomUUID()}`;
@@ -138,7 +152,7 @@ export async function runHistoryActionsAcceptance(configuration) {
   try {
     await mkdir(backup); obstruction = true;
     await click(send);
-    await wait(async () => (await dialog().getText()).includes('Completion is unknown'), 'Target save failure was not retained for exact reconciliation');
+    await wait(async () => (await dialog().getText()).includes('isn’t sure the summary was sent'), 'Target save failure was not retained for exact reconciliation');
     pendingOperation = await dialog().$('[data-operation-id]').getAttribute('data-operation-id');
     assert.match(pendingOperation, /^[0-9a-f-]{36}$/);
     assert.deepEqual(await readFile(sourcePath), sourceBytes, 'Forced target write failure changed source');
@@ -149,7 +163,7 @@ export async function runHistoryActionsAcceptance(configuration) {
     if (obstruction) await rm(backup, { recursive: true });
     await rename(preservedBackup, backup);
   }
-  await click(await dialog().$('button=Reconcile saved action'));
+  await click(await dialog().$('button=Check again'));
   await wait(async () => Object.keys((await readJson(targetPath)).continuations).length === Object.keys(targetBefore.continuations).length + 1, 'Explicit reconciliation did not save one continuation');
   await wait(async () => !(await dialog().isExisting()), 'Reconciled Continue dialog did not close');
   const finalTarget = await readJson(targetPath), copied = Object.values(finalTarget.continuations).find(value => !targetBefore.continuations[value.operation_id]);

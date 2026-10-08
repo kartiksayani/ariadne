@@ -22,6 +22,32 @@ export function hostApp(location: string | null | undefined): string | null {
   return location ? location.replace(/ window \d+$/, '') : null;
 }
 
+/** The owner's own name and one-line description of a session (ADR-0091); a session and its catalogue summary both carry them. */
+export interface SessionNaming { readonly name?: string | null; readonly description?: string | null }
+/** The most characters the owner can type into each field; core refuses more. */
+export const SESSION_NAME_MAX = 60, SESSION_DESCRIPTION_MAX = 200;
+
+/** The owner's name for the session, trimmed; null when none is set. */
+export const ownerName = (naming: SessionNaming | null | undefined): string | null => naming?.name?.trim() || null;
+export const ownerDescription = (naming: SessionNaming | null | undefined): string | null => naming?.description?.trim() || null;
+
+/** `title` is what names the session; `secondary` is the agent line, kept quieter beneath a name. */
+export interface SessionLabel { readonly named: boolean; readonly title: string; readonly secondary: string | null; readonly description: string | null }
+/** The owner's name leads when one is set, over the agent line ("claude-code · iTerm window 1"). Unnamed, the agent line is the title. */
+export function sessionLabel(naming: SessionNaming | null | undefined, agentLine: string): SessionLabel {
+  const name = ownerName(naming);
+  return { named: name !== null, title: name ?? agentLine, secondary: name === null ? null : agentLine, description: ownerDescription(naming) };
+}
+
+/** "claude-code · iTerm window 1", or just the agent when the host reports no location. */
+export const agentLine = (agent: string, location: string | null | undefined): string => location ? `${agent} · ${location}` : agent;
+
+/** The words a confirmation uses for a session: the owner's name, else "the claude-code session from today". */
+export function sessionPhrase(naming: SessionNaming | null | undefined, agent: string, when: string): string {
+  const name = ownerName(naming);
+  return name ? `the “${name}” session` : `the ${agent} session from ${when.toLowerCase()}`;
+}
+
 /** Local wall-clock time, "15:04". */
 export function clock(at: number): string {
   const date = new Date(at);
@@ -116,6 +142,8 @@ export interface SessionTabFacts {
   readonly project: string;
   readonly agent: string | null;
   readonly where?: string | null;
+  /** The owner's name and description; the name leads the tab. */
+  readonly naming?: SessionNaming | null;
   readonly createdAt: number | null;
   readonly endedAt: number | null;
   readonly running: boolean;
@@ -142,9 +170,10 @@ export function tabModels(input: { readonly selection: 'projects' | 'all_session
       const agent = session.agent ?? 'No agent';
       const when = session.createdAt === null ? '' : sessionWhen(session.createdAt, now);
       const range = session.createdAt === null ? '' : sessionRange(session.createdAt, session.endedAt, session.running, now);
-      return { id: session.id, on: session.on, label: agent, sub: when, project: input.projectCount > 1 ? session.project : null,
+      const name = ownerName(session.naming);
+      return { id: session.id, on: session.on, label: name ?? agent, sub: when, project: input.projectCount > 1 ? session.project : null,
         icon: session.running ? 'ph-fill ph-circle' : 'ph ph-circle', iconSize: '9px', iconColor: session.running ? 'var(--st-done)' : neutral(55),
-        title: [session.project, agent, session.where, range, session.running ? 'agent running' : 'agent not running'].filter(Boolean).join(' · '),
+        title: [session.project, name, agent, session.where, ownerDescription(session.naming), range, session.running ? 'agent running' : 'agent not running'].filter(Boolean).join(' · '),
         closable: true };
     }),
   ];
@@ -165,12 +194,58 @@ export function footerSummary(counts: FooterCounts | null): string {
 
 export const footerKeys: readonly { readonly k: string; readonly t: string }[] = [
   { k: '↑↓', t: 'move' }, { k: '←→', t: 'fold' }, { k: 'a', t: 'answer' }, { k: '1–9', t: 'choose' }, { k: '↵', t: 'send / details' },
-  { k: 'b r d z o', t: 'item actions' }, { k: '/', t: 'search' }, { k: 'g', t: 'graph' }, { k: 'm', t: 'messages' }, { k: 'esc', t: 'close' },
+  { k: 'b r d z o', t: 'item actions' }, { k: '/', t: 'search' }, { k: 'g', t: 'graph' }, { k: 'm', t: 'messages' }, { k: 'w', t: 'waiting' }, { k: 'esc', t: 'close' },
 ];
 
-/** Body grid: waiting | centre | [detail] | [rail]. */
-export function bodyColumns(detail: boolean, rail: boolean): string {
-  return `300px minmax(560px,1fr)${detail ? ' 400px' : ''}${rail ? ' 240px' : ''}`;
+/** Body column widths in CSS pixels. The detail bounds match the saved `detail_width` bounds. */
+export const WAITING_WIDTH = 300, WAITING_FOLDED = 44, CENTRE_MIN = 560, RAIL_WIDTH = 240;
+export const DETAIL_MIN = 320, DETAIL_MAX = 720, DETAIL_DEFAULT = 400;
+
+export interface BodyLayoutInput {
+  /** The body's width; null before it is measured. */
+  readonly width: number | null;
+  readonly detail: boolean;
+  readonly rail: boolean;
+  /** The owner's detail width; null for the default. */
+  readonly detailWidth?: number | null;
+  /** The owner folded the Waiting column. */
+  readonly folded?: boolean;
+  /** The owner opened the Waiting column although the window is too narrow for it. */
+  readonly peek?: boolean;
+}
+
+export interface BodyLayout {
+  readonly columns: string;
+  /** The Waiting column shows as a strip. */
+  readonly folded: boolean;
+  /** Folded only because the window is too narrow. */
+  readonly auto: boolean;
+  /** The window is too narrow for the open Waiting column. */
+  readonly narrow: boolean;
+  readonly detailWidth: number;
+  /** The widest the detail panel can be without the body scrolling sideways. */
+  readonly detailMax: number;
+}
+
+const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
+
+/**
+ * Body grid: waiting | centre | [detail] | [rail]. When the open columns do not fit, the Waiting
+ * column folds to a strip and the detail panel narrows, so the body never scrolls sideways.
+ */
+export function bodyLayout({ width, detail, rail, detailWidth, folded = false, peek = false }: BodyLayoutInput): BodyLayout {
+  const room = width ?? Number.POSITIVE_INFINITY, railWidth = rail ? RAIL_WIDTH : 0;
+  const wanted = clamp(Math.round(detailWidth ?? DETAIL_DEFAULT), DETAIL_MIN, DETAIL_MAX);
+  const narrow = room < WAITING_WIDTH + CENTRE_MIN + (detail ? wanted : 0) + railWidth;
+  const strip = folded || (narrow && !peek);
+  const waiting = strip ? WAITING_FOLDED : WAITING_WIDTH;
+  // An owner-opened column in a narrow window squeezes the centre instead of scrolling the body.
+  const centreMin = narrow && !strip ? 0 : CENTRE_MIN;
+  const detailMax = clamp(Math.floor(room - waiting - centreMin - railWidth), DETAIL_MIN, DETAIL_MAX);
+  const shown = Math.min(wanted, detailMax);
+  const centre = `minmax(${centreMin ? `${centreMin}px` : '0'},1fr)`;
+  return { columns: `${waiting}px ${centre}${detail ? ` ${shown}px` : ''}${rail ? ` ${RAIL_WIDTH}px` : ''}`,
+    folded: strip, auto: strip && !folded, narrow, detailWidth: shown, detailMax };
 }
 
 export function themeToggle(theme: ShellTheme): { readonly icon: string; readonly title: string; readonly next: ShellTheme } {

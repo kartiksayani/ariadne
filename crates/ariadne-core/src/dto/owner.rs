@@ -31,6 +31,7 @@ owner_commands!(
     TopicRemove(TopicLifecycleParams),
     SessionRemove(SessionRemoveParams),
     ProjectRemove(ProjectRemoveParams),
+    SessionLabelSet(SessionLabelParams),
 );
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -70,6 +71,29 @@ pub struct InputSubmitParams {
 pub struct InputCancelParams {
     pub input_id: UuidV4,
     pub expected_revision: PositiveSafeInteger,
+    // Why the owner cancels: delete (the default when absent) or take it back
+    // to edit. Recorded as the input's `cancel_cause` (Owner or OwnerEdit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub purpose: Option<CancelPurpose>,
+}
+/// What an owner `input_cancel` is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum CancelPurpose {
+    /// Delete the message: it is not sent.
+    Delete,
+    /// Take the message back to edit: only a message still queued can be.
+    Edit,
+}
+impl CancelPurpose {
+    /// The cause recorded on the cancelled input.
+    pub fn cause(self) -> CancelCause {
+        match self {
+            Self::Delete => CancelCause::Owner,
+            Self::Edit => CancelCause::OwnerEdit,
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
@@ -91,6 +115,14 @@ pub struct TopicLifecycleParams {
 #[serde(deny_unknown_fields)]
 pub struct SessionLifecycleParams {
     pub expected_revision: PositiveSafeInteger,
+}
+/// Replaces the routed session's owner-set name and description. `null` or a
+/// blank string clears a field (the session falls back to its agent label).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SessionLabelParams {
+    pub name: Option<String>,
+    pub description: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]

@@ -529,6 +529,7 @@ fn copy(
         attempts: vec![],
         active_attempt_id: None,
         resolution_history: vec![],
+        cancel_cause: None,
     };
     target.counters.next_input = increment(input.seq)?;
     let number = target.counters.next_message;

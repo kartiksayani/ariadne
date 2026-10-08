@@ -38,6 +38,40 @@ export function bindingStatus(value, binding) {
   }
   return value;
 }
+// Which Ariadne session each Claude conversation was connected to, kept in the
+// plugin's own store (never ~/.ariadne) so `claude --resume` reconnects it.
+// Lives here, not in its own module: the installed Mod's file set is fixed.
+const MEMORY_PREFIX = 'binding:';
+const MEMORY_LIMIT = 50;
+function memoryKey(claudeSessionId) {
+  return bounded(claudeSessionId,200) ? MEMORY_PREFIX + claudeSessionId : null;
+}
+export async function recall($, claudeSessionId) {
+  const name = memoryKey(claudeSessionId);
+  if (name === null) return null;
+  try {
+    const value = await $.store.get(name);
+    return fields(value,['project_id','session_id','saved_at']) && uuid(value.project_id) && uuid(value.session_id)
+      ? {project_id:value.project_id,session_id:value.session_id} : null;
+  } catch { return null; }
+}
+export async function remember($, claudeSessionId, session) {
+  const name = memoryKey(claudeSessionId);
+  if (name === null) return;
+  try {
+    await $.store.set(name,{project_id:session.project_id,session_id:session.session_id,saved_at:new Date().toISOString()});
+    const names = (await $.store.keys()).filter(entry => typeof entry === 'string' && entry.startsWith(MEMORY_PREFIX));
+    if (names.length <= MEMORY_LIMIT) return;
+    const dated = await Promise.all(names.map(async entry => [entry,(await $.store.get(entry))?.saved_at ?? '']));
+    dated.sort((a,b) => String(a[1]).localeCompare(String(b[1])));
+    for (const [entry] of dated.slice(0,dated.length - MEMORY_LIMIT)) await $.store.delete(entry);
+  } catch { /* best effort: a lost entry only means no automatic reconnect */ }
+}
+export async function forget($, claudeSessionId) {
+  const name = memoryKey(claudeSessionId);
+  if (name === null) return;
+  try { await $.store.delete(name); } catch { /* best effort */ }
+}
 export function setup(helperPath, savedBinding = async () => {}, publish = {waitMs:15000,pollMs:250}) {
   let projectRequest = null;
   let projectId = null;
@@ -144,5 +178,12 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
     disconnectRequest = null;
     return receipt;
   }
-  return {connect,status,disconnect};
+  // A new Claude conversation replaced the bound one (/clear, /resume): its
+  // connection and any operation retained for the old conversation no longer apply.
+  function forget() {
+    binding = null;
+    connectRequest = null;
+    disconnectRequest = null;
+  }
+  return {connect,status,disconnect,forget,current:() => binding};
 }
