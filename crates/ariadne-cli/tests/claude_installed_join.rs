@@ -643,7 +643,14 @@ fn missing_installed_helper_or_resource_cannot_advertise_a_qualified_connection(
         let failed = fixture
             .sdk
             .command(json!({"action":"connect","session":id(2)}));
-        assert_eq!(failed["value"]["text"],"Ariadne operation did not complete. See the local status message; retain original operation IDs.");
+        // The owner reads one plain sentence: the app is not reachable for a
+        // missing resource, and a generic one when the helper itself is gone.
+        let sentence = if missing_helper {
+            "That did not complete. Something went wrong while talking to Ariadne. Open the Ariadne app and try again; if it keeps happening, update Ariadne."
+        } else {
+            "That did not complete. Ariadne isn't open, so this session's work isn't being recorded. Open Ariadne and it will reconnect."
+        };
+        assert_eq!(failed["value"]["text"], sentence);
         assert!(!failed["logs"].as_array().unwrap().is_empty());
         assert!(failed["prompts"].as_array().unwrap().is_empty());
         assert!(failed["reports"].as_array().unwrap().is_empty());
