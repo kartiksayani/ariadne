@@ -268,6 +268,7 @@ fn absent_preferences_are_canonical_defaults_without_a_data_write() {
     assert_eq!(value.revision, revision(1));
     assert_eq!(value.schema_version, one());
     assert_eq!(value.global.theme, Theme::System);
+    assert_eq!(value.global.text_scale, TEXT_SCALE_DEFAULT);
     assert_eq!(
         value.global.selected_navigation,
         NavigationSelection::Projects {}
@@ -282,6 +283,62 @@ fn absent_preferences_are_canonical_defaults_without_a_data_write() {
     let lock = fs::metadata(s.home.path().join(".ariadne/ui.lock")).unwrap();
     assert_eq!(lock.mode() & 0o777, 0o600);
     assert_eq!(s.preferences().get(&owner()).unwrap(), value);
+}
+
+#[test]
+fn text_scale_steps_survive_reopening_and_legacy_preferences_default_to_eighty() {
+    let s = Setup::new();
+    let defaults = s.preferences().get(&owner()).unwrap().global;
+    let old = serde_json::to_value(&defaults).unwrap();
+    assert!(old.get("text_scale").is_none());
+    assert_eq!(
+        serde_json::from_value::<GlobalPreferences>(old)
+            .unwrap()
+            .text_scale,
+        80
+    );
+    for (index, scale) in TEXT_SCALE_STEPS.into_iter().enumerate() {
+        let mut global = defaults.clone();
+        global.text_scale = scale;
+        let command = patch(
+            100 + index as u64,
+            1 + index as u64,
+            vec![PreferencesPatchEntry::SetGlobal {
+                preferences: global,
+            }],
+        );
+        let saved = s.preferences().patch(&owner(), &command).unwrap();
+        let reopened = Registry::open(s.home.path()).unwrap();
+        let service = PreferencesService::new(&reopened);
+        assert_eq!(service.get(&owner()).unwrap().global.text_scale, scale);
+        // Canonical defaults stay compatible with old commands and exact receipt replay.
+        assert_eq!(service.patch(&owner(), &command).unwrap(), saved);
+    }
+}
+
+#[test]
+fn text_scale_rejects_values_between_steps_or_outside_bounds_without_writing() {
+    for scale in [0, 69, 75, 85, 121, u16::MAX] {
+        let s = Setup::new();
+        let mut global = s.preferences().get(&owner()).unwrap().global;
+        global.text_scale = scale;
+        let error = s
+            .preferences()
+            .patch(
+                &owner(),
+                &patch(
+                    100,
+                    1,
+                    vec![PreferencesPatchEntry::SetGlobal {
+                        preferences: global,
+                    }],
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidArgument);
+        assert_eq!(s.preferences().get(&owner()).unwrap().revision, revision(1));
+        assert!(!s.live().exists());
+    }
 }
 
 #[test]

@@ -6,6 +6,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { workspaceIntent } from '../keys';
 import type { ItemHistoryControls } from './itemHistory';
+import type { TextSizeIntent } from './textScale';
 
 const editable = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]';
 const dialogs = 'dialog,[role="dialog"],[role="alertdialog"]';
@@ -37,12 +38,21 @@ export function keyAnchor(root: HTMLElement): HTMLElement {
  * window after that (HOLD_MS) the field takes focus back and the key goes into it.
  */
 export function routeWindowKey(event: KeyboardEvent, root: HTMLElement, stranded: Stranded | null = null,
-  history?: Pick<ItemHistoryControls, 'back' | 'forward'>): void {
+  history?: Pick<ItemHistoryControls, 'back' | 'forward'>, changeTextSize?: (intent: TextSizeIntent) => void): void {
   const target = event.target, page = root.ownerDocument;
   const outside = !(target instanceof Node && root.contains(target));
   const field = stranded && stranded.field.isConnected ? stranded.field : null;
   const toBody = outside && !event.defaultPrevented && !within(target, `${editable},${dialogs}`) && !page.querySelector(openDialogs);
   const intent = workspaceIntent(event);
+  // These chords always belong to the app, including in fields and dialogs.
+  // Consume them even at a size limit or during a save so WebView zoom stays off.
+  if (changeTextSize && (intent?.kind === 'text-smaller' || intent?.kind === 'text-larger' || intent?.kind === 'text-default')) {
+    if (!event.defaultPrevented && !event.isComposing) {
+      event.preventDefault();
+      changeTextSize(intent.kind);
+    }
+    return;
+  }
   if (history && (intent?.kind === 'history-back' || intent?.kind === 'history-forward')) {
     if (!event.defaultPrevented && !event.isComposing && !field && !within(target, `${editable},${dialogs}`)
       && !within(page.activeElement, editable) && !page.querySelector(openDialogs)) {
@@ -108,9 +118,12 @@ function insertText(field: Element, text: string, erase = 0): boolean {
 }
 
 /** Installs `routeWindowKey` on the window for the lifetime of the app root. */
-export function useWindowKeys(root: RefObject<HTMLElement | null>, history?: Pick<ItemHistoryControls, 'back' | 'forward'>): void {
+export function useWindowKeys(root: RefObject<HTMLElement | null>, history?: Pick<ItemHistoryControls, 'back' | 'forward'>,
+  changeTextSize?: (intent: TextSizeIntent) => void): void {
   const latestHistory = useRef(history);
   latestHistory.current = history;
+  const latestTextSize = useRef(changeTextSize);
+  latestTextSize.current = changeTextSize;
   useEffect(() => {
     // The last text field focused, forgotten as soon as focus goes elsewhere or the owner clicks away.
     let field: Element | null = null;
@@ -150,17 +163,27 @@ export function useWindowKeys(root: RefObject<HTMLElement | null>, history?: Pic
     const listener = (event: KeyboardEvent) => {
       if (!root.current) return;
       settle();
-      routeWindowKey(event, root.current, field && stranded ? { field, hold, resume } : null, latestHistory.current);
+      routeWindowKey(event, root.current, field && stranded ? { field, hold, resume } : null, latestHistory.current, latestTextSize.current);
+    };
+    // Some editors stop bubbling keys. Reserve the text chords in capture so
+    // they still work there, before the browser can apply its own zoom.
+    const textListener = (event: KeyboardEvent) => {
+      const intent = workspaceIntent(event);
+      if (root.current && (intent?.kind === 'text-smaller' || intent?.kind === 'text-larger' || intent?.kind === 'text-default')) {
+        routeWindowKey(event, root.current, null, undefined, latestTextSize.current);
+      }
     };
     window.addEventListener('focusin', focused);
     window.addEventListener('pointerdown', clicked, true);
     window.addEventListener('mousedown', clicked, true);
     window.addEventListener('keydown', listener);
+    window.addEventListener('keydown', textListener, true);
     return () => {
       window.removeEventListener('focusin', focused);
       window.removeEventListener('pointerdown', clicked, true);
       window.removeEventListener('mousedown', clicked, true);
       window.removeEventListener('keydown', listener);
+      window.removeEventListener('keydown', textListener, true);
       watch?.disconnect();
       reset();
     };

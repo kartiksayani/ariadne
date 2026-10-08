@@ -2,6 +2,7 @@
 // under the filters (Ariadne.dc.html:107-130).
 import { useState, type ReactNode } from 'react';
 import { RenameButton, SessionRename } from '../shared/SessionRename';
+import { CopySessionId } from '../shared/CopySessionId';
 import type { SessionBar as Bar } from './model';
 
 /**
@@ -27,6 +28,7 @@ export function SessionBar({ bar, busy, onClose, dispatch, onRename }: {
     <span className="tree-session-meta">{bar.meta}</span>
     {dispatch ?? <span className="tree-run" data-running={bar.running || undefined} data-connection={bar.connection}><span className="tree-run-dot" />{bar.running ? 'Agent running' : 'Agent not running'}</span>}
     <span className="tree-session-actions">
+      <CopySessionId sessionId={bar.sessionId} />
       {onRename && <RenameButton disabled={busy || !!editor} onClick={() => setRenaming(true)} />}
       {bar.closed
         ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={onClose}

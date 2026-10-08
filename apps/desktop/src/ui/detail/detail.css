@@ -8,8 +8,8 @@
   align-items: center;
   gap: 2px 5px;
   padding-top: 4px;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
@@ -34,7 +34,7 @@
 }
 
 .detail-crumb > i {
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   opacity: 0.7;
 }
 
@@ -91,13 +91,13 @@
 }
 
 .detail-meta {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
 .detail-question {
   margin: 0;
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   line-height: 1.4;
   font-weight: 500;
   letter-spacing: -0.012em;
@@ -111,7 +111,7 @@
 }
 
 .detail-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 500;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -171,8 +171,8 @@
 }
 
 .detail-step-label {
-  font-size: 12px;
-  line-height: 16px;
+  font-size: calc(12px * var(--text-scale));
+  line-height: calc(16px * var(--text-scale));
 }
 
 .detail-delivery {
@@ -180,12 +180,12 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 8px;
-  font-size: 13.5px;
-  line-height: 20px;
+  font-size: calc(13.5px * var(--text-scale));
+  line-height: calc(20px * var(--text-scale));
 }
 
 .detail-delivery > i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .detail-delivery > span {
@@ -203,7 +203,7 @@
 .detail-action {
   height: 32px;
   padding: 0 10px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .detail-action[aria-pressed="true"] {
@@ -211,7 +211,7 @@
 }
 
 .detail-action > i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .detail-key {
@@ -223,12 +223,12 @@
   padding: 0 4px;
   border-radius: 4px;
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-scale));
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
 .detail-hint {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   line-height: 1.5;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 64%, transparent);
@@ -243,13 +243,13 @@
 .detail-box > textarea {
   min-height: 34px;
   resize: none;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   line-height: 1.5;
 }
 
 .detail-box > input {
   min-height: 34px;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
 }
 
 .detail-box-row {
@@ -264,7 +264,7 @@
 }
 
 .detail-box-row > :where(.btn) > i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .detail-box-row > .detail-cancel {
@@ -274,20 +274,20 @@
 /* Says what a draft written in another box will be sent as. */
 .detail-box-note {
   margin: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   line-height: 1.5;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 64%, transparent);
 }
 
 .detail-box-hint {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
 .detail-error {
   margin: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   color: var(--a-warn);
 }
 
@@ -297,7 +297,7 @@
 }
 
 .detail-ask {
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--text-scale));
   line-height: 1.5;
   color: var(--a-acc-text);
 }
@@ -305,7 +305,7 @@
 /* — outcome, note, why — */
 .detail-outcome-text {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   line-height: 1.6;
   text-wrap: pretty;
 }
@@ -314,17 +314,17 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   color: var(--st-progress);
 }
 
 .detail-note > i {
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 .detail-why-text {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   line-height: 1.6;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 84%, transparent);
@@ -332,7 +332,7 @@
 
 .detail-prev {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   line-height: 1.6;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 80%, transparent);
@@ -362,13 +362,13 @@
 .detail-replaced > i {
   flex: none;
   margin-top: 3px;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   color: var(--st-replaced);
 }
 
 .detail-replaced > span:where(:first-of-type) {
   flex: 1;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   line-height: 1.5;
 }
 
@@ -409,8 +409,8 @@
 }
 
 .detail-kid-text {
-  font-size: 14px;
-  line-height: 21px;
+  font-size: calc(14px * var(--text-scale));
+  line-height: calc(21px * var(--text-scale));
   text-wrap: pretty;
 }
 
@@ -419,8 +419,8 @@
   align-items: center;
   gap: 8px;
   padding: 4px 0;
-  font-size: 13.5px;
-  line-height: 20px;
+  font-size: calc(13.5px * var(--text-scale));
+  line-height: calc(20px * var(--text-scale));
   text-decoration: none;
   color: var(--a-acc-text);
 }
@@ -444,7 +444,7 @@
 
 .detail-link > i {
   flex: none;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 .detail-link-label {
@@ -456,7 +456,7 @@
 
 .detail-link-meta {
   flex: none;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
@@ -486,14 +486,14 @@
   display: flex;
   gap: 8px;
   min-width: 0;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   line-height: 1.5;
 }
 
 .detail-msg-icon {
   flex: none;
   margin-top: 3px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
@@ -526,7 +526,7 @@
 .detail-waiting-tag {
   align-self: flex-start;
   padding: 1px 7px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-scale));
 }
 
 /* You: right, tinted. */
@@ -562,7 +562,7 @@
 
 .detail-pending-caption {
   grid-column: 2;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
@@ -594,7 +594,7 @@
   border-radius: 6px;
   text-align: left;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.45;
   cursor: pointer;
   color: var(--color-text);
@@ -607,7 +607,7 @@
 
 .detail-fork > i {
   flex: none;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
@@ -632,7 +632,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
@@ -640,16 +640,16 @@
   padding: 1px 6px;
   border-radius: 4px;
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 78%, transparent);
   background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 
 .detail-reference > .detail-copy {
   padding: 2px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .detail-copy > i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }

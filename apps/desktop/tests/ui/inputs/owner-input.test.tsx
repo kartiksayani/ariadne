@@ -156,6 +156,16 @@ describe('owner input component and durable draft controller', () => {
   describe('the reply box is always docked on an open or in-progress item', () => {
     const show = (value: Awaited<ReturnType<typeof setup>>, itemId: string) =>
       render(<ItemDetail drafts={value.drafts} store={value.store} itemId={itemId} later={false} onOpenItem={() => {}} />);
+    it.each([['8', 'open', 'Reply message'], ['3', 'in_progress', 'Note message']])('keeps the composer visible outside the scrolling detail for %s (%s), without waiting on the owner', async (itemId, status, label) => {
+      const value = await setup();
+      expect(value.session.items[itemId]!.status).toBe(status);
+      show(value, itemId);
+      const composer = await screen.findByRole('textbox', { name: label });
+      expect(composer.closest('.detail-dock')).not.toBeNull();
+      expect(composer.closest('.detail-body')).toBeNull();
+      expect(composer.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+      expect(document.activeElement).not.toBe(composer);
+    });
     it('shows the reply box on an open item and the note box on an in-progress one, with no button pressed first', async () => {
       const value = await setup();
       show(value, '8');

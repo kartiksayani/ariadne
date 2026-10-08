@@ -10,7 +10,7 @@
 .pw-rename .input {
   min-height: 30px;
   height: 30px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .pw-rename-buttons {

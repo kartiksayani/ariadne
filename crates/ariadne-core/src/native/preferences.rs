@@ -160,6 +160,7 @@ fn defaults() -> PreferencesSnapshot {
         revision: PositiveSafeInteger::new(1).expect("literal"),
         global: GlobalPreferences {
             theme: Theme::System,
+            text_scale: TEXT_SCALE_DEFAULT,
             selected_navigation: NavigationSelection::Projects {},
             window: None,
             pinned: false,
@@ -293,10 +294,16 @@ fn validate(record: &Record) -> Result<(), CoreError> {
     }
     Ok(())
 }
-/// Bounds of the renderer layout preferences: detail panel width and folded topic bands.
+/// Bounds of the renderer preferences: text size, detail width and folded topic bands.
 fn layout_bounds(entry: &PreferencesPatchEntry) -> Result<(), CoreError> {
     match entry {
         PreferencesPatchEntry::SetGlobal { preferences } => {
+            if !TEXT_SCALE_STEPS.contains(&preferences.text_scale) {
+                return Err(errors::local(
+                    CoreErrorCode::InvalidArgument,
+                    "Text size must be 70%, 80%, 90%, 100%, 110% or 120%",
+                ));
+            }
             if preferences
                 .detail_width
                 .is_some_and(|width| !(DETAIL_WIDTH_MIN..=DETAIL_WIDTH_MAX).contains(&width))

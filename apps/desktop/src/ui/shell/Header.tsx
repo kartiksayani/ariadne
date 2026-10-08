@@ -1,5 +1,7 @@
 import type { HeaderText, ShellTheme } from './model';
 import { glow, themeToggle } from './model';
+import { TextSizeControl } from './TextSizeControl';
+import type { TextSize } from './textScale';
 
 export interface ViewTab {
   readonly label: string;
@@ -20,11 +22,13 @@ export interface HeaderProps {
   readonly onToggleRail?: () => void;
   readonly theme: ShellTheme;
   readonly onToggleTheme?: () => void;
+  readonly textSize?: TextSize;
+  readonly onTextSizeChange?: (size: TextSize) => void;
   /** Disables the controls while navigation writes. */
   readonly disabled?: boolean;
 }
 
-export function Header({ text, demo, query, onQueryChange, views, railOn, onToggleRail, theme, onToggleTheme, disabled }: HeaderProps) {
+export function Header({ text, demo, query, onQueryChange, views, railOn, onToggleRail, theme, onToggleTheme, textSize, onTextSizeChange, disabled }: HeaderProps) {
   const toggle = themeToggle(theme);
   return <header className="shell-header">
     <div className="shell-brand"><svg className="shell-brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(12 12)"><path d="M-3.245 9.986A10.5 10.5 0 1 1 3.245 9.986M2.086 -6.42A6.75 6.75 0 1 1 -2.086 -6.42M-1.721 2.457A3 3 0 1 1 1.721 2.457" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /><circle cx="0" cy="0" r="1.35" fill="currentColor" /></g></svg><span>Ariadne</span></div>
@@ -48,6 +52,7 @@ export function Header({ text, demo, query, onQueryChange, views, railOn, onTogg
     <button type="button" className="btn btn-secondary btn-icon shell-icon" title="Messages (m)" aria-label="Messages (m)" aria-pressed={railOn}
       style={{ color: railOn ? 'var(--color-accent)' : 'var(--color-text)' }} disabled={onToggleRail ? disabled : undefined} onClick={onToggleRail}>
       <i className="ph ph-chats-teardrop" aria-hidden="true" /></button>
+    {onTextSizeChange && <TextSizeControl size={textSize ?? 80} onChange={onTextSizeChange} disabled={disabled} />}
     <button type="button" className="btn btn-secondary btn-icon shell-icon" title={toggle.title} aria-label={toggle.title}
       disabled={onToggleTheme ? disabled : undefined} onClick={onToggleTheme}><i className={toggle.icon} aria-hidden="true" /></button>
   </header>;

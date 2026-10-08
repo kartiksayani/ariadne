@@ -290,6 +290,13 @@ export class NavigationStore {
       return await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, theme } }]);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
+  async saveTextScale(textScale: number, expectedPreferencesRevision: number): Promise<boolean> {
+    try {
+      const preferences = await this.editingPreferences(expectedPreferencesRevision);
+      if (!preferences || this.stopped || this.pending) return false;
+      return await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, text_scale: textScale } }]);
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
   /** Saves the detail panel width or the Waiting column fold. */
   async saveLayout(change: LayoutChange, expectedPreferencesRevision: number): Promise<boolean> {
     try {

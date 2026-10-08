@@ -6,7 +6,8 @@ import { useCallback, useRef, type KeyboardEvent } from 'react';
 export type IntentKind =
   | 'move-down' | 'move-up' | 'first' | 'last' | 'unfold' | 'fold' | 'enter' | 'send'
   | 'answer' | 'choose' | 'bring' | 'respond' | 'drop' | 'later' | 'reopen' | 'archive'
-  | 'search' | 'graph' | 'messages' | 'waiting' | 'escape' | 'remove' | 'history-back' | 'history-forward';
+  | 'search' | 'graph' | 'messages' | 'waiting' | 'escape' | 'remove' | 'history-back' | 'history-forward'
+  | 'text-smaller' | 'text-larger' | 'text-default';
 
 export type WorkspaceIntent =
   | { readonly kind: Exclude<IntentKind, 'choose'> }
@@ -30,6 +31,9 @@ const plain: Readonly<Record<string, Exclude<IntentKind, 'choose'>>> = {
 /** The intent a key press means, or null when it is not a workspace key. */
 export function workspaceIntent(event: KeyLike): WorkspaceIntent | null {
   if (event.metaKey && !event.ctrlKey && !event.altKey) {
+    if (event.key === '-') return { kind: 'text-smaller' };
+    if (event.key === '+' || event.key === '=') return { kind: 'text-larger' };
+    if (!event.shiftKey && event.key === '0') return { kind: 'text-default' };
     if (!event.shiftKey && event.key === '[') return { kind: 'history-back' };
     if (!event.shiftKey && event.key === ']') return { kind: 'history-forward' };
     if (event.key.toLowerCase() === 'f') return { kind: 'search' };
