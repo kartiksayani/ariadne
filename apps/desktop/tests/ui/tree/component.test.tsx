@@ -428,6 +428,18 @@ describe('stopped deliveries in the tree', () => {
       input_id: stopped, attempt_id: '00000000-0000-4000-8000-000000000063', decision: 'resend', reason: '', evidence: { source: 'owner_attestation', owner_attested_idle: true } } });
     expect(calls.selected).toHaveLength(0);
   });
+  it('keeps the decision on the row when a later message is queued behind it on the same item', async () => {
+    const { transport } = await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!, successor = structuredClone(session.inputs[stopped]!);
+      successor.id = '00000000-0000-4000-8000-0000000000f4'; successor.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1;
+      successor.state = 'queued'; successor.attempts = []; successor.active_attempt_id = null;
+      session.inputs[successor.id] = successor;
+    } });
+    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
+    expect(fix.getAttribute('data-stuck-input')).toBe(stopped);
+    fireEvent.click(within(fix).getByRole('button', { name: 'Mark as done' }));
+    await waitFor(() => expect(transport.mutations.find(request => request.command.command === 'input_resolve')).toBeTruthy());
+  });
   it('opens the audited form from More options, and keys typed there never reach the tree', async () => {
     const { transport } = await mount({ configure: active });
     fireEvent.click(within(row('7')).getByRole('button', { name: 'More options' }));

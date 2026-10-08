@@ -76,12 +76,18 @@ const inputLabel = (input: Immutable<Input>, options: readonly Immutable<ItemOpt
   const option = input.payload.selected_option_id ? options.find(value => value.id === input.payload.selected_option_id) : null;
   return option?.label ?? input.payload.text;
 };
-/** The delivery line of the latest unsettled input on an item or topic (Ariadne.dc.html:1415). */
+/**
+ * The delivery line of the latest unsettled input on an item or topic (Ariadne.dc.html:1415). A stopped delivery
+ * needing a decision comes first, even with later messages queued behind it: those cannot go out until it is
+ * settled, so its Retry / Mark as done must stay on the row.
+ */
 export function deliveryLine(session: Immutable<Session>, target: { readonly topicId: string; readonly itemId: string | null },
   presence: Immutable<PresenceObservation> | null, health: SupervisorHealth | null = null): Delivery | null {
+  const stopped = (value: Immutable<Input>) => value.state === 'needs_attention' ? 1 : 0;
   const input = Object.values(session.inputs).filter((value): value is Immutable<Input> => !!value
     && value.target.topic_id === target.topicId && value.target.item_id === target.itemId
-    && value.state !== 'handled' && value.state !== 'cancelled' && value.state !== 'skipped').sort((a, b) => b.seq - a.seq)[0];
+    && value.state !== 'handled' && value.state !== 'cancelled' && value.state !== 'skipped')
+    .sort((a, b) => stopped(b) - stopped(a) || b.seq - a.seq)[0];
   if (!input) return null;
   const binding = session.bindings[input.binding_id];
   const summary = binding ? { ...binding, presence: null } as Immutable<BindingSummary> : null;
