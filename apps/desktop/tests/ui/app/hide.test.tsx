@@ -35,6 +35,20 @@ describe('owner hide and unhide actions', () => {
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
   });
 
+  it('keeps focus on a newly hidden row in an expanded group and unhides it with x', async () => {
+    const { transport } = await mount(); await hide('2'); fireEvent.click(group());
+    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
+    await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['2', '4'])); await ready();
+    expect(group(2).getAttribute('aria-expanded')).toBe('true');
+    expect(row('4')!.classList.contains('tree-item-hidden')).toBe(true);
+    expect(document.activeElement).toBe(row('4'));
+    fireEvent.keyDown(document.activeElement!, { key: 'x' });
+    await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['2'])); await ready();
+    expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
+    expect(document.activeElement).toBe(row('4'));
+    expect(group().getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('hides a parent from the hover actions, expands and collapses its group, and unhides with x', async () => {
     const { transport } = await mount(), sessionBefore = JSON.stringify(transport.sessions.get(route.session_id));
     const actions = row('1')!.querySelector('.tree-actions')!;
@@ -119,6 +133,16 @@ describe('owner hide and unhide actions', () => {
     expect(chip('All').textContent).toContain('1'); expect(chip('Open').textContent).toContain('0');
     fireEvent.click(chip('Open'));
     expect(await screen.findByText('Showing 0 of 8 items matching “receipt” (1 hidden) in the statuses you picked')).toBeTruthy();
+    expect(group()).toBeTruthy();
+  });
+
+  it('explains hidden matches for a status chip without search and clears that filter', async () => {
+    await mount(); await hide('1.1'); fireEvent.click(chip('Open'));
+    expect(await screen.findByText('Showing 2 of 8 items (1 hidden) in the statuses you picked')).toBeTruthy();
+    expect(chip('Open').textContent).toContain('2');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await waitFor(() => expect(chip('All').getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.queryByText('Showing 2 of 8 items (1 hidden) in the statuses you picked')).toBeNull();
     expect(group()).toBeTruthy();
   });
 });

@@ -126,9 +126,12 @@ export class SessionStore {
     });
     return this.setup;
   }
-  refresh(): Promise<void> {
+  refresh(afterCurrent = false): Promise<void> {
     if (this.closed) return Promise.resolve();
-    if (this.flight) return this.flight;
+    if (this.flight) {
+      if (afterCurrent) this.requested = true;
+      return this.flight;
+    }
     this.requested = true;
     this.flight = this.load().finally(() => { this.flight = null; });
     return this.flight;
@@ -186,6 +189,9 @@ export class SessionStore {
 export class OpenSessions {
   private readonly stores = new Map<string, SessionStore>();
   constructor(private readonly service: RendererService) {}
+  get(route: SessionRef): SessionStore | undefined {
+    return this.stores.get(JSON.stringify([route.project_id, route.session_id]));
+  }
   open(route: SessionRef): SessionStore {
     const key = JSON.stringify([route.project_id, route.session_id]);
     const existing = this.stores.get(key);

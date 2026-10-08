@@ -78,4 +78,13 @@ describe('hidden item tree projection', () => {
     expect(searched.counts.open).toBe(0); expect(searched.counts.progress).toBe(1); expect(searched.counts.all).toBe(1);
     expect(model({ search: 'unmatched' }).hiddenCount).toBe(0);
   });
+
+  it('counts hidden matches only for the selected statuses without search text', () => {
+    const { view, model } = fixture(['1.1']); view.filters.statuses = ['open'];
+    const filtered = model();
+    expect(filtered.searchCount).toBe(2); expect(filtered.itemCount).toBe(8); expect(filtered.hiddenCount).toBe(1);
+    expect(filtered.counts.open).toBe(2);
+    view.filters.statuses = ['in_progress'];
+    expect(model().hiddenCount).toBe(0);
+  });
 });

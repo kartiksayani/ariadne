@@ -13,8 +13,9 @@ type Failure = CoreFailure | ServiceFailure;
 // `retry` exists only for navigation-only preference patches. It rebuilds the same owner
 // action against the refreshed snapshot with a new operation id, after a definite revision_conflict.
 type PendingMutation = { request: OwnerMutationRequest; confirmed: (receipt: MutationReceipt) => void;
-  retry?: () => PendingMutation | null };
+  retry?: () => PendingMutation | null | Promise<PendingMutation | null> };
 type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' }>;
+type ReplayEntries = (preferences: PreferencesSnapshot) => NavigationPatch[] | null;
 export interface NavigationState {
   readonly preferences: Immutable<PreferencesSnapshot> | null;
   readonly projects: Immutable<ProjectListResult> | null;
@@ -200,6 +201,15 @@ export class NavigationStore {
           // complete pair and restart instead of silently dropping orphan rows.
           throw new ServiceFailure('invalid_response');
         }
+        // A foreign preferences writer may have hidden a newly created item.
+        // Pair those ids with a session read after this preferences capture,
+        // before exposing them to a synchronous hide/selection write's cleanup.
+        await Promise.all(preferences.sessions.flatMap(view => {
+          const store = this.opened.get(view.session), snapshot = store?.getSnapshot().snapshot;
+          return store && view.hidden_item_ids?.some(id => !snapshot?.session.items[id])
+            ? [store.refresh(true)] : [];
+        }));
+        if (this.stopped || epoch !== this.epoch || preferences.revision < Math.max(this.state.preferences?.revision ?? 0, this.preferencesFloor)) continue;
         this.publish({ preferences: immutable(normalizeStatusFilters(preferences)), projects: immutable(projects), sessions: immutable(sessions),
           sessionProjectId: projectId, status: 'ready', error: this.mutationFailure, ...this.setupAfter(sessions, projectId) });
         this.flushStartupRoute();
@@ -238,22 +248,42 @@ export class NavigationStore {
     if (!this.state.preferences) throw new ServiceFailure('transport');
     return structuredClone(this.state.preferences) as PreferencesSnapshot;
   }
-  private patch(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void = () => {}): Promise<boolean> {
-    const mutation = this.patchMutation(preferences, entries, confirmed, true);
+  private patch(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void = () => {}, replay?: ReplayEntries): Promise<boolean> {
+    const mutation = this.patchMutation(preferences, entries, confirmed, true, replay);
     return this.execute(mutation.request, mutation.confirmed, mutation.retry);
   }
-  private patchMutation(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void, retryable: boolean): PendingMutation {
+  private pruneHidden(entries: NavigationPatch[]): NavigationPatch[] {
+    return entries.map(entry => {
+      if (entry.kind !== 'set_session_view' || !entry.preferences.hidden_item_ids?.length) return entry;
+      const state = this.opened.get(entry.preferences.session)?.getSnapshot();
+      if (!state?.snapshot || state.status !== 'ready' || state.snapshot.freshness !== 'fresh') return entry;
+      return { ...entry, preferences: { ...entry.preferences,
+        hidden_item_ids: entry.preferences.hidden_item_ids.filter(id => !!state.snapshot!.session.items[id]) } };
+    });
+  }
+  private patchMutation(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void, retryable: boolean, replay?: ReplayEntries): PendingMutation {
+    // Keep the owner's original fields for rebasing; cleanup must never replay a
+    // stale whole set over a concurrent hide. Only the outgoing write is pruned.
+    const written = this.pruneHidden(entries);
     const request: OwnerMutationRequest = { session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(),
-      params: { expected_preferences_revision: preferences.revision, entries } } };
+      params: { expected_preferences_revision: preferences.revision, entries: written } } };
     // One re-apply per owner action; the second attempt never retries again.
     const intent = this.navigationIntent;
-    const retry = retryable ? () => {
+    const retry = retryable ? async () => {
+      // Fresh preferences may hide an item created since the loaded session.
+      // Refresh before recomputing ancestry or treating absence as removal.
+      const sessions = entries.flatMap(entry => entry.kind === 'set_session_view'
+        && (replay || entry.preferences.hidden_item_ids?.length || this.state.preferences?.sessions
+          .find(view => sameRoute(view.session, entry.preferences.session))?.hidden_item_ids?.length)
+        ? [this.opened.get(entry.preferences.session)] : []);
+      await Promise.all(sessions.map(store => store?.refresh(true)));
       const current = this.state.preferences;
       // A newer owner navigation was dropped while this write was pending; do not let stale intent win.
       if (this.navigationIntent !== intent) return null;
       if (!current || current.revision <= preferences.revision) return null;
       const fresh = structuredClone(current) as PreferencesSnapshot;
-      return this.patchMutation(fresh, rebaseEntries(entries, preferences, fresh), confirmed, false);
+      const rebased = replay ? replay(fresh) : rebaseEntries(entries, preferences, fresh);
+      return rebased && this.patchMutation(fresh, rebased, confirmed, false);
     } : undefined;
     return { request, retry, confirmed: receipt => {
       if (!('preferences_revision' in receipt) || receipt.preferences_revision < preferences.revision) {
@@ -266,7 +296,7 @@ export class NavigationStore {
       if ((this.state.preferences?.revision ?? 0) <= receipt.preferences_revision) {
         const saved = structuredClone(preferences);
         saved.revision = receipt.preferences_revision;
-        for (const entry of entries) {
+        for (const entry of written) {
           if (entry.kind === 'set_global') saved.global = structuredClone(entry.preferences);
           else if (entry.kind === 'set_session_view') {
             const index = saved.sessions.findIndex(view => sameRoute(view.session, entry.preferences.session));
@@ -371,31 +401,45 @@ export class NavigationStore {
   /** Hiding is an owner view preference; no domain mutation reaches the agent. */
   async setHidden(item: ItemRoute, hidden: boolean, expectedPreferencesRevision: number): Promise<boolean> {
     try {
-      const preferences = await this.editingPreferences(expectedPreferencesRevision);
-      if (!preferences || this.stopped || this.pending) return false;
-      const current = preferences.sessions.find(saved => sameRoute(saved.session, item));
-      const snapshot = await this.service.query({ session: { project_id: item.project_id, session_id: item.session_id }, request: { command: 'session_get', params: {} } });
       if (this.stopped || this.pending) return false;
-      if (!snapshot.session.items[item.item_id]) throw new ServiceFailure('invalid_response');
-      const view: SessionPreferences = current ? structuredClone(current) : {
-        session: { project_id: item.project_id, session_id: item.session_id }, tab_open: false, selected_item_id: null,
-        tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
-        expanded_item_ids: [...initialExpansion(snapshot.session)],
-        filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null,
-      };
-      const ids = new Set(view.hidden_item_ids ?? []);
-      if (hidden) ids.add(item.item_id);
-      else {
-        // An inherited hidden row also offers Unhide. Open its ancestors while
-        // retaining separately hidden siblings and descendants.
-        const seen = new Set<string>();
-        for (let id: string | null = item.item_id; id && !seen.has(id); id = snapshot.session.items[id]?.parent ?? null) {
-          ids.delete(id); seen.add(id);
-        }
+      const preferences = this.preferences();
+      if (preferences.revision !== expectedPreferencesRevision) {
+        await this.editingPreferences(expectedPreferencesRevision);
+        return false;
       }
-      if (ids.size) view.hidden_item_ids = [...ids]; else delete view.hidden_item_ids;
-      return await this.patch(preferences, [{ kind: 'set_session_view', preferences: view }]);
+      const replay: ReplayEntries = fresh => {
+        const entry = this.hiddenEntry(fresh, item, hidden);
+        return entry ? [entry] : null;
+      };
+      const entries = replay(preferences);
+      if (!entries) throw new ServiceFailure('invalid_response');
+      // Reserve the canonical writer before yielding: another x or selection
+      // save must see writing=true, never race an extra session_get round trip.
+      return await this.patch(preferences, entries, undefined, replay);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
+  private hiddenEntry(preferences: PreferencesSnapshot, item: ItemRoute, hidden: boolean): NavigationPatch | null {
+    const state = this.opened.get(item)?.getSnapshot(), session = state?.snapshot?.session;
+    if (!session?.items[item.item_id] || state?.status !== 'ready' || state.snapshot?.freshness !== 'fresh') return null;
+    const current = preferences.sessions.find(saved => sameRoute(saved.session, item));
+    const view: SessionPreferences = current ? structuredClone(current) : {
+      session: { project_id: item.project_id, session_id: item.session_id }, tab_open: false, selected_item_id: null,
+      tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
+      expanded_item_ids: [...initialExpansion(session)],
+      filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null,
+    };
+    const ids = new Set((view.hidden_item_ids ?? []).filter(id => !!session.items[id]));
+    if (hidden) ids.add(item.item_id);
+    else {
+      // Restoring an inherited hidden row opens its ancestors but keeps
+      // independently hidden siblings and descendants.
+      const seen = new Set<string>();
+      for (let id: string | null = item.item_id; id && !seen.has(id); id = session.items[id]?.parent ?? null) {
+        ids.delete(id); seen.add(id);
+      }
+    }
+    view.hidden_item_ids = [...ids];
+    return { kind: 'set_session_view', preferences: view };
   }
   async setLater(item: ItemRoute, later: boolean, expectedPreferencesRevision: number): Promise<boolean> {
     try {
@@ -472,7 +516,7 @@ export class NavigationStore {
     });
   }
   private async execute(request: OwnerMutationRequest, confirmed: (receipt: MutationReceipt) => void,
-    retry?: () => PendingMutation | null): Promise<boolean> {
+    retry?: PendingMutation['retry']): Promise<boolean> {
     if (this.stopped || this.pending) return false;
     this.pending = { request: structuredClone(request), confirmed, retry };
     return this.retryMutation();
@@ -516,7 +560,7 @@ export class NavigationStore {
       // refreshed revision with a new operation id. Uncertain and every other rejection fall through.
       if (pending.retry && failure instanceof CoreFailure && failure.error.code === 'revision_conflict') {
         await this.refresh();
-        const next = this.stopped ? null : pending.retry();
+        const next = this.stopped ? null : await pending.retry();
         if (next) {
           this.pending = next;
           this.publish({ pendingOperationId: next.request.command.op_id });
