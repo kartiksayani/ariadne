@@ -203,8 +203,10 @@ export async function runHistoryActionsAcceptance(configuration) {
     await click(await browser.$('.copied-provenance').$(`button=Source item ${originalItem.id}`));
     await wait(async () => (await browser.$('.copied-provenance').getText()).includes('Full copied history remains here'), 'Unavailable original project did not expose copied local fallback');
     const unavailableReason = await browser.$('.copied-provenance').getText();
-    assert.ok(unavailableReason.includes(sourceProject), 'The registered source failure must retain its actual project path');
-    assert.ok(unavailableReason.includes('NotFound'), 'The registered source failure must retain the actual missing-directory reason');
+    // The screen words a failure in plain language (data/plain.ts); the raw project path and
+    // OS reason (NotFound) go to the console for diagnostics, never into the owner-facing text.
+    assert.ok(unavailableReason.includes('Original project is unavailable. Ariadne couldn’t read or save its data. Try again.'), 'The registered source failure must show the plain-language reason');
+    assert.ok(!unavailableReason.includes(sourceProject) && !unavailableReason.includes('NotFound'), 'The owner-facing failure must not expose the raw project path or OS error');
     await click(await browser.$('.copied-provenance').$(`button=Open copied item ${copiedItemId}`));
     await wait(async () => await detailReference() === copiedItemId, 'Copied provenance fallback did not use the local registered item');
     await (await browser.$('.item-detail [aria-label="Timeline"]')).waitForDisplayed();
