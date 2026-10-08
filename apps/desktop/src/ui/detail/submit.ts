@@ -94,7 +94,9 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
   return {
     ready,
     locked: target => lockedEntry(entryOf(target)),
-    edit: (target, text) => { if (!ready) return; const id = open(target); if (id) drafts.edit(id, { text }); },
+    // Typing needs only the loaded drafts and a snapshot: a refresh in progress (status 'stale') must not swallow the owner's
+    // words. Sending still waits for `ready`, and a draft written against an older snapshot is reviewed before it goes.
+    edit: (target, text) => { if (!state.ready || !session) return; const id = open(target); if (id) drafts.edit(id, { text }); },
     changed, review,
     send: async (target, text, as) => {
       if (!ready) return false;

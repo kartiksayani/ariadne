@@ -774,6 +774,28 @@ describe('owner input component and durable draft controller', () => {
     expect((screen.getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe('One more thing');
     expect(screen.getByText('Your follow-up is kept. Send it, or answer below.')).toBeTruthy();
   });
+  it('keeps words typed while the session view is refreshing, and sends them once it is fresh', async () => {
+    const value = await setup(), user = userEvent.setup(), item = value.session.items['2']!;
+    const queued = structuredClone(value.session.inputs['00000000-0000-4000-8000-000000000076']!);
+    value.session.inputs[uuid(90)] = { ...queued, id: uuid(90), kind: 'answer', target: { topic_id: item.topic_id, item_id: '2' } };
+    value.session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
+    const followUp = await screen.findByRole('button', { name: 'Add a follow-up' });
+    await waitFor(() => expect(followUp.hasAttribute('disabled')).toBe(false)); await user.click(followUp);
+    const box = await screen.findByRole('textbox', { name: 'Reply message' });
+    // A live change hint marks the view stale until its refresh lands; the owner types in that window.
+    act(() => { (value.store as unknown as { publish: (update: object) => void }).publish({ status: 'stale' }); });
+    fireEvent.change(box, { target: { value: 'Typed while refreshing' } });
+    await waitFor(() => expect(value.prefs.drafts.some(draft => draft.text === 'Typed while refreshing')).toBe(true));
+    expect((screen.getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe('Typed while refreshing');
+    // Nothing goes out against a view that may be behind.
+    expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(true);
+    value.session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(false));
+    expect((screen.getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe('Typed while refreshing');
+  });
   it('shows only the reply warning in Follow-up, never a stale reopen one', async () => {
     const demoItem = (demo as unknown as Session).items['2']!;
     const reopen: OwnerDraft = { op_id: uuid(80), session: route, binding_id: (demo as unknown as Session).active_binding_id!,
