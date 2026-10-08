@@ -32,8 +32,8 @@ while preserving its original decision. Follow those links for current authority
 | Quality | Every application code commit, including scaffold source, passes all maintained-code lint, functional/E2E checks and at least 80% weighted overall application line coverage. Live/billable host acceptance runs at M7. |
 | Publication | GitHub publication of the curated repository is authorized. Preserve existing history and the archived planning/POC reference. |
 
-The bounded transport proofs are [Claude Code 2.1.287](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/claude-mods/RESULTS.md)
-and [Codex 0.160.0](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/RESULTS.md).
+The bounded transport proofs are [Claude Code 2.1.287](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/claude-mods/RESULTS.md)
+and [Codex 0.160.0](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/RESULTS.md).
 They prove ordered delivery and retained existing-session context; they do not
 prove the production store, structured result loop, native UI or installation.
 Acceptance status belongs in the [verification ledger](docs/planning/low-level/VERIFICATION.md).
@@ -42,5 +42,5 @@ The owner explicitly waived Seezo for this work. Organization security guidance
 was not fetched or checked; these decisions make no organization-compliance claim.
 
 Earlier decisions, research and prototypes remain available in the
-[immutable planning archive](https://github.com/kartiksayani/ariadne/tree/a5e306f)
+[planning archive](https://github.com/kartiksayani/ariadne/tree/reference/planning-and-pocs)
 and the `reference/planning-and-pocs` branch.

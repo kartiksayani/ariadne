@@ -31,8 +31,8 @@ private host transcripts in evidence files.
 
 | Subject | Evidence | Establishes | Does not establish |
 | --- | --- | --- | --- |
-| Claude Mods transport | [POC results](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/claude-mods/RESULTS.md), Claude Code 2.1.287 | Three external inputs reached an already-running interactive Claude session; busy ordering, retained context and lifecycle replies were observed | Production bridge, durable queue, Ariadne domain results, recovery, installation, or Claude versions outside 2.1.287 |
-| Codex native queue/history | [POC results](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/RESULTS.md), Codex 0.160.0 | Eight checks passed for idle/busy ordered delivery, retained context, and full reply retrieval without start/resume | Production adapter contract, durable Ariadne queue/results, crash recovery, direct queue API, or Codex versions outside 0.160.0 |
+| Claude Mods transport | [POC results](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/claude-mods/RESULTS.md), Claude Code 2.1.287 | Three external inputs reached an already-running interactive Claude session; busy ordering, retained context and lifecycle replies were observed | Production bridge, durable queue, Ariadne domain results, recovery, installation, or Claude versions outside 2.1.287 |
+| Codex native queue/history | [POC results](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/RESULTS.md), Codex 0.160.0 | Eight checks passed for idle/busy ordered delivery, retained context, and full reply retrieval without start/resume | Production adapter contract, durable Ariadne queue/results, crash recovery, direct queue API, or Codex versions outside 0.160.0 |
 | Design and protocol documents | Current low-level specifications and adapter POCs | Specified contracts and observed protocol facts as labelled above | Implemented application behavior |
 
 Keep redacted protocol fixtures with provenance in the repository: source host

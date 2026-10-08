@@ -19,7 +19,7 @@ checked-in files. An ordinary xtask unit test runs the same check in CI.
 Application builds use checked-in Rust and do not require Codex to be installed.
 
 `fixtures/poc-live-exercise.json` is the unchanged, previously redacted retained
-[POC evidence at a5e306f](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/evidence/live-exercise.json).
+[POC evidence at a5e306f](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/evidence/live-exercise.json).
 The other fixtures are **schema-valid reconstructed examples, not raw RPC
 captures**. Initialization adds synthetic `/redacted/codex-home` because the
 retained evidence omits required `codexHome`. Turn pages preserve the observed
