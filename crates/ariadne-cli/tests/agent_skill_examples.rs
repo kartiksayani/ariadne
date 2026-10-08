@@ -457,7 +457,7 @@ fn the_core_and_on_demand_files_stay_small_and_are_each_pointed_at() {
         let files = generated(directory);
         let skill = &files[0].1;
         assert!(
-            skill.len() <= 10 * 1024,
+            skill.len() <= 10_000,
             "{directory} core skill is {} bytes",
             skill.len()
         );
@@ -699,6 +699,7 @@ fn the_closing_parent_example_settles_the_last_child_and_closes_the_parent() {
 fn the_inputs_example_replies_decides_and_commits_its_result() {
     let (seeded, request, data) = Seeded::committed(&examples(INPUTS)[0]);
     assert_compact(&data);
+    assert_eq!(request["summary"], "Answered [owner choice](item:1)");
     let session = seeded.session();
     let item = &session.items.0[&ItemRef::new("1").unwrap()];
     assert_eq!(item.status, ItemStatus::Decided);
@@ -786,11 +787,18 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
     ] {
         assert!(INPUTS.contains(needle), "{needle}");
     }
-    // An uncertain commit is resent with the same `op_id`: the generated one is
-    // named in the error's hint.
-    assert!(ERRORS.contains("SAME request"));
-    assert!(ERRORS.contains("the hint names it"));
+    // Blind retries also work without having received the derived ID.
+    assert!(ERRORS.contains("Resend the identical request"));
+    assert!(ERRORS.contains("the CLI derives the same `op_id`"));
+    assert!(ERRORS.contains("A retry of the identical request is safe"));
     for needle in ["`short` label", "at most 40 characters"] {
+        assert!(RULES.contains(needle), "{needle}");
+    }
+    for needle in [
+        "Refer to another item only as a markdown link `[short label](item:<item id>)`",
+        "`[cache choice](item:3.2)`",
+        "clickable navigation",
+    ] {
         assert!(RULES.contains(needle), "{needle}");
     }
     assert!(SKILL.contains("[ARIADNE_INPUT:"));

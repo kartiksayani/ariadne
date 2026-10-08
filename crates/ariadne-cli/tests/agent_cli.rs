@@ -447,7 +447,7 @@ fn apply_persists_full_reply_batch_and_exact_replay_with_no_second_write() {
         .messages
         .iter()
         .any(|m| m.body == "  Exact activity\nsecond line  "));
-    assert_eq!(envelope(&setup.apply(&command), 0), first);
+    assert_eq!(envelope(&setup.apply(&command), 0), as_replay(&first));
     assert_eq!(setup.bytes(), saved);
     command["summary"] = json!("  Exact activity\nsecond line ");
     assert_eq!(
@@ -491,7 +491,7 @@ fn retained_binding_replay_survives_rebind_and_old_route_cannot_apply_new_operat
         session.active_binding_id = Some(id(30));
     });
     let before = setup.bytes();
-    assert_eq!(envelope(&setup.apply(&command), 0), saved);
+    assert_eq!(envelope(&setup.apply(&command), 0), as_replay(&saved));
     assert_eq!(setup.bytes(), before);
     assert_eq!(
         envelope(&setup.apply(&request(501)), 3)["error"]["code"],
@@ -506,7 +506,7 @@ fn generation_is_forwarded_unchanged_and_saved_apply_replays_before_current_guar
     let saved = envelope(&setup.apply(&command), 0);
     setup.change(|session| session.bindings.0.get_mut(&id(3)).unwrap().generation = id(44));
     let before = setup.bytes();
-    assert_eq!(envelope(&setup.apply(&command), 0), saved);
+    assert_eq!(envelope(&setup.apply(&command), 0), as_replay(&saved));
     assert_eq!(
         envelope(&setup.apply(&request(501)), 3)["error"]["code"],
         "stale_generation"
@@ -1015,6 +1015,12 @@ fn listed(rows: &[Value], key: &str) -> Vec<String> {
         })
         .collect()
 }
+/// A compact receipt as the replay of it prints: the same, plus `replayed`.
+fn as_replay(receipt: &Value) -> Value {
+    let mut replay = receipt.clone();
+    replay["data"]["replayed"] = json!(true);
+    replay
+}
 fn lenient_with_op(op: u64) -> Vec<u8> {
     let mut value: Value = serde_json::from_str(LENIENT).unwrap();
     value["op_id"] = json!(id(op));
@@ -1093,7 +1099,45 @@ fn full_prints_the_complete_saved_receipt_and_a_stated_op_id_replays() {
     let compact = envelope(&setup.apply_with(&[], &body), 0);
     assert_eq!(compact["data"]["op_id"], id(600).as_str());
     assert_eq!(compact["data"]["items"][0]["id"], "3");
+    assert_eq!(compact["data"]["replayed"], true);
     assert_eq!(setup.bytes(), saved, "an exact replay writes nothing");
+    assert_eq!(envelope(&setup.apply_with(&["--full"], &body), 0), full);
+    assert_eq!(setup.bytes(), saved, "a full replay also writes nothing");
+}
+
+#[test]
+fn an_identical_request_without_an_op_id_replays_and_files_once() {
+    let setup = Setup::new(&seed());
+    let first = setup.lenient(&[]);
+    assert!(first["data"].get("replayed").is_none(), "{first}");
+    let saved = setup.bytes();
+    // A blind retry of a call that was killed or timed out: same bytes, no op_id.
+    let retry = setup.lenient(&[]);
+    assert_eq!(retry["data"]["op_id"], first["data"]["op_id"]);
+    assert_eq!(retry["data"]["replayed"], true);
+    assert_eq!(retry["data"]["topics"], first["data"]["topics"]);
+    assert_eq!(retry["data"]["items"], first["data"]["items"]);
+    assert_eq!(setup.bytes(), saved, "the retry writes nothing");
+    // Formatting and key order also normalize to the same expanded operation.
+    let request: Value = serde_json::from_str(LENIENT).unwrap();
+    let formatted = serde_json::to_vec_pretty(&request).unwrap();
+    assert_eq!(envelope(&setup.apply_with(&[], &formatted), 0), retry);
+    assert_eq!(setup.bytes(), saved);
+    let session = setup.store().read(&id(2)).unwrap();
+    assert_eq!(session.topics.0.len(), 2, "the seed topic and one new one");
+    assert_eq!(
+        session.items.0.len(),
+        5,
+        "the two seed items and three new ones"
+    );
+    // A different request is new work.
+    let other =
+        serde_json::to_vec(&json!({"operations": [{"op": "topic.add", "name": "Another"}]}))
+            .unwrap();
+    let filed = envelope(&setup.apply_with(&[], &other), 0);
+    assert_ne!(filed["data"]["op_id"], first["data"]["op_id"]);
+    assert!(filed["data"].get("replayed").is_none());
+    assert_eq!(setup.store().read(&id(2)).unwrap().topics.0.len(), 3);
 }
 
 #[test]
@@ -1199,7 +1243,7 @@ fn dry_run_rejects_what_the_real_apply_would_reject_and_still_commits_nothing() 
 }
 
 #[test]
-fn a_generated_op_id_differs_per_run_and_an_apply_flag_misuse_is_refused() {
+fn a_generated_op_id_follows_the_request_and_an_apply_flag_misuse_is_refused() {
     let setup = Setup::new(&seed());
     let first = envelope(
         &setup.apply_with(&["--dry-run"], br#"{"operations":[]}"#),
@@ -1209,7 +1253,12 @@ fn a_generated_op_id_differs_per_run_and_an_apply_flag_misuse_is_refused() {
         &setup.apply_with(&["--dry-run"], br#"{"operations":[]}"#),
         0,
     );
-    assert_ne!(first["data"]["op_id"], second["data"]["op_id"]);
+    assert_eq!(first["data"]["op_id"], second["data"]["op_id"]);
+    let other = envelope(
+        &setup.apply_with(&["--dry-run"], br#"{"summary":"x","operations":[]}"#),
+        0,
+    );
+    assert_ne!(first["data"]["op_id"], other["data"]["op_id"]);
     let before = setup.bytes();
     for args in [
         vec!["read", "--dry-run", "--json"],

@@ -19,7 +19,7 @@ valid requests.
   strict `ApplyRequest` (`crates/ariadne-cli/src/agent/lenient.rs`), and core
   validates the result exactly as before. A fully explicit request expands to itself.
   Repeated object keys are still rejected. MCP `apply` keeps the strict shape.
-- Omittable: `op_id` (the CLI generates a UUIDv4 and prints it), the top-level
+- Omittable: `op_id` (the CLI derives a UUIDv4 and prints it), the top-level
   source, attempt, result, revision guards and `summary`, and every optional
   operation field. Defaults, all listed in `ariadne --help`: `ref` is `r1`, `r2`, ...;
   an `item.add` without `topic` uses the request's only `topic.add`; `status` is
@@ -28,18 +28,33 @@ valid requests.
   position and `recommended` false; `item.ask` recipient is the calling binding.
 - `item.add` may carry `children`, recursively. The CLI flattens them in order
   (parent first), sets each `parent` and inherits `topic`.
-- A generated `op_id` is unknown to the caller, so an uncertain-commit or I/O error
-  names it in the hint and the retry resends it. A stated `op_id` replays as before.
+- An omitted `op_id` is deterministic: SHA-256 over four byte strings in order,
+  each prefixed by its byte length as a big-endian u64: ASCII `ariadne apply op_id v1`,
+  the binding's lowercase UUID string, the generation's lowercase UUID string, and
+  compact JSON of the expanded typed `ApplyRequest` with `op_id` removed. JSON
+  object keys are recursively sorted lexicographically; array order and exact prose
+  are preserved. Defaults are filled, refs allocated and children flattened before
+  hashing. Take the first 16 digest bytes, set byte 6's high nibble to `0100` (v4)
+  and byte 8's high bits to `10` (RFC variant), then format as a lowercase UUID.
+  SHA-256 is already locked; the CLI moves it from a test to a runtime dependency.
+- Resending the identical request with the same binding and generation is safe
+  after an uncertain commit, I/O error, timeout or killed call, even with no receipt:
+  a saved request replays instead of filing twice. Uncertainty hints also name the
+  derived ID. An explicit `op_id` always wins and replays as before. Intentionally
+  filing the identical request again requires a fresh explicit `op_id`.
 - `--dry-run` runs the real validation without committing. `Store::preview` shares
   `stage_effect` with every commit (callback, receipt entry, candidate validation,
   encoding); `ApplyService::preview` runs the same wire checks, replay lookup and
   batch. The output is the compact receipt plus `dry_run: true`, and `replayed: true`
-  when the same bytes already committed.
+  when the same expanded request already committed.
 - The default receipt is compact (`ApplySummary`): `op_id`, `session_revision`, and for
   each created or changed topic and item its id, number, short label, new revision and
   `created`. An item's id is its number; a topic's number is its `order`. `--full`
   prints the complete saved receipt. If building the compact form fails after a
   commit, the full receipt is printed so a committed apply never reads as failed.
+  Real apply also adds `replayed: true` when the store replayed under the writer
+  lock, in compact output (including its fallback); fresh commits omit it. Explicit
+  `--full` output, saved receipts and strict API shapes stay unchanged.
 - `ariadne read --view items` takes `--topic <id|number>` and `--archived`;
   `--view topics` takes `--archived`.
 

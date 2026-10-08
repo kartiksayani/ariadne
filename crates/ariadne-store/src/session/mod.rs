@@ -305,10 +305,24 @@ impl Store {
         normalized_command: &Value,
         apply: impl FnOnce(&mut Session) -> Result<SavedReceiptData, E>,
     ) -> Result<SavedReceipt, TransactionError<E>> {
+        self.transact_noting_replay(session_id, actor, operation_id, normalized_command, apply)
+            .map(|(receipt, _)| receipt)
+    }
+
+    /// `transact`, also saying whether the receipt is an exact replay of an earlier
+    /// commit (nothing was applied or written) rather than a new one.
+    pub fn transact_noting_replay<E>(
+        &self,
+        session_id: &UuidV4,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        normalized_command: &Value,
+        apply: impl FnOnce(&mut Session) -> Result<SavedReceiptData, E>,
+    ) -> Result<(SavedReceipt, bool), TransactionError<E>> {
         self.with_lock(session_id, || {
             let (live, previous) = self.live(session_id)?;
             if let Some(saved) = self.saved(&live, actor, operation_id, normalized_command)? {
-                return Ok(saved);
+                return Ok((saved, true));
             }
             let digest = self.digest(session_id, actor, normalized_command)?;
             let mut candidate = live.clone();
@@ -322,6 +336,7 @@ impl Store {
                 digest,
                 data,
             )
+            .map(|saved| (saved, false))
             .map_err(TransactionError::Store)
         })
     }

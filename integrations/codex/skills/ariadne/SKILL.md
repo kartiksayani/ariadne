@@ -37,12 +37,10 @@ Read these files, beside this one, only when they apply:
 
 ## Commands
 
-`ariadne` below is the exact command from the connect output or setup
-instruction. Run it verbatim: keep any `ARIADNE_HOME=...` prefix and the absolute
-path, because your tool shell may not inherit the environment or find it on PATH.
-The CLI is the only way to read or change Ariadne state. Never open, edit or
-create files under any `.ariadne/` directory or `~/.ariadne`: that skips revisions
-and validation and can make the app refuse the session.
+`ariadne` means the exact connect/setup command: keep its `ARIADNE_HOME=...`
+prefix and absolute path; your shell may lack them. Use only the CLI for Ariadne
+state. Never open, edit or create `.ariadne/` or `~/.ariadne` files: bypassing
+revisions and validation can make the session unreadable.
 
 - `ariadne read --binding B --generation G --view items|topics|messages|inputs --json`:
   20 entries a page, `--limit N` up to 100. `--view items --topic <id|number>`
@@ -63,15 +61,17 @@ One JSON object on stdin. Only `operations` is required.
 
 | Field | Meaning |
 |---|---|
-| `op_id` | Optional; the CLI generates one and prints it in the receipt. Set your own lowercase UUIDv4 only to replay a cut-off call (`errors.md`) |
+| `op_id` | Optional; the CLI derives one from the request, so resending the identical request replays. Your own: lowercase UUIDv4 (`errors.md`) |
 | `expected_item_revisions`, `expected_topic_revisions` | `{"1":4}`: the current revision of each existing item or topic the request replies to, edits, asks, closes or adds a child under. Not needed for what the same request creates |
 | `summary` | Optional; one short line shown in the timeline of every item touched |
 | `source_input_id`, `attempt_id`, `input_result` | Optional; only to answer a dispatched input (`inputs.md`) |
 
-The receipt lists each topic and item the request created or changed, with its new
-`revision`: keep those for your next request instead of reading again. An item's
-receipt `id` is its number (`3`, `3.1`), the value `{"id":...}` takes. Any optional
-field of an operation may be omitted.
+Keep receipt revisions for your next request instead of reading again. An item's
+`id` is its number, the value `{"id":...}` takes. Omit any optional operation field.
+
+Refer to another item only as a markdown link `[short label](item:<item id>)`,
+for example `[cache choice](item:3.2)`; never use a bare item number such as
+"item 3.2" or "#3.2". The app turns `item:` links into clickable navigation.
 
 | `op` | Required | Optional |
 |---|---|---|
@@ -87,8 +87,8 @@ field of an operation may be omitted.
 - Defaults. `topic`: the request's only `topic.add` (a child takes its parent's).
   `status`: `waiting_on_me` with an `ask`, else `open`. `owner`: you; `{"kind":"me"}`
   with an `ask`; others are `{"kind":"other","name":"N"}`. Option `id`: 1, 2, ...
-  `ref`: r1, r2, ... by position, so name a `ref` only to cite it later (a
-  `parent`, an `item.ask`, `reply_refs`). An ask's answer comes back to you.
+  `ref`: r1, r2, ... by position; name one only to reference it later. An ask's
+  answer comes back to you.
 - `children: [...]` on `item.add` holds nested `item.add` objects; their parent
   and topic are wired automatically.
 - References: `{"ref":"a"}` names an earlier `ref` of this request (a letter, then
@@ -115,10 +115,9 @@ yourself; the owner never names topics or items.
   `in_progress` summary item. Update items in place as the work moves
   (`item.edit` note, `item.status`, `reply`); close each when it finishes. Do not
   file everything at the end, and never post the same report twice.
-- **Route.** Anything the owner should read that is longer than a few lines or has
-  more than one point goes into Ariadne, findings that need no decision included.
-  Your chat reply is then 1-3 lines pointing at the topic. An explicit instruction
-  from the owner beats these defaults (for example a requested chat copy).
+- **Route.** Results longer than a few lines or with multiple points go into
+  Ariadne, findings included. Chat is then 1-3 lines pointing at the topic.
+  Explicit owner instructions beat these defaults.
 - **Topic.** One per piece of work or concern (a PR, a test run, an incident, a
   plan), named for what and which object; never one per step.
 - **Tree.** First a one-line summary item with the result and what waits on the
@@ -140,11 +139,10 @@ yourself; the owner never names topics or items.
 | Work for later or someone else | task | `open`, owner `other` |
 | Something you will not do | any | `dropped` |
 
-- **Fields.** `question` is the heading (one sentence); `ask` and `options` are
-  the answer box; `outcome` and `why` are the result and its evidence on closed
-  items; `note` is the progress line while in progress; `links` are `pr`, `file`
-  or `doc` targets; `reply` is for answering the owner or long detail. Never
-  repeat a text across them.
+- **Fields.** `question`: one-sentence heading; `ask` and `options`: answer box;
+  `outcome` and `why`: closed result and evidence; `note`: progress line;
+  `links`: `pr`, `file` or `doc` targets; `reply`: owner answer or long detail.
+  Never repeat text across them.
 - **Ask.** One decision per item: set `ask` (and `options`) on the `item.add`; it
   starts `waiting_on_me`, owned by the owner, with one round. Give options with a
   `label` and a `consequence` each and at most one `recommended`; no `options`
@@ -159,7 +157,7 @@ yourself; the owner never names topics or items.
 
 ## Examples
 
-Item `1` below is a placeholder.
+[Review summary](item:1) below is a placeholder.
 
 Open a topic with an in-progress summary item and a finding under it:
 
@@ -167,8 +165,8 @@ Open a topic with an in-progress summary item and a finding under it:
 {"summary":"Started the retry review","operations":[{"op":"topic.add","name":"Review: PR #812 retry backoff","short":"PR #812 review"},{"op":"item.add","question":"Reviewing PR #812; nothing concluded yet","short":"Review summary","type":"task","status":"in_progress","note":"Reading the diff","children":[{"question":"Backoff has no jitter","short":"No jitter","type":"finding","status":"done","outcome":"Clients retry in lockstep","why":"The delay is fixed at 2s."}]}]}
 ```
 
-Later, finish it using the revision from the receipt (item `1` is at revision 3):
+Later, finish [review summary](item:1) using receipt revision 3:
 
 ```json
-{"expected_item_revisions":{"1":3},"operations":[{"op":"item.status","item":{"id":"1"},"status":"done","outcome":"PR #812 needs one fix","why":"See the finding under this item."}]}
+{"expected_item_revisions":{"1":3},"operations":[{"op":"item.status","item":{"id":"1"},"status":"done","outcome":"PR #812 needs one fix","why":"See [no jitter](item:1.1)."}]}
 ```

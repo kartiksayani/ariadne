@@ -68,14 +68,14 @@ it open.
 
 ## Examples
 
-Answer an ask on item `1` (revision 4): reply, decide, finish the input.
+Answer an ask on [owner choice](item:1) (revision 4): reply, decide, finish the input.
 
 ```json
-{"source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":4},"summary":"Answered item 1","operations":[{"op":"reply","ref":"r1","item":{"id":"1"},"text":"Full answer with reasoning."},{"op":"item.status","item":{"id":"1"},"status":"decided","outcome":"Use X","why":"Because Y"}],"input_result":{"outcome":"answered","explanation":"Replied and decided.","reply_refs":[{"ref":"r1"}],"handled_through_message_number":7}}
+{"source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":4},"summary":"Answered [owner choice](item:1)","operations":[{"op":"reply","ref":"r1","item":{"id":"1"},"text":"Full answer with reasoning."},{"op":"item.status","item":{"id":"1"},"status":"decided","outcome":"Use X","why":"Because Y"}],"input_result":{"outcome":"answered","explanation":"Replied and decided.","reply_refs":[{"ref":"r1"}],"handled_through_message_number":7}}
 ```
 
-The last open child `1.1` (revision 1) of decision `1` (revision 2) is settled, so
-the parent closes with it:
+The last open child [cache choice](item:1.1) (revision 1) of [shipping decision](item:1)
+(revision 2) is settled, so the parent closes with it:
 
 ```json
 {"expected_item_revisions":{"1":2,"1.1":1},"summary":"Settled the last choice","operations":[{"op":"item.status","item":{"id":"1.1"},"status":"decided","outcome":"Use cache A","why":"The owner picked A."},{"op":"item.status","item":{"id":"1"},"status":"decided","outcome":"Ship with cache A","why":"Every choice under it is decided."}]}

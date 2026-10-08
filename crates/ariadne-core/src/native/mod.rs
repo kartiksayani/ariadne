@@ -66,6 +66,18 @@ impl NativeCoreService {
             .map_err(errors::apply)
     }
 
+    /// `apply`, also saying whether the core replayed an earlier commit of the same
+    /// operation ID and request instead of applying anything.
+    pub fn apply_noting_replay(
+        &self,
+        context: AgentContext,
+        request: ApplyRequest,
+    ) -> Result<(ApplyReceipt, bool), CoreError> {
+        ApplyService::new(&self.registry)
+            .execute_noting_replay(&context, &request, || (self.allocate)(), (self.now)())
+            .map_err(errors::apply)
+    }
+
     /// The compact view of a committed (or replayed) apply receipt.
     pub fn apply_summary(
         &self,

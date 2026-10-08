@@ -28,9 +28,11 @@ ItemRoundsRequest or ApplyRequest (not an actor/context envelope), at most 512Ki
 Apply stdin may leave out defaulted fields (below); a fully explicit ApplyRequest
 works unchanged. A malformed stdin request fails with exit 2 and the parser's message
 (offending field, variant or type, with its position in operations); fix that
-and send the corrected request. A generated op_id is new every run; after
-an uncertain commit (exit 4) resend the same request with the op_id the error
-names, so it replays instead of repeating.
+and send the corrected request. An omitted op_id is derived from the request, so
+after an uncertain commit, a timeout or a killed call (exit 4 or no reply) the
+identical request is safe to send again: the core replays it if it was saved
+("replayed":true in the receipt) and files nothing twice. A changed request is a
+new operation.
 Use stdin for filters and all outer/nested continuation cursors. --json emits one
 canonical envelope on stdout, including failures. Text failures use stderr.
 ARIADNE_HOME selects the same existing application data directory as bridge;
@@ -38,7 +40,7 @@ the default is HOME/.ariadne. Models cannot select project/session paths.
 
 Lenient apply input (the CLI expands it into the full ApplyRequest, then core
 validates it exactly as before):
-  Omit: op_id (a UUIDv4 is generated and echoed in the receipt), source_input_id,
+  Omit: op_id (a UUIDv4 is derived from the request and echoed in the receipt), source_input_id,
   attempt_id, input_result (null), expected_item_revisions, expected_topic_revisions
   ({}), summary (""), and any optional operation field (absent = null or empty).
   Defaults: ref on topic.add/item.add/reply = r1, r2, ...; item.add topic = the
@@ -232,14 +234,24 @@ fn run_apply(
         }
         return Ok(shown);
     }
-    let receipt = core.apply(context.clone(), request)?;
+    let (receipt, replayed) = core.apply_noting_replay(context.clone(), request)?;
+    let mut shown = None;
     if !call.full {
         // The commit already happened: a failed summary must not read as a failed apply.
         if let Ok(summary) = core.apply_summary(&context, &receipt) {
-            return value(serde_json::to_value(summary));
+            shown = Some(value(serde_json::to_value(summary))?);
         }
     }
-    value(serde_json::to_value(receipt))
+    let mut shown = match shown {
+        Some(shown) => shown,
+        None => value(serde_json::to_value(receipt))?,
+    };
+    if replayed && !call.full {
+        if let Some(object) = shown.as_object_mut() {
+            object.insert("replayed".into(), true.into());
+        }
+    }
+    Ok(shown)
 }
 
 /// Number of a topic as `--view topics` shows it (`order`) to its id.
@@ -278,14 +290,15 @@ fn topic_by_number(
     }
 }
 
-/// A generated `op_id` is unknown to the caller, so an uncertain commit has to
-/// name it: the retry must carry the same one to replay instead of repeating.
+/// The CLI derives an omitted `op_id` from the request, so after an uncertain
+/// commit the identical request is safe to send again: the core replays it if it
+/// was saved. The id is named for a caller that wants to pin it.
 fn name_generated_op(mut error: CoreError, generated: Option<UuidV4>) -> CoreError {
     if let (Some(id), CoreErrorCode::CommitUncertain | CoreErrorCode::IoError) =
         (generated, &error.code)
     {
         let note = format!(
-            " The CLI generated op_id {0}; resend the same request with \"op_id\":\"{0}\" added.",
+            " Sending the identical request again is safe: it replays if it was saved, and files once. The CLI used op_id {}.",
             id.as_str()
         );
         if error.hint.len() + note.len() <= 4096 {
@@ -428,9 +441,7 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
     match method {
         "apply" => {
             let bytes = bytes.ok_or_else(|| invalid("Apply requires --json-stdin."))?;
-            let expanded = lenient::expand(&bytes, &binding_id, &mut || {
-                uuid::Uuid::new_v4().to_string()
-            })?;
+            let expanded = lenient::expand(&bytes, &binding_id, &generation)?;
             expanded.request.validate_wire()?;
             Ok(Tool::Apply(ApplyCall {
                 request: AgentApplyToolRequest {
@@ -597,4 +608,27 @@ fn invalid(message: &str) -> CoreError {
         message,
         "Use ariadne --help; supply explicit binding/generation and canonical JSON parameters.",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uncertain_generated_operations_explain_that_an_identical_resend_is_safe() {
+        let id = UuidV4::new("00000000-0000-4000-8000-000000000003").unwrap();
+        for code in [CoreErrorCode::CommitUncertain, CoreErrorCode::IoError] {
+            let error = CoreError::new(code, "Save failed", "Inspect the receipt.");
+            let named = name_generated_op(error.clone(), Some(id.clone()));
+            assert!(named
+                .hint
+                .contains("Sending the identical request again is safe"));
+            assert!(named.hint.contains(id.as_str()));
+            assert_eq!(named.code, error.code);
+            assert_eq!(named.message, error.message);
+            assert_eq!(name_generated_op(error.clone(), None).hint, error.hint);
+        }
+        let error = invalid("Fix the request.");
+        assert_eq!(name_generated_op(error.clone(), Some(id)).hint, error.hint);
+    }
 }

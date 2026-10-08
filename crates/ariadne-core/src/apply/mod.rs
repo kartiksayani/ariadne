@@ -33,11 +33,23 @@ impl<'a> ApplyService<'a> {
         &self,
         context: &AgentContext,
         request: &ApplyRequest,
-        mut allocate: impl FnMut() -> UuidV4,
+        allocate: impl FnMut() -> UuidV4,
         at: UtcMillis,
     ) -> Result<ApplyReceipt, ApplyError> {
+        self.execute_noting_replay(context, request, allocate, at)
+            .map(|(receipt, _)| receipt)
+    }
+    /// `execute`, also saying whether the core replayed an earlier commit of the
+    /// same operation ID and request instead of applying anything.
+    pub fn execute_noting_replay(
+        &self,
+        context: &AgentContext,
+        request: &ApplyRequest,
+        mut allocate: impl FnMut() -> UuidV4,
+        at: UtcMillis,
+    ) -> Result<(ApplyReceipt, bool), ApplyError> {
         let (store, intent) = self.open(context, request)?;
-        let receipt = store.transact(
+        let (receipt, replayed) = store.transact_noting_replay(
             context.session().session_id(),
             &ReceiptActorScope::Agent {
                 binding_id: context.binding_id().clone(),
@@ -47,7 +59,7 @@ impl<'a> ApplyService<'a> {
             |session| batch::execute(session, context, request, &mut allocate, &at),
         )?;
         validate_apply_receipt(&receipt, context, request)?;
-        Ok(receipt)
+        Ok((receipt, replayed))
     }
     /// Validate-only `execute`: the same wire checks, replay lookup, current-state
     /// guards, batch and candidate validation, with nothing written. Fresh IDs

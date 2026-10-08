@@ -15,11 +15,11 @@ files.
 | `invalid_transition` with `details.reason: "topic_archived"` | 3 | The owner parked this topic. Do not retry. Ask the owner, in a live topic, to restore it. Reads still work (`--view items --topic <id> --archived`). |
 | `attempt_sealed` | 3 | This input/attempt is closed. Do not retry or invent another attempt; tell the owner. |
 | `result_already_committed` | 3 | The result is already saved. Send nothing more for this attempt; only an exact replay is valid. |
-| `commit_uncertain`, `store_busy`, `io_error` | 4 | The save may have happened. If the CLI generated the `op_id`, the hint names it: resend the SAME request with `"op_id":"<that id>"` added, at most 3 times, never a different `op_id`. If you set your own, resend the same bytes. Still no receipt: stop and tell the owner. (`store_busy` saved nothing: resend.) |
-| no reply at all (timeout, killed call) | 4 | No `op_id` was printed, so a plain resend could file twice. Read the topic or item you were filing: if it is there, go on; if not, resend with an `op_id` you set yourself. |
+| `commit_uncertain`, `store_busy`, `io_error` | 4 | The save may have happened. Resend the identical request, at most 3 times, changing nothing: the CLI derives the same `op_id` from it, so a saved request replays (`"replayed":true`) and files nothing twice. If you set your own `op_id`, resend the same bytes. Still no receipt: stop and tell the owner. (`store_busy` saved nothing: resend.) |
+| no reply at all (timeout, killed call) | 4 | A retry of the identical request is safe: it files once, and a replay shows `"replayed":true`. Change nothing in it; a changed request is new work. |
 | any other exit 4 (e.g. `capacity_exceeded`, `host_unreachable`) | 4 | Stop and tell the owner; do not retry in a loop. |
 | `unsupported`, `future_schema` | 5 | Stop and tell the owner. |
 
-A replay of the same `op_id` and bytes writes nothing twice. Never resend the
+A replay of the same `op_id` and request writes nothing twice. Never resend the
 owner's message, re-run completed work after a retry, scrape a transcript, or infer
 non-delivery from missing output, presence, a timeout or a failed receipt.
