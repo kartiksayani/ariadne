@@ -78,7 +78,13 @@ impl Fixture {
             ("hooks/discovery.js", "// fixture"),
             ("hooks/installed.js", "export default null;"),
             ("skills/ariadne/SKILL.md", "# Local scripted provider"),
-            ("skills/ariadne/playbook.md", "# Local scripted playbook"),
+            ("skills/ariadne/inputs.md", "# Fixture"),
+            ("skills/ariadne/errors.md", "# Fixture"),
+            ("skills/ariadne/reconnect.md", "# Fixture"),
+            ("skills/ariadne/report.md", "# Fixture"),
+            ("skills/ariadne/review.md", "# Fixture"),
+            ("skills/ariadne/checklist.md", "# Fixture"),
+            ("skills/ariadne/follow-up.md", "# Fixture"),
         ] {
             let file = plugin.join(name);
             fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -165,7 +171,7 @@ impl Fixture {
             panic!("setup")
         };
         // A short block naming the skill and the routing IDs, never the rule sheet.
-        assert!(setup_instruction.contains("Follow the Ariadne skill"));
+        assert!(setup_instruction.contains("the ariadne skill has the rest"));
         assert!(setup_instruction.contains(binding_id.as_str()));
         assert!(!setup_instruction.contains("# Ariadne shared agent rules"));
         assert!(setup_instruction.lines().count() <= 10);
@@ -882,11 +888,12 @@ fn admitted_real_core_claim_retains_its_physical_lease_until_quit_drains_it() {
 fn setup_instructions_are_short_and_name_the_skill_and_fallback_rules() {
     let rules = std::path::Path::new("/opt/ariadne/current/integrations/rules/codex.md");
     let with = instructions("ariadne", Some(rules));
-    assert!(with.codex.contains("Follow the Ariadne skill"));
+    assert!(with.codex.contains("the ariadne skill has the rest"));
     assert!(with
         .codex
         .contains(&format!("read {} first", rules.display())));
-    assert!(with.codex.contains("/clear or /compact"));
+    // The read-once rule lives in the skill's reconnect file, not here.
+    assert!(!with.codex.contains("/clear"));
     let without = instructions("ARIADNE_HOME=/data ariadne", None);
     assert!(!without.codex.contains("first."));
     assert_eq!(without.cli_invocation, "ARIADNE_HOME=/data ariadne");

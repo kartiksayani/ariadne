@@ -272,7 +272,7 @@ impl Fixture {
                 .command(json!({"action":"connect","session":id(2)}));
             let text = connected["value"]["text"].as_str().unwrap();
             if text.starts_with("Ariadne connected: ") {
-                assert!(text.contains("Resume structured Ariadne context"));
+                assert!(text.contains("This resumes an earlier session"));
                 break connected;
             }
             assert!(Instant::now() < until, "{connected}");
@@ -302,7 +302,7 @@ impl Fixture {
         let generation: UuidV4 =
             serde_json::from_value(receipt["data"]["generation"].clone()).unwrap();
         let text = connected["value"]["text"].as_str().unwrap();
-        assert!(text.contains(&format!("session {} ", id(2).as_str())));
+        assert!(text.contains("\nCommand: /"));
         assert!(text.contains(&format!(
             "binding {}, generation {}",
             binding.as_str(),

@@ -330,9 +330,9 @@ async function connectTransition(state, $, requestedSessionId) {
   state.notices.delete('auto');
   // The command output below gives Claude the routing itself.
   state.note = null;
-  const {binding,status} = bound.result;
-  const guidance = chosen === null ? '' : `\nResume structured Ariadne context for project ${binding.session.project_id}, session ${binding.session.session_id}: read its topics, items, questions, answers and results; summarize completed work, remaining work and missing context; reuse existing items and respect cancelled work. This does not transfer the old host transcript or dispatch an input.`;
-  const summary = `Ariadne connected: session ${binding.session.session_id} in project ${binding.session.project_id}; binding ${binding.binding_id}, generation ${binding.generation}; dispatch ${status.dispatch_state}, connection ${status.connection_state}. Organise this session's work in Ariadne now with the ariadne skill: choose topics and file typed items with full replies as you work, without waiting for an input (null source_input_id/attempt_id/input_result). Owner inputs arrive as messages starting with [ARIADNE_INPUT:<input>:<attempt>]; only an input's result needs its claimed envelope. Never edit .ariadne/ files directly.`;
+  const {binding} = bound.result;
+  const guidance = chosen === null ? '' : '\nThis resumes an earlier session: read reconnect.md in the ariadne skill first.';
+  const summary = `Ariadne connected: binding ${binding.binding_id}, generation ${binding.generation}.\nCommand: ${state.descriptor.helperPath}\nFile your work as you go; the ariadne skill has the rest.`;
   return {text:summary + guidance};
 }
 function connectRun(state, $, event) {

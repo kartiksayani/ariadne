@@ -5,12 +5,28 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RECEIPT: &str = "setup.json";
 
 macro_rules! resource {
-    ($name:literal) => {
+    ($name:expr) => {
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../integrations/",
             $name
         ))
+    };
+}
+
+/// The skill's files beside `SKILL.md` for both hosts: loaded on demand.
+macro_rules! on_demand_files {
+    ($($file:literal),*) => {
+        [$(
+            (
+                concat!("claude-mod/plugin/skills/ariadne/", $file),
+                resource!(concat!("claude/plugin/skills/ariadne/", $file)).as_slice(),
+            ),
+            (
+                concat!("codex-skills/ariadne/", $file),
+                resource!(concat!("codex/skills/ariadne/", $file)).as_slice(),
+            ),
+        )*]
     };
 }
 
@@ -55,20 +71,22 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
             resource!("claude/plugin/skills/ariadne/SKILL.md").as_slice(),
         ),
         (
-            "claude-mod/plugin/skills/ariadne/playbook.md",
-            resource!("claude/plugin/skills/ariadne/playbook.md").as_slice(),
-        ),
-        (
             "codex-skills/ariadne/SKILL.md",
             resource!("codex/skills/ariadne/SKILL.md").as_slice(),
         ),
-        (
-            "codex-skills/ariadne/playbook.md",
-            resource!("codex/skills/ariadne/playbook.md").as_slice(),
-        ),
         ("rules/claude.md", resource!("rules/claude.md").as_slice()),
         ("rules/codex.md", resource!("rules/codex.md").as_slice()),
-    ] {
+    ]
+    .into_iter()
+    .chain(on_demand_files!(
+        "inputs.md",
+        "errors.md",
+        "reconnect.md",
+        "report.md",
+        "review.md",
+        "checklist.md",
+        "follow-up.md"
+    )) {
         files.insert(name.to_owned(), bytes.to_vec());
     }
     let manifest = files

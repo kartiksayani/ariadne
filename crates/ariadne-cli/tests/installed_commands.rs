@@ -95,7 +95,7 @@ fn installed_setup_repeat_and_uninstall_preserve_foreign_settings_and_data() {
         String::from_utf8_lossy(&first.stderr)
     );
     let result = envelope(&first);
-    assert_eq!(result["data"]["changes"].as_array().unwrap().len(), 15);
+    assert_eq!(result["data"]["changes"].as_array().unwrap().len(), 27);
     assert_eq!(
         result["data"]["host_commands"][1],
         "/plugin install ariadne@ariadne-local"
@@ -121,7 +121,7 @@ fn installed_setup_repeat_and_uninstall_preserve_foreign_settings_and_data() {
             .as_array()
             .unwrap()
             .len(),
-        14
+        26
     );
     assert_eq!(
         envelope(&removed)["data"]["retained"]
