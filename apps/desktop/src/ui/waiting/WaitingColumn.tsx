@@ -19,7 +19,7 @@ import { AnswerControl, defaultSelection } from '../answer/AnswerControl';
 import { useSubmit, type PendingSubmission } from '../answer/useSubmit';
 import { waitingModel, type SentRowModel, type WaitingCardModel } from './model';
 import { useHidden } from '../remove/queue';
-import { Markdown } from '../shared/MarkdownText';
+import { FileRefProject, Markdown } from '../shared/MarkdownText';
 import { WaitingFold } from '../shell/fold';
 import './waiting.css';
 
@@ -138,7 +138,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
   const selection = frozen !== undefined ? item.options.findIndex(option => option.id === frozen) : defaultSelection(item.options, entry?.draft.selected_option_id);
   const ring = delivery ? '0 0 0 1px color-mix(in srgb, var(--a-warn) 60%, transparent)'
     : selected ? '0 0 0 1.5px color-mix(in srgb, var(--color-text) 45%, transparent)' : '0 0 0 1px var(--color-divider)';
-  return <div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} aria-current={selected || undefined} onClick={open}>
+  return <FileRefProject.Provider value={card.route.project_id}><div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} aria-current={selected || undefined} onClick={open}>
     <div className="waiting-path">{card.path}</div>
     <Markdown className="waiting-question" text={item.question} />
     {card.ask && <Markdown className="waiting-ask" text={card.ask} />}
@@ -159,7 +159,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
     {submit.error && !delivery && <p className="waiting-error" role="alert">{submit.error}</p>}
     <div className="waiting-foot"><i className="ph ph-clock" aria-hidden="true" /><span>Waiting {card.age}{card.tag && ` · asked in ${card.tag}`}</span>
       <button type="button" className="btn btn-ghost waiting-details" onClick={open}>Details</button></div>
-  </div>;
+  </div></FileRefProject.Provider>;
 }
 
 function SentRow({ row, drafts, store, open }: { readonly row: SentRowModel; readonly drafts: OwnerDraftStore; readonly store: WaitingStore; readonly open: () => void }) {

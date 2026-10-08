@@ -42,6 +42,10 @@ export interface RendererService {
   codexDefaultEndpoint?(): Promise<string | null>;
   /** Opens an http, https or mailto link in the system browser; the native side checks it again. */
   openLink?(url: string): Promise<void>;
+  /** Which references (`src/app.ts:12`) name a file inside the project's folder; the native side decides. */
+  resolveFileReferences?(projectId: string, references: readonly string[]): Promise<boolean[]>;
+  /** Opens the file a reference names in the owner's text editor; the native side checks it again. */
+  openFileReference?(projectId: string, reference: string): Promise<void>;
   /** The latest supervisor health per binding; invalid entries are dropped. */
   supervisorHealth?(): Promise<SupervisorHealth[]>;
   query<C extends QueryCommand>(request: QueryCall<C>): Promise<QueryData<C>>;
@@ -75,6 +79,8 @@ export interface DesktopTransport {
   setConnectionUiOpen?(open: boolean): Promise<void>;
   codexDefaultEndpoint?(): Promise<string | null>;
   openLink?(url: string): Promise<void>;
+  resolveFileReferences?(projectId: string, references: readonly string[]): Promise<unknown>;
+  openFileReference?(projectId: string, reference: string): Promise<void>;
   supervisorHealth?(): Promise<unknown>;
   invoke<T>(command: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T>;
   listen<E extends keyof HintPayloads>(event: E, receive: (hint: HintPayloads[E]) => void): Promise<Unsubscribe>;
@@ -84,6 +90,8 @@ const tauriTransport: DesktopTransport = {
   setConnectionUiOpen: open => invoke('discovery_ui_open', { request: { open } }),
   codexDefaultEndpoint: () => invoke('codex_default_endpoint'),
   openLink: url => invoke('open_link', { url }),
+  resolveFileReferences: (projectId, references) => invoke('file_references_resolve', { projectId, references }),
+  openFileReference: (projectId, reference) => invoke('file_reference_open', { projectId, reference }),
   supervisorHealth: () => invoke('supervisor_health'),
   invoke: (command, args) => invoke(command, args),
   async listen(event, receive) {
@@ -169,6 +177,17 @@ export function createDesktopService(transport: DesktopTransport = tauriTranspor
     async openLink(url) {
       if (!transport.openLink) throw new ServiceFailure('transport');
       try { await transport.openLink(url); } catch { throw new ServiceFailure('transport'); }
+    },
+    async resolveFileReferences(projectId, references) {
+      if (!transport.resolveFileReferences) return references.map(() => false);
+      let flags: unknown;
+      try { flags = await transport.resolveFileReferences(projectId, references); } catch { throw new ServiceFailure('transport'); }
+      if (!Array.isArray(flags) || flags.length !== references.length) throw new ServiceFailure('invalid_response');
+      return flags.map(flag => flag === true);
+    },
+    async openFileReference(projectId, reference) {
+      if (!transport.openFileReference) throw new ServiceFailure('transport');
+      try { await transport.openFileReference(projectId, reference); } catch { throw new ServiceFailure('transport'); }
     },
     async supervisorHealth() {
       if (!transport.supervisorHealth) return [];

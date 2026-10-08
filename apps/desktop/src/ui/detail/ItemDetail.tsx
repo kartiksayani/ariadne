@@ -17,7 +17,7 @@ import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendi
 import { useGrow } from '../answer/useGrow';
 import { AnswerSlot, changedText } from './AnswerSlot';
 import { TimelineExcerpt } from '../shared/MessageExcerpt';
-import { Markdown, singleParagraph } from '../shared/MarkdownText';
+import { FileRefProject, Markdown, singleParagraph } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
 import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type OpenMode, type PendingView, type WordsKind } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
@@ -290,7 +290,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     </div>}
   </div>;
   const docked = !!(model.open || model.followUp || model.answer || retainedAnswer || owner);
-  return <article className="item-detail" data-status={model.status} aria-label={`Detail of #${model.id}`}>
+  return <FileRefProject.Provider value={session.project_id}><article className="item-detail" data-status={model.status} aria-label={`Detail of #${model.id}`}>
     <div className="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
     <div className="detail-head">
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
@@ -437,5 +437,5 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}
     </div>}
-  </article>;
+  </article></FileRefProject.Provider>;
 }
