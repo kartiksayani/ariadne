@@ -159,7 +159,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
         warn={submit.changed && !delivery ? 'This item changed. Review the current question and options; your text is retained.' : undefined}
         warnAction={submit.changed && !delivery ? { label: 'Review current target', onAction: submit.review } : undefined}
         onSelect={index => { const option = item.options[index]; if (option) submit.select(option.id); }}
-        onDraft={submit.write} onSendOption={index => { const option = item.options[index]; if (option) submit.sendOption(option.id); }}
+        onDraft={submit.write} onSendOption={(index, note) => { const option = item.options[index]; if (option) submit.sendOption(option.id, note); }}
         onSendText={submit.sendText} />
     </div>
     {submit.error && !delivery && <p className="waiting-error" role="alert">{submit.error}</p>}

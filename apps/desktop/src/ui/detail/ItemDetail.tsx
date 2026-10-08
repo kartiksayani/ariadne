@@ -1,8 +1,8 @@
 // The item detail panel (handoff README §5 "Item detail"; Ariadne.dc.html
 // lines 324-464), laid out like a chat. The shell's aside holds the header;
 // DetailPath fills the header's breadcrumb and ItemDetail the body: what the
-// item is (head, delivery, outcome, why, children, links, timeline) scrolls
-// and ends in the conversation, oldest first; the owner's composer stays
+// item is (head, delivery, outcome, why, children, links) scrolls
+// and ends in the chat, oldest first; the owner's composer stays
 // docked under it (quick replies above a reply box that grows as you type).
 import { useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
@@ -16,7 +16,6 @@ import { NotSentLine } from '../answer/NotSentLine';
 import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain } from '../answer/held';
 import { useGrow } from '../answer/useGrow';
 import { AnswerSlot, changedText } from './AnswerSlot';
-import { TimelineExcerpt } from '../shared/MessageExcerpt';
 import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, singleParagraph, useProjectFile } from '../shared/MarkdownText';
 import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
@@ -128,10 +127,10 @@ function OwnerReply({ text }: { readonly text: string }) {
 }
 
 /** What the owner sent, inside their bubble: the option they chose, a one-press request, or their own words. */
-function YouSaid({ how, text }: { readonly how: PendingView['how']; readonly text: string }) {
+function YouSaid({ how, text, note = '' }: { readonly how: PendingView['how']; readonly text: string; readonly note?: string }) {
   return <>
     <i className={`${how === 'chose' ? 'ph ph-check-circle' : 'ph ph-user'} detail-msg-icon detail-you-icon`} aria-hidden="true" />
-    {how === 'chose' ? <span>{`You chose “${text}”`}</span> : how === 'action' ? <span>{text}</span> : <OwnerReply text={text} />}
+    {how === 'chose' ? <div className="detail-reply"><span>{`You chose “${text}”`}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : how === 'action' ? <div className="detail-reply"><span>{text}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : <OwnerReply text={text} />}
   </>;
 }
 
@@ -139,6 +138,28 @@ function KidButton({ kid, onOpen }: { readonly kid: Kid; readonly onOpen: (id: s
   return <button type="button" className={`detail-kid${kid.closed ? ' detail-kid-closed' : ''}`} onClick={() => onOpen(kid.id)}>
     <span className="detail-kid-icon"><StatusBadge status={kid.status} variant="icon" size={15} /></span><span className="detail-kid-text">{kid.question}</span>
   </button>;
+}
+
+/** A short child list scrolls independently; its fade disappears once the last row is visible. */
+function ChildrenBox({ kids, onOpen }: { readonly kids: readonly Kid[]; readonly onOpen: (id: string) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  const measure = () => { const node = box.current; if (node) setMore(node.scrollHeight - node.clientHeight - node.scrollTop > 1); };
+  useEffect(() => {
+    measure();
+    if (!box.current || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box.current);
+    return () => observer.disconnect();
+  }, [kids]);
+  return <div className={`detail-kids-box${more ? ' detail-kids-more' : ''}`}>
+    <div className="detail-kids-scroll" ref={box} onScroll={measure} onFocus={event => {
+      const node = event.currentTarget, row = event.target.getBoundingClientRect(), bounds = node.getBoundingClientRect();
+      if (row.bottom > bounds.bottom) node.scrollTop += row.bottom - bounds.bottom;
+      else if (row.top < bounds.top) node.scrollTop -= bounds.top - row.top;
+      measure();
+    }}>{kids.map(kid => <KidButton key={kid.id} kid={kid} onOpen={onOpen} />)}</div>
+  </div>;
 }
 
 /**
@@ -213,12 +234,11 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const showLatest = () => {
     const pane = body.current;
     if (!pane) return;
-    if (pane.querySelector('.detail-chat .detail-bubble-you, .detail-chat .detail-msg-result')) pane.scrollTop = pane.scrollHeight;
+    if (pane.querySelector('.detail-chat [data-owner-said="true"], .detail-chat .detail-msg-result')) pane.scrollTop = pane.scrollHeight;
     atEnd.current = nearEnd(pane);
   };
   const sentJustNow = () => { justSent.current = true; showLatest(); };
-  const chatKey = model ? [...model.rounds.map(round => `${round.ordinal}:${round.you ? 1 : 0}:${round.result.length}:${round.forks.length}`),
-    ...model.outbox.map(pending => `${pending.input.id}:${pending.input.state}`)].join('|') : null;
+  const chatKey = model ? model.chat.map(entry => `${entry.id}:${entry.message.body}:${entry.result}:${entry.pending?.input.state}:${entry.asks.map(ask => `${ask.text}:${ask.now}`).join(',')}:${entry.forks.length}`).join('|') : null;
   useEffect(() => {
     if (chatKey === null) return;
     if (atEnd.current || justSent.current) showLatest();
@@ -324,12 +344,14 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
-  }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-status={model.status} aria-label={`Detail of #${model.id}`}>
+  }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of #${model.id}`}>
     <div className="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
     <div className="detail-head">
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
       <div className="detail-status"><div className="detail-badge"><StatusBadge status={model.display} label={model.badgeLabel} /></div>
-        <span className="detail-meta">{model.meta}</span></div>
+        <span className="detail-meta">{model.meta}</span>
+        <span className="detail-reference"><span>Agent reference</span><button type="button" className="btn btn-ghost detail-copy" onClick={copy}>
+          <i className={copied ? 'ph ph-check' : 'ph ph-copy'} aria-hidden="true" />{copied ? 'Copied' : 'Copy reference'}</button></span></div>
       <h2 className="detail-question"><Markdown text={model.question} inline /></h2>
     </div>
 
@@ -362,7 +384,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {model.kids.length > 0 && <section className="detail-section detail-kids" aria-label="Child items">
       {sectionLabel(model.kidLabel)}
-      {model.kids.map(kid => <KidButton key={kid.id} kid={kid} onOpen={onOpenItem} />)}
+      <ChildrenBox kids={model.kids} onOpen={onOpenItem} />
     </section>}
 
     {model.links.length > 0 && <section className="detail-section detail-links" aria-label="Item links">
@@ -380,46 +402,44 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       <Markdown className="detail-prev" text={model.prev.outcome} />
     </section>}
 
-    <section className="detail-section detail-timeline" aria-label="Timeline">
-      {sectionLabel('Timeline')}
-      <div className="detail-timeline-list">{model.timeline.map(entry => <TimelineExcerpt key={entry.id} id={entry.id} message={entry.message} mark={entry.mark} label={entry.label}
-        note={entry.note} last={entry.last} highlighted={highlightedMessageIds?.has(entry.id)}
-        after={entry.unsent && <NotSentLine line={entry.unsent.line} again={entry.unsent.again || sendingAgain(draftState, session, entry.unsent.input)}
-          restoreHint={editable(entry.unsent.input.kind) ? putBackBlocked(session, entry.unsent.input) : null}
-          onPutBack={putBackBlocked(session, entry.unsent.input) || !editable(entry.unsent.input.kind) ? null : async () => {
-            const outcome = await putBackCancelled(drafts, session, entry.unsent!.input);
-            if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
-            return outcome;
-          }} />} />)}</div>
-    </section>
-
-    <div className="detail-reference">
-      <span>Agent reference</span><code>{model.id}</code>
-      <button type="button" className="btn btn-ghost detail-copy" onClick={copy}><i className={copied ? 'ph ph-check' : 'ph ph-copy'} aria-hidden="true" />{copied ? 'Copied' : 'Copy reference'}</button>
-    </div>
-
-    {(model.rounds.length > 0 || model.outbox.length > 0) && <section className="detail-section detail-chat" aria-label="Conversation">
+    {model.chat.length > 0 && <section className="detail-section detail-chat" aria-label="Conversation">
       <ol className="detail-chat-list">
-        {model.rounds.map(round => <li className={`detail-turn${round.now ? ' detail-turn-now' : ''}`} key={round.ordinal} data-round={round.ordinal}>
-          {(round.ask || round.now) && <div className="detail-msg"><i className="ph ph-robot detail-msg-icon" aria-hidden="true" />
-            <div className="detail-bubble detail-bubble-agent">{round.ask && <Markdown text={round.ask} inline />}
-              {round.now && <span className="tag tag-accent detail-waiting-tag">Waiting on you</span>}</div>{round.ask && <CopyMessage text={round.ask} />}</div>}
-          {round.you && <div className="detail-msg detail-msg-you"><div className="detail-bubble detail-bubble-you"><YouSaid how={round.you.chosen ? 'chose' : 'said'} text={round.you.text} /></div><CopyMessage text={round.you.source} /></div>}
-          {round.result && <div className="detail-msg detail-msg-result"><i className="ph ph-arrow-elbow-down-right detail-msg-icon" aria-hidden="true" />
-            <Markdown className="detail-msg-text" text={round.result} inline /><CopyMessage text={round.result} /></div>}
-          {round.forks.map(fork => <button type="button" className="detail-fork" key={fork.id} onClick={() => onOpenItem(fork.id)}>
-            <i className="ph ph-git-fork" aria-hidden="true" /><span>{fork.question}</span><StatusBadge status={fork.status} variant="text" /></button>)}
-        </li>)}
-        {model.outbox.map(pending => <li className="detail-turn detail-turn-pending" key={pending.input.id} data-pending={pending.input.id}>
-          <div className="detail-msg detail-msg-you"><div className="detail-bubble detail-bubble-you"><YouSaid how={pending.how} text={pending.text} />
-            {pending.caption && <span className="detail-pending-caption">{pending.caption}</span>}</div><CopyMessage text={pending.source} /></div>
-          {pending.stuck && <StuckNote actions={actions} input={pending.input} stuck={pending.stuck}
-            onEdit={async () => {
-              // An answer goes back to the composer below; anything else opens the box that now holds it.
-              const outcome = await editQueued(drafts, session, pending.input, actions);
+        {model.chat.map(entry => <li key={entry.id} data-message-id={entry.id} data-pending={entry.pending?.input.id}
+          data-round={entry.asks[0]?.ordinal}
+          data-owner-said={entry.you && !Object.values(session.inputs).some(input => input?.message_id === entry.id && input.state === 'cancelled') ? 'true' : undefined}
+          className={`detail-turn${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${highlightedMessageIds?.has(entry.id) ? ' excerpt-highlighted' : ''}`}>
+          {entry.marker && <div className="detail-chat-marker">{entry.marker}</div>}
+          <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
+            <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>
+              {entry.you ? <><YouSaid {...entry.you} /><span className="detail-pending-caption">you · {entry.message.when}</span>
+                {entry.pending?.caption && <span className="detail-pending-caption">{entry.pending.caption}</span>}</>
+                : <><div className="detail-agent-meta"><span>{entry.message.number}</span><span>{entry.message.who}</span><span>{entry.message.when}</span></div>
+                  <Markdown text={entry.message.body} />
+                  {entry.asks.filter(ask => !ask.text && ask.now).map(ask => <span key={ask.ordinal} className="tag tag-accent detail-waiting-tag">Waiting on you</span>)}</>}
+            </div><CopyMessage text={entry.message.body} />
+          </div>
+          {entry.asks.filter(ask => ask.text || entry.you && ask.now).map(ask => <div className="detail-msg" key={ask.ordinal}>
+            <div className="detail-bubble detail-bubble-agent">{ask.text && <Markdown text={ask.text} />}
+              {ask.now && <span className="tag tag-accent detail-waiting-tag">Waiting on you</span>}</div>
+            {ask.text && <CopyMessage text={ask.text} />}
+          </div>)}
+          {entry.note && <div className="detail-chat-marker">{entry.note}</div>}
+          {entry.unsent && <NotSentLine line={entry.unsent.line} again={entry.unsent.again || sendingAgain(draftState, session, entry.unsent.input)}
+            restoreHint={editable(entry.unsent.input.kind) ? putBackBlocked(session, entry.unsent.input) : null}
+            onPutBack={putBackBlocked(session, entry.unsent.input) || !editable(entry.unsent.input.kind) ? null : async () => {
+              const outcome = await putBackCancelled(drafts, session, entry.unsent!.input);
               if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
               return outcome;
             }} />}
+          {entry.pending?.stuck && <StuckNote actions={actions} input={entry.pending.input} stuck={entry.pending.stuck}
+            onEdit={async () => {
+              const outcome = await editQueued(drafts, session, entry.pending!.input, actions);
+              if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
+              return outcome;
+            }} />}
+          {entry.result && <div className="detail-msg detail-msg-result"><span aria-hidden="true">↳</span><Markdown className="detail-msg-text" text={entry.result} inline /><CopyMessage text={entry.result} /></div>}
+          {entry.forks.map(fork => <button type="button" className="detail-fork" key={fork.id} onClick={() => onOpenItem(fork.id)}>
+            <i className="ph ph-git-fork" aria-hidden="true" /><span>Branched into {fork.question}</span><StatusBadge status={fork.status} variant="text" /></button>)}
         </li>)}
       </ol>
     </section>}

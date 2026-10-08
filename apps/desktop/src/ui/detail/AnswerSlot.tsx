@@ -74,7 +74,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
       blocked={entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}
       onSelect={index => { const option = options[index]; if (option) submit.select(option.id); }}
-      onDraft={submit.write} onSendOption={index => { const option = options[index]; if (option) submit.sendOption(option.id); }}
+      onDraft={submit.write} onSendOption={(index, note) => { const option = options[index]; if (option) submit.sendOption(option.id, note); }}
       onSendText={submit.sendText} onEscape={onEscape} />
     {entry.uncertain && <div className="detail-answer-retry">
       <p role="status">{entry.rejected ? 'This reply was rejected before it was saved.' : 'Ariadne isn’t sure this reply was saved.'} Retry it to confirm; your text is kept.</p>

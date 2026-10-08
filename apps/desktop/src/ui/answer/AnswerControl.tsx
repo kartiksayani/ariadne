@@ -33,8 +33,9 @@ export interface AnswerOption {
  *   Send buttons are `aria-disabled` (their clicks and keys do nothing), but
  *   the reply box stays typeable. A truly disabled button or box drops the
  *   focus it holds to <body>, where keys become tree shortcuts.
- * - `onSendOption(index)` sends the option only; `onSendText(text)` sends the
- *   reply only. A reply never also sends the option.
+ * - `onSendOption(index, note)` sends the option with the text box's note;
+ *   compact controls and controls without a text box send the option only.
+ *   `onSendText(text)` sends the reply only, without an option.
  * - `onEscape`: Esc closes the control; the draft is kept by the caller.
  *
  * Keys (through `ui/keys.ts`, editor scope): 1–9 select and never send, Enter
@@ -56,7 +57,7 @@ export interface AnswerControlProps {
   readonly label?: string;
   readonly onSelect: (index: number) => void;
   readonly onDraft: (text: string) => void;
-  readonly onSendOption: (index: number) => void;
+  readonly onSendOption: (index: number, note?: string) => void;
   readonly onSendText: (text: string) => void;
   readonly onEscape?: () => void;
 }
@@ -79,7 +80,9 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
   // disabled one drops the focus it holds to <body>, where the next digit becomes a tree shortcut. Its click and keys do nothing
   // (`off` and `blocked` are checked where they act). A `hard` one (a send in progress, no words) is disabled.
   const gate = (hard: boolean, soft: boolean) => ({ disabled: hard || undefined, 'aria-disabled': soft && !hard ? true : undefined });
-  const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index); };
+  const hasText = full && !noText;
+  const withNote = hasText && !!draft.trim();
+  const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index, hasText ? draft : undefined); };
   const sendText = () => { if (draft.trim() && !blocked && !off) onSendText(draft); };
   const optionIndex = (target: EventTarget) => target instanceof HTMLElement && root.current?.contains(target)
     ? Number(target.closest<HTMLElement>('[data-answer-option]')?.dataset.answerOption ?? -1) : -1;
@@ -135,27 +138,27 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
     {picked && <div className="answer-send-row">
       <button type="button" className="btn btn-primary answer-send" {...gate(locked, frozen || !!blocked)} onClick={event => { event.stopPropagation(); sendOption(selected); }}>
         <i className="ph ph-paper-plane-right" aria-hidden="true" />
-        <span className="answer-send-label">{full ? `Send “${picked.label}”` : 'Send answer'}</span>
+        <span className="answer-send-label">{full ? `Send “${picked.label}”${withNote ? ' with your note' : ''}` : 'Send answer'}</span>
         <span className="answer-enter" aria-hidden="true">↵</span>
       </button>
       <span className="answer-hint">{hint}</span>
     </div>}
     {chat && !noText && <div className="answer-reply answer-composer">
       <div className="answer-composer-row">
-        <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Or reply in your own words…" rows={1}
+        <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={1}
           value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />
         <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
-          onClick={event => { event.stopPropagation(); sendText(); }}>Send reply</button>
+          onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
       </div>
-      <span className="answer-hint">⌘↵ sends the reply instead of the option</span>
+      <span className="answer-hint">⌘↵ sends as a reply only</span>
     </div>}
     {full && !chat && !noText && <div className="answer-reply">
-      <textarea className="input answer-text" aria-label="Reply in your own words" placeholder="Or reply in your own words…" rows={2}
+      <textarea className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={2}
         value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />
       <div className="answer-reply-row">
         <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
-          onClick={event => { event.stopPropagation(); sendText(); }}>Send reply</button>
-        <span className="answer-hint">⌘↵ sends the reply instead of the option</span>
+          onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
+        <span className="answer-hint">⌘↵ sends as a reply only</span>
       </div>
     </div>}
     {blocked && <div className="answer-blocked" role="status"><i className="ph ph-wifi-slash" aria-hidden="true" /><span>{blocked}</span></div>}

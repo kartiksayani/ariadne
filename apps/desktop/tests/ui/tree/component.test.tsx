@@ -681,7 +681,7 @@ describe('session tree inline answering', () => {
     await waitFor(() => expect(picked()).toEqual(['true', 'false']));
     const text = within(control()!).getByLabelText('Reply in your own words');
     fireEvent.change(text, { target: { value: 'Neither, ship tomorrow.' } });
-    await waitFor(() => expect((within(control()!).getByRole('button', { name: 'Send reply' }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect((within(control()!).getByRole('button', { name: 'Send as a reply only' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.keyDown(text, { key: 'Escape' });
     expect(control()).toBeNull(); expect(document.activeElement).toBe(row('2'));
     fireEvent.keyDown(row('2'), { key: 'a' });
@@ -699,12 +699,16 @@ describe('session tree inline answering', () => {
     await waitFor(() => expect(control()).not.toBeNull());
     await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
     await waitFor(() => expect((within(control()!).getByRole('button', { name: /Send “Afternoon”/ }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(within(control()!).getByRole('textbox'), { target: { value: ' After the review, please.  ' } });
+    expect(within(control()!).getByRole('button', { name: 'Send “Afternoon” with your note' })).toBeTruthy();
     fireEvent.keyDown(row('2'), { key: 'Enter' });
     await waitFor(() => expect(held).toHaveLength(1));
-    expect(held[0]).toMatchObject({ route: { ...route, item_id: '2' }, intent: 'answer', label: 'Afternoon', question: transport.sessions.get(route.session_id)!.items['2']!.question });
+    expect(held[0]).toMatchObject({ route: { ...route, item_id: '2' }, intent: 'answer', label: 'Afternoon', question: transport.sessions.get(route.session_id)!.items['2']!.question,
+      change: { selected_option_id: 'afternoon', text: ' After the review, please.  ' } });
     expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
     expect(await held[0].queue()).toBe(true);
     expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(true);
+    expect(transport.mutations.find(request => request.command.command === 'input_submit')?.command).toMatchObject({ params: { selected_option_id: 'afternoon', text: ' After the review, please.  ' } });
   });
   it('answers the oldest waiting question when a is pressed elsewhere', async () => {
     await mount({ configure: options });

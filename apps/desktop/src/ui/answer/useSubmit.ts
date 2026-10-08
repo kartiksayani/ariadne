@@ -61,8 +61,8 @@ export interface Submit {
   readonly error: string | null;
   select: (optionId: string | null) => void;
   write: (text: string) => void;
-  /** Sends the option only. */
-  sendOption: (optionId: string) => void;
+  /** Sends the option with an optional note from the answer text box. */
+  sendOption: (optionId: string, note?: string) => void;
   /** Sends the text only, never with an option. */
   sendText: (text: string) => void;
   /** Sends the draft as written (non-answer intents). */
@@ -128,10 +128,10 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
     error: entry?.error ? plainFailure(entry.error) : state.error ? plainFailure(state.error) : null,
     select: optionId => { if (entry && !locked) drafts.edit(entry.draft.op_id, { selected_option_id: optionId }); },
     write: text => { if (entry && !locked) drafts.edit(entry.draft.op_id, { text }); },
-    sendOption: optionId => {
+    sendOption: (optionId, note = '') => {
       const option = item?.options.find(value => value.id === optionId);
       if (!entry || !option || !ready()) return;
-      dispatch(option.label, { selected_option_id: option.id, text: '' });
+      dispatch(option.label, { selected_option_id: option.id, text: note });
     },
     sendText: text => {
       if (!entry || !text.trim() || !ready()) return;

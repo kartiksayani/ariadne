@@ -30,7 +30,7 @@ describe('composed item navigation', () => {
   it('records tree, detail child and breadcrumb selections, traverses without pushing, and branches after a new selection', async () => {
     setup(); await openSession(); await pick('1');
     expect(control('Back').disabled).toBe(true); expect(control('Forward').disabled).toBe(true);
-    fireEvent.click(await screen.findByRole('button', { name: /^Add the receipt lookup test/ })); await selected('1.1');
+    fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ })); await selected('1.1');
     expect(control('Back').disabled).toBe(false);
     fireEvent.click(document.querySelectorAll<HTMLButtonElement>('.detail-path button')[1]); await selected('1');
     fireEvent.click(control('Back')); await selected('1.1');
