@@ -29,6 +29,10 @@ export interface AnswerOption {
  *   Selection still works; both Send buttons are disabled and the hint hides.
  * - `locked`: a send or save is in progress or must be reconciled first; the
  *   options, the reply box and both Send buttons are disabled.
+ * - `frozen`: the view behind the control is refreshing; the options and both
+ *   Send buttons are disabled, but the reply box stays typeable. A disabled
+ *   box drops the owner's keystrokes and focus, and keys on <body> become
+ *   tree shortcuts.
  * - `onSendOption(index)` sends the option only; `onSendText(text)` sends the
  *   reply only. A reply never also sends the option.
  * - `onEscape`: Esc closes the control; the draft is kept by the caller.
@@ -45,6 +49,8 @@ export interface AnswerControlProps {
   readonly warnAction?: { readonly label: string; readonly onAction: () => void };
   readonly blocked?: string;
   readonly locked?: boolean;
+  /** The view behind the control is refreshing: options and both Send buttons are disabled, but the reply box keeps taking words. */
+  readonly frozen?: boolean;
   readonly noText?: boolean;
   /** Accessible name of the control's group. */
   readonly label?: string;
@@ -61,21 +67,23 @@ export function defaultSelection(options: readonly Pick<AnswerOption, 'id' | 're
   return index >= 0 ? index : options.findIndex(option => option.recommended);
 }
 
-export function AnswerControl({ options, variant, selected, draft, warn, warnAction, blocked, locked = false, noText = false, label,
+export function AnswerControl({ options, variant, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
   onSelect, onDraft, onSendOption, onSendText, onEscape }: AnswerControlProps) {
   const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null);
   const chat = variant === 'chat', full = variant !== 'compact', picked = options[selected];
   useGrow(text, draft, chat);
-  const canSend = !!picked && !blocked && !locked;
-  const sendOption = (index: number) => { if (options[index] && !blocked && !locked) onSendOption(index); };
-  const sendText = () => { if (draft.trim() && !blocked && !locked) onSendText(draft); };
+  // `off` stops choosing and sending; only `locked` stops the owner typing.
+  const off = locked || frozen;
+  const canSend = !!picked && !blocked && !off;
+  const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index); };
+  const sendText = () => { if (draft.trim() && !blocked && !off) onSendText(draft); };
   const optionIndex = (target: EventTarget) => target instanceof HTMLElement && root.current?.contains(target)
     ? Number(target.closest<HTMLElement>('[data-answer-option]')?.dataset.answerOption ?? -1) : -1;
   const keys = useWorkspaceKeys<HTMLDivElement>({
     choose: (intent, event) => {
       if (intent.kind !== 'choose' || !options[intent.index]) return false;
       event.stopPropagation();
-      if (!locked) onSelect(intent.index);
+      if (!off) onSelect(intent.index);
       return true;
     },
     enter: (_intent, event) => {
@@ -85,7 +93,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
       if (focused < 0 && event.target !== event.currentTarget) return false;
       event.stopPropagation();
       const index = focused >= 0 ? focused : selected;
-      if (focused >= 0 && focused !== selected && !locked) onSelect(focused);
+      if (focused >= 0 && focused !== selected && !off) onSelect(focused);
       sendOption(index);
       return true;
     },
@@ -108,7 +116,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
     <div className="answer-options">
       {options.map((option, index) => {
         const on = index === selected;
-        return <button type="button" key={option.id} data-answer-option={index} title={`Press ${index + 1} to select`} aria-pressed={on} disabled={locked}
+        return <button type="button" key={option.id} data-answer-option={index} title={`Press ${index + 1} to select`} aria-pressed={on} disabled={off}
           className={`btn ${option.recommended ? 'btn-primary' : 'btn-secondary'} answer-option${on ? ' answer-option-on' : ''}${option.recommended ? ' answer-option-rec' : ''}`}
           onClick={event => { event.stopPropagation(); onSelect(index); }}>
           <span className="answer-option-head">
@@ -121,7 +129,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
       })}
     </div>
     {picked && <div className="answer-send-row">
-      <button type="button" className="btn btn-primary answer-send" disabled={!!blocked || locked} onClick={event => { event.stopPropagation(); sendOption(selected); }}>
+      <button type="button" className="btn btn-primary answer-send" disabled={!!blocked || off} onClick={event => { event.stopPropagation(); sendOption(selected); }}>
         <i className="ph ph-paper-plane-right" aria-hidden="true" />
         <span className="answer-send-label">{full ? `Send “${picked.label}”` : 'Send answer'}</span>
         <span className="answer-enter" aria-hidden="true">↵</span>
@@ -132,7 +140,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
       <div className="answer-composer-row">
         <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Or reply in your own words…" rows={1}
           value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />
-        <button type="button" className="btn btn-secondary answer-reply-send" disabled={!draft.trim() || !!blocked || locked}
+        <button type="button" className="btn btn-secondary answer-reply-send" disabled={!draft.trim() || !!blocked || off}
           onClick={event => { event.stopPropagation(); sendText(); }}>Send reply</button>
       </div>
       <span className="answer-hint">⌘↵ sends the reply instead of the option</span>
@@ -141,7 +149,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
       <textarea className="input answer-text" aria-label="Reply in your own words" placeholder="Or reply in your own words…" rows={2}
         value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />
       <div className="answer-reply-row">
-        <button type="button" className="btn btn-secondary answer-reply-send" disabled={!draft.trim() || !!blocked || locked}
+        <button type="button" className="btn btn-secondary answer-reply-send" disabled={!draft.trim() || !!blocked || off}
           onClick={event => { event.stopPropagation(); sendText(); }}>Send reply</button>
         <span className="answer-hint">⌘↵ sends the reply instead of the option</span>
       </div>

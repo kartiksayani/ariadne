@@ -29,12 +29,17 @@ export function keyAnchor(root: HTMLElement): HTMLElement {
  * root, other than a field) is replayed on the focus anchor while no dialog is
  * open. Plain Esc is always consumed unless it belongs to a dialog, so macOS
  * never takes it as "leave full screen".
+ *
+ * `field` is the text field that last held focus, if the owner has not moved on. When it is still on the page but
+ * disabled (a save started under their hands, so the browser dropped focus to <body>), the keys are the owner's
+ * words, not shortcuts: nothing is replayed.
  */
-export function routeWindowKey(event: KeyboardEvent, root: HTMLElement): void {
+export function routeWindowKey(event: KeyboardEvent, root: HTMLElement, field: Element | null = null): void {
   const target = event.target, page = root.ownerDocument;
   const outside = !(target instanceof Node && root.contains(target));
+  const typingInDisabledField = !!field && field.isConnected && field.matches(':disabled');
   if (outside && !event.defaultPrevented && workspaceIntent(event) && !within(target, `${editable},${dialogs}`)
-    && !page.querySelector(openDialogs)) {
+    && !typingInDisabledField && !page.querySelector(openDialogs)) {
     const anchor = keyAnchor(root);
     if (anchor !== root) anchor.focus({ preventScroll: true });
     const replay = new KeyboardEvent('keydown', {
@@ -51,8 +56,20 @@ export function routeWindowKey(event: KeyboardEvent, root: HTMLElement): void {
 /** Installs `routeWindowKey` on the window for the lifetime of the app root. */
 export function useWindowKeys(root: RefObject<HTMLElement | null>): void {
   useEffect(() => {
-    const listener = (event: KeyboardEvent) => { if (root.current) routeWindowKey(event, root.current); };
+    // The last text field focused, forgotten as soon as focus goes elsewhere or the owner clicks away.
+    let field: Element | null = null;
+    const focused = (event: FocusEvent) => { field = event.target instanceof Element && event.target.matches(editable) ? event.target : null; };
+    const clicked = () => { field = null; };
+    const listener = (event: KeyboardEvent) => { if (root.current) routeWindowKey(event, root.current, field); };
+    window.addEventListener('focusin', focused);
+    window.addEventListener('pointerdown', clicked, true);
+    window.addEventListener('mousedown', clicked, true);
     window.addEventListener('keydown', listener);
-    return () => window.removeEventListener('keydown', listener);
+    return () => {
+      window.removeEventListener('focusin', focused);
+      window.removeEventListener('pointerdown', clicked, true);
+      window.removeEventListener('mousedown', clicked, true);
+      window.removeEventListener('keydown', listener);
+    };
   }, [root]);
 }

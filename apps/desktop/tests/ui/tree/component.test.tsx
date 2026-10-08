@@ -6,6 +6,8 @@ import { resolve } from 'node:path';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { routeWindowKey } from '../../../src/ui/shell/windowKeys';
 import type { ItemRoute } from '../../../src/generated/core';
 import { createDesktopService } from '../../../src/data/service';
 import type { RevealedItem } from '../../../src/data/routes';
@@ -498,6 +500,34 @@ describe('Reply to topic', () => {
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
     await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe('Half a thought'));
   });
+  it('keeps the words and the focus when typed while the session view refreshes, with no shortcut firing, and holds Send until it is fresh', async () => {
+    const { transport, store, calls } = await mount(), user = userEvent.setup();
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    await waitFor(() => expect(box()).not.toBeNull());
+    const text = within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement;
+    await waitFor(() => expect(text.disabled).toBe(false));
+    // The app's window-level routing, and every key that reaches something other than the box.
+    const root = document.body.firstElementChild as HTMLElement, elsewhere: Element[] = [];
+    const routeKey = (event: KeyboardEvent) => { routeWindowKey(event, root); };
+    const record = (event: KeyboardEvent) => { if (event.target !== text) elsewhere.push(event.target as Element); };
+    window.addEventListener('keydown', routeKey); document.addEventListener('keydown', record, true);
+    try {
+      await user.click(text);
+      act(() => { (store as unknown as { publish: (update: object) => void }).publish({ status: 'stale' }); });
+      await user.keyboard('de1');
+      await waitFor(() => expect(text.value).toBe('de1'));
+      expect(document.activeElement).toBe(text);
+      expect(elsewhere).toEqual([]);
+      expect(calls.acts).toEqual([]);
+      // Nothing goes out against a view that may be behind.
+      expect(within(box()!).getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(true);
+      await user.keyboard('{Meta>}{Enter}{/Meta}');
+      expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
+      await act(async () => { await store.refresh(); });
+      await waitFor(() => expect(within(box()!).getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(false));
+      expect(text.value).toBe('de1');
+    } finally { window.removeEventListener('keydown', routeKey); document.removeEventListener('keydown', record, true); }
+  });
   it('is not offered in a closed session', async () => {
     await mount({ configure: transport => { const session = transport.sessions.get(route.session_id)!; session.state = 'closed'; session.closed_at = session.updated_at; } });
     expect(within(topicRow('Delivery decisions')).queryByRole('button', { name: 'Reply to topic' })).toBeNull();
@@ -755,5 +785,65 @@ describe('scrolling the tree', () => {
     // The last row's bottom (840) lands 8 px above the tree's bottom: 840 + 8 - 400.
     expect(scroller().scrollTop).toBe(448);
     expect(row('8').getBoundingClientRect().top).toBe(352);
+  });
+
+  // The first row grows by `grow` px (a live edit made it longer); every row below it moves down with it.
+  describe('when rows above the viewport change size', () => {
+    let grow = 0;
+    const growing = () => {
+      grow = 0;
+      const rectangle = HTMLElement.prototype.getBoundingClientRect;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const box = document.querySelector<HTMLElement>('.tree-scroll');
+        if (this === box) return new DOMRect(0, 0, 300, 400);
+        const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1;
+        if (this.getAttribute('role') === 'treeitem' && at >= 0) return new DOMRect(0, at * 100 + (at > 0 ? grow : 0) - (box?.scrollTop ?? 0), 300, 40);
+        return rectangle.call(this);
+      });
+    };
+    const firstVisible = () => ids().find(id => row(id!).getBoundingClientRect().bottom > 0);
+
+    it('keeps the row being read where it is, instead of letting the view shift', async () => {
+      growing();
+      const view = await mount();
+      scroller().scrollTop = 150; fireEvent.scroll(scroller());
+      const reading = firstVisible()!, offset = row(reading).getBoundingClientRect().top;
+      grow = 600; view.rerender({});
+      expect(firstVisible()).toBe(reading);
+      expect(row(reading).getBoundingClientRect().top).toBe(offset);
+      expect(scroller().scrollTop).toBe(750);
+      // It holds through a shrink too, and after the owner scrolls on.
+      grow = 200; view.rerender({});
+      expect(row(reading).getBoundingClientRect().top).toBe(offset);
+      scroller().scrollTop = 350; fireEvent.scroll(scroller());
+      const next = firstVisible()!, nextOffset = row(next).getBoundingClientRect().top;
+      grow = 500; view.rerender({});
+      expect(row(next).getBoundingClientRect().top).toBe(nextOffset);
+    });
+
+    it('lets new rows show when the tree is at the very top, and never undoes the owner’s own scrolling', async () => {
+      growing();
+      const view = await mount();
+      grow = 300; view.rerender({});
+      expect(scroller().scrollTop).toBe(0);
+      scroller().scrollTop = 150; fireEvent.scroll(scroller());
+      scroller().scrollTop = 250;
+      grow = 400; view.rerender({});
+      expect(scroller().scrollTop).toBe(250);
+    });
+
+    it('keeps the row being read when the tree grows after the render, as fonts and images do', async () => {
+      growing();
+      const observers: (() => void)[] = [];
+      vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} });
+      try {
+        await mount();
+        scroller().scrollTop = 150; fireEvent.scroll(scroller());
+        const reading = firstVisible()!, offset = row(reading).getBoundingClientRect().top;
+        grow = 450;
+        act(() => { observers.forEach(callback => callback()); });
+        expect(row(reading).getBoundingClientRect().top).toBe(offset);
+      } finally { vi.unstubAllGlobals(); }
+    });
   });
 });

@@ -70,6 +70,26 @@ describe('window-level workspace keys', () => {
     expect(onKey).not.toHaveBeenCalled();
   });
 
+  it('does not replay keys as shortcuts when the focused text field was disabled under the owner, until they click away', () => {
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const field = document.body.appendChild(document.createElement('textarea'));
+    act(() => { field.focus(); });
+    // A save starts: the field is disabled and focus falls to <body>.
+    field.disabled = true; field.blur();
+    expect(press(document.body, 'e').defaultPrevented).toBe(false);
+    expect(onKey).not.toHaveBeenCalled();
+    // Clicking elsewhere is a deliberate move: keys on <body> are shortcuts again.
+    act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    expect(press(document.body, 'e').defaultPrevented).toBe(true);
+    expect(onKey).toHaveBeenCalled();
+    // A field that is enabled again, or gone, no longer holds the keys back.
+    onKey.mockClear();
+    act(() => { field.disabled = false; field.focus(); field.disabled = true; field.blur(); });
+    field.remove();
+    expect(press(document.body, 'e').defaultPrevented).toBe(true);
+  });
+
   it('always consumes plain Esc so macOS does not leave full screen, except for dialogs and input methods', () => {
     render(<Workspace onKey={() => false} />);
     expect(press(document.body, 'Escape').defaultPrevented).toBe(true);

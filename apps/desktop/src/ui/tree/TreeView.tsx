@@ -405,6 +405,44 @@ export function TreeView(props: TreeViewProps) {
     // Keyboard moves scroll only when the new row is off-screen, and by the least amount.
     nearest(focusKey, 8);
   }, [focusKey]);
+  // The tree never jumps on its own: what the owner is reading stays put when rows above it grow, shrink, arrive or
+  // leave (a live edit, a message landing, fonts loading). WKWebView has no `overflow-anchor`, so the first visible row
+  // is remembered with its offset (and the scroll position it was seen at) and put back after every layout change.
+  const held = useRef<{ readonly key: string; readonly offset: number; readonly scrollTop: number } | null>(null);
+  const placed = useRef<Anchor | null>(null);
+  placed.current = anchor;
+  const remembering = () => {
+    const box = scroller.current;
+    if (!box) { held.current = null; return; }
+    const top = box.getBoundingClientRect().top, list = latest.current.rows;
+    // Rows are stacked in order, so the first one ending below the tree's top is found by halving.
+    let low = 0, high = list.length;
+    while (low < high) {
+      const middle = (low + high) >> 1, element = elements.current.get(list[middle]!.key);
+      if (!element || element.getBoundingClientRect().bottom > top) high = middle; else low = middle + 1;
+    }
+    const key = list[low]?.key, element = key ? elements.current.get(key) : undefined;
+    held.current = key && element ? { key, offset: element.getBoundingClientRect().top - top, scrollTop: box.scrollTop } : null;
+  };
+  const holding = () => {
+    const box = scroller.current, before = held.current, element = before ? elements.current.get(before.key) : undefined;
+    // At the very top the owner wants the newest rows; a different scroll position means the view was moved on purpose
+    // (a scroll, a reveal, the keyboard), and the opening placement holds its own row until the owner steers.
+    if (box && before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
+      const delta = element.getBoundingClientRect().top - box.getBoundingClientRect().top - before.offset;
+      if (Math.abs(delta) >= 1) box.scrollTop += delta;
+    }
+    remembering();
+  };
+  useLayoutEffect(holding);
+  const hasRows = rows.length > 0 && !graph;
+  useEffect(() => {
+    const content = scroller.current?.querySelector('.tree-rows');
+    if (!content || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(holding);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [hasRows]);
   // Leaving the tree saves the first visible row as the session's reading position.
   const saveScroll = (event: FocusEvent<HTMLDivElement>) => {
     const box = scroller.current;
@@ -534,7 +572,7 @@ export function TreeView(props: TreeViewProps) {
     {lifecycle.error && <Banner icon="ph ph-warning-circle" alert>{lifecycle.error}</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}
-    {graph && !loading ? graph : <div ref={scroller} className="tree-scroll">{body}</div>}
+    {graph && !loading ? graph : <div ref={scroller} className="tree-scroll" onScroll={remembering}>{body}</div>}
     {lifecycle.dialog}
     {continuing && <ContinuePicker topicName={session?.topics[continuing]?.name ?? 'this topic'} targets={continueTargets(route, summaries)}
       onCancel={() => setContinuing(null)}

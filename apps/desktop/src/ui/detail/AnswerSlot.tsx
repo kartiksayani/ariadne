@@ -70,7 +70,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   const review = { label: 'Review current target', onAction: submit.review };
   return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
     <AnswerControl variant="chat" options={options} selected={selected} draft={draft.text} label="Answer"
-      locked={submit.locked || submit.changed || !live}
+      locked={submit.locked || submit.changed} frozen={!live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
       blocked={entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}
       onSelect={index => { const option = options[index]; if (option) submit.select(option.id); }}

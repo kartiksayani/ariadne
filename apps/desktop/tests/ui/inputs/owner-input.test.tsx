@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { useRef, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -23,6 +24,7 @@ import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { sentAs } from '../../../src/ui/detail/model';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { HistoryTransport } from '../history/fixtures';
+import { useWindowKeys } from '../../../src/ui/shell/windowKeys';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
 const opened: OpenSessions[] = [];
@@ -120,6 +122,13 @@ async function setup(saved: OwnerDraft[] = []) {
     restart: async () => { const restored = new OwnerDraftStore(service, () => uuid(++counter)); await restored.load(); return restored; } };
 }
 const editor = () => screen.getByRole('textbox') as HTMLTextAreaElement;
+/** The app root with its window-level key routing and a tree row that records every key replayed at it as a shortcut. */
+function KeyedRoot({ children, shortcuts }: { readonly children: ReactNode; readonly shortcuts: string[] }) {
+  const root = useRef<HTMLDivElement>(null);
+  useWindowKeys(root);
+  return <div ref={root}><section className="tree-column"><div data-row="1" tabIndex={0} onKeyDown={event => { shortcuts.push(event.key); }} /></section>{children}</div>;
+}
+const staleView = (store: object) => act(() => { (store as unknown as { publish: (update: object) => void }).publish({ status: 'stale' }); });
 
 describe('owner input component and durable draft controller', () => {
   // The tree's z-persists-Later versus editor-typing check lives in App.test.tsx now that rows hand z to the workspace keys.
@@ -795,6 +804,47 @@ describe('owner input component and durable draft controller', () => {
     await act(async () => { await value.store.refresh(); });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(false));
     expect((screen.getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe('Typed while refreshing');
+  });
+  it('keeps the words and the focus when the answer box is typed in while the session view refreshes, with no shortcut firing', async () => {
+    const value = await setup(), user = userEvent.setup(), shortcuts: string[] = [];
+    render(<KeyedRoot shortcuts={shortcuts}><AnswerSlot drafts={value.drafts} store={value.store} itemId="2" onEscape={() => {}} /></KeyedRoot>);
+    await waitFor(() => expect(editor().disabled).toBe(false));
+    await user.click(editor());
+    staleView(value.store);
+    // d, e and 1 are drop, archive and choose when they reach the tree; here they are the owner's words.
+    await user.keyboard('de1');
+    await waitFor(() => expect(editor().value).toBe('de1'));
+    expect(document.activeElement).toBe(editor());
+    expect(shortcuts).toEqual([]);
+    // Nothing goes out against a view that may be behind: neither the reply nor the option.
+    expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Send “Keep the design”' }).hasAttribute('disabled')).toBe(true);
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+    expect(value.calls).toHaveLength(0);
+    await act(async () => { await value.store.refresh(); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(false));
+    expect(editor().value).toBe('de1');
+  });
+  it('keeps words typed while the view refreshes when the item changes underneath, then asks for a review and holds Send', async () => {
+    const value = await setup(), user = userEvent.setup(), shortcuts: string[] = [];
+    render(<KeyedRoot shortcuts={shortcuts}><AnswerSlot drafts={value.drafts} store={value.store} itemId="2" onEscape={() => {}} /></KeyedRoot>);
+    await waitFor(() => expect(editor().disabled).toBe(false));
+    await user.click(editor());
+    staleView(value.store);
+    value.session.items['2']!.revision++; value.session.revision++;
+    await user.keyboard('Keep it');
+    await waitFor(() => expect(editor().value).toBe('Keep it'));
+    expect(shortcuts).toEqual([]);
+    await act(async () => { await value.store.refresh(); });
+    await screen.findByRole('button', { name: 'Review current target' });
+    expect(screen.getByText(changedText)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Send “Keep the design”' }).hasAttribute('disabled')).toBe(true);
+    expect(editor().value).toBe('Keep it');
+    expect(value.calls).toHaveLength(0);
+    // The box locks for the review, which drops focus to <body>: further keys stay the owner's, never tree shortcuts.
+    await user.keyboard('de');
+    expect(shortcuts).toEqual([]);
   });
   it('shows only the reply warning in Follow-up, never a stale reopen one', async () => {
     const demoItem = (demo as unknown as Session).items['2']!;
