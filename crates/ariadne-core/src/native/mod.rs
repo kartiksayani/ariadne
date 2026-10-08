@@ -78,6 +78,28 @@ impl NativeCoreService {
             .map_err(errors::apply)
     }
 
+    /// CLI completion repair with strict authorization and stable replay intent.
+    pub fn apply_lenient(
+        &self,
+        context: &AgentContext,
+        request: &ApplyRequest,
+    ) -> Result<(ApplyReceipt, bool, Vec<String>), CoreError> {
+        ApplyService::new(&self.registry)
+            .execute_lenient(context, request, || (self.allocate)(), (self.now)())
+            .map_err(errors::apply)
+    }
+
+    /// Preview the same locked-state completion repair used by the CLI.
+    pub fn apply_preview_lenient(
+        &self,
+        context: &AgentContext,
+        request: &ApplyRequest,
+    ) -> Result<(ApplyPreview, Vec<String>), CoreError> {
+        ApplyService::new(&self.registry)
+            .preview_lenient(context, request, || (self.allocate)(), (self.now)())
+            .map_err(errors::apply)
+    }
+
     /// The compact view of a committed (or replayed) apply receipt.
     pub fn apply_summary(
         &self,

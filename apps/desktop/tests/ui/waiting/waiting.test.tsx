@@ -89,6 +89,20 @@ const sentRow = (text: string) => screen.getAllByRole('button').find(element => 
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); sessions.splice(0).forEach(opened => opened.closeAll()); vi.useRealTimers(); });
 
 describe('current Waiting and immutable Sent selection', () => {
+  it.each(['bring', 'reopen'] as const)('a handled %s requests an ask without answering it', kind => {
+    const seed = fixture(), old = seed.session.inputs[inputId('71')]!;
+    old.kind = kind; old.payload.intent = kind;
+    expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
+  });
+  it.each(['answer', 'reply', 'note', 'followup', 'drop'] as const)('a handled %s answers only its question revision', kind => {
+    const seed = fixture(), session = seed.session, old = session.inputs[inputId('71')]!;
+    old.kind = kind; old.payload.intent = kind;
+    expect(waitingRows([seed])).toHaveLength(0);
+    ++session.items['2']!.question_revision;
+    expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
+    old.payload.target_snapshot.question_revision = session.items['2']!.question_revision;
+    expect(waitingRows([seed])).toHaveLength(0);
+  });
   it('keeps a new ask beside the old sent answer and its complete original payload', () => {
     const seed = fixture(), session = seed.session as Session;
     const old = session.inputs[inputId('71')]!; old.state = 'queued'; old.active_attempt_id = null;

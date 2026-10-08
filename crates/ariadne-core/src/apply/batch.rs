@@ -16,6 +16,7 @@ pub(super) fn execute(
     request: &ApplyRequest,
     allocate: &mut impl FnMut() -> UuidV4,
     at: &UtcMillis,
+    repairs: Option<&mut Vec<String>>,
 ) -> Result<SavedReceiptData, CoreError> {
     scope::authorize(session, context, request)?;
     let original_items = session.items.0.keys().cloned().collect();
@@ -42,6 +43,7 @@ pub(super) fn execute(
     let mut batch = Batch {
         context,
         request,
+        repairs,
         allocate,
         at,
         original_items,
@@ -150,6 +152,7 @@ pub(super) fn execute(
 pub(super) struct Batch<'a, F> {
     pub context: &'a AgentContext,
     pub request: &'a ApplyRequest,
+    repairs: Option<&'a mut Vec<String>>,
     allocate: &'a mut F,
     pub at: &'a UtcMillis,
     original_items: BTreeSet<ItemRef>,
@@ -284,36 +287,51 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
         &mut self,
         session: &mut Session,
         id: &ItemRef,
-        change: ItemChange,
+        mut change: ItemChange,
     ) -> Result<(), CoreError> {
         self.target(session, id)?;
-        if matches!(&change, ItemChange::Status { status: ItemStatus::Open | ItemStatus::InProgress, ack_to, .. }
-            if ack_to.is_some() || session.items.0[id].ack_to.is_some())
-            && session.items.0[id].ask.is_some()
-            && crate::queries::question_unanswered(session, &session.items.0[id])
+        // Only an existing Ack proposal needs protection from agent completion.
+        // Source fields were authenticated by scope::authorize before mutations.
+        if self.original_items.contains(id)
+            && session.items.0[id].ack_to.is_some()
+            && self.request.source_input_id.is_none()
         {
-            return Err(core(
-                CoreErrorCode::InvalidTransition,
-                "A question still waits for the owner; keep it waiting_on_me until they answer before proposing Ack",
-            ));
-        }
-        if session.items.0[id].ack_to.is_some()
-            && matches!(
-                &change,
-                ItemChange::Replace { .. }
-                    | ItemChange::Status {
-                        status: ItemStatus::Decided
-                            | ItemStatus::Done
-                            | ItemStatus::Dropped
-                            | ItemStatus::Replaced,
-                        ..
-                    }
-            )
-        {
-            return Err(core(
-                CoreErrorCode::InvalidTransition,
-                "This item is waiting for the owner's Ack; keep it open with ack_to until they acknowledge it",
-            ));
+            if let ItemChange::Status {
+                status,
+                ack_to,
+                reason,
+                ..
+            } = &mut change
+            {
+                let target = match status {
+                    ItemStatus::Decided => Some(AckTarget::Decided),
+                    ItemStatus::Done => Some(AckTarget::Done),
+                    ItemStatus::Dropped => Some(AckTarget::Dropped),
+                    _ => None,
+                };
+                if let Some(target) = target {
+                    let Some(repairs) = &mut self.repairs else {
+                        return Err(core(
+                            CoreErrorCode::InvalidTransition,
+                            "This item is waiting for the owner's Ack; keep it open with ack_to, keep an unanswered question waiting_on_me, explain withdrawal in a new item with ack_to \"dropped\", or use item.replace for superseded work",
+                        ));
+                    };
+                    *status = ItemStatus::Open;
+                    *ack_to = Some(target);
+                    reason.get_or_insert_with(|| {
+                        "Finished work; waiting for the owner's Ack.".into()
+                    });
+                    repairs.push(format!(
+                        "item {}: kept open with ack_to `{}`; owner Ack is required to finish.",
+                        id.as_str(),
+                        match target {
+                            AckTarget::Decided => "decided",
+                            AckTarget::Done => "done",
+                            AckTarget::Dropped => "dropped",
+                        }
+                    ));
+                }
+            }
         }
         if !self.original_items.contains(id)
             && matches!(
@@ -330,7 +348,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
         {
             return Err(core(
                 CoreErrorCode::InvalidArgument,
-                "A newly created item must remain nonterminal; propose completion with ack_to",
+                "A newly created item must remain nonterminal; use open with ack_to, or waiting_on_me for an unanswered question",
             ));
         }
         let cause = self.cause(session, id);
@@ -347,6 +365,18 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             expected_question_revision: None,
         };
         let candidate = transition_item(session, id, &change, &context).map_err(transition)?;
+        if matches!(candidate.status, ItemStatus::Open | ItemStatus::InProgress)
+            && candidate
+                .ask
+                .as_ref()
+                .is_some_and(|ask| !ask.trim().is_empty())
+            && crate::queries::question_unanswered(session, &candidate)
+        {
+            return Err(core(
+                CoreErrorCode::InvalidTransition,
+                "A question still waits for the owner; keep it waiting_on_me, or use ack_to \"dropped\" on a separate new item to explain withdrawing it, or item.replace for a replacement question",
+            ));
+        }
         if matches!(change, ItemChange::Ask { .. }) {
             *session = history_api::open_ask_round(session, candidate, &cause, self.at.clone())
                 .map_err(history)?;

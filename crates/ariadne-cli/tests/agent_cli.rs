@@ -1583,7 +1583,10 @@ fn existing_summary_completion_waits_for_ack_and_replays_after_the_owner_acks() 
         );
         envelope(&ack, 0);
         let before_retry = setup.bytes();
-        assert_eq!(envelope(&setup.apply(&completion), 0), as_replay(&applied));
+        let mut expected = as_replay(&applied);
+        // Replay runs no mutation or repair, even after the target is cleared.
+        expected["data"].as_object_mut().unwrap().remove("repairs");
+        assert_eq!(envelope(&setup.apply(&completion), 0), expected);
         assert_eq!(setup.bytes(), before_retry);
     }
 }

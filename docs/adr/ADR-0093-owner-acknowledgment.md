@@ -32,14 +32,29 @@ question or sending a message to the agent.
 - `item.status` to Open or InProgress can set `ack_to` and carry the proposed
   outcome and why. Omitting `ack_to` preserves an existing target and its prose.
   The agent finishes a summary by making it Open with a target for the owner.
-  Strict core refuses any agent terminal transition, including replacement,
-  while that item has `ack_to`. The agent cannot bypass the owner's Ack.
-  Existing items without a target retain their strict terminal transitions.
-- Lenient CLI repairs every Decided, Done or Dropped `item.status` request to
-  Open with the requested target as `ack_to`, preserving its outcome and why
-  and supplying a reason if absent. It reports the repair plainly. This repair
-  depends only on request bytes, rather than changing live state, so identical
-  retries keep the same operation ID even after the owner acknowledges it.
+  Existing items without `ack_to` retain terminal status transitions. With
+  `ack_to`, terminal `item.status` is refused in strict filing or repaired in
+  lenient filing unless the authenticated request answers an owner input
+  (`source_input_id`), such as Drop or “close it”. Owner-directed completion
+  passes and clears `ack_to`. Superseded work uses `item.replace` with its live
+  replacement link, also clearing `ack_to`.
+- Lenient status repair applies only to existing items with `ack_to` and no
+  owner input: keep Open with the requested Decided, Done or Dropped target,
+  retaining outcome and why. Unlike creation expansion, this decision needs
+  live state. It runs under the store lock after replay lookup, against the
+  original request intent; operation IDs and digests never depend on live state.
+  Both preview and commit report repairs. Exact retries still replay after Ack.
+- A Handled owner reply on the current question counts as replied, alongside
+  Queued/InFlight inputs and standing answers. Core counts, Ack and filing share
+  the same predicate; the TypeScript selector mirrors it. Failed, cancelled,
+  skipped, superseded and older-question inputs do not count. Handled inputs
+  count only Answer/Reply/Note/Followup/Drop; a Handled Bring/Reopen requests
+  an ask and cannot answer it, even at the same question revision. A newer ask
+  advances the question revision and never reuses a prior Handled reply.
+  Handling a reply cannot make its proposed completion lose Ack. Agent transitions
+  and edits refuse an Open/InProgress unanswered ask, even without an Ack target; keep it
+  Waiting on me, explain withdrawal with a new `ack_to: "dropped"` item, or
+  replace the question with `item.replace`.
 - The no-terminal-creation rule covers agent filing only. Continue is the owner's
   action: finished copies stay finished, and replacement links within the topic
   stay live and point to the copied replacement. External replacements retain
@@ -47,7 +62,10 @@ question or sending a message to the agent.
 - New agent asks must have an answer round. Strict core refuses a new Open or
   InProgress item with an ask; lenient filing makes it Waiting on me, owned by
   the owner, preserving `ack_to` and text. Continue likewise repairs copied
-  unanswered asks without a current round to Waiting on me with a fresh round.
+  unanswered asks to Waiting on me with a fresh question revision and round,
+  closing any previous live round. Inputs themselves are not imported, so copied
+  non-answer replies and failed answers cannot strand an Open ask or suppress
+  the new Waiting episode.
   Reply, follow-up and Back to Open remain available throughout.
 - Ack means the owner read the item. Permission to act requires a real question
   with an explicit option, such as “Got it, go ahead”.

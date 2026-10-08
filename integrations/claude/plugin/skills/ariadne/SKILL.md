@@ -121,16 +121,15 @@ When connected or told "use Ariadne", organise the work there yourself.
 | Work for later or someone else | task | `open`, owner `other` |
 | Something you will not do | any | `open`, `ack_to: "dropped"` |
 
-- **Ack.** New findings, explanations, summaries and reports start `open` with
-  `ack_to` (usually `done`; recorded decisions `decided`, ruled-out points
-  `dropped`). The owner sees the target beside Ack; pressing it moves the item
-  there. Ack only acknowledges reading: no message, input or agent delivery.
-  An ask may coexist; Ack waits until no owner question is pending. Never close
-  or replace an item with `ack_to`, even after a follow-up or its last child
-  finishes; update it in place for Ack.
-  For confirmation before acting, ask a real question with a "Got it, go ahead"
-  option and its consequence; wait for the answer. Progress tasks stay
-  `in_progress`; finish `open` with `ack_to` too.
+- **Ack.** New reading material starts `open` with `ack_to`: usually `done`,
+  recorded decisions `decided`, ruled-out points `dropped`. Ack moves it there
+  without agent delivery. An ask may coexist; Ack waits for the owner reply.
+  Keep `ack_to` work open unless an owner input directs completion: terminal
+  `item.status` with `source_input_id` clears the target. Existing work without
+  `ack_to` can close normally. Use `item.replace` for superseded work.
+  Keep unanswered asks `waiting_on_me`; explain withdrawal with a new
+  `ack_to: "dropped"` item. Permission to act needs a real question and a
+  "Got it, go ahead" option. Progress tasks finish `open` with `ack_to` too.
 - **Fields.** `question`: one-sentence heading; `ask` and `options`: answer box;
   `outcome` and `why`: result and evidence; `note`: progress line;
   `links`: `pr`, `file` or `doc` targets; `reply`: owner answer or long detail.

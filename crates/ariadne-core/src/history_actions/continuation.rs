@@ -464,10 +464,12 @@ fn copy(
             item.why = Some(why.clone());
             item.replaced_by = None;
         }
-        if matches!(item.status, ItemStatus::Open | ItemStatus::InProgress)
+        let source_unanswered = crate::queries::question_unanswered(source, old);
+        let copied_unanswered = crate::queries::question_unanswered(target, &item);
+        if (matches!(item.status, ItemStatus::Open | ItemStatus::InProgress)
+            || (item.status == ItemStatus::WaitingOnMe && source_unanswered && !copied_unanswered))
             && item.ask.is_some()
-            && item.current_round_id.is_none()
-            && crate::queries::question_unanswered(target, &item)
+            && (source_unanswered || copied_unanswered)
         {
             restore_question(
                 target,
@@ -612,6 +614,17 @@ fn restore_question(
         handled_through_message_number: NonnegativeSafeInteger::new(0).unwrap(),
         reason: Some("Imported unanswered ask with an owner question round".into()),
     });
+    // This is a new answerable episode; imported failed answers must not count.
+    item.question_revision = increment(item.question_revision)?;
+    if let Some(round) = item
+        .current_round_id
+        .as_ref()
+        .and_then(|id| target.rounds.0.get_mut(id))
+    {
+        if round.closed_at.is_none() {
+            round.closed_at = Some(at.clone());
+        }
+    }
     item.status = ItemStatus::WaitingOnMe;
     item.owner = ItemOwner::Me {};
     item.waiting_since = Some(at.clone());

@@ -168,7 +168,13 @@ pub fn transition_item(
                     return Err(TransitionError::InvalidTransition);
                 }
             } else {
-                if old.ack_to.is_some() || ack_to.is_some() {
+                let answers_owner_input = session
+                    .messages
+                    .iter()
+                    .find(|message| message.id == context.cause_message_id)
+                    .and_then(|message| message.input_id.as_ref())
+                    .is_some_and(|input_id| session.inputs.0.contains_key(input_id));
+                if (old.ack_to.is_some() && !answers_owner_input) || ack_to.is_some() {
                     return Err(TransitionError::InvalidTransition);
                 }
                 terminal_guard(session, old, context)?;
@@ -189,7 +195,7 @@ pub fn transition_item(
             outcome,
             why,
         } => {
-            if old.status == ItemStatus::Replaced || old.ack_to.is_some() {
+            if old.status == ItemStatus::Replaced {
                 return Err(TransitionError::InvalidTransition);
             }
             terminal_guard(session, old, context)?;

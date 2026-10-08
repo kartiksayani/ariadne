@@ -202,7 +202,7 @@ fn execute(
             } else {
                 vec![]
             };
-            let result = run_apply(&core, context, call)
+            let result = run_apply(&core, context, call, errors)
                 .map_err(|error| name_generated_op(error, generated));
             if result.is_ok() {
                 for note in notes {
@@ -240,11 +240,18 @@ fn execute(
 fn run_apply(
     core: &NativeCoreService,
     context: AgentContext,
-    call: ApplyCall,
+    mut call: ApplyCall,
+    errors: &mut dyn Write,
 ) -> Result<serde_json::Value, CoreError> {
     let request = call.request.request;
     if call.dry_run {
-        let preview = core.apply_preview(&context, &request)?;
+        let (preview, repairs) = core.apply_preview_lenient(&context, &request)?;
+        if call.full {
+            for repair in &repairs {
+                let _ = writeln!(errors, "Repair: {repair}");
+            }
+        }
+        call.repairs.extend(repairs);
         let mut shown = if call.full {
             value(serde_json::to_value(&preview.receipt))?
         } else {
@@ -264,7 +271,13 @@ fn run_apply(
         }
         return Ok(shown);
     }
-    let (receipt, replayed) = core.apply_noting_replay(context.clone(), request)?;
+    let (receipt, replayed, repairs) = core.apply_lenient(&context, &request)?;
+    if call.full {
+        for repair in &repairs {
+            let _ = writeln!(errors, "Repair: {repair}");
+        }
+    }
+    call.repairs.extend(repairs);
     let mut shown = None;
     if !call.full {
         // The commit already happened: a failed summary must not read as a failed apply.

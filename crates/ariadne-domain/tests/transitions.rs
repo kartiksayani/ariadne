@@ -1667,7 +1667,7 @@ fn ack_target_is_optional_on_old_data_and_restricted_on_wire() {
 }
 
 #[test]
-fn agents_cannot_finish_or_replace_items_awaiting_ack() {
+fn agents_cannot_finish_ack_items_but_can_replace_superseded_work() {
     for target in [AckTarget::Decided, AckTarget::Done, AckTarget::Dropped] {
         let mut s = session();
         let i = s.items.0.get_mut(&reference("1")).unwrap();
@@ -1688,18 +1688,20 @@ fn agents_cannot_finish_or_replace_items_awaiting_ack() {
     s.items.0.get_mut(&reference("1")).unwrap().ack_to = Some(AckTarget::Done);
     s.counters.next_root = positive(3);
     s.items.0.insert(reference("2"), item("2", None, 2));
-    assert_eq!(
-        reject(
-            &s,
-            &ItemChange::Replace {
-                replacement: reference("2"),
-                outcome: "Replacement".into(),
-                why: "Better choice".into(),
-            },
-            &context(&s)
-        ),
-        TransitionError::InvalidTransition
-    );
+    let replacement = transition_item(
+        &s,
+        &reference("1"),
+        &ItemChange::Replace {
+            replacement: reference("2"),
+            outcome: "Replacement".into(),
+            why: "Better choice".into(),
+        },
+        &context(&s),
+    )
+    .unwrap();
+    assert_eq!(replacement.status, ItemStatus::Replaced);
+    assert_eq!(replacement.replaced_by, Some(reference("2")));
+    assert_eq!(replacement.ack_to, None);
     s.items.0.get_mut(&reference("1")).unwrap().ack_to = None;
     apply(&mut s, &status(ItemStatus::Done));
     s.items.0.get_mut(&reference("1")).unwrap().ack_to = Some(AckTarget::Done);

@@ -20,16 +20,15 @@
   `ack_to`: `decided`, `done` or `dropped` (never `replaced`). `ack_to` requires
   a nonterminal item; it may coexist with an ask on `waiting_on_me`, but Ack is
   offered only on `open` or `in_progress` when no owner question is pending.
-  `outcome` and `why` preserve the
-  result and evidence for Ack; acknowledgment does not answer a question.
-  The lenient CLI converts legacy
-  `decided`/`done`/`dropped` creation to Open with that Ack target; write the
-  explicit Open shape yourself. Strict API calls reject terminal creation.
+  Preserve result and evidence in `outcome` and `why`. Lenient creation repairs
+  `decided`/`done`/`dropped` to Open with that target; strict creation rejects it.
   `item.status` `open` or `in_progress` can set `ack_to` on existing work.
-  Strict calls refuse agent terminal status or replacement on an item with
-  `ack_to`. The lenient CLI converts every `item.status` request for `decided`,
-  `done` or `dropped` to Open with that Ack target, preserving result and evidence;
-  write the explicit Open shape yourself. Leave acknowledgment to the owner.
+  On existing `ack_to` items, strict calls refuse terminal status without an
+  owner input; lenient filing keeps them Open with the requested target.
+  Owner-directed completion with `source_input_id` passes and clears `ack_to`.
+  Existing items without `ack_to` retain terminal transitions. Keep unanswered
+  asks `waiting_on_me`; explain withdrawal with a new `ack_to: "dropped"` item,
+  or use `item.replace` for superseded work.
 - Types: question, decision, finding, task, explanation. Existing-item statuses:
   `open` and `in_progress` take a `reason` (only in `item.status`); `decided`, `done` and
   `dropped` need `outcome` and `why`; `replaced` only through `item.replace`;

@@ -323,10 +323,10 @@ describe('Ack eligibility follows the current question episode', () => {
     item.ask = 'Confirm these limits?';
     expect(ackTarget(session, item)).toBeNull();
     const input = structuredClone(Object.values(session.inputs).find(value => value)!);
-    input.target.item_id = item.id; input.answer_id = null; input.state = state;
+    input.target.item_id = item.id; input.answer_id = null; input.state = state; input.kind = 'reply'; input.payload.intent = 'reply';
     input.payload.target_snapshot.question_revision = item.question_revision;
     session.inputs = { [input.id]: input }; session.answers = [];
-    const expected = state === 'queued' || state === 'in_flight' ? 'done' : null;
+    const expected = state === 'queued' || state === 'in_flight' || state === 'handled' ? 'done' : null;
     expect(ackTarget(session, item)).toBe(expected);
     expect(ownerReplied(session, item)).toBe(false); // The Waiting rail remains status-scoped.
     ++input.payload.target_snapshot.question_revision!;
@@ -378,7 +378,7 @@ describe('Ack eligibility follows the current question episode', () => {
     expect(ackTarget(session, item)).toBeNull();
   });
 
-  it.each(['queued', 'in_flight', 'standing'] as const)('accepts a %s reply at the current revision even when an older round is retained', state => {
+  it.each(['queued', 'in_flight', 'handled', 'standing'] as const)('accepts a %s reply at the current revision even when an older round is retained', state => {
     const transport = new AckTransport(), session = transport.sessions.get(route.session_id)!, item = session.items['2']!;
     const round = session.rounds[item.current_round_id!]!;
     round.question_snapshot = item.question; round.ask_snapshot = item.ask; round.options_snapshot = structuredClone(item.options);
@@ -386,6 +386,7 @@ describe('Ack eligibility follows the current question episode', () => {
     const input = structuredClone(Object.values(session.inputs).find(input => input)!);
     item.status = 'open'; ++item.question_revision;
     input.target.item_id = item.id; input.payload.target_snapshot.question_revision = item.question_revision;
+    input.kind = 'reply'; input.payload.intent = 'reply';
     input.answer_id = null; input.state = state === 'standing' ? 'handled' : state;
     session.inputs = { [input.id]: input }; session.answers = [];
     if (state === 'standing') {

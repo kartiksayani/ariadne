@@ -230,7 +230,17 @@ impl Seeded {
             if choice_with_note {
                 self.prepare_retry_choice();
             }
-            let (input, number) = self.deliver_input(choice_with_note);
+            let dropping = request["operations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|op| op["status"] == "dropped");
+            let (input, number) = if dropping {
+                self.ask_waiting_question(Some("done"));
+                self.deliver_input_as(InputKind::Drop, "Drop this question.", None, None)
+            } else {
+                self.deliver_input(choice_with_note)
+            };
             request["source_input_id"] = json!(input.as_str());
             request["input_result"]["handled_through_message_number"] = json!(number);
         }
@@ -326,6 +336,46 @@ impl Seeded {
         } else {
             (InputKind::Reply, "What are Q10 and Q11?", None, None)
         };
+        self.deliver_input_as(kind, text, selected_option_id, expected_question_revision)
+    }
+    fn ask_waiting_question(&self, ack_to: Option<&str>) {
+        self.succeeds(
+            &[],
+            &json!({"expected_item_revisions": {"1": self.revision("1")},
+            "operations": [{"op": "item.ask", "item": {"id": "1"}, "ask": "Keep this question?"}]}),
+        );
+        if let Some(target) = ack_to {
+            self.store()
+                .transact(
+                    &id(2),
+                    &ReceiptActorScope::Adapter { binding_id: id(3) },
+                    &id(699),
+                    &json!({"test": 699}),
+                    |session| {
+                        session
+                            .items
+                            .0
+                            .get_mut(&ItemRef::new("1").unwrap())
+                            .unwrap()
+                            .ack_to = Some(serde_json::from_value(json!(target)).unwrap());
+                        Ok::<_, ()>(SavedReceiptData::Event {
+                            event_id: "test:699".into(),
+                            input_id: None,
+                            attempt_id: None,
+                            durable_effect: true,
+                        })
+                    },
+                )
+                .unwrap();
+        }
+    }
+    fn deliver_input_as(
+        &self,
+        kind: InputKind,
+        text: &str,
+        selected_option_id: Option<String>,
+        expected_question_revision: Option<PositiveSafeInteger>,
+    ) -> (UuidV4, u64) {
         let command = OwnerCommand::InputSubmit {
             api_version: SchemaVersion::new(1).unwrap(),
             op_id: id(700),
@@ -395,7 +445,11 @@ impl Seeded {
                         acceptance_receipt: None,
                         acceptance_observed_at: Some(at()),
                         host_turn_id: Some("host-turn".into()),
-                        turn_state: TurnState::Running,
+                        turn_state: if text == "close it" || text == "Drop this question." {
+                            TurnState::Completed
+                        } else {
+                            TurnState::Running
+                        },
                         turn_observed_at: Some(at()),
                         domain_result: None,
                         result_state: ResultState::Pending,
@@ -1097,4 +1151,78 @@ fn error_table_exit_codes_match_the_real_cli_exit_mapping() {
     ] {
         assert_eq!(code.cli_exit(), 4);
     }
+}
+
+#[test]
+fn the_drop_example_keeps_the_waiting_question_in_the_tree_marked_dropped() {
+    let (seeded, request, data) = Seeded::committed(&examples(INPUTS)[2]);
+    let saved = seeded.session();
+    let item = &saved.items.0[&ItemRef::new("1").unwrap()];
+    assert_eq!(item.status, ItemStatus::Dropped);
+    assert_eq!(item.ack_to, None);
+    let source = UuidV4::new(request["source_input_id"].as_str().unwrap()).unwrap();
+    assert_eq!(saved.inputs.0[&source].kind, InputKind::Drop);
+    assert_eq!(saved.inputs.0[&source].state, InputState::Handled);
+    assert!(data["repairs"].is_null());
+    let replay = seeded.succeeds(&[], &request);
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(seeded.session(), saved);
+}
+
+#[test]
+fn owner_close_reply_finishes_a_waiting_ack_question_and_agent_can_drop_its_own_question() {
+    for owner_directed in [true, false] {
+        let seeded = Seeded::new();
+        seeded.ask_waiting_question(owner_directed.then_some("done"));
+        let mut request = json!({"expected_item_revisions": {"1": seeded.revision("1")}, "operations": [{
+            "op": "item.status", "item": {"id": "1"}, "status": if owner_directed {"done"} else {"dropped"},
+            "outcome": "Question closed.", "why": "No more work is needed."
+        }]});
+        if owner_directed {
+            let (input, number) = seeded.deliver_input_as(InputKind::Reply, "close it", None, None);
+            request["source_input_id"] = json!(input);
+            request["attempt_id"] = json!(id(0x11));
+            request["expected_item_revisions"]["1"] = json!(seeded.revision("1"));
+            request["operations"].as_array_mut().unwrap().insert(0, json!({"op": "reply", "ref": "r1", "item": {"id": "1"}, "text": "Closed at your request."}));
+            request["input_result"] = json!({"outcome": "answered", "explanation": "Closed at your request.", "reply_refs": [{"ref": "r1"}], "handled_through_message_number": number});
+        }
+        let data = seeded.succeeds(&[], &request);
+        assert!(data["repairs"].is_null());
+        let item = seeded.session().items.0[&ItemRef::new("1").unwrap()].clone();
+        assert_eq!(
+            item.status,
+            if owner_directed {
+                ItemStatus::Done
+            } else {
+                ItemStatus::Dropped
+            }
+        );
+        assert_eq!(item.ack_to, None);
+    }
+}
+
+#[test]
+fn cli_repairs_only_existing_ack_proposals_and_reports_preview_and_full_repairs() {
+    let seeded = Seeded::new();
+    seeded.succeeds(&[], &json!({"expected_item_revisions": {"1": 1}, "operations": [{"op": "item.status", "item": {"id": "1"},
+        "status": "open", "ack_to": "done", "reason": "Ready for reading."}]}));
+    let request = json!({"expected_item_revisions": {"1": seeded.revision("1")}, "operations": [{"op": "item.status", "item": {"id": "1"},
+        "status": "dropped", "outcome": "Exact result.", "why": "Exact evidence."}]});
+    let before = seeded.session();
+    let preview = seeded.succeeds(&["--dry-run"], &request);
+    assert!(preview["repairs"][0]
+        .as_str()
+        .unwrap()
+        .contains("ack_to `dropped`"));
+    assert_eq!(seeded.session(), before);
+    let full = seeded.apply(&["--full"], &serde_json::to_vec(&request).unwrap());
+    assert_eq!(full.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&full.stderr).contains("Repair:"));
+    let saved = seeded.session();
+    let item = &saved.items.0[&ItemRef::new("1").unwrap()];
+    assert_eq!(item.status, ItemStatus::Open);
+    assert_eq!(item.ack_to, Some(AckTarget::Dropped));
+    assert_eq!(item.outcome.as_deref(), Some("Exact result."));
+    assert_eq!(seeded.succeeds(&[], &request)["replayed"], true);
+    assert_eq!(seeded.session(), saved);
 }

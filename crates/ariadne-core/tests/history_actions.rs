@@ -1737,11 +1737,19 @@ fn continuation_preserves_each_finished_status_and_pending_ack_proposal() {
 
 #[test]
 fn continuation_restores_unanswered_legacy_ask_to_waiting_and_allows_owner_answer() {
-    for status in [ItemStatus::Open, ItemStatus::InProgress] {
+    for (status, episode) in [
+        (ItemStatus::Open, "none"),
+        (ItemStatus::InProgress, "none"),
+        (ItemStatus::Open, "open"),
+        (ItemStatus::Open, "closed"),
+        (ItemStatus::Open, "handled_reply"),
+        (ItemStatus::Open, "cancelled_answer"),
+        (ItemStatus::WaitingOnMe, "cancelled_answer"),
+    ] {
         let mut source = seed();
         let key = ItemRef::new("1").unwrap();
         let item = source.items.0.get_mut(&key).unwrap();
-        item.status = status;
+        item.status = status.clone();
         item.ask = Some("May I finish this change?".into());
         item.ack_to = Some(AckTarget::Done);
         item.outcome = Some("Prepared the change.".into());
@@ -1752,6 +1760,79 @@ fn continuation_restores_unanswered_legacy_ask_to_waiting_and_allows_owner_answe
             consequence: "Finish the prepared change.".into(),
             recommended: true,
         }];
+        if episode != "none" {
+            let item = source.items.0.get_mut(&key).unwrap();
+            item.status = ItemStatus::WaitingOnMe;
+            item.waiting_since = Some(at());
+            item.owner = ItemOwner::Me {};
+            item.recipient_binding_id = Some(id(3));
+            item.current_round_id = Some(id(30));
+            source.rounds.0.insert(
+                id(30),
+                Round {
+                    id: id(30),
+                    item_id: key.clone(),
+                    ordinal: p(1),
+                    opened_message_id: id(6),
+                    question_snapshot: item.question.clone(),
+                    ask_snapshot: item.ask.clone(),
+                    options_snapshot: item.options.clone(),
+                    question_revision: item.question_revision,
+                    owner_message_ids: vec![],
+                    agent_message_ids: vec![],
+                    result_input_ids: vec![],
+                    fork_item_ids: vec![],
+                    closed_at: None,
+                    origin: None,
+                },
+            );
+            let initial = Setup::new(&source);
+            let is_answer = episode == "cancelled_answer";
+            crate_input_submit(
+                &initial.registry,
+                &OwnerCommand::InputSubmit {
+                    api_version: SchemaVersion::new(1).unwrap(),
+                    op_id: id(300),
+                    params: InputSubmitParams {
+                        binding_id: id(3),
+                        target: InputTarget {
+                            topic_id: id(5),
+                            item_id: Some(key.clone()),
+                        },
+                        kind: if is_answer {
+                            InputKind::Answer
+                        } else {
+                            InputKind::Reply
+                        },
+                        text: "Please finish.".into(),
+                        selected_option_id: is_answer.then(|| "go".into()),
+                        expected_question_revision: is_answer.then_some(p(1)),
+                        supersedes_answer_id: None,
+                    },
+                },
+            );
+            source = initial.store().read(&id(2)).unwrap();
+            let item = source.items.0.get_mut(&key).unwrap();
+            item.status = status;
+            item.waiting_since = (item.status == ItemStatus::WaitingOnMe).then(at);
+            item.question_revision = p(if item.status == ItemStatus::WaitingOnMe {
+                1
+            } else {
+                2
+            });
+            let round_id = item.current_round_id.clone().unwrap();
+            if episode == "closed" {
+                source.rounds.0.get_mut(&round_id).unwrap().closed_at = Some(at());
+            }
+            let input = source.inputs.0.values_mut().next().unwrap();
+            if episode == "handled_reply" {
+                input.state = InputState::Handled;
+            }
+            if is_answer {
+                input.state = InputState::Cancelled;
+                input.cancel_cause = Some(CancelCause::Owner);
+            }
+        }
         let setup = Setup::new(&source);
         setup.store().create(&target_seed()).unwrap();
         let source_bytes = setup.bytes();
@@ -1779,6 +1860,18 @@ fn continuation_restores_unanswered_legacy_ask_to_waiting_and_allows_owner_answe
         assert_eq!(copied.why, source.items.0[&key].why);
         assert!(ariadne_core::queries::waiting_unanswered(&target, copied));
         let round = &target.rounds.0[copied.current_round_id.as_ref().unwrap()];
+        assert_eq!(
+            copied.question_revision.value(),
+            source.items.0[&key].question_revision.value() + 1
+        );
+        for old_round in target
+            .rounds
+            .0
+            .values()
+            .filter(|r| r.item_id == copied_key && r.id != round.id)
+        {
+            assert!(old_round.closed_at.is_some());
+        }
         assert_eq!(round.question_revision, copied.question_revision);
         assert_eq!(round.ask_snapshot, copied.ask);
         assert_eq!(round.options_snapshot, copied.options);

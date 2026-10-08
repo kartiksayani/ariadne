@@ -204,9 +204,6 @@ impl Expander {
                 object.entry("options").or_insert(json!([]));
                 options(&mut object);
             }
-            Some("item.status") => {
-                self.repair_completion(&mut object, &path)?;
-            }
             Some("reply") => {
                 self.ensure_ref(&mut object);
             }
@@ -236,21 +233,8 @@ impl Expander {
             }
             object.insert("status".into(), json!("open"));
             object.insert("ack_to".into(), json!(status));
-            if object.get("op").and_then(Value::as_str) == Some("item.status")
-                && object.get("reason").is_none_or(Value::is_null)
-            {
-                object.insert(
-                    "reason".into(),
-                    json!("Finished work; waiting for the owner's Ack."),
-                );
-            }
-            let action = if object.get("op").and_then(Value::as_str) == Some("item.status") {
-                "kept"
-            } else {
-                "created"
-            };
             self.repairs.push(format!(
-                "{path}: {action} open with ack_to `{status}`; owner Ack is required to finish."
+                "{path}: created open with ack_to `{status}`; owner Ack is required to finish."
             ));
         }
         Ok(())
@@ -792,44 +776,27 @@ mod tests {
              "outcome": "o", "why": "w"},
             {"op": "item.edit", "item": {"id": "1"}, "patch": {"question": "Q2"}}]}));
         let value = wire(&request);
-        assert_eq!(value["operations"][0]["status"], "open");
-        assert_eq!(value["operations"][0]["ack_to"], "done");
-        assert_eq!(
-            value["operations"][0]["reason"],
-            "Finished work; waiting for the owner's Ack."
-        );
+        assert_eq!(value["operations"][0]["status"], "done");
+        assert_eq!(value["operations"][0]["ack_to"], Value::Null);
+        assert_eq!(value["operations"][0]["reason"], Value::Null);
         assert_eq!(value["operations"][1]["patch"]["type"], Value::Null);
     }
 
     #[test]
-    fn completion_statuses_are_repaired_without_losing_text_or_changing_retry_identity() {
+    fn existing_terminal_statuses_pass_through_without_request_only_repairs() {
         for target in ["decided", "done", "dropped"] {
-            let input = json!({"expected_item_revisions": {"1": 2}, "operations": [{
-                "op": "item.status", "item": {"id": "1"}, "status": target,
-                "outcome": "Exact outcome\nwith details.", "why": "Exact why."
-            }]});
-            let expanded = run(&input).unwrap();
-            let again = run(&input).unwrap();
-            assert_eq!(expanded.request, again.request);
-            let operation = &wire(&expanded.request)["operations"][0];
-            assert_eq!(operation["status"], "open");
-            assert_eq!(operation["ack_to"], target);
-            assert_eq!(operation["outcome"], input["operations"][0]["outcome"]);
-            assert_eq!(operation["why"], input["operations"][0]["why"]);
-            assert!(operation["reason"].as_str().is_some());
-            assert_eq!(expanded.repairs.len(), 1);
-            assert!(expanded.repairs[0].contains("owner Ack is required"));
-            let mut canonical = wire(&expanded.request);
-            canonical.as_object_mut().unwrap().remove("op_id");
-            assert_eq!(
-                run(&canonical).unwrap().generated_op_id,
-                expanded.generated_op_id
-            );
-            assert!(message(
-                json!({"operations": [{"op": "item.status", "item": {"id": "1"},
-                "status": target, "ack_to": if target == "done" { "dropped" } else { "done" }}]})
-            )
-            .contains("conflicts"));
+            for source in [Value::Null, json!(TOPIC)] {
+                let input = json!({"source_input_id": source, "operations": [{
+                    "op": "item.status", "item": {"id": "1"}, "status": target,
+                    "outcome": "Exact outcome", "why": "Exact why"
+                }]});
+                let expanded = run(&input).unwrap();
+                assert_eq!(expanded.request, run(&input).unwrap().request);
+                let operation = &wire(&expanded.request)["operations"][0];
+                assert_eq!(operation["status"], target);
+                assert!(operation["ack_to"].is_null());
+                assert!(expanded.repairs.is_empty());
+            }
         }
     }
 

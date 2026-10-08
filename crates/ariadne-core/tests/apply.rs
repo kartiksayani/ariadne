@@ -213,6 +213,9 @@ impl Setup {
             .unwrap();
     }
     fn prepare(&self, turn: TurnState) -> UuidV4 {
+        self.prepare_kind(turn, InputKind::Reply, "Original immutable owner message.")
+    }
+    fn prepare_kind(&self, turn: TurnState, kind: InputKind, text: &str) -> UuidV4 {
         let command = OwnerCommand::InputSubmit {
             api_version: SchemaVersion::new(1).unwrap(),
             op_id: id(700),
@@ -222,8 +225,8 @@ impl Setup {
                     topic_id: id(5),
                     item_id: Some(item("1")),
                 },
-                kind: InputKind::Reply,
-                text: "Original immutable owner message.".into(),
+                kind,
+                text: text.into(),
                 selected_option_id: None,
                 expected_question_revision: None,
                 supersedes_answer_id: None,
@@ -246,6 +249,7 @@ impl Setup {
             panic!("input")
         };
         let input_id = input_id.clone();
+        let number = self.saved().messages.last().unwrap().number.value();
         self.write(701, |s| {
             let input = s.inputs.0.get_mut(&input_id).unwrap();
             let marker = format!("[ARIADNE_INPUT:{}:{}]", input_id.as_str(), id(800).as_str());
@@ -277,7 +281,7 @@ impl Setup {
             });
             let binding = s.bindings.0.get_mut(&id(3)).unwrap();
             binding.active_input_id = Some(input_id.clone());
-            binding.issued_through_message_number = NonnegativeSafeInteger::new(2).unwrap();
+            binding.issued_through_message_number = NonnegativeSafeInteger::new(number).unwrap();
         });
         input_id
     }
@@ -290,7 +294,13 @@ impl Setup {
             "response",
             "Exact full reply.\nWith trailing spaces.  ",
         ));
-        r.input_result = Some(result());
+        let mut result = result();
+        result.handled_through_message_number = p(self
+            .context(Some(source))
+            .read_scope()
+            .issued_through_message_number()
+            .value());
+        r.input_result = Some(result);
         r
     }
 }
@@ -1542,7 +1552,11 @@ fn agents_finish_summaries_by_proposing_ack_and_cannot_close_them() {
             outcome: "Replaced.".into(),
             why: "Newer.".into(),
         });
-        setup.rejected(&replace, CoreErrorCode::InvalidTransition);
+        // Superseding work uses its explicit replacement link, clearing Ack.
+        let replacement_setup = Setup::new(&saved);
+        replacement_setup.next.store(20000, Ordering::SeqCst);
+        replacement_setup.execute(&replace).unwrap();
+        assert_eq!(replacement_setup.saved().items.0[&item("1")].ack_to, None);
         let mut progress = guarded(994, "1", summary.revision.value());
         progress.operations.push(Operation::ItemStatus {
             item: existing("1"),
@@ -1606,4 +1620,240 @@ fn strict_filing_requires_an_answer_round_and_ack_never_hides_an_unanswered_ques
         reason: Some("Finished.".into()),
     });
     setup.rejected(&hide, CoreErrorCode::InvalidTransition);
+}
+
+#[test]
+fn owner_drop_and_close_reply_can_finish_existing_ack_questions() {
+    for (kind, text, status) in [
+        (InputKind::Drop, "Drop this question.", ItemStatus::Dropped),
+        (InputKind::Reply, "close it", ItemStatus::Done),
+    ] {
+        for lenient in [false, true] {
+            let setup = Setup::new(&seed());
+            let mut ask = guarded(1001, "1", 1);
+            ask.operations.push(Operation::ItemAsk {
+                item: existing("1"),
+                ask: "Keep this question?".into(),
+                options: vec![],
+                recipient_binding_id: id(3),
+            });
+            setup.execute(&ask).unwrap();
+            setup.write(1002, |s| {
+                s.items.0.get_mut(&item("1")).unwrap().ack_to = Some(AckTarget::Done)
+            });
+            let source = setup.prepare_kind(TurnState::Completed, kind.clone(), text);
+            let mut close = setup.dispatched(1003, &source);
+            close.operations.push(Operation::ItemStatus {
+                item: existing("1"),
+                status: status.clone(),
+                ack_to: None,
+                outcome: Some("Closed at your request.".into()),
+                why: Some("The owner directed it.".into()),
+                reason: None,
+            });
+            if lenient {
+                let (_, replayed, repairs) = ApplyService::new(&setup.registry)
+                    .execute_lenient(
+                        &setup.context(Some(&source)),
+                        &close,
+                        || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                        at(),
+                    )
+                    .unwrap();
+                assert!(!replayed && repairs.is_empty());
+            } else {
+                setup.execute(&close).unwrap();
+            }
+            let saved = setup.saved();
+            assert_eq!(saved.items.0[&item("1")].status, status);
+            assert_eq!(saved.items.0[&item("1")].ack_to, None);
+            assert_eq!(saved.inputs.0[&source].state, InputState::Handled);
+        }
+    }
+}
+
+#[test]
+fn agent_can_drop_its_unanswered_question_without_an_ack_target() {
+    let setup = Setup::new(&seed());
+    let mut ask = guarded(1004, "1", 1);
+    ask.operations.push(Operation::ItemAsk {
+        item: existing("1"),
+        ask: "Proceed?".into(),
+        options: vec![],
+        recipient_binding_id: id(3),
+    });
+    setup.execute(&ask).unwrap();
+    let mut hide = guarded(
+        1014,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    hide.operations.push(Operation::ItemStatus {
+        item: existing("1"),
+        status: ItemStatus::Open,
+        ack_to: None,
+        outcome: None,
+        why: None,
+        reason: Some("Question pending.".into()),
+    });
+    let error = core_error(setup.execute(&hide).unwrap_err());
+    assert_eq!(error.code, CoreErrorCode::InvalidTransition);
+    for guidance in [
+        "waiting_on_me",
+        "ack_to \"dropped\"",
+        "new item",
+        "item.replace",
+    ] {
+        assert!(error.message.contains(guidance), "{}", error.message);
+    }
+    let mut close = guarded(
+        1005,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    close.operations.push(Operation::ItemStatus {
+        item: existing("1"),
+        status: ItemStatus::Dropped,
+        ack_to: None,
+        outcome: Some("Question withdrawn.".into()),
+        why: Some("No longer needed.".into()),
+        reason: None,
+    });
+    setup.execute(&close).unwrap();
+    assert_eq!(
+        setup.saved().items.0[&item("1")].status,
+        ItemStatus::Dropped
+    );
+}
+
+#[test]
+fn lenient_ack_repair_is_locked_state_aware_and_replays_after_owner_ack() {
+    for target in [AckTarget::Decided, AckTarget::Done, AckTarget::Dropped] {
+        let mut source = seed();
+        source.items.0.get_mut(&item("1")).unwrap().ack_to = Some(AckTarget::Done);
+        let setup = Setup::new(&source);
+        let mut close = guarded(1006, "1", 1);
+        close.operations.push(Operation::ItemStatus {
+            item: existing("1"),
+            status: target.status(),
+            ack_to: None,
+            outcome: Some("Exact outcome.".into()),
+            why: Some("Exact evidence.".into()),
+            reason: None,
+        });
+        let service = ApplyService::new(&setup.registry);
+        let context = setup.context(None);
+        let (preview, repairs) = service
+            .preview_lenient(
+                &context,
+                &close,
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap();
+        assert_eq!(repairs.len(), 1);
+        assert_eq!(setup.saved(), source);
+        assert_eq!(preview.session.items.0[&item("1")].ack_to, Some(target));
+        let (receipt, replayed, repairs) = service
+            .execute_lenient(
+                &context,
+                &close,
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap();
+        assert!(!replayed && repairs.len() == 1);
+        let saved = setup.saved();
+        assert_eq!(saved.items.0[&item("1")].status, ItemStatus::Open);
+        assert_eq!(
+            saved.items.0[&item("1")].outcome.as_deref(),
+            Some("Exact outcome.")
+        );
+        ariadne_core::history_actions::HistoryActionService::new(&setup.registry)
+            .acknowledge(
+                &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+                    RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                )),
+                &OwnerCommand::Ack {
+                    api_version: SchemaVersion::new(1).unwrap(),
+                    op_id: id(1007),
+                    params: ItemAckParams {
+                        item_id: item("1"),
+                        expected_revision: saved.items.0[&item("1")].revision,
+                    },
+                },
+                at(),
+                || id(1008),
+            )
+            .unwrap();
+        let after_ack = setup.saved();
+        let (replay, replayed, repairs) = service
+            .execute_lenient(
+                &context,
+                &close,
+                || panic!("replay allocates nothing"),
+                at(),
+            )
+            .unwrap();
+        assert_eq!(replay, receipt);
+        assert!(replayed && repairs.is_empty());
+        assert_eq!(setup.saved(), after_ack);
+        assert_eq!(after_ack.items.0[&item("1")].status, target.status());
+    }
+}
+
+#[test]
+fn handled_reply_keeps_a_proposed_completion_ackable_and_new_questions_answerable() {
+    let setup = Setup::new(&seed());
+    let mut ask = guarded(1009, "1", 1);
+    ask.operations.push(Operation::ItemAsk {
+        item: existing("1"),
+        ask: "Proceed?".into(),
+        options: vec![],
+        recipient_binding_id: id(3),
+    });
+    setup.execute(&ask).unwrap();
+    let source = setup.prepare(TurnState::Completed);
+    let mut finished = setup.dispatched(1010, &source);
+    finished.operations.push(Operation::ItemStatus {
+        item: existing("1"),
+        status: ItemStatus::Open,
+        ack_to: Some(AckTarget::Done),
+        outcome: Some("Ready.".into()),
+        why: Some("Owner replied.".into()),
+        reason: Some("Ready for Ack.".into()),
+    });
+    setup.execute(&finished).unwrap();
+    let saved = setup.saved();
+    assert_eq!(saved.inputs.0[&source].state, InputState::Handled);
+    let mut edit = guarded(1011, "1", saved.items.0[&item("1")].revision.value());
+    edit.operations.push(Operation::ItemEdit {
+        item: existing("1"),
+        patch: ItemPatch {
+            question: Some("A new question?".into()),
+            short: None,
+            item_type: None,
+            note: None,
+            links: None,
+        },
+    });
+    setup.rejected(&edit, CoreErrorCode::InvalidTransition);
+    ariadne_core::history_actions::HistoryActionService::new(&setup.registry)
+        .acknowledge(
+            &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+                RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+            )),
+            &OwnerCommand::Ack {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(1012),
+                params: ItemAckParams {
+                    item_id: item("1"),
+                    expected_revision: saved.items.0[&item("1")].revision,
+                },
+            },
+            at(),
+            || id(1013),
+        )
+        .unwrap();
+    assert_eq!(setup.saved().items.0[&item("1")].status, ItemStatus::Done);
 }
