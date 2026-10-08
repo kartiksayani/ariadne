@@ -18,7 +18,7 @@ function destination(history: History | undefined, direction: HistoryDirection, 
   if (!history) return null;
   const step = direction === 'back' ? -1 : 1;
   for (let index = history.index + step; index >= 0 && index < history.items.length; index += step) {
-    if (exists(history.items[index])) return index;
+    if (history.items[index] !== history.items[history.index] && exists(history.items[index])) return index;
   }
   return null;
 }

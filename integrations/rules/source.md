@@ -12,8 +12,10 @@ revisions and validation can make the session unreadable.
   one item's full history.
 - `ariadne apply --binding B --generation G --json-stdin --json`: one request on
   stdin (use a quoted heredoc). `--dry-run` validates without committing. The
-  receipt is compact: `op_id` and, for each topic and item created or changed, its
-  `id`, `short` label and new `revision` (a topic also its `number`).
+  receipt lists `op_id`, and each changed topic/item's `id`, `short` label,
+  new `revision` and `created` flag (topics also have a `number`).
+
+An unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to deliberately file the identical request again.
 
 Ariadne never pushes context: read the topics and items and reuse the ones that
 fit.
@@ -24,13 +26,13 @@ One JSON object on stdin. Only `operations` is required.
 
 | Field | Meaning |
 |---|---|
-| `op_id` | Optional; the CLI derives one from the request, so resending the identical request replays. Your own: lowercase UUIDv4 (`errors.md`) |
+| `op_id` | Optional: derived from binding and request, independent of generation. Explicit: lowercase UUIDv4 (`errors.md`) |
 | `expected_item_revisions`, `expected_topic_revisions` | `{"1":4}`: the current revision of each existing item or topic the request replies to, edits, asks, closes or adds a child under. Not needed for what the same request creates |
 | `summary` | Optional; one short line shown in the timeline of every item touched |
 | `source_input_id`, `attempt_id`, `input_result` | Optional; only to answer a dispatched input (`inputs.md`) |
 
-Keep receipt revisions for your next request instead of reading again. An item's
-`id` is its number, the value `{"id":...}` takes. Omit any optional operation field.
+Reuse receipt revisions for your next request. An item's `id` is its number, used
+in `{"id":...}`. Omit optional operation fields.
 
 Refer to another item only as a markdown link `[short label](item:<item id>)`,
 for example `[cache choice](item:3.2)`; never use a bare item number such as

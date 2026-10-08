@@ -32,7 +32,7 @@ import { nextSelection, removeSubject, subtree, targetSession } from './ui/remov
 import { agentName, hostApp, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
-import { nextTextSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
+import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
 import { connectionOf } from './ui/shared/connection';
 import { earlierAgent } from './ui/shared/excerpt';
@@ -151,7 +151,7 @@ interface CenterProps {
   readonly historyReveal: RevealedItem | null;
   readonly highlightedItems: ReadonlySet<string>; readonly highlightedMessages: ReadonlySet<string>;
   readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
-  readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
+  readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onClearFilters: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void; readonly onRemoveTarget: RemoveHandler;
   readonly onAgentNotRunning: (submission: PendingSubmission) => void;
@@ -300,17 +300,18 @@ function Workspace({ application }: { application: Application }) {
   const onAgentNotRunning = (submission: PendingSubmission) => {
     void agentNotRunning({ navigation, drafts: application.drafts, reveal: revealItem })(submission);
   };
-  const focusOwner = (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => {
+  const focusOwner = (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number, onReveal?: (result: RevealedItem) => void) => {
     const token = ++shortcutSequence.current, navigationRequest = navigation.getNavigationRequest();
     setOwnerFocus(null);
     void navigation.routes.revealItem(target).then(async result => {
       if (!result || result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== navigationRequest) return;
+      onReveal?.(result);
       const openedRequest = await reveal(result, token);
       if (openedRequest === null || shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex });
     }).catch((error: unknown) => setRouteError(plainFailure(error, 'This registered item could not be opened.')));
   };
-  const queueBring = async (target: ItemRoute) => {
+  const queueBring = async (target: ItemRoute, onReveal?: (result: RevealedItem) => void) => {
     const identity = JSON.stringify(target);
     if (bringing.current.has(identity)) return;
     bringing.current.add(identity);
@@ -319,6 +320,7 @@ function Workspace({ application }: { application: Application }) {
     try {
       const result = await navigation.routes.revealItem(target);
       if (!result || result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== navigationRequest) return;
+      onReveal?.(result);
       const openedRequest = await reveal(result, token);
       if (openedRequest === null) return;
       await application.drafts.load();
@@ -347,10 +349,24 @@ function Workspace({ application }: { application: Application }) {
   };
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
   const shown = useAppliedTheme(theme);
-  const shownTextSize = useAppliedTextSize(preferences?.global.text_scale);
+  const [textSizeTarget, setTextSizeTarget] = useState<TextSize | null>(null);
+  const textSizeIntent = useRef<TextSize | null>(null);
+  const shownTextSize = useAppliedTextSize(textSizeTarget ?? preferences?.global.text_scale);
+  useEffect(() => {
+    if (textSizeTarget === textSize(preferences?.global.text_scale) && !state.writing && state.pendingOperationId === null) {
+      textSizeIntent.current = null;
+      setTextSizeTarget(null);
+    }
+  }, [textSizeTarget, preferences?.global.text_scale, state.writing, state.pendingOperationId]);
   const changeTextSize = (size: TextSize) => {
-    const current = navigation.getSnapshot().preferences;
-    if (current && size !== (current.global.text_scale ?? 80)) void navigation.saveTextScale(size, current.revision);
+    const current = navigation.getSnapshot();
+    if (!current.preferences) return;
+    const replacingTarget = textSizeIntent.current !== null;
+    textSizeIntent.current = size;
+    setTextSizeTarget(size);
+    if (replacingTarget || current.writing || current.pendingOperationId !== null || size !== textSize(current.preferences.global.text_scale)) {
+      void navigation.saveTextScale(size, current.preferences.revision);
+    }
   };
   const projectName = (projectId: string) => state.projects?.projects.items.find(project => project.project_id === projectId)?.project?.display_name ?? 'Unavailable project';
   const archived = view?.filters.archived ?? false;
@@ -432,7 +448,7 @@ function Workspace({ application }: { application: Application }) {
   }), { scope: 'workspace' });
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
-  useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(navigation.getSnapshot().preferences?.global.text_scale, intent)));
+  useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
   return <ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget}
@@ -466,10 +482,10 @@ function Workspace({ application }: { application: Application }) {
         selectedId={treeSelectedId} detailOpen={detailOpen && !!selectedId} railOpen={!!view && view.rail !== 'hidden'}
         highlightedItems={highlightedItems} highlightedMessages={highlightedMessages} onHoverItem={hoverItem} onSelected={selected}
         onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}
-        onAct={(intent, target) => {
-          if (intent === 'bring') void queueBring(target);
+        onAct={(intent, target, onReveal) => {
+          if (intent === 'bring') void queueBring(target, onReveal);
           else if (intent === 'later') toggleLater(target, target.item_id);
-          else focusOwner(target, intent);
+          else focusOwner(target, intent, undefined, onReveal);
         }}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
         onRemove={target => { askRemove(target); }} onRemoveTarget={removeTarget} onAgentNotRunning={onAgentNotRunning} />} />

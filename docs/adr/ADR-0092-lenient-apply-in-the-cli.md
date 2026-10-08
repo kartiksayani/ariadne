@@ -28,17 +28,20 @@ valid requests.
   position and `recommended` false; `item.ask` recipient is the calling binding.
 - `item.add` may carry `children`, recursively. The CLI flattens them in order
   (parent first), sets each `parent` and inherits `topic`.
-- An omitted `op_id` is deterministic: SHA-256 over four byte strings in order,
+- An omitted `op_id` is deterministic: SHA-256 over three byte strings in order,
   each prefixed by its byte length as a big-endian u64: ASCII `ariadne apply op_id v1`,
-  the binding's lowercase UUID string, the generation's lowercase UUID string, and
+  the binding's lowercase UUID string, and
   compact JSON of the expanded typed `ApplyRequest` with `op_id` removed. JSON
   object keys are recursively sorted lexicographically; array order and exact prose
   are preserved. Defaults are filled, refs allocated and children flattened before
   hashing. Take the first 16 digest bytes, set byte 6's high nibble to `0100` (v4)
   and byte 8's high bits to `10` (RFC variant), then format as a lowercase UUID.
+  Generation is excluded, matching Core's binding-scoped replay lookup. For binding
+  `00000000-0000-4000-8000-000000000003` and `{"operations":[]}`, the derived ID is
+  `47d12499-bc46-48f3-a2d3-33c007644020`.
   SHA-256 is already locked; the CLI moves it from a test to a runtime dependency.
-- Resending the identical request with the same binding and generation is safe
-  after an uncertain commit, I/O error, timeout or killed call, even with no receipt:
+- Resending the identical request with the same binding is safe across generation
+  changes after an uncertain commit, I/O error, timeout or killed call, even with no receipt:
   a saved request replays instead of filing twice. Uncertainty hints also name the
   derived ID. An explicit `op_id` always wins and replays as before. Intentionally
   filing the identical request again requires a fresh explicit `op_id`.

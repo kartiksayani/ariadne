@@ -285,8 +285,9 @@ export function treeModel(input: TreeInput): TreeModel {
   };
   const shows = new Map(all.map(item => [item.id, displayStatus(session, item)]));
   const display = (item: Immutable<Item>) => shows.get(item.id) ?? item.status;
-  const statusMatch = (item: Immutable<Item>) => !filters.statuses.length || statusIn(filters.statuses, display(item));
-  const filtering = terms.length > 0 || filters.statuses.length > 0 || filters.owners.length > 0 || filters.hide_later;
+  const statusFiltered = !chips.has('all');
+  const statusMatch = (item: Immutable<Item>) => !statusFiltered || statusIn(filters.statuses, display(item));
+  const filtering = terms.length > 0 || statusFiltered || filters.owners.length > 0 || filters.hide_later;
   const scoped = live.filter(item => base(item) && (filters.topic_id === null || item.topic_id === filters.topic_id));
   const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => inChip(key, display(item))).length])) as Record<Chip, number>;
 

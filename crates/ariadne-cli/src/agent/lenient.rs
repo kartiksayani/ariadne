@@ -22,10 +22,10 @@ pub struct Expanded {
 const PLACEHOLDER_OP_ID: &str = "00000000-0000-4000-8000-000000000000";
 
 /// Expands lenient stdin bytes into the strict request for `binding` at `generation`.
-/// An omitted `op_id` is derived from the binding, the generation and the expanded
-/// request, never drawn at random: a blind retry of a call that was killed or timed
-/// out is then the same operation, and the core replays it instead of filing twice.
-pub fn expand(bytes: &[u8], binding: &UuidV4, generation: &UuidV4) -> Result<Expanded, CoreError> {
+/// An omitted `op_id` is derived from the binding and the expanded request, never
+/// drawn at random: a blind retry remains the same operation across generation
+/// changes, and the core replays it instead of filing twice.
+pub fn expand(bytes: &[u8], binding: &UuidV4, _generation: &UuidV4) -> Result<Expanded, CoreError> {
     let Strict(value) = serde_json::from_slice(bytes).map_err(|e| bad_stdin("ApplyRequest", &e))?;
     let Value::Object(mut top) = value else {
         return Err(bad_request("the request must be a JSON object".into()));
@@ -71,7 +71,7 @@ pub fn expand(bytes: &[u8], binding: &UuidV4, generation: &UuidV4) -> Result<Exp
         .map_err(|e| bad_request(e.to_string()))?;
     request.operations = parsed;
     let generated_op_id = if derive {
-        let id = derived_op_id(binding, generation, &request)?;
+        let id = derived_op_id(binding, &request)?;
         request.op_id = id.clone();
         Some(id)
     } else {
@@ -83,17 +83,13 @@ pub fn expand(bytes: &[u8], binding: &UuidV4, generation: &UuidV4) -> Result<Exp
     })
 }
 
-/// SHA-256 over the binding, the generation and the canonical expanded request
+/// SHA-256 over the binding and the canonical expanded request
 /// without its `op_id` (the request parameters the core's replay compares).
 /// Each input, including the domain separator, has a big-endian u64 byte-length
 /// prefix. JSON object keys are sorted by serde_json's default map representation;
 /// array order and exact prose are preserved. The first 16 digest bytes become a
 /// UUID with the version 4 and RFC variant bits set.
-fn derived_op_id(
-    binding: &UuidV4,
-    generation: &UuidV4,
-    request: &ApplyRequest,
-) -> Result<UuidV4, CoreError> {
+fn derived_op_id(binding: &UuidV4, request: &ApplyRequest) -> Result<UuidV4, CoreError> {
     let mut canonical = serde_json::to_value(request)
         .map_err(|_| invalid("Cannot derive an op_id from this request."))?;
     if let Some(object) = canonical.as_object_mut() {
@@ -103,7 +99,6 @@ fn derived_op_id(
     for part in [
         b"ariadne apply op_id v1".as_slice(),
         binding.as_str().as_bytes(),
-        generation.as_str().as_bytes(),
         &serde_json::to_vec(&canonical)
             .map_err(|_| invalid("Cannot derive an op_id from this request."))?,
     ] {
@@ -428,7 +423,7 @@ mod tests {
         let expanded = run(&json!({"operations": []})).unwrap();
         let derived = expanded.generated_op_id.clone().unwrap();
         // Fixed independently from the documented length-prefixed SHA-256 inputs.
-        assert_eq!(derived.as_str(), "a055dcbc-2b1a-4bf7-820d-f9b680d29e0d");
+        assert_eq!(derived.as_str(), "47d12499-bc46-48f3-a2d3-33c007644020");
         assert_eq!(expanded.request.op_id, derived);
         let request = wire(&expanded.request);
         assert_eq!(
@@ -440,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn the_derived_op_id_is_a_v4_uuid_that_depends_on_the_request_and_its_route_only() {
+    fn the_derived_op_id_is_a_v4_uuid_that_depends_on_request_and_binding_not_generation() {
         let request = json!({"summary": "s", "operations": [{"op": "topic.add", "name": "T"}]});
         let first = run(&request).unwrap().generated_op_id.unwrap();
         // The same request is the same operation, however its JSON is spaced or ordered.
@@ -458,7 +453,7 @@ mod tests {
             ["8", "9", "a", "b"].contains(&&text[19..20]),
             "variant: {text}"
         );
-        // Another request, binding or generation is another operation.
+        // Another request or binding is another operation.
         let changed = json!({"summary": "s", "operations": [{"op": "topic.add", "name": "U"}]});
         assert_ne!(run(&changed).unwrap().generated_op_id.unwrap(), first);
         let bytes = serde_json::to_vec(&request).unwrap();
@@ -470,7 +465,8 @@ mod tests {
             &UuidV4::new(GENERATED).unwrap(),
         )
         .unwrap();
-        assert_ne!(other_generation.generated_op_id.unwrap(), first);
+        // Reconnecting the same binding must not make a saved operation new work.
+        assert_eq!(other_generation.generated_op_id.unwrap(), first);
     }
 
     #[test]

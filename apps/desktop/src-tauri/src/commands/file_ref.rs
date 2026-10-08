@@ -56,10 +56,16 @@ fn normalise(path: &Path) -> PathBuf {
 
 /// The path a reference names inside `root`, worked out from text alone (no
 /// filesystem call): relative references join `root`, `~/` expands against
-/// `home`, `.` and `..` are resolved, and the result must start with `root`.
+/// `home`, `.` and `..` are resolved, and the result must start with the recorded
+/// `root` or its already canonicalised spelling.
 /// A path outside the project, such as one on a stale network share, is
 /// refused here before anything touches the disk.
-fn lexical_candidate(root: &Path, home: Option<&Path>, reference: &str) -> Option<PathBuf> {
+fn lexical_candidate(
+    root: &Path,
+    canonical_root: &Path,
+    home: Option<&Path>,
+    reference: &str,
+) -> Option<PathBuf> {
     if reference.is_empty()
         || reference.len() > MAX_REFERENCE
         || reference.chars().any(char::is_control)
@@ -73,17 +79,19 @@ fn lexical_candidate(root: &Path, home: Option<&Path>, reference: &str) -> Optio
         root.join(path)
     };
     let candidate = normalise(&joined);
-    candidate.starts_with(normalise(root)).then_some(candidate)
+    (candidate.starts_with(normalise(root)) || candidate.starts_with(canonical_root))
+        .then_some(candidate)
 }
 
 /// The canonical regular file a reference names inside `root`, else None.
-/// The text check comes first (`lexical_candidate`); only a path that passes it
-/// is canonicalised, and the result is checked again so symlinks cannot leave.
+/// The approved project root is canonicalised first. The candidate passes the
+/// text check (`lexical_candidate`) before any filesystem call touches it, then
+/// its canonical result is checked again so symlinks cannot leave.
 fn resolve(root: &Path, home: Option<&Path>, reference: &str) -> Option<PathBuf> {
-    let candidate = lexical_candidate(root, home, reference)?;
-    let root = root.canonicalize().ok()?;
+    let canonical_root = root.canonicalize().ok()?;
+    let candidate = lexical_candidate(root, &canonical_root, home, reference)?;
     let file = candidate.canonicalize().ok()?;
-    (file.starts_with(&root) && std::fs::metadata(&file).ok()?.is_file()).then_some(file)
+    (file.starts_with(&canonical_root) && std::fs::metadata(&file).ok()?.is_file()).then_some(file)
 }
 
 fn resolve_in(root: &Path, reference: &str) -> Option<PathBuf> {
@@ -224,12 +232,12 @@ mod tests {
             "~/x.rs",
         ] {
             assert_eq!(
-                lexical_candidate(root, Some(home), outside),
+                lexical_candidate(root, root, Some(home), outside),
                 None,
                 "{outside}"
             );
         }
-        assert_eq!(lexical_candidate(root, None, "~/project/x.rs"), None);
+        assert_eq!(lexical_candidate(root, root, None, "~/project/x.rs"), None);
         assert_eq!(resolve(root, Some(home), "/Volumes/stale-share/x.rs"), None);
     }
 
@@ -237,15 +245,59 @@ mod tests {
     fn the_text_check_normalises_inside_paths() {
         let root = Path::new("/no/such/project");
         let want = Some(PathBuf::from("/no/such/project/src/app.ts"));
-        assert_eq!(lexical_candidate(root, None, "src/app.ts:3"), want);
-        assert_eq!(lexical_candidate(root, None, "./src/deep/../app.ts"), want);
+        assert_eq!(lexical_candidate(root, root, None, "src/app.ts:3"), want);
         assert_eq!(
-            lexical_candidate(root, None, "/no/such/project/src/./app.ts"),
+            lexical_candidate(root, root, None, "./src/deep/../app.ts"),
             want
         );
         assert_eq!(
-            lexical_candidate(root, Some(Path::new("/no/such")), "~/project/src/app.ts"),
+            lexical_candidate(root, root, None, "/no/such/project/src/./app.ts"),
             want
+        );
+        assert_eq!(
+            lexical_candidate(
+                root,
+                root,
+                Some(Path::new("/no/such")),
+                "~/project/src/app.ts"
+            ),
+            want
+        );
+    }
+
+    #[test]
+    fn the_text_check_accepts_both_root_spellings_with_component_boundaries() {
+        // These aliases are supplied as text; no candidate needs to exist.
+        let recorded = Path::new("/tmp/p");
+        let canonical = Path::new("/private/tmp/p");
+        for root in [recorded, canonical] {
+            let inside = root.join("src/app.ts");
+            assert_eq!(
+                lexical_candidate(recorded, canonical, None, inside.to_str().unwrap()),
+                Some(inside)
+            );
+            for outside in [
+                root.with_file_name("p-sibling/app.ts"),
+                root.join("../app.ts"),
+            ] {
+                assert_eq!(
+                    lexical_candidate(recorded, canonical, None, outside.to_str().unwrap()),
+                    None
+                );
+            }
+        }
+        assert_eq!(
+            lexical_candidate(
+                recorded,
+                canonical,
+                Some(Path::new("/private/tmp")),
+                "~/p/src/app.ts:3"
+            ),
+            Some(canonical.join("src/app.ts"))
+        );
+        assert_eq!(
+            lexical_candidate(recorded, canonical, None, "../app.ts"),
+            None
         );
     }
 
@@ -340,6 +392,18 @@ mod tests {
             resolve(&alias, None, "src/app.ts"),
             Some(f.project.join("src/app.ts"))
         );
+        for path in [alias.join("src/app.ts"), f.project.join("src/app.ts")] {
+            assert_eq!(
+                resolve(&alias, None, path.to_str().unwrap()),
+                Some(f.project.join("src/app.ts"))
+            );
+        }
+        symlink(f.outside.join("secret.txt"), f.project.join("escape.txt")).unwrap();
+        for root in [&alias, &f.project] {
+            for path in [root.join("escape.txt"), root.join("../secret.txt")] {
+                assert_eq!(resolve(&alias, None, path.to_str().unwrap()), None);
+            }
+        }
     }
 
     #[test]

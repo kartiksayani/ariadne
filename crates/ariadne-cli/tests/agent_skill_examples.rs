@@ -791,6 +791,11 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
     assert!(ERRORS.contains("Resend the identical request"));
     assert!(ERRORS.contains("the CLI derives the same `op_id`"));
     assert!(ERRORS.contains("A retry of the identical request is safe"));
+    assert!(RULES.contains("An unexpected `\"replayed\":true` files nothing new"));
+    assert!(
+        RULES.contains("a fresh explicit `op_id` to deliberately file the identical request again")
+    );
+    assert!(RULES.contains("independent of generation"));
     for needle in ["`short` label", "at most 40 characters"] {
         assert!(RULES.contains(needle), "{needle}");
     }

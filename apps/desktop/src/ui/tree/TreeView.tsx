@@ -49,7 +49,7 @@ export interface TreeViewProps {
   readonly query: string;
   /** An item revealed from a link or the waiting panel; null once dismissed. */
   readonly reveal: RevealedItem | null;
-  /** Only Back/Forward asks the tree to bring an offscreen selection into view. */
+  /** The latest Back/Forward reveal; retained alongside ordinary external reveals. */
   readonly historyReveal?: RevealedItem | null;
   readonly selectedId: string | null;
   readonly detailOpen: boolean;
@@ -68,7 +68,7 @@ export interface TreeViewProps {
   readonly onDismissReveal: () => void;
   /** "Resume filtered view": drop the reveal and close its detail. */
   readonly onResume: () => void;
-  readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
+  readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onClearFilters: () => void;
   readonly onShowArchive: () => void;
   /** Called instead of sending when the agent is not running; without it the send queues. */
@@ -88,7 +88,7 @@ const SKELETON = [
 ];
 
 export function TreeView(props: TreeViewProps) {
-  const { navigation, store, actions, drafts, query, reveal, historyReveal, selectedId, detailOpen, railOpen, graph, notices, highlightedItems, highlightedMessages,
+  const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, railOpen, graph, notices, highlightedItems, highlightedMessages,
     summaries, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onShowArchive,
     onAgentNotRunning, onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
@@ -155,6 +155,7 @@ export function TreeView(props: TreeViewProps) {
     change(next);
     return navigation.saveSessionView(next, revision.revision);
   };
+  const clickedReveal = useRef<RevealedItem | null>(null);
   const select = (id: string) => {
     if (busy) return;
     const call = ++request.current;
@@ -162,6 +163,7 @@ export function TreeView(props: TreeViewProps) {
     void navigation.routes.revealItem({ ...route, item_id: id }).then(result => {
       if (!mounted.current || call !== request.current || !result) return;
       // The owner is already looking at this row: opening it must not move the tree.
+      clickedReveal.current = result;
       onSelected(result);
       if (result.kind === 'item' && latest.current.view?.selected_item_id !== id) void saveView(next => { next.selected_item_id = id; });
     }).catch((error: unknown) => {
@@ -393,17 +395,24 @@ export function TreeView(props: TreeViewProps) {
     void document.fonts?.ready.then(() => { if (mounted.current && !settled.current) place(target); });
     // Only the first rows of this session view place the anchor; later changes keep the reading position.
   }, [rows.length, graph]);
+  const previousSelection = useRef({ reveal, selectedId, detailOpen, railOpen });
   useLayoutEffect(() => {
-    if (reveal?.kind !== 'item' || !centered.current) return;
-    const id = reveal.route.item_id;
-    setKbd(false);
-    // History restores the item with the least movement. All ordinary selection sources preserve reading position.
-    if (historyReveal === reveal && !inView(id)) {
+    const previous = previousSelection.current;
+    previousSelection.current = { reveal, selectedId, detailOpen, railOpen };
+    if (!centered.current || graph) return;
+    const selectionChanged = reveal !== previous.reveal || selectedId !== previous.selectedId;
+    const panelOpened = (detailOpen && !previous.detailOpen) || (railOpen && !previous.railOpen);
+    const id = reveal?.kind === 'item' ? reveal.route.item_id : selectedId;
+    if (!id || (!selectionChanged && !panelOpened)) return;
+    const clicked = clickedReveal.current;
+    // A tree click's immediate selection and its workspace reveal echo share the same result.
+    const clickEcho = selectionChanged && clicked?.kind === 'item' && clicked.route.item_id === id
+      && (reveal === clicked || reveal === previous.reveal);
+    if (!clickEcho && !inView(id)) {
       settled.current = true; nearest(id); setAnchor(null);
     }
-    // A reveal moves the keyboard focus to its row, as the graph does.
-    focusRow(id);
-  }, [reveal, historyReveal]);
+    if (reveal?.kind === 'item' && reveal !== previous.reveal) { setKbd(false); focusRow(id); }
+  }, [reveal, selectedId, detailOpen, railOpen, graph]);
   // The prototype re-centres a while after mount (Ariadne.dc.html:976); here the anchor row stays put
   // while the view settles (fonts loading, detail or rail opening, rows arriving or folding, the row's
   // answer opening) until the owner scrolls, clicks in the tree or moves the focus.
@@ -480,7 +489,7 @@ export function TreeView(props: TreeViewProps) {
   const touchedMessage = highlightedMessages.size && session ? session.messages.find(message => highlightedMessages.has(message.id))?.number ?? null : null;
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
-    const act = (intent: RowIntent) => () => onAct(intent, target);
+    const act = (intent: RowIntent) => () => onAct(intent, target, result => { clickedReveal.current = result; });
     if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed) && running && !archivedMode && session?.state === 'active') {
       const bring = { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') };
       if (item.status === 'open') list.push(bring, ...row.later ? [{ icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: act('later') }]

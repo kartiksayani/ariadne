@@ -265,7 +265,7 @@ def bundle_identifier(app):
 
 
 def app_state(home, known, bundle_id=None):
-    """Classify ~/Applications/Ariadne.app: absent, link (old layout), copy (ours) or None (not provably ours).
+    """Classify the app: absent, link (old layout), copy (receipt-owned), adopt (unrecorded) or None.
 
     With no receipt left at all (the version folder was moved aside), a copy that names the same
     bundle identifier as the package being installed is adopted; the bytes can no longer be proven."""
@@ -286,7 +286,7 @@ def app_state(home, known, bundle_id=None):
     claims = (item for item in known if item.get("owned_app", True))
     if any(bundle_files(item["owned_files"]) == seen for item in claims):
         return "copy"
-    return "copy" if not known and bundle_id and bundle_identifier(path) == bundle_id else None
+    return "adopt" if not known and bundle_id and bundle_identifier(path) == bundle_id else None
 
 
 def discard(parent_fd, name):
@@ -308,6 +308,8 @@ def place_app(home, final, state):
         try:
             shutil.copytree(final / "Ariadne.app", apps / stage, symlinks=True)
             if state != "absent":
+                if state == "adopt":
+                    print("Found an Ariadne app without an install record; replacing it.", flush=True)
                 os.rename("Ariadne.app", old, src_dir_fd=apps_fd, dst_dir_fd=apps_fd)
             try:
                 os.rename(stage, "Ariadne.app", src_dir_fd=apps_fd, dst_dir_fd=apps_fd)
@@ -365,7 +367,7 @@ def external_plan(home, root, known, bundle_id):
     when one of them is not provably ours. Returns the app state, the links to own and notes to print."""
     if exists(home / "Applications"):
         directory(home / "Applications")
-    # The app copy is replaced only when a receipt proves we made it (ADR-0080).
+    # A receipt proves ownership; with no receipts, the matching bundle ID allows adoption (ADR-0080).
     state = app_state(home, known, bundle_id) if exists(home / APP_PATH) else "absent"
     require(state is not None, f"Foreign or edited install path: {home / APP_PATH}")
     owned_links = {}

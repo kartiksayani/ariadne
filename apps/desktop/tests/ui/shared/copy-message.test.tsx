@@ -99,6 +99,10 @@ describe('message copy', () => {
     expect(css).toMatch(/\.detail-message-copy\s*\{[^}]*flex:\s*none;[^}]*width:\s*24px;[^}]*opacity:\s*0;/s);
     expect(css).toContain('.detail-msg:hover .detail-message-copy');
     expect(css).toContain('.detail-msg:focus-within .detail-message-copy');
+    expect(css).toContain('.excerpt-timeline:hover .detail-message-copy');
+    expect(css).toContain('.excerpt-timeline:focus-within .detail-message-copy');
+    const timeline = readFileSync(resolve(__dirname, '../../../src/ui/shared/shared.css'), 'utf8');
+    expect(timeline).toMatch(/\.excerpt-timeline\s*\{[^}]*grid-template-columns:\s*16px minmax\(0, 1fr\) 24px;/s);
     expect(css).toContain('.detail-message-copy:focus-visible');
     expect(css).toContain('.detail-message-copy-feedback');
     expect(css).not.toMatch(/display:\s*none|visibility:\s*hidden|pointer-events:\s*none/);

@@ -360,6 +360,101 @@ describe('ordinary desktop composition', () => {
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.filters.search === 'missing pending needle'));
     expect(searches).toHaveLength(1);
   });
+  it('accumulates two text-size keyboard presses before React renders either change', async () => {
+    const { transport } = setup();
+    await screen.findByRole('heading', { name: 'All sessions' });
+    act(() => {
+      fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+      fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+    });
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('1');
+    await waitFor(() => expect(transport.preferences.global.text_scale).toBe(100));
+  });
+  it.each(['-', '0'])('keeps a same-render text-size increase then %s at the last requested size', async key => {
+    const { transport } = setup();
+    await screen.findByRole('heading', { name: 'All sessions' });
+    act(() => {
+      fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+      fireEvent.keyDown(document.body, { key, metaKey: true });
+    });
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.8');
+    await waitFor(() => expect(transport.preferences.global.text_scale).toBe(80));
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(1);
+  });
+  it('applies two rapid text-size keyboard presses as two steps before their save completes', async () => {
+    const { transport } = setup();
+    await screen.findByRole('heading', { name: 'All sessions' });
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.text_scale === 90)) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+    await waitFor(() => expect(entered).toBe(true));
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.9');
+    fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('1');
+    expect(transport.preferences.global.text_scale).toBeUndefined();
+    await act(async () => { release(); await gate; });
+    await waitFor(() => expect(transport.preferences.global.text_scale).toBe(100));
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Text size' }));
+    expect(screen.getByRole('button', { name: '100%' }).getAttribute('aria-pressed')).toBe('true');
+  });
+  it('uses the clicked text size as the next keyboard step while its save is pending', async () => {
+    const { transport } = setup();
+    await screen.findByRole('heading', { name: 'All sessions' });
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.text_scale === 110)) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Text size' }));
+    fireEvent.click(screen.getByRole('button', { name: '110%' }));
+    await waitFor(() => expect(entered).toBe(true));
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('1.1');
+    fireEvent.keyDown(document.body, { key: '-', metaKey: true });
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('1');
+    await act(async () => { release(); await gate; });
+    await waitFor(() => expect(transport.preferences.global.text_scale).toBe(100));
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(2);
+  });
+  it.each(['confirmed', 'reconciled'])('retains typed search and the text-size keyboard target while a theme save is %s', async completion => {
+    const { transport } = setup(); await openSession();
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.theme === 'light')) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    const search = screen.getByLabelText('Search questions and outcomes') as HTMLInputElement;
+    fireEvent.change(search, { target: { value: 'retain this typed search' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
+    await waitFor(() => expect(entered).toBe(true));
+    fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+    fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('1');
+    if (completion === 'reconciled') transport.failNext = 'preferences_patch';
+    await act(async () => { release(); await gate; });
+    if (completion === 'reconciled') {
+      fireEvent.click(await screen.findByRole('button', { name: 'Check again' }));
+    }
+    await waitFor(() => expect(transport.preferences.global).toMatchObject({ text_scale: 100, theme: 'light' }));
+    await waitFor(() => expect(transport.preferences.sessions[0].filters.search).toBe('retain this typed search'));
+    await waitFor(() => expect(search.disabled).toBe(false));
+    expect(search.value).toBe('retain this typed search');
+  });
   it('opens a native route over an earlier local selection without clearing its filters', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);

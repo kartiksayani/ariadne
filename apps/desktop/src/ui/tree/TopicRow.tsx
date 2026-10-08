@@ -18,14 +18,14 @@ export interface TopicRowProps {
   readonly onToggle: (topicId: string) => void;
   /** The open "Reply to topic" box (ui/answer/TopicReply), under the band. */
   readonly reply?: ReactNode;
-  /** A stopped delivery's inline fix (ui/answer/StuckNote); it takes the delivery line's place. */
+  /** A stopped delivery's inline fix (ui/answer/StuckNote), below the sticky status. */
   readonly fix?: ReactNode;
 }
 
 export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onKeyDown, onToggle, reply, fix }: TopicRowProps) {
   const topic = row.topic;
   // A click focuses the band, which tints it and shows its actions; the chevron folds.
-  return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={1} aria-expanded={row.expanded} aria-label={topic.name}
+  return <><div ref={element => remember(row.key, element)} role="treeitem" aria-level={1} aria-expanded={row.expanded} aria-label={topic.name}
     tabIndex={focused ? 0 : -1} className="tree-row tree-topic" data-topic-id={topic.id} data-row={row.key} data-first={row.first || undefined}
     onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }} onKeyDown={onKeyDown}>
     <div className="tree-topic-head">
@@ -40,10 +40,12 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
         {row.counts.map(count => <span key={count.text} className="tree-count"><i className={count.icon} style={{ color: count.color }} />{count.text}</span>)}
       </span>
     </div>
-    {row.delivery?.stuck && fix ? <div className="tree-topic-fix">{fix}</div>
-      : row.delivery && <div className="tree-topic-line" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
+    {row.delivery && <div className="tree-topic-line tree-topic-status" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
+  </div>
+  {(fix || prompt || reply) && <div className="tree-topic-content">
+    {row.delivery?.stuck && fix && <div className="tree-topic-fix">{fix}</div>}
     {prompt && <div className="tree-topic-line tree-prompt"><i className="ph ph-check-circle" /><span>Everything here is closed.</span>
       <button type="button" className="btn btn-ghost" onClick={event => { event.stopPropagation(); prompt(); }}><i className="ph ph-archive" />Archive topic</button></div>}
     {reply}
-  </div>;
+  </div>}</>;
 }

@@ -28,7 +28,7 @@
 /* — Message Excerpt, timeline variant (detail panel) — */
 .excerpt-timeline {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) 24px;
   column-gap: 10px;
 }
 

@@ -1141,6 +1141,59 @@ fn an_identical_request_without_an_op_id_replays_and_files_once() {
 }
 
 #[test]
+fn a_derived_op_id_replays_after_generation_rotation_and_a_fresh_explicit_id_files_again() {
+    let setup = Setup::new(&seed());
+    let first = setup.lenient(&[]);
+    setup.change(|session| session.bindings.0.get_mut(&id(3)).unwrap().generation = id(44));
+    let saved = setup.bytes();
+    let binding = id(3);
+    let generation = id(44);
+    let apply = |flags: &[&str], body: &[u8]| {
+        let mut args = vec![
+            "apply",
+            "--binding",
+            binding.as_str(),
+            "--generation",
+            generation.as_str(),
+            "--json-stdin",
+            "--json",
+        ];
+        args.extend(flags);
+        envelope(&setup.call(&args, Some(body)), 0)
+    };
+
+    // A lost receipt retried after reconnecting is still the saved operation.
+    let replay = apply(&[], LENIENT.as_bytes());
+    assert_eq!(replay, as_replay(&first));
+    assert_eq!(
+        setup.bytes(),
+        saved,
+        "the new-generation retry writes nothing"
+    );
+    // Core also recognizes the saved operation when its original generation is stale.
+    assert_eq!(setup.lenient(&[]), replay);
+    let mut dry_replay = replay.clone();
+    dry_replay["data"]["dry_run"] = json!(true);
+    assert_eq!(apply(&["--dry-run"], LENIENT.as_bytes()), dry_replay);
+    assert_eq!(
+        setup.bytes(),
+        saved,
+        "all replay paths leave the store unchanged"
+    );
+    let session = setup.store().read(&id(2)).unwrap();
+    assert_eq!(session.topics.0.len(), 2);
+    assert_eq!(session.items.0.len(), 5);
+
+    // Deliberate duplicate filing uses a fresh explicit ID under current authority.
+    let duplicate = apply(&[], &lenient_with_op(602));
+    assert_eq!(duplicate["data"]["op_id"], id(602).as_str());
+    assert!(duplicate["data"].get("replayed").is_none());
+    let session = setup.store().read(&id(2)).unwrap();
+    assert_eq!(session.topics.0.len(), 3);
+    assert_eq!(session.items.0.len(), 8);
+}
+
+#[test]
 fn dry_run_reports_what_would_change_and_commits_nothing() {
     let setup = Setup::new(&seed());
     let before = setup.bytes();

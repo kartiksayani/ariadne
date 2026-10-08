@@ -91,6 +91,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(self.install(), final)
         self.assertIn("Replacing the Ariadne 0.1.0 already installed (your projects and history are kept).",
                       self.output.getvalue())
+        self.assertNotIn("without an install record", self.output.getvalue())
         self.assertEqual((final / "install.json").read_bytes(), before)
         self.assertEqual(history.read_bytes(), b"session and backups survive")
         self.assertEqual(installer.uninstall(self.home), [])
@@ -348,6 +349,54 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual((self.app / "owner.txt").read_bytes(), b"owner bundle")
         self.assertFalse((final / "bin").exists())
 
+    def test_unrecorded_matching_app_is_replaced_with_one_plain_message(self):
+        for identical in (False, True):
+            with self.subTest(identical=identical):
+                final = self.install()
+                final.rename(self.base / f"saved-version-{identical}")
+                if not identical:
+                    (self.app / "Contents/MacOS/ariadne-desktop").write_bytes(b"older app")
+                previous_inode = self.app.stat().st_ino
+                self.output.truncate(0)
+                self.output.seek(0)
+                again = self.install()
+                line = "Found an Ariadne app without an install record; replacing it."
+                self.assertEqual(self.output.getvalue().splitlines().count(line), 1)
+                self.assertNotEqual(self.app.stat().st_ino, previous_inode)
+                self.assertEqual(installer.app_inventory(self.app),
+                                 installer.bundle_files(installer.inventory(again)))
+                self.assertEqual(installer.uninstall(self.home), [])
+
+    def test_unrecorded_app_adoption_is_not_announced_when_a_link_refuses_install(self):
+        final = self.install()
+        final.rename(self.base / "saved-version")
+        helper = self.home / ".local/bin/ariadne"
+        helper.unlink()
+        helper.write_bytes(b"owner helper")
+        previous = installer.app_inventory(self.app)
+        self.output.truncate(0)
+        self.output.seek(0)
+        with self.assertRaisesRegex(installer.InstallError, "Foreign or edited"):
+            self.install()
+        self.assertNotIn("without an install record", self.output.getvalue())
+        self.assertEqual(installer.app_inventory(self.app), previous)
+
+    def test_unrecorded_app_with_another_identifier_is_refused_without_adoption_message(self):
+        final = self.install()
+        final.rename(self.base / "saved-version")
+        info = self.app / "Contents/Info.plist"
+        with info.open("wb") as output:
+            plistlib.dump({"CFBundleIdentifier": "dev.other.fixture"}, output)
+        previous = installer.app_inventory(self.app)
+        self.output.truncate(0)
+        self.output.seek(0)
+        with self.assertRaisesRegex(installer.InstallError, "Foreign or edited"):
+            self.install()
+        self.assertNotIn("without an install record", self.output.getvalue())
+        self.assertEqual(installer.app_inventory(self.app), previous)
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertEqual(installer.app_inventory(self.app), previous)
+
     def test_edited_app_copy_is_left_by_uninstall_with_a_plain_message(self):
         final = self.install()
         edited = self.app / "Contents/MacOS/ariadne-desktop"
@@ -356,6 +405,7 @@ class InstallationTests(unittest.TestCase):
             self.install()
         self.assertEqual(installer.uninstall(self.home), [])
         self.assertEqual(edited.read_bytes(), b"owner patched executable")
+        self.assertNotIn("without an install record", self.output.getvalue())
         self.assertIn("was edited after install, so it was left in place", self.output.getvalue())
         self.assertFalse(final.exists())
 

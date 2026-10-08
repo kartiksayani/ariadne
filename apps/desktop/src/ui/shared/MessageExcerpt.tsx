@@ -5,6 +5,7 @@
 import { useContext, type ReactNode } from 'react';
 import type { ExcerptView, Mark } from './excerpt';
 import { ItemRefs, Markdown } from './MarkdownText';
+import { CopyMessage } from '../detail/CopyMessage';
 import './shared.css';
 
 export function RailExcerpt({ id, view, active, highlight, onHover, onPin }: {
@@ -39,5 +40,6 @@ export function TimelineExcerpt({ id, message, mark, label, note, last, highligh
       {note && <div className="excerpt-note">{note}</div>}
       {after}
     </div>
+    <CopyMessage text={message.body} />
   </div>;
 }

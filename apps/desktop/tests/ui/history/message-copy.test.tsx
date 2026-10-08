@@ -11,6 +11,23 @@ const opened: ReturnType<typeof setup>[] = [];
 afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.clearAllMocks(); });
 
 describe('conversation message copying', () => {
+  it('copies each Timeline entry raw body, preserving markdown and whitespace', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session;
+    session.messages.forEach(message => { message.body = `  **Message ${message.id}**\r\n\r\n- source with spaces  `; });
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} />);
+    const timeline = await screen.findByRole('region', { name: 'Timeline' });
+    const entries = timeline.querySelectorAll<HTMLElement>('.excerpt-timeline');
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      const message = session.messages.find(message => message.id === entry.dataset.messageId)!;
+      expect(message).toBeDefined();
+      fireEvent.click(within(entry).getByRole('button', { name: 'Copy message' }));
+      expect(copy).toHaveBeenLastCalledWith(message.body);
+    }
+  });
+
   it('copies the original ask, owner message, result and pending message without display changes', async () => {
     const value = setup(); opened.push(value);
     const session = value.transport.session, item = session.items['1']!;

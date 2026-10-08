@@ -165,15 +165,25 @@ describe('session tree rows', () => {
     const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
     const band = topicRow('Continued context');
     expect(within(band).getByRole('button', { name: 'Archive' })).toBeTruthy();
-    await act(async () => { fireEvent.click(within(band).getByRole('button', { name: 'Delete' })); });
+    await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Delete' })); });
     expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id }]);
-    await waitFor(() => expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Delete' })).toBeNull());
+    await waitFor(() => expect(within(topicRow('Continued context').parentElement!).queryByRole('button', { name: 'Delete' })).toBeNull());
     expect(transport.preferences.drafts.filter(draft => draft.target.item_id === null)).toHaveLength(0);
+  });
+  it('keeps topic delivery status sticky while its recovery controls remain in the topic flow', async () => {
+    await mount({ configure: queuedReply });
+    const band = topicRow('Continued context'), group = band.parentElement!;
+    expect(band.querySelector('.tree-topic-status')).not.toBeNull();
+    expect(band.querySelector('.stuck-note')).toBeNull();
+    const content = group.querySelector('.tree-topic-content')!;
+    expect(content.previousElementSibling).toBe(band);
+    expect(content.querySelector('.stuck-note')).not.toBeNull();
+    expect(group.contains(row('8'))).toBe(true);
   });
   it('edits a topic reply not sent yet: the queued reply is taken back first, then its text goes into the topic’s reply box', async () => {
     let id = '';
     const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
-    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Edit' })); });
+    await act(async () => { fireEvent.click(within(topicRow('Continued context').parentElement!).getByRole('button', { name: 'Edit' })); });
     await waitFor(() => expect((screen.getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe(text));
     expect(transport.preferences.drafts.find(draft => draft.target.item_id === null)).toMatchObject({ intent: 'topic_reply', text });
     expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id, purpose: 'edit' }]);
@@ -190,7 +200,7 @@ describe('session tree rows', () => {
     await act(async () => { await drafts.load(); });
     const started = drafts.beginTopic(session, topic)!;
     await act(async () => { await drafts.editSaved(started, { text: 'Something else' }); });
-    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Edit' })); });
+    await act(async () => { fireEvent.click(within(topicRow('Continued context').parentElement!).getByRole('button', { name: 'Edit' })); });
     expect((await screen.findByLabelText('Your earlier message') as HTMLTextAreaElement).value).toBe(text);
     expect(drafts.findTopic(route, topic)?.draft.text).toBe('Something else');
     expect(cancels(transport)).toHaveLength(0);
@@ -426,8 +436,8 @@ describe('session tree lifecycle', () => {
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
     const band = topicRow('Continued context');
-    expect(within(band).getByText('Everything here is closed.')).toBeTruthy();
-    await act(async () => { fireEvent.click(within(band).getByRole('button', { name: 'Archive topic' })); });
+    expect(within(band.parentElement!).getByText('Everything here is closed.')).toBeTruthy();
+    await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Archive topic' })); });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(await screen.findByText('Archived “Continued context”.')).toBeTruthy();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
@@ -560,6 +570,26 @@ describe('stopped deliveries in the tree', () => {
 
 describe('Reply to topic', () => {
   const box = () => document.querySelector<HTMLElement>('[data-owner-input^="topic:"]');
+  it('keeps the reply composer and closed-topic prompt outside the sticky header in the same topic section', async () => {
+    await mount({ configure: transport => {
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    const band = topicRow('Delivery decisions'), group = band.parentElement!;
+    fireEvent.click(within(band).getByRole('button', { name: 'Reply to topic' }));
+    await waitFor(() => expect(box()).not.toBeNull());
+    expect(band.querySelector('.tree-prompt')).toBeNull();
+    expect(band.contains(box())).toBe(false);
+    const content = group.querySelector('.tree-topic-content')!;
+    expect(content.previousElementSibling).toBe(band);
+    expect(content.contains(box())).toBe(true);
+    expect(content.querySelector('.tree-prompt')).not.toBeNull();
+    expect(group.contains(row('1'))).toBe(true);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    expect(css).toMatch(/\.tree-topic-group\s*\{[^}]*position: relative/s);
+    expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0/s);
+    expect(css).toMatch(/\.tree-topic-status > span\s*\{[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis/s);
+    expect(css).not.toMatch(/\.tree-topic-content\s*\{[^}]*position: sticky/s);
+  });
   it('opens a box on the topic band and sends a topic reply with no item', async () => {
     const { transport, drafts } = await mount();
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
@@ -735,15 +765,24 @@ describe('session tree reading position', () => {
     await mount({ configure: savedAtTop, props: { selectedId: '8', detailOpen: true } });
     expect(top('8')).toBeGreaterThanOrEqual(0); expect(top('8') + 40).toBeLessThanOrEqual(400);
   });
-  it('preserves the reading position when detail and messages open', async () => {
+  it('reveals an offscreen selected item with the least movement when detail opens', async () => {
     layout();
     const { rerender } = await mount({ configure: savedAtTop, props: { selectedId: '8' } });
     expect(top('8')).toBe(800);
     rerender({ detailOpen: true });
-    expect(top('8')).toBe(800);
+    expect(top('8')).toBe(360);
     const before = top('8');
     rerender({ detailOpen: true, railOpen: true });
     expect(top('8')).toBe(before);
+  });
+  it('leaves a visible selection in place when detail and messages open', async () => {
+    layout();
+    const { rerender } = await mount({ configure: savedAtTop, props: { selectedId: '3' } });
+    const before = top('3');
+    rerender({ detailOpen: true });
+    expect(top('3')).toBe(before);
+    rerender({ detailOpen: true, railOpen: true });
+    expect(top('3')).toBe(before);
   });
 });
 
@@ -937,19 +976,23 @@ describe('scrolling the tree', () => {
     await waitFor(() => expect(view.calls.selected).toHaveLength(2));
     view.rerender({ reveal: view.calls.selected[1], selectedId: '4', detailOpen: true });
     expect(scroller().scrollTop).toBe(150);
+    fireEvent.click(row('8'));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(3));
+    view.rerender({ reveal: view.calls.selected[2], selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(150);
   });
 
-  it('preserves scroll for ordinary external selection, including an offscreen item and opening detail', async () => {
+  it('reveals an external offscreen selection with the least scroll, leaving a visible selection in place', async () => {
     const view = await opened();
     row('3').focus(); fireEvent.keyDown(row('3'), { key: 'ArrowDown' });
     expect(document.activeElement).toBe(row('4'));
     view.rerender({ reveal: link(view, '4'), selectedId: '4' });
     expect(scroller().scrollTop).toBe(150);
     view.rerender({ reveal: link(view, '8'), selectedId: '8', detailOpen: true });
-    expect(scroller().scrollTop).toBe(150);
+    expect(scroller().scrollTop).toBe(440);
   });
 
-  it('reveals only history navigation with the least scroll, leaving an onscreen history target in place', async () => {
+  it('reveals history navigation with the least scroll, leaving an onscreen history target in place', async () => {
     const view = await opened();
     row('3').focus(); fireEvent.keyDown(row('3'), { key: 'ArrowDown' });
     const onscreen = link(view, '4');
@@ -960,6 +1003,49 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(440);
     expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
     expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+  });
+
+  it('keeps the tree still when an item link inside a preview opens an offscreen item', async () => {
+    const view = await opened({ configure: transport => {
+      const item = transport.sessions.get(route.session_id)!.items['4']!;
+      item.status = 'done'; item.outcome = '[Next item](item:8)';
+    } });
+    fireEvent.click(within(row('4')).getByRole('link', { name: 'Next item' }));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    view.rerender({ reveal: view.calls.selected[0], selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(150);
+  });
+  it('keeps the tree still when a row action echoes a new detail selection from the workspace', async () => {
+    let onReveal: ((result: RevealedItem) => void) | undefined;
+    const act = vi.fn((_intent: RowIntent, _target: ItemRoute, callback?: (result: RevealedItem) => void) => { onReveal = callback; });
+    const view = await opened({ props: { onAct: act } });
+    fireEvent.click(within(row('8')).getByRole('button', { name: 'Bring it up (b)' }));
+    expect(act.mock.calls[0]?.slice(0, 2)).toMatchObject(['bring', { item_id: '8' }]);
+    const result = link(view, '8');
+    onReveal!(result);
+    view.rerender({ reveal: result, selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(150);
+    // The callback suppresses only that exact result; an external reopen still reveals it.
+    view.rerender({ reveal: link(view, '8'), selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
+  });
+  it('reveals an external item after a tree action fails or is cancelled before revealing it', async () => {
+    const view = await opened();
+    fireEvent.click(within(row('8')).getByRole('button', { name: 'Bring it up (b)' }));
+    expect(view.calls.acts).toMatchObject([['bring', { item_id: '8' }]]);
+    // A failed or cancelled operation never calls the exact-result callback.
+    view.rerender({ reveal: link(view, '8'), selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
+  });
+
+  it('reveals a selection without a link when the side panel opens after the owner scrolls away', async () => {
+    const view = await opened({ props: { selectedId: '8' } });
+    view.rerender({ detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
+    scroller().scrollTop = 150;
+    fireEvent.scroll(scroller());
+    view.rerender({ detailOpen: true, railOpen: true });
+    expect(scroller().scrollTop).toBe(440);
   });
 
   it('scrolls on the keyboard only when the row is off-screen, and only as far as needed', async () => {
@@ -979,9 +1065,12 @@ describe('scrolling the tree', () => {
     const rect = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      if (this.matches('.tree-topic-content')) return new DOMRect(0, 60, 300, 360);
       return rect.call(this);
     });
     const view = await mount();
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    await waitFor(() => expect(document.querySelector('.tree-topic-reply')).not.toBeNull());
     scroller().scrollTop = 190;
     const target = link(view, '2'); // top 10: on screen, but behind the 60 px band.
     view.rerender({ reveal: target, historyReveal: target, selectedId: '2' });

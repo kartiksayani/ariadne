@@ -422,6 +422,22 @@
   font-size: calc(13px * var(--text-scale));
 }
 
+.tree-topic-status > span {
+  overflow: hidden;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Reply and recovery controls scroll with the section, below its sticky band. */
+.tree-topic-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 16px 6px 12px;
+  background: var(--a-side);
+}
+
 .tree-topic-fix {
   padding-left: 26px;
 }
