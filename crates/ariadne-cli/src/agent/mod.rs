@@ -441,7 +441,7 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
     match method {
         "apply" => {
             let bytes = bytes.ok_or_else(|| invalid("Apply requires --json-stdin."))?;
-            let expanded = lenient::expand(&bytes, &binding_id, &generation)?;
+            let expanded = lenient::expand(&bytes, &binding_id)?;
             expanded.request.validate_wire()?;
             Ok(Tool::Apply(ApplyCall {
                 request: AgentApplyToolRequest {

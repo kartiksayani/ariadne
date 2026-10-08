@@ -156,14 +156,14 @@ export function TreeView(props: TreeViewProps) {
     return navigation.saveSessionView(next, revision.revision);
   };
   const clickedReveal = useRef<RevealedItem | null>(null);
-  const select = (id: string) => {
+  const select = (id: string, fromRow = true) => {
     if (busy) return;
     const call = ++request.current;
     setFocusKey(id);
     void navigation.routes.revealItem({ ...route, item_id: id }).then(result => {
       if (!mounted.current || call !== request.current || !result) return;
-      // The owner is already looking at this row: opening it must not move the tree.
-      clickedReveal.current = result;
+      // Opening the clicked row holds still; a preview link reveals a different row.
+      clickedReveal.current = fromRow ? result : null;
       onSelected(result);
       if (result.kind === 'item' && latest.current.view?.selected_item_id !== id) void saveView(next => { next.selected_item_id = id; });
     }).catch((error: unknown) => {
@@ -400,7 +400,7 @@ export function TreeView(props: TreeViewProps) {
     const previous = previousSelection.current;
     previousSelection.current = { reveal, selectedId, detailOpen, railOpen };
     if (!centered.current || graph) return;
-    const selectionChanged = reveal !== previous.reveal || selectedId !== previous.selectedId;
+    const selectionChanged = selectedId !== previous.selectedId || (reveal?.kind === 'item' && reveal !== previous.reveal);
     const panelOpened = (detailOpen && !previous.detailOpen) || (railOpen && !previous.railOpen);
     const id = reveal?.kind === 'item' ? reveal.route.item_id : selectedId;
     if (!id || (!selectionChanged && !panelOpened)) return;
@@ -534,7 +534,7 @@ export function TreeView(props: TreeViewProps) {
   const tree = model && rows.length > 0 && <ItemRefs.Provider value={{ lookup: id => {
     const item = session?.items[id];
     return item && session ? { label: shortLabel(item), status: displayStatus(session, item) } : null;
-  }, onOpenItem: select }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
+  }, onOpenItem: id => select(id, false) }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
     {sections.map(({ topic: row, items }) => <div key={row.key} className="tree-topic-group" role="presentation">
       <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
@@ -546,7 +546,7 @@ export function TreeView(props: TreeViewProps) {
         note={row.collapsed ? collapsedNote(row.collapsed, { items: highlightedItems, message: touchedMessage }) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
-        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} onJump={select} onHover={onHoverItem} />)}
+        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} onJump={id => select(id, false)} onHover={onHoverItem} />)}
     </div>)}
   </div></ItemRefs.Provider>;
 

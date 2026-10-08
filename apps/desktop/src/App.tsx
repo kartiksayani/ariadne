@@ -358,6 +358,19 @@ function Workspace({ application }: { application: Application }) {
       setTextSizeTarget(null);
     }
   }, [textSizeTarget, preferences?.global.text_scale, state.writing, state.pendingOperationId]);
+  const restoreRefusedTextSize = useCallback((saved: boolean, size: TextSize) => {
+    const latest = navigation.getSnapshot();
+    if (!saved && !latest.writing && latest.pendingOperationId === null && !navigation.hasQueuedTextScale() && textSizeIntent.current === size) {
+      textSizeIntent.current = null;
+      setTextSizeTarget(null);
+    }
+  }, [navigation]);
+  useEffect(() => {
+    if (textSizeTarget === null) return;
+    // Reconciliation can resume a queued size after its original promise has settled.
+    const completion = navigation.getWritingCompletion();
+    if (completion) void completion.then(saved => restoreRefusedTextSize(saved, textSizeTarget));
+  }, [navigation, textSizeTarget, state.writing, state.pendingOperationId, restoreRefusedTextSize]);
   const changeTextSize = (size: TextSize) => {
     const current = navigation.getSnapshot();
     if (!current.preferences) return;
@@ -365,7 +378,7 @@ function Workspace({ application }: { application: Application }) {
     textSizeIntent.current = size;
     setTextSizeTarget(size);
     if (replacingTarget || current.writing || current.pendingOperationId !== null || size !== textSize(current.preferences.global.text_scale)) {
-      void navigation.saveTextScale(size, current.preferences.revision);
+      void navigation.saveTextScale(size, current.preferences.revision).then(saved => restoreRefusedTextSize(saved, size));
     }
   };
   const projectName = (projectId: string) => state.projects?.projects.items.find(project => project.project_id === projectId)?.project?.display_name ?? 'Unavailable project';

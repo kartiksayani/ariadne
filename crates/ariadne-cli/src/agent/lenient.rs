@@ -21,11 +21,11 @@ pub struct Expanded {
 /// Stands in for `op_id` while the request is expanded; replaced by the derived id.
 const PLACEHOLDER_OP_ID: &str = "00000000-0000-4000-8000-000000000000";
 
-/// Expands lenient stdin bytes into the strict request for `binding` at `generation`.
+/// Expands lenient stdin bytes into the strict request for `binding`.
 /// An omitted `op_id` is derived from the binding and the expanded request, never
 /// drawn at random: a blind retry remains the same operation across generation
 /// changes, and the core replays it instead of filing twice.
-pub fn expand(bytes: &[u8], binding: &UuidV4, _generation: &UuidV4) -> Result<Expanded, CoreError> {
+pub fn expand(bytes: &[u8], binding: &UuidV4) -> Result<Expanded, CoreError> {
     let Strict(value) = serde_json::from_slice(bytes).map_err(|e| bad_stdin("ApplyRequest", &e))?;
     let Value::Object(mut top) = value else {
         return Err(bad_request("the request must be a JSON object".into()));
@@ -396,16 +396,10 @@ mod tests {
     const BINDING: &str = "00000000-0000-4000-8000-000000000003";
     const TOPIC: &str = "00000000-0000-4000-8000-000000000005";
     const GENERATED: &str = "00000000-0000-4000-8000-0000000000aa";
-    const GENERATION: &str = "00000000-0000-4000-8000-000000000004";
-
-    fn generation() -> UuidV4 {
-        UuidV4::new(GENERATION).unwrap()
-    }
     fn run(request: &Value) -> Result<Expanded, CoreError> {
         expand(
             &serde_json::to_vec(request).unwrap(),
             &UuidV4::new(BINDING).unwrap(),
-            &generation(),
         )
     }
     fn ok(request: Value) -> ApplyRequest {
@@ -435,13 +429,13 @@ mod tests {
     }
 
     #[test]
-    fn the_derived_op_id_is_a_v4_uuid_that_depends_on_request_and_binding_not_generation() {
+    fn the_derived_op_id_is_a_v4_uuid_that_depends_on_request_and_binding() {
         let request = json!({"summary": "s", "operations": [{"op": "topic.add", "name": "T"}]});
         let first = run(&request).unwrap().generated_op_id.unwrap();
         // The same request is the same operation, however its JSON is spaced or ordered.
         let reordered =
             br#"{ "operations": [ {"name": "T", "op": "topic.add"} ], "summary": "s" }"#;
-        let again = expand(reordered, &UuidV4::new(BINDING).unwrap(), &generation())
+        let again = expand(reordered, &UuidV4::new(BINDING).unwrap())
             .unwrap()
             .generated_op_id
             .unwrap();
@@ -457,16 +451,8 @@ mod tests {
         let changed = json!({"summary": "s", "operations": [{"op": "topic.add", "name": "U"}]});
         assert_ne!(run(&changed).unwrap().generated_op_id.unwrap(), first);
         let bytes = serde_json::to_vec(&request).unwrap();
-        let other_binding = expand(&bytes, &UuidV4::new(TOPIC).unwrap(), &generation()).unwrap();
+        let other_binding = expand(&bytes, &UuidV4::new(TOPIC).unwrap()).unwrap();
         assert_ne!(other_binding.generated_op_id.unwrap(), first);
-        let other_generation = expand(
-            &bytes,
-            &UuidV4::new(BINDING).unwrap(),
-            &UuidV4::new(GENERATED).unwrap(),
-        )
-        .unwrap();
-        // Reconnecting the same binding must not make a saved operation new work.
-        assert_eq!(other_generation.generated_op_id.unwrap(), first);
     }
 
     #[test]
@@ -684,20 +670,16 @@ mod tests {
         assert!(top.contains("caller_actor"), "{top}");
         let missing = message(json!({}));
         assert!(missing.contains("operations"), "{missing}");
-        let not_object = expand(b"[]", &UuidV4::new(BINDING).unwrap(), &generation())
-            .err()
-            .unwrap();
+        let not_object = expand(b"[]", &UuidV4::new(BINDING).unwrap()).err().unwrap();
         assert!(not_object.message.contains("JSON object"));
     }
 
     #[test]
     fn duplicate_keys_and_bad_syntax_are_rejected_with_a_position() {
         let binding = UuidV4::new(BINDING).unwrap();
-        let generation = generation();
         let duplicate = expand(
             br#"{"operations":[],"expected_item_revisions":{"1":1,"1":2}}"#,
             &binding,
-            &generation,
         )
         .err()
         .unwrap();
@@ -705,14 +687,13 @@ mod tests {
             duplicate.message.contains("duplicate field `1`"),
             "{duplicate:?}"
         );
-        let syntax = expand(b"{\"operations\": [\n  oops]}", &binding, &generation)
+        let syntax = expand(b"{\"operations\": [\n  oops]}", &binding)
             .err()
             .unwrap();
         assert!(syntax.message.contains("line 2"), "{syntax:?}");
         let number = expand(
             br#"{"operations":[],"expected_item_revisions":{"1":1.5e0}}"#,
             &binding,
-            &generation,
         )
         .err()
         .unwrap();
