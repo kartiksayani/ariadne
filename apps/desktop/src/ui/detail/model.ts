@@ -108,12 +108,15 @@ const TRACKED = new Set<InputKind>(['answer', 'bring', 'reply', 'drop', 'reopen'
 const byDecisionThenNewest = (a: Immutable<Input>, b: Immutable<Input>) =>
   Number(b.state === 'needs_attention') - Number(a.state === 'needs_attention') || b.seq - a.seq;
 
-/** The submission whose delivery the stepper follows: one being saved, else the latest unresolved input. */
+/**
+ * The submission whose delivery the stepper follows: one being saved, else the latest unresolved input. Newest, not
+ * a stopped one ahead of it: an answer queued behind a stopped delivery still keeps the answer box closed.
+ */
 function submission(session: Immutable<Session>, item: Immutable<Item>, saving: InputKind | null) {
   if (saving) return { kind: saving, stage: 'sending' as DeliveryStage, label: '' };
   // Cancelled and skipped inputs never reached the agent; they leave no trace here.
   const inputs = Object.values(session.inputs).filter((input): input is Immutable<Input> => !!input && input.target.item_id === item.id
-    && (ACTIVE_INPUT.has(input.state) || (input.state === 'handled' && TRACKED.has(input.kind)))).sort(byDecisionThenNewest);
+    && (ACTIVE_INPUT.has(input.state) || (input.state === 'handled' && TRACKED.has(input.kind)))).sort((a, b) => b.seq - a.seq);
   const latest = inputs.find(input => ACTIVE_INPUT.has(input.state)) ?? inputs[0];
   if (!latest) return null;
   const option = latest.payload.selected_option_id ? latest.payload.target_snapshot.options.find(value => value.id === latest.payload.selected_option_id) : null;
