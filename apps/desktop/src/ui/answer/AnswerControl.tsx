@@ -3,6 +3,7 @@
 // tree's inline answer and the detail panel (full) all render this one control.
 import { useRef } from 'react';
 import { useWorkspaceKeys } from '../keys';
+import { useGrow } from './useGrow';
 import './answer.css';
 
 export interface AnswerOption {
@@ -16,8 +17,10 @@ export interface AnswerOption {
  * Props of the answer control. The control keeps no state: the caller owns the
  * selection and the draft (normally `useSubmit`, backed by the draft store).
  *
- * - `variant`: `compact` (Waiting card, tree row) or `full` (detail; adds the
- *   reply box and the "Send “label”" wording).
+ * - `variant`: `compact` (Waiting card), `full` (tree row; adds the reply box
+ *   and the "Send “label”" wording) or `chat` (the detail's docked composer:
+ *   `full`, with the options as quick replies above a one-line reply box that
+ *   grows as you type).
  * - `selected`: index of the selected option, or -1. Callers pass the draft's
  *   choice, else the recommended option (`defaultSelection`).
  * - `draft`: the reply text, shown in the full variant unless `noText`.
@@ -35,7 +38,7 @@ export interface AnswerOption {
  */
 export interface AnswerControlProps {
   readonly options: readonly AnswerOption[];
-  readonly variant: 'compact' | 'full';
+  readonly variant: 'compact' | 'full' | 'chat';
   readonly selected: number;
   readonly draft: string;
   readonly warn?: string;
@@ -60,8 +63,9 @@ export function defaultSelection(options: readonly Pick<AnswerOption, 'id' | 're
 
 export function AnswerControl({ options, variant, selected, draft, warn, warnAction, blocked, locked = false, noText = false, label,
   onSelect, onDraft, onSendOption, onSendText, onEscape }: AnswerControlProps) {
-  const root = useRef<HTMLDivElement>(null);
-  const full = variant === 'full', picked = options[selected];
+  const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null);
+  const chat = variant === 'chat', full = variant !== 'compact', picked = options[selected];
+  useGrow(text, draft, chat);
   const canSend = !!picked && !blocked && !locked;
   const sendOption = (index: number) => { if (options[index] && !blocked && !locked) onSendOption(index); };
   const sendText = () => { if (draft.trim() && !blocked && !locked) onSendText(draft); };
@@ -98,7 +102,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
     },
   }, { scope: 'editor' });
   const hint = blocked ? '' : full && options.length > 1 ? `1–${options.length} to change · Enter sends · Esc closes, keeps your draft` : 'Enter sends';
-  return <div ref={root} className={`answer answer-${variant}`} role="group" aria-label={label} onKeyDown={keys}>
+  return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
     {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
       {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
     <div className="answer-options">
@@ -124,7 +128,16 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
       </button>
       <span className="answer-hint">{hint}</span>
     </div>}
-    {full && !noText && <div className="answer-reply">
+    {chat && !noText && <div className="answer-reply answer-composer">
+      <div className="answer-composer-row">
+        <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Or reply in your own words…" rows={1}
+          value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />
+        <button type="button" className="btn btn-secondary answer-reply-send" disabled={!draft.trim() || !!blocked || locked}
+          onClick={event => { event.stopPropagation(); sendText(); }}>Send reply</button>
+      </div>
+      <span className="answer-hint">⌘↵ sends the reply instead of the option</span>
+    </div>}
+    {full && !chat && !noText && <div className="answer-reply">
       <textarea className="input answer-text" aria-label="Reply in your own words" placeholder="Or reply in your own words…" rows={2}
         value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />
       <div className="answer-reply-row">

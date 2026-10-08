@@ -173,20 +173,27 @@ test('keeps a sent answer between the item question and its timeline in the ordi
     await expect(session).toBeEnabled(); await session.click();
     await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
     await page.locator('[data-item-id="2"]').click();
-    // The handoff order puts the answer control under the question head and
-    // above the rounds and timeline (Ariadne.dc.html 324-464).
-    const detail = page.locator('.shell-detail-scroll'), head = detail.locator('.item-detail > .detail-head');
+    // The reference (head, delivery receipt, timeline) scrolls on top; the composer is docked below it.
+    const detail = page.locator('.shell-detail-scroll'), head = detail.locator('.item-detail .detail-head');
     await expect(head.getByRole('heading', { name: 'Which native delivery window should we use?', level: 2 })).toBeVisible();
     await detail.getByLabel('Reply in your own words').fill('Use the saved native delivery option.');
     await detail.getByRole('button', { name: 'Send reply', exact: true }).click();
-    // A sent answer becomes the delivery stepper and its status line, and the
-    // reply joins the timeline (handoff README §5 "Item detail"). The fixture's
-    // session already has a message in flight, so the line says what the reply
-    // waits behind instead of echoing it.
-    const receipt = detail.getByRole('region', { name: 'Your answer' }).getByRole('status').filter({ hasText: 'Queued behind your message' });
+    // A sent answer becomes the delivery stepper on top, the reply joins the timeline, and the
+    // reply ends the conversation as the owner's pending message. The fixture's session already
+    // has a message in flight, so its status line says what the reply waits behind instead of
+    // echoing it; that line sits with the pending message.
+    const receipt = detail.getByRole('region', { name: 'Conversation' }).getByRole('status').filter({ hasText: 'Queued behind your message' });
     const sent = detail.getByRole('region', { name: 'Timeline' }).getByText('Use the saved native delivery option.');
+    await expect(detail.getByRole('region', { name: 'Your answer' })).toContainText('Sending');
     await expect(receipt).toBeVisible(); await expect(sent).toBeAttached();
     await expect(detail.getByLabel('Reply in your own words')).toHaveCount(0);
+    // The sent reply also ends the conversation, as the owner's pending message, after the timeline.
+    const pending = detail.getByRole('region', { name: 'Conversation' }).locator('li[data-pending]').last();
+    await expect(pending).toContainText('Use the saved native delivery option.');
+    expect(await detail.evaluate(element => {
+      const timeline = element.querySelector('[aria-label="Timeline"]')!, chat = element.querySelector('[aria-label="Conversation"]')!;
+      return !!(timeline.compareDocumentPosition(chat) & Node.DOCUMENT_POSITION_FOLLOWING);
+    })).toBe(true);
     // Check actual rectangles at the reported size, the supported minimum and
     // the wide workspace, including a shorter window that requires scrolling.
     for (const viewport of [{ width: 900, height: 650 }, { width: 1000, height: 700 }, { width: 1600, height: 960 }, { width: 1000, height: 500 }]) {
@@ -196,13 +203,118 @@ test('keeps a sent answer between the item question and its timeline in the ordi
       await expect(sent).toBeInViewport();
       const headBox = (await head.boundingBox())!, receiptBox = (await receipt.boundingBox())!, sentBox = (await sent.boundingBox())!;
       expect(receiptBox.y, `receipt below the question at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(headBox.y + headBox.height);
-      expect(sentBox.y, `timeline reply below receipt at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(receiptBox.y + receiptBox.height);
+      expect(receiptBox.y, `pending message after the timeline reply at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(sentBox.y + sentBox.height);
       for (const content of await head.locator('h2, .detail-status').all()) {
         const box = (await content.boundingBox())!;
         expect(box.y + box.height, `question head above receipt at ${viewport.width}×${viewport.height}`).toBeLessThanOrEqual(receiptBox.y);
       }
       if (viewport.width === 1000 && viewport.height === 700) await page.screenshot({ path: testInfo.outputPath('saved-answer.png') });
     }
+    expect(errors).toEqual([]);
+  } finally { await server.close(); }
+});
+
+test('docks the composer under a scrolling detail body that grows it to a third of the pane', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const origin = `http://127.0.0.1:${address.port}`;
+    await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
+    await page.goto(`${origin}/tests/e2e/owner-input/fixture.html`);
+    await page.locator('[data-shell-tab="projects"]').click();
+    await page.locator('.pw-project-open').first().click();
+    const session = page.locator('button[data-session-id]').first();
+    await expect(session).toBeEnabled(); await session.click();
+    await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
+    await page.locator('[data-item-id="2"]').click();
+    const pane = page.locator('.item-detail'), body = pane.locator('.detail-body'), dock = pane.locator('.detail-dock');
+    const composer = pane.getByLabel('Reply in your own words');
+    await expect(composer).toBeVisible();
+    for (const viewport of [{ width: 1000, height: 700 }, { width: 1000, height: 500 }]) {
+      await page.setViewportSize(viewport);
+      // The body scrolls; the pane and its shell host do not, so the dock never leaves the view.
+      const geometry = await page.evaluate(() => {
+        const detail = document.querySelector<HTMLElement>('.item-detail')!, host = document.querySelector<HTMLElement>('.shell-detail-scroll')!;
+        const bodyBox = detail.querySelector('.detail-body')!.getBoundingClientRect(), dockBox = detail.querySelector('.detail-dock')!.getBoundingClientRect();
+        return { hostOverflow: host.scrollHeight - host.clientHeight, bodyBottom: bodyBox.bottom, dockTop: dockBox.top, dockBottom: dockBox.bottom, paneBottom: detail.getBoundingClientRect().bottom };
+      });
+      expect(geometry.hostOverflow, `detail host does not scroll at ${viewport.width}×${viewport.height}`).toBeLessThanOrEqual(1);
+      expect(geometry.bodyBottom, `body ends where the dock starts at ${viewport.width}×${viewport.height}`).toBeLessThanOrEqual(geometry.dockTop + 1);
+      expect(geometry.dockBottom).toBeLessThanOrEqual(geometry.paneBottom + 1);
+      await body.evaluate(element => { element.scrollTop = 0; });
+      await expect(composer).toBeInViewport();
+      await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      await expect(composer).toBeInViewport();
+      // Quick replies sit above the composer inside the dock.
+      if (await dock.locator('[data-answer-option]').count()) {
+        const options = (await dock.locator('[data-answer-option]').first().boundingBox())!, box = (await composer.boundingBox())!;
+        expect(options.y + options.height).toBeLessThanOrEqual(box.y);
+      }
+    }
+    // One line when empty; grows with its text to about a third of the pane, then scrolls inside itself.
+    const empty = (await composer.boundingBox())!.height;
+    await composer.fill(Array.from({ length: 40 }, (_, index) => `Line ${index + 1} of a long reply`).join('\n'));
+    const grown = await composer.evaluate(element => ({ height: element.getBoundingClientRect().height, scrolls: element.scrollHeight > element.clientHeight,
+      pane: element.closest('.item-detail')!.getBoundingClientRect().height }));
+    expect(grown.height).toBeGreaterThan(empty);
+    expect(grown.height).toBeLessThanOrEqual(grown.pane / 3 + 2);
+    expect(grown.scrolls).toBe(true);
+    await expect(composer).toBeInViewport();
+    expect(errors).toEqual([]);
+  } finally { await server.close(); }
+});
+
+test('reads as a chat: oldest exchange first with no round headers, quick replies above the composer, no composer when closed', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const origin = `http://127.0.0.1:${address.port}`;
+    await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
+    await page.goto(`${origin}/tests/e2e/owner-input/fixture.html?chat`);
+    await page.locator('[data-shell-tab="projects"]').click();
+    await page.locator('.pw-project-open').first().click();
+    const session = page.locator('button[data-session-id]').first();
+    await expect(session).toBeEnabled(); await session.click();
+    await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
+    const pane = page.locator('.item-detail');
+
+    // A waiting item: its quick replies sit above the composer, which is the last thing in the dock.
+    await page.locator('[data-item-id="2"]').click();
+    const composer = pane.getByLabel('Reply in your own words');
+    await expect(composer).toBeVisible();
+    const options = pane.locator('.detail-dock [data-answer-option]');
+    await expect(options).toHaveCount(2);
+    const composerBox = (await composer.boundingBox())!;
+    for (const option of await options.all()) {
+      const box = (await option.boundingBox())!;
+      expect(box.y + box.height, 'quick reply above the composer').toBeLessThanOrEqual(composerBox.y);
+    }
+
+    // A closed item: its exchanges run oldest first, with no round headers, and no composer, only its revisit actions in the dock.
+    await page.locator('[data-item-id="1"]').click();
+    const turns = pane.locator('.detail-chat-list li[data-round]');
+    await expect(turns).toHaveCount(3);
+    expect(await turns.evaluateAll(list => list.map(turn => turn.getAttribute('data-round')))).toEqual(['1', '2', '3']);
+    const tops = await turns.evaluateAll(list => list.map(turn => turn.getBoundingClientRect().top));
+    expect(tops).toEqual([...tops].sort((a, b) => a - b));
+    await expect(pane.getByRole('region', { name: 'Conversation' })).toContainText('Second reply of the chat');
+    expect(await pane.innerText()).not.toMatch(/Round \d|Back and forth/);
+    await expect(pane.getByRole('textbox')).toHaveCount(0);
+    await expect(pane.locator('.answer')).toHaveCount(0);
+    const dock = pane.locator('.detail-dock');
+    await expect(dock.getByRole('region', { name: 'Revisit' })).toBeVisible();
+    const [dockBox, paneBox] = [(await dock.boundingBox())!, (await pane.boundingBox())!];
+    expect(dockBox.y + dockBox.height, 'revisit actions docked at the pane bottom').toBeGreaterThan(paneBox.y + paneBox.height - 2);
     expect(errors).toEqual([]);
   } finally { await server.close(); }
 });

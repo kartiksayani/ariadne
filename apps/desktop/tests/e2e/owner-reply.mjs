@@ -14,8 +14,8 @@ export const folded = value => value.replace(/\s+/g, ' ').trim();
 
 /**
  * Opens the selected item's reply editor. A waiting item answers in its answer slot, whose saved
- * receipt offers "Write another input"; any other item replies in the Reply box of its Item actions,
- * which closes once it sends. `afterSaved`: a previous reply has saved on disk and its renderer
+ * receipt offers "Write another input"; an open item replies in its Reply box, which is always docked
+ * and empties once it sends. `afterSaved`: a previous reply has saved on disk and its renderer
  * acknowledgement may still be arriving; await it before choosing the next editor.
  */
 export async function openOwnerReply(afterSaved = false) {
@@ -24,7 +24,7 @@ export async function openOwnerReply(afterSaved = false) {
     if (afterSaved || await another.isExisting()) await click(another);
     return;
   }
-  if (afterSaved) await wait(async () => !(await browser.$('.item-detail .detail-box').isExisting()), 'The sent Reply box did not close');
+  if (afterSaved) await wait(async () => { const box = await browser.$('.item-detail .detail-box textarea'); return !(await box.isExisting()) || (await box.getValue()) === ''; }, 'The sent Reply box did not empty');
   if (!(await browser.$('.item-detail .detail-box textarea').isExisting())) {
     // Item actions carry their key hint ("Reply r"), so the button matches by contained text.
     await click(await browser.$('[aria-label="Item actions"]').$('button*=Reply'));

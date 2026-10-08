@@ -1,7 +1,10 @@
 // The item detail panel (handoff README §5 "Item detail"; Ariadne.dc.html
-// lines 324-464). The shell's aside holds the header and scroll container;
-// DetailPath fills the header's breadcrumb and ItemDetail the scroll body.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+// lines 324-464), laid out like a chat. The shell's aside holds the header;
+// DetailPath fills the header's breadcrumb and ItemDetail the body: what the
+// item is (head, delivery, outcome, why, children, links, timeline) scrolls
+// and ends in the conversation, oldest first; the owner's composer stays
+// docked under it (quick replies above a reply box that grows as you type).
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { sessionActionsFor } from '../../components/bindings/actions';
@@ -10,14 +13,18 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import type { OwnerFocusRequest, PendingSubmission } from '../answer/useSubmit';
 import { StuckNote } from '../answer/StuckNote';
 import { NotSentLine } from '../answer/NotSentLine';
-import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled } from '../answer/held';
+import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain } from '../answer/held';
+import { useGrow } from '../answer/useGrow';
 import { AnswerSlot, changedText } from './AnswerSlot';
 import { TimelineExcerpt } from '../shared/MessageExcerpt';
 import { Markdown, singleParagraph } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
-import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type OpenMode } from './model';
-import { useDetailSubmit } from './submit';
+import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type OpenMode, type PendingView, type WordsKind } from './model';
+import { useDetailSubmit, type DraftTarget, type Words } from './submit';
 import './detail.css';
+
+/** The pane is scrolled to (nearly) its end. */
+const nearEnd = (pane: HTMLElement) => pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
 
 /** Return focus to the item's row so workspace keys work again. */
 function focusRoot(itemId: string) {
@@ -53,14 +60,70 @@ export interface ItemDetailProps {
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   /** Set for an earlier session's item: its message numbers read "codex #19" (shared/excerpt earlierAgent). */
   readonly earlierAgent?: string | null;
+  /** Where a copied item came from (its Source item button): shown with the item's references, not under the composer. */
+  readonly provenance?: ReactNode;
 }
 
 const sectionLabel = (text: string) => <div className="detail-label">{text}</div>;
 
+const kindName: Readonly<Record<WordsKind, string>> = { reply: 'reply', note: 'note', followup: 'follow-up' };
+
+interface WordsFieldProps {
+  readonly slot: Words;
+  /** What the words go out as now. */
+  readonly sentAs: WordsKind;
+  readonly first: boolean;
+  readonly inputRef: RefObject<HTMLTextAreaElement | null> | null;
+  readonly sendOff: boolean;
+  /** The box was opened by a button and holds no words: it can be closed. */
+  readonly closable: boolean;
+  readonly onEdit: (text: string) => void;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+  readonly onSend: () => void;
+  readonly onCancel: () => void;
+  readonly onReview: () => void;
+}
+
+/**
+ * One draft of the owner's words. It edits its own draft in place and is labelled by what it will be sent as, so the
+ * owner sees the kind before sending. Its mount does not depend on the section around it, so typing and focus survive
+ * the item changing status.
+ */
+function WordsField({ slot, sentAs, first, inputRef, sendOff, closable, onEdit, onKeyDown, onSend, onCancel, onReview }: WordsFieldProps) {
+  const own = useRef<HTMLTextAreaElement>(null), ref = inputRef ?? own;
+  useGrow(ref, slot.text);
+  const text = boxText[sentAs], noteId = useId();
+  // A locked draft (an attempt in flight or awaiting a retry) goes out as the kind it was saved with, so the note would be wrong.
+  const note = slot.kind !== sentAs && !slot.locked;
+  return <>
+    {slot.changed && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
+      <button type="button" className="btn btn-secondary answer-warn-action" disabled={slot.locked} onClick={onReview}>Review current target</button></div>}
+    <div className="detail-box">
+      {note && <p className="detail-box-note" id={noteId}>{`This was written as a ${kindName[slot.kind]}. It will be sent as a ${kindName[sentAs]}, which fits the item now.`}</p>}
+      <textarea ref={ref} className="input" rows={1} aria-label={first ? text.label : `${text.label}, another draft`} aria-describedby={note ? noteId : undefined}
+        placeholder={text.placeholder} value={slot.text} disabled={slot.locked} onChange={event => onEdit(event.target.value)} onKeyDown={onKeyDown} />
+      <div className="detail-box-row">
+        <button type="button" className="btn btn-primary" disabled={sendOff} aria-label={first ? text.button : `${text.button}, another draft`} onClick={onSend}>
+          <i className="ph ph-paper-plane-right" aria-hidden="true" />{text.button}</button>
+        {closable && <button type="button" className="btn btn-ghost detail-cancel" onClick={onCancel}>Cancel</button>}
+        <span className="detail-box-hint">{closable ? text.hint : text.hint.replace('Esc cancels, keeps your draft', 'Esc leaves the box, keeps your draft')}</span>
+      </div>
+    </div>
+  </>;
+}
+
 /** "You replied: “…”" for a one-paragraph reply; a longer reply keeps its paragraphs and lists below the words. */
 function OwnerReply({ text }: { readonly text: string }) {
   if (singleParagraph(text)) return <span>You replied: “<Markdown text={text} inline />”</span>;
-  return <div className="detail-round-reply"><span>You replied:</span><Markdown text={text} /></div>;
+  return <div className="detail-reply"><span>You replied:</span><Markdown text={text} /></div>;
+}
+
+/** What the owner sent, inside their bubble: the option they chose, a one-press request, or their own words. */
+function YouSaid({ how, text }: { readonly how: PendingView['how']; readonly text: string }) {
+  return <>
+    <i className={`${how === 'chose' ? 'ph ph-check-circle' : 'ph ph-user'} detail-msg-icon detail-you-icon`} aria-hidden="true" />
+    {how === 'chose' ? <span>{`You chose “${text}”`}</span> : how === 'action' ? <span>{text}</span> : <OwnerReply text={text} />}
+  </>;
 }
 
 function KidButton({ kid, onOpen }: { readonly kid: Kid; readonly onOpen: (id: string) => void }) {
@@ -69,7 +132,7 @@ function KidButton({ kid, onOpen }: { readonly kid: Kid; readonly onOpen: (id: s
   </button>;
 }
 
-export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null }: ItemDetailProps) {
+export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
   const submit = useDetailSubmit(drafts, store, itemId);
   const draftState = useOwnerDrafts(drafts);
@@ -82,29 +145,78 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const [laterError, setLaterError] = useState(false);
   // The drop reason is local; the sent text wraps it (Ariadne.dc.html:1207).
   const [reason, setReason] = useState('');
-  const box = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null), dropBox = useRef<HTMLInputElement>(null);
   const handled = useRef<number | null>(null);
+  // The scrolling body, and whether the owner is reading its end (the latest message) or has scrolled up.
+  const body = useRef<HTMLDivElement>(null), atEnd = useRef(true), justSent = useRef(false);
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   // The session's write barrier, shared with the session bar: Resume, Cancel and Retry go through it.
   const actions = useMemo(() => sessionActionsFor(drafts.service, store), [drafts, store]);
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
-    replyDraft: mode === 'reply' || !!submit.text('reply').trim() }) : null;
+    replyDraft: mode === 'reply' || submit.written.length > 0 }) : null;
   const item = session?.items[itemId];
+  // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
+  // boxes (drop reason, follow-up on a finished item) open on press.
+  // Words are bound to the draft they were typed in: the box edits that draft in place whatever the item's status does, and
+  // the label says what the words go out as now (`fit`). Every draft that holds words shows, so none is ever hidden.
+  const fit = model?.box ?? null;
+  // A box the owner opened stays only while its action is still offered (Drop goes once a message is on its way).
+  const modeFits = (value: OpenMode) => !!model && ((value === 'reply' && !!model.followUp) || !!model.open?.actions.some(action => action.action === value));
+  const shownMode = mode && modeFits(mode) ? mode : null;
+  const standingEmpty = !!model && !!fit && !!model.open && (model.status === 'open' || model.status === 'progress');
+  const dropOpen = shownMode === 'drop';
+  const wantBlank = !!fit && ((standingEmpty && !dropOpen) || (!!shownMode && shownMode !== 'drop'));
+  const slots: readonly Words[] = !fit ? [] : submit.written.length ? submit.written : wantBlank ? [submit.blank(fit)] : [];
+  useEffect(() => { if (mode && model && !modeFits(mode)) setMode(null); });
+  // A box is keyed by its draft, so removing one draft never hands its mount (and the owner's focus) to another. The empty box
+  // keeps one key when its first keystroke makes it a draft, so that keystroke does not remount the textarea.
+  const lead = useRef<string | null>(null), blankShown = useRef(false);
+  const showingBlank = slots.length === 1 && submit.written.length === 0;
+  if (showingBlank) lead.current = slots[0]!.id;
+  else if (blankShown.current && slots.length > 0) lead.current = slots[0]!.id;
+  blankShown.current = showingBlank;
+  const slotKey = (slot: Words) => showingBlank || slot.id === null || slot.id === lead.current ? 'blank' : slot.id;
 
-  const openBox = (next: OpenMode) => { setMode(next); setFocusBox(value => value + 1); };
+  // Opening the item, and sending, show the latest message, as chat apps do. A message that arrives
+  // while the owner reads further up leaves the view where it is. An item with nothing said yet (no conversation, or
+  // only the open ask, which the head already carries) opens at its head.
+  // Whether the owner is at the end is read from where the pane really is afterwards, so an item opened at its head (nothing
+  // said yet, a long head) stays there when its first message arrives.
+  const showLatest = () => {
+    const pane = body.current;
+    if (!pane) return;
+    if (pane.querySelector('.detail-chat .detail-bubble-you, .detail-chat .detail-msg-result')) pane.scrollTop = pane.scrollHeight;
+    atEnd.current = nearEnd(pane);
+  };
+  const sentJustNow = () => { justSent.current = true; showLatest(); };
+  const chatKey = model ? [...model.rounds.map(round => `${round.ordinal}:${round.you ? 1 : 0}:${round.result.length}:${round.forks.length}`),
+    ...model.outbox.map(pending => `${pending.input.id}:${pending.input.state}`)].join('|') : null;
+  useEffect(() => {
+    if (chatKey === null) return;
+    if (atEnd.current || justSent.current) showLatest();
+    justSent.current = false;
+  }, [chatKey]);
+  // The composer growing shrinks the scrolling body; at the end of the chat, the end stays in view.
+  useEffect(() => {
+    const element = body.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(() => { if (atEnd.current) showLatest(); });
+    watch.observe(element);
+    return () => watch.disconnect();
+  }, [chatKey === null]);
+
+  // Words open in the box that fits the status, whichever box the action or a put-back names.
+  const openBox = (next: OpenMode) => { setMode(next === 'drop' || !fit ? next : fit); setFocusBox(value => value + 1); };
   const closeBox = () => { setMode(null); focusRoot(itemId); };
-  const send = async (intent: 'reply' | 'note' | 'followup' | 'drop' | 'reopen', text: string) => {
-    const sent = await submit.send(intent, text);
-    if (sent) setMode(null);
+  const send = async (target: DraftTarget, text: string, as?: 'reply' | 'note' | 'followup') => {
+    const sent = await submit.send(target, text, as);
+    if (sent) { setMode(null); sentJustNow(); }
     return sent;
   };
-  const sendBox = () => {
-    if (!model || !mode) return;
-    if (mode === 'drop') void send('drop', actionText('drop', model.question, reason)).then(sent => { if (sent) setReason(''); });
-    else if (submit.text(mode).trim()) void send(mode, submit.text(mode));
-  };
+  const sendWords = (slot: Words) => { if (fit && slot.text.trim()) void send(slot, slot.text, fit); };
+  const sendDrop = () => { if (model) void send('drop', actionText('drop', model.question, reason)).then(sent => { if (sent) setReason(''); }); };
   const toggleLater = async () => { try { setLaterError(!await onLater?.(!later)); } catch { setLaterError(true); } };
   const act = (action: ActionKey) => {
     if (!model) return;
@@ -114,7 +226,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     else openBox(action);
   };
 
-  useEffect(() => { if (focusBox) box.current?.focus(); }, [focusBox]);
+  useEffect(() => { if (focusBox) (dropOpen ? dropBox : box).current?.focus(); }, [focusBox]);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1600);
@@ -135,49 +247,51 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   });
 
   if (!session || !item || !model) return <p role="status">The current item is unavailable. Refresh its registered session.</p>;
-  const boxKey = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); closeBox(); return; }
-    if (mode !== 'drop' && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.stopPropagation(); event.preventDefault(); sendBox(); }
-    if (mode === 'drop' && event.key === 'Enter') { event.stopPropagation(); event.preventDefault(); sendBox(); }
-  };
-  const text = mode && mode !== 'drop' ? boxText[mode] : null;
-  // The open box's saved draft, or a reopen that could not go out, was written against an older item (OwnerInput's Review step).
-  const stale = mode && submit.changed(mode) ? mode : submit.changed('reopen') ? 'reopen' : null;
+  // A reopen that could not go out was written against an older item (OwnerInput's Review step). Only the Open section offers it.
+  const reopenStale = !!model.open && submit.changed('reopen');
   const answerFocus = focusRequest && model.status === 'waiting' && !model.followUp && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
   const copy = () => {
     try { void navigator.clipboard?.writeText(`${model.id} — ${model.question}`).catch(() => {}); } catch { /* The reference still shows. */ }
     setCopied(true);
   };
-  // The open box: the Open section's actions, or the follow-up of a waiting item whose input is pending.
-  // data-owner-input marks it with its changed-target warning, like the answer slot (native tests).
-  // The Follow-up section shows only its own (reply) warning, never the reopen one.
-  const ownerBox = (warn: typeof stale) => (warn || mode) && <div className="detail-owner-input" data-owner-input={itemId}>
+  // The owner's boxes, docked in one place whatever section the item's status shows above them, so a box keeps its mount (and
+  // the owner's focus and caret) when the status changes. data-owner-input marks them with their changed-target warnings, like the
+  // answer slot (native tests).
+  // A box that holds words has nothing to cancel: its text is kept either way, and Esc only leaves it. Offline, its send waits for the connection.
+  const sendHeld = !!fit && !!model.open?.actions.find(value => value.action === fit)?.disabled;
+  const closable = submit.written.length === 0 && !standingEmpty;
+  // The Send button and the keys follow one rule: nothing goes out while this says no.
+  const sendOff = (slot: Words) => !submit.ready || submit.saving !== null || slot.changed || sendHeld || !slot.text.trim();
+  const wordsKey = (slot: Words) => (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); closeBox(); return; }
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.stopPropagation(); event.preventDefault(); if (!sendOff(slot)) sendWords(slot); }
+  };
+  const dropKey = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); closeBox(); return; }
+    if (event.key === 'Enter') { event.stopPropagation(); event.preventDefault(); if (!dropOff) sendDrop(); }
+  };
+  const dropOff = !submit.ready || submit.saving !== null;
+  const owner = (slots.length > 0 || dropOpen || reopenStale) && <div className="detail-owner-input" data-owner-input={itemId}>
     <PausedNote actions={actions} />
-    {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
-      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked(warn)} onClick={() => submit.review(warn)}>Review current target</button></div>}
-    {text && mode && <div className="detail-box">
-      <textarea ref={box} className="input" rows={3} aria-label={text.label} placeholder={text.placeholder} value={submit.text(mode)} disabled={submit.locked(mode)}
-        onChange={event => submit.edit(mode, event.target.value)} onKeyDown={boxKey} />
+    {reopenStale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
+      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked('reopen')} onClick={() => submit.review('reopen')}>Review current target</button></div>}
+    {fit && slots.map((slot, index) => <WordsField key={slotKey(slot)} slot={slot} sentAs={fit} first={index === 0} inputRef={index === 0 ? box : null} sendOff={sendOff(slot)}
+      closable={closable} onEdit={value => submit.edit(slot, value)} onKeyDown={wordsKey(slot)} onSend={() => sendWords(slot)} onCancel={closeBox}
+      onReview={() => submit.review(slot)} />)}
+    {dropOpen && <div className="detail-box">
+      <input ref={dropBox} className="input" aria-label="Drop reason" placeholder="Reason (optional), e.g. the metric already covers it" value={reason}
+        disabled={submit.locked('drop')} onChange={event => setReason(event.target.value)} onKeyDown={dropKey} />
       <div className="detail-box-row">
-        <button type="button" className="btn btn-primary" disabled={!submit.ready || !submit.text(mode).trim() || submit.saving !== null || stale === mode} onClick={sendBox}>
-          <i className="ph ph-paper-plane-right" aria-hidden="true" />{text.button}</button>
-        <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button>
-        <span className="detail-box-hint">{text.hint}</span>
-      </div>
-    </div>}
-    {mode === 'drop' && <div className="detail-box">
-      <input ref={box} className="input" aria-label="Drop reason" placeholder="Reason (optional), e.g. the metric already covers it" value={reason}
-        disabled={submit.locked('drop')} onChange={event => setReason(event.target.value)} onKeyDown={boxKey} />
-      <div className="detail-box-row">
-        <button type="button" className="btn btn-secondary" disabled={!submit.ready || submit.saving !== null || stale === 'drop'} onClick={sendBox}>
+        <button type="button" className="btn btn-secondary" disabled={dropOff} onClick={sendDrop}>
           <i className="ph ph-x-circle" aria-hidden="true" />Drop item</button>
         <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button>
         <span className="detail-box-hint">Enter drops · the agent confirms</span>
       </div>
     </div>}
   </div>;
-
+  const docked = !!(model.open || model.followUp || model.answer || retainedAnswer || owner);
   return <article className="item-detail" data-status={model.status} aria-label={`Detail of #${model.id}`}>
+    <div className="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
     <div className="detail-head">
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
       <div className="detail-status"><div className="detail-badge"><StatusBadge status={model.display} label={model.badgeLabel} /></div>
@@ -194,50 +308,6 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </div>)}</div>
       {model.delivery && <div className="detail-delivery" role="status" style={{ color: model.delivery.color }}>
         <i className={model.delivery.icon} aria-hidden="true" /><span>{model.delivery.text}</span></div>}
-      {model.stuck && <StuckNote actions={actions} input={model.stuck.input} stuck={model.stuck.note}
-        onEdit={async () => {
-          // An answer goes back to the answer slot below; anything else opens the box that now holds it.
-          const outcome = await editQueued(drafts, session, model.stuck!.input, actions);
-          if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
-          return outcome;
-        }} />}
-    </section>}
-
-    {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
-      {sectionLabel(model.open.title)}
-      <div className="detail-actions" role="group" aria-label="Item actions">
-        {model.open.actions.map(action => <button type="button" key={action.action} className={`btn ${action.primary ? 'btn-primary' : 'btn-secondary'} detail-action`}
-          aria-pressed={action.primary ? undefined : action.pressed} disabled={action.disabled || (!submit.ready && action.action !== 'later')} title={action.title}
-          onClick={() => act(action.action)}>
-          <i className={action.icon} aria-hidden="true" />{action.label}<span className="detail-key" aria-hidden="true">{action.key}</span>
-        </button>)}
-      </div>
-      <div className="detail-hint">{model.open.hint}</div>
-      {ownerBox(stale) || <PausedNote actions={actions} />}
-      {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
-      {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
-    </section>}
-
-    {model.followUp && <section className="detail-section detail-open" aria-label="Follow-up">
-      <div className="detail-actions" role="group" aria-label="Item actions">
-        <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !submit.ready}
-          title="Reply in your own words" onClick={() => openBox('reply')}>
-          <i className="ph ph-chat-text" aria-hidden="true" />{model.followUp.label}<span className="detail-key" aria-hidden="true">r</span>
-        </button>
-      </div>
-      <div className="detail-hint">{model.followUp.hint}</div>
-      {(mode === 'reply' || stale === 'reply') && ownerBox(stale === 'reply' ? 'reply' : null)}
-      {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
-    </section>}
-
-    {(model.answer || retainedAnswer) && <section className="detail-section detail-answer" aria-label="Your answer">
-      {model.answer?.heading && <div className="detail-label detail-label-accent">Your answer</div>}
-      {model.answer?.ask && <Markdown className="detail-ask" text={model.answer.ask} />}
-      {model.answer && <PausedNote actions={actions} />}
-      {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
-      <AnswerSlot drafts={drafts} store={store} itemId={itemId} blocked={model.answer?.blocked} focusRequest={answerFocus}
-        marked={!(model.followUp && (mode === 'reply' || stale === 'reply'))}
-        onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} />
     </section>}
 
     {model.outcome && <section className="detail-section detail-outcome" aria-label="Current outcome">
@@ -268,30 +338,21 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </a>)}
     </section>}
 
+    {provenance && item.origin && <section className="detail-section detail-provenance" aria-label="Original item">
+      {sectionLabel('Copied from')}
+      {provenance}
+    </section>}
+
     {model.prev && <section className="detail-section" aria-label="Former outcome">
       <div className="detail-label detail-label-row"><span>Before you reopened it</span><StatusBadge status={model.prev.status} variant="text" /></div>
       <Markdown className="detail-prev" text={model.prev.outcome} />
-    </section>}
-
-    {model.rounds.length > 0 && <section className="detail-section detail-rounds" aria-label="Back and forth">
-      <div className="detail-label-row"><span className="detail-label">Back and forth</span><span className="detail-count">{model.roundsCount}</span></div>
-      {model.rounds.map(round => <div className={`detail-round${round.now ? ' detail-round-now' : ''}`} key={round.label} aria-label={round.label}>
-        <div className="detail-round-head"><span>{round.label}</span><span className="detail-round-range">{round.range}</span>
-          {round.now && <span className="tag tag-accent detail-round-tag">Waiting on you</span>}</div>
-        <div className="detail-round-line"><i className="ph ph-robot" aria-hidden="true" /><Markdown text={round.ask} inline /></div>
-        {round.you && <div className="detail-round-line detail-round-you"><i className={round.you.chosen ? 'ph ph-check-circle' : 'ph ph-user'} aria-hidden="true" />
-          {round.you.chosen ? <span>{`You chose “${round.you.text}”`}</span> : <OwnerReply text={round.you.text} />}</div>}
-        {round.result && <div className="detail-round-line detail-round-result"><i className="ph ph-arrow-elbow-down-right" aria-hidden="true" /><Markdown text={round.result} inline /></div>}
-        {round.forks.map(fork => <button type="button" className="detail-fork" key={fork.id} onClick={() => onOpenItem(fork.id)}>
-          <i className="ph ph-git-fork" aria-hidden="true" /><span>{fork.question}</span><StatusBadge status={fork.status} variant="text" /></button>)}
-      </div>)}
     </section>}
 
     <section className="detail-section detail-timeline" aria-label="Timeline">
       {sectionLabel('Timeline')}
       <div className="detail-timeline-list">{model.timeline.map(entry => <TimelineExcerpt key={entry.id} id={entry.id} message={entry.message} mark={entry.mark} label={entry.label}
         note={entry.note} last={entry.last} highlighted={highlightedMessageIds?.has(entry.id)}
-        after={entry.unsent && <NotSentLine line={entry.unsent.line} again={entry.unsent.again}
+        after={entry.unsent && <NotSentLine line={entry.unsent.line} again={entry.unsent.again || sendingAgain(draftState, session, entry.unsent.input)}
           restoreHint={editable(entry.unsent.input.kind) ? putBackBlocked(session, entry.unsent.input) : null}
           onPutBack={putBackBlocked(session, entry.unsent.input) || !editable(entry.unsent.input.kind) ? null : async () => {
             const outcome = await putBackCancelled(drafts, session, entry.unsent!.input);
@@ -304,5 +365,77 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       <span>Agent reference</span><code>{model.id}</code>
       <button type="button" className="btn btn-ghost detail-copy" onClick={copy}><i className={copied ? 'ph ph-check' : 'ph ph-copy'} aria-hidden="true" />{copied ? 'Copied' : 'Copy reference'}</button>
     </div>
+
+    {(model.rounds.length > 0 || model.outbox.length > 0) && <section className="detail-section detail-chat" aria-label="Conversation">
+      <ol className="detail-chat-list">
+        {model.rounds.map(round => <li className={`detail-turn${round.now ? ' detail-turn-now' : ''}`} key={round.ordinal} data-round={round.ordinal}>
+          {(round.ask || round.now) && <div className="detail-msg"><i className="ph ph-robot detail-msg-icon" aria-hidden="true" />
+            <div className="detail-bubble detail-bubble-agent">{round.ask && <Markdown text={round.ask} inline />}
+              {round.now && <span className="tag tag-accent detail-waiting-tag">Waiting on you</span>}</div></div>}
+          {round.you && <div className="detail-msg detail-msg-you"><div className="detail-bubble detail-bubble-you"><YouSaid how={round.you.chosen ? 'chose' : 'said'} text={round.you.text} /></div></div>}
+          {round.result && <div className="detail-msg detail-msg-result"><i className="ph ph-arrow-elbow-down-right detail-msg-icon" aria-hidden="true" />
+            <Markdown className="detail-msg-text" text={round.result} inline /></div>}
+          {round.forks.map(fork => <button type="button" className="detail-fork" key={fork.id} onClick={() => onOpenItem(fork.id)}>
+            <i className="ph ph-git-fork" aria-hidden="true" /><span>{fork.question}</span><StatusBadge status={fork.status} variant="text" /></button>)}
+        </li>)}
+        {model.outbox.map(pending => <li className="detail-turn detail-turn-pending" key={pending.input.id} data-pending={pending.input.id}>
+          <div className="detail-msg detail-msg-you"><div className="detail-bubble detail-bubble-you"><YouSaid how={pending.how} text={pending.text} />
+            {pending.caption && <span className="detail-pending-caption">{pending.caption}</span>}</div></div>
+          {pending.stuck && <StuckNote actions={actions} input={pending.input} stuck={pending.stuck}
+            onEdit={async () => {
+              // An answer goes back to the composer below; anything else opens the box that now holds it.
+              const outcome = await editQueued(drafts, session, pending.input, actions);
+              if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
+              return outcome;
+            }} />}
+        </li>)}
+      </ol>
+    </section>}
+    </div>
+
+    {docked && <div className="detail-dock">
+    {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
+      {sectionLabel(model.open.title)}
+      <div className="detail-actions" role="group" aria-label="Item actions">
+        {model.open.actions.map(action => <button type="button" key={action.action} className={`btn ${action.primary ? 'btn-primary' : 'btn-secondary'} detail-action`}
+          aria-pressed={action.primary ? undefined : action.pressed} disabled={action.disabled || (!submit.ready && action.action !== 'later')} title={action.title}
+          onClick={() => act(action.action)}>
+          <i className={action.icon} aria-hidden="true" />{action.label}<span className="detail-key" aria-hidden="true">{action.key}</span>
+        </button>)}
+      </div>
+      <div className="detail-hint">{model.open.hint}</div>
+      {!owner && <PausedNote actions={actions} />}
+      {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
+      {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
+    </section>}
+
+    {model.followUp && <section className="detail-section detail-open" aria-label="Follow-up">
+      <div className="detail-actions" role="group" aria-label="Item actions">
+        <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !submit.ready}
+          title="Reply in your own words" onClick={() => openBox('reply')}>
+          <i className="ph ph-chat-text" aria-hidden="true" />{model.followUp.label}<span className="detail-key" aria-hidden="true">r</span>
+        </button>
+      </div>
+      <div className="detail-hint">{model.followUp.hint}</div>
+      {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
+    </section>}
+
+    {/* The one place the owner's boxes live: the same mount for every status, so typing and focus survive a status change. */}
+    {owner && <section className="detail-section detail-open" aria-label="Your message">
+      {owner}
+      {!model.open && !model.followUp && submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
+    </section>}
+
+    {(model.answer || retainedAnswer) && <section className="detail-section detail-answer" aria-label="Your answer">
+      {model.answer?.heading && <div className="detail-label detail-label-accent">Your answer</div>}
+      {/* The ask the conversation's last message does not already carry. */}
+      {model.answer?.ask && <Markdown className="detail-ask" text={model.answer.ask} />}
+      {model.answer && <PausedNote actions={actions} />}
+      {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
+      <AnswerSlot drafts={drafts} store={store} itemId={itemId} blocked={model.answer?.blocked} focusRequest={answerFocus}
+        marked={!owner}
+        onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
+    </section>}
+    </div>}
   </article>;
 }

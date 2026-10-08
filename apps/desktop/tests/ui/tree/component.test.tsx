@@ -1,6 +1,8 @@
 // The Paperwhite session tree (ui/tree) over the real navigation, session,
 // draft and action stores. The workspace props (reveal, selection, intents) are
 // recorded instead of composed; App.test.tsx covers the composed workspace.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -625,5 +627,133 @@ describe('session tree reading position', () => {
     const before = top('8');
     rerender({ detailOpen: true, railOpen: true });
     expect(top('8')).toBe(before);
+  });
+});
+
+describe('item details in the tree', () => {
+  const long = Array.from({ length: 20 }, (_, index) => `Line ${index + 1} of a long finding the agent wrote.`).join('\n');
+  // jsdom has no layout: text over 100 characters reports a tall scrollHeight, anything shorter fits.
+  const measure = () => vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
+    return this.classList.contains('tree-clamp') && (this.textContent?.length ?? 0) > 100 ? 420 : 20;
+  });
+  const longOutcome = (transport: AppTransport) => { transport.sessions.get(route.session_id)!.items['1']!.outcome = long; };
+  const more = (id: string) => within(row(id)).queryByRole('button', { name: /^Show (more|less)$/ });
+
+  it('folds a long preview to six lines with Show more and Show less, and none for short text', async () => {
+    measure();
+    const { calls } = await mount({ configure: longOutcome });
+    const preview = row('1').querySelector<HTMLElement>('.tree-preview')!;
+    expect(preview.style.getPropertyValue('--tree-clamp')).toBe('6');
+    expect(preview.hasAttribute('data-open')).toBe(false);
+    // Short details have no control; the title is never folded.
+    expect(more('5')).toBeNull(); expect(more('3')).toBeNull();
+    expect(row('1').querySelector('.tree-question .tree-clamp')).toBeNull();
+    const button = more('1')!;
+    expect(button.textContent).toBe('Show more'); expect(button.tabIndex).toBe(0); expect(button.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(button);
+    expect(more('1')!.textContent).toBe('Show less'); expect(preview.hasAttribute('data-open')).toBe(true);
+    expect(more('1')!.getAttribute('aria-expanded')).toBe('true');
+    // Unfolding one item opens nothing else and selects nothing.
+    expect(calls.selected).toHaveLength(0); expect(row('1').getAttribute('aria-selected')).toBe('false');
+    expect(row('1').getAttribute('aria-expanded')).toBe('true');
+    // The unfolded state is per item and outlives the rows being rebuilt.
+    cleanup();
+    await mount({ configure: longOutcome });
+    expect(more('1')!.textContent).toBe('Show less');
+    fireEvent.click(more('1')!);
+    expect(more('1')!.textContent).toBe('Show more');
+    expect(row('1').querySelector('.tree-preview')!.hasAttribute('data-open')).toBe(false);
+  });
+
+  it('keeps an item’s details while a message to the agent is on its way', async () => {
+    const delivering = (transport: AppTransport) => {
+      const session = transport.sessions.get(route.session_id)!;
+      const sent = structuredClone(Object.values(session.inputs).find(input => input?.state === 'in_flight')!);
+      sent.id = '00000000-0000-4000-8000-000000000099'; sent.seq = 99; sent.kind = 'followup';
+      sent.target = { topic_id: sent.target.topic_id, item_id: '5' };
+      session.inputs[sent.id] = sent;
+    };
+    await mount({ configure: delivering });
+    // A closed item keeps its outcome and gains the delivery as a small line.
+    expect(row('5').querySelector('.tree-outcome')?.textContent).toBe('Recorded final decision.');
+    expect(row('5').querySelector('.tree-delivery')?.textContent).toMatch(/^Follow-up received/);
+    // An item being worked on keeps its note beside its reply in flight.
+    expect(row('3').textContent).toContain('Receipt lookup is underway.');
+    expect(row('3').querySelector('.tree-delivery')?.textContent).toMatch(/^Your reply was received/);
+    // A stopped delivery shows its fix under the details, not in their place.
+    expect(row('7').textContent).toContain('Replaced by');
+    expect(row('7').querySelector('.stuck-note')).not.toBeNull();
+  });
+
+  it('keeps the space of the shortcut icons so the text never changes width on hover', async () => {
+    await mount();
+    const body = row('4').querySelector('.tree-body')!, before = row('4').innerHTML;
+    expect(row('4').querySelector('.tree-actions')).not.toBeNull();
+    fireEvent.mouseEnter(row('4'));
+    expect(row('4').innerHTML).toBe(before); expect(row('4').querySelector('.tree-body')).toBe(body);
+    // The icons are always laid out and only fade in: nothing in the stylesheet takes them out of the flow.
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /\.tree-actions\b/.test(selector!));
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, , declarations] of rules) expect(declarations).not.toMatch(/display:\s*none|width:|position:\s*absolute/);
+    expect(rules.some(([, , declarations]) => /visibility:\s*hidden/.test(declarations!) && /opacity:\s*0/.test(declarations!))).toBe(true);
+  });
+});
+
+describe('scrolling the tree', () => {
+  // A 400 px tree over rows 100 px apart that move with its scrollTop, scrolled 150 px down.
+  const layout = () => {
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, 300, 400);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1;
+      if (this.getAttribute('role') === 'treeitem' && at >= 0) return new DOMRect(0, at * 100 - (box?.scrollTop ?? 0), 300, 40);
+      return rectangle.call(this);
+    });
+  };
+  const scroller = () => document.querySelector<HTMLElement>('.tree-scroll')!;
+  const opened = async (extra: Parameters<typeof mount>[0] = {}) => {
+    layout();
+    const view = await mount(extra);
+    scroller().scrollTop = 150;
+    return view;
+  };
+  const link = (view: Awaited<ReturnType<typeof mount>>, id: string): RevealedItem =>
+    ({ kind: 'item', route: { ...route, item_id: id }, store: view.store, temporaryExpandedItemIds: [] });
+
+  it('never scrolls when an item is clicked, even once the workspace echoes the opening back', async () => {
+    const view = await opened();
+    fireEvent.click(row('3'));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    view.rerender({ reveal: view.calls.selected[0], selectedId: '3', detailOpen: true });
+    expect(scroller().scrollTop).toBe(150);
+    // An item part-way down the tree stays where it is as well.
+    fireEvent.click(row('4'));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(2));
+    view.rerender({ reveal: view.calls.selected[1], selectedId: '4', detailOpen: true });
+    expect(scroller().scrollTop).toBe(150);
+  });
+
+  it('reveals an item opened from elsewhere only when it is not in view', async () => {
+    const view = await opened();
+    view.rerender({ reveal: link(view, '4'), selectedId: '4' });
+    expect(scroller().scrollTop).toBe(150);
+    view.rerender({ reveal: link(view, '8'), selectedId: '8' });
+    expect(scroller().scrollTop).not.toBe(150);
+    expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+    expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+  });
+
+  it('scrolls on the keyboard only when the row is off-screen, and only as far as needed', async () => {
+    await opened();
+    row('3').focus();
+    fireEvent.keyDown(row('3'), { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(row('4')); expect(scroller().scrollTop).toBe(150);
+    fireEvent.keyDown(row('4'), { key: 'End' });
+    expect(document.activeElement).toBe(row('8'));
+    // The last row's bottom (840) lands 8 px above the tree's bottom: 840 + 8 - 400.
+    expect(scroller().scrollTop).toBe(448);
+    expect(row('8').getBoundingClientRect().top).toBe(352);
   });
 });

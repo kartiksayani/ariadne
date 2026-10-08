@@ -83,7 +83,7 @@ test('fork links and parent references cannot admit a different selected history
     ${nested}<div class="detail-reference"><span>Agent reference</span><code>${header}</code></div></article>`;
   const views = [
     view(parent.id, parent.question, `<section aria-label="Child items"><button class="detail-kid">${child.question}</button></section>
-      <section class="detail-rounds" aria-label="Back and forth"><div class="detail-round" aria-label="Round 1"><button class="detail-fork">${child.question}</button></div></section>`),
+      <section class="detail-chat" aria-label="Conversation"><ol class="detail-chat-list"><li class="detail-turn" data-round="1"><button class="detail-fork">${child.question}</button></li></ol></section>`),
     view(child.id, parent.question, ''),
     view(parent.id, child.question, ''),
     view(child.id, child.question.split('\n')[0], ''),
@@ -108,9 +108,9 @@ test('fork links and parent references cannot admit a different selected history
   assert.deepEqual(admitted, [false, true]);
 });
 
-// A Back and forth round renders its ask, the owner's answer and the result's explanation
-// as one-paragraph lines (Ariadne.dc.html); its explanation alone proves the closed result.
-const roundText = (ask, you, result = null) => ['Round 5', ask, you, result].filter(Boolean).join('\n');
+// An exchange of the Conversation renders its ask, the owner's answer and the result's explanation
+// as one-paragraph lines; its explanation alone proves the closed result. It carries no visible number.
+const roundText = (ask, you, result = null) => [ask, you, result].filter(Boolean).join('\n');
 const roundAsk = 'History round 5: choose and explain. Full ask line 5.';
 const roundChoice = 'You chose “Use round 5 choice”';
 
@@ -126,7 +126,7 @@ test('five existing round sections do not admit assertions before the final clos
   t.after(() => { globalThis.browser = previousBrowser; });
   globalThis.browser = {
     $(selector) {
-      assert.equal(selector, '.detail-rounds [aria-label="Round 5"]');
+      assert.equal(selector, '.detail-chat-list [data-round="5"]');
       return typeof state === 'string' ? { isExisting: async () => true, getText: async () => state } : state;
     },
     async waitUntil(condition, options) {

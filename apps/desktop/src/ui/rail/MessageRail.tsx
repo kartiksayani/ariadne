@@ -2,7 +2,7 @@
 // rail variant of Message Excerpt.dc.html. Hovering a message highlights the
 // items it touched; clicking pins it. The rail follows the latest message
 // until the owner scrolls up, then offers "N new messages · Jump to latest".
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { RendererService } from '../../data/service';
 import type { SessionStore } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
@@ -13,13 +13,17 @@ import { excerptView } from '../shared/excerpt';
 import { notSent, withdrawn } from '../../selectors/waiting/stuck';
 import { RailExcerpt } from '../shared/MessageExcerpt';
 import { NotSentLine } from '../answer/NotSentLine';
-import { editable, putBackBlocked, putBackCancelled } from '../answer/held';
-import type { OwnerDraftStore } from '../../state/drafts/store';
+import { editable, putBackBlocked, putBackCancelled, sendingAgain } from '../answer/held';
+import type { DraftState, OwnerDraftStore } from '../../state/drafts/store';
 import { followButton, jumpText } from './model';
 import './rail.css';
 
 const load = (service: RendererService, route: Parameters<typeof loadMessages>[1], revision: number, _selection: string, signal: AbortSignal) =>
   loadMessages(service, route, revision, signal);
+
+/** Without a draft store there is no editor sending anything: the same empty state every time. */
+const noDrafts: DraftState = Object.freeze({ entries: {}, ready: false, error: null, preferenceUncertain: false });
+const noSubscribe = () => () => {};
 
 export interface MessageRailProps {
   readonly service: RendererService;
@@ -40,6 +44,7 @@ export interface MessageRailProps {
 export function MessageRail({ service, store, drafts, selectedItemId = null, hoveredItemId = null, onHighlight, onClose, closeDisabled = false, now = Date.now,
   earlierAgent = null }: MessageRailProps) {
   const history = useHistory(service, store, 'messages', load);
+  const draftState = useSyncExternalStore(drafts?.subscribe ?? noSubscribe, drafts?.getSnapshot ?? (() => noDrafts));
   // A message deleted (or taken back to edit) before it was sent leaves the history.
   const live = history.session.snapshot?.session, all = history.data?.items;
   const messages = useMemo(() => all && live ? all.filter(message => !withdrawn(live, message)) : all, [all, live]);
@@ -111,7 +116,7 @@ export function MessageRail({ service, store, drafts, selectedItemId = null, hov
             highlight={focus !== null && messageItems(message).includes(focus)}
             onHover={on => setHovered(previous => on ? message.id : previous === message.id ? null : previous)}
             onPin={() => setPinned(previous => previous === message.id ? null : message.id)} />
-          {live && unsent && <div className="pw-excerpt-unsent"><NotSentLine line={unsent.line} again={unsent.again}
+          {live && unsent && <div className="pw-excerpt-unsent"><NotSentLine line={unsent.line} again={unsent.again || sendingAgain(draftState, live, unsent.input)}
             restoreHint={editable(unsent.input.kind) ? putBackBlocked(live, unsent.input) : null}
             onPutBack={!drafts || putBackBlocked(live, unsent.input) || !editable(unsent.input.kind) ? null
               : () => putBackCancelled(drafts, live, unsent.input)} /></div>}

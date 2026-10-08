@@ -13,6 +13,7 @@ export default defineConfig({
   projects: [
     { name: 'design' },
     { name: 'graph-2000', testDir: resolve('tests/e2e/graph'), testMatch: '*.spec.mts', use: { viewport: { width: 1000, height: 700 } } },
+    { name: 'tree-layout', testDir: resolve('tests/e2e/tree-layout'), testMatch: '*.spec.mts', use: { viewport: { width: 1000, height: 700 } } },
     { name: 'owner-input-layout', testDir: resolve('tests/e2e/owner-input'), testMatch: '*.spec.mts', use: { viewport: { width: 1000, height: 700 } } },
   ],
 });

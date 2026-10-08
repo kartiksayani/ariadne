@@ -26,7 +26,7 @@ export function historyFailureFacts() {
     selected: { treeItemIds: all('[data-item-id][aria-selected="true"], [data-item-id][aria-current]').map(node => node.getAttribute('data-item-id')),
       detailHeader: text(document.querySelector('.item-detail .detail-reference code')),
       detailQuestion: text(document.querySelector('.item-detail .detail-question')),
-      rounds: all('.item-detail .detail-round').map(node => node.getAttribute('aria-label')) },
+      rounds: all('.item-detail .detail-chat-list li[data-round]').map(node => node.getAttribute('data-round')) },
     ownerInput: { present: Boolean(owner), itemId: owner?.getAttribute('data-owner-input') ?? null,
       textarea: editor ? { disabled: editor.disabled, valueLength: editor.value.length } : null,
       send: control(send), buttons: owner ? [...owner.querySelectorAll('button')].map(control) : [],

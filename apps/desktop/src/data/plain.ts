@@ -49,6 +49,19 @@ export function registrationFailure(failure: unknown): string {
 /** A failure Ariadne raised itself, whose message is already written for the owner. */
 export class OwnFailure extends CoreFailure {}
 
+/**
+ * What to say when opening the original of a copied item failed. Core sends `io_error` when the project's folder is
+ * missing or can't be read: say which folder and what to do. It sends `not_found` when the original session was removed
+ * or its project is no longer registered: the folder is fine, the item is gone. Null for any other failure, which
+ * `plainFailure` words. The folder's path is the owner's own; the OS reason goes to the console only.
+ */
+export function originalFailure(failure: unknown, path: string | null): string | null {
+  if (!(failure instanceof CoreFailure) || failure instanceof OwnFailure || !['not_found', 'io_error'].includes(failure.error.code)) return null;
+  console.debug('Ariadne core error', failure.error.code, failure.error.message, failure.error.hint);
+  if (failure.error.code === 'not_found') return 'The original item is no longer in Ariadne.';
+  return `The original project folder ${path ? `(${path}) ` : ''}is missing or can’t be read. Restore it or move it back, then try again.`;
+}
+
 /** One plain sentence for a failure; `fallback` replaces "Ariadne couldn't do that" where the caller knows what was attempted. */
 export function plainFailure(failure: unknown, fallback: string = COULDNT_DO_THAT): string {
   if (failure instanceof OwnFailure) return failure.message;

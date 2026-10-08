@@ -187,19 +187,20 @@ async function renderedBodies(selector) {
     id: card.dataset.messageId, body: card.querySelector('.excerpt-body, .pw-excerpt-text')?.textContent,
   })), selector);
 }
-// A round of Back and forth shows its ask, the owner's answer and the result's explanation (Ariadne.dc.html).
+// An exchange of the Conversation shows its ask, the owner's answer and the result's explanation.
+// Exchanges carry no visible number; `data-round` is their ordinal for tests.
 export async function waitForRoundResult(round, explanation) {
   await wait(async () => {
-    const section = await browser.$(`.detail-rounds [aria-label="Round ${round.ordinal}"]`);
+    const section = await browser.$(`.detail-chat-list [data-round="${round.ordinal}"]`);
     return await section.isExisting() && folded(await section.getText()).includes(folded(explanation));
   }, 'Native detail did not publish the final closed round and its complete correlated result');
 }
 async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
-  // Back and forth and Timeline are sections of the detail panel, both always shown.
-  const back = await browser.$('.item-detail [aria-label="Back and forth"]'); await failureEvidence('history-back-and-forth', () => back.waitForDisplayed()); await back.scrollIntoView();
+  // The Conversation and the Timeline are sections of the detail body, both always shown.
+  const back = await browser.$('.item-detail [aria-label="Conversation"]'); await failureEvidence('history-conversation', () => back.waitForDisplayed()); await back.scrollIntoView();
   // Restoration runs against the final session, whose open sixth round (no result) is also rendered.
   const every = Object.keys(saved.rounds).length;
-  await failureEvidence('history-rounds', () => wait(async () => (await browser.$$('.detail-rounds .detail-round')).length === every, `Native detail did not load all ${every} real rounds`));
+  await failureEvidence('history-rounds', () => wait(async () => (await browser.$$('.detail-chat-list li[data-round]')).length === every, `Native detail did not load all ${every} real rounds`));
   const rounds = Object.values(saved.rounds).filter(round => round.closed_at).sort((a, b) => a.ordinal - b.ordinal);
   assert.equal(rounds.length, 5); assert.equal(Object.keys(saved.items).length, 3);
   // Five sections already exist after the fifth answer. The Core completion
@@ -207,7 +208,7 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
   const finalRound = rounds.at(-1);
   await failureEvidence('history-final-round-result', () => waitForRoundResult(finalRound, saved.inputs[finalRound.result_input_ids[0]].attempts[0].domain_result.explanation));
   for (let index = 0; index < 5; index++) {
-    const section = await browser.$(`.detail-rounds [aria-label="Round ${index + 1}"]`);
+    const section = await browser.$(`.detail-chat-list [data-round="${index + 1}"]`);
     const text = folded(await section.getText()), round = rounds[index];
     // Each round shows its full ask, the owner's choice or own words, and the result's full explanation.
     assert.ok(text.includes(folded(round.ask_snapshot ?? round.question_snapshot)), `Round ${index + 1} lost its full stored ask`);
@@ -224,7 +225,7 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
   for (const id of ['1.1', '1.2']) {
     // The fork sits in the round it came from: its correlated source round.
     const source = saved.rounds[saved.items[id].source_round_id]; assert.ok(source);
-    const fork = await browser.$(`.detail-rounds [aria-label="Round ${source.ordinal}"]`).$(`button.detail-fork*=${saved.items[id].question.split('\n')[0]}`);
+    const fork = await browser.$(`.detail-chat-list [data-round="${source.ordinal}"]`).$(`button.detail-fork*=${saved.items[id].question.split('\n')[0]}`);
     await fork.scrollIntoView(); await fork.click();
     await waitForHistoryItem(saved.items[id], `after-fork-${id}`);
     await selectParent(saved.items['1']);
@@ -331,7 +332,7 @@ async function rail(history, saved, paged) {
       error.message += ` railState=${JSON.stringify(lastState)}`; throw error;
     }
   });
-  // Item actions carry their key hint ("Reply r"), so they match by contained text.
+  // The open item's Reply box is always docked; the Reply button (its key hint "r" is part of the text) focuses it.
   const reply = await browser.$('[aria-label="Item actions"]').$('button*=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const editor = await browser.$(`${ownerInput('1')} textarea`); await failureEvidence('owner-input-editor-first', () => editor.waitForEnabled());
   const draft = `Unsent native history draft ${process.env.ARIADNE_E2E_NONCE}\nKeep focus and every word.`;
@@ -472,7 +473,7 @@ export async function restoreHistoryAcceptance(configuration) {
   assert.deepEqual(await snapshot(history), finalSession); assert.deepEqual(await admissions(history), prior.queued);
   await open(history);
   await proveRounds(history, finalSession, prior.ownerTexts, prior.resultTexts, prior.paged);
-  // The Reply box opens on request; it reopens with the draft the relaunch retained.
+  // The Reply box is docked on the open item; it shows the draft the relaunch retained.
   const reply = await browser.$('[aria-label="Item actions"]').$('button*=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const editor = await browser.$(`${ownerInput('1')} textarea`); await failureEvidence('restored-owner-draft', () => editor.waitForDisplayed());
   assert.equal(await editor.getValue(), prior.railProof.draft, 'Actual process relaunch must retain the unsent owner draft without creating a new input');

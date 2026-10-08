@@ -91,5 +91,15 @@ export function frameSpec(id: string): FrameSpec {
   return spec;
 }
 
+/**
+ * The scrolling body of the detail column is left out of the comparison on every frame that shows it:
+ * the chat-style pane (reference on top, conversation after it, composer docked at the bottom) departs
+ * on purpose from the handoff's stacked sections. The pane's header strip, the other columns and the
+ * shell are still compared. The pane is guarded by tests/e2e/owner-input/layout.spec.mts and the UI
+ * tests of tests/ui/inputs and tests/ui/history instead.
+ */
+export const detailMask = { reason: 'chat-style detail pane, owner request 2026-10-08; covered by tests/e2e/owner-input/layout.spec.mts + UI tests', selector: '.shell-detail-scroll' } as const;
+export const detailMasked = (spec: FrameSpec): boolean => !!spec.detail;
+
 /** Graph frames: the handoff's view="graph" or the session scenario (Ariadne.dc.html:961). */
 export const graphFrame = (spec: FrameSpec): boolean => spec.view === 'graph' || spec.scenario === 'session';

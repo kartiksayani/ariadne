@@ -1,8 +1,9 @@
 // "Item Row" of the handoff (Item Row.dc.html): guides and the accent thread,
-// the status icon, the question with search hits, exactly one supporting line,
-// the collapsed note, the inline answer box, the round tag, hover actions, the
+// the status icon, the question with search hits, the item's details (folded to
+// six lines, with Show more) and under them the delivery of the owner's latest
+// message, the collapsed note, the inline answer box, the round tag, hover actions, the
 // id and the text badge.
-import type { KeyboardEvent, ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { StatusBadge } from '../shared/StatusBadge';
 import { closed, visual, type Guide, type ItemRow as Row } from './model';
 
@@ -20,23 +21,61 @@ export function Guides({ guides }: { guides: readonly Guide[] }) {
   })}</>;
 }
 
-/** The one supporting line, by priority (Item Row.dc.html:68-75). */
-function supporting(row: Row, jump: () => void, fix: ReactNode): ReactNode {
-  const item = row.item, delivery = row.delivery;
-  if (delivery?.stuck && fix) return fix;
-  if (delivery) return <div className="tree-line" style={{ color: delivery.color }}><i className={delivery.icon} /><span>{delivery.text}</span></div>;
-  if (row.later) return <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}><i className="ph ph-clock" /><span>Parked for later · still open</span></div>;
-  if (item.status === 'waiting_on_me' && item.ask) return <div className="tree-line tree-ask">{item.ask}</div>;
-  if (item.status === 'in_progress' && item.note) return <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress)' }}><i className="ph ph-robot" /><span>{item.note}</span></div>;
+/** Lines of an item's preview before "Show more" folds the rest away. */
+const CLAMP_LINES = 6;
+/** Row height of the preview text (tree.css `.tree-line`), when the browser reports none. */
+const PREVIEW_LINE = 21;
+
+interface Preview { readonly node: ReactNode; /** The long text the clamp applies to, if any. */ readonly text: string | null }
+
+/** The item's own details under the title, by priority (Item Row.dc.html:68-75). A delivery never takes this place. */
+function preview(row: Row, jump: () => void): Preview | null {
+  const item = row.item;
+  if (row.later) return { text: null, node: <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}><i className="ph ph-clock" /><span>Parked for later · still open</span></div> };
+  if (item.status === 'waiting_on_me' && item.ask) return { text: item.ask, node: <div className="tree-line tree-ask"><span className="tree-clamp">{item.ask}</span></div> };
+  if (item.status === 'in_progress' && item.note) {
+    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress)' }}><i className="ph ph-robot" /><span className="tree-clamp">{item.note}</span></div> };
+  }
   if (item.status === 'replaced' && row.replacedBy) {
-    return <div className="tree-line" style={{ color: neutral(66) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
+    return { text: null, node: <div className="tree-line" style={{ color: neutral(66) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
       <button type="button" className="tree-jump" onClick={event => { event.stopPropagation(); jump(); }}>{row.replacedBy.question}</button>
-      <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div>;
+      <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div> };
   }
   if (closed(item.status) && item.outcome) {
-    return <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} /><span>{item.outcome}</span></div>;
+    return { text: item.outcome, node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} />
+      <span className="tree-clamp">{item.outcome}</span></div> };
   }
   return null;
+}
+
+/** The delivery of the owner's latest message, as a small line under the details; a stopped one shows its fix instead. */
+function delivery(row: Row, fix: ReactNode): ReactNode {
+  const value = row.delivery;
+  if (!value) return null;
+  if (value.stuck && fix) return fix;
+  return <div className="tree-line tree-delivery" style={{ color: value.color }}><i className={value.icon} /><span>{value.text}</span></div>;
+}
+
+/** The preview folded to six lines, with Show more/Show less only when the text runs longer. */
+function PreviewBlock({ value, open, onToggle }: { value: Preview; open: boolean; onToggle: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(false);
+  const text = value.text;
+  useLayoutEffect(() => {
+    const target = text === null ? null : box.current?.querySelector<HTMLElement>('.tree-clamp');
+    if (!target) { setLong(false); return; }
+    const measure = () => setLong(target.scrollHeight > (parseFloat(getComputedStyle(target).lineHeight) || PREVIEW_LINE) * CLAMP_LINES + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [text]);
+  return <div ref={box} className="tree-preview" data-open={(long && open) || undefined} style={{ '--tree-clamp': CLAMP_LINES } as CSSProperties}>
+    {value.node}
+    {long && <button type="button" className="tree-more" aria-expanded={open}
+      onClick={event => { event.stopPropagation(); onToggle(); }}>{open ? 'Show less' : 'Show more'}</button>}
+  </div>;
 }
 
 export interface ItemRowProps {
@@ -52,6 +91,9 @@ export interface ItemRowProps {
   readonly answer: ReactNode;
   /** A stopped delivery's inline fix (ui/answer/StuckNote); it takes the delivery line's place. */
   readonly fix?: ReactNode;
+  /** The long preview is shown in full ("Show less" offered) instead of folded to six lines. */
+  readonly unfolded: boolean;
+  readonly onUnfold: (id: string) => void;
   readonly remember: (key: string, element: HTMLDivElement | null) => void;
   readonly onFocus: (key: string) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
@@ -61,8 +103,9 @@ export interface ItemRowProps {
   readonly onHover: (id: string | null) => void;
 }
 
-export function ItemRow({ row, selected, focused, disabled = false, highlight, note, actions, answer, fix, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, disabled = false, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
+  const details = preview(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); });
   const muted = closed(item.status) || row.context || row.later;
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className="tree-row tree-item"
@@ -80,7 +123,8 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
       <div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
       </div>
-      {supporting(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); }, fix)}
+      {details && <PreviewBlock value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />}
+      {delivery(row, fix)}
       {note && <button type="button" className="tree-collapsed" tabIndex={-1} data-weak={highlight === 'weak' || undefined}
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className="ph ph-dots-three" />{note}</button>}
       {answer && <div className="tree-answer" onClick={event => event.stopPropagation()}>{answer}</div>}
