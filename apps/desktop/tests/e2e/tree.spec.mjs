@@ -338,10 +338,18 @@ async function anchor() {
   });
 }
 async function completeRowLayout(id, item) {
+  // Preview text is deliberately bounded; verify complete native layout after Show more opens it.
+  const opened = await browser.execute(id => {
+    const row = document.querySelector(`.tree-rows [data-item-id="${id}"]`);
+    const more = row.querySelector('.tree-more[aria-expanded="false"]');
+    if (more) more.click();
+    return !!more;
+  }, id);
+  if (opened) await wait(async () => await browser.execute(id => document.querySelector(`.tree-rows [data-item-id="${id}"]`)?.hasAttribute('data-open'), id), 'Show more did not expand the complete row');
   const layout = await browser.execute(id => {
     const row = document.querySelector(`.tree-rows [data-item-id="${id}"]`);
     const bounds = element => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, height: value.height }; };
-    const parts = ['.tree-question', '.tree-outcome > span'].map(selector => {
+    const parts = ['.tree-question', '.tree-outcome > .tree-clamp'].map(selector => {
       const element = row.querySelector(selector); if (!element) return null;
       const range = document.createRange(); range.selectNodeContents(element);
       const fragments = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0)
@@ -351,7 +359,7 @@ async function completeRowLayout(id, item) {
         const style = window.getComputedStyle(parent);
         containers.push({ bounds: bounds(parent), clientHeight: parent.clientHeight, scrollHeight: parent.scrollHeight,
           clientWidth: parent.clientWidth, scrollWidth: parent.scrollWidth,
-          lineClamp: style.getPropertyValue('-webkit-line-clamp'), textOverflow: style.textOverflow });
+          lineClamp: style.getPropertyValue('-webkit-line-clamp'), display: style.display, textOverflow: style.textOverflow });
         if (parent === row) break;
       }
       return { text: element.textContent, bounds: bounds(element), fragments, containers,
@@ -366,9 +374,9 @@ async function completeRowLayout(id, item) {
     const lines = new Set(part.fragments.map(rect => Math.round(rect.top)));
     assert.ok(lines.size >= text.split('\n').length, `${id} ${name} must retain its complete multiline layout`);
     for (const container of part.containers) {
-      // The only fold is the outcome's six-line preview (Show more); these outcomes are shorter, so it hides nothing.
+      // Expanded rows keep both texts whole; short collapsed rows may use the two-line clamp.
       const clamp = Number.parseInt(container.lineClamp, 10);
-      assert.ok(!clamp || (name === 'outcome' && clamp === 6 && lines.size <= clamp), `${id} ${name} must not fold any of its lines`);
+      assert.ok(container.display !== '-webkit-box' || !clamp || (clamp === 2 && lines.size <= clamp), `${id} ${name} must not fold any of its lines`);
       assert.notEqual(container.textOverflow, 'ellipsis', `${id} ${name} must not truncate with an ellipsis`);
       assert.ok(container.scrollHeight <= container.clientHeight + 1 && container.scrollWidth <= container.clientWidth + 1,
         `${id} ${name} must fit every containing row box without overflow`);

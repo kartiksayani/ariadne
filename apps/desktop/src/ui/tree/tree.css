@@ -15,12 +15,22 @@
   flex: 1;
   min-height: 0;
   padding-bottom: 40px;
+  scroll-padding-top: var(--tree-header-height, 0);
   overflow: auto;
 }
 
 .tree-rows {
   display: flex;
   flex-direction: column;
+}
+
+/* A section bounds its sticky band; the next topic pushes it away natively. */
+.tree-topic-group {
+  position: relative;
+}
+
+.tree-topic-group + .tree-topic-group {
+  margin-top: 20px;
 }
 
 /* ---------------------------------------------------------------- bars */
@@ -280,10 +290,12 @@
 
 /* Topic band. */
 .tree-topic {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: 20px;
   padding: 10px 16px 10px 12px;
   border-top: 1px solid var(--color-divider);
   border-bottom: 1px solid var(--color-divider);
@@ -456,9 +468,15 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding-top: 9px;
+  padding-top: 12px;
   padding-right: 14px;
-  padding-bottom: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+/* Extra room before a root keeps its descendants together without breaking guide lines. */
+.tree-item-root {
+  padding-top: 20px;
 }
 
 .tree-item:hover {
@@ -501,6 +519,14 @@
   height: 20px;
 }
 
+.tree-item-child > .tree-elbow {
+  height: 23px;
+}
+
+.tree-item-root > .tree-elbow {
+  height: 31px;
+}
+
 .tree-icon {
   position: relative;
   z-index: 1;
@@ -518,7 +544,7 @@
   gap: 3px;
 }
 
-/* Questions and outcomes keep the agent's own line breaks, in full. */
+/* The title expands with its excerpt; only text is clamped, never the badge or actions. */
 .tree-question {
   font-size: 15px;
   line-height: 22px;
@@ -580,8 +606,7 @@
   text-wrap: pretty;
 }
 
-/* The details fold to six lines (--tree-clamp, set by ItemRow); the title above never folds.
-   Show more / Show less appears only when the text runs longer. */
+/* Titles and excerpts fold separately to two lines. Show more opens the whole row. */
 .tree-preview {
   display: flex;
   flex-direction: column;
@@ -593,19 +618,26 @@
   align-self: stretch;
 }
 
-/* Every preview keeps the agent's own line breaks, so a bulleted ask or note reads as a list. */
+/* Compact Markdown flows inline; expanded Markdown keeps its block structure. */
 .tree-clamp {
   display: -webkit-box;
   min-width: 0;
   overflow: hidden;
-  white-space: pre-line;
-  -webkit-line-clamp: var(--tree-clamp);
+  -webkit-line-clamp: var(--tree-clamp, 2);
   -webkit-box-orient: vertical;
 }
 
-.tree-preview[data-open] .tree-clamp {
+.tree-line > .tree-clamp {
+  flex: 1;
+}
+
+.tree-item[data-open] .tree-clamp {
   display: block;
   overflow: visible;
+}
+
+.tree-preview .md-pre {
+  font-size: 0.88em;
 }
 
 .tree-more {

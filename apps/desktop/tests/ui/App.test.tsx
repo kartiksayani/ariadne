@@ -466,7 +466,8 @@ describe('ordinary desktop composition', () => {
       await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
       await screen.findByLabelText('Detail of #1.1');
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
-      expect(transport.preferences.sessions[0].scroll).toEqual({ item_id: '1', offset: 20 });
+      // The saved row offset is below its 40 px topic header: 20 - 40.
+      expect(transport.preferences.sessions[0].scroll).toEqual({ item_id: '1', offset: -20 });
     } else {
       if (outcome === 'uncertain') {
         const reconcile = await screen.findByRole('button', { name: 'Check again' });

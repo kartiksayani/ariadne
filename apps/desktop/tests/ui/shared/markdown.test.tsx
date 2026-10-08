@@ -190,6 +190,32 @@ describe('Markdown component', () => {
     expect(container.textContent).toContain('<script>alert(1)</script>');
   });
 
+  it('flattens headings, lists, quotes, code and tables into formatted compact text', () => {
+    const text = '# Heading\n\n**Bold\ncontinued** and [safe](https://example.com), [unsafe](javascript:alert(1)).\n\n> A quote\n\n- First\n- Second `inline`\n\n```\nfenced\ncode\n```\n\n---\n\n| Name | Value |\n| --- | --- |\n| Result | **Ready** |';
+    const { container, rerender } = render(<Markdown text={text} compact />);
+    expect(container.querySelector('strong')?.textContent).toBe('Bold continued');
+    expect(container.querySelectorAll('a')).toHaveLength(1);
+    expect(container.querySelector('br,p,li,blockquote,pre,table,hr')).toBeNull();
+    expect(container.textContent).toContain('Heading · Bold continued');
+    expect(container.textContent).toContain('A quote · First · Second');
+    expect(container.textContent).toContain('fenced code');
+    expect(container.textContent).toContain('Name · Value · Result · Ready');
+    expect(container.textContent).not.toMatch(/\||---|javascript:|\*\*/);
+    rerender(<Markdown text={text} />);
+    expect(container.querySelector('table')).not.toBeNull();
+    expect(container.querySelector('pre')?.textContent).toBe('fenced\ncode');
+    cleanup();
+  });
+
+  it('keeps raw HTML inert and omits an unparsed tail in compact text', () => {
+    const { container } = render(<Markdown compact text={'<img src=x> ' + 'a'.repeat(MARKDOWN_LIMIT) + '**tail**'} />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('<img src=x>');
+    expect(container.textContent).toContain(' …');
+    expect(container.textContent).not.toContain('**tail**');
+    cleanup();
+  });
+
   it('opens links through the opener and never navigates the window', () => {
     const open = vi.fn();
     render(<LinkOpener.Provider value={open}><Markdown text={'Read [the PR](https://github.com/o/r/pull/1) and [this](javascript:alert(1))'} /></LinkOpener.Provider>);

@@ -28,6 +28,9 @@ import { Banner, SessionBar } from './SessionBar';
 import { saveSessionLabel } from '../shared/SessionRename';
 import { FilterBar } from './FilterBar';
 import { useLifecycle } from './Lifecycle';
+import { ItemRefs } from '../shared/MarkdownText';
+import { shortLabel } from '../shared/short';
+import { displayStatus } from '../../selectors/waiting/replied';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
 import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/ContinueTopicDialog';
@@ -130,6 +133,14 @@ export function TreeView(props: TreeViewProps) {
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, minute, presence);
   const rows = useMemo(() => model?.rows ?? [], [model]);
+  const sections = useMemo(() => {
+    const groups: { topic: Extract<Row, { kind: 'topic' }>; items: ItemRowModel[] }[] = [];
+    for (const row of rows) {
+      if (row.kind === 'topic') groups.push({ topic: row, items: [] });
+      else groups.at(-1)?.items.push(row);
+    }
+    return groups;
+  }, [rows]);
   const latest = useRef({ view, preferences, rows, session, folds });
   latest.current = { view, preferences, rows, session, folds };
 
@@ -306,19 +317,34 @@ export function TreeView(props: TreeViewProps) {
     setFocusKey(next);
     if (hadFocus) elements.current.get(next)?.focus({ preventScroll: true });
   }, [rows, focusKey, session]);
+  // Reserve the target topic's actual height, including wrapped names and delivery lines.
+  const headerHeight = (element: HTMLElement) => element.classList.contains('tree-topic') ? 0
+    : element.closest('.tree-topic-group')?.querySelector('.tree-topic')?.getBoundingClientRect().height ?? 0;
+  const readingTop = () => {
+    const box = scroller.current;
+    if (!box) return 0;
+    const top = box.getBoundingClientRect().top;
+    let height = 0;
+    for (const header of box.querySelectorAll<HTMLElement>('.tree-topic')) {
+      const rect = header.getBoundingClientRect();
+      if (rect.top <= top && rect.bottom > top) height = Math.max(height, rect.bottom - top);
+    }
+    box.style.setProperty('--tree-header-height', `${height}px`);
+    return top + height;
+  };
   // scrollToSel (Ariadne.dc.html:990): centre on open and on a reveal, else keep the focus in view.
   const center = (key: string | null) => {
     const box = scroller.current, element = key ? elements.current.get(key) : undefined;
     if (!box || !element) return;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    box.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + a.height / 2);
+    box.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + headerHeight(element) + (a.height - headerHeight(element)) / 2);
   };
   // Puts the anchor row back where it belongs: centred, or at its saved offset from the top.
   const place = (target: Anchor | null) => {
     const box = scroller.current, element = target ? elements.current.get(target.key) : undefined;
     if (!box || !element || !target) return;
     if (target.offset === null) center(target.key);
-    else box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - target.offset;
+    else box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - headerHeight(element) - target.offset;
   };
   // The least scrolling that brings a row into view (`block: 'nearest'`): none when it is in view already; a row
   // taller than the tree lines up its top instead of running past it.
@@ -326,14 +352,15 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current, element = elements.current.get(key);
     if (!box || !element) return;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    if (b.top < a.top + margin) box.scrollTop -= a.top + margin - b.top;
-    else if (b.bottom > a.bottom - margin) box.scrollTop += Math.min(b.bottom - a.bottom + margin, b.top - a.top - margin);
+    const top = a.top + headerHeight(element) + margin;
+    if (b.top < top) box.scrollTop -= top - b.top;
+    else if (b.bottom > a.bottom - margin) box.scrollTop += Math.min(b.bottom - a.bottom + margin, b.top - top);
   };
   const inView = (key: string) => {
     const box = scroller.current, element = elements.current.get(key);
     if (!box || !element) return false;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    return b.top >= a.top && b.top + Math.min(b.height, 120) <= a.bottom;
+    return b.top >= a.top + headerHeight(element) && b.top + Math.min(b.height, 120) <= a.bottom;
   };
   const centered = useRef(false), settled = useRef(false);
   // Show more / Show less on a long preview. The owner is steering, so the view stops holding its anchor; folding
@@ -405,7 +432,7 @@ export function TreeView(props: TreeViewProps) {
   const remembering = () => {
     const box = scroller.current;
     if (!box) { held.current = null; return; }
-    const top = box.getBoundingClientRect().top, list = latest.current.rows;
+    const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
     // Rows are stacked in order, so the first one ending below the tree's top is found by halving.
     let low = 0, high = list.length;
     while (low < high) {
@@ -420,7 +447,7 @@ export function TreeView(props: TreeViewProps) {
     // At the very top the owner wants the newest rows; a different scroll position means the view was moved on purpose
     // (a scroll, a reveal, the keyboard), and the opening placement holds its own row until the owner steers.
     if (box && before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
-      const delta = element.getBoundingClientRect().top - box.getBoundingClientRect().top - before.offset;
+      const delta = element.getBoundingClientRect().top - readingTop() - before.offset;
       if (Math.abs(delta) >= 1) box.scrollTop += delta;
     }
     remembering();
@@ -432,17 +459,19 @@ export function TreeView(props: TreeViewProps) {
     if (!content || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(holding);
     observer.observe(content);
+    content.querySelectorAll('.tree-topic').forEach(header => observer.observe(header));
     return () => observer.disconnect();
   }, [hasRows]);
   // Leaving the tree saves the first visible row as the session's reading position.
   const saveScroll = (event: FocusEvent<HTMLDivElement>) => {
     const box = scroller.current;
     if (!box || event.currentTarget.contains(event.relatedTarget)) return;
-    const top = box.getBoundingClientRect().top;
+    const top = readingTop();
     const first = latest.current.rows.find(row => row.kind === 'item' && (elements.current.get(row.key)?.getBoundingClientRect().bottom ?? -Infinity) > top);
     const element = first && elements.current.get(first.key);
     if (!first || !element) return;
-    const scroll = { item_id: first.key, offset: element.getBoundingClientRect().top - top }, current = latest.current.view?.scroll;
+    // Save in the same target-header coordinates used by place, even during topic push-out.
+    const scroll = { item_id: first.key, offset: element.getBoundingClientRect().top - box.getBoundingClientRect().top - headerHeight(element) }, current = latest.current.view?.scroll;
     if (current?.item_id !== scroll.item_id || current.offset !== scroll.offset) void saveView(next => { next.scroll = scroll; });
   };
 
@@ -493,20 +522,24 @@ export function TreeView(props: TreeViewProps) {
   const fixOf = (row: Row) => row.delivery?.stuck ? <div className="tree-fix" onKeyDown={event => event.stopPropagation()}>
     <StuckNote actions={actions} input={row.delivery.stuck.input} stuck={row.delivery.stuck.note}
       onEdit={row.kind === 'topic' ? editTopicReply(row.delivery.stuck.input) : undefined} /></div> : null;
-  const tree = model && rows.length > 0 && <div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
-    {rows.map(row => row.kind === 'topic'
-      ? <TopicRow key={row.key} row={row} focused={focusKey === row.key} actions={topicActions(row)}
+  const tree = model && rows.length > 0 && <ItemRefs.Provider value={{ lookup: id => {
+    const item = session?.items[id];
+    return item && session ? { label: shortLabel(item), status: displayStatus(session, item) } : null;
+  }, onOpenItem: select }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
+    {sections.map(({ topic: row, items }) => <div key={row.key} className="tree-topic-group" role="presentation">
+      <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
-      : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={busy}
+      {items.map(row => <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={busy}
         highlight={highlightedItems.has(row.key) ? 'strong' : row.collapsed?.ids.some(id => highlightedItems.has(id)) ? 'weak' : null}
         note={row.collapsed ? collapsedNote(row.collapsed, { items: highlightedItems, message: touchedMessage }) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} onJump={select} onHover={onHoverItem} />)}
-  </div>;
+    </div>)}
+  </div></ItemRefs.Provider>;
 
   const loading = !session && state.status === 'loading';
   // Stopped deliveries answered on a row the owner can see; the recovery banner lists the rest

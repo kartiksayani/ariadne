@@ -6,7 +6,7 @@ import { RailExcerpt } from '../../../src/ui/shared/MessageExcerpt';
 import { Markdown } from '../../../src/ui/shared/MarkdownText';
 
 // The agent's line breaks reach the screen: stored text is kept as written, Markdown turns bullets into
-// lists, and the one-paragraph previews (tree rows, message rail) lay the text out with its breaks.
+// lists. Tree excerpts compact those blocks until expanded; message rail previews retain their breaks.
 afterEach(cleanup);
 const css = (path: string) => readFileSync(resolve(__dirname, '../../../src', path), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 const declarations = (file: string, selector: string) => [...css(file).matchAll(/([^{}]+)\{([^}]*)\}/g)]
@@ -22,9 +22,13 @@ describe('line breaks in agent text', () => {
     expect(declarations('ui/shared/shared.css', '.pw-excerpt-text')).toMatch(/white-space:\s*pre-line/);
   });
 
-  it('are laid out as written in every tree preview (ask, note and outcome)', () => {
-    expect(declarations('ui/tree/tree.css', '.tree-clamp')).toMatch(/white-space:\s*pre-line/);
+  it('compact excerpt blocks until expanded while titles keep their authored breaks', () => {
     expect(declarations('ui/tree/tree.css', '.tree-question')).toMatch(/white-space:\s*pre-line/);
+    const { container, rerender } = render(<Markdown text={bullets} compact className="tree-clamp" />);
+    expect(container.textContent).toBe('Done: · one · two · three');
+    expect(container.querySelector('br,li')).toBeNull();
+    rerender(<Markdown text={bullets} className="tree-clamp" />);
+    expect([...container.querySelectorAll('li')].map(li => li.textContent)).toEqual(['one', 'two', 'three']);
   });
 
   it('become a list in the detail panel and the waiting cards, in a one-paragraph slot too', () => {
