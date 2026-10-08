@@ -1802,7 +1802,8 @@
             "enum": [
               "pr",
               "file",
-              "doc"
+              "doc",
+              "item"
             ],
             "type": "string"
           },

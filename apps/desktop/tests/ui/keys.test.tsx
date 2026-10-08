@@ -16,10 +16,14 @@ describe('workspace keymap', () => {
     expect(kinds(['0', 'A', 'x', 'Tab', ' '])).toEqual([null, null, null, null, null]);
   });
 
-  it('accepts only Cmd+F and Cmd+Enter among modified keys', () => {
+  it('accepts Cmd+F, Cmd+Enter and item history chords among modified keys', () => {
     expect(workspaceIntent({ key: 'f', metaKey: true })?.kind).toBe('search');
     expect(workspaceIntent({ key: 'F', metaKey: true })?.kind).toBe('search');
     expect(workspaceIntent({ key: 'Enter', metaKey: true })?.kind).toBe('send');
+    expect(workspaceIntent({ key: '[', metaKey: true })?.kind).toBe('history-back');
+    expect(workspaceIntent({ key: ']', metaKey: true })?.kind).toBe('history-forward');
+    expect(workspaceIntent({ key: '[', metaKey: true, shiftKey: true })).toBeNull();
+    expect(workspaceIntent({ key: '[', ctrlKey: true })).toBeNull();
     expect(workspaceIntent({ key: 'g', metaKey: true })).toBeNull();
     expect(workspaceIntent({ key: 'f', metaKey: true, ctrlKey: true })).toBeNull();
     expect(workspaceIntent({ key: 'j', ctrlKey: true })).toBeNull();

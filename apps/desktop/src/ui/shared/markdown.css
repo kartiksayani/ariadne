@@ -123,6 +123,10 @@
   cursor: pointer;
 }
 
+.md-item-missing {
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
 /* A file the desktop found: it keeps its code look and takes the link's colour and underline. */
 .md-file {
   text-decoration: none;

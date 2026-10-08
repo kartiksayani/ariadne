@@ -38,10 +38,28 @@ fn without_line(reference: &str) -> &str {
     path
 }
 
-/// The canonical regular file a reference names inside `root`, else None.
-/// Relative references read against `root`; absolute and `~/` ones count only
-/// when they land inside it. `..` and symlinks are resolved before the check.
-fn resolve(root: &Path, home: Option<&Path>, reference: &str) -> Option<PathBuf> {
+/// Resolves `.` and `..` in `path` by its text alone; the disk is never read.
+fn normalise(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// The path a reference names inside `root`, worked out from text alone (no
+/// filesystem call): relative references join `root`, `~/` expands against
+/// `home`, `.` and `..` are resolved, and the result must start with `root`.
+/// A path outside the project, such as one on a stale network share, is
+/// refused here before anything touches the disk.
+fn lexical_candidate(root: &Path, home: Option<&Path>, reference: &str) -> Option<PathBuf> {
     if reference.is_empty()
         || reference.len() > MAX_REFERENCE
         || reference.chars().any(char::is_control)
@@ -49,13 +67,20 @@ fn resolve(root: &Path, home: Option<&Path>, reference: &str) -> Option<PathBuf>
         return None;
     }
     let path = without_line(reference);
-    let candidate = if let Some(rest) = path.strip_prefix("~/") {
+    let joined = if let Some(rest) = path.strip_prefix("~/") {
         home?.join(rest)
-    } else if Path::new(path).is_absolute() {
-        PathBuf::from(path)
     } else {
         root.join(path)
     };
+    let candidate = normalise(&joined);
+    candidate.starts_with(normalise(root)).then_some(candidate)
+}
+
+/// The canonical regular file a reference names inside `root`, else None.
+/// The text check comes first (`lexical_candidate`); only a path that passes it
+/// is canonicalised, and the result is checked again so symlinks cannot leave.
+fn resolve(root: &Path, home: Option<&Path>, reference: &str) -> Option<PathBuf> {
+    let candidate = lexical_candidate(root, home, reference)?;
     let root = root.canonicalize().ok()?;
     let file = candidate.canonicalize().ok()?;
     (file.starts_with(&root) && std::fs::metadata(&file).ok()?.is_file()).then_some(file)
@@ -182,6 +207,46 @@ mod tests {
             project,
             outside,
         }
+    }
+
+    #[test]
+    fn the_text_check_refuses_outside_paths_without_touching_the_disk() {
+        // None of these paths exist; the check is pure text, so it needs no folder.
+        let root = Path::new("/no/such/project");
+        let home = Path::new("/no/such/home");
+        for outside in [
+            "/Volumes/stale-share/x.rs",
+            "/Volumes/stale-share/x.rs:12",
+            "/no/such/project-sibling/x.rs",
+            "../other/x.rs",
+            "src/../../other/x.rs",
+            "..",
+            "~/x.rs",
+        ] {
+            assert_eq!(
+                lexical_candidate(root, Some(home), outside),
+                None,
+                "{outside}"
+            );
+        }
+        assert_eq!(lexical_candidate(root, None, "~/project/x.rs"), None);
+        assert_eq!(resolve(root, Some(home), "/Volumes/stale-share/x.rs"), None);
+    }
+
+    #[test]
+    fn the_text_check_normalises_inside_paths() {
+        let root = Path::new("/no/such/project");
+        let want = Some(PathBuf::from("/no/such/project/src/app.ts"));
+        assert_eq!(lexical_candidate(root, None, "src/app.ts:3"), want);
+        assert_eq!(lexical_candidate(root, None, "./src/deep/../app.ts"), want);
+        assert_eq!(
+            lexical_candidate(root, None, "/no/such/project/src/./app.ts"),
+            want
+        );
+        assert_eq!(
+            lexical_candidate(root, Some(Path::new("/no/such")), "~/project/src/app.ts"),
+            want
+        );
     }
 
     #[test]

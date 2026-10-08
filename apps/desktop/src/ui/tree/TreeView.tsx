@@ -46,6 +46,8 @@ export interface TreeViewProps {
   readonly query: string;
   /** An item revealed from a link or the waiting panel; null once dismissed. */
   readonly reveal: RevealedItem | null;
+  /** Only Back/Forward asks the tree to bring an offscreen selection into view. */
+  readonly historyReveal?: RevealedItem | null;
   readonly selectedId: string | null;
   readonly detailOpen: boolean;
   readonly railOpen: boolean;
@@ -83,7 +85,7 @@ const SKELETON = [
 ];
 
 export function TreeView(props: TreeViewProps) {
-  const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, railOpen, graph, notices, highlightedItems, highlightedMessages,
+  const { navigation, store, actions, drafts, query, reveal, historyReveal, selectedId, detailOpen, railOpen, graph, notices, highlightedItems, highlightedMessages,
     summaries, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onShowArchive,
     onAgentNotRunning, onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
@@ -111,8 +113,6 @@ export function TreeView(props: TreeViewProps) {
   const lifecycle = useLifecycle(actions);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const mounted = useRef(true), request = useRef(0);
-  /** What the owner just opened from this tree (click or Enter): that reveal, echoed back as a prop, must not scroll. */
-  const opened = useRef<RevealedItem | null>(null);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
   // Unmounting or swapping the rows for the graph leaves no row to fire mouseleave.
   const graphShown = !!graph;
@@ -151,7 +151,6 @@ export function TreeView(props: TreeViewProps) {
     void navigation.routes.revealItem({ ...route, item_id: id }).then(result => {
       if (!mounted.current || call !== request.current || !result) return;
       // The owner is already looking at this row: opening it must not move the tree.
-      opened.current = result;
       onSelected(result);
       if (result.kind === 'item' && latest.current.view?.selected_item_id !== id) void saveView(next => { next.selected_item_id = id; });
     }).catch((error: unknown) => {
@@ -298,7 +297,7 @@ export function TreeView(props: TreeViewProps) {
   const remember = useRef((key: string, element: HTMLDivElement | null) => {
     if (element) elements.current.set(key, element); else elements.current.delete(key);
   }).current;
-  useEffect(() => { if (selectedId) setFocusKey(selectedId); }, [selectedId]);
+  useEffect(() => { if (selectedId) { setKbd(false); setFocusKey(selectedId); } }, [selectedId]);
   useLayoutEffect(() => {
     if (!rows.length || (focusKey && rows.some(row => row.key === focusKey))) return;
     let candidate: string | null = focusKey && session?.items[focusKey] ? session.items[focusKey]!.parent ?? session.items[focusKey]!.topic_id : null;
@@ -369,23 +368,15 @@ export function TreeView(props: TreeViewProps) {
   }, [rows.length, graph]);
   useLayoutEffect(() => {
     if (reveal?.kind !== 'item' || !centered.current) return;
-    const id = reveal.route.item_id, own = opened.current === reveal;
-    // A reveal from a link, search or the Waiting panel brings its row into view, but only when it is not in view
-    // already. Opening an item from this tree (click, Enter) is the owner's own doing and never moves the tree.
-    if (!own && !inView(id)) {
-      const target = { key: id, offset: null };
-      settled.current = false; place(target); setAnchor(target);
+    const id = reveal.route.item_id;
+    setKbd(false);
+    // History restores the item with the least movement. All ordinary selection sources preserve reading position.
+    if (historyReveal === reveal && !inView(id)) {
+      settled.current = true; nearest(id); setAnchor(null);
     }
-    opened.current = null;
     // A reveal moves the keyboard focus to its row, as the graph does.
     focusRow(id);
-  }, [reveal]);
-  // Opening or closing a side panel reflows the rows; the selected row must not end up off-screen.
-  useLayoutEffect(() => {
-    if (!centered.current || !selectedId || !detailOpen || inView(selectedId)) return;
-    if (!settled.current && anchor) { place(anchor); if (inView(selectedId)) return; }
-    nearest(selectedId);
-  }, [detailOpen, railOpen]);
+  }, [reveal, historyReveal]);
   // The prototype re-centres a while after mount (Ariadne.dc.html:976); here the anchor row stays put
   // while the view settles (fonts loading, detail or rail opening, rows arriving or folding, the row's
   // answer opening) until the owner scrolls, clicks in the tree or moves the focus.

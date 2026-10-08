@@ -1232,6 +1232,78 @@ fn separate_writers_preserve_different_item_updates_and_reject_same_item_conflic
     }
 }
 
+#[test]
+fn item_links_are_saved_by_add_and_patch_even_when_targets_are_missing() {
+    let setup = Setup::new(&seed());
+    let links = vec![ItemLinkTarget {
+        kind: LinkKind::Item,
+        label: "Earlier item".into(),
+        target: "99.2".into(),
+    }];
+    let mut create = request(10);
+    let mut operation = add("linked", uuid(5), None, false);
+    if let Operation::ItemAdd(draft) = &mut operation {
+        draft.links = Some(links.clone());
+    }
+    create.operations = vec![operation];
+    create.validate_wire().unwrap();
+    setup.execute(&create).unwrap();
+    assert_eq!(setup.saved().items.0[&item("3")].links, links);
+
+    let mut edit = guarded(11, "1", 1);
+    edit.operations = vec![Operation::ItemEdit {
+        item: existing("1"),
+        patch: ItemPatch {
+            question: None,
+            item_type: None,
+            note: None,
+            links: Some(links.clone()),
+            short: None,
+        },
+    }];
+    edit.validate_wire().unwrap();
+    setup.execute(&edit).unwrap();
+    assert_eq!(setup.saved().items.0[&item("1")].links, links);
+}
+
+#[test]
+fn malformed_item_links_are_rejected_on_add_and_patch_without_saving_anything() {
+    let setup = Setup::new(&seed());
+    for target in ["item:3.2", "0", "01", "3..2", "9007199254740992", "3.2\n"] {
+        let links = vec![ItemLinkTarget {
+            kind: LinkKind::Item,
+            label: "Related item".into(),
+            target: target.into(),
+        }];
+        let mut create = request(10);
+        let mut operation = add("linked", uuid(5), None, false);
+        if let Operation::ItemAdd(draft) = &mut operation {
+            draft.links = Some(links.clone());
+        }
+        create.operations = vec![operation];
+        let mut edit = guarded(11, "1", 1);
+        edit.operations = vec![Operation::ItemEdit {
+            item: existing("1"),
+            patch: ItemPatch {
+                question: None,
+                item_type: None,
+                note: None,
+                links: Some(links),
+                short: None,
+            },
+        }];
+        for request in [create, edit] {
+            assert_eq!(
+                request.validate_wire().unwrap_err().code,
+                CoreErrorCode::InvalidArgument,
+                "{target:?}"
+            );
+            setup.rejected(&request, CoreErrorCode::InvalidArgument);
+        }
+    }
+    assert_eq!(setup.saved(), seed());
+}
+
 fn short_patch(short: Option<Option<&str>>) -> Operation {
     Operation::ItemEdit {
         item: existing("1"),

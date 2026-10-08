@@ -17,8 +17,12 @@ import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendi
 import { useGrow } from '../answer/useGrow';
 import { AnswerSlot, changedText } from './AnswerSlot';
 import { TimelineExcerpt } from '../shared/MessageExcerpt';
-import { FileRefProject, fileLinkProps, LinkOpener, Markdown, singleParagraph, useProjectFile } from '../shared/MarkdownText';
+import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, singleParagraph, useProjectFile } from '../shared/MarkdownText';
 import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
+import { copyText } from '../shared/clipboard';
+import { shortLabel } from '../shared/short';
+import { displayStatus } from '../../selectors/waiting/replied';
+import { CopyMessage } from './CopyMessage';
 import { StatusBadge } from '../shared/StatusBadge';
 import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type LinkView, type OpenMode, type PendingView, type WordsKind } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
@@ -118,8 +122,9 @@ function WordsField({ slot, sentAs, first, register, sendOff, closable, onEdit, 
 
 /** "You replied: “…”" for a one-paragraph reply; a longer reply keeps its paragraphs and lists below the words. */
 function OwnerReply({ text }: { readonly text: string }) {
-  if (singleParagraph(text)) return <span>You replied: “<Markdown text={text} inline />”</span>;
-  return <div className="detail-reply"><span>You replied:</span><Markdown text={text} /></div>;
+  return <ItemRefs.Provider value={null}>{singleParagraph(text)
+    ? <span>You replied: “<Markdown text={text} inline />”</span>
+    : <div className="detail-reply"><span>You replied:</span><Markdown text={text} /></div>}</ItemRefs.Provider>;
 }
 
 /** What the owner sent, inside their bubble: the option they chose, a one-press request, or their own words. */
@@ -143,6 +148,7 @@ function KidButton({ kid, onOpen }: { readonly kid: Kid; readonly onOpen: (id: s
 function ItemLink({ link }: { readonly link: LinkView }) {
   const open = useContext(LinkOpener), file = useProjectFile(link.target), web = safeHref(link.target);
   const body = <><i className={link.icon} aria-hidden="true" /><span className="detail-link-label">{link.label}</span>{link.meta && <span className="detail-link-meta">{link.meta}</span>}</>;
+  if (link.kind === 'item') return <ItemReference className="detail-link" itemId={link.target}>{body}</ItemReference>;
   if (web) {
     const click = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); event.stopPropagation(); open(web); };
     return <a className="detail-link" href={web} title={web} rel="noreferrer noopener" onClick={click}>{body}</a>;
@@ -276,8 +282,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const reopenStale = !!model.open && submit.changed('reopen');
   const answerFocus = focusRequest && model.status === 'waiting' && !model.followUp && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
   const copy = () => {
-    try { void navigator.clipboard?.writeText(`${model.id} — ${model.question}`).catch(() => {}); } catch { /* The reference still shows. */ }
-    setCopied(true);
+    void copyText(`${model.id} — ${model.question}`).then(() => setCopied(true), () => {});
   };
   // The owner's boxes, docked in one place whatever section the item's status shows above them, so a box keeps its mount (and
   // the owner's focus and caret) when the status changes. data-owner-input marks them with their changed-target warnings, like the
@@ -316,7 +321,10 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     </div>}
   </div>;
   const docked = !!(model.open || model.followUp || model.answer || retainedAnswer || owner);
-  return <FileRefProject.Provider value={session.project_id}><article className="item-detail" data-status={model.status} aria-label={`Detail of #${model.id}`}>
+  return <ItemRefs.Provider value={{ lookup: id => {
+    const target = session.items[id];
+    return target ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
+  }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-status={model.status} aria-label={`Detail of #${model.id}`}>
     <div className="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
     <div className="detail-head">
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
@@ -395,16 +403,16 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         {model.rounds.map(round => <li className={`detail-turn${round.now ? ' detail-turn-now' : ''}`} key={round.ordinal} data-round={round.ordinal}>
           {(round.ask || round.now) && <div className="detail-msg"><i className="ph ph-robot detail-msg-icon" aria-hidden="true" />
             <div className="detail-bubble detail-bubble-agent">{round.ask && <Markdown text={round.ask} inline />}
-              {round.now && <span className="tag tag-accent detail-waiting-tag">Waiting on you</span>}</div></div>}
-          {round.you && <div className="detail-msg detail-msg-you"><div className="detail-bubble detail-bubble-you"><YouSaid how={round.you.chosen ? 'chose' : 'said'} text={round.you.text} /></div></div>}
+              {round.now && <span className="tag tag-accent detail-waiting-tag">Waiting on you</span>}</div>{round.ask && <CopyMessage text={round.ask} />}</div>}
+          {round.you && <div className="detail-msg detail-msg-you"><div className="detail-bubble detail-bubble-you"><YouSaid how={round.you.chosen ? 'chose' : 'said'} text={round.you.text} /></div><CopyMessage text={round.you.source} /></div>}
           {round.result && <div className="detail-msg detail-msg-result"><i className="ph ph-arrow-elbow-down-right detail-msg-icon" aria-hidden="true" />
-            <Markdown className="detail-msg-text" text={round.result} inline /></div>}
+            <Markdown className="detail-msg-text" text={round.result} inline /><CopyMessage text={round.result} /></div>}
           {round.forks.map(fork => <button type="button" className="detail-fork" key={fork.id} onClick={() => onOpenItem(fork.id)}>
             <i className="ph ph-git-fork" aria-hidden="true" /><span>{fork.question}</span><StatusBadge status={fork.status} variant="text" /></button>)}
         </li>)}
         {model.outbox.map(pending => <li className="detail-turn detail-turn-pending" key={pending.input.id} data-pending={pending.input.id}>
           <div className="detail-msg detail-msg-you"><div className="detail-bubble detail-bubble-you"><YouSaid how={pending.how} text={pending.text} />
-            {pending.caption && <span className="detail-pending-caption">{pending.caption}</span>}</div></div>
+            {pending.caption && <span className="detail-pending-caption">{pending.caption}</span>}</div><CopyMessage text={pending.source} /></div>
           {pending.stuck && <StuckNote actions={actions} input={pending.input} stuck={pending.stuck}
             onEdit={async () => {
               // An answer goes back to the composer below; anything else opens the box that now holds it.
@@ -461,5 +469,5 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}
     </div>}
-  </article></FileRefProject.Provider>;
+  </article></FileRefProject.Provider></ItemRefs.Provider>;
 }
