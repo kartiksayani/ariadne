@@ -4,6 +4,7 @@ import type { SessionPreferences } from '../../../src/generated/core';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { initialExpansion, normalizeSearch, sentenceRows } from '../../../src/selectors/tree/rows';
+import { chipsOf, toggleChip } from '../../../src/ui/tree/model';
 
 function seed() { return structuredClone(demo) as Session; }
 function view(session: Session): SessionPreferences {
@@ -11,6 +12,16 @@ function view(session: Session): SessionPreferences {
     tab_order: 0, expanded_item_ids: [], filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false },
     rail: 'waiting', scroll: null };
 }
+
+describe('saved status filter chips', () => {
+  it('treats every known saved status as All before toggling, while preserving partial groups', () => {
+    const full = ['open', 'waiting_on_me', 'in_progress', 'decided', 'done', 'dropped', 'replaced', 'open'] as const;
+    expect([...chipsOf(full)]).toEqual(['all']);
+    expect(toggleChip(full, 'open')).toEqual(['open']);
+    expect([...chipsOf(['done'])]).toEqual(['closed']);
+    expect(toggleChip(['done'], 'open')).toEqual(['open', 'done']);
+  });
+});
 
 describe('canonical sentence tree projection', () => {
   it('orders numeric siblings and topics without changing domain IDs or stored text', () => {
@@ -85,6 +96,21 @@ describe('canonical sentence tree projection', () => {
     expect(selected.rows.map(row => [row.item.id, row.context, row.expanded])).toEqual([['1', true, true], ['1.1', false, false]]);
     preferences.filters.statuses = ['done'];
     expect(sentenceRows(immutable(session), preferences, new Set()).rows).toHaveLength(0);
+  });
+  it('counts the union of selected statuses and narrows that union with search', () => {
+    const session = seed(), preferences = view(session);
+    preferences.filters.statuses = ['open', 'in_progress'];
+    const frozen = immutable(session), selected = sentenceRows(frozen, preferences, new Set());
+    expect(selected.rows.filter(row => !row.context).map(row => row.item.id)).toEqual(['1.1', '3', '4', '8']);
+    expect(selected.matchingTotal).toBe(4);
+    expect(selected.scopeTotal).toBe(9);
+    preferences.filters.search = 'receipt';
+    const searched = sentenceRows(frozen, preferences, new Set());
+    expect(searched.rows.filter(row => !row.context).map(row => row.item.id)).toEqual(['1.1', '3']);
+    expect(searched.matchingTotal).toBe(2);
+    preferences.filters.statuses = [];
+    preferences.filters.search = '';
+    expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(9);
   });
   it('matches canonical owners exactly with OR within owners and AND across categories', () => {
     const session = seed(), preferences = view(session);

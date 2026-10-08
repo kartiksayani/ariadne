@@ -35,10 +35,21 @@ export const CHIPS: readonly { readonly chip: Chip; readonly label: string; read
   { chip: 'progress', label: 'In progress', icon: STATUS.progress.icon, iconColor: 'var(--st-progress)', statuses: ['in_progress'] },
   { chip: 'closed', label: 'Closed', icon: STATUS.decided.icon, iconColor: 'var(--st-decided)', statuses: ['decided', 'done', 'dropped', 'replaced'] },
 ];
-/** The chip a saved status filter means; null for a combination no chip makes. */
-export function chipOf(statuses: readonly ItemStatus[]): Chip | null {
-  const key = [...statuses].sort().join();
-  return CHIPS.find(chip => [...chip.statuses].sort().join() === key)?.chip ?? null;
+const FILTER_STATUSES = CHIPS.flatMap(value => value.statuses);
+const fullStatusFilter = (statuses: readonly ItemStatus[]) => FILTER_STATUSES.every(status => statuses.includes(status));
+/** The selected chips represented by the saved status set; empty and full sets mean All. */
+export function chipsOf(statuses: readonly ItemStatus[]): ReadonlySet<Chip> {
+  return new Set(statuses.length && !fullStatusFilter(statuses)
+    ? CHIPS.filter(value => value.statuses.some(status => statuses.includes(status))).map(value => value.chip) : ['all']);
+}
+/** Toggle a group of statuses without changing the persisted preference shape. */
+export function toggleChip(statuses: readonly ItemStatus[], chip: Chip): ItemStatus[] {
+  if (chip === 'all') return [];
+  const group = CHIPS.find(value => value.chip === chip)!.statuses, next = new Set(fullStatusFilter(statuses) ? [] : statuses);
+  if (group.some(status => next.has(status))) group.forEach(status => next.delete(status));
+  else group.forEach(status => next.add(status));
+  const ordered = FILTER_STATUSES.filter(status => next.has(status));
+  return ordered.length === FILTER_STATUSES.length ? [] : ordered;
 }
 /** Whether a status filter matches what a row shows: Waiting on agent counts as In progress, never as Waiting on me. */
 export const statusIn = (statuses: readonly ItemStatus[], status: DisplayStatus) =>
@@ -105,6 +116,7 @@ export function deliveryLine(session: Immutable<Session>, target: { readonly top
 // ---------------------------------------------------------------- session bar
 
 export interface SessionBar {
+  readonly sessionId: string;
   /** The owner's name for the session; unnamed, "codex · iTerm window 2" (the location segment only when the host reports one). */
   readonly title: string;
   /** The "codex · iTerm window 2" line kept quietly beside a name; null while unnamed. */
@@ -138,7 +150,7 @@ export function sessionBar(session: Immutable<Session> | null, summary: Immutabl
   const range = sessionRange(Date.parse(created), ended ? Date.parse(ended) : null, running, now);
   const agent = binding ? agentName(binding.adapter_id) : 'No agent', location = binding?.host_location ?? null;
   const label = sessionLabel(session ?? summary, agentLine(agent, location));
-  return { title: label.title, secondary: label.secondary, description: label.description, named: label.named, agent, where: hostApp(location),
+  return { sessionId: session?.id ?? summary!.session_id, title: label.title, secondary: label.secondary, description: label.description, named: label.named, agent, where: hostApp(location),
     meta: topics === null ? range : `${range} · ${plural(topics, 'topic')}`,
     running, connection, closed: (session?.state ?? summary?.state) === 'closed' };
 }
@@ -215,7 +227,7 @@ export interface TreeModel {
   readonly noMatch: boolean;
   /** The session has no items at all. */
   readonly empty: boolean;
-  readonly chip: Chip | null;
+  readonly chips: ReadonlySet<Chip>;
   readonly counts: Readonly<Record<Chip, number>>;
   readonly topics: readonly { readonly id: string; readonly name: string }[];
 }
@@ -260,7 +272,7 @@ export function treeModel(input: TreeInput): TreeModel {
   const { session, view, later, selectedId, revealId } = input, filters = view.filters;
   const indexes = indexSession(session), all = items(session);
   const terms = words(input.search);
-  const chip = chipOf(filters.statuses);
+  const chips = chipsOf(filters.statuses);
   const topics = topicList(session).filter(topic => filters.archived ? topic.archived_at !== null : topic.archived_at === null);
   const shown = new Set(topics.map(topic => topic.id));
   const live = all.filter(item => shown.has(item.topic_id));
@@ -363,7 +375,7 @@ export function treeModel(input: TreeInput): TreeModel {
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.
   const outside = filtering && rows.length > 0 && !!revealId && forced.has(revealId) && !matched.has(revealId);
-  return { rows, filtering, outside, noMatch: live.length > 0 && rows.length === 0, empty: all.length === 0, chip, counts,
+  return { rows, filtering, outside, noMatch: live.length > 0 && rows.length === 0, empty: all.length === 0, chips, counts,
     topics: topics.map(topic => ({ id: topic.id, name: topic.name })) };
 }
 

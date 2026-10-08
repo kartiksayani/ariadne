@@ -17,7 +17,7 @@ import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { AnswerControl } from '../answer/AnswerControl';
 import type { PendingSubmission } from '../answer/useSubmit';
 import { notices as noticeStore } from '../pages/notices';
-import { CHIPS, collapsedNote, oldestWaiting, parentKey, sessionBar, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
+import { chipsOf, collapsedNote, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
 import { TopicReply } from '../answer/TopicReply';
@@ -189,7 +189,7 @@ export function TreeView(props: TreeViewProps) {
   };
   const setChip = (chip: Chip) => {
     onDismissReveal();
-    void saveView(next => { next.filters.statuses = [...CHIPS.find(value => value.chip === chip)!.statuses]; });
+    void saveView(next => { next.filters.statuses = toggleChip(next.filters.statuses, chip); });
   };
   const setTopic = (topicId: string | null) => { onDismissReveal(); void saveView(next => { next.filters.topic_id = topicId; }); };
   const resume = () => {
@@ -582,7 +582,7 @@ export function TreeView(props: TreeViewProps) {
       onRename={session ? (name, description) => saveSessionLabel(actions, session.revision, name, description) : undefined}
       dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}
     {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
-    {filtersShown && <FilterBar chip={model ? model.chip : 'all'} counts={counts} topics={model?.topics ?? []} topicId={view?.filters.topic_id ?? null}
+    {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts} topics={model?.topics ?? []} topicId={view?.filters.topic_id ?? null}
       showTopics={!(detailOpen && railOpen)} disabled={nav.writing || nav.pendingOperationId !== null} onChip={setChip} onTopic={setTopic} />}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}

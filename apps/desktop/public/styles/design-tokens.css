@@ -2,6 +2,11 @@
    the app roles, status colours and light overrides are the THEMES object of Ariadne.dc.html.
    Values stay in the handoff's notation so they can be compared byte for byte. */
 /* stylelint-disable -- verbatim handoff notation (oklch lightness/hue, rgba, grouping blank lines). */
+:root {
+  /* Text only: spacing, borders and column widths keep their original values. */
+  --text-scale: 0.8;
+}
+
 :root,
 [data-theme="dark"] {
   /* Dark ground (default). Light values live in each app's THEMES.light. */

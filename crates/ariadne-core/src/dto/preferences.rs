@@ -19,6 +19,14 @@ pub struct PreferencesSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct GlobalPreferences {
     pub theme: Theme,
+    // Percentage of the original text size; older preferences use the smaller default.
+    #[serde(
+        default = "default_text_scale",
+        skip_serializing_if = "is_default_text_scale"
+    )]
+    #[schemars(schema_with = "text_scale_schema")]
+    #[ts(as = "Option<u16>", optional)]
+    pub text_scale: u16,
     pub selected_navigation: NavigationSelection,
     pub window: Option<WindowGeometry>,
     pub pinned: bool,
@@ -39,6 +47,18 @@ pub struct GlobalPreferences {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[ts(as = "Option<bool>", optional)]
     pub waiting_collapsed: bool,
+}
+
+pub const TEXT_SCALE_DEFAULT: u16 = 80;
+pub const TEXT_SCALE_STEPS: [u16; 6] = [70, 80, 90, 100, 110, 120];
+fn default_text_scale() -> u16 {
+    TEXT_SCALE_DEFAULT
+}
+fn is_default_text_scale(scale: &u16) -> bool {
+    *scale == TEXT_SCALE_DEFAULT
+}
+fn text_scale_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": "integer", "enum": TEXT_SCALE_STEPS })
 }
 
 /// Bounds of `GlobalPreferences::detail_width`; the renderer clamps to the same range.

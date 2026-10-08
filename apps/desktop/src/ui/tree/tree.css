@@ -42,7 +42,7 @@
   gap: 6px 12px;
   padding: 6px 8px 6px 12px;
   border-radius: var(--radius-md);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
@@ -55,7 +55,7 @@
 
 .tree-session-bar > i,
 .tree-banner > i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 65%, transparent);
 }
 
@@ -108,7 +108,7 @@
 .tree-session-bar .btn,
 .tree-banner .btn {
   padding: 3px 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 /* Rename and Close/Reopen sit together at the bar's right edge. */
@@ -161,7 +161,7 @@
   border: 0;
   border-radius: 7px;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   cursor: pointer;
   color: color-mix(in srgb, var(--color-text) 74%, transparent);
   background: transparent;
@@ -179,7 +179,7 @@
 }
 
 .tree-chip i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .tree-chip-count {
@@ -196,7 +196,7 @@
   min-height: 28px;
   margin-left: auto;
   padding: 0 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .tree-banner {
@@ -233,7 +233,7 @@
   padding: 6px 8px 6px 12px;
   border: 0;
   border-radius: var(--radius-md);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   background: color-mix(in srgb, var(--color-text) 6%, transparent);
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
@@ -242,7 +242,7 @@
   padding: 6px 0;
   border: 0;
   border-radius: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 /* ---------------------------------------------------------------- rows */
@@ -279,7 +279,7 @@
 }
 
 .tree-chevron i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .tree-chevron-space {
@@ -323,12 +323,12 @@
 }
 
 .tree-topic-name {
-  flex: 1 1 12em;
+  flex: 1 1 calc(12em / var(--text-scale));
   min-width: 0;
   padding-left: 4px;
-  font-size: 15.5px;
+  font-size: calc(15.5px * var(--text-scale));
   font-weight: 500;
-  line-height: 22px;
+  line-height: calc(22px * var(--text-scale));
   letter-spacing: -.01em;
   color: var(--color-text);
 }
@@ -345,14 +345,14 @@
   height: 22px;
   padding: 0 8px;
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
 .tree-session-chip i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .tree-topic-end {
@@ -361,7 +361,7 @@
   align-items: center;
   gap: 12px;
   margin-left: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
@@ -392,7 +392,7 @@
   border: 0;
   border-radius: 5px;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   cursor: pointer;
   color: color-mix(in srgb, var(--color-text) 74%, transparent);
   background: transparent;
@@ -400,7 +400,7 @@
 
 .tree-topic-action i,
 .tree-count i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .tree-count {
@@ -414,12 +414,12 @@
   align-items: center;
   gap: 7px;
   padding-left: 26px;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: calc(13px * var(--text-scale));
+  line-height: calc(20px * var(--text-scale));
 }
 
 .tree-topic-line > i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .tree-topic-fix {
@@ -460,7 +460,7 @@
 
 .tree-prompt .btn {
   padding: 2px 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 /* Item row. */
@@ -546,8 +546,8 @@
 
 /* The title expands with its excerpt; only text is clamped, never the badge or actions. */
 .tree-question {
-  font-size: 15px;
-  line-height: 22px;
+  font-size: calc(15px * var(--text-scale));
+  line-height: calc(22px * var(--text-scale));
   white-space: pre-line;
   overflow-wrap: anywhere;
   text-wrap: pretty;
@@ -563,8 +563,8 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 7px;
-  font-size: 13.5px;
-  line-height: 21px;
+  font-size: calc(13.5px * var(--text-scale));
+  line-height: calc(21px * var(--text-scale));
 }
 
 .tree-line-tight {
@@ -573,30 +573,30 @@
 }
 
 .tree-line > i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .tree-line > i.tree-line-small {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .tree-ask {
   display: block;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   color: var(--a-acc-text);
 }
 
 .tree-outcome {
   flex-wrap: nowrap;
   align-items: flex-start;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 84%, transparent);
 }
 
 .tree-outcome > i {
   flex: none;
   margin-top: 4px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .tree-outcome > span {
@@ -646,8 +646,8 @@
   border: 0;
   border-radius: 5px;
   font: inherit;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
   cursor: pointer;
   color: var(--a-acc-text);
   background: transparent;
@@ -663,7 +663,7 @@
 
 /* The owner's message on its way: a small line under the details, never in their place. */
 .tree-delivery {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .tree-jump {
@@ -689,8 +689,8 @@
   border: 0;
   border-radius: 5px;
   font: inherit;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
   cursor: pointer;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
   background: transparent;
@@ -705,7 +705,7 @@
 }
 
 .tree-collapsed i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .tree-answer {
@@ -729,13 +729,13 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
 .tree-round i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 /* The shortcut icons keep their room at all times and only fade in, so the text column
@@ -770,7 +770,7 @@
 }
 
 .tree-action i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .tree-topic-action:hover,
@@ -781,7 +781,7 @@
 
 .tree-id {
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
   opacity: 0;
 }
@@ -804,19 +804,19 @@
 }
 
 .tree-empty > i {
-  font-size: 34px;
+  font-size: calc(34px * var(--text-scale));
   color: var(--color-accent);
 }
 
 .tree-empty-title {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   font-weight: 500;
   letter-spacing: -.012em;
 }
 
 .tree-empty p {
   margin: 0;
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--text-scale));
   line-height: 1.6;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 66%, transparent);
@@ -827,7 +827,7 @@
   align-items: center;
   gap: 8px;
   margin-top: 6px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
@@ -840,7 +840,7 @@
 }
 
 .tree-no-match-title {
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 500;
 }
 
@@ -885,16 +885,16 @@
   align-items: center;
   gap: 8px;
   padding: 18px 40px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
 .tree-loading-text i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 /* Last: more specific than every other tree icon rule. */
 .tree-session-bar .btn i,
 .tree-topic-line .btn i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }

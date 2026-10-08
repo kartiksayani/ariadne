@@ -25,14 +25,14 @@
 }
 
 .pw-dialog-body {
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   line-height: 1.6;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 76%, transparent);
 }
 
 .pw-dialog-lead {
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   line-height: 1.55;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
@@ -47,7 +47,7 @@
 .pw-dialog-danger-title i {
   flex: none;
   margin-top: 2px;
-  font-size: 18px;
+  font-size: calc(18px * var(--text-scale));
   color: var(--a-danger);
 }
 
@@ -57,14 +57,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   color: var(--a-danger);
 }
 
-.pw-dialog-warn i { font-size: 14px; }
+.pw-dialog-warn i { font-size: calc(14px * var(--text-scale)); }
 
 .pw-dialog-error {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
   color: var(--a-danger);
 }
@@ -97,15 +97,15 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 500;
 }
 
-.pw-dialog-option-label i { font-size: 15px; }
+.pw-dialog-option-label i { font-size: calc(15px * var(--text-scale)); }
 
 .pw-dialog-option-desc {
   padding-left: 23px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   line-height: 1.45;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 68%, transparent);
@@ -144,18 +144,18 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 500;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
-.pw-continue-group-title i { font-size: 12px; }
+.pw-continue-group-title i { font-size: calc(12px * var(--text-scale)); }
 
 .pw-continue-line {
   display: flex;
   gap: 10px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
 }
 
@@ -164,14 +164,14 @@
   min-width: 30px;
   padding-top: 1px;
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
 .pw-continue-line span { text-wrap: pretty; }
 
 .pw-continue-status {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
   color: color-mix(in srgb, var(--color-text) 68%, transparent);
 }
@@ -181,7 +181,7 @@
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 4px 14px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
 }
 
@@ -191,9 +191,9 @@
 .pw-dialog-list {
   margin: 0;
   padding-left: 18px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
 }
 
 /* Kept last: more specific than the icon rules above. */
-.pw-dialog .btn i { font-size: 14px; }
+.pw-dialog .btn i { font-size: calc(14px * var(--text-scale)); }

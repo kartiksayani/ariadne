@@ -32,6 +32,7 @@ import { nextSelection, removeSubject, subtree, targetSession } from './ui/remov
 import { agentName, hostApp, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
+import { nextTextSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
 import { connectionOf } from './ui/shared/connection';
 import { earlierAgent } from './ui/shared/excerpt';
@@ -346,6 +347,11 @@ function Workspace({ application }: { application: Application }) {
   };
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
   const shown = useAppliedTheme(theme);
+  const shownTextSize = useAppliedTextSize(preferences?.global.text_scale);
+  const changeTextSize = (size: TextSize) => {
+    const current = navigation.getSnapshot().preferences;
+    if (current && size !== (current.global.text_scale ?? 80)) void navigation.saveTextScale(size, current.revision);
+  };
   const projectName = (projectId: string) => state.projects?.projects.items.find(project => project.project_id === projectId)?.project?.display_name ?? 'Unavailable project';
   const archived = view?.filters.archived ?? false;
   // The archive is kept per project (1x), so the label counts the project's archived topics.
@@ -426,12 +432,13 @@ function Workspace({ application }: { application: Application }) {
   }), { scope: 'workspace' });
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
-  useWindowKeys(appRoot, historyControls);
+  useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(navigation.getSnapshot().preferences?.global.text_scale, intent)));
   return <ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget}
       session={store ? sessionFacts(sessionState, projectName) : undefined}
       chrome={{ query, views, railOn: !!store && !!view && view.rail !== 'hidden', theme: shown,
+        textSize: shownTextSize, onTextSizeChange: changeTextSize,
         // A new search is a filter change: it drops the temporary reveal (the selection stays as its own row).
         onQueryChange: view ? text => { setSearchEdit({ route: key, text, attempted: false }); setDismissedReveal(currentReveal); } : undefined,
         onToggleRail: view ? toggleRail : undefined,

@@ -220,6 +220,86 @@ describe('session tree rows', () => {
 });
 
 describe('session tree filters', () => {
+  it('reads a saved full status set, including duplicates, as All', async () => {
+    const { transport } = await mount({ configure: value => {
+      viewOf(value).filters.statuses = ['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open', 'done'];
+    } });
+    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
+      expect(chip(label).getAttribute('aria-pressed')).toBe('false');
+    }
+    expect(ids()).toHaveLength(9);
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
+    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('All').getAttribute('aria-pressed')).toBe('false');
+    expect(ids()).toEqual(['1', '1.1', '4', '8']);
+  });
+  it('keeps a saved partial Closed group narrow when another chip is added', async () => {
+    const { transport } = await mount({ configure: value => { viewOf(value).filters.statuses = ['done']; } });
+    expect(chip('Closed').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('All').getAttribute('aria-pressed')).toBe('false');
+    expect(ids()).toEqual(['1']);
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'done']));
+    expect(ids()).toEqual(['1', '1.1', '4', '8']);
+  });
+  it('toggles multiple chips, keeps counts independent, and restores the saved combination', async () => {
+    const { transport, navigation, rerender } = await mount();
+    const labels = ['All', 'Waiting on me', 'Open', 'In progress', 'Closed'];
+    const counts = labels.map(label => chip(label).textContent);
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
+    // Status buttons remain ordinary keyboard-reachable buttons.
+    chip('In progress').focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
+    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('In progress').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('All').getAttribute('aria-pressed')).toBe('false');
+    expect(chip('Closed').getAttribute('aria-pressed')).toBe('false');
+    expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
+    expect(labels.map(label => chip(label).textContent)).toEqual(counts);
+    rerender({ query: 'receipt' });
+    expect(ids()).toEqual(['1', '1.1', '3']);
+    expect(chip('All').textContent).toContain('2');
+    expect(chip('Open').textContent).toContain('1');
+    expect(chip('In progress').textContent).toContain('1');
+    cleanup(); navigation.stop();
+    await mount({ transport });
+    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('In progress').getAttribute('aria-pressed')).toBe('true');
+    expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['in_progress']));
+    expect(ids()).toEqual(['3']);
+    fireEvent.click(chip('In progress'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
+    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    expect(ids()).toHaveLength(9);
+  });
+  it('collapses every selected status to All and clears a combination with All', async () => {
+    const { transport } = await mount();
+    for (const [label, expected] of [
+      ['Waiting on me', ['waiting_on_me']], ['Open', ['waiting_on_me', 'open']],
+      ['In progress', ['waiting_on_me', 'open', 'in_progress']], ['Closed', []],
+    ] as const) {
+      fireEvent.click(chip(label));
+      await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(expected));
+    }
+    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
+      expect(chip(label).getAttribute('aria-pressed')).toBe('false');
+    }
+    expect(ids()).toHaveLength(9);
+    fireEvent.click(chip('Closed'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['decided', 'done', 'dropped', 'replaced']));
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'decided', 'done', 'dropped', 'replaced']));
+    fireEvent.click(chip('All'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
+    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+  });
   it('writes the status chip and the topic, and counts follow the search and topic', async () => {
     const { transport, rerender } = await mount();
     fireEvent.click(chip('Open'));
@@ -252,9 +332,15 @@ describe('session tree filters', () => {
     expect(screen.getByText('Nothing matches “zzz”.')).toBeTruthy(); expect(screen.queryByRole('tree')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Clear search and filters' })); expect(calls.cleared).toBe(1);
   });
-  it('says so when a status filter matches nothing', async () => {
-    await mount({ configure: transport => { viewOf(transport).filters.statuses = ['waiting_on_me']; transport.sessions.get(route.session_id)!.items['2']!.status = 'open'; } });
+  it('says so when a saved status combination matches nothing', async () => {
+    await mount({ configure: transport => {
+      viewOf(transport).filters.statuses = ['waiting_on_me', 'in_progress'];
+      const session = transport.sessions.get(route.session_id)!;
+      session.items['2']!.status = 'open'; session.items['3']!.status = 'open';
+    } });
     expect(screen.getByText('No items match these filters.')).toBeTruthy();
+    expect(chip('Waiting on me').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('In progress').getAttribute('aria-pressed')).toBe('true');
   });
   it('shows a reveal outside the filters, keeps its ancestry open and resumes the filtered view', async () => {
     const { transport, store, calls, rerender } = await mount({ configure: transport => {

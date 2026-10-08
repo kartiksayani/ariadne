@@ -29,7 +29,7 @@
 
 .nav-setup-head > h2 {
   margin: 0 0 6px;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 500;
 }
 
@@ -49,7 +49,7 @@
 
 .nav-setup-code > details > summary {
   padding: 6px 10px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -60,7 +60,7 @@
   overflow: auto;
   border-top: 1px solid var(--color-divider);
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .nav-setup-copy {
@@ -71,7 +71,7 @@
 
 .nav-registration p {
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
 }
 
@@ -84,7 +84,7 @@
   display: grid;
   gap: 6px;
   margin-top: 14px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .nav-registration input, .nav-registration select {
