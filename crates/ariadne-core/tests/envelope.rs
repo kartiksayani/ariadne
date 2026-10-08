@@ -207,7 +207,7 @@ fn answer_envelope_carries_only_echo_ids_target_revisions_option_and_text() {
         ]
     );
     // The skill, loaded once, explains every field the envelope carries.
-    let rules = include_str!("../../../integrations/rules/source.md");
+    let rules = include_str!("../../../integrations/rules/inputs.md");
     for key in keys.iter().chain([&"topic_id".to_owned()]) {
         assert!(rules.contains(&format!("`{key}`")), "rules omit {key}");
     }

@@ -154,6 +154,9 @@ fn links(values: &[ItemLinkTarget]) -> Result<(), CoreError> {
     }
     for link in values {
         text(&link.target, 4096, true)?;
+        if link.kind == LinkKind::Item && ItemRef::new(link.target.clone()).is_err() {
+            return Err(invalid("Item link target must be a raw item id"));
+        }
     }
     Ok(())
 }

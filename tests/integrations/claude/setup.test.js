@@ -22,7 +22,7 @@ describe('installed owner helper setup', () => {
     expect(h.prompts).toEqual([]);
   });
   it('accepts the shipped setup instruction and refuses one past the core limit', async () => {
-    const shipped = readFileSync(new URL('../../../integrations/rules/claude.md', import.meta.url), 'utf8')
+    const shipped = readFileSync(new URL('../../../integrations/claude/plugin/skills/ariadne/SKILL.md', import.meta.url), 'utf8')
       + `\n\nUse these routing IDs for Ariadne commands: binding ${ids.binding}, generation ${ids.generation}.`;
     expect(Buffer.byteLength(shipped)).toBeGreaterThan(4096);
     const connectWith = async instruction => {

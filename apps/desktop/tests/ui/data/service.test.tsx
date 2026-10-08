@@ -407,3 +407,45 @@ describe('selectors and registered reveal', () => {
     expect(onFailed).toHaveBeenCalledTimes(1); stop();
   });
 });
+
+describe('file references through the transport', () => {
+  const project = demo.project_id;
+  const withTransport = (extra: Partial<DesktopTransport>) => createDesktopService({
+    invoke: vi.fn(), listen: vi.fn(async () => () => {}), ...extra,
+  } as DesktopTransport);
+
+  it('passes the project and references to the native side and reads one answer per reference', async () => {
+    const resolveFileReferences = vi.fn(async () => [true, false, 'yes']);
+    const service = withTransport({ resolveFileReferences });
+    expect(await service.resolveFileReferences!(project, ['a/b.rs', 'c/d.rs', 'e/f.rs'])).toEqual([true, false, false]);
+    expect(resolveFileReferences).toHaveBeenCalledWith(project, ['a/b.rs', 'c/d.rs', 'e/f.rs']);
+  });
+
+  it('finds no file when the transport cannot look, and fails on a wrong-sized or failed answer', async () => {
+    expect(await withTransport({}).resolveFileReferences!(project, ['a/b.rs'])).toEqual([false]);
+    await expect(withTransport({ resolveFileReferences: async () => [true] }).resolveFileReferences!(project, ['a', 'b']))
+      .rejects.toMatchObject({ reason: 'invalid_response' });
+    await expect(withTransport({ resolveFileReferences: async () => 'no' }).resolveFileReferences!(project, ['a']))
+      .rejects.toMatchObject({ reason: 'invalid_response' });
+    await expect(withTransport({ resolveFileReferences: async () => { throw new Error('x'); } }).resolveFileReferences!(project, ['a']))
+      .rejects.toMatchObject({ reason: 'transport' });
+  });
+
+  it('opens through the transport and reports a failure to open', async () => {
+    const openFileReference = vi.fn(async () => {});
+    await withTransport({ openFileReference }).openFileReference!(project, 'src/app.ts:3');
+    expect(openFileReference).toHaveBeenCalledWith(project, 'src/app.ts:3');
+    await expect(withTransport({}).openFileReference!(project, 'a')).rejects.toMatchObject({ reason: 'transport' });
+    await expect(withTransport({ openFileReference: async () => { throw new Error('x'); } }).openFileReference!(project, 'a'))
+      .rejects.toMatchObject({ reason: 'transport' });
+  });
+
+  it('calls the native commands with camelCase arguments by default', async () => {
+    vi.mocked(invoke).mockResolvedValue([true]);
+    const service = createDesktopService();
+    await service.resolveFileReferences!(project, ['a/b.rs']);
+    expect(invoke).toHaveBeenCalledWith('file_references_resolve', { projectId: project, references: ['a/b.rs'] });
+    await service.openFileReference!(project, 'a/b.rs');
+    expect(invoke).toHaveBeenCalledWith('file_reference_open', { projectId: project, reference: 'a/b.rs' });
+  });
+});

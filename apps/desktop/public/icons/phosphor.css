@@ -86,6 +86,14 @@
   content: "\e094";
 }
 
+.ph.ph-caret-double-left::before {
+  content: "\e128";
+}
+
+.ph.ph-caret-double-right::before {
+  content: "\e12a";
+}
+
 .ph.ph-caret-down::before {
   content: "\e136";
 }
@@ -182,6 +190,14 @@
   content: "\e2b8";
 }
 
+.ph.ph-info::before {
+  content: "\e2ce";
+}
+
+.ph.ph-link::before {
+  content: "\e2e2";
+}
+
 .ph.ph-list::before {
   content: "\e2f0";
 }
@@ -214,6 +230,30 @@
   content: "\e398";
 }
 
+.ph.ph-pause::before {
+  content: "\e39e";
+}
+
+.ph.ph-pause-circle::before {
+  content: "\e3a0";
+}
+
+.ph.ph-pencil-simple::before {
+  content: "\e3b4";
+}
+
+.ph.ph-play::before {
+  content: "\e3d0";
+}
+
+.ph.ph-plugs::before {
+  content: "\eb56";
+}
+
+.ph.ph-plugs-connected::before {
+  content: "\eb5a";
+}
+
 .ph.ph-plus::before {
   content: "\e3d4";
 }
@@ -240,6 +280,10 @@
 
 .ph.ph-trash::before {
   content: "\e4a6";
+}
+
+.ph.ph-tree-structure::before {
+  content: "\e67c";
 }
 
 .ph.ph-tree-view::before {

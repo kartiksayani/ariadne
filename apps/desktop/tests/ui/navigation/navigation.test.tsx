@@ -6,7 +6,7 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import inventory from '../../../../../fixtures/contracts/core/inventory.json';
 import type { CoreError, MutationEnvelope, OwnerMutationRequest, PreferencesSnapshot, ProjectListResult,
   QueryEnvelope, SessionListResult, SessionPreferences, SessionRef } from '../../../src/generated/core';
-import type { Page, ProjectSummary, QueryCursor, Session, SessionSummary, SummaryCounts } from '../../../src/generated/domain/models';
+import type { ItemStatus, Page, ProjectSummary, QueryCursor, Session, SessionSummary, SummaryCounts } from '../../../src/generated/domain/models';
 import { createDesktopService, type DesktopTransport, type HintPayloads } from '../../../src/data/service';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import * as catalogue from '../../../src/state/navigation/catalogue';
@@ -96,6 +96,28 @@ const cursor = (view: 'projects' | 'sessions', revision = 21): QueryCursor => ({
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); vi.useRealTimers(); });
 
 describe('complete registered navigation reads', () => {
+  it.each([false, true])('normalizes every loaded full status set to All with duplicates=%s', async duplicates => {
+    const { transport, store } = setup();
+    const statuses: ItemStatus[] = ['open', 'waiting_on_me', 'in_progress', 'decided', 'done', 'dropped', 'replaced'];
+    const initial = preferences();
+    initial.sessions[0].filters.statuses = duplicates ? [...statuses, 'open', 'done'] : statuses;
+    const before = structuredClone(initial);
+    read(transport, initial);
+    await store.start();
+    expect(store.getSnapshot().preferences).toEqual({ ...before,
+      sessions: [{ ...before.sessions[0], filters: { ...before.sessions[0].filters, statuses: [] } }] });
+    expect(initial).toEqual(before);
+    expect(transport.calls.some(call => 'command' in call.request)).toBe(false);
+
+    const refreshed = preferences(2);
+    refreshed.sessions[0].filters.statuses = ['open', 'open', 'waiting_on_me'];
+    read(transport, refreshed); await store.refresh();
+    expect(store.getSnapshot().preferences?.sessions[0].filters.statuses).toEqual(['open', 'open', 'waiting_on_me']);
+    const full = preferences(3);
+    full.sessions[0].filters.statuses = [...statuses, 'replaced'];
+    read(transport, full); await store.refresh();
+    expect(store.getSnapshot().preferences?.sessions[0].filters.statuses).toEqual([]);
+  });
   it('subscribes before loading and captures every project/session page with backend counts', async () => {
     const { transport, store } = setup();
     transport.enqueue('preferences_get', success('preferences_get', preferences()));

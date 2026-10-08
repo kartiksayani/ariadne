@@ -25,7 +25,7 @@ async function apply(configuration, operations, expectedItemRevisions = {}, summ
 }
 export async function publishTreeRequest(configuration, request, setup = false) {
   assert.ok(Buffer.byteLength(JSON.stringify(request)) < 512 * 1024, 'Every real CLI request remains within its protocol limit');
-  const args = ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--json'];
+  const args = ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--full', '--json'];
   const before = await snapshot(configuration), rejections = [];
   const maximumRetries = setup ? 2 : 0;
   for (let retry = 0; retry <= maximumRetries; retry++) {
@@ -232,15 +232,16 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed, 
       const current = selector ? document.querySelector(selector) : [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
         .find(value => value.textContent.trim() === name);
       const rect = button.getBoundingClientRect(), hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const enabled = !button.disabled && button.getAttribute('aria-disabled') !== 'true';
       const scroll = [];
       for (let parent = button.parentElement; parent; parent = parent.parentElement) scroll.push([parent.scrollLeft, parent.scrollTop]);
       const geometry = { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, scroll };
       sample.readiness.geometry = geometry;
       sample.readiness.connectedNamedTarget = button.isConnected && current === button;
-      sample.readiness.enabled = !button.disabled;
+      sample.readiness.enabled = enabled;
       sample.readiness.centreHit = hit !== null && button.contains(hit);
       const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
-      if (button.isConnected && current === button && !button.disabled
+      if (button.isConnected && current === button && enabled
         && sample.readiness.visibilityState === 'visible' && !sample.readiness.hidden && sample.readiness.hasFocus
         && (x < 0 || x >= window.innerWidth || y < 0 || y >= window.innerHeight)) {
         // Native nested scrolling can settle after the initial centering. Move
@@ -251,7 +252,7 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed, 
         frame = window.requestAnimationFrame(inspect); return;
       }
       const valid = sample.readiness.visibilityState === 'visible' && !sample.readiness.hidden && sample.readiness.hasFocus
-        && button.isConnected && current === button && !button.disabled && hit !== null && button.contains(hit);
+        && button.isConnected && current === button && enabled && hit !== null && button.contains(hit);
       const signature = JSON.stringify(geometry);
       sample.readiness.frames = valid ? (signature === previous ? sample.readiness.frames + 1 : 1) : 0;
       sample.readiness.ready = sample.readiness.frames >= 2;
@@ -300,7 +301,7 @@ async function readySessionButton(tree) {
   if (failure) throw failure;
   return button;
 }
-// Status chips are single-select; their names carry a live count, so the chip
+// Status chips toggle a set; their names carry a live count, so the chip
 // key (all, waiting, open, progress, closed) names the control instead.
 export async function choose(chip, pressed) {
   const focused = () => browser.execute(() => document.visibilityState === 'visible' && !document.hidden && document.hasFocus());
@@ -329,19 +330,51 @@ export async function choose(chip, pressed) {
   }
   if (failure) throw failure;
 }
-async function anchor() {
-  return browser.execute(() => {
-    // .tree-scroll is the column's scroller; the saved anchor is always an item row.
-    const tree = document.querySelector('.tree-scroll'), top = tree.getBoundingClientRect().top;
-    const element = [...tree.querySelectorAll('.tree-item')].find(element => element.getBoundingClientRect().bottom > top);
-    return { id: element.dataset.itemId, offset: element.getBoundingClientRect().top - top, scrollTop: tree.scrollTop };
-  });
+export function observeTreeAnchor() {
+  // The reading edge is below the visible sticky band. Saved offsets reserve
+  // the anchor's own topic height, including when the next topic pushes it up.
+  const tree = document.querySelector('.tree-scroll'), top = tree.getBoundingClientRect().top;
+  const readingTop = [...tree.querySelectorAll('.tree-topic')].reduce((edge, header) => {
+    const rect = header.getBoundingClientRect();
+    return rect.top <= top && rect.bottom > top ? Math.max(edge, rect.bottom) : edge;
+  }, top);
+  const element = [...tree.querySelectorAll('.tree-item')].find(element => element.getBoundingClientRect().bottom > readingTop);
+  const header = element.closest('.tree-topic-group').querySelector('.tree-topic');
+  return { id: element.dataset.itemId, offset: element.getBoundingClientRect().top - top - header.getBoundingClientRect().height, scrollTop: tree.scrollTop };
+}
+const anchor = () => browser.execute(observeTreeAnchor);
+
+export async function assertStatusFilters(tree, expectedIds) {
+  const chipCount = async chip => Number(await (await browser.$(`[data-chip="${chip}"] .tree-chip-count`)).getText());
+  const pressed = async () => browser.execute(() => [...document.querySelectorAll('.tree-filters [data-chip][aria-pressed="true"]')].map(element => element.dataset.chip));
+  assert.deepEqual(await Promise.all(['all', 'open', 'closed'].map(chipCount)), [2000, 1320, 680]);
+  await choose('open', true); await wait(async () => (await visibleIds()).length === 1340, 'Open chip differs from the canonical fixture');
+  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['open']); assert.equal(await chipCount('open'), 1320);
+  assert.deepEqual(await pressed(), ['open']);
+  await choose('closed', true); await wait(async () => (await visibleIds()).length === 2000, 'Open and Closed together did not restore the complete fixture');
+  assert.deepEqual(await visibleIds(), expectedIds);
+  assert.deepEqual(await pressed(), ['open', 'closed']);
+  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['open', 'decided', 'done', 'dropped', 'replaced']);
+  await choose('open', false); await wait(async () => (await visibleIds()).length === 680, 'Closed chip did not keep exactly the terminal items');
+  assert.deepEqual(await pressed(), ['closed']);
+  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['decided', 'done', 'dropped', 'replaced']);
+  await choose('all', true); await wait(async () => (await visibleIds()).length === 2000, 'All chip did not restore every item');
+  assert.deepEqual(await visibleIds(), expectedIds); assert.deepEqual(await pressed(), ['all']);
+  assert.deepEqual((await preferences(tree)).view.filters.statuses, []);
 }
 async function completeRowLayout(id, item) {
+  // Preview text is deliberately bounded; verify complete native layout after Show more opens it.
+  const opened = await browser.execute(id => {
+    const row = document.querySelector(`.tree-rows [data-item-id="${id}"]`);
+    const more = row.querySelector('.tree-more[aria-expanded="false"]');
+    if (more) more.click();
+    return !!more;
+  }, id);
+  if (opened) await wait(async () => await browser.execute(id => document.querySelector(`.tree-rows [data-item-id="${id}"]`)?.hasAttribute('data-open'), id), 'Show more did not expand the complete row');
   const layout = await browser.execute(id => {
     const row = document.querySelector(`.tree-rows [data-item-id="${id}"]`);
     const bounds = element => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, height: value.height }; };
-    const parts = ['.tree-question', '.tree-outcome > span'].map(selector => {
+    const parts = ['.tree-question', '.tree-outcome > .tree-clamp'].map(selector => {
       const element = row.querySelector(selector); if (!element) return null;
       const range = document.createRange(); range.selectNodeContents(element);
       const fragments = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0)
@@ -351,7 +384,7 @@ async function completeRowLayout(id, item) {
         const style = window.getComputedStyle(parent);
         containers.push({ bounds: bounds(parent), clientHeight: parent.clientHeight, scrollHeight: parent.scrollHeight,
           clientWidth: parent.clientWidth, scrollWidth: parent.scrollWidth,
-          lineClamp: style.getPropertyValue('-webkit-line-clamp'), textOverflow: style.textOverflow });
+          lineClamp: style.getPropertyValue('-webkit-line-clamp'), display: style.display, textOverflow: style.textOverflow });
         if (parent === row) break;
       }
       return { text: element.textContent, bounds: bounds(element), fragments, containers,
@@ -366,9 +399,9 @@ async function completeRowLayout(id, item) {
     const lines = new Set(part.fragments.map(rect => Math.round(rect.top)));
     assert.ok(lines.size >= text.split('\n').length, `${id} ${name} must retain its complete multiline layout`);
     for (const container of part.containers) {
-      // The only fold is the outcome's six-line preview (Show more); these outcomes are shorter, so it hides nothing.
+      // Expanded rows keep both texts whole; short collapsed rows may use the two-line clamp.
       const clamp = Number.parseInt(container.lineClamp, 10);
-      assert.ok(!clamp || (name === 'outcome' && clamp === 6 && lines.size <= clamp), `${id} ${name} must not fold any of its lines`);
+      assert.ok(container.display !== '-webkit-box' || !clamp || (clamp === 2 && lines.size <= clamp), `${id} ${name} must not fold any of its lines`);
       assert.notEqual(container.textOverflow, 'ellipsis', `${id} ${name} must not truncate with an ellipsis`);
       assert.ok(container.scrollHeight <= container.clientHeight + 1 && container.scrollWidth <= container.clientWidth + 1,
         `${id} ${name} must fit every containing row box without overflow`);
@@ -471,13 +504,7 @@ async function treeAcceptance(configuration) {
   await setSearch(tree, ''); await wait(async () => (await visibleIds()).length === 2000, 'Clear search did not restore the complete tree');
   // Chip counts follow the search and topic, never the chip itself. Open keeps
   // its 1,320 matches plus the 20 done roots as context; Closed matches 680 rows.
-  const chipCount = async chip => Number(await (await browser.$(`[data-chip="${chip}"] .tree-chip-count`)).getText());
-  assert.deepEqual(await Promise.all(['all', 'open', 'closed'].map(chipCount)), [2000, 1320, 680]);
-  await choose('open', true); await wait(async () => (await visibleIds()).length === 1340, 'Open chip differs from the canonical fixture');
-  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['open']); assert.equal(await chipCount('open'), 1320);
-  await choose('closed', true); await wait(async () => (await visibleIds()).length === 680, 'Closed chip did not keep exactly the terminal items');
-  await choose('all', true); await wait(async () => (await visibleIds()).length === 2000, 'All chip did not restore every item');
-  assert.deepEqual((await preferences(tree)).view.filters.statuses, []);
+  await assertStatusFilters(tree, expectedIds);
 
   // The detail heading folds the stored line breaks in rendered text, so its DOM text carries the complete question.
   const heading = () => browser.$('[aria-label="Item detail"] .detail-question');
@@ -526,8 +553,15 @@ async function treeAcceptance(configuration) {
   await secondToggle.waitForEnabled(); await secondToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('2'), 'Second explicit collapse was not persisted');
   await (await search()).waitForEnabled();
-  await (await row('10.50')).scrollIntoView({ block: 'start' }); await (await row('10.50')).click();
+  // Centre the driver target below the sticky band before the click. Selecting
+  // an already visible tree row must keep this reading position.
+  const anchorRow = await row('10.50');
+  await browser.execute(observeTreeClickReadiness, anchorRow, null, null, null, '.tree-rows [data-item-id="10.50"]');
+  try { await waitClickReadiness('The visible anchor row did not settle below its sticky header'); }
+  finally { await browser.execute(() => window.__ariadneTreeFilterCleanup?.()); }
+  const beforeSelection = await anchor(); await anchorRow.click();
   await wait(async () => (await preferences(tree)).view.selected_item_id === '10.50', 'The anchor selection must finish before the real CLI live edit');
+  assert.equal((await anchor()).scrollTop, beforeSelection.scrollTop, 'A click inside the tree must not scroll it');
   await (await search()).waitForEnabled();
   const beforeEdit = await anchor(); assert.ok(beforeEdit.scrollTop > 0);
   const live = await snapshot(tree), longer = `${live.items['1'].question}\n${'A complete upstream sentence wraps across the native row. '.repeat(40)}`;

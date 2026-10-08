@@ -26,6 +26,18 @@ const row = (tree: ReturnType<typeof model>, itemId: string) => tree.rows.find((
 const topic = (tree: ReturnType<typeof model>) => tree.rows.find((value): value is TopicRow => value.kind === 'topic' && value.topic.id === id('10'))!;
 
 describe('an archived topic in the tree counts', () => {
+  it('keeps a saved full status set equivalent to All, including collapsed descendants and topics', () => {
+    const session = structuredClone(demo) as Session;
+    const project = (statuses: ItemStatus[]) => treeModel({ session: immutable(session), view: view(session, statuses),
+      search: '', later: new Set(), collapsedTopics: new Set([session.items['8']!.topic_id]), selectedId: null, revealId: null,
+      temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.created_at) });
+    const all = project([]), full = project(['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open']);
+    expect(full.filtering).toBe(false);
+    expect([...full.chips]).toEqual(['all']);
+    expect(full.rows).toEqual(all.rows);
+    expect(row(full, '1.1')).toBeUndefined();
+    expect(row(full, '8')).toBeUndefined();
+  });
   it('leaves Waiting on me while archived and comes back on restore; its items keep their status', () => {
     const session = structuredClone(demo) as Session, waitingTopic = session.topics[session.items['2']!.topic_id]!;
     const before = model(session);

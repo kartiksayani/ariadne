@@ -98,6 +98,11 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
         // Pause and Resume are icon buttons: their name is the aria-label.
         const label = ((await action.getAttribute('aria-label')) ?? (await action.innerText())).trim();
         if (/Pause|Resume|Try again/.test(label)) continue;
+        // Copy ID acts immediately without a dialog. This layout harness grants no clipboard permissions.
+        if (label === 'Copy ID') {
+          await expect(page.getByRole('dialog')).toHaveCount(0);
+          continue;
+        }
         // Rename opens its fields in the bar, not a dialog; Esc closes them and focus returns to the button.
         if (label === 'Rename') {
           await action.click();

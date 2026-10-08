@@ -2,7 +2,7 @@
   padding: 12px 16px;
   border-bottom: 1px solid var(--color-divider);
   background: var(--color-surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
@@ -18,7 +18,7 @@
   padding: 12px;
   border: 1px solid var(--color-divider);
   border-radius: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .lifecycle-edge[data-edge-state="loading"] .lifecycle-notice,
@@ -61,7 +61,7 @@
   max-height: 65vh;
   overflow: auto;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .lifecycle-dialog label {
@@ -117,7 +117,7 @@
 .dispatch-action {
   height: 24px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   gap: 4px;
 }
 
@@ -131,7 +131,7 @@
 
 .dispatch-error {
   color: var(--a-warn);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 /* The project page card's sending state: a visible button, not link text. */
@@ -162,14 +162,14 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--a-warn) 12%, transparent);
   color: var(--color-text);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
 .dispatch-note > i {
   flex: none;
   color: var(--a-warn);
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 .dispatch-note > span {
@@ -184,7 +184,7 @@
   align-items: center;
   gap: 6px 8px;
   margin: 6px 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
   overflow-wrap: anywhere;
 }

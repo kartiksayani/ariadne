@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { Shell, type ShellProps } from '../../../src/ui/shell/Shell';
 import { resolveTheme, useAppliedTheme } from '../../../src/ui/shell/theme';
 import { tabModels } from '../../../src/ui/shell/model';
 import { WaitingFrame } from '../../../src/ui/waiting/WaitingColumn';
+import { ItemHistoryContext } from '../../../src/ui/shell/itemHistory';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.theme; });
 
@@ -21,6 +24,22 @@ function props(patch: Partial<ShellProps> = {}): ShellProps {
 }
 
 describe('Paperwhite shell', () => {
+  it('puts accessible Back/Forward icons before the detail breadcrumb, with shortcut tooltips and disabled endpoints', () => {
+    const back = vi.fn(() => true), forward = vi.fn(() => true);
+    const value = props({ body: { waiting: null, center: null, detail: <p>Detail</p>, detailPath: <span>Topic / #2</span> } });
+    const { rerender } = render(<ItemHistoryContext.Provider value={{ canBack: true, canForward: false, back, forward }}><Shell {...value} /></ItemHistoryContext.Provider>);
+    const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Back' });
+    expect(button.title).toBe('Back (⌘[)'); expect(button.querySelector('.ph-arrow-left')).not.toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Forward' }).disabled).toBe(true);
+    expect(button.closest('.shell-detail-history')?.nextElementSibling?.className).toBe('shell-detail-path');
+    fireEvent.click(button); expect(back).toHaveBeenCalledOnce();
+    rerender(<ItemHistoryContext.Provider value={{ canBack: false, canForward: true, back, forward }}><Shell {...value} /></ItemHistoryContext.Provider>);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Back' }).disabled).toBe(true);
+    const next = screen.getByRole<HTMLButtonElement>('button', { name: 'Forward' });
+    expect(next.title).toBe('Forward (⌘])'); expect(next.querySelector('.ph-arrow-right')).not.toBeNull();
+    fireEvent.click(next); expect(forward).toHaveBeenCalledOnce();
+  });
+
   it('renders header, tabs, body and footer from props', () => {
     const value = props(); render(<Shell {...value} />);
     expect(document.querySelector('.shell-session-text')?.textContent).toBe('checkout · started 14:02');
@@ -77,6 +96,18 @@ describe('Paperwhite shell', () => {
     expect((screen.getByText('Card').closest('.waiting-scroll') as HTMLElement).hidden).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (3)' }));
     expect(fold).toHaveBeenLastCalledWith(false);
+  });
+
+  it('draws an icon on both the Hide and the Show button of the Waiting column', () => {
+    // Phosphor ships as a bundled subset; a class outside it renders an empty square.
+    const icons = readFileSync(resolve(__dirname, '../../../public/icons/phosphor.css'), 'utf8');
+    const glyph = (button: HTMLElement) => button.querySelector('i')!.className.split(' ').find(name => name !== 'ph')!;
+    const { rerender } = render(<Shell {...props({ body: { waiting: <WaitingFrame count="3" />, center: null, onFoldWaiting: vi.fn() } })} />);
+    const hide = screen.getByRole('button', { name: 'Hide Waiting on me' });
+    expect(hide.className).toContain('btn-icon');
+    expect(icons).toContain(`.ph.${glyph(hide)}::before`);
+    rerender(<Shell {...props({ body: { waiting: <WaitingFrame count="3" />, center: null, onFoldWaiting: vi.fn(), waitingFolded: true } })} />);
+    expect(icons).toContain(`.ph.${glyph(screen.getByRole('button', { name: 'Show Waiting on me (3)' }))}::before`);
   });
 
   it('folds the Waiting column by itself in a window too narrow for every column, and the owner can still open it', () => {

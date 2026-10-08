@@ -37,9 +37,11 @@ exports, `install.json` and owned links under `$HOME`.
   HOME, then creates a GitHub pre-release with `gh`. A manual run without a tag
   keeps the tarball as a workflow artifact only.
 - The app version stays 0.1.0; release tags look like `v0.1.0-alpha.1`. The
-  workflow fails unless the tag starts with `v` plus the app version, and
-  `install.sh` stops with a message when `versions/<app version>` already exists,
-  because `install()` refuses a different package with the same version.
+  workflow fails unless the tag starts with `v` plus the app version. Because
+  `install()` refuses a different package with the same version, `install.py`
+  replaces an existing `versions/<app version>` (complete or partial) with the
+  owned-only uninstall first, and stops with one plain instruction when foreign
+  or edited files block that.
 - Publishing only happens on a tag push, never on manual dispatch, and never over
   an existing release. The checkout keeps no credentials, and the verify step
   asserts that uninstall left nothing behind.

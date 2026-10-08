@@ -16,23 +16,23 @@
 }
 
 .pw-rail-title {
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   font-weight: 500;
 }
 
 .pw-rail-count {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
 .pw-rail-follow {
   margin-left: auto;
   padding: 2px 6px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
 }
 
 .pw-rail-follow i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .pw-rail-close {
@@ -42,7 +42,7 @@
 }
 
 .pw-rail-close i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .pw-rail-list {
@@ -68,13 +68,13 @@
 
 .pw-rail-note {
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
 .pw-rail-retry {
   padding: 0 4px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .pw-rail-jump {
@@ -84,11 +84,11 @@
   transform: translateX(-50%);
   white-space: nowrap;
   padding: 5px 12px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   background: var(--a-card);
   box-shadow: var(--a-pop);
 }
 
 .pw-rail-jump i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }

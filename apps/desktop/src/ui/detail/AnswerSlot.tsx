@@ -47,11 +47,11 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
     const buttons = root.current?.querySelectorAll<HTMLButtonElement>('[data-answer-option]');
     if (focusRequest.optionIndex !== undefined) {
       const choice = item?.options[focusRequest.optionIndex], button = buttons?.[focusRequest.optionIndex];
-      if (choice && button && !button.disabled) { drafts.edit(entry.draft.op_id, { selected_option_id: choice.id }); button.focus(); }
+      if (choice && button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') { drafts.edit(entry.draft.op_id, { selected_option_id: choice.id }); button.focus(); }
       return;
     }
     if (entry.saving || entry.uncertain || entry.receipt || state.preferenceUncertain) return;
-    root.current?.querySelector<HTMLElement>('[data-answer-option]:not(:disabled),textarea:not(:disabled)')?.focus();
+    root.current?.querySelector<HTMLElement>('[data-answer-option]:not(:disabled):not([aria-disabled="true"]),textarea:not(:disabled)')?.focus();
   }, [focusRequest, entry, item, drafts, state.preferenceUncertain, onFocusRequestConsumed]);
   if (!item) return null;
   // data-owner-input marks every owner input of the detail (this slot and the action box) for native tests.

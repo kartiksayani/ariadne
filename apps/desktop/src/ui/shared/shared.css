@@ -10,14 +10,14 @@
   padding: 0 8px 0 7px;
   border-radius: 6px;
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
 }
 
 .status-badge > i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .status-badge-icon {
@@ -28,7 +28,7 @@
 /* — Message Excerpt, timeline variant (detail panel) — */
 .excerpt-timeline {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) 24px;
   column-gap: 10px;
 }
 
@@ -80,8 +80,8 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 7px;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: calc(12px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
@@ -96,7 +96,7 @@
 
 .excerpt-number {
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
 }
 
 .excerpt-who {
@@ -106,11 +106,11 @@
 }
 
 .excerpt-who > i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .excerpt-body {
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   line-height: 1.55;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 84%, transparent);
@@ -125,7 +125,7 @@
 }
 
 .excerpt-note {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 1.45;
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
@@ -192,18 +192,18 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
-  line-height: 16px;
+  font-size: calc(11.5px * var(--text-scale));
+  line-height: calc(16px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
 .pw-excerpt-meta i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .pw-excerpt-number {
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
 }
 
 .pw-excerpt-who {
@@ -218,10 +218,13 @@
 .pw-excerpt-text {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
   color: color-mix(in srgb, var(--color-text) 84%, transparent);
   text-wrap: pretty;
+
+  /* The agent's own line breaks stay, so a bulleted message previews as a list. */
+  white-space: pre-line;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }

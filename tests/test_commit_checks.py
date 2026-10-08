@@ -258,7 +258,7 @@ class LintTests(unittest.TestCase):
         check = ("cargo", "run", "--locked", "-p", "ariadne-xtask", "--", "gen-rules", "--check")
         for changed, full, expected in [
             (["integrations/rules/source.md"], False, True),
-            (["integrations/rules/codex.md"], False, True),
+            (["integrations/rules/skill.md"], False, True),
             (["tools/xtask/src/rules.rs"], False, True),
             (["crates/core/src/lib.rs"], False, False),
             ([], True, True),

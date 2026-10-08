@@ -51,14 +51,23 @@ export function createRegister(descriptor, publish) {
   return on => registerModule(descriptor, on, publish);
 }
 
-function failure($, error) {
-  // Only our bounded actionable messages are displayed; raw rejected host
-  // promises, helper stderr and owner payloads are never reflected.
-  $.ui.log(error instanceof ModError ? error.message : 'Ariadne helper unavailable; retain original IDs and check the app.');
+// Only our bounded plain sentences are displayed; raw rejected host
+// promises, helper stderr and owner payloads are never reflected.
+function failureText(error) {
+  return error instanceof ModError ? (error.plain ?? error.message)
+    : 'Something went wrong while talking to Ariadne. Open the Ariadne app and try again; if it keeps happening, update Ariadne.';
 }
-async function checked($, action) {
-  try { return await action(); }
-  catch (error) { failure($,error); return {text:'Ariadne operation did not complete. See the local status message; retain original operation IDs.'}; }
+// Printed once per outage: the 'helper' slot clears when a helper call works again.
+function failure(state, $, error) {
+  notice(state,host($),'helper',failureText(error));
+}
+// A command always answers the owner, even when its log line was already shown.
+async function checked(state, $, action) {
+  try {
+    const result = await action();
+    state.notices.delete('helper');
+    return result;
+  } catch (error) { failure(state,$,error); return {text:`That did not complete. ${failureText(error)}`}; }
 }
 // One owner notice per state: a slot prints again only after its text changes
 // or the state clears.
@@ -70,15 +79,17 @@ function notice(state, h, slot, text) {
 async function announce(state, h) {
   try {
     await state.discovery.announce(h,state.announcementScope);
-    state.notices.delete('heartbeat');
+    for (const slot of ['heartbeat','helper']) state.notices.delete(slot);
   } catch (error) {
     let last = error;
     // A scope the app no longer has still leaves this conversation discoverable.
     if (state.announcementScope && STALE_SCOPE.includes(error?.code)) {
-      try { await state.discovery.announce(h,null); state.notices.delete('heartbeat'); return; }
+      try { await state.discovery.announce(h,null); for (const slot of ['heartbeat','helper']) state.notices.delete(slot); return; }
       catch (fallback) { last = fallback; }
     }
-    notice(state,h,'heartbeat',last instanceof ModError && last.code === undefined ? last.message : TEXT.unreachable);
+    // The closed-app outage shares one slot with hook failures, so it is told once.
+    if (last instanceof ModError && last.code === 'host_unreachable') notice(state,h,'helper',failureText(last));
+    else notice(state,h,'heartbeat',last instanceof ModError && last.code === undefined ? last.message : TEXT.unreachable);
   }
 }
 async function heartbeat(state, $) {
@@ -211,16 +222,25 @@ async function followChange(state, $) {
   // later follows whatever this conversation is connected to then.
   if (followed) await forget(h,previous);
   state.target = await recall(h,id) ?? followed ?? null;
-  for (const slot of ['auto','heartbeat']) state.notices.delete(slot);
+  // The new conversation has seen none of these, so each may print again (a closed app included).
+  for (const slot of ['auto','heartbeat','helper']) state.notices.delete(slot);
   await announce(state,h);
   if (state.target) await autoConnect(state,$);
 }
 // Every reconnect rotates the generation. A note in the conversation (a meta
 // row the model reads on its next turn, not a prompt) gives Claude the new
 // routing, so its Ariadne commands keep working without an owner command.
-function routingNote(binding) {
+function routingNote(binding, helperPath) {
   const {binding_id,generation,session} = binding;
-  return `Ariadne reconnected this conversation to session ${session.session_id} in project ${session.project_id} by itself. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current. If your context is fresh, run ariadne read once to rebuild it. This note is not a message from the owner; do not reply to it.`;
+  return `Ariadne reconnected this conversation to session ${session.session_id} in project ${session.project_id} by itself. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current.\n${commandLine(helperPath)}\nIf your context is fresh, read reconnect.md in the ariadne skill first. This note is not a message from the owner; do not reply to it.`;
+}
+// The skill tells the agent to run this path verbatim, so a path with a space or
+// another shell-special character is single-quoted here.
+function shellQuote(path) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'","'\\''")}'`;
+}
+function commandLine(helperPath) {
+  return `Command: ${shellQuote(helperPath)}`;
 }
 // A note the engine refuses (no conversation mounted yet) is retried on the
 // poll tick; past that, the skill's stale_generation rule still applies.
@@ -231,7 +251,7 @@ async function deliverNote(state, $) {
   note.sending = true;
   note.tries += 1;
   try {
-    await $.session.append({message:{type:'user',content:[{type:'text',text:routingNote(note.binding)}]}});
+    await $.session.append({message:{type:'user',content:[{type:'text',text:routingNote(note.binding,state.descriptor.helperPath)}]}});
     if (state.note === note) state.note = null;
   } catch {
     if (state.note === note && note.tries >= NOTE_TRIES) state.note = null;
@@ -289,7 +309,7 @@ async function sessionStart(state, $, event, next) {
     await qualify(host($),state.descriptor);
     state.qualified = true;
     startPolling(state,$);
-  } catch (error) { failure($,error); }
+  } catch (error) { failure(state,$,error); }
   // `claude --resume` of a connected conversation reconnects it; a new
   // conversation has no remembered session and only announces itself.
   if (state.qualified && !state.sessionEnded) {
@@ -330,13 +350,13 @@ async function connectTransition(state, $, requestedSessionId) {
   state.notices.delete('auto');
   // The command output below gives Claude the routing itself.
   state.note = null;
-  const {binding,status} = bound.result;
-  const guidance = chosen === null ? '' : `\nResume structured Ariadne context for project ${binding.session.project_id}, session ${binding.session.session_id}: read its topics, items, questions, answers and results; summarize completed work, remaining work and missing context; reuse existing items and respect cancelled work. This does not transfer the old host transcript or dispatch an input.`;
-  const summary = `Ariadne connected: session ${binding.session.session_id} in project ${binding.session.project_id}; binding ${binding.binding_id}, generation ${binding.generation}; dispatch ${status.dispatch_state}, connection ${status.connection_state}. Organise this session's work in Ariadne now with the ariadne skill: choose topics and file typed items with full replies as you work, without waiting for an input (null source_input_id/attempt_id/input_result). Owner inputs arrive as messages starting with [ARIADNE_INPUT:<input>:<attempt>]; only an input's result needs its claimed envelope. Never edit .ariadne/ files directly.`;
+  const {binding} = bound.result;
+  const guidance = chosen === null ? '' : '\nThis resumes an earlier session: read reconnect.md in the ariadne skill first.';
+  const summary = `Ariadne connected: binding ${binding.binding_id}, generation ${binding.generation}.\n${commandLine(state.descriptor.helperPath)}\nFile your work as you go; the ariadne skill has the rest.`;
   return {text:summary + guidance};
 }
 function connectRun(state, $, event) {
-  return checked($,() => {
+  return checked(state,$,() => {
     const requestedSessionId = selectedSession(event);
     return transition(state,$,() => connectTransition(state,$,requestedSessionId));
   });
@@ -367,13 +387,13 @@ async function disconnectAction(state, $) {
 }
 async function turnStart(state, $, event, next) {
   try { if (state.loop) await state.loop.start(host($),event); }
-  catch (error) { failure($,error); }
+  catch (error) { failure(state,$,error); }
   return next(event);
 }
 async function turnComplete(state, $, event, next) {
   // A retired loop still records the end of a turn it delivered.
   try { for (const loop of [state.loop,...state.retired]) if (loop) await loop.complete(host($),event); }
-  catch (error) { failure($,error); }
+  catch (error) { failure(state,$,error); }
   return next(event);
 }
 // /clear and /resume end this conversation but not the process: report the
@@ -433,8 +453,8 @@ function registerModule(descriptor, on, publish) {
   state.owner = descriptor ? setup(descriptor.helperPath,(h,binding) => savedBinding(state,h,binding),publish) : null;
   on('session.start',($,event,next) => sessionStart(state,$,event,next));
   on('command.run',{command:'ariadne-connect'},($,event) => connectRun(state,$,event));
-  on('command.run',{command:'ariadne-status'},($) => checked($,() => statusAction(state,$)));
-  on('command.run',{command:'ariadne-disconnect'},($) => checked($,() => transition(state,$,() => disconnectAction(state,$))));
+  on('command.run',{command:'ariadne-status'},($) => checked(state,$,() => statusAction(state,$)));
+  on('command.run',{command:'ariadne-disconnect'},($) => checked(state,$,() => transition(state,$,() => disconnectAction(state,$))));
   on('turn.start',($,event,next) => turnStart(state,$,event,next));
   on('turn.complete',($,event,next) => turnComplete(state,$,event,next));
   on('session.end',($,event,next) => sessionEnd(state,$,event,next));

@@ -25,13 +25,19 @@ to a directory, so it works with either layout.
   and removes the old one. `~/Applications` is created with mode 0700 when absent.
   Removals use the anchored no-follow helpers; a failure removes the stage and
   restores the old copy.
-- Ownership is proved, never assumed. An existing `~/Applications/Ariadne.app` is
+- With valid install receipts, an existing `~/Applications/Ariadne.app` is
   replaced only when it is (a) the old relative symlink and a receipt records it in
   `owned_links`, or (b) a real directory whose inventory (file SHA-256 and modes,
   contained symlinks) equals the `Ariadne.app/` subset of a valid receipt of any
-  installed version. Anything else is refused with "Foreign or edited install
-  path". Receipts of every installed version count, so a retry after an
-  interrupted upgrade still recognises the older copy.
+  installed version. Receipts of every installed version count, so a retry after
+  an interrupted upgrade still recognises the older copy.
+- Recovery when no valid install receipts remain may adopt a real app directory
+  with the same `CFBundleIdentifier` as the package being installed, even though
+  its old bytes cannot be proved. It prints "Found an Ariadne app without an
+  install record; replacing it." when replacing that copy. This also applies
+  when the old copy matches the new package. A mismatched identifier, an
+  unrecorded symlink, or an edited copy with an existing receipt is refused with
+  "Foreign or edited install path". Uninstall never adopts an unrecorded copy.
 - Receipts move to `inventory_version` 2, which adds `owned_app` (boolean) and no
   longer lists the app link. Version 1 receipts are still accepted, including their
   app symlink, so the old layout uninstalls and migrates. A version 1 receipt has

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { BindingConnectParams, GlobalPreferences, ItemRoute, MutationReceipt, NavigationSelection, OwnerMutationRequest,
   PreferencesPatchEntry, PreferencesSnapshot, ProjectListResult, SessionListResult, SessionPreferences, SessionRef, Theme } from '../../generated/core';
 import type { RevealedItem } from '../../data/routes';
+import type { ItemStatus } from '../../generated/domain/models';
 import { RegisteredRoutes } from '../../data/routes';
 import { immutable, OpenSessions, type Immutable, type SessionStore } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } from '../../data/service';
@@ -35,6 +36,12 @@ const sameRoute = (a: SessionRef, b: SessionRef) => a.project_id === b.project_i
 const fail = (error: unknown): Failure => error instanceof CoreFailure || error instanceof ServiceFailure
   ? error : new ServiceFailure('transport');
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const filterStatuses: Record<ItemStatus, true> = { open: true, waiting_on_me: true, in_progress: true,
+  decided: true, done: true, dropped: true, replaced: true };
+function normalizeStatusFilters(preferences: PreferencesSnapshot): PreferencesSnapshot {
+  return { ...preferences, sessions: preferences.sessions.map(view => Object.keys(filterStatuses).every(status => view.filters.statuses.includes(status as ItemStatus))
+    ? { ...view, filters: { ...view.filters, statuses: [] } } : view) };
+}
 // Patch semantics for a retry: apply only the fields the owner's action changed (`base` -> `desired`)
 // onto the refreshed value, so a foreign change to a different field survives.
 function replayFields<T extends object>(base: T, desired: T, current: T): T {
@@ -78,6 +85,8 @@ export class NavigationStore {
   private timer: ReturnType<typeof setInterval> | null = null;
   private pending: PendingMutation | null = null;
   private activeMutation: Promise<boolean> | null = null;
+  private textScaleTarget: { value: number; expectedRevision: number | null } | null = null;
+  private textScaleFlight: Promise<boolean> | null = null;
   // Reconciled reads recover their own errors, not the last rejected edit.
   private mutationFailure: Failure | null = null;
   // Write operations that settled with a definite revision_conflict (already cleared and refreshed).
@@ -98,6 +107,7 @@ export class NavigationStore {
   // Observe only the already executing write; uncertain operations still need
   // explicit reconciliation. This neither schedules nor retries a mutation.
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
+  readonly hasQueuedTextScale = () => this.textScaleTarget !== null;
   // True only when this exact write operation settled with a definite revision_conflict, which
   // the store has already cleared and refreshed. Uncertain and other rejections are never reported.
   readonly settledAsConflict = (completion: Promise<boolean>) => {
@@ -191,7 +201,7 @@ export class NavigationStore {
           // complete pair and restart instead of silently dropping orphan rows.
           throw new ServiceFailure('invalid_response');
         }
-        this.publish({ preferences: immutable(preferences), projects: immutable(projects), sessions: immutable(sessions),
+        this.publish({ preferences: immutable(normalizeStatusFilters(preferences)), projects: immutable(projects), sessions: immutable(sessions),
           sessionProjectId: projectId, status: 'ready', error: this.mutationFailure, ...this.setupAfter(sessions, projectId) });
         this.flushStartupRoute();
       } catch (error: unknown) {
@@ -268,7 +278,7 @@ export class NavigationStore {
             if (entry.later) saved.later.push(structuredClone(entry.item));
           }
         }
-        this.publish({ preferences: immutable(saved) });
+        this.publish({ preferences: immutable(normalizeStatusFilters(saved)) });
       }
       confirmed();
     } };
@@ -288,6 +298,54 @@ export class NavigationStore {
       const preferences = await this.editingPreferences(expectedPreferencesRevision);
       if (!preferences || this.stopped || this.pending) return false;
       return await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, theme } }]);
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
+  saveTextScale(textScale: number, expectedPreferencesRevision: number): Promise<boolean> {
+    if (this.stopped) return Promise.resolve(false);
+    // Only the last unsubmitted size matters. A choice made during a write is
+    // applied to its resulting preferences, preserving every unrelated field.
+    this.textScaleTarget = { value: textScale,
+      expectedRevision: this.pending || this.textScaleFlight ? null : expectedPreferencesRevision };
+    return this.flushTextScale();
+  }
+  private flushTextScale(): Promise<boolean> {
+    if (this.textScaleFlight) return this.textScaleFlight;
+    const flight = Promise.resolve().then(() => this.saveQueuedTextScale());
+    this.textScaleFlight = flight;
+    const clear = () => { if (this.textScaleFlight === flight) this.textScaleFlight = null; };
+    void flight.then(clear, clear);
+    return flight;
+  }
+  private async saveQueuedTextScale(): Promise<boolean> {
+    try {
+      let saved = false;
+      while (this.textScaleTarget && !this.stopped) {
+        if (this.pending) {
+          this.textScaleTarget.expectedRevision = null;
+          const completion = this.getWritingCompletion();
+          // An uncertain operation still needs the owner's explicit reconciliation.
+          // Keep the size target for that completion, without replaying the write.
+          if (!completion) return false;
+          if (!await completion && this.pending) return false;
+          continue;
+        }
+        const target = this.textScaleTarget;
+        this.textScaleTarget = null;
+        const preferences = target.expectedRevision === null ? this.preferences() : await this.editingPreferences(target.expectedRevision);
+        if (this.stopped) return false;
+        if (!preferences) {
+          // A stale request's refresh can outlive a newer explicit size choice.
+          if (this.textScaleTarget) continue;
+          return false;
+        }
+        // Another preference action can be admitted while editingPreferences yields.
+        if (this.pending) {
+          this.textScaleTarget ??= { value: target.value, expectedRevision: null };
+          continue;
+        }
+        saved = await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, text_scale: target.value } }]);
+      }
+      return saved;
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   /** Saves the detail panel width or the Waiting column fold. */
@@ -399,7 +457,10 @@ export class NavigationStore {
     const operation: Promise<boolean> = Promise.resolve().then(() => this.completeMutation(pending, () => operation));
     this.activeMutation = operation;
     this.publish({ writing: true, pendingOperationId: pending.request.command.op_id, error: null });
-    const clear = () => { if (this.activeMutation === operation) this.activeMutation = null; };
+    const clear = () => {
+      if (this.activeMutation === operation) this.activeMutation = null;
+      if (this.textScaleTarget && !this.textScaleFlight && !this.pending && !this.stopped) void this.flushTextScale();
+    };
     void operation.then(clear, clear);
     return operation;
   }
@@ -449,6 +510,7 @@ export class NavigationStore {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.textScaleTarget = null;
     this.startupRoute = null;
     this.startupRoutes = false;
     ++this.epoch;

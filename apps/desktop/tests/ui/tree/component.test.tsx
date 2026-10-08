@@ -18,6 +18,7 @@ import { TreeView, type RowIntent, type TreeViewProps } from '../../../src/ui/tr
 import type { PendingSubmission } from '../../../src/ui/answer/useSubmit';
 import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
+import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
 
 const stores: NavigationStore[] = [];
@@ -40,18 +41,19 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   if (load) await store.refresh();
   const actions = new SessionActionControllers(service).forSession(store), drafts = new OwnerDraftStore(service);
   const calls: Recorded = { selected: [], hovered: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0 };
+  const openLink = vi.fn();
   const hover = (id: string | null) => { calls.hovered.push(id); };
   function Harness(extra: Partial<TreeViewProps>) {
     const [selected, setSelected] = useState<string | null>(null);
-    return <TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
+    return <LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
       detailOpen={false} railOpen={false} highlightedItems={none} highlightedMessages={none} summaries={[]} now={now} onHoverItem={hover}
       onSelected={result => { calls.selected.push(result); if (result.kind === 'item') setSelected(result.route.item_id); }}
       onDismissReveal={() => { calls.dismissed++; }} onResume={() => { calls.resumed++; }} onAct={(intent, target) => { calls.acts.push([intent, target]); }}
       onClearFilters={() => { calls.cleared++; }} onShowArchive={() => { calls.archive++; }}
-      onRemove={() => { calls.removed++; }} {...props} {...extra} />;
+      onRemove={() => { calls.removed++; }} {...props} {...extra} /></LinkOpener.Provider>;
   }
   const view = render(<Harness />);
-  return { transport, navigation, store, actions, drafts, calls, rerender: (extra: Partial<TreeViewProps>) => view.rerender(<Harness {...extra} />) };
+  return { transport, navigation, store, actions, drafts, calls, openLink, rerender: (extra: Partial<TreeViewProps>) => view.rerender(<Harness {...extra} />) };
 }
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 const topicRow = (name: string) => screen.getByRole('treeitem', { name });
@@ -163,15 +165,25 @@ describe('session tree rows', () => {
     const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
     const band = topicRow('Continued context');
     expect(within(band).getByRole('button', { name: 'Archive' })).toBeTruthy();
-    await act(async () => { fireEvent.click(within(band).getByRole('button', { name: 'Delete' })); });
+    await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Delete' })); });
     expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id }]);
-    await waitFor(() => expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Delete' })).toBeNull());
+    await waitFor(() => expect(within(topicRow('Continued context').parentElement!).queryByRole('button', { name: 'Delete' })).toBeNull());
     expect(transport.preferences.drafts.filter(draft => draft.target.item_id === null)).toHaveLength(0);
+  });
+  it('keeps topic delivery status sticky while its recovery controls remain in the topic flow', async () => {
+    await mount({ configure: queuedReply });
+    const band = topicRow('Continued context'), group = band.parentElement!;
+    expect(band.querySelector('.tree-topic-status')).not.toBeNull();
+    expect(band.querySelector('.stuck-note')).toBeNull();
+    const content = group.querySelector('.tree-topic-content')!;
+    expect(content.previousElementSibling).toBe(band);
+    expect(content.querySelector('.stuck-note')).not.toBeNull();
+    expect(group.contains(row('8'))).toBe(true);
   });
   it('edits a topic reply not sent yet: the queued reply is taken back first, then its text goes into the topic’s reply box', async () => {
     let id = '';
     const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
-    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Edit' })); });
+    await act(async () => { fireEvent.click(within(topicRow('Continued context').parentElement!).getByRole('button', { name: 'Edit' })); });
     await waitFor(() => expect((screen.getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe(text));
     expect(transport.preferences.drafts.find(draft => draft.target.item_id === null)).toMatchObject({ intent: 'topic_reply', text });
     expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id, purpose: 'edit' }]);
@@ -188,7 +200,7 @@ describe('session tree rows', () => {
     await act(async () => { await drafts.load(); });
     const started = drafts.beginTopic(session, topic)!;
     await act(async () => { await drafts.editSaved(started, { text: 'Something else' }); });
-    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Edit' })); });
+    await act(async () => { fireEvent.click(within(topicRow('Continued context').parentElement!).getByRole('button', { name: 'Edit' })); });
     expect((await screen.findByLabelText('Your earlier message') as HTMLTextAreaElement).value).toBe(text);
     expect(drafts.findTopic(route, topic)?.draft.text).toBe('Something else');
     expect(cancels(transport)).toHaveLength(0);
@@ -218,6 +230,86 @@ describe('session tree rows', () => {
 });
 
 describe('session tree filters', () => {
+  it('reads a saved full status set, including duplicates, as All', async () => {
+    const { transport } = await mount({ configure: value => {
+      viewOf(value).filters.statuses = ['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open', 'done'];
+    } });
+    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
+      expect(chip(label).getAttribute('aria-pressed')).toBe('false');
+    }
+    expect(ids()).toHaveLength(9);
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
+    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('All').getAttribute('aria-pressed')).toBe('false');
+    expect(ids()).toEqual(['1', '1.1', '4', '8']);
+  });
+  it('keeps a saved partial Closed group narrow when another chip is added', async () => {
+    const { transport } = await mount({ configure: value => { viewOf(value).filters.statuses = ['done']; } });
+    expect(chip('Closed').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('All').getAttribute('aria-pressed')).toBe('false');
+    expect(ids()).toEqual(['1']);
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'done']));
+    expect(ids()).toEqual(['1', '1.1', '4', '8']);
+  });
+  it('toggles multiple chips, keeps counts independent, and restores the saved combination', async () => {
+    const { transport, navigation, rerender } = await mount();
+    const labels = ['All', 'Waiting on me', 'Open', 'In progress', 'Closed'];
+    const counts = labels.map(label => chip(label).textContent);
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
+    // Status buttons remain ordinary keyboard-reachable buttons.
+    chip('In progress').focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
+    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('In progress').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('All').getAttribute('aria-pressed')).toBe('false');
+    expect(chip('Closed').getAttribute('aria-pressed')).toBe('false');
+    expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
+    expect(labels.map(label => chip(label).textContent)).toEqual(counts);
+    rerender({ query: 'receipt' });
+    expect(ids()).toEqual(['1', '1.1', '3']);
+    expect(chip('All').textContent).toContain('2');
+    expect(chip('Open').textContent).toContain('1');
+    expect(chip('In progress').textContent).toContain('1');
+    cleanup(); navigation.stop();
+    await mount({ transport });
+    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('In progress').getAttribute('aria-pressed')).toBe('true');
+    expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['in_progress']));
+    expect(ids()).toEqual(['3']);
+    fireEvent.click(chip('In progress'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
+    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    expect(ids()).toHaveLength(9);
+  });
+  it('collapses every selected status to All and clears a combination with All', async () => {
+    const { transport } = await mount();
+    for (const [label, expected] of [
+      ['Waiting on me', ['waiting_on_me']], ['Open', ['waiting_on_me', 'open']],
+      ['In progress', ['waiting_on_me', 'open', 'in_progress']], ['Closed', []],
+    ] as const) {
+      fireEvent.click(chip(label));
+      await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(expected));
+    }
+    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
+      expect(chip(label).getAttribute('aria-pressed')).toBe('false');
+    }
+    expect(ids()).toHaveLength(9);
+    fireEvent.click(chip('Closed'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['decided', 'done', 'dropped', 'replaced']));
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'decided', 'done', 'dropped', 'replaced']));
+    fireEvent.click(chip('All'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
+    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+  });
   it('writes the status chip and the topic, and counts follow the search and topic', async () => {
     const { transport, rerender } = await mount();
     fireEvent.click(chip('Open'));
@@ -250,9 +342,15 @@ describe('session tree filters', () => {
     expect(screen.getByText('Nothing matches “zzz”.')).toBeTruthy(); expect(screen.queryByRole('tree')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Clear search and filters' })); expect(calls.cleared).toBe(1);
   });
-  it('says so when a status filter matches nothing', async () => {
-    await mount({ configure: transport => { viewOf(transport).filters.statuses = ['waiting_on_me']; transport.sessions.get(route.session_id)!.items['2']!.status = 'open'; } });
+  it('says so when a saved status combination matches nothing', async () => {
+    await mount({ configure: transport => {
+      viewOf(transport).filters.statuses = ['waiting_on_me', 'in_progress'];
+      const session = transport.sessions.get(route.session_id)!;
+      session.items['2']!.status = 'open'; session.items['3']!.status = 'open';
+    } });
     expect(screen.getByText('No items match these filters.')).toBeTruthy();
+    expect(chip('Waiting on me').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('In progress').getAttribute('aria-pressed')).toBe('true');
   });
   it('shows a reveal outside the filters, keeps its ancestry open and resumes the filtered view', async () => {
     const { transport, store, calls, rerender } = await mount({ configure: transport => {
@@ -338,8 +436,8 @@ describe('session tree lifecycle', () => {
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
     const band = topicRow('Continued context');
-    expect(within(band).getByText('Everything here is closed.')).toBeTruthy();
-    await act(async () => { fireEvent.click(within(band).getByRole('button', { name: 'Archive topic' })); });
+    expect(within(band.parentElement!).getByText('Everything here is closed.')).toBeTruthy();
+    await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Archive topic' })); });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(await screen.findByText('Archived “Continued context”.')).toBeTruthy();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
@@ -472,6 +570,26 @@ describe('stopped deliveries in the tree', () => {
 
 describe('Reply to topic', () => {
   const box = () => document.querySelector<HTMLElement>('[data-owner-input^="topic:"]');
+  it('keeps the reply composer and closed-topic prompt outside the sticky header in the same topic section', async () => {
+    await mount({ configure: transport => {
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    const band = topicRow('Delivery decisions'), group = band.parentElement!;
+    fireEvent.click(within(band).getByRole('button', { name: 'Reply to topic' }));
+    await waitFor(() => expect(box()).not.toBeNull());
+    expect(band.querySelector('.tree-prompt')).toBeNull();
+    expect(band.contains(box())).toBe(false);
+    const content = group.querySelector('.tree-topic-content')!;
+    expect(content.previousElementSibling).toBe(band);
+    expect(content.contains(box())).toBe(true);
+    expect(content.querySelector('.tree-prompt')).not.toBeNull();
+    expect(group.contains(row('1'))).toBe(true);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    expect(css).toMatch(/\.tree-topic-group\s*\{[^}]*position: relative/s);
+    expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0/s);
+    expect(css).toMatch(/\.tree-topic-status > span\s*\{[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis/s);
+    expect(css).not.toMatch(/\.tree-topic-content\s*\{[^}]*position: sticky/s);
+  });
   it('opens a box on the topic band and sends a topic reply with no item', async () => {
     const { transport, drafts } = await mount();
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
@@ -647,16 +765,24 @@ describe('session tree reading position', () => {
     await mount({ configure: savedAtTop, props: { selectedId: '8', detailOpen: true } });
     expect(top('8')).toBeGreaterThanOrEqual(0); expect(top('8') + 40).toBeLessThanOrEqual(400);
   });
-  it('brings the selected row back into view when the detail panel opens', async () => {
+  it('reveals an offscreen selected item with the least movement when detail opens', async () => {
     layout();
     const { rerender } = await mount({ configure: savedAtTop, props: { selectedId: '8' } });
     expect(top('8')).toBe(800);
     rerender({ detailOpen: true });
-    expect(top('8')).toBeGreaterThanOrEqual(0); expect(top('8') + 40).toBeLessThanOrEqual(400);
-    // A row already in view stays put.
+    expect(top('8')).toBe(360);
     const before = top('8');
     rerender({ detailOpen: true, railOpen: true });
     expect(top('8')).toBe(before);
+  });
+  it('leaves a visible selection in place when detail and messages open', async () => {
+    layout();
+    const { rerender } = await mount({ configure: savedAtTop, props: { selectedId: '3' } });
+    const before = top('3');
+    rerender({ detailOpen: true });
+    expect(top('3')).toBe(before);
+    rerender({ detailOpen: true, railOpen: true });
+    expect(top('3')).toBe(before);
   });
 });
 
@@ -669,15 +795,15 @@ describe('item details in the tree', () => {
   const longOutcome = (transport: AppTransport) => { transport.sessions.get(route.session_id)!.items['1']!.outcome = long; };
   const more = (id: string) => within(row(id)).queryByRole('button', { name: /^Show (more|less)$/ });
 
-  it('folds a long preview to six lines with Show more and Show less, and none for short text', async () => {
+  it('folds a long preview to two lines with Show more and Show less, and none for short text', async () => {
     measure();
     const { calls } = await mount({ configure: longOutcome });
     const preview = row('1').querySelector<HTMLElement>('.tree-preview')!;
-    expect(preview.style.getPropertyValue('--tree-clamp')).toBe('6');
+    expect(preview.style.getPropertyValue('--tree-clamp')).toBe('2');
     expect(preview.hasAttribute('data-open')).toBe(false);
-    // Short details have no control; the title is never folded.
+    // Short details and titles have no control.
     expect(more('5')).toBeNull(); expect(more('3')).toBeNull();
-    expect(row('1').querySelector('.tree-question .tree-clamp')).toBeNull();
+    expect(row('1').querySelector('.tree-question')!.classList.contains('tree-clamp')).toBe(true);
     const button = more('1')!;
     expect(button.textContent).toBe('Show more'); expect(button.tabIndex).toBe(0); expect(button.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(button);
@@ -693,6 +819,68 @@ describe('item details in the tree', () => {
     fireEvent.click(more('1')!);
     expect(more('1')!.textContent).toBe('Show more');
     expect(row('1').querySelector('.tree-preview')!.hasAttribute('data-open')).toBe(false);
+  });
+
+  it('expands a long title even when the item has no excerpt and keeps badges outside both clamps', async () => {
+    measure();
+    await mount({ configure: transport => {
+      const item = transport.sessions.get(route.session_id)!.items['4']!;
+      item.question = 'A long title that needs more room. '.repeat(15);
+      item.outcome = null;
+    } });
+    expect(more('4')?.textContent).toBe('Show more');
+    expect(row('4').querySelector('.tree-end .tree-clamp')).toBeNull();
+    expect(row('4').querySelector('.tree-end')).not.toBeNull();
+    fireEvent.click(more('4')!);
+    expect(row('4').hasAttribute('data-open')).toBe(true);
+    expect(more('4')?.textContent).toBe('Show less');
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    expect(css).toMatch(/-webkit-line-clamp: var\(--tree-clamp, 2\)/);
+    expect(css).toMatch(/\.tree-item\[data-open\] \.tree-clamp\s*\{[^}]*overflow: visible/s);
+  });
+
+  it('formats compact excerpts and opens external and item links without selecting their containing row', async () => {
+    const { calls, openLink } = await mount({ configure: transport => {
+      transport.sessions.get(route.session_id)!.items['1']!.outcome = '**Bold** and `code`, [website](https://example.com) and [next item](item:4).\n\n| Name | Value |\n| --- | --- |\n| Result | **Ready** |';
+    } });
+    const excerpt = row('1').querySelector('.tree-outcome')!;
+    expect(excerpt.querySelector('strong')?.textContent).toBe('Bold');
+    expect(excerpt.querySelector('code')?.textContent).toBe('code');
+    expect(excerpt.querySelector('table')).toBeNull();
+    expect(excerpt.textContent).not.toMatch(/\||---|\*\*|\]\(/);
+    fireEvent.click(within(row('1')).getByRole('link', { name: 'website' }));
+    expect(openLink).toHaveBeenCalledWith('https://example.com');
+    expect(calls.selected).toHaveLength(0);
+    expect(more('1')?.textContent).toBe('Show more');
+    fireEvent.click(within(row('1')).getByRole('link', { name: 'next item' }));
+    await waitFor(() => expect(calls.selected).toHaveLength(1));
+    expect(calls.selected[0]).toMatchObject({ kind: 'item', route: { item_id: '4' } });
+    expect(row('1').getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(more('1')!);
+    expect(within(row('1')).getByRole('table')).toBeTruthy();
+    expect(within(row('1')).getByRole('cell', { name: 'Ready' }).querySelector('strong')).toBeTruthy();
+    fireEvent.click(within(row('1')).getByRole('link', { name: 'website' }));
+    expect(openLink).toHaveBeenCalledTimes(2);
+    expect(calls.selected).toHaveLength(1);
+    fireEvent.click(more('1')!);
+  });
+
+  it('groups each topic with its items and separates roots more than children with continuous guides', async () => {
+    await mount();
+    const groups = document.querySelectorAll('.tree-topic-group');
+    expect(groups).toHaveLength(2);
+    expect(groups[0]!.firstElementChild).toBe(topicRow('Delivery decisions'));
+    expect(groups[0]!.contains(row('7'))).toBe(true);
+    expect(groups[0]!.contains(row('8'))).toBe(false);
+    expect(groups[1]!.lastElementChild).toBe(row('8'));
+    expect(row('1').classList.contains('tree-item-root')).toBe(true);
+    expect(row('1.1').classList.contains('tree-item-child')).toBe(true);
+    expect(row('1.1').querySelector('.tree-elbow')).not.toBeNull();
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0;[^}]*background: var\(--a-side\)/s);
+    expect(css).toMatch(/\.tree-item\s*\{[^}]*padding-top: 12px;[^}]*padding-bottom: 14px;[^}]*border-bottom: 1px solid var\(--color-divider\)/s);
+    expect(css).toMatch(/\.tree-item-root\s*\{[^}]*padding-top: 20px/s);
+    expect(css).toMatch(/scroll-padding-top: var\(--tree-header-height, 0\)/);
   });
 
   it('keeps an item’s details while a message to the agent is on its way', async () => {
@@ -727,6 +915,31 @@ describe('item details in the tree', () => {
     expect(rules.length).toBeGreaterThan(0);
     for (const [, , declarations] of rules) expect(declarations).not.toMatch(/display:\s*none|width:|position:\s*absolute/);
     expect(rules.some(([, , declarations]) => /visibility:\s*hidden/.test(declarations!) && /opacity:\s*0/.test(declarations!))).toBe(true);
+  });
+  it('keeps the space of a topic band’s actions so the topic name never rewraps on hover or focus', async () => {
+    await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!;
+      for (const item of Object.values(session.items)) if (item) item.status = 'done';
+    } });
+    const band = topicRow('Delivery decisions'), before = band.innerHTML;
+    expect(band.querySelector('.tree-topic-actions')).not.toBeNull();
+    fireEvent.mouseEnter(band); band.focus();
+    expect(band.innerHTML).toBe(before);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /\.tree-topic-actions\b/.test(selector!));
+    const hidden = rules.filter(([, , declarations]) => /visibility:\s*hidden/.test(declarations!));
+    const shown = rules.filter(([, , declarations]) => /visibility:\s*visible/.test(declarations!));
+    // Hidden by visibility and opacity only: no rule takes the actions out of the flow, at rest or on hover or focus.
+    expect(hidden).toHaveLength(1); expect(hidden[0]![2]).toMatch(/opacity:\s*0/);
+    expect(shown).toHaveLength(1); expect(shown[0]![1]).toMatch(/:hover[^,]*\.tree-topic-actions/); expect(shown[0]![1]).toMatch(/:focus-within/);
+    for (const [, , declarations] of rules) expect(declarations).not.toMatch(/display:\s*none|width:|position:\s*absolute/);
+    // The buttons stay out of the tab order while hidden, like the item shortcuts.
+    for (const button of band.querySelectorAll('.tree-topic-actions button')) expect((button as HTMLElement).tabIndex).toBe(-1);
+    // Icon-only like the item shortcuts, so the reserved room is small: each has its plain name and a distinct icon.
+    const buttons = [...band.querySelectorAll<HTMLElement>('.tree-topic-actions button')];
+    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Reply to topic', 'Continue here', 'Archive', 'Remove']);
+    for (const button of buttons) { expect(button.textContent).toBe(''); expect(button.title).not.toBe(''); }
+    expect(new Set(buttons.map(button => button.querySelector('i')!.className)).size).toBe(buttons.length);
   });
 });
 
@@ -763,16 +976,124 @@ describe('scrolling the tree', () => {
     await waitFor(() => expect(view.calls.selected).toHaveLength(2));
     view.rerender({ reveal: view.calls.selected[1], selectedId: '4', detailOpen: true });
     expect(scroller().scrollTop).toBe(150);
+    fireEvent.click(row('8'));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(3));
+    view.rerender({ reveal: view.calls.selected[2], selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(150);
   });
 
-  it('reveals an item opened from elsewhere only when it is not in view', async () => {
+  it.each(['fold topic', 'collapse item', 'status chip', 'topic filter', 'Resume filtered view'])(
+  'never scrolls when %s dismisses the active tree reveal', async path => {
     const view = await opened();
+    fireEvent.click(row('8'));
+    await waitFor(() => expect(viewOf(view.transport).selected_item_id).toBe('8'));
+    const reveal = view.calls.selected[0];
+    view.rerender({ reveal, selectedId: '8', detailOpen: true });
+    if (path === 'Resume filtered view') view.rerender({ reveal, selectedId: '8', detailOpen: true, query: 'missing' });
+    const readingPosition = path === 'collapse item' ? 0 : 150;
+    scroller().scrollTop = readingPosition;
+    fireEvent.scroll(scroller());
+    switch (path) {
+      case 'fold topic':
+        fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
+        break;
+      case 'collapse item':
+        fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
+        break;
+      case 'status chip':
+        fireEvent.click(chip('All'));
+        break;
+      case 'topic filter':
+        fireEvent.change(screen.getByRole('combobox', { name: 'Topic' }), {
+          target: { value: view.transport.sessions.get(route.session_id)!.items['8']!.topic_id },
+        });
+        break;
+      case 'Resume filtered view':
+        fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
+        break;
+    }
+    await waitFor(() => expect(path === 'Resume filtered view' ? view.calls.resumed : view.calls.dismissed).toBe(1));
+    // Dismissal can reach the workspace before a queued preference write changes selection.
+    view.rerender({ reveal: null, selectedId: '8', detailOpen: true, query: path === 'Resume filtered view' ? 'missing' : '' });
+    expect(scroller().scrollTop).toBe(readingPosition);
+    await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(false));
+    expect(scroller().scrollTop).toBe(readingPosition);
+  });
+
+  it('reveals an external offscreen selection with the least scroll, leaving a visible selection in place', async () => {
+    const view = await opened();
+    row('3').focus(); fireEvent.keyDown(row('3'), { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(row('4'));
     view.rerender({ reveal: link(view, '4'), selectedId: '4' });
     expect(scroller().scrollTop).toBe(150);
-    view.rerender({ reveal: link(view, '8'), selectedId: '8' });
-    expect(scroller().scrollTop).not.toBe(150);
+    view.rerender({ reveal: link(view, '8'), selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
+  });
+
+  it('reveals history navigation with the least scroll, leaving an onscreen history target in place', async () => {
+    const view = await opened();
+    row('3').focus(); fireEvent.keyDown(row('3'), { key: 'ArrowDown' });
+    const onscreen = link(view, '4');
+    view.rerender({ reveal: onscreen, historyReveal: onscreen, selectedId: '4' });
+    expect(scroller().scrollTop).toBe(150);
+    const offscreen = link(view, '8');
+    view.rerender({ reveal: offscreen, historyReveal: offscreen, selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
     expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
     expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+  });
+
+  it.each([['4', 150], ['8', 440]] as const)('reveals preview link target %s with nearest scroll only when offscreen', async (target, expectedScroll) => {
+    const view = await opened({ configure: transport => {
+      const item = transport.sessions.get(route.session_id)!.items['4']!;
+      item.status = 'done'; item.outcome = `[Next item](item:${target})`;
+    } });
+    fireEvent.click(within(row('4')).getByRole('link', { name: 'Next item' }));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    view.rerender({ reveal: view.calls.selected[0], selectedId: target, detailOpen: true });
+    expect(scroller().scrollTop).toBe(expectedScroll);
+  });
+  it('reveals an offscreen replacement link target with nearest scroll', async () => {
+    const view = await opened({ configure: transport => {
+      const item = transport.sessions.get(route.session_id)!.items['4']!;
+      item.status = 'replaced'; item.replaced_by = '8';
+    } });
+    fireEvent.click(within(row('4')).getByRole('button', { name: view.transport.sessions.get(route.session_id)!.items['8']!.question }));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    view.rerender({ reveal: view.calls.selected[0], selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
+  });
+  it('keeps the tree still when a row action echoes a new detail selection from the workspace', async () => {
+    let onReveal: ((result: RevealedItem) => void) | undefined;
+    const act = vi.fn((_intent: RowIntent, _target: ItemRoute, callback?: (result: RevealedItem) => void) => { onReveal = callback; });
+    const view = await opened({ props: { onAct: act } });
+    fireEvent.click(within(row('8')).getByRole('button', { name: 'Bring it up (b)' }));
+    expect(act.mock.calls[0]?.slice(0, 2)).toMatchObject(['bring', { item_id: '8' }]);
+    const result = link(view, '8');
+    onReveal!(result);
+    view.rerender({ reveal: result, selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(150);
+    // The callback suppresses only that exact result; an external reopen still reveals it.
+    view.rerender({ reveal: link(view, '8'), selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
+  });
+  it('reveals an external item after a tree action fails or is cancelled before revealing it', async () => {
+    const view = await opened();
+    fireEvent.click(within(row('8')).getByRole('button', { name: 'Bring it up (b)' }));
+    expect(view.calls.acts).toMatchObject([['bring', { item_id: '8' }]]);
+    // A failed or cancelled operation never calls the exact-result callback.
+    view.rerender({ reveal: link(view, '8'), selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
+  });
+
+  it('reveals a selection without a link when the side panel opens after the owner scrolls away', async () => {
+    const view = await opened({ props: { selectedId: '8' } });
+    view.rerender({ detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
+    scroller().scrollTop = 150;
+    fireEvent.scroll(scroller());
+    view.rerender({ detailOpen: true, railOpen: true });
+    expect(scroller().scrollTop).toBe(440);
   });
 
   it('scrolls on the keyboard only when the row is off-screen, and only as far as needed', async () => {
@@ -785,6 +1106,53 @@ describe('scrolling the tree', () => {
     // The last row's bottom (840) lands 8 px above the tree's bottom: 840 + 8 - 400.
     expect(scroller().scrollTop).toBe(448);
     expect(row('8').getBoundingClientRect().top).toBe(352);
+  });
+
+  it('reveals a row hidden by its topic header using the least movement and restores below that header', async () => {
+    layout();
+    const rect = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      if (this.matches('.tree-topic-content')) return new DOMRect(0, 60, 300, 360);
+      return rect.call(this);
+    });
+    const view = await mount();
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    await waitFor(() => expect(document.querySelector('.tree-topic-reply')).not.toBeNull());
+    scroller().scrollTop = 190;
+    const target = link(view, '2'); // top 10: on screen, but behind the 60 px band.
+    view.rerender({ reveal: target, historyReveal: target, selectedId: '2' });
+    expect(row('2').getBoundingClientRect().top).toBe(60);
+    expect(scroller().scrollTop).toBe(140);
+    fireEvent.scroll(scroller());
+    expect(scroller().style.getPropertyValue('--tree-header-height')).toBe('60px');
+    const outside = document.createElement('button'); document.body.append(outside);
+    row('2').focus(); outside.focus();
+    await waitFor(() => expect(viewOf(view.transport).scroll).toEqual({ item_id: '2', offset: 0 }));
+    cleanup();
+    await mount({ transport: view.transport });
+    expect(row('2').getBoundingClientRect().top).toBe(60);
+    outside.remove();
+  });
+
+  it.each([12, -40])('restores the same reading position when a header is at %s px during a topic transition', async headerTop => {
+    layout();
+    const rect = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.tree-topic')) return new DOMRect(0, headerTop, 300, 60);
+      return rect.call(this);
+    });
+    const view = await mount();
+    scroller().scrollTop = 150;
+    fireEvent.scroll(scroller());
+    const before = row('2').getBoundingClientRect().top;
+    const outside = document.createElement('button'); document.body.append(outside);
+    row('2').focus(); outside.focus();
+    await waitFor(() => expect(viewOf(view.transport).scroll).toEqual({ item_id: '2', offset: before - 60 }));
+    cleanup();
+    await mount({ transport: view.transport });
+    expect(row('2').getBoundingClientRect().top).toBe(before);
+    outside.remove();
   });
 
   // The first row grows by `grow` px (a live edit made it longer); every row below it moves down with it.
@@ -844,6 +1212,60 @@ describe('scrolling the tree', () => {
         act(() => { observers.forEach(callback => callback()); });
         expect(row(reading).getBoundingClientRect().top).toBe(offset);
       } finally { vi.unstubAllGlobals(); }
+    });
+  });
+
+  // The tree opens with an anchor (the saved reading position: row 4, 20 px below the top). A row above the
+  // viewport is then folded away, which moves every row under it up by 100 px, as an unfold moves them down.
+  describe('with an opening anchor', () => {
+    const observers: (() => void)[] = [];
+    const readingAt4 = (transport: AppTransport) => {
+      transport.preferences.sessions = transport.preferences.sessions.map(view =>
+        view.session.session_id === route.session_id ? { ...view, scroll: { item_id: '4', offset: 20 } } : view);
+    };
+    const top = (id: string) => row(id).getBoundingClientRect().top;
+    const fold = (id: string) => within(row(id)).getByRole('button', { name: 'Expand or collapse' });
+    const opening = async () => {
+      observers.length = 0;
+      vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} });
+      layout();
+      const view = await mount({ configure: readingAt4 });
+      expect(top('4')).toBe(20);
+      return view;
+    };
+    const visible = () => ids().filter(id => { const rectangle = row(id!).getBoundingClientRect(); return rectangle.bottom > 0 && rectangle.top < 400; });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('keeps the visible rows still when a row above the viewport opens or closes while the view is still settling', async () => {
+      await opening();
+      const before = visible(), at = Object.fromEntries(before.map(id => [id, top(id!)]));
+      expect(before).toContain('4');
+      fireEvent.click(fold('1'));
+      await waitFor(() => expect(ids()).not.toContain('1.1'));
+      act(() => { observers.forEach(callback => callback()); });
+      expect(top('4')).toBe(20);
+      // Every row that was in view and is still there sits exactly where it was.
+      for (const id of before.filter(id => ids().includes(id))) if (Number(id) >= 4) expect(top(id!)).toBe(at[id!]);
+      // Opening it again moves everything down; the anchored row still does not move.
+      fireEvent.click(fold('1'));
+      await waitFor(() => expect(ids()).toContain('1.1'));
+      act(() => { observers.forEach(callback => callback()); });
+      expect(top('4')).toBe(20);
+    });
+
+    it('keeps the clicked row in place when a pointerdown hands the view over to the owner', async () => {
+      await opening();
+      const clicked = top('4');
+      // The press settles the view: from here the first visible row holds its place on every render, no observer needed.
+      fireEvent.pointerDown(fold('1'));
+      fireEvent.click(fold('1'));
+      await waitFor(() => expect(ids()).not.toContain('1.1'));
+      expect(top('4')).toBe(clicked);
+      // The row pressed is the one that was under the pointer, and it stays there through the next change too.
+      fireEvent.pointerDown(row('4'));
+      fireEvent.click(fold('1'));
+      await waitFor(() => expect(ids()).toContain('1.1'));
+      expect(top('4')).toBe(clicked);
     });
   });
 });

@@ -353,7 +353,8 @@
       "enum": [
         "pr",
         "file",
-        "doc"
+        "doc",
+        "item"
       ]
     },
     "NonnegativeSafeInteger": {

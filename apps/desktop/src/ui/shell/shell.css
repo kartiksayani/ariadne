@@ -10,7 +10,7 @@
   background: var(--a-bg);
   color: var(--color-text);
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   line-height: 1.5;
 }
 
@@ -45,7 +45,7 @@
 }
 
 .shell-brand > span {
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 500;
   letter-spacing: -0.01em;
 }
@@ -55,7 +55,7 @@
   align-items: center;
   gap: 12px;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 64%, transparent);
 }
 
@@ -103,7 +103,7 @@
 .shell-search > i {
   position: absolute;
   left: 10px;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   pointer-events: none;
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
@@ -113,7 +113,7 @@
   height: 32px;
   padding-left: 30px;
   padding-right: 30px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .shell-search-key {
@@ -125,7 +125,7 @@
   height: 18px;
   border-radius: 4px;
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   pointer-events: none;
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
   box-shadow: inset 0 0 0 1px var(--color-divider);
@@ -149,7 +149,7 @@
   border: 0;
   border-radius: 6px;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   font-weight: 500;
   cursor: pointer;
   background: transparent;
@@ -162,7 +162,7 @@
 }
 
 .shell-view > i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .shell-icon {
@@ -171,7 +171,32 @@
 }
 
 .shell-icon > i {
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
+}
+
+/* Text choices sit above the chrome without changing its height. */
+.shell-text-size {
+  position: relative;
+}
+
+.shell-text-size-menu {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  min-width: 140px;
+  border-radius: var(--radius-md);
+  background: var(--a-card);
+  box-shadow: var(--a-pop);
+}
+
+.shell-text-size-menu .shell-view {
+  justify-content: flex-start;
+  white-space: nowrap;
 }
 
 /* — tab bar — */
@@ -207,7 +232,7 @@
   border: 0;
   background: transparent;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   white-space: nowrap;
   cursor: pointer;
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
@@ -253,7 +278,7 @@
 }
 
 .shell-tab-close > i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .shell-tab-bar {
@@ -334,14 +359,20 @@
   min-width: 0;
 }
 
-.shell-detail-head > .shell-detail-action {
+.shell-detail-history {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.shell-detail-head .shell-detail-action {
   width: 28px;
   height: 28px;
   color: color-mix(in srgb, var(--color-text) 65%, transparent);
 }
 
-.shell-detail-head > .shell-detail-action > i {
-  font-size: 15px;
+.shell-detail-head .shell-detail-action > i {
+  font-size: calc(15px * var(--text-scale));
 }
 
 /* Long unbroken tokens (paths, URLs, hashes) wrap instead of scrolling the panel sideways. */
@@ -365,7 +396,7 @@
   padding: 0 14px;
   overflow: hidden;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   border-top: 1px solid var(--color-divider);
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }

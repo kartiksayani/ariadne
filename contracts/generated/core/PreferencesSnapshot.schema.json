@@ -79,6 +79,17 @@
         "selected_navigation": {
           "$ref": "#/$defs/NavigationSelection"
         },
+        "text_scale": {
+          "type": "integer",
+          "enum": [
+            70,
+            80,
+            90,
+            100,
+            110,
+            120
+          ]
+        },
         "theme": {
           "$ref": "#/$defs/Theme"
         },

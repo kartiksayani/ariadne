@@ -6,20 +6,74 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { choose, observeTreeClickReadiness, publishTreeRequest, treeBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { assertStatusFilters, choose, observeTreeAnchor, observeTreeClickReadiness, publishTreeRequest, treeBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
 
-for (const target of ['filter', 'session']) test(`${target} click readiness requires the same enabled hit target and stable nested geometry without clicking`, () => {
+for (const scenario of ['multi-select', 'exclusive-selection', 'incorrect-saved-set']) {
+  test(`native status steps verify combined rows, deselection and saved sets: ${scenario}`, async () => {
+    const operations = Array.from({ length: 20 }, (_, index) => treeBatch('topic', index + 1)).flat();
+    const ids = operations.map(operation => operation.ref.replace('native_root_', '').replace('native_child_', '').replace('_', '.'));
+    const closed = ['decided', 'done', 'dropped', 'replaced'], selected = new Set(), calls = [];
+    let statuses = [];
+    const shown = () => ids.filter((id, index) => selected.size !== 1 || (selected.has('closed') ? operations[index].status === 'done'
+      : operations[index].status === 'open' || operations[index].parent === null));
+    const document = { querySelectorAll: () => (selected.size ? ['open', 'closed'].filter(chip => selected.has(chip)) : ['all']).map(chip => ({ dataset: { chip } })) };
+    const context = {
+      assert: { ...assert, deepEqual: (actual, expected, message) => assert.deepEqual(globalThis.structuredClone(actual), globalThis.structuredClone(expected), message) },
+      browser: {
+        $: async selector => ({ getText: async () => selector.includes('"all"') ? '2000' : selector.includes('"open"') ? '1320' : '680' }),
+        execute: async callback => globalThis.structuredClone(runInNewContext(`(${callback.toString()})()`, { document })),
+      },
+      choose: async (chip, pressed) => {
+        calls.push([chip, pressed]);
+        if (chip === 'all' || scenario === 'exclusive-selection') selected.clear();
+        if (chip !== 'all') { if (selected.has(chip)) selected.delete(chip); else selected.add(chip); }
+        assert.equal(chip === 'all' ? selected.size === 0 : selected.has(chip), pressed);
+        statuses = [...(selected.has('open') ? ['open'] : []), ...(selected.has('closed') ? closed : [])];
+        if (scenario === 'incorrect-saved-set' && selected.size === 2) statuses = ['open', 'done'];
+      },
+      wait: async (condition, message) => assert.ok(await condition(), message), visibleIds: async () => shown(),
+      preferences: async () => ({ view: { filters: { statuses } } }),
+    };
+    const action = runInNewContext(`(${assertStatusFilters.toString()})(null, ids)`, { ...context, ids });
+    if (scenario === 'exclusive-selection') await assert.rejects(action, /Open and Closed together/);
+    else if (scenario === 'incorrect-saved-set') await assert.rejects(action, /deep-equal/);
+    else {
+      await action;
+      assert.deepEqual(calls, [['open', true], ['closed', true], ['open', false], ['all', true]]);
+      assert.deepEqual(statuses, []); assert.deepEqual(shown(), ids);
+    }
+  });
+}
+
+for (const scenario of ['sticky', 'pushed', 'not-stuck']) {
+  test(`native anchor observes the reading edge and saved topic-relative offset: ${scenario}`, () => {
+    const top = 100, headerRect = scenario === 'sticky' ? { top, bottom: 140, height: 40 }
+      : scenario === 'pushed' ? { top: 80, bottom: 120, height: 40 } : { top: 200, bottom: 240, height: 40 };
+    const header = { getBoundingClientRect: () => headerRect };
+    const row = (id, rowTop, bottom) => ({ dataset: { itemId: id }, getBoundingClientRect: () => ({ top: rowTop, bottom }),
+      closest: selector => { assert.equal(selector, '.tree-topic-group'); return { querySelector: () => header }; } });
+    const rows = [row('hidden', 80, 100), row('under-band', 100, 130), row('visible', 130, 180)];
+    const tree = { scrollTop: 500, getBoundingClientRect: () => ({ top }), querySelectorAll: selector => selector === '.tree-topic' ? [header] : rows };
+    const actual = runInNewContext(`(${observeTreeAnchor.toString()})()`, { document: { querySelector: () => tree } });
+    assert.deepEqual(globalThis.structuredClone(actual), scenario === 'sticky' ? { id: 'visible', offset: -10, scrollTop: 500 }
+      : { id: 'under-band', offset: -40, scrollTop: 500 });
+  });
+}
+
+for (const target of ['filter', 'session', 'row']) test(`${target} click readiness requires the same enabled hit target and stable nested geometry without clicking`, () => {
   const frames = new Map(), listeners = new Map(), scrolls = [];
   let nextFrame = 0, rect = { top: 200, bottom: 220, left: 400, right: 440, width: 40, height: 20 };
   const parent = { scrollLeft: 0, scrollTop: 0, parentElement: null };
-  const button = { textContent: 'Me', disabled: false, isConnected: true, parentElement: parent, outerHTML: '<button>Me</button>',
+  let softDisabled = false;
+  const selector = target === 'filter' ? null : target === 'session' ? '[data-session-id="fixture"]' : '.tree-rows [data-item-id="fixture"]';
+  const button = { textContent: 'Me', disabled: target === 'row' ? undefined : false, isConnected: true, parentElement: parent, outerHTML: '<button>Me</button>',
     scrollIntoView: options => { scrolls.push(options); if (rect.top > 700) rect = { ...rect, top: 200, bottom: 220 }; }, getBoundingClientRect: () => ({ ...rect }),
-    getAttribute: () => 'false', contains: value => value === button };
+    getAttribute: name => name === 'aria-disabled' ? String(softDisabled) : 'false', contains: value => value === button };
   let named = button, hit = button;
   const document = {
     visibilityState: 'visible', hidden: false, hasFocus: () => true,
-    querySelector: selector => {
-      assert.equal(selector, target === 'filter' ? '[aria-label="Item owner"]' : '[data-session-id="fixture"]');
+    querySelector: value => {
+      assert.equal(value, selector ?? '[aria-label="Item owner"]');
       return target === 'filter' ? { querySelectorAll: () => [named] } : named;
     },
     elementFromPoint: () => hit,
@@ -31,7 +85,7 @@ for (const target of ['filter', 'session']) test(`${target} click readiness requ
   // Exercise the same self-contained callback WebDriver serializes; this proves
   // readiness admission only, not native rendering or OS input acceptance.
   runInNewContext(`(${observeTreeClickReadiness.toString()})(button, 'Item owner', 'Me', true, selector)`,
-    { window, document, button, selector: target === 'session' ? '[data-session-id="fixture"]' : null });
+    { window, document, button, selector });
   const state = window.__ariadneTreeFilterAction;
   const status = () => runInNewContext(`(${treeClickReadinessStatus.toString()})(true)`, { window, document });
   assert.equal(state.readiness.callbacks, 0); assert.equal(state.readiness.callbackError, null);
@@ -44,12 +98,13 @@ for (const target of ['filter', 'session']) test(`${target} click readiness requ
   frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
   for (const change of [
     () => { button.disabled = true; },
+    () => { softDisabled = true; },
     () => { button.isConnected = false; },
     () => { named = { ...button }; },
     () => { hit = parent; },
   ]) {
     change(); frame(); assert.equal(state.readiness.ready, false); assert.equal(state.readiness.frames, 0);
-    button.disabled = false; button.isConnected = true; named = button; hit = button;
+    button.disabled = target === 'row' ? undefined : false; softDisabled = false; button.isConnected = true; named = button; hit = button;
     frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
   }
   assert.equal(scrolls.length, 1); assert.equal(scrolls[0].behavior, 'instant');
@@ -88,17 +143,18 @@ for (const target of ['filter', 'session']) test(`${target} click readiness requ
   window.__ariadneTreeFilterCleanup(); assert.equal(frames.size, 0); assert.equal(listeners.size, 0);
 });
 
-for (const scenario of ['focused', 'unfocused', 'hidden', 'activation_error', 'focus_timeout', 'readiness_error']) {
-  test(`untimed filter choice prepares owned focus once and preserves one click: ${scenario}`, async () => {
+for (const expectedPressed of [true, false]) for (const scenario of ['focused', 'unfocused', 'hidden', 'activation_error', 'focus_timeout', 'readiness_error']) {
+  test(`untimed filter ${expectedPressed ? 'selection' : 'deselection'} prepares owned focus once and preserves one click: ${scenario}`, async () => {
     const calls = [], environment = { ARIADNE_E2E_ROOT: '/private/fixture', ARIADNE_E2E_BINARY: '/private/fixture/App', ARIADNE_E2E_NONCE: 'owned' };
     const document = { visibilityState: scenario === 'hidden' ? 'hidden' : 'visible', hidden: scenario === 'hidden', hasFocus: () => scenario === 'focused' || scenario === 'readiness_error' };
     const window = { __ariadneTreeFilterCleanup: () => calls.push('cleanup') };
-    const button = { waitForClickable: async () => { calls.push('clickable'); }, click: async () => { calls.push('click'); },
-      getAttribute: async () => 'true', isEnabled: async () => true };
+    let pressed = !expectedPressed;
+    const button = { waitForClickable: async () => { calls.push('clickable'); }, click: async () => { calls.push('click'); pressed = !pressed; },
+      getAttribute: async () => String(pressed), isEnabled: async () => true };
     // Run the actual orchestration with observed browser/OS boundaries; this
     // checks input ordering and rejection, not real macOS activation or rendering.
     const context = {
-      process: { env: environment },
+      process: { env: environment }, expectedPressed,
       browser: {
         $: () => ({ $: async () => button }),
         execute: async callback => {
@@ -118,7 +174,7 @@ for (const scenario of ['focused', 'unfocused', 'hidden', 'activation_error', 'f
         if (scenario === 'readiness_error') throw new Error('Native readiness callback failed');
       },
     };
-    const action = runInNewContext(`(${choose.toString()})('open', true)`, context);
+    const action = runInNewContext(`(${choose.toString()})('open', expectedPressed)`, context);
     if (scenario === 'activation_error') { await assert.rejects(action, /Owned activation rejected/); assert.deepEqual(calls, ['activate']); }
     else if (scenario === 'focus_timeout') { await assert.rejects(action, /did not become visible and focused before filtering/); assert.deepEqual(calls, ['activate', 'wait']); }
     else if (scenario === 'readiness_error') { await assert.rejects(action, /Native readiness callback failed/); assert.deepEqual(calls, ['clickable', 'observe', 'ready', 'cleanup']); }
@@ -150,6 +206,7 @@ test('tree setup repeats only definitive Busy with the identical frozen request 
     const repeated = await calls(); assert.equal(repeated.length, 3);
     assert.ok(repeated.every(call => JSON.stringify(call) === JSON.stringify(repeated[0])));
     assert.deepEqual(repeated[0].request, request); assert.ok(repeated[0].args.includes('--json'));
+    assert.ok(repeated[0].args.includes('--full'), 'Session identity requires the full saved receipt');
     for (const failure of ['revision_conflict', 'commit_uncertain', 'store_io', 'binding_mismatch', 'store_busy']) {
       await script(failure === 'store_busy' ? [failure, failure, failure] : [failure]);
       await assert.rejects(publishTreeRequest(configuration, request, true), new RegExp(failure));

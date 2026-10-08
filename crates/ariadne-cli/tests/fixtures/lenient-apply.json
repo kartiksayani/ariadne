@@ -1,0 +1,35 @@
+{
+  "operations": [
+    { "op": "topic.add", "name": "Cache PR review", "short": "Cache PR" },
+    {
+      "op": "item.add",
+      "short": "Review result",
+      "type": "finding",
+      "question": "Review finished: one race, one choice",
+      "status": "done",
+      "outcome": "Reviewed",
+      "why": "Read every changed file",
+      "children": [
+        {
+          "short": "Fill race",
+          "type": "finding",
+          "question": "Two writers race in fill()",
+          "status": "done",
+          "outcome": "Confirmed",
+          "why": "Reproduced locally"
+        }
+      ]
+    },
+    {
+      "op": "item.add",
+      "short": "Fallback merge",
+      "type": "decision",
+      "question": "Merge the fallback path now?",
+      "ask": "Merge now or wait?",
+      "options": [
+        { "label": "Merge now", "consequence": "Ships today" },
+        { "label": "Wait", "consequence": "Ships next week" }
+      ]
+    }
+  ]
+}

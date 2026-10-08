@@ -3,7 +3,7 @@
 // already holds. Strings are the prototype's; nothing here is invented copy.
 import type { Immutable } from '../../data/session-store';
 import type { SupervisorHealth } from '../../data/service';
-import type { Input, InputKind, Item, ItemOption, Message, PresenceObservation, Round, Session } from '../../generated/domain/models';
+import type { Input, InputKind, Item, ItemOption, LinkKind, Message, PresenceObservation, Round, Session } from '../../generated/domain/models';
 import { connectionOf, reconnectingNote } from '../shared/connection';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentName } from '../shell/model';
@@ -44,14 +44,14 @@ export interface OpenAction {
 export interface OpenSection { readonly title: string; readonly hint: string; readonly actions: readonly OpenAction[] }
 export interface BoxText { readonly label: string; readonly placeholder: string; readonly button: string; readonly hint: string }
 export interface Kid { readonly id: string; readonly question: string; readonly status: StatusKey; readonly closed: boolean }
-export interface LinkView { readonly icon: string; readonly label: string; readonly meta: string }
+export interface LinkView { readonly kind: LinkKind; readonly icon: string; readonly label: string; readonly meta: string; /** Where the link points: an item, web address or file path. */ readonly target: string }
 /** One exchange of the conversation: the agent's ask, the owner's reply, what the agent did with it, and the items it forked. */
 export interface RoundView {
   /** The round's number: a test hook only, never shown. */
   readonly ordinal: number;
   /** Empty when it only repeats the item's question (the head shows it). */
   readonly ask: string; readonly now: boolean;
-  readonly you: { readonly chosen: boolean; readonly text: string } | null; readonly result: string;
+  readonly you: { readonly chosen: boolean; readonly text: string; readonly source: string } | null; readonly result: string;
   readonly forks: readonly Kid[];
 }
 /** A message of the owner's that has not settled: it ends the conversation as a pending bubble. */
@@ -60,6 +60,8 @@ export interface PendingView {
   /** What was sent: the chosen option (`chose`), the owner's words (`said`) or a one-press request (`action`). */
   readonly how: 'chose' | 'said' | 'action';
   readonly text: string;
+  /** Original message source, before the display label or whitespace shortening. */
+  readonly source: string;
   /** Where it stands, in a few words. */
   readonly caption: string;
   /** Why it hasn't reached the agent, with what fixes it (ui/answer/StuckNote); null while saving. */
@@ -93,7 +95,7 @@ export interface DetailModel {
    * on a finished one. Null when the session or topic is read-only. Words written in another box stay in their draft and go out as this.
    */
   readonly box: WordsKind | null;
-  /** A waiting item whose input is in flight or queued: a reply queues behind it (owner FIFO). */
+  /** A waiting item whose input is in flight or queued: a reply queues behind it (owner FIFO). Named for what is sent: a reply. */
   readonly followUp: { readonly label: string; readonly hint: string; readonly disabled: boolean } | null;
   readonly answer: (AnswerModel & { readonly heading: boolean; readonly ask: string | null }) | null;
   readonly outcome: { readonly label: string; readonly text: string; readonly color: string } | null;
@@ -188,19 +190,33 @@ const CAPTION: Readonly<Partial<Record<Input['state'], string>>> = { queued: 'No
 
 /**
  * `pending`: owner messages still on their way; they end the conversation as pending bubbles instead of sitting in their round.
+ * `delivered`: the pending ones already with the agent (in flight). Once their round has its result, they stay in the round,
+ * so the exchange reads ask, answer, result; each one so kept is added to `kept` and leaves the pending bubbles.
  * `answered`: an answer or reply written for the current question is on its way.
  */
-function roundView(session: Immutable<Session>, item: Immutable<Item>, round: Immutable<Round>, last: boolean, pending: ReadonlySet<string>, answered: boolean): RoundView {
+function roundView(session: Immutable<Session>, item: Immutable<Item>, round: Immutable<Round>, last: boolean, pending: ReadonlySet<string>, delivered: ReadonlySet<string>,
+  kept: Set<string>, answered: boolean): RoundView {
   // A message deleted before it was sent, or cancelled by archive or close, is not part of the round: the agent never got it.
   const messages = (ids: readonly string[]) => ids.map(id => session.messages.find(message => message.id === id))
     .filter((message): message is Immutable<Message> => !!message && counted(session, message));
-  const owner = messages(round.owner_message_ids).filter(message => !pending.has(message.id)), agent = messages(round.agent_message_ids);
-  const answer = session.answers.filter(value => value.item_id === item.id && owner.some(message => message.id === value.message_id)).sort((a, b) => b.seq - a.seq)[0];
-  const chosen = answer?.selected_option_id ? answer.options_snapshot.find(option => option.id === answer.selected_option_id)?.label ?? null : null;
-  const you = chosen ? { chosen: true, text: chosen } : answer?.text.trim() ? { chosen: false, text: answer.text.trim() }
-    : owner.length ? { chosen: false, text: owner.at(-1)!.body } : null;
+  const agent = messages(round.agent_message_ids);
   const results = round.result_input_ids.flatMap(id => session.inputs[id]?.attempts.flatMap(attempt => attempt.domain_result ? [attempt.domain_result] : []) ?? []);
   const result = results.at(-1)?.explanation ?? agent.at(-1)?.body ?? '';
+  // A message is only answered by a result or agent message that comes after it: an older agent message in the round is not its answer.
+  const answeredAfter = (message: Immutable<Message>) => !!result
+    && (agent.some(value => value.number > message.number)
+      || round.result_input_ids.some(id => session.inputs[id]?.attempts.some(attempt => attempt.domain_result && attempt.domain_result.handled_through_message_number >= message.number)));
+  const owner = messages(round.owner_message_ids).filter(message => {
+    if (!pending.has(message.id)) return true;
+    if (!delivered.has(message.id) || !answeredAfter(message)) return false;
+    kept.add(message.id);
+    return true;
+  });
+  const answer = session.answers.filter(value => value.item_id === item.id && owner.some(message => message.id === value.message_id)).sort((a, b) => b.seq - a.seq)[0];
+  const chosen = answer?.selected_option_id ? answer.options_snapshot.find(option => option.id === answer.selected_option_id)?.label ?? null : null;
+  const source = (answer ? owner.find(message => message.id === answer.message_id)?.body ?? answer.text : owner.at(-1)?.body) ?? '';
+  const you = chosen ? { chosen: true, text: chosen, source } : answer?.text.trim() ? { chosen: false, text: answer.text.trim(), source }
+    : owner.length ? { chosen: false, text: owner.at(-1)!.body, source } : null;
   // Still waiting on the owner unless an answer or reply to this ask is on its way. Core files every owner input of the item in
   // its open round, a Bring or a note too, so being in the round proves nothing: only the kind and the question it was written for do.
   const now = last && !you && !answered && item.status === 'waiting_on_me';
@@ -245,7 +261,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const newest = active.at(-1);
   const held = !saving && !!newest && heldInput(session, newest);
   const stuck = !saving && tracked ? stuckInput(session, tracked, presence, health) : null;
-  const outbox = active.map((input): PendingView => ({ input, ...sentView(input), caption: CAPTION[input.state] ?? '',
+  const outbox = active.map((input): PendingView => ({ input, ...sentView(input), source: byId.get(input.message_id)?.body ?? input.payload.text, caption: CAPTION[input.state] ?? '',
     stuck: saving ? null : stuckInput(session, input, presence, health) }));
   const pending = !!sub?.stage && sub.stage !== 'failed' && !held;
   const outLabel = status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
@@ -290,9 +306,10 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
 
   const answerable = status === 'waiting' && !pending;
   // The answer slot hides while its input is pending; a follow-up reply still queues behind it.
-  // A follow-up being written stays when the hold clears, next to the answer box.
-  const followUp = !readOnly && status === 'waiting' && (pending || replyDraft) ? { label: 'Add a follow-up',
-    hint: pending ? 'Queued behind the answer in flight' : 'Your follow-up is kept. Send it, or answer below.', disabled: offline } : null;
+  // A reply being written stays when the hold clears, next to the answer box. A waiting item's words go out as a reply
+  // (`sentAs`), so the button says reply: "follow-up" is only ever the kind sent on a finished item.
+  const followUp = !readOnly && status === 'waiting' && (pending || replyDraft) ? { label: `Add a ${sentAs(status)}`,
+    hint: pending ? 'Queued behind the answer in flight' : 'Your reply is kept. Send it, or answer below.', disabled: offline } : null;
   const recommended = item.options.findIndex(option => option.recommended);
   const blocked = session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
     : offline ? reconnectingNote(agent) : null;
@@ -325,7 +342,8 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const onItsWay = new Set(active.map(input => input.message_id));
   // An answer or a reply that is on its way and was written for the current question (not held for an older one) answers the newest ask.
   const answered = active.some(input => (input.kind === 'answer' || input.kind === 'reply') && !heldInput(session, input));
-  const roundViews = rounds.map((round, index) => roundView(session, item, round, index === rounds.length - 1, onItsWay, answered));
+  const delivered = new Set(active.filter(input => input.state === 'in_flight').map(input => input.message_id)), kept = new Set<string>();
+  const roundViews = rounds.map((round, index) => roundView(session, item, round, index === rounds.length - 1, onItsWay, delivered, kept, answered));
   // The head already shows the question: a lone ask that only repeats it is not said twice.
   if (roundViews.length === 1 && roundViews[0].ask.trim() === item.question.trim()) roundViews[0] = { ...roundViews[0], ask: '' };
   const reopened = isClosed ? undefined : [...item.status_history].reverse().find(entry => closedStatus.has(statusKey[entry.old_status]) && !closedStatus.has(statusKey[entry.new_status]));
@@ -340,7 +358,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     steps: showSteps ? stepsOf(sub.stage, status) : null,
     // An in-flight message keeps its delivery line; the `sent` note only adds Cancel.
     delivery: sub?.stage && (!stuck || stuck.kind === 'sent') ?deliveryOf(sub.stage, sub.kind, sub.label, agent) : null,
-    outbox,
+    outbox: outbox.filter(pending => !kept.has(pending.input.message_id)),
     open,
     box: readOnly ? null : sentAs(status),
     followUp,
@@ -352,7 +370,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     replaced: replacement ? kid(replacement) : null,
     kidLabel: `Branched into ${kids.length} item${kids.length > 1 ? 's' : ''}`,
     kids: kids.map(kid),
-    links: item.links.map(link => ({ icon: LINKICON[link.kind] ?? 'ph ph-link', label: link.label, meta: (link as typeof link & { meta?: string }).meta ?? '' })),
+    links: item.links.map(link => ({ kind: link.kind, icon: LINKICON[link.kind] ?? 'ph ph-link', target: link.target, label: link.label, meta: (link as typeof link & { meta?: string }).meta ?? '' })),
     prev: reopened ? { status: statusKey[reopened.old_status], outcome: reopened.previous_outcome ?? '' } : null,
     rounds: roundViews,
     timeline,

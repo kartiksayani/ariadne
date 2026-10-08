@@ -11,7 +11,7 @@
 
 .graph-error {
   margin: 0 16px 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   color: var(--a-warn);
 }
 
@@ -37,7 +37,7 @@
   padding: 6px 16px 8px 20px;
   border-bottom: 1px solid var(--color-divider);
   background: var(--a-bg);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
@@ -78,11 +78,11 @@
 .graph-reveal {
   margin-left: auto;
   padding: 3px 10px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .graph-reveal > i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 /* — topic cards — */
@@ -117,7 +117,7 @@
 }
 
 .graph-card-name {
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--text-scale));
   font-weight: 500;
   letter-spacing: -0.01em;
 }
@@ -130,17 +130,17 @@
   padding: 0 8px;
   border-radius: 6px;
   box-shadow: inset 0 0 0 1px var(--color-divider);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
 }
 
 .graph-card-session > i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .graph-card-counts {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
@@ -182,7 +182,7 @@
 
 .graph-replaced-label {
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
 }
 
 /* — nodes — */
@@ -245,7 +245,7 @@
 .graph-node-icon {
   display: block;
   flex: none;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   line-height: 1;
 }
 
@@ -253,9 +253,9 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   font-weight: 500;
-  line-height: 16px;
+  line-height: calc(16px * var(--text-scale));
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--color-text);
@@ -270,9 +270,9 @@
   padding: 0 5px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--color-text) 8%, transparent);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-scale));
   font-weight: 500;
-  line-height: 15px;
+  line-height: calc(15px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
 }
 
@@ -296,14 +296,14 @@
 }
 
 .graph-node-collapse > i {
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
 }
 
 .graph-node-question {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 11.5px;
-  line-height: 15px;
+  font-size: calc(11.5px * var(--text-scale));
+  line-height: calc(15px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 74%, transparent);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

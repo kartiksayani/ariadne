@@ -312,3 +312,59 @@ describe('stuck inputs explain themselves', () => {
     expect(flying?.delivery).toBeNull();
   });
 });
+
+describe('an owner message still in flight once its round has the result', () => {
+  const at = Date.parse('2026-10-03T12:00:00.000Z');
+  /** Item 2's only round already holds the agent's result; the owner's reply to it is `state`. */
+  const setup = (state: Input['state']) => {
+    const session = seed(), input = reply(session, state), round = Object.values(session.rounds).find(value => value?.item_id === '2')!;
+    const message = session.messages.find(value => value.id === input.message_id)!;
+    message.item_id = '2'; message.input_id = input.id;
+    round.owner_message_ids = [input.message_id]; round.result_input_ids = [];
+    return { session, input, round, model: () => detailModel({ session: immutable(session), itemId: '2', now: at, mode: null, later: false, saving: null }) };
+  };
+  it('stays in its round, between the ask and the result, and not again as a pending bubble', () => {
+    const { model, input } = setup('in_flight');
+    const round = model()!.rounds[0]!;
+    expect(round.result).not.toBe('');
+    expect(round.you).toMatchObject({ chosen: false, text: expect.any(String) });
+    expect(model()!.outbox.map(pending => pending.input.id)).not.toContain(input.id);
+  });
+  it('still ends the conversation as a pending bubble while it has not reached the agent', () => {
+    const { model, input } = setup('queued');
+    expect(model()!.rounds[0]!.you).toBeNull();
+    expect(model()!.outbox.map(pending => pending.input.id)).toContain(input.id);
+  });
+  it('is still a pending bubble when the only agent message in the round is older than it', () => {
+    const { model, input, session, round } = setup('in_flight');
+    const message = session.messages.find(value => value.id === input.message_id)!;
+    for (const id of round.agent_message_ids) session.messages.find(value => value.id === id)!.number = message.number - 1;
+    // The agent's earlier text is still the round's text, but it is not an answer to the newer reply.
+    expect(model()!.rounds[0]!.result).not.toBe('');
+    expect(model()!.rounds[0]!.you).toBeNull();
+    expect(model()!.outbox.map(pending => pending.input.id)).toContain(input.id);
+    // An agent message numbered after the reply answers it again.
+    session.messages.find(value => value.id === round.agent_message_ids[0])!.number = message.number + 1;
+    expect(model()!.rounds[0]!.you).not.toBeNull();
+    expect(model()!.outbox.map(pending => pending.input.id)).not.toContain(input.id);
+  });
+  it('is answered by a result that handled it, and not by one that handled only older messages', () => {
+    const { model, input, session, round } = setup('in_flight');
+    const message = session.messages.find(value => value.id === input.message_id)!;
+    for (const id of round.agent_message_ids) session.messages.find(value => value.id === id)!.number = message.number - 1;
+    const earlier = session.inputs[id('71')]!;
+    round.result_input_ids = [earlier.id];
+    const result = earlier.attempts.find(attempt => attempt.domain_result)!.domain_result!;
+    result.handled_through_message_number = message.number - 1;
+    expect(model()!.outbox.map(pending => pending.input.id)).toContain(input.id);
+    result.handled_through_message_number = message.number;
+    expect(model()!.outbox.map(pending => pending.input.id)).not.toContain(input.id);
+  });
+  it('is a pending bubble when its round has no result yet', () => {
+    const { model, input, session, round } = setup('in_flight');
+    round.agent_message_ids = []; session.messages.filter(value => value.author === 'agent' && value.item_id === '2').forEach(value => { value.item_id = '1'; });
+    expect(model()!.rounds[0]!.result).toBe('');
+    expect(model()!.rounds[0]!.you).toBeNull();
+    expect(model()!.outbox.map(pending => pending.input.id)).toContain(input.id);
+  });
+});

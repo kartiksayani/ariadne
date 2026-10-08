@@ -73,6 +73,14 @@ impl fmt::Display for StoreError {
 }
 impl std::error::Error for StoreError {}
 
+/// The outcome of `Store::preview`: what a commit would save, not written.
+#[derive(Debug)]
+pub struct Preview {
+    pub receipt: SavedReceipt,
+    pub session: Session,
+    pub replayed: bool,
+}
+
 #[derive(Debug)]
 pub enum TransactionError<E> {
     Store(StoreError),
@@ -297,10 +305,24 @@ impl Store {
         normalized_command: &Value,
         apply: impl FnOnce(&mut Session) -> Result<SavedReceiptData, E>,
     ) -> Result<SavedReceipt, TransactionError<E>> {
+        self.transact_noting_replay(session_id, actor, operation_id, normalized_command, apply)
+            .map(|(receipt, _)| receipt)
+    }
+
+    /// `transact`, also saying whether the receipt is an exact replay of an earlier
+    /// commit (nothing was applied or written) rather than a new one.
+    pub fn transact_noting_replay<E>(
+        &self,
+        session_id: &UuidV4,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        normalized_command: &Value,
+        apply: impl FnOnce(&mut Session) -> Result<SavedReceiptData, E>,
+    ) -> Result<(SavedReceipt, bool), TransactionError<E>> {
         self.with_lock(session_id, || {
             let (live, previous) = self.live(session_id)?;
             if let Some(saved) = self.saved(&live, actor, operation_id, normalized_command)? {
-                return Ok(saved);
+                return Ok((saved, true));
             }
             let digest = self.digest(session_id, actor, normalized_command)?;
             let mut candidate = live.clone();
@@ -314,7 +336,43 @@ impl Store {
                 digest,
                 data,
             )
+            .map(|saved| (saved, false))
             .map_err(TransactionError::Store)
+        })
+    }
+
+    /// Validate-only `transact`: the same lock, replay check, callback and
+    /// candidate validation, but nothing is written. An exact replay returns the
+    /// saved receipt and the live session with `replayed` set; otherwise the
+    /// candidate session carries the new revision and the receipt entry.
+    pub fn preview<E>(
+        &self,
+        session_id: &UuidV4,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        normalized_command: &Value,
+        apply: impl FnOnce(&mut Session) -> Result<SavedReceiptData, E>,
+    ) -> Result<Preview, TransactionError<E>> {
+        self.with_lock(session_id, || {
+            let (live, _) = self.live(session_id)?;
+            if let Some(receipt) = self.saved(&live, actor, operation_id, normalized_command)? {
+                return Ok(Preview {
+                    receipt,
+                    session: live,
+                    replayed: true,
+                });
+            }
+            let digest = self.digest(session_id, actor, normalized_command)?;
+            let mut candidate = live.clone();
+            let data = apply(&mut candidate).map_err(TransactionError::Command)?;
+            let (receipt, session, _) = self
+                .stage_effect(&live, candidate, actor, operation_id, digest, data)
+                .map_err(TransactionError::Store)?;
+            Ok(Preview {
+                receipt,
+                session,
+                replayed: false,
+            })
         })
     }
 
@@ -490,12 +548,35 @@ impl Store {
         &self,
         live: &Session,
         previous: &[u8],
-        mut candidate: Session,
+        candidate: Session,
         actor: &ReceiptActorScope,
         operation_id: &UuidV4,
         digest: Sha256,
         data: SavedReceiptData,
     ) -> Result<SavedReceipt, StoreError> {
+        let (saved, candidate, bytes) =
+            self.stage_effect(live, candidate, actor, operation_id, digest, data)?;
+        self.commit(
+            &format!("{}.json", candidate.id.as_str()),
+            Some(previous),
+            &bytes,
+            Some(operation_id.clone()),
+        )?;
+        Ok(saved)
+    }
+
+    /// Everything `save_effect` checks before the first byte is written: callback
+    /// bookkeeping, the receipt entry, full candidate validation and encoding.
+    /// `preview` and every real commit share it, so they accept the same requests.
+    fn stage_effect(
+        &self,
+        live: &Session,
+        mut candidate: Session,
+        actor: &ReceiptActorScope,
+        operation_id: &UuidV4,
+        digest: Sha256,
+        data: SavedReceiptData,
+    ) -> Result<(SavedReceipt, Session, Vec<u8>), StoreError> {
         // Callbacks own business effects, not transaction bookkeeping.
         if candidate.id != live.id
             || candidate.project_id != live.project_id
@@ -533,13 +614,7 @@ impl Store {
             });
         self.validate(&candidate, &live.id)?;
         let bytes = encode(&candidate)?;
-        self.commit(
-            &format!("{}.json", live.id.as_str()),
-            Some(previous),
-            &bytes,
-            Some(operation_id.clone()),
-        )?;
-        Ok(saved)
+        Ok((saved, candidate, bytes))
     }
 
     fn with_lock<T, E: From<StoreError>>(
