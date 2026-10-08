@@ -1082,6 +1082,87 @@ fn the_lenient_fixture_applies_end_to_end_and_prints_a_compact_receipt() {
 }
 
 #[test]
+fn native_result_request_prints_a_full_raw_receipt_and_replays_without_a_second_write() {
+    let session: Session =
+        serde_json::from_str(include_str!("../../../fixtures/domain/demo/session.json")).unwrap();
+    let setup = Setup::new(&session);
+    let input = &session.inputs.0[&id(0x72)];
+    let item = input.target.item_id.as_ref().unwrap();
+    let owner = session
+        .messages
+        .iter()
+        .find(|message| message.id == input.message_id)
+        .unwrap();
+    // Same explicit reply/result request and raw stdout mode as publishResult
+    // in the native scripted provider. --full is required for receipt identity.
+    let request = json!({
+        "op_id": id(0x9000), "source_input_id": input.id,
+        "attempt_id": input.active_attempt_id,
+        "expected_item_revisions": {item.as_str(): session.items.0[item].revision},
+        "expected_topic_revisions": {}, "summary": "",
+        "operations": [{"op": "reply", "ref": "native_reply", "item": {"id": item},
+            "text": "Explicit scripted reply", "round_id": null}],
+        "input_result": {"outcome": "answered", "explanation": "Explicit scripted result 1",
+            "reply_refs": [{"ref": "native_reply"}], "followup_item_refs": [],
+            "handled_through_message_number": owner.number}
+    });
+    let body = serde_json::to_vec(&request).unwrap();
+    let binding = &session.bindings.0[&input.binding_id];
+    let args = [
+        "apply",
+        "--binding",
+        binding.id.as_str(),
+        "--generation",
+        binding.generation.as_str(),
+        "--json-stdin",
+        "--full",
+    ];
+    let output = setup.call(&args, Some(&body));
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty());
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["session_id"], session.id.as_str());
+    assert_eq!(receipt["operation_id"], id(0x9000).as_str());
+    assert_eq!(receipt["data"]["kind"], "apply");
+    let saved = setup.bytes();
+    let committed = setup.store().read(&session.id).unwrap();
+    assert_eq!(receipt["revision"], committed.revision.value());
+    let reply = committed
+        .messages
+        .iter()
+        .find(|message| message.body == "Explicit scripted reply")
+        .unwrap();
+    assert_eq!(
+        receipt["data"]["allocated_refs"]["native_reply"]["id"],
+        reply.id.as_str()
+    );
+    let attempt = committed.inputs.0[&input.id]
+        .attempts
+        .iter()
+        .find(|attempt| Some(&attempt.id) == input.active_attempt_id.as_ref())
+        .unwrap();
+    let result = attempt.domain_result.as_ref().unwrap();
+    assert_eq!(result.operation_id, id(0x9000));
+    assert_eq!(result.outcome, ResultOutcome::Answered);
+    assert_eq!(result.reply_message_ids, std::slice::from_ref(&reply.id));
+    assert_eq!(
+        result.handled_through_message_number.value(),
+        owner.number.value()
+    );
+    let replay = setup.call(&args, Some(&body));
+    assert_eq!(replay.status.code(), Some(0), "{replay:?}");
+    assert!(replay.stderr.is_empty());
+    assert_eq!(replay.stdout, output.stdout);
+    assert_eq!(setup.bytes(), saved);
+    // The tree helper requests the same saved receipt inside a JSON envelope.
+    let mut enveloped_args = args.to_vec();
+    enveloped_args.push("--json");
+    let enveloped = envelope(&setup.call(&enveloped_args, Some(&body)), 0);
+    assert_eq!(enveloped["data"], receipt);
+    assert_eq!(setup.bytes(), saved);
+}
+
+#[test]
 fn full_prints_the_complete_saved_receipt_and_a_stated_op_id_replays() {
     let setup = Setup::new(&seed());
     let body = lenient_with_op(600);

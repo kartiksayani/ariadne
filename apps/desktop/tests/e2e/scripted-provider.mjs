@@ -96,7 +96,7 @@ export function journeyResultRequest(configuration, admission, session, reply) {
 }
 export async function publishResult(configuration, admission, reply, env = process.env) {
   const request = journeyResultRequest(configuration, admission, await snapshot(configuration), reply);
-  const applied = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request, env);
+  const applied = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--full'], request, env);
   assert.equal(applied.code, 0); assert.equal(applied.value.session_id, configuration.sessionId);
   return { request, receipt: applied.value };
 }

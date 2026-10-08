@@ -72,7 +72,7 @@ export function historyMessageBatch(roundId, first, count) {
 async function apply(history, operations, revisions = {}, frozen = null) {
   const value = frozen ?? { ...request(operations), expected_item_revisions: revisions };
   assert.ok(Buffer.byteLength(JSON.stringify(value)) < 512 * 1024);
-  const result = await cliRequest(history.cli, ['apply', '--binding', history.bindingId, '--generation', history.generation, '--json-stdin'], value);
+  const result = await cliRequest(history.cli, ['apply', '--binding', history.bindingId, '--generation', history.generation, '--json-stdin', '--full'], value);
   assert.equal(result.code, 0); assert.equal(result.value.session_id, history.sessionId);
   return { request: value, receipt: result.value };
 }

@@ -150,6 +150,7 @@ test('tree setup repeats only definitive Busy with the identical frozen request 
     const repeated = await calls(); assert.equal(repeated.length, 3);
     assert.ok(repeated.every(call => JSON.stringify(call) === JSON.stringify(repeated[0])));
     assert.deepEqual(repeated[0].request, request); assert.ok(repeated[0].args.includes('--json'));
+    assert.ok(repeated[0].args.includes('--full'), 'Session identity requires the full saved receipt');
     for (const failure of ['revision_conflict', 'commit_uncertain', 'store_io', 'binding_mismatch', 'store_busy']) {
       await script(failure === 'store_busy' ? [failure, failure, failure] : [failure]);
       await assert.rejects(publishTreeRequest(configuration, request, true), new RegExp(failure));

@@ -52,7 +52,7 @@ export function repairResultRequest(configuration, admission, session, original,
 }
 
 async function apply(configuration, request) {
-  const result = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request);
+  const result = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--full'], request);
   assert.equal(result.code, 0); assert.equal(result.value.session_id, configuration.sessionId);
   return { request, receipt: result.value };
 }

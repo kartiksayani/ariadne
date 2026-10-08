@@ -25,7 +25,7 @@ async function apply(configuration, operations, expectedItemRevisions = {}, summ
 }
 export async function publishTreeRequest(configuration, request, setup = false) {
   assert.ok(Buffer.byteLength(JSON.stringify(request)) < 512 * 1024, 'Every real CLI request remains within its protocol limit');
-  const args = ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--json'];
+  const args = ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--full', '--json'];
   const before = await snapshot(configuration), rejections = [];
   const maximumRetries = setup ? 2 : 0;
   for (let retry = 0; retry <= maximumRetries; retry++) {
