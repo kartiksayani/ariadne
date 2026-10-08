@@ -33,7 +33,7 @@ Read these files, beside this one, only when they apply:
 | Read | When |
 |---|---|
 | `inputs.md` | A message starting `[ARIADNE_INPUT:`; closing a parent |
-| `errors.md` | An `ariadne` command exits non-zero |
+| `errors.md` | Preparing an unfamiliar request; an `ariadne` command exits non-zero |
 | `reconnect.md` | After `/clear` or `/compact`, or on attaching a fresh conversation |
 | `report.md` | Filing a report, audit, test run or investigation |
 | `review.md` | Reviewing a PR or document, or comparing options |
