@@ -171,6 +171,8 @@ pub enum LinkKind {
     Pr,
     File,
     Doc,
+    // A same-session item reference; `target` is the raw dotted item id.
+    Item,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]

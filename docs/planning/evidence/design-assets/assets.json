@@ -87,5 +87,18 @@
     {"weight":"fill","class":"ph-circle","unicode":"U+E18A"},
     {"weight":"fill","class":"ph-question","unicode":"U+E3E8"},
     {"weight":"fill","class":"ph-star","unicode":"U+E46A"}
+  ],
+  "app_glyphs": [
+    {"weight":"regular","class":"ph-caret-double-left","unicode":"U+E128"},
+    {"weight":"regular","class":"ph-caret-double-right","unicode":"U+E12A"},
+    {"weight":"regular","class":"ph-info","unicode":"U+E2CE"},
+    {"weight":"regular","class":"ph-link","unicode":"U+E2E2"},
+    {"weight":"regular","class":"ph-pause","unicode":"U+E39E"},
+    {"weight":"regular","class":"ph-pause-circle","unicode":"U+E3A0"},
+    {"weight":"regular","class":"ph-pencil-simple","unicode":"U+E3B4"},
+    {"weight":"regular","class":"ph-play","unicode":"U+E3D0"},
+    {"weight":"regular","class":"ph-plugs","unicode":"U+EB56"},
+    {"weight":"regular","class":"ph-plugs-connected","unicode":"U+EB5A"},
+    {"weight":"regular","class":"ph-tree-structure","unicode":"U+E67C"}
   ]
 }

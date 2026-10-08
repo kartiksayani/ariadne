@@ -1,5 +1,5 @@
 use super::{
-    expiry::ResultExpiry, health::HealthHub, installed_codex_rules, instructions,
+    expiry::ResultExpiry, health::HealthHub, installed_codex_skill, instructions,
     presence::PresenceCache, CoreBridge,
 };
 use crate::watchers::RegisteredWatcher;
@@ -162,8 +162,8 @@ impl NativeRuntime {
                 roots.clone(),
             )),
         );
-        let codex_rules = installed_codex_rules(std::env::var_os("HOME").map(PathBuf::from));
-        let instructions = instructions(&config.cli_invocation, codex_rules.as_deref());
+        let codex_skill = installed_codex_skill(std::env::var_os("HOME").map(PathBuf::from));
+        let instructions = instructions(&config.cli_invocation, codex_skill.as_deref());
         let providers = ProviderFactory::new(
             roots,
             discovery.clone(),

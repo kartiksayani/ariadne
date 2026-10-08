@@ -8,7 +8,7 @@ mod preferences;
 pub use preferences::PreferencesService;
 
 use crate::{
-    apply::ApplyService,
+    apply::{ApplyPreview, ApplyService, ApplySummary},
     bindings::{BindingService, VerifiedHost},
     delivery::DeliveryService,
     history_actions::HistoryActionService,
@@ -52,6 +52,41 @@ impl NativeCoreService {
 
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Validate an apply request against the current session exactly as `apply`
+    /// would, then stop before the commit.
+    pub fn apply_preview(
+        &self,
+        context: &AgentContext,
+        request: &ApplyRequest,
+    ) -> Result<ApplyPreview, CoreError> {
+        ApplyService::new(&self.registry)
+            .preview(context, request, || (self.allocate)(), (self.now)())
+            .map_err(errors::apply)
+    }
+
+    /// `apply`, also saying whether the core replayed an earlier commit of the same
+    /// operation ID and request instead of applying anything.
+    pub fn apply_noting_replay(
+        &self,
+        context: AgentContext,
+        request: ApplyRequest,
+    ) -> Result<(ApplyReceipt, bool), CoreError> {
+        ApplyService::new(&self.registry)
+            .execute_noting_replay(&context, &request, || (self.allocate)(), (self.now)())
+            .map_err(errors::apply)
+    }
+
+    /// The compact view of a committed (or replayed) apply receipt.
+    pub fn apply_summary(
+        &self,
+        context: &AgentContext,
+        receipt: &ApplyReceipt,
+    ) -> Result<ApplySummary, CoreError> {
+        ApplyService::new(&self.registry)
+            .summary(context, receipt)
+            .map_err(errors::apply)
     }
 
     /// Native-only recovery wiring supplies provider-qualified presence. Ordinary

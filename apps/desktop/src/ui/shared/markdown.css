@@ -12,26 +12,27 @@
   margin-top: 0;
 }
 
+/* Cancel text scaling in relative gaps so only the letters and lines resize. */
 .md p,
 .md ul,
 .md ol,
 .md blockquote,
 .md hr {
-  margin: 0.5em 0 0;
+  margin: calc(0.5em / var(--text-scale)) 0 0;
 }
 
 .md ul,
 .md ol {
-  padding-left: 1.4em;
+  padding-left: calc(1.4em / var(--text-scale));
 }
 
 .md li + li {
-  margin-top: 0.2em;
+  margin-top: calc(0.2em / var(--text-scale));
 }
 
 .md li > ul,
 .md li > ol {
-  margin-top: 0.2em;
+  margin-top: calc(0.2em / var(--text-scale));
 }
 
 .md li::marker {
@@ -68,13 +69,13 @@
 
 /* Code blocks keep their lines; a long line wraps rather than scrolling the panel. */
 .md-pre {
-  margin: 0.5em 0 0;
+  margin: calc(0.5em / var(--text-scale)) 0 0;
   max-height: 360px;
   overflow: auto;
   padding: 8px 10px;
   border-radius: 6px;
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -87,7 +88,7 @@
 }
 
 .md-table {
-  margin: 0.5em 0 0;
+  margin: calc(0.5em / var(--text-scale)) 0 0;
   max-width: 100%;
   overflow-x: auto;
   border-radius: 6px;
@@ -121,6 +122,21 @@
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
+}
+
+.md-item-missing {
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* A file the desktop found: it keeps its code look and takes the link's colour and underline. */
+.md-file {
+  text-decoration: none;
+}
+
+.md-file .md-code {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .md-rest {

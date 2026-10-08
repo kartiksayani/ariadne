@@ -9,6 +9,7 @@ import { RemoveDialog } from '../dialogs/RemoveDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from '../dialogs/remove';
 import { ownerName, sessionWhen } from '../shell/model';
 import { RenameButton, SessionRename, saveSessionLabel } from '../shared/SessionRename';
+import { CopySessionId } from '../shared/CopySessionId';
 import type { RendererService } from '../../data/service';
 import { plainFailure } from '../../data/plain';
 import { useSupervisorHealth } from '../../components/bindings/health';
@@ -139,6 +140,7 @@ export function SessionLists(props: SessionListsProps) {
             <span className="pw-session-meta">{text.meta}</span></div>}
         <CardRun summary={summary} service={actions.service} onClick={() => dispatch(summary)} />
         <span className="pw-session-actions">
+          <CopySessionId sessionId={summary.session_id} className="btn btn-ghost pw-card-button" />
           {text.closed
             ? <button type="button" className="btn btn-secondary pw-card-button" disabled={off} onClick={() => { void lifecycle(summary, 'session_reopen'); }}>
               <i className="ph ph-arrow-counter-clockwise" aria-hidden="true" />Reopen</button>

@@ -6,7 +6,69 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySeedRequest, unpinHistoryMessage, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySeedRequest, navigationRejection, unpinHistoryMessage, waitForHistoryControl, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { archiveClosedTopic, topicAction } from '../../../apps/desktop/tests/e2e/history-actions.spec.mjs';
+
+test('history recovery requires the plain changed-view alert and enabled Refresh without uncertain Check again', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  const changed = 'This changed while you were working. Look at it as it is now, then try again.';
+  let message, refresh, enabled, uncertain;
+  globalThis.browser = { $(selector) {
+    if (selector === '.nav-banner[role="alert"] p') return { async isExisting() { return message !== null; }, async getText() { return message; } };
+    assert.equal(selector, '.nav-banner[role="alert"]');
+    return { $(selector) {
+      assert.notEqual(message, null, 'An absent alert must not initiate a nested element lookup');
+      if (selector === 'button=Refresh') return { async isExisting() { return refresh; }, async isEnabled() { return enabled; } };
+      assert.equal(selector, 'button=Check again'); return { async isExisting() { return uncertain; } };
+    } };
+  } };
+  const admitted = [];
+  for ([message, refresh, enabled, uncertain] of [[null, false, false, false], ['Preferences revision changed; reload before applying this new patch', true, true, false],
+    [changed, false, false, false], [changed, true, false, false], [changed, true, true, true], [changed, true, true, false]]) {
+    admitted.push(await navigationRejection());
+  }
+  assert.deepEqual(admitted, [false, false, false, false, false, true]);
+});
+
+test('history topic actions use their accessible names and the all-closed prompt stays outside the sticky band', async t => {
+  const dom = new JSDOM(`<div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
+    <button aria-label="Continue here"><i></i></button><button aria-label="Archive"><i></i></button></div>
+    <div class="tree-topic-content"><div class="tree-prompt"><button>Archive topic</button></div></div>
+    <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div>`);
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; dom.window.close(); });
+  const clicked = [];
+  const wrap = node => {
+    assert.ok(node, 'The current native selector must find an actual rendered control');
+    return { node, async waitForDisplayed() {}, async waitForEnabled() {},
+      async click() { clicked.push(node.getAttribute('aria-label') ?? node.textContent); },
+      $(selector) { return wrap(node.querySelector(selector)); } };
+  };
+  globalThis.browser = { $(selector) { return wrap(dom.window.document.querySelector(selector)); },
+    async execute(callback, element) { return callback(element.node); } };
+  await topicAction('Native topic', 'Continue here');
+  await topicAction('Native topic', 'Archive');
+  await archiveClosedTopic('topic');
+  assert.deepEqual(clicked, ['Continue here', 'Archive', 'Archive topic']);
+});
+
+test('history choice and Send wait for both native enabled and refresh aria-disabled to clear', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  let enabled = false, frozen = true;
+  const admitted = [];
+  globalThis.browser = { async waitUntil(condition, options) {
+    assert.equal(options.timeout, 20000);
+    admitted.push(await condition());
+    enabled = true; admitted.push(await condition());
+    frozen = false; admitted.push(await condition());
+    assert.equal(admitted.at(-1), true);
+  } };
+  await waitForHistoryControl({ async waitForEnabled() {}, async isEnabled() { return enabled; },
+    async getAttribute(name) { assert.equal(name, 'aria-disabled'); return frozen ? 'true' : null; } }, 'round choice');
+  assert.deepEqual(admitted, [false, false, true]);
+});
 
 test('unpin proves pin removal independently, while deliberate rail Close requires cleared references', async t => {
   const dom = new JSDOM(`<aside class="pw-rail"><div class="pw-rail-list"><button data-message-id="message" class="pw-excerpt pw-excerpt-active" aria-pressed="true"></button></div></aside>

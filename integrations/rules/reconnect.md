@@ -1,0 +1,27 @@
+# Reconnecting
+
+<!-- only:claude -->
+After `/clear`, `/compact` or `claude --resume` the plugin reconnects this
+conversation and adds a note starting "Ariadne reconnected this conversation"
+with the new binding, the generation and a `Command: <path>` line, the same line
+`/ariadne-connect` prints. From then on use the latest note or `/ariadne-connect`
+output; earlier values are stale. Run the command exactly as written on that
+line (it is already quoted if the path needs it). Do not reply to the note.
+<!-- /only -->
+<!-- only:codex -->
+After `/clear` or `/compact` the connection stays, but the setup instruction may
+scroll out of reach. Use the binding and generation of the setup instruction
+pasted in this thread; if none is left, ask the owner to paste it again.
+<!-- /only -->
+
+Run `ariadne read` once to rebuild the session's topics, items, questions, answers
+and results; Ariadne does not push them. Read an item's full history with
+`ariadne item messages|rounds` when you work on it. Then summarize completed work,
+remaining work and missing context, reuse existing items and respect cancelled
+work and closed or superseded history.
+
+The same applies when the owner attaches a fresh conversation to an existing
+session. This is structured context, not the old host transcript, private memory
+or authority over an old binding or attempt; reconnecting dispatches no work. Only
+a reply or `input_result` for a specific input needs its claimed envelope; file
+your own work at any time without those fields.

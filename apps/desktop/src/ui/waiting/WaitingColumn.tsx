@@ -19,7 +19,9 @@ import { AnswerControl, defaultSelection } from '../answer/AnswerControl';
 import { useSubmit, type PendingSubmission } from '../answer/useSubmit';
 import { waitingModel, type SentRowModel, type WaitingCardModel } from './model';
 import { useHidden } from '../remove/queue';
-import { Markdown } from '../shared/MarkdownText';
+import { FileRefProject, ItemRefs, Markdown } from '../shared/MarkdownText';
+import { shortLabel } from '../shared/short';
+import { displayStatus } from '../../selectors/waiting/replied';
 import { WaitingFold } from '../shell/fold';
 import './waiting.css';
 
@@ -46,14 +48,15 @@ export function WaitingFrame({ count, loading = false, children }: { readonly co
   const fold = useContext(WaitingFold);
   return <aside className={`waiting${fold.folded ? ' waiting-folded' : ''}`} aria-label="Waiting on me">
     {fold.folded
-      ? <button type="button" className="btn btn-ghost waiting-unfold" aria-label={`Show Waiting on me (${count})`} title="Show Waiting on me (w)" data-shortcut-waiting-fold="" onClick={fold.toggle}>
-        <i className="ph ph-caret-double-right" aria-hidden="true" /><span className="waiting-count">{count}</span></button>
+      // The icons come from the bundled Phosphor subset (public/icons/phosphor.css); an icon outside it draws nothing.
+      ? <button type="button" className="btn btn-secondary waiting-unfold" aria-label={`Show Waiting on me (${count})`} title="Show Waiting on me (w)" data-shortcut-waiting-fold="" onClick={fold.toggle}>
+        <i className="ph ph-arrow-right" aria-hidden="true" /><span className="waiting-count">{count}</span></button>
       : <div className="waiting-head">
         <span className="waiting-title">Waiting on me</span>
         <span className="waiting-count">{count}</span>
         <span className="waiting-order">Oldest first</span>
-        {fold.toggle && <button type="button" className="btn btn-ghost btn-icon waiting-fold" aria-label="Hide Waiting on me" title="Hide Waiting on me (w)" data-shortcut-waiting-fold="" onClick={fold.toggle}>
-          <i className="ph ph-caret-double-left" aria-hidden="true" /></button>}
+        {fold.toggle && <button type="button" className="btn btn-secondary btn-icon waiting-fold" aria-label="Hide Waiting on me" title="Hide Waiting on me (w)" data-shortcut-waiting-fold="" onClick={fold.toggle}>
+          <i className="ph ph-arrow-left" aria-hidden="true" /></button>}
       </div>}
     <div className="waiting-scroll" hidden={fold.folded}>
       {loading && [0, 1].map(index => <div className="waiting-skeleton" key={index} aria-label="Loading waiting questions"><span /><span /><span /><span /></div>)}
@@ -138,7 +141,10 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
   const selection = frozen !== undefined ? item.options.findIndex(option => option.id === frozen) : defaultSelection(item.options, entry?.draft.selected_option_id);
   const ring = delivery ? '0 0 0 1px color-mix(in srgb, var(--a-warn) 60%, transparent)'
     : selected ? '0 0 0 1.5px color-mix(in srgb, var(--color-text) 45%, transparent)' : '0 0 0 1px var(--color-divider)';
-  return <div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} aria-current={selected || undefined} onClick={open}>
+  return <ItemRefs.Provider value={{ lookup: id => {
+    const target = card.session.items[id];
+    return target ? { label: shortLabel(target), status: displayStatus(card.session, target) } : null;
+  }, onOpenItem: id => revealItem({ ...card.route, item_id: id }) }}><FileRefProject.Provider value={card.route.project_id}><div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} aria-current={selected || undefined} onClick={open}>
     <div className="waiting-path">{card.path}</div>
     <Markdown className="waiting-question" text={item.question} />
     {card.ask && <Markdown className="waiting-ask" text={card.ask} />}
@@ -159,7 +165,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
     {submit.error && !delivery && <p className="waiting-error" role="alert">{submit.error}</p>}
     <div className="waiting-foot"><i className="ph ph-clock" aria-hidden="true" /><span>Waiting {card.age}{card.tag && ` · asked in ${card.tag}`}</span>
       <button type="button" className="btn btn-ghost waiting-details" onClick={open}>Details</button></div>
-  </div>;
+  </div></FileRefProject.Provider></ItemRefs.Provider>;
 }
 
 function SentRow({ row, drafts, store, open }: { readonly row: SentRowModel; readonly drafts: OwnerDraftStore; readonly store: WaitingStore; readonly open: () => void }) {

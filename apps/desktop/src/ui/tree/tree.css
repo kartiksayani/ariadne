@@ -15,12 +15,22 @@
   flex: 1;
   min-height: 0;
   padding-bottom: 40px;
+  scroll-padding-top: var(--tree-header-height, 0);
   overflow: auto;
 }
 
 .tree-rows {
   display: flex;
   flex-direction: column;
+}
+
+/* A section bounds its sticky band; the next topic pushes it away natively. */
+.tree-topic-group {
+  position: relative;
+}
+
+.tree-topic-group + .tree-topic-group {
+  margin-top: 20px;
 }
 
 /* ---------------------------------------------------------------- bars */
@@ -32,7 +42,7 @@
   gap: 6px 12px;
   padding: 6px 8px 6px 12px;
   border-radius: var(--radius-md);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
@@ -45,7 +55,7 @@
 
 .tree-session-bar > i,
 .tree-banner > i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 65%, transparent);
 }
 
@@ -98,7 +108,7 @@
 .tree-session-bar .btn,
 .tree-banner .btn {
   padding: 3px 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 /* Rename and Close/Reopen sit together at the bar's right edge. */
@@ -151,7 +161,7 @@
   border: 0;
   border-radius: 7px;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   cursor: pointer;
   color: color-mix(in srgb, var(--color-text) 74%, transparent);
   background: transparent;
@@ -169,7 +179,7 @@
 }
 
 .tree-chip i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .tree-chip-count {
@@ -186,7 +196,7 @@
   min-height: 28px;
   margin-left: auto;
   padding: 0 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .tree-banner {
@@ -223,7 +233,7 @@
   padding: 6px 8px 6px 12px;
   border: 0;
   border-radius: var(--radius-md);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   background: color-mix(in srgb, var(--color-text) 6%, transparent);
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
@@ -232,7 +242,7 @@
   padding: 6px 0;
   border: 0;
   border-radius: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 /* ---------------------------------------------------------------- rows */
@@ -269,7 +279,7 @@
 }
 
 .tree-chevron i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .tree-chevron-space {
@@ -280,10 +290,12 @@
 
 /* Topic band. */
 .tree-topic {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: 20px;
   padding: 10px 16px 10px 12px;
   border-top: 1px solid var(--color-divider);
   border-bottom: 1px solid var(--color-divider);
@@ -311,12 +323,12 @@
 }
 
 .tree-topic-name {
-  flex: 1 1 12em;
+  flex: 1 1 calc(12em / var(--text-scale));
   min-width: 0;
   padding-left: 4px;
-  font-size: 15.5px;
+  font-size: calc(15.5px * var(--text-scale));
   font-weight: 500;
-  line-height: 22px;
+  line-height: calc(22px * var(--text-scale));
   letter-spacing: -.01em;
   color: var(--color-text);
 }
@@ -333,14 +345,14 @@
   height: 22px;
   padding: 0 8px;
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
 .tree-session-chip i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .tree-topic-end {
@@ -349,32 +361,38 @@
   align-items: center;
   gap: 12px;
   margin-left: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
+/* The band's actions keep their room at all times and only fade in (as .tree-actions does on items),
+   so the name never rewraps between hover and no hover. visibility keeps them unclickable while hidden. */
 .tree-topic-actions {
-  display: none;
+  display: flex;
   gap: 2px;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity .12s;
 }
 
 .tree-topic:hover .tree-topic-actions,
 .tree-topic:focus .tree-topic-actions,
 .tree-topic:focus-within .tree-topic-actions {
-  display: flex;
+  visibility: visible;
+  opacity: 1;
 }
 
 .tree-topic-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 7px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px; /* No taller than the name's line, so the always-present actions never make the band taller. */
+  padding: 0;
   border: 0;
   border-radius: 5px;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   cursor: pointer;
   color: color-mix(in srgb, var(--color-text) 74%, transparent);
   background: transparent;
@@ -382,7 +400,7 @@
 
 .tree-topic-action i,
 .tree-count i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .tree-count {
@@ -396,12 +414,28 @@
   align-items: center;
   gap: 7px;
   padding-left: 26px;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: calc(13px * var(--text-scale));
+  line-height: calc(20px * var(--text-scale));
 }
 
 .tree-topic-line > i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.tree-topic-status > span {
+  overflow: hidden;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Reply and recovery controls scroll with the section, below its sticky band. */
+.tree-topic-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 16px 6px 12px;
+  background: var(--a-side);
 }
 
 .tree-topic-fix {
@@ -442,7 +476,7 @@
 
 .tree-prompt .btn {
   padding: 2px 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 /* Item row. */
@@ -450,9 +484,15 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding-top: 9px;
+  padding-top: 12px;
   padding-right: 14px;
-  padding-bottom: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+/* Extra room before a root keeps its descendants together without breaking guide lines. */
+.tree-item-root {
+  padding-top: 20px;
 }
 
 .tree-item:hover {
@@ -495,6 +535,14 @@
   height: 20px;
 }
 
+.tree-item-child > .tree-elbow {
+  height: 23px;
+}
+
+.tree-item-root > .tree-elbow {
+  height: 31px;
+}
+
 .tree-icon {
   position: relative;
   z-index: 1;
@@ -512,10 +560,10 @@
   gap: 3px;
 }
 
-/* Questions and outcomes keep the agent's own line breaks, in full. */
+/* The title expands with its excerpt; only text is clamped, never the badge or actions. */
 .tree-question {
-  font-size: 15px;
-  line-height: 22px;
+  font-size: calc(15px * var(--text-scale));
+  line-height: calc(22px * var(--text-scale));
   white-space: pre-line;
   overflow-wrap: anywhere;
   text-wrap: pretty;
@@ -531,8 +579,8 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 7px;
-  font-size: 13.5px;
-  line-height: 21px;
+  font-size: calc(13.5px * var(--text-scale));
+  line-height: calc(21px * var(--text-scale));
 }
 
 .tree-line-tight {
@@ -541,30 +589,30 @@
 }
 
 .tree-line > i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .tree-line > i.tree-line-small {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .tree-ask {
   display: block;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   color: var(--a-acc-text);
 }
 
 .tree-outcome {
   flex-wrap: nowrap;
   align-items: flex-start;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 84%, transparent);
 }
 
 .tree-outcome > i {
   flex: none;
   margin-top: 4px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .tree-outcome > span {
@@ -574,8 +622,7 @@
   text-wrap: pretty;
 }
 
-/* The details fold to six lines (--tree-clamp, set by ItemRow); the title above never folds.
-   Show more / Show less appears only when the text runs longer. */
+/* Titles and excerpts fold separately to two lines. Show more opens the whole row. */
 .tree-preview {
   display: flex;
   flex-direction: column;
@@ -587,17 +634,26 @@
   align-self: stretch;
 }
 
+/* Compact Markdown flows inline; expanded Markdown keeps its block structure. */
 .tree-clamp {
   display: -webkit-box;
   min-width: 0;
   overflow: hidden;
-  -webkit-line-clamp: var(--tree-clamp);
+  -webkit-line-clamp: var(--tree-clamp, 2);
   -webkit-box-orient: vertical;
 }
 
-.tree-preview[data-open] .tree-clamp {
+.tree-line > .tree-clamp {
+  flex: 1;
+}
+
+.tree-item[data-open] .tree-clamp {
   display: block;
   overflow: visible;
+}
+
+.tree-preview .md-pre {
+  font-size: 0.88em;
 }
 
 .tree-more {
@@ -606,8 +662,8 @@
   border: 0;
   border-radius: 5px;
   font: inherit;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
   cursor: pointer;
   color: var(--a-acc-text);
   background: transparent;
@@ -623,7 +679,7 @@
 
 /* The owner's message on its way: a small line under the details, never in their place. */
 .tree-delivery {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .tree-jump {
@@ -649,8 +705,8 @@
   border: 0;
   border-radius: 5px;
   font: inherit;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
   cursor: pointer;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
   background: transparent;
@@ -665,7 +721,7 @@
 }
 
 .tree-collapsed i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .tree-answer {
@@ -689,13 +745,13 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
 .tree-round i {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 /* The shortcut icons keep their room at all times and only fade in, so the text column
@@ -730,7 +786,7 @@
 }
 
 .tree-action i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .tree-topic-action:hover,
@@ -741,7 +797,7 @@
 
 .tree-id {
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
   opacity: 0;
 }
@@ -764,19 +820,19 @@
 }
 
 .tree-empty > i {
-  font-size: 34px;
+  font-size: calc(34px * var(--text-scale));
   color: var(--color-accent);
 }
 
 .tree-empty-title {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   font-weight: 500;
   letter-spacing: -.012em;
 }
 
 .tree-empty p {
   margin: 0;
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--text-scale));
   line-height: 1.6;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 66%, transparent);
@@ -787,7 +843,7 @@
   align-items: center;
   gap: 8px;
   margin-top: 6px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
@@ -800,7 +856,7 @@
 }
 
 .tree-no-match-title {
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 500;
 }
 
@@ -845,16 +901,16 @@
   align-items: center;
   gap: 8px;
   padding: 18px 40px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
 .tree-loading-text i {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 /* Last: more specific than every other tree icon rule. */
 .tree-session-bar .btn i,
 .tree-topic-line .btn i {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }

@@ -516,6 +516,8 @@ fn saved_connect_instruction_routes_real_read_and_apply_processes() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_ariadne"))
         .arg("apply")
         .args(apply.split_whitespace())
+        // The default receipt is compact; this test parses the saved receipt.
+        .arg("--full")
         .env("ARIADNE_HOME", home.path().join(".ariadne"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -19,7 +19,7 @@
 }
 
 .waiting-title {
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 500;
   letter-spacing: -0.01em;
 }
@@ -31,7 +31,7 @@
   height: 20px;
   padding: 0 6px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 500;
   color: var(--a-acc-text);
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
@@ -39,15 +39,22 @@
 
 .waiting-order {
   margin-left: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
+/* A bordered icon button like the Messages toggle, so it reads as a button before it is hovered. */
 .waiting-head > .waiting-fold {
+  flex: none;
+  box-sizing: border-box;
   width: 24px;
   height: 24px;
   margin: -4px -6px -4px -2px;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  color: var(--color-text);
+}
+
+.waiting-fold > i {
+  font-size: calc(14px * var(--text-scale));
 }
 
 /* Folded: a strip with the unfold button and the count. */
@@ -61,7 +68,7 @@
 }
 
 .waiting-unfold > i {
-  font-size: 15px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .waiting-scroll[hidden] {
@@ -97,17 +104,17 @@
 }
 
 .waiting-empty > i {
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   color: var(--st-done);
 }
 
 .waiting-empty-title {
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--text-scale));
   font-weight: 500;
 }
 
 .waiting-empty-text {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.55;
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 64%, transparent);
@@ -117,7 +124,7 @@
   margin: 0;
   padding: 8px 10px;
   border-radius: var(--radius-md);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   line-height: 1.45;
   color: color-mix(in srgb, var(--color-text) 72%, transparent);
   background: color-mix(in srgb, var(--color-text) 6%, transparent);
@@ -140,21 +147,21 @@
 }
 
 .waiting-path {
-  font-size: 12px;
-  line-height: 17px;
+  font-size: calc(12px * var(--text-scale));
+  line-height: calc(17px * var(--text-scale));
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
 .waiting-question {
-  font-size: 14.5px;
-  line-height: 21px;
+  font-size: calc(14.5px * var(--text-scale));
+  line-height: calc(21px * var(--text-scale));
   text-wrap: pretty;
 }
 
 .waiting-ask {
-  font-size: 13.5px;
-  line-height: 20px;
+  font-size: calc(13.5px * var(--text-scale));
+  line-height: calc(20px * var(--text-scale));
   color: var(--a-acc-text);
 }
 
@@ -162,15 +169,15 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 64%, transparent);
 }
 
 .waiting-context > i {
   flex: none;
   margin-top: 2px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 .waiting-context > span { text-wrap: pretty; }
 
@@ -179,11 +186,11 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 7px;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
 }
 
-.waiting-delivery > i { font-size: 13px; }
+.waiting-delivery > i { font-size: calc(13px * var(--text-scale)); }
 
 .waiting-delivery > span {
   flex: 1;
@@ -192,13 +199,13 @@
 
 .waiting-delivery-action {
   padding: 3px 10px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .waiting-error {
   margin: 0;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
   color: var(--a-warn);
 }
 
@@ -206,11 +213,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
-.waiting-foot > i { font-size: 13px; }
+.waiting-foot > i { font-size: calc(13px * var(--text-scale)); }
 
 /* The card wraps long tokens anywhere; its own button label stays whole. */
 .waiting-details {
@@ -218,7 +225,7 @@
   margin-left: auto;
   white-space: nowrap;
   padding: 2px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .waiting-sent-label {
@@ -226,7 +233,7 @@
   align-items: center;
   gap: 6px;
   padding: 8px 6px 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 500;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -256,8 +263,8 @@
   overflow: hidden;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  font-size: 13.5px;
-  line-height: 20px;
+  font-size: calc(13.5px * var(--text-scale));
+  line-height: calc(20px * var(--text-scale));
   text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 80%, transparent);
 }
@@ -266,16 +273,16 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
 }
 
-.waiting-sent-line > i { font-size: 13px; }
+.waiting-sent-line > i { font-size: calc(13px * var(--text-scale)); }
 
 .waiting-sent-what {
   overflow: hidden;
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
   color: var(--a-label);
   text-overflow: ellipsis;
   white-space: nowrap;

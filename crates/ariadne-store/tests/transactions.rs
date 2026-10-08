@@ -898,3 +898,63 @@ fn binding_host_location_is_optional_and_hand_edits_must_stay_one_bounded_line()
         other => panic!("expected a validation error, got {other:?}"),
     }
 }
+
+#[test]
+fn preview_runs_the_transaction_checks_and_never_writes() {
+    let project = ProjectDir::new();
+    let store = project.store();
+    let before = fs::read(project.live()).unwrap();
+    let preview = store
+        .preview(
+            &id(2),
+            &actor(),
+            &id(100),
+            &command("1", 100, Some(1)),
+            |session| reply(session, "1", 100, Some(1)),
+        )
+        .unwrap();
+    assert!(!preview.replayed);
+    assert_eq!(preview.receipt.revision.value(), 2);
+    assert_eq!(preview.session.revision.value(), 2);
+    assert_eq!(preview.session.items.0[&item("1")].revision.value(), 2);
+    assert!(preview.session.operation_receipts.0.contains_key(&id(100)));
+    assert_eq!(fs::read(project.live()).unwrap(), before);
+    assert!(!project.backup().exists());
+
+    // A callback refusal and a stale revision surface exactly as in `transact`.
+    let refused: Result<_, TransactionError<&str>> = store.preview(
+        &id(2),
+        &actor(),
+        &id(101),
+        &command("1", 101, Some(9)),
+        |session| reply(session, "1", 101, Some(9)),
+    );
+    assert!(matches!(refused, Err(TransactionError::Command(_))));
+    assert_eq!(fs::read(project.live()).unwrap(), before);
+
+    // The same operation committed for real is then a replay: callback not run.
+    let saved = transact(&store, "1", 100, Some(1)).unwrap();
+    let committed = fs::read(project.live()).unwrap();
+    let replay: Result<_, TransactionError<()>> = store.preview(
+        &id(2),
+        &actor(),
+        &id(100),
+        &command("1", 100, Some(1)),
+        |_| panic!("replay must not run callback"),
+    );
+    let replay = replay.unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.receipt, saved);
+    assert_eq!(fs::read(project.live()).unwrap(), committed);
+    let reused: Result<_, TransactionError<&str>> = store.preview(
+        &id(2),
+        &actor(),
+        &id(100),
+        &command("1", 999, Some(1)),
+        |session| reply(session, "1", 999, Some(1)),
+    );
+    assert!(matches!(
+        reused,
+        Err(TransactionError::Store(StoreError::OperationReused))
+    ));
+}

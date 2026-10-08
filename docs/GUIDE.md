@@ -53,9 +53,10 @@ cd ariadne-*/
 `install.sh` does these steps in order:
 
 1. It checks that `python3` is 3.11 or newer, and stops with a message if not.
-2. It stops if this version is already installed (the app stays 0.1.0 across
-   alphas). Uninstall the existing install first with
-   `python3 install.py uninstall`; your project history is kept.
+2. If this version is already installed (the app stays 0.1.0 across alphas), even
+   partly, the installer says so and replaces it; your project history is kept. If
+   the old install holds files you edited or that are not Ariadne's, it leaves them
+   and tells you which folder to move aside.
 3. It prints "This download is unsigned; removing macOS's download quarantine
    mark from this folder so it can run. Only install packages you trust." and
    clears the quarantine mark from the package folder.
@@ -270,10 +271,15 @@ findings as structured items through `ariadne apply`, write full replies on the
 item rather than only in the terminal, choose item statuses deliberately, and
 finish every input Ariadne sends them with exactly one explicit result. Agents
 must never guess which session they belong to, and never repeat work because a
-result was missing. The full text is in [integrations/rules](../integrations/rules/):
-[claude.md](../integrations/rules/claude.md) and [codex.md](../integrations/rules/codex.md).
-They are generated from [source.md](../integrations/rules/source.md); do not edit
-the generated files.
+result was missing. The authored text is in [integrations/rules](../integrations/rules/):
+[skill.md](../integrations/rules/skill.md) and [source.md](../integrations/rules/source.md)
+make each agent's `SKILL.md`, which `cargo xtask gen-rules` writes into the Claude
+plugin and the Codex skill folder; do not edit the generated files. The skill loads
+the rest on demand from beside it: inputs, errors, reconnecting and one file per kind
+of work (`inputs.md`, `errors.md`, `reconnect.md`, `report.md`, `review.md`,
+`checklist.md`, `follow-up.md`). If the Codex skill link was skipped at setup, the
+setup instruction points Codex at the installed skill's `SKILL.md`, whose folder
+holds those files.
 
 ## Recovery
 

@@ -59,9 +59,18 @@ app, or an `architecture` that differs from this Mac. It then calls the same
 `install()` with the package directory as read-only input and records the
 installing Mac's facts plus the package's `built` facts in `install.json`.
 Uninstall is unchanged: `python3 install.py uninstall` from the package directory.
-`install.sh` first stops with a message if `~/.local/share/ariadne/versions/<app
-version>` already exists (the app stays 0.1.0 across alphas, so uninstall first;
-project history is kept). Quit the desktop app and agent sessions before upgrading
+If `~/.local/share/ariadne/versions/<app version>` already exists (the app stays
+0.1.0 across alphas), `install.py` prints "Replacing the Ariadne 0.1.0 already
+installed (your projects and history are kept).", removes what Ariadne owns, then installs.
+Under one lock hold, everything is checked before anything is removed: the new package
+(helper `--version`, resources, a foreign app copy or links), then every installed version
+(each must hold only unchanged files Ariadne created, or have them missing). If any check
+fails nothing is touched; for a foreign or edited version folder the install stops with one
+sentence naming the folder to move aside, and the rerun then succeeds (a `current` pointer
+whose folder is gone counts as no install). If more than one version is removed, the
+message names the others. A partial install (for example `bin/` and the app gone) counts:
+anything the receipt owns that is already missing counts as removed, and the
+integration-inventory cross-check is skipped only when the helper itself is gone. Quit the desktop app and agent sessions before upgrading
 from alpha.2 or earlier: the first open migrates each project's store out of the
 repo and parks the old copy at `~/.ariadne/projects/<id>.legacy-<ts>` for you to
 delete. If `xattr` exists it then prints "This download is

@@ -1,323 +1,137 @@
-# Ariadne shared agent rules
-
-Ariadne is where the owner reads, answers and decides on your work. While this
-session is connected, every result the owner should read goes there as topics
-and items: questions, and also reports, reviews, plans, findings, the decisions
-you took and your progress. Ordinary terminal prose does not update Ariadne.
-Use plain sentences.
-
 ## Commands
 
-Below, `ariadne` stands for the exact CLI invocation named in the setup
-instruction. Run it verbatim: your tool shell may not inherit environment
-variables or find the helper on PATH, so keep any `ARIADNE_HOME=...` prefix and
-the absolute helper path. The CLI and the MCP tools are the only way to read or
-change Ariadne state. Never open, edit or create files under any `.ariadne/`
-directory or `~/.ariadne`: a direct edit skips revisions, receipts and validation
-and can make the app refuse the session. If an `ariadne` command fails, fix the
-request or tell the owner; do not work around it in the files.
+`ariadne` means the exact connect/setup command: keep its `ARIADNE_HOME=...`
+prefix and absolute path; your shell may lack them. Use only the CLI for Ariadne
+state. Never open, edit or create `.ariadne/` or `~/.ariadne` files: bypassing
+revisions and validation can make the session unreadable.
 
-Use only the binding and generation supplied by setup or the dispatched input.
-Never infer a session from cwd, filenames, a previous conversation or a foreign
-item reference.
+- `ariadne read --binding B --generation G --view items|topics|messages|inputs --json`:
+  20 entries a page, `--limit N` up to 100. `--view items --topic <id|number>`
+  reads one topic; add `--archived` for an archived one.
+- `ariadne item messages|rounds --binding B --generation G --item ID --json`:
+  one item's full history.
+- `ariadne apply --binding B --generation G --json-stdin --json`: one request on
+  stdin (use a quoted heredoc). `--dry-run` validates without committing. The
+  receipt lists `op_id`, and each changed topic/item's `id`, `short` label,
+  new `revision` and `created` flag (topics also have a `number`).
 
-Read with `ariadne read --binding B --generation G --view items|topics|messages|inputs --json`
-and `ariadne item messages|rounds --binding B --generation G --item ID --json`.
-A page holds 20 entries unless you pass `--limit N` (at most 100).
-Context is a pull, never pushed with an input: when your context is fresh (just
-connected, after `/clear` or `/compact`, or you do not recognise an item ID), run
-`ariadne read` once to rebuild it, and read one item's full history with
-`ariadne item messages|rounds` when you need it.
-Publish with `ariadne apply --binding B --generation G --json-stdin --json`,
-passing one complete ApplyRequest on stdin (use a quoted heredoc). The same
-operations exist as MCP tools `session_read`, `item_messages`, `item_rounds` and
-`apply` only if the owner configured them; the CLI is the baseline. A malformed
-CLI request fails with exit 2 and names the offending field (MCP returns only a
-generic message).
+An unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to deliberately file the identical request again.
 
-## Requests
+Ariadne never pushes context: read the topics and items and reuse the ones that
+fit.
 
-Each new request gets a fresh lowercase UUIDv4 `op_id`; for uncertainty see the
-error table. Only a saved receipt proves commit. `expected_item_revisions` must
-give the current revision of every existing item the request touches (reply,
-status, ask, edit, replace, close a round, or a new child's parent);
-`expected_topic_revisions` does the same for topics. Only item and topic
-revisions are guarded. The saved receipt lists `allocated_refs` (the ID each
-`ref` received) and the new `item_revisions`; use them for your next request
-instead of reading again.
+## Request
 
-Words and their wire names: Activity = the request `summary`; Reply = op `reply`
-(full text of an item reply, with the useful reasoning and outcome; an Activity is
-only a concise shared summary, never a substitute); Ask round = op `item.ask` on
-the existing item (another question about the same decision); Child = `item.add`
-with `parent` (a different decision or point). Items form a tree: an item may have
-any number of children, and a child may have children of its own. Each item is
-also a thread: your replies, each ask round, the owner's answer and your reply to
-it are retained in order and shown together in the app, so continue a
-conversation on the item it belongs to; a new point the owner could decide or
-comment on by itself is a child of that item, not a new top-level item. Do not manufacture a parent or round relationship from proximity.
+One JSON object on stdin. Only `operations` is required.
 
-Statuses: `open` and `in_progress` need `reason` (only in `item.status`;
-`item.add` has no `reason`) and no outcome/why; `decided`, `done`, `dropped` need
-`outcome` and `why`; `replaced` only through `item.replace`; `waiting_on_me` only
-through `item.ask` or `item.add` (owner `{"kind":"me"}`). Owners: `{"kind":"me"}`,
-`{"kind":"agent","binding_id":B}`, `{"kind":"other","name":"N"}`. `item.ask` sets
-the item `waiting_on_me` and needs `recipient_binding_id` = your own binding ID.
-Item types: question, decision, finding, task, explanation. Preserve closed
-outcome history.
+| Field | Meaning |
+|---|---|
+| `op_id` | Optional: derived from binding and request, independent of generation. Explicit: lowercase UUIDv4 (`errors.md`) |
+| `expected_item_revisions`, `expected_topic_revisions` | `{"1":4}`: the current revision of each existing item or topic the request replies to, edits, asks, closes or adds a child under. Not needed for what the same request creates |
+| `summary` | Optional; one short line shown in the timeline of every item touched |
+| `source_input_id`, `attempt_id`, `input_result` | Optional; only to answer a dispatched input (`inputs.md`) |
 
-References: `{"ref":"a"}` names an earlier `ref` (letter first, letters, digits or
-`_`, at most 32) in the same request; `{"id":"1.2"}` is an existing item, or an
-existing UUID for a topic or message. Every field shown in the examples is required,
-except `short`; use `null` when unused.
+Reuse receipt revisions for your next request. An item's `id` is its number, used
+in `{"id":...}`. Omit optional operation fields.
 
-Short labels. Give every topic (`topic.add`) and item (`item.add`) you create a
-`short` label: a 2-4 word noun phrase, one line, at most 40 characters, such as
-"SDK cache PR" or "Fallback merge test". The app shows it as the graph node title
-and in breadcrumbs, so keep it stable across updates. In `item.edit`, leave
-`short` (or `note`) out of the patch to keep it, send a string to replace it (for
-example to label an older item that has none) and `null` only to clear it.
+Refer to another item only as a markdown link `[short label](item:<item id>)`,
+for example `[cache choice](item:3.2)`; never use a bare item number such as
+"item 3.2" or "#3.2". The app turns `item:` links into clickable navigation.
+
+| `op` | Required | Optional |
+|---|---|---|
+| `topic.add` | `name` | `short`, `ref` |
+| `item.add` | `question`, `type`, `topic` | `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
+| `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `short` |
+| `item.ask` | `item`, `ask` | `options` |
+| `item.status` | `item`, `status` | `outcome`, `why`, `reason` |
+| `item.replace` | `item`, `replacement`, `outcome`, `why` | |
+| `reply` | `item`, `text` | `ref`, `round_id` |
+| `round.close` | `round_id` | |
+
+- Defaults. `topic`: the request's only `topic.add` (a child takes its parent's).
+  `status`: `waiting_on_me` with an `ask`, else `open`. `owner`: you; `{"kind":"me"}`
+  with an `ask`; others are `{"kind":"other","name":"N"}`. Option `id`: 1, 2, ...
+  `ref`: r1, r2, ... by position; name one only to reference it later. An ask's
+  answer comes back to you.
+- `children: [...]` on `item.add` holds nested `item.add` objects; their parent
+  and topic are wired automatically.
+- References: `{"ref":"a"}` names an earlier `ref` of this request (a letter, then
+  letters, digits or `_`, at most 32); `{"id":"1.2"}` is an existing item, or a
+  UUID for a topic or message. In `item.edit`, omit `short` or `note` to keep it,
+  send a string to replace it, `null` to clear it.
+- Types: question, decision, finding, task, explanation. Statuses: `open` and
+  `in_progress` take a `reason` (only in `item.status`); `decided`, `done` and
+  `dropped` need `outcome` and `why`; `replaced` only through `item.replace`;
+  `waiting_on_me` only through an `ask`.
+- Every topic and item you create gets a `short` label: a 2-4 word noun phrase of
+  at most 40 characters, such as "SDK cache PR". It is the tree node title; keep
+  it stable.
+- Limits: `question`, `ask`, `note`, `outcome`, `why` at most 4096 bytes, `reply`
+  64 KiB, 100 operations, 12 options and 32 links per item. Text renders as
+  markdown; topic names, `short` labels and option labels are plain text.
 
 ## Shape the work
 
-Whenever this session is connected, or the owner says "use Ariadne", organise
-the work in Ariadne yourself; the owner never names topics or items. At the
-start, read the existing topics and items and reuse the ones that fit.
+When connected, or when the owner says "use Ariadne", organise the work there
+yourself; the owner never names topics or items.
 
-- **Route.** Anything the owner should read that is longer than a few lines or
-  has more than one point goes into Ariadne, filed as you get it; do not wait for
-  a dispatched input. File every finding, even one that needs no decision: the
-  owner may want to comment on it. Your chat reply is then 1-3 lines that point
-  at the topic, such as "Posted to Ariadne: load test round 1, 4 choices waiting".
-  Never put the report in chat as well.
-- **Topic.** One topic per piece of work or concern (a PR, a test run, an
-  incident, a plan), named for what and which object; never one per step. Topics
-  are flat, and the owner can reply to a whole topic.
-- **Tree.** Each section is a top-level item and each point is a child item;
-  nest deeper when a point has sub-points. An item is one thing the owner might
-  decide, comment on or track, so the same thing mentioned in two sections is
-  one item. Items show in the order you add them: first a one-line summary item
-  with the result and what waits on the owner, then any decision about the whole
-  work, then the sections in reading order. An ask about one point sits on that
-  point: "Waiting on me" collects asks wherever they are, and a collapsed parent
-  shows how many wait below it.
-- **Every write, not only the first.** Shape an answer to a follow-up, reply,
-  note, topic reply or `bring` the way you shape a first report. Split it into
-  points and ask of each: must the owner act, does it repeat another point, would
-  they comment on it alone, what does it belong to. Points that stand alone become
-  child items; one long reply that holds several is a report in the wrong place.
-- **Type and status** say what the owner has to do. There is no FYI flag:
-  `done` is FYI, and only an item that needs the owner waits on them.
+- **File as you go.** At the start of a piece of work, open its topic and an
+  `in_progress` summary item. Update items in place as the work moves
+  (`item.edit` note, `item.status`, `reply`); close each when it finishes. Do not
+  file everything at the end, and never post the same report twice.
+- **Route.** Results longer than a few lines or with multiple points go into
+  Ariadne, findings included. Chat is then 1-3 lines pointing at the topic.
+  Explicit owner instructions beat these defaults.
+- **Topic.** One per piece of work or concern (a PR, a test run, an incident, a
+  plan), named for what and which object; never one per step.
+- **Tree.** First a one-line summary item with the result and what waits on the
+  owner, then any decision about the whole work, then sections in reading order;
+  each point is a child, nested deeper when it has sub-points. One item is one
+  thing the owner might decide, comment on or track; the same thing in two
+  sections is one item. An ask sits on the point it is about. Apply the same
+  shaping to every later write, not only the first.
+- **Type and status** say what the owner has to do; `done` is FYI.
 
 | The point is | Type | Status |
 |---|---|---|
-| A decision only the owner can make | decision or question | `open`, then `item.ask` with options |
-| A question that does not block you | question | `open`; the owner can bring it up |
-| A decision you already took | decision | `decided`, so the owner can overturn it |
-| Something you established (FYI) | finding | `done` |
+| A decision only the owner can make | decision or question | `waiting_on_me`: set `ask` |
+| A question that does not block you | question | `open` |
+| A decision you already took | decision | `decided` |
+| Something you established | finding | `done` |
 | Something the owner should understand | explanation | `done` |
 | Work you are doing now | task | `in_progress`, with a `note` |
-| Work for later or for someone else | task | `open`, owner `other` naming who |
+| Work for later or someone else | task | `open`, owner `other` |
 | Something you will not do | any | `dropped` |
 
-- **Fields.** Put each part of a point where the app shows it. A closed item
-  carries its own content; add a `reply` only to answer the owner, to continue a
-  conversation, or when a point needs more than `outcome` and `why` hold.
-
-| Field | The app shows it | Put there |
-|---|---|---|
-| question | As the item heading | The point, in one sentence |
-| short | As the tree node title | A 2-4 word label |
-| ask, options | In the answer box, while waiting | What the owner needs to choose, and the choices |
-| outcome | As the outcome, on closed items | The result; tables are fine |
-| why | Under the outcome, on closed items | Evidence and reasoning |
-| note | As a progress line, only while in progress | What you are doing now |
-| links | As a link list | PRs, files and docs (kinds `pr`, `file`, `doc`) |
-| reply | In the item timeline | Answers, conversation, long detail |
-| summary | In the timeline of every item the request touches | One short line |
-
-- **Ask.** One decision per item. Add it `open` with owner `{"kind":"agent",…}`,
-  then `item.ask` on its `{"ref":…}` in the same request: `item.ask` flips it to
-  `waiting_on_me` owned by `me` and opens exactly one round (adding it as
-  `waiting_on_me` would open a second; items added in the request skip the
-  revision guard). Give options whenever you can, each with a `consequence`, at
-  most one `recommended`; `"options":[]` leaves the owner a free-text answer. A
-  choice with several parts is a parent item with one child ask per part. A
-  question you would write in prose ("if you want X, …") is an ask, never a
-  sentence in the terminal or in a `why`. Another question about the same
-  decision is a new ask round on that item, not a new item.
-- **Keep it alive.** Mark an item `in_progress` when you start it and close it
-  `done`, `decided` or `dropped` with outcome and why when you finish. As work
-  continues, update the same items (`item.status`, `item.edit`, a `reply`, or
-  `item.replace` for a superseded result); never post the same report twice.
-- **Spend few tokens.** File a finished result in one request: a child names a
-  parent made in the same request with `"parent":{"ref":"a"}`. Past the limit of
-  100 operations, send one request per section and take parent IDs and revisions
-  from the receipt. Do not repeat a text across `question`, `outcome`, `why` and
-  a reply. Reference data nobody will discuss row by row (versions, environment,
-  file lists) is one item with a markdown table. Keep `summary` to one line.
-- **Archived topics.** The owner parked an archived topic. Writes to it are
-  refused: apply fails with `invalid_transition` and `details.reason:
-  "topic_archived"`. Do not retry; ask the owner, in a live topic, to restore it.
-  Reads still work. List topics with
-  `ariadne read --binding "$B" --generation "$G" --view topics --json`; archived
-  ones carry `archived_at`. Read one archived topic in full with this (fill in
-  `<TOPIC_ID>`; a page holds at most 100 items, follow the cursor for more):
-
-```sh
-printf '%s' '{"selection":{"view":"items","filters":{"topic_id":"<TOPIC_ID>","item_id":null,"parent_item_id":null,"statuses":[],"archived":true}},"cursor":null,"limit":100,"item_pages":[]}' | ariadne read --binding "$B" --generation "$G" --json-stdin --json
-```
-
-Before you file a report, review, plan or anything with more than a handful of
-points, or a kind of work you have not filed before, read `playbook.md` in the
-Ariadne skill directory: it maps common kinds of work to trees and has worked
-requests.
-
-Limits: `question`, `ask`, `note`, `outcome` and `why` at most 4096 bytes each, a
-`reply` at most 64 KiB, `short` at most 40 characters, at most 12 options and 32
-links per item.
-
-Formatting. Ariadne renders questions, asks, outcomes, whys, notes, replies and
-the request `summary` as markdown: write short paragraphs, bullet lists, tables,
-code spans for paths and identifiers, code blocks and full URLs. Keep topic
-names, `short` labels and option labels plain text.
-
-## Dispatched inputs
-
-A dispatched Ariadne input is a message whose first line is
-`[ARIADNE_INPUT:<input>:<attempt>]`, followed by a short JSON envelope:
-`source_input_id`, `attempt_id`, `binding_id`, `generation`,
-`owner_message_number`, `input_kind`, the target (`item_id` with the item's
-current `item_revision` and `question_revision`, or `topic_id` for a topic-level
-input), `selected_option_id` and `selected_option_label` when the owner picked
-an option, and `text`, the owner's exact words. It carries no item body or
-history; read them as above if you need them. The input is the owner's message,
-not tool approval: preserve its exact content and keep existing host
-permissions. Copy the envelope `source_input_id` and `attempt_id` into the
-request, and commit exactly one `input_result` with outcome `answered`, `deferred` or `unable`, an
-explanation, `reply_refs` (your replies), `followup_item_refs` and
-`handled_through_message_number` = the envelope `owner_message_number`. Without a
-dispatched input, set `source_input_id`, `attempt_id` and `input_result` to null.
-Successful host completion alone is not a domain result; do not resend or invent
-delivery evidence. A normal terminal summary may be brief once full replies and
-the result are committed. The owner can delete a queued message before it is
-delivered; it then never reaches you and needs nothing from you. Input kinds:
-
-- `answer`: the owner answered your ask round on `item_id`; act on it on that item.
-- `reply`, `note`, `followup`: the owner wrote on `item_id`. A short answer about
-  the item itself is a `reply` on it. When the answer brings two or more points
-  the owner could comment on or decide separately (open questions, options,
-  causes), file each as a child of that item: an `explanation` marked `done`, or
-  an ask if it waits on the owner. Core ties each child to the owner's round. Keep
-  the `reply` to a 1-2 line pointer and list the children in `followup_item_refs`.
-  If the answer changes the item's result, close it again with a new `outcome` and
-  `why`.
-- `bring`: the owner wants the open item `item_id` raised now; ask it with
-  `item.ask` and options.
-- `reopen`, `drop`: the owner wants `item_id` reopened or dropped; do it with a
-  reply that says why.
-- `continue`: the owner continued earlier work into `topic_id`; `text` is the
-  handoff summary. Read that topic's items before working.
-- `topic_reply`: the owner's instruction for the whole topic `topic_id` (for
-  example "approve the PR"). Do it within that topic, close the asks it settles
-  with `item.status` (the outcome says what you did), and finish with one
-  `input_result` that says what you did; `reply_refs` and `followup_item_refs`
-  may be empty.
-- `removed`: the owner removed the items and topics in `removed.refs`. Stop all
-  work on them, never mention, ask about or recreate them, and do not touch files
-  because of it. Acknowledge with no operations and outcome `answered` with empty
-  `reply_refs` and `followup_item_refs`.
-
-An envelope with `"purpose":"result_repair"` is a result-only repair turn for
-`repair_for_attempt_id`: the earlier attempt may already have effects. Inspect
-`original_message_ids`, `affected_item_ids` and `original_domain_result` through
-the read commands, do not repeat the original action or its mutations, and
-publish only the missing `input_result` for this new `attempt_id`, citing the
-verified original replies and children.
+- **Fields.** `question`: one-sentence heading; `ask` and `options`: answer box;
+  `outcome` and `why`: closed result and evidence; `note`: progress line;
+  `links`: `pr`, `file` or `doc` targets; `reply`: owner answer or long detail.
+  Never repeat text across them.
+- **Ask.** One decision per item: set `ask` (and `options`) on the `item.add`; it
+  starts `waiting_on_me`, owned by the owner, with one round. Give options with a
+  `label` and a `consequence` each and at most one `recommended`; no `options`
+  leaves a free-text answer. A question you would write in prose is an ask, never
+  a sentence in chat. `item.ask` asks on an item that already exists, and
+  another question on the same decision is a new ask round on that item.
+- **Proposals** (comments to post, fixes to apply): one child each with its own
+  `ask` and options. The parent is a summary with no ask. Never file them `done`
+  under one blanket ask on the parent.
+- **Spend few tokens.** File a result in one request, children nested with
+  `children`. Data nobody discusses row by row is one item with a table.
 
 ## Examples
 
-UUIDs ending in small numbers are placeholders; item `1`, topic `...0005`,
-binding `...0003`, input `...0010`, attempt `...0011`.
+[Review summary](item:1) below is a placeholder.
 
-Reply, decide, answer the input:
-
-```json
-{"op_id":"00000000-0000-4000-8000-000000000101","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":4},"expected_topic_revisions":{},"summary":"Answered item 1","operations":[{"op":"reply","ref":"r1","item":{"id":"1"},"text":"Full answer with reasoning.","round_id":null},{"op":"item.status","item":{"id":"1"},"status":"decided","outcome":"Use X","why":"Because Y","reason":null}],"input_result":{"outcome":"answered","explanation":"Replied and decided.","reply_refs":[{"ref":"r1"}],"followup_item_refs":[],"handled_through_message_number":7}}
-```
-
-Add an item and a child of existing item 1, defer the input:
+Open a topic with an in-progress summary item and a finding under it:
 
 ```json
-{"op_id":"00000000-0000-4000-8000-000000000102","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":4},"expected_topic_revisions":{},"summary":"Recorded follow-ups","operations":[{"op":"item.add","ref":"a","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":null,"question":"Should we migrate?","short":"Migration decision","type":"decision","status":"open","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"item.add","ref":"b","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":{"id":"1"},"question":"Who reviews it?","short":"Migration reviewer","type":"task","status":"open","owner":{"kind":"other","name":"Alice"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"reply","ref":"r1","item":{"ref":"a"},"text":"Recorded for later.","round_id":null}],"input_result":{"outcome":"deferred","explanation":"Recorded follow-up items.","reply_refs":[{"ref":"r1"}],"followup_item_refs":[{"ref":"a"},{"ref":"b"}],"handled_through_message_number":7}}
+{"summary":"Started the retry review","operations":[{"op":"topic.add","name":"Review: PR #812 retry backoff","short":"PR #812 review"},{"op":"item.add","question":"Reviewing PR #812; nothing concluded yet","short":"Review summary","type":"task","status":"in_progress","note":"Reading the diff","children":[{"question":"Backoff has no jitter","short":"No jitter","type":"finding","status":"done","outcome":"Clients retry in lockstep","why":"The delay is fixed at 2s."}]}]}
 ```
 
-Ask the owner a question on item 1 (new round):
+Later, finish [review summary](item:1) using receipt revision 3:
 
 ```json
-{"op_id":"00000000-0000-4000-8000-000000000103","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":4},"expected_topic_revisions":{},"summary":"Asked which option","operations":[{"op":"item.ask","item":{"id":"1"},"ask":"Which option?","options":[{"id":"x","label":"X","consequence":"Faster","recommended":true}],"recipient_binding_id":"00000000-0000-4000-8000-000000000003"},{"op":"reply","ref":"r1","item":{"id":"1"},"text":"Blocked on the owner's choice.","round_id":null}],"input_result":{"outcome":"answered","explanation":"Asked the owner.","reply_refs":[{"ref":"r1"}],"followup_item_refs":[],"handled_through_message_number":7}}
+{"expected_item_revisions":{"1":3},"operations":[{"op":"item.status","item":{"id":"1"},"status":"done","outcome":"PR #812 needs one fix","why":"See [no jitter](item:1.1)."}]}
 ```
-
-Cannot do the work (no replies to cite, so `reply_refs` is empty):
-
-```json
-{"op_id":"00000000-0000-4000-8000-000000000104","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":{"outcome":"unable","explanation":"Cannot run the tests here.","reply_refs":[],"followup_item_refs":[],"handled_through_message_number":7}}
-```
-
-Acknowledge a `removed` input (no operations, no replies):
-
-```json
-{"op_id":"00000000-0000-4000-8000-000000000108","source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":{"outcome":"answered","explanation":"Stopped work on the removed items.","reply_refs":[],"followup_item_refs":[],"handled_through_message_number":7}}
-```
-
-No dispatched input: label an older item, start it, then close an earlier round:
-
-```json
-{"op_id":"00000000-0000-4000-8000-000000000105","source_input_id":null,"attempt_id":null,"expected_item_revisions":{"2":3},"expected_topic_revisions":{},"summary":"Started item 2","operations":[{"op":"item.edit","item":{"id":"2"},"patch":{"question":null,"type":null,"links":null,"short":"Retry backoff"}},{"op":"item.status","item":{"id":"2"},"status":"in_progress","outcome":null,"why":null,"reason":"Started work"},{"op":"round.close","round_id":"00000000-0000-4000-8000-000000000020"}],"input_result":null}
-```
-
-No dispatched input: create a topic and file a closed finding in it (the item
-carries its content, so it needs no reply):
-
-```json
-{"op_id":"00000000-0000-4000-8000-000000000106","source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"Filed a security finding","operations":[{"op":"topic.add","ref":"t","name":"Security","short":"Security"},{"op":"item.add","ref":"f","topic":{"ref":"t"},"parent":null,"question":"The retry path logged the bearer token","short":"Logged bearer token","type":"finding","status":"done","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":[{"kind":"file","label":"src/retry.rs","target":"src/retry.rs"}],"outcome":"Redacted: the token no longer reaches the log","why":"The retry path logged the full request, bearer token included, at error level. It now logs the request without the `Authorization` header.","replaced_by":null,"source_round_id":null}],"input_result":null}
-```
-
-No dispatched input: file a question only the owner can answer (add, then ask on the new ref, one round):
-
-```json
-{"op_id":"00000000-0000-4000-8000-000000000107","source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"Asked which database","operations":[{"op":"item.add","ref":"q","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":null,"question":"Which database should we use?","short":"Database choice","type":"question","status":"open","owner":{"kind":"agent","binding_id":"00000000-0000-4000-8000-000000000003"},"ask":null,"options":null,"note":null,"links":null,"outcome":null,"why":null,"replaced_by":null,"source_round_id":null},{"op":"item.ask","item":{"ref":"q"},"ask":"Which database should we use?","options":[{"id":"pg","label":"Postgres","consequence":"Needs a server","recommended":true},{"id":"sqlite","label":"SQLite","consequence":"Single file, no concurrency","recommended":false}],"recipient_binding_id":"00000000-0000-4000-8000-000000000003"},{"op":"reply","ref":"r1","item":{"ref":"q"},"text":"I cannot choose the storage engine without your deployment constraints; both options work for the current schema.","round_id":null}],"input_result":null}
-```
-
-## Errors
-
-Exit 2 (`invalid_argument`, `invalid_ref`): fix the named field and send a
-corrected request with a new `op_id`. Exit 3 conflicts (`revision_conflict`,
-`invalid_transition`, `binding_mismatch`, `operation_reused`): reread the items,
-rebuild with current revisions and a new `op_id`, except where a code below says
-otherwise. Specific codes:
-
-| Code | Exit | Do |
-|---|---|---|
-| `stale_generation` | 3 | The generation is no longer current. If this conversation holds a newer Ariadne connection note, setup instruction or `/ariadne-connect` output with a different generation, rebuild the request with its binding and generation and a new `op_id`. Otherwise stop writing to Ariadne; ask the owner for the current setup instruction or a fresh `/ariadne-connect`. Never guess one. |
-| `invalid_transition` with `details.reason: "topic_archived"` | 3 | The owner parked this topic. Do not retry or rebuild. Ask the owner, in a live topic, to restore it. |
-| `attempt_sealed` | 3 | This input/attempt is closed. Do not retry or invent another attempt; tell the owner. |
-| `result_already_committed` | 3 | The result is already saved. Send nothing more for this attempt; only an exact replay is valid. |
-| `commit_uncertain`, `store_busy`, `io_error`, or no reply at all (timeout, killed call) | 4 | The save may have happened. Replay the SAME bytes with the SAME `op_id`, at most 3 times, never a new `op_id`. If there is still no receipt, stop and tell the owner; uncertain delivery stays visible and nothing is resent automatically. |
-| any other exit 4 (e.g. `capacity_exceeded`, `host_unreachable`) | 4 | Stop and tell the owner; do not retry in a loop. |
-| `unsupported`, `future_schema` | 5 | Stop and tell the owner. |
-
-Never resend the owner's message, re-run completed work (including after a
-retry), scrape a transcript or infer non-delivery from missing output, presence,
-a timeout or a failed persistence receipt.
-
-## Attaching a fresh conversation
-
-When the owner explicitly attaches a fresh host conversation to an existing
-Ariadne session, run `ariadne read` once for its recorded topics, items, current
-questions/options, answers and outcomes, and read an item's full history with
-`ariadne item messages|rounds` when you work on it. Reuse existing items and
-respect cancelled/skipped inputs and closed or superseded history. This is
-structured context, not a transfer of the prior host transcript, private memory
-or authority over an old attempt. Use the exact routing IDs returned by the saved
-setup receipt or `/ariadne-connect`; attachment does not itself dispatch work.

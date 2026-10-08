@@ -17,7 +17,7 @@ import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { AnswerControl } from '../answer/AnswerControl';
 import type { PendingSubmission } from '../answer/useSubmit';
 import { notices as noticeStore } from '../pages/notices';
-import { CHIPS, collapsedNote, oldestWaiting, parentKey, sessionBar, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
+import { chipsOf, collapsedNote, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
 import { TopicReply } from '../answer/TopicReply';
@@ -28,6 +28,9 @@ import { Banner, SessionBar } from './SessionBar';
 import { saveSessionLabel } from '../shared/SessionRename';
 import { FilterBar } from './FilterBar';
 import { useLifecycle } from './Lifecycle';
+import { ItemRefs } from '../shared/MarkdownText';
+import { shortLabel } from '../shared/short';
+import { displayStatus } from '../../selectors/waiting/replied';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
 import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/ContinueTopicDialog';
@@ -46,6 +49,8 @@ export interface TreeViewProps {
   readonly query: string;
   /** An item revealed from a link or the waiting panel; null once dismissed. */
   readonly reveal: RevealedItem | null;
+  /** The latest Back/Forward reveal; retained alongside ordinary external reveals. */
+  readonly historyReveal?: RevealedItem | null;
   readonly selectedId: string | null;
   readonly detailOpen: boolean;
   readonly railOpen: boolean;
@@ -63,7 +68,7 @@ export interface TreeViewProps {
   readonly onDismissReveal: () => void;
   /** "Resume filtered view": drop the reveal and close its detail. */
   readonly onResume: () => void;
-  readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
+  readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onClearFilters: () => void;
   readonly onShowArchive: () => void;
   /** Called instead of sending when the agent is not running; without it the send queues. */
@@ -111,8 +116,6 @@ export function TreeView(props: TreeViewProps) {
   const lifecycle = useLifecycle(actions);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const mounted = useRef(true), request = useRef(0);
-  /** What the owner just opened from this tree (click or Enter): that reveal, echoed back as a prop, must not scroll. */
-  const opened = useRef<RevealedItem | null>(null);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
   // Unmounting or swapping the rows for the graph leaves no row to fire mouseleave.
   const graphShown = !!graph;
@@ -130,6 +133,14 @@ export function TreeView(props: TreeViewProps) {
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, minute, presence);
   const rows = useMemo(() => model?.rows ?? [], [model]);
+  const sections = useMemo(() => {
+    const groups: { topic: Extract<Row, { kind: 'topic' }>; items: ItemRowModel[] }[] = [];
+    for (const row of rows) {
+      if (row.kind === 'topic') groups.push({ topic: row, items: [] });
+      else groups.at(-1)?.items.push(row);
+    }
+    return groups;
+  }, [rows]);
   const latest = useRef({ view, preferences, rows, session, folds });
   latest.current = { view, preferences, rows, session, folds };
 
@@ -144,14 +155,15 @@ export function TreeView(props: TreeViewProps) {
     change(next);
     return navigation.saveSessionView(next, revision.revision);
   };
-  const select = (id: string) => {
+  const clickedReveal = useRef<RevealedItem | null>(null);
+  const select = (id: string, fromRow = true) => {
     if (busy) return;
     const call = ++request.current;
     setFocusKey(id);
     void navigation.routes.revealItem({ ...route, item_id: id }).then(result => {
       if (!mounted.current || call !== request.current || !result) return;
-      // The owner is already looking at this row: opening it must not move the tree.
-      opened.current = result;
+      // Opening the clicked row holds still; a preview link reveals a different row.
+      clickedReveal.current = fromRow ? result : null;
       onSelected(result);
       if (result.kind === 'item' && latest.current.view?.selected_item_id !== id) void saveView(next => { next.selected_item_id = id; });
     }).catch((error: unknown) => {
@@ -179,7 +191,7 @@ export function TreeView(props: TreeViewProps) {
   };
   const setChip = (chip: Chip) => {
     onDismissReveal();
-    void saveView(next => { next.filters.statuses = [...CHIPS.find(value => value.chip === chip)!.statuses]; });
+    void saveView(next => { next.filters.statuses = toggleChip(next.filters.statuses, chip); });
   };
   const setTopic = (topicId: string | null) => { onDismissReveal(); void saveView(next => { next.filters.topic_id = topicId; }); };
   const resume = () => {
@@ -298,7 +310,7 @@ export function TreeView(props: TreeViewProps) {
   const remember = useRef((key: string, element: HTMLDivElement | null) => {
     if (element) elements.current.set(key, element); else elements.current.delete(key);
   }).current;
-  useEffect(() => { if (selectedId) setFocusKey(selectedId); }, [selectedId]);
+  useEffect(() => { if (selectedId) { setKbd(false); setFocusKey(selectedId); } }, [selectedId]);
   useLayoutEffect(() => {
     if (!rows.length || (focusKey && rows.some(row => row.key === focusKey))) return;
     let candidate: string | null = focusKey && session?.items[focusKey] ? session.items[focusKey]!.parent ?? session.items[focusKey]!.topic_id : null;
@@ -307,19 +319,34 @@ export function TreeView(props: TreeViewProps) {
     setFocusKey(next);
     if (hadFocus) elements.current.get(next)?.focus({ preventScroll: true });
   }, [rows, focusKey, session]);
+  // Reserve the target topic's actual height, including wrapped names and delivery lines.
+  const headerHeight = (element: HTMLElement) => element.classList.contains('tree-topic') ? 0
+    : element.closest('.tree-topic-group')?.querySelector('.tree-topic')?.getBoundingClientRect().height ?? 0;
+  const readingTop = () => {
+    const box = scroller.current;
+    if (!box) return 0;
+    const top = box.getBoundingClientRect().top;
+    let height = 0;
+    for (const header of box.querySelectorAll<HTMLElement>('.tree-topic')) {
+      const rect = header.getBoundingClientRect();
+      if (rect.top <= top && rect.bottom > top) height = Math.max(height, rect.bottom - top);
+    }
+    box.style.setProperty('--tree-header-height', `${height}px`);
+    return top + height;
+  };
   // scrollToSel (Ariadne.dc.html:990): centre on open and on a reveal, else keep the focus in view.
   const center = (key: string | null) => {
     const box = scroller.current, element = key ? elements.current.get(key) : undefined;
     if (!box || !element) return;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    box.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + a.height / 2);
+    box.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + headerHeight(element) + (a.height - headerHeight(element)) / 2);
   };
   // Puts the anchor row back where it belongs: centred, or at its saved offset from the top.
   const place = (target: Anchor | null) => {
     const box = scroller.current, element = target ? elements.current.get(target.key) : undefined;
     if (!box || !element || !target) return;
     if (target.offset === null) center(target.key);
-    else box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - target.offset;
+    else box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - headerHeight(element) - target.offset;
   };
   // The least scrolling that brings a row into view (`block: 'nearest'`): none when it is in view already; a row
   // taller than the tree lines up its top instead of running past it.
@@ -327,14 +354,15 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current, element = elements.current.get(key);
     if (!box || !element) return;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    if (b.top < a.top + margin) box.scrollTop -= a.top + margin - b.top;
-    else if (b.bottom > a.bottom - margin) box.scrollTop += Math.min(b.bottom - a.bottom + margin, b.top - a.top - margin);
+    const top = a.top + headerHeight(element) + margin;
+    if (b.top < top) box.scrollTop -= top - b.top;
+    else if (b.bottom > a.bottom - margin) box.scrollTop += Math.min(b.bottom - a.bottom + margin, b.top - top);
   };
   const inView = (key: string) => {
     const box = scroller.current, element = elements.current.get(key);
     if (!box || !element) return false;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    return b.top >= a.top && b.top + Math.min(b.height, 120) <= a.bottom;
+    return b.top >= a.top + headerHeight(element) && b.top + Math.min(b.height, 120) <= a.bottom;
   };
   const centered = useRef(false), settled = useRef(false);
   // Show more / Show less on a long preview. The owner is steering, so the view stops holding its anchor; folding
@@ -367,25 +395,24 @@ export function TreeView(props: TreeViewProps) {
     void document.fonts?.ready.then(() => { if (mounted.current && !settled.current) place(target); });
     // Only the first rows of this session view place the anchor; later changes keep the reading position.
   }, [rows.length, graph]);
+  const previousSelection = useRef({ reveal, selectedId, detailOpen, railOpen });
   useLayoutEffect(() => {
-    if (reveal?.kind !== 'item' || !centered.current) return;
-    const id = reveal.route.item_id, own = opened.current === reveal;
-    // A reveal from a link, search or the Waiting panel brings its row into view, but only when it is not in view
-    // already. Opening an item from this tree (click, Enter) is the owner's own doing and never moves the tree.
-    if (!own && !inView(id)) {
-      const target = { key: id, offset: null };
-      settled.current = false; place(target); setAnchor(target);
+    const previous = previousSelection.current;
+    previousSelection.current = { reveal, selectedId, detailOpen, railOpen };
+    if (!centered.current || graph) return;
+    const selectionChanged = selectedId !== previous.selectedId || (reveal?.kind === 'item' && reveal !== previous.reveal);
+    const panelOpened = (detailOpen && !previous.detailOpen) || (railOpen && !previous.railOpen);
+    const id = reveal?.kind === 'item' ? reveal.route.item_id : selectedId;
+    if (!id || (!selectionChanged && !panelOpened)) return;
+    const clicked = clickedReveal.current;
+    // A tree click's immediate selection and its workspace reveal echo share the same result.
+    const clickEcho = selectionChanged && clicked?.kind === 'item' && clicked.route.item_id === id
+      && (reveal === clicked || reveal === previous.reveal);
+    if (!clickEcho && !inView(id)) {
+      settled.current = true; nearest(id); setAnchor(null);
     }
-    opened.current = null;
-    // A reveal moves the keyboard focus to its row, as the graph does.
-    focusRow(id);
-  }, [reveal]);
-  // Opening or closing a side panel reflows the rows; the selected row must not end up off-screen.
-  useLayoutEffect(() => {
-    if (!centered.current || !selectedId || !detailOpen || inView(selectedId)) return;
-    if (!settled.current && anchor) { place(anchor); if (inView(selectedId)) return; }
-    nearest(selectedId);
-  }, [detailOpen, railOpen]);
+    if (reveal?.kind === 'item' && reveal !== previous.reveal) { setKbd(false); focusRow(id); }
+  }, [reveal, selectedId, detailOpen, railOpen, graph]);
   // The prototype re-centres a while after mount (Ariadne.dc.html:976); here the anchor row stays put
   // while the view settles (fonts loading, detail or rail opening, rows arriving or folding, the row's
   // answer opening) until the owner scrolls, clicks in the tree or moves the focus.
@@ -414,7 +441,7 @@ export function TreeView(props: TreeViewProps) {
   const remembering = () => {
     const box = scroller.current;
     if (!box) { held.current = null; return; }
-    const top = box.getBoundingClientRect().top, list = latest.current.rows;
+    const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
     // Rows are stacked in order, so the first one ending below the tree's top is found by halving.
     let low = 0, high = list.length;
     while (low < high) {
@@ -429,7 +456,7 @@ export function TreeView(props: TreeViewProps) {
     // At the very top the owner wants the newest rows; a different scroll position means the view was moved on purpose
     // (a scroll, a reveal, the keyboard), and the opening placement holds its own row until the owner steers.
     if (box && before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
-      const delta = element.getBoundingClientRect().top - box.getBoundingClientRect().top - before.offset;
+      const delta = element.getBoundingClientRect().top - readingTop() - before.offset;
       if (Math.abs(delta) >= 1) box.scrollTop += delta;
     }
     remembering();
@@ -441,17 +468,19 @@ export function TreeView(props: TreeViewProps) {
     if (!content || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(holding);
     observer.observe(content);
+    content.querySelectorAll('.tree-topic').forEach(header => observer.observe(header));
     return () => observer.disconnect();
   }, [hasRows]);
   // Leaving the tree saves the first visible row as the session's reading position.
   const saveScroll = (event: FocusEvent<HTMLDivElement>) => {
     const box = scroller.current;
     if (!box || event.currentTarget.contains(event.relatedTarget)) return;
-    const top = box.getBoundingClientRect().top;
+    const top = readingTop();
     const first = latest.current.rows.find(row => row.kind === 'item' && (elements.current.get(row.key)?.getBoundingClientRect().bottom ?? -Infinity) > top);
     const element = first && elements.current.get(first.key);
     if (!first || !element) return;
-    const scroll = { item_id: first.key, offset: element.getBoundingClientRect().top - top }, current = latest.current.view?.scroll;
+    // Save in the same target-header coordinates used by place, even during topic push-out.
+    const scroll = { item_id: first.key, offset: element.getBoundingClientRect().top - box.getBoundingClientRect().top - headerHeight(element) }, current = latest.current.view?.scroll;
     if (current?.item_id !== scroll.item_id || current.offset !== scroll.offset) void saveView(next => { next.scroll = scroll; });
   };
 
@@ -460,7 +489,7 @@ export function TreeView(props: TreeViewProps) {
   const touchedMessage = highlightedMessages.size && session ? session.messages.find(message => highlightedMessages.has(message.id))?.number ?? null : null;
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
-    const act = (intent: RowIntent) => () => onAct(intent, target);
+    const act = (intent: RowIntent) => () => onAct(intent, target, result => { clickedReveal.current = result; });
     if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed) && running && !archivedMode && session?.state === 'active') {
       const bring = { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') };
       if (item.status === 'open') list.push(bring, ...row.later ? [{ icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: act('later') }]
@@ -502,20 +531,24 @@ export function TreeView(props: TreeViewProps) {
   const fixOf = (row: Row) => row.delivery?.stuck ? <div className="tree-fix" onKeyDown={event => event.stopPropagation()}>
     <StuckNote actions={actions} input={row.delivery.stuck.input} stuck={row.delivery.stuck.note}
       onEdit={row.kind === 'topic' ? editTopicReply(row.delivery.stuck.input) : undefined} /></div> : null;
-  const tree = model && rows.length > 0 && <div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
-    {rows.map(row => row.kind === 'topic'
-      ? <TopicRow key={row.key} row={row} focused={focusKey === row.key} actions={topicActions(row)}
+  const tree = model && rows.length > 0 && <ItemRefs.Provider value={{ lookup: id => {
+    const item = session?.items[id];
+    return item && session ? { label: shortLabel(item), status: displayStatus(session, item) } : null;
+  }, onOpenItem: id => select(id, false) }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
+    {sections.map(({ topic: row, items }) => <div key={row.key} className="tree-topic-group" role="presentation">
+      <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
-      : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={busy}
+      {items.map(row => <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={busy}
         highlight={highlightedItems.has(row.key) ? 'strong' : row.collapsed?.ids.some(id => highlightedItems.has(id)) ? 'weak' : null}
         note={row.collapsed ? collapsedNote(row.collapsed, { items: highlightedItems, message: touchedMessage }) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
-        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} onJump={select} onHover={onHoverItem} />)}
-  </div>;
+        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} onJump={id => select(id, false)} onHover={onHoverItem} />)}
+    </div>)}
+  </div></ItemRefs.Provider>;
 
   const loading = !session && state.status === 'loading';
   // Stopped deliveries answered on a row the owner can see; the recovery banner lists the rest
@@ -558,7 +591,7 @@ export function TreeView(props: TreeViewProps) {
       onRename={session ? (name, description) => saveSessionLabel(actions, session.revision, name, description) : undefined}
       dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}
     {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
-    {filtersShown && <FilterBar chip={model ? model.chip : 'all'} counts={counts} topics={model?.topics ?? []} topicId={view?.filters.topic_id ?? null}
+    {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts} topics={model?.topics ?? []} topicId={view?.filters.topic_id ?? null}
       showTopics={!(detailOpen && railOpen)} disabled={nav.writing || nav.pendingOperationId !== null} onChip={setChip} onTopic={setTopic} />}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}

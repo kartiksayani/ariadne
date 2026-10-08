@@ -1505,7 +1505,8 @@
       "enum": [
         "pr",
         "file",
-        "doc"
+        "doc",
+        "item"
       ]
     },
     "Message": {

@@ -156,6 +156,16 @@ describe('owner input component and durable draft controller', () => {
   describe('the reply box is always docked on an open or in-progress item', () => {
     const show = (value: Awaited<ReturnType<typeof setup>>, itemId: string) =>
       render(<ItemDetail drafts={value.drafts} store={value.store} itemId={itemId} later={false} onOpenItem={() => {}} />);
+    it.each([['8', 'open', 'Reply message'], ['3', 'in_progress', 'Note message']])('keeps the composer visible outside the scrolling detail for %s (%s), without waiting on the owner', async (itemId, status, label) => {
+      const value = await setup();
+      expect(value.session.items[itemId]!.status).toBe(status);
+      show(value, itemId);
+      const composer = await screen.findByRole('textbox', { name: label });
+      expect(composer.closest('.detail-dock')).not.toBeNull();
+      expect(composer.closest('.detail-body')).toBeNull();
+      expect(composer.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+      expect(document.activeElement).not.toBe(composer);
+    });
     it('shows the reply box on an open item and the note box on an in-progress one, with no button pressed first', async () => {
       const value = await setup();
       show(value, '8');
@@ -219,7 +229,7 @@ describe('owner input component and durable draft controller', () => {
       await moveTo(value, '8', 'in_progress');
       await waitFor(() => expect((screen.getByRole('textbox', { name: 'Note message' }) as HTMLTextAreaElement).value).toBe(words));
       expect(screen.queryByRole('textbox', { name: 'Reply message' })).toBeNull();
-      expect(screen.getByText('This was written as a reply. It will be sent as a note, which fits the item now.')).toBeTruthy();
+      expect(screen.getByText('This will be sent as a note, which fits the item now. You wrote it as a reply.')).toBeTruthy();
       await settle();
       expect(savedIn(value, words)).toEqual(['reply']);
       expect(value.prefs.drafts).toHaveLength(1);
@@ -305,7 +315,7 @@ describe('owner input component and durable draft controller', () => {
       expect(first.value).toBe('First words');
       const second = screen.getByRole('textbox', { name: 'Reply message, another draft' }) as HTMLTextAreaElement;
       expect(second.value).toBe('Second words');
-      expect(screen.getAllByText('This was written as a note. It will be sent as a reply, which fits the item now.')).toHaveLength(1);
+      expect(screen.getAllByText('This will be sent as a reply, which fits the item now. You wrote it as a note.')).toHaveLength(1);
       expect(document.querySelectorAll('[data-owner-input]')).toHaveLength(1);
       await waitFor(() => expect(sendable('Send reply') && sendable('Send reply, another draft')).toBe(true));
       await user.click(screen.getByRole('button', { name: 'Send reply, another draft' }));
@@ -325,7 +335,7 @@ describe('owner input component and durable draft controller', () => {
       const first = await screen.findByRole('textbox', { name: 'Reply message' }), second = screen.getByRole('textbox', { name: 'Reply message, another draft' });
       expect(screen.getAllByRole('button', { name: /^Send reply/ }).map(button => button.getAttribute('aria-label'))).toEqual(['Send reply', 'Send reply, another draft']);
       // Only the first draft was written as a note: its note describes it, and the other box has no description.
-      const note = screen.getByText('This was written as a note. It will be sent as a reply, which fits the item now.');
+      const note = screen.getByText('This will be sent as a reply, which fits the item now. You wrote it as a note.');
       expect(note.id).not.toBe('');
       expect(first.getAttribute('aria-describedby')).toBe(note.id);
       expect(second.getAttribute('aria-describedby')).toBeNull();
@@ -336,10 +346,15 @@ describe('owner input component and durable draft controller', () => {
         intent: 'reply', text: 'Tried once', selected_option_id: null, target_revision: item.revision, question_revision: item.question_revision, supersedes_answer_id: null,
         submission_attempted: true }]);
       show(value, '3');
-      // The item is in progress, so a fresh draft would go out as a note, but this attempt is frozen as the reply it was.
-      const box = await screen.findByRole('textbox', { name: 'Note message' }) as HTMLTextAreaElement;
+      // The item is in progress, so a fresh draft would go out as a note, but this attempt is frozen as the reply it was: the
+      // box and its Send button are named for the reply that the retry sends, not for the note the status would suggest.
+      const box = await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
       expect(box.value).toBe('Tried once'); expect(box.disabled).toBe(true);
-      expect(screen.queryByText(/It will be sent as a note/)).toBeNull();
+      expect(screen.queryByRole('textbox', { name: 'Note message' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Send reply' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Send note' })).toBeNull();
+      expect(box.placeholder).toBe('Reply in your own words…');
+      expect(screen.queryByText(/It will be sent as a/)).toBeNull();
       expect(box.getAttribute('aria-describedby')).toBeNull();
     });
     it('keeps typing in the same box when the other draft is emptied', async () => {
@@ -363,6 +378,51 @@ describe('owner input component and durable draft controller', () => {
       await user.keyboard('Hello');
       await waitFor(() => expect(savedIn(value, 'Hello')).toEqual(['reply']));
       expect(box.isConnected).toBe(true); expect(document.activeElement).toBe(box); expect(box.value).toBe('Hello');
+    });
+    it('keeps the same box, with its focus, when a saved draft is emptied', async () => {
+      const item = (demo as unknown as Session).items['8']!;
+      const value = await setup([{ session: route, binding_id: (demo as unknown as Session).active_binding_id!, target: { topic_id: item.topic_id, item_id: '8' }, op_id: uuid(86),
+        intent: 'reply', text: 'Some saved words', selected_option_id: null, target_revision: item.revision, question_revision: item.question_revision, supersedes_answer_id: null }]);
+      show(value, '8');
+      const box = await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
+      expect(box.value).toBe('Some saved words');
+      act(() => { box.focus(); });
+      fireEvent.change(box, { target: { value: '' } });
+      await waitFor(() => expect(value.prefs.drafts.map(draft => draft.text).filter(Boolean)).toEqual([]));
+      const after = screen.getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
+      expect(after).toBe(box); expect(box.isConnected).toBe(true); expect(document.activeElement).toBe(box); expect(box.value).toBe('');
+      fireEvent.change(box, { target: { value: 'New words' } });
+      expect(screen.getByRole('textbox', { name: 'Reply message' })).toBe(box);
+    });
+    it('focuses the draft typed in last when r is pressed, else the newest', async () => {
+      const value = await setup(twoDrafts());
+      const render8 = (token?: number) => <ItemDetail drafts={value.drafts} store={value.store} itemId="8" later={false} onOpenItem={() => {}}
+        focusRequest={token ? { intent: 'reply', token } : undefined} />;
+      const view = render(render8());
+      const first = await screen.findByRole('textbox', { name: 'Reply message' }), second = screen.getByRole('textbox', { name: 'Reply message, another draft' });
+      // Nothing typed yet: the newest draft.
+      view.rerender(render8(1));
+      await waitFor(() => expect(document.activeElement).toBe(second));
+      // The oldest is typed in: r goes back to it, whichever has focus.
+      fireEvent.change(first, { target: { value: 'First words!' } });
+      act(() => { second.focus(); });
+      view.rerender(render8(2));
+      await waitFor(() => expect(document.activeElement).toBe(first));
+      fireEvent.change(second, { target: { value: 'Second words!' } });
+      act(() => { first.focus(); });
+      view.rerender(render8(3));
+      await waitFor(() => expect(document.activeElement).toBe(second));
+    });
+    it('names a waiting item’s reply a reply, never a follow-up, on the button, the box and the note', async () => {
+      const item = (demo as unknown as Session).items['2']!;
+      const value = await setup([{ session: route, binding_id: (demo as unknown as Session).active_binding_id!, target: { topic_id: item.topic_id, item_id: '2' }, op_id: uuid(87),
+        intent: 'followup', text: 'Written as a follow-up', selected_option_id: null, target_revision: item.revision, question_revision: item.question_revision, supersedes_answer_id: null }]);
+      show(value, '2');
+      expect(await screen.findByRole('button', { name: 'Add a reply' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /follow-up/i })).toBeNull();
+      expect(screen.getByRole('textbox', { name: 'Reply message' })).toBeTruthy();
+      expect(screen.getByText('This will be sent as a reply, which fits the item now. You wrote it as a follow-up.')).toBeTruthy();
+      expect(screen.getByText('Your reply is kept. Send it, or answer below.')).toBeTruthy();
     });
     // What each box's draft goes out as follows the item's status (core accepts all three kinds at any status).
     it('names the kind that fits every status', () => {
@@ -411,7 +471,7 @@ describe('owner input component and durable draft controller', () => {
       expect(document.activeElement).toBe(box);
       // The agent asks a question: the box moves from "While the agent works" to the follow-up, but is the same box.
       await moveTo(value, '3', 'waiting_on_me');
-      await screen.findByRole('button', { name: 'Add a follow-up' });
+      await screen.findByRole('button', { name: 'Add a reply' });
       const after = await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
       expect(after).toBe(box);
       expect(document.activeElement).toBe(box);
@@ -654,7 +714,11 @@ describe('owner input component and durable draft controller', () => {
     const before = structuredClone(value.drafts.getSnapshot().entries[id]!.draft), consumed = vi.fn();
     const view = value.render('2', { focusRequest: { intent: 'answer', token: 1, optionIndex: 1 }, onFocusRequestConsumed: consumed });
     await waitFor(() => expect(consumed).toHaveBeenCalledWith(1));
-    expect(screen.getByRole('button', { name: /2Change the design/ }).hasAttribute('disabled')).toBe(true);
+    // A stale view only marks the option aria-disabled (it keeps focus); a send or save in progress disables it outright.
+    const option = screen.getByRole('button', { name: /2Change the design/ });
+    expect(option.hasAttribute('disabled')).toBe(guard !== 'stale');
+    expect(option.getAttribute('aria-disabled')).toBe(guard === 'stale' ? 'true' : null);
+    fireEvent.click(option);
     fireEvent.keyDown(screen.getByRole('group', { name: 'Answer' }), { key: '2' });
     expect(value.drafts.getSnapshot().entries[id]!.draft).toEqual(before);
     if (guard === 'saving') { await act(async () => { finish!(); await submission; }); expect(value.calls[0]?.command).toMatchObject({ params: { selected_option_id: 'yes', text: before.text } }); }
@@ -732,7 +796,7 @@ describe('owner input component and durable draft controller', () => {
     value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
-    const followUp = await screen.findByRole('button', { name: 'Add a follow-up' });
+    const followUp = await screen.findByRole('button', { name: 'Add a reply' });
     expect(screen.getByText('Queued behind the answer in flight')).toBeTruthy();
     expect(document.querySelector('.detail-answer-slot')).toBeNull();
     await waitFor(() => expect(followUp.hasAttribute('disabled')).toBe(false));
@@ -746,7 +810,7 @@ describe('owner input component and durable draft controller', () => {
     const sent = value.calls[0]!.command;
     expect(sent.command === 'input_submit' && [sent.params.kind, sent.params.text]).toEqual(['reply', 'One more thing']);
     await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
-    expect(screen.getByRole('button', { name: 'Add a follow-up' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add a reply' })).toBeTruthy();
   });
   it('keeps one owner input while the follow-up box is open beside a retained answer', async () => {
     const value = await setup(), user = userEvent.setup(); value.outcome('uncertain');
@@ -759,7 +823,7 @@ describe('owner input component and durable draft controller', () => {
     value.session.inputs[uuid(90)] = { ...queued, id: uuid(90), kind: 'answer', target: { topic_id: item.topic_id, item_id: '2' } };
     value.session.revision++;
     await act(async () => { await value.store.refresh(); });
-    const followUp = await screen.findByRole('button', { name: 'Add a follow-up' });
+    const followUp = await screen.findByRole('button', { name: 'Add a reply' });
     await waitFor(() => expect(followUp.hasAttribute('disabled')).toBe(false));
     expect(document.querySelector('.detail-answer-slot')).toBeTruthy();
     await user.click(followUp);
@@ -774,14 +838,14 @@ describe('owner input component and durable draft controller', () => {
     value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
-    const followUp = await screen.findByRole('button', { name: 'Add a follow-up' });
+    const followUp = await screen.findByRole('button', { name: 'Add a reply' });
     await waitFor(() => expect(followUp.hasAttribute('disabled')).toBe(false)); await user.click(followUp);
     fireEvent.change(await screen.findByRole('textbox', { name: 'Reply message' }), { target: { value: 'One more thing' } });
     await waitFor(() => expect(value.prefs.drafts.some(draft => draft.text === 'One more thing')).toBe(true));
     value.session.inputs[uuid(90)]!.state = 'cancelled'; value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     expect((screen.getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe('One more thing');
-    expect(screen.getByText('Your follow-up is kept. Send it, or answer below.')).toBeTruthy();
+    expect(screen.getByText('Your reply is kept. Send it, or answer below.')).toBeTruthy();
   });
   it('keeps words typed while the session view is refreshing, and sends them once it is fresh', async () => {
     const value = await setup(), user = userEvent.setup(), item = value.session.items['2']!;
@@ -790,7 +854,7 @@ describe('owner input component and durable draft controller', () => {
     value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
-    const followUp = await screen.findByRole('button', { name: 'Add a follow-up' });
+    const followUp = await screen.findByRole('button', { name: 'Add a reply' });
     await waitFor(() => expect(followUp.hasAttribute('disabled')).toBe(false)); await user.click(followUp);
     const box = await screen.findByRole('textbox', { name: 'Reply message' });
     // A live change hint marks the view stale until its refresh lands; the owner types in that window.
@@ -817,13 +881,35 @@ describe('owner input component and durable draft controller', () => {
     expect(document.activeElement).toBe(editor());
     expect(shortcuts).toEqual([]);
     // Nothing goes out against a view that may be behind: neither the reply nor the option.
-    expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Send “Keep the design”' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Send reply' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Send “Keep the design”' }).getAttribute('aria-disabled')).toBe('true');
     await user.keyboard('{Meta>}{Enter}{/Meta}');
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
     expect(value.calls).toHaveLength(0);
     await act(async () => { await value.store.refresh(); });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('aria-disabled')).toBe(false));
     expect(editor().value).toBe('de1');
+  });
+  it('keeps a focused option focusable while the view refreshes: aria-disabled, so a click, Enter or digit changes and sends nothing', async () => {
+    const value = await setup(), user = userEvent.setup(), shortcuts: string[] = [];
+    render(<KeyedRoot shortcuts={shortcuts}><AnswerSlot drafts={value.drafts} store={value.store} itemId="2" onEscape={() => {}} /></KeyedRoot>);
+    await waitFor(() => expect(editor().disabled).toBe(false));
+    const other = screen.getByRole('button', { name: /2Change the design/ }), recommended = screen.getByRole('button', { name: /1Keep the design/ });
+    act(() => { other.focus(); });
+    staleView(value.store);
+    // A disabled button drops the focus it holds to <body>, where the next digit is a tree shortcut; an aria-disabled one keeps it.
+    await waitFor(() => expect(other.getAttribute('aria-disabled')).toBe('true'));
+    expect(other.hasAttribute('disabled')).toBe(false); expect(recommended.hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Send “Keep the design”' }).getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(other);
+    await user.click(other); await user.keyboard('2'); await user.keyboard('{Enter}'); await user.keyboard('{Meta>}{Enter}{/Meta}');
+    expect(other.getAttribute('aria-pressed')).toBe('false'); expect(recommended.getAttribute('aria-pressed')).toBe('true');
+    expect(shortcuts).toEqual([]); expect(value.calls).toHaveLength(0);
+    // Fresh again: the same button works.
+    await act(async () => { await value.store.refresh(); });
+    await waitFor(() => expect(other.hasAttribute('aria-disabled')).toBe(false));
+    await user.click(other);
+    expect(other.getAttribute('aria-pressed')).toBe('true');
   });
   it('keeps words typed while the view refreshes when the item changes underneath, then asks for a review and holds Send', async () => {
     const value = await setup(), user = userEvent.setup(), shortcuts: string[] = [];
@@ -842,9 +928,17 @@ describe('owner input component and durable draft controller', () => {
     expect(screen.getByRole('button', { name: 'Send “Keep the design”' }).hasAttribute('disabled')).toBe(true);
     expect(editor().value).toBe('Keep it');
     expect(value.calls).toHaveLength(0);
-    // The box locks for the review, which drops focus to <body>: further keys stay the owner's, never tree shortcuts.
-    await user.keyboard('de');
+    // The box locks for the review, which drops focus to <body>: further keys stay the owner's, never tree shortcuts. A browser
+    // moves the focus of a field disabled under the owner to <body>; jsdom keeps it there (and user.keyboard would type into the
+    // disabled field, which does nothing), so the keys are sent to <body> directly.
+    expect(editor().disabled).toBe(true);
+    fireEvent.keyDown(document.body, { key: 'd' }); fireEvent.keyDown(document.body, { key: 'e' });
     expect(shortcuts).toEqual([]);
+    expect(editor().value).toBe('Keep it');
+    // The same keys do reach the tree once the owner moves on deliberately, so the check above is not vacuous.
+    fireEvent.mouseDown(document.body);
+    fireEvent.keyDown(document.body, { key: 'd' });
+    expect(shortcuts).toEqual(['d']);
   });
   it('shows only the reply warning in Follow-up, never a stale reopen one', async () => {
     const demoItem = (demo as unknown as Session).items['2']!;
@@ -857,10 +951,10 @@ describe('owner input component and durable draft controller', () => {
     item.revision++; value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
-    const followUp = await screen.findByRole('button', { name: 'Add a follow-up' });
+    const followUp = await screen.findByRole('button', { name: 'Add a reply' });
     await waitFor(() => expect(followUp.hasAttribute('disabled')).toBe(false)); await user.click(followUp);
     await screen.findByRole('textbox', { name: 'Reply message' });
-    const section = screen.getByRole('region', { name: 'Follow-up' });
+    const section = screen.getByRole('region', { name: 'Reply' });
     expect(section.textContent).not.toContain(changedText);
     expect(screen.queryByRole('button', { name: 'Review current target' })).toBeNull();
   });
@@ -1002,7 +1096,7 @@ describe('the detail explains messages that have not reached the agent', () => {
     // The words land in the one box the owner can see, which says what it will send as. No second draft is made.
     const box = await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
     expect(box.value).toBe(queuedText);
-    expect(screen.getByText('This was written as a note. It will be sent as a reply, which fits the item now.')).toBeTruthy();
+    expect(screen.getByText('This will be sent as a reply, which fits the item now. You wrote it as a note.')).toBeTruthy();
     expect(value.prefs.drafts).toMatchObject([{ intent: 'note', text: queuedText, target: { item_id: '4' } }]);
     await act(async () => { await new Promise(done => setTimeout(done, 80)); });
     expect(value.prefs.drafts).toHaveLength(1);
@@ -1341,7 +1435,7 @@ describe('the detail explains messages that have not reached the agent', () => {
     expect(await screen.findByText('The question changed — review and send again')).toBeTruthy();
     // Not stuck behind its own held message: the answer box is there for the newer question.
     expect(document.querySelector('.detail-answer-slot')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Add a follow-up' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add a reply' })).toBeNull();
     const review = screen.getByRole('button', { name: 'Review and send again' }), revision = value.session.revision;
     await waitFor(() => expect(review.hasAttribute('disabled')).toBe(false)); fireEvent.click(review);
     await waitFor(() => expect(cancels(value.calls)).toEqual([{ input_id: held.id, expected_revision: revision, purpose: 'edit' }]));

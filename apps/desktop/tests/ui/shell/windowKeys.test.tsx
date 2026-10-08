@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useRef, useState, type KeyboardEvent } from 'react';
-import { keyAnchor, useWindowKeys } from '../../../src/ui/shell/windowKeys';
+import { HOLD_MAX, HOLD_MS, keyAnchor, routeWindowKey, useWindowKeys } from '../../../src/ui/shell/windowKeys';
 import { watchFullscreen, SETTLE_MS } from '../../../src/ui/shell/fullscreen';
 import { RootBoundary } from '../../../src/RootBoundary';
 
@@ -31,6 +31,42 @@ const press = (target: EventTarget, key: string, init: KeyboardEventInit = {}) =
 };
 
 describe('window-level workspace keys', () => {
+  it('routes Cmd brackets directly from body, buttons and tree rows while leaving removal keys unchanged', () => {
+    const root = document.createElement('div'); root.innerHTML = '<button>Back</button><div tabindex="0"></div>';
+    document.body.append(root);
+    const history = { back: vi.fn(() => true), forward: vi.fn(() => true) };
+    const route = (target: EventTarget, key: string, init: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent('keydown', { key, metaKey: true, bubbles: true, cancelable: true, ...init });
+      target.addEventListener('keydown', event => routeWindowKey(event as globalThis.KeyboardEvent, root, null, history), { once: true });
+      target.dispatchEvent(event); return event;
+    };
+    expect(route(document.body, '[').defaultPrevented).toBe(true);
+    expect(route(root.querySelector('button')!, ']').defaultPrevented).toBe(true);
+    expect(route(root.querySelector('div')!, '[').defaultPrevented).toBe(true);
+    expect(history.back).toHaveBeenCalledTimes(2); expect(history.forward).toHaveBeenCalledOnce();
+    route(root, 'Backspace', { metaKey: false }); route(root, 'Delete', { metaKey: false });
+    expect(history.back).toHaveBeenCalledTimes(2); expect(history.forward).toHaveBeenCalledOnce();
+  });
+
+  it('never routes history chords in text fields, editable content, dialogs, composition or stranded fields', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<input /><textarea></textarea><select></select><div contenteditable="true"><span>Editing</span></div><div contenteditable=""></div><div contenteditable="plaintext-only"></div><div role="textbox"></div>';
+    document.body.append(root);
+    const history = { back: vi.fn(() => true), forward: vi.fn(() => true) };
+    const route = (target: Element, init: KeyboardEventInit = {}, stranded = false) => {
+      const event = new KeyboardEvent('keydown', { key: '[', metaKey: true, bubbles: true, cancelable: true, ...init });
+      target.addEventListener('keydown', event => routeWindowKey(event as globalThis.KeyboardEvent, root,
+        stranded ? { field: root.querySelector('input')!, hold: vi.fn(), resume: vi.fn() } : null, history), { once: true });
+      target.dispatchEvent(event); expect(event.defaultPrevented).toBe(false);
+    };
+    for (const target of root.querySelectorAll('input,textarea,select,span,[contenteditable],[role="textbox"]')) route(target);
+    root.querySelector('input')!.focus(); route(document.body); root.querySelector('input')!.blur();
+    route(document.body, { isComposing: true }); route(document.body, {}, true);
+    const dialog = document.body.appendChild(document.createElement('div')); dialog.setAttribute('role', 'dialog');
+    route(document.body); route(dialog);
+    expect(history.back).not.toHaveBeenCalled(); expect(history.forward).not.toHaveBeenCalled();
+  });
+
   it('replays a key pressed on <body> at the tree’s roving row, focuses it and consumes the key when handled', () => {
     const seen: string[] = [];
     render(<Workspace onKey={(where, key) => { seen.push(`${where}:${key}`); return where === 'row' && key === 'ArrowDown'; }} />);
@@ -88,6 +124,156 @@ describe('window-level workspace keys', () => {
     act(() => { field.disabled = false; field.focus(); field.disabled = true; field.blur(); });
     field.remove();
     expect(press(document.body, 'e').defaultPrevented).toBe(true);
+  });
+
+  /** A text field outside the app root that the owner is typing in, then a save disables it (focus falls to <body>). */
+  const strand = () => {
+    const field = document.body.appendChild(document.createElement('textarea'));
+    act(() => { field.focus(); });
+    field.disabled = true; field.blur();
+    return field;
+  };
+  const settle = () => act(async () => { await Promise.resolve(); });
+
+  it('gives the field its focus back and the held keys once it is enabled again, instead of replaying them on the tree', async () => {
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const field = strand();
+    await settle();
+    // Typed while it was disabled: held, neither lost nor treated as the tree’s d, e and 1.
+    press(document.body, 'd'); press(document.body, 'e'); press(document.body, '1');
+    expect(field.value).toBe('');
+    field.disabled = false;
+    await settle();
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe('de1');
+    expect(onKey).not.toHaveBeenCalled();
+  });
+
+  it('refocuses the field and types into it when a key comes right after it was enabled again', async () => {
+    vi.useFakeTimers();
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const field = strand();
+    await settle();
+    field.disabled = false;
+    await settle();
+    act(() => { vi.advanceTimersByTime(HOLD_MS - 100); });
+    const event = press(document.body, 'd');
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe('d');
+    expect(onKey).not.toHaveBeenCalled();
+    // The caret is kept: the owner is back in the field, and keys inside it are theirs alone.
+    expect(press(field, 'e').defaultPrevented).toBe(false);
+  });
+
+  it('treats a key long after the field was enabled again as a shortcut on the tree, not as typing', async () => {
+    vi.useFakeTimers();
+    const seen: string[] = [];
+    render(<Workspace onKey={(where, key) => { seen.push(`${where}:${key}`); return where === 'row'; }} />);
+    const field = strand();
+    await settle();
+    field.disabled = false;
+    await settle();
+    // Minutes later, with nothing typed in between.
+    act(() => { vi.advanceTimersByTime(5 * 60_000); });
+    const event = press(document.body, 'j');
+    expect(event.defaultPrevented).toBe(true);
+    expect(seen).toEqual(['row:j', 'root:j']);
+    expect(field.value).toBe('');
+    expect(document.activeElement).toBe(screen.getByTestId('row-2'));
+    // The tree’s arrows and Esc work too.
+    expect(press(document.body, 'ArrowDown').defaultPrevented).toBe(true);
+  });
+
+  it('inserts at the caret and reports the change to the field’s own handler', async () => {
+    render(<Workspace onKey={() => true} />);
+    const field = strand();
+    await settle();
+    field.disabled = false;
+    field.value = 'ac'; field.setSelectionRange(1, 1);
+    const seen: string[] = [];
+    field.addEventListener('input', () => seen.push(field.value));
+    await settle();
+    press(document.body, 'b');
+    expect(field.value).toBe('abc');
+    expect(seen).toEqual(['abc']);
+  });
+
+  it('keeps the held keys for a slow save and hands them over once the field is enabled, never to the tree', async () => {
+    vi.useFakeTimers();
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const field = strand();
+    await settle();
+    press(document.body, 'd'); press(document.body, 'e');
+    act(() => { vi.advanceTimersByTime(HOLD_MS * 4); });
+    press(document.body, '1');
+    expect(field.value).toBe('');
+    field.disabled = false;
+    await settle();
+    expect(field.value).toBe('de1');
+    expect(document.activeElement).toBe(field);
+    expect(onKey).not.toHaveBeenCalled();
+  });
+
+  it('applies Backspace typed while the field was disabled, to the held text and then to the field’s own text', async () => {
+    render(<Workspace onKey={() => true} />);
+    const field = strand();
+    field.value = 'abc';
+    await settle();
+    press(document.body, 'x'); press(document.body, 'y'); press(document.body, 'Backspace'); press(document.body, 'z');
+    press(document.body, 'Backspace'); press(document.body, 'Backspace'); press(document.body, 'Backspace');
+    field.disabled = false;
+    await settle();
+    // x y <- z <- <- <-  : the three Backspaces remove z, x, then the “c” before the caret.
+    expect(field.value).toBe('ab');
+  });
+
+  it('never holds or replays Enter or shortcut chords, so nothing is sent twice', async () => {
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const field = strand();
+    const submitted = vi.fn();
+    field.addEventListener('keydown', submitted);
+    await settle();
+    press(document.body, 'a'); press(document.body, 'Enter'); press(document.body, 'Enter', { metaKey: true });
+    press(document.body, 'b', { metaKey: true }); press(document.body, 'Backspace', { metaKey: true }); press(document.body, 'ArrowDown');
+    field.disabled = false;
+    await settle();
+    expect(field.value).toBe('a');
+    expect(submitted).not.toHaveBeenCalled();
+    expect(onKey).not.toHaveBeenCalled();
+    // In the window after, Enter is not typed into the field either.
+    expect(press(document.body, 'Enter').defaultPrevented).toBe(false);
+    expect(field.value).toBe('a');
+  });
+
+  it('holds at most HOLD_MAX characters', async () => {
+    render(<Workspace onKey={() => true} />);
+    const field = strand();
+    await settle();
+    for (let at = 0; at < HOLD_MAX + 50; at += 1) press(document.body, 'a');
+    field.disabled = false;
+    await settle();
+    expect(field.value).toBe('a'.repeat(HOLD_MAX));
+  });
+
+  it('drops what was held when the field is removed from the page', async () => {
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const field = strand();
+    await settle();
+    press(document.body, 'd');
+    field.remove();
+    // The keys went with the field: a later field gets none of them, and keys are shortcuts again.
+    expect(press(document.body, 'e').defaultPrevented).toBe(true);
+    expect(onKey).toHaveBeenCalled();
+    const later = document.body.appendChild(document.createElement('textarea'));
+    act(() => { later.focus(); });
+    await settle();
+    expect(later.value).toBe('');
   });
 
   it('always consumes plain Esc so macOS does not leave full screen, except for dialogs and input methods', () => {

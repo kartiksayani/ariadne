@@ -37,9 +37,13 @@ pub struct WaitingCapture {
     pub labels: BTreeMap<String, String>,
 }
 
-/// The owner-facing name of a session, as the session bar shows it:
-/// "claude-code · iTerm window 1", "claude-code", or "No agent". Never an ID.
-pub fn session_label(binding: Option<&BindingSummary>) -> String {
+/// The owner-facing name of a session, as the session bar shows it: the name the
+/// owner gave it when there is one, else "claude-code · iTerm window 1",
+/// "claude-code", or "No agent". Never an ID.
+pub fn session_label(owner_name: Option<&str>, binding: Option<&BindingSummary>) -> String {
+    if let Some(name) = owner_name.map(str::trim).filter(|name| !name.is_empty()) {
+        return name.into();
+    }
     let Some(binding) = binding else {
         return "No agent".into();
     };
@@ -171,7 +175,7 @@ pub fn capture(
         .collect();
     for summary in summaries {
         let project = projects.get(&summary.project_id).ok_or_else(inconsistent)?;
-        let session_label = session_label(summary.active_binding.as_ref());
+        let session_label = session_label(summary.name.as_deref(), summary.active_binding.as_ref());
         if let Some(binding) = &summary.active_binding {
             labels.insert(binding.id.as_str().to_owned(), session_label.clone());
             if let Some(status) = binding_status(binding) {
@@ -345,20 +349,39 @@ mod label_tests {
         let mut binding = binding();
         binding.adapter_id = "claude_code_mod".into();
         assert_eq!(
-            session_label(Some(&binding)),
+            session_label(None, Some(&binding)),
             "claude-code · iTerm window 1"
         );
         binding.host_location = None;
-        assert_eq!(session_label(Some(&binding)), "claude-code");
+        assert_eq!(session_label(None, Some(&binding)), "claude-code");
         binding.host_location = Some(String::new());
-        assert_eq!(session_label(Some(&binding)), "claude-code");
+        assert_eq!(session_label(None, Some(&binding)), "claude-code");
         binding.adapter_id = "codex".into();
         binding.host_location = Some("Terminal window 2".into());
-        assert_eq!(session_label(Some(&binding)), "codex · Terminal window 2");
-        assert_eq!(session_label(None), "No agent");
-        let label = session_label(Some(&binding));
+        assert_eq!(
+            session_label(None, Some(&binding)),
+            "codex · Terminal window 2"
+        );
+        assert_eq!(session_label(None, None), "No agent");
+        let label = session_label(None, Some(&binding));
         assert!(
             !label.contains(binding.id.as_str()) && !label.contains(&binding.external_session_id)
+        );
+    }
+
+    #[test]
+    fn session_label_prefers_the_name_the_owner_set() {
+        let binding = binding();
+        assert_eq!(
+            session_label(Some("  Billing fix "), Some(&binding)),
+            "Billing fix"
+        );
+        assert_eq!(session_label(Some("Billing fix"), None), "Billing fix");
+        // A blank name counts as none.
+        assert_eq!(session_label(Some("   "), None), "No agent");
+        assert_eq!(
+            session_label(Some(""), Some(&binding)),
+            session_label(None, Some(&binding))
         );
     }
 

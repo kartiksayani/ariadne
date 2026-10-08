@@ -1,17 +1,21 @@
 // A small, safe Markdown reader for agent message bodies. It turns text into a
 // plain tree (paragraphs, line breaks, headings, lists, quotes, code, tables,
 // emphasis, links); Markdown.tsx renders that tree as React elements. Raw HTML
-// is never interpreted: it stays text. Links keep only http, https and mailto
-// targets. Parsing is linear in the input: every scan is a single pass or a
+// is never interpreted: it stays text. External links keep only http, https and
+// mailto targets; item references select items inside the app. Parsing is linear
+// in the input: every scan is a single pass or a
 // bounded lookahead, and the input and nesting depth are capped.
 
 export type Inline =
   | string
   | { readonly t: 'br' }
   | { readonly t: 'code'; readonly text: string }
-  /** A `file.go:123` reference: shown as code, never opened. */
+  /** A `file.go:123` reference: shown as code, and a link when the desktop finds the file. */
   | { readonly t: 'ref'; readonly text: string }
+  /** A bare `src/app.ts` path (no line): plain text, and a link when the desktop finds the file. */
+  | { readonly t: 'path'; readonly text: string }
   | { readonly t: 'strong' | 'em' | 'del'; readonly children: readonly Inline[] }
+  | { readonly t: 'item'; readonly itemId: string; readonly children: readonly Inline[] }
   | { readonly t: 'link'; readonly href: string; readonly children: readonly Inline[] };
 
 export type Align = 'left' | 'center' | 'right' | null;
@@ -27,6 +31,16 @@ export type Block =
 /** Characters read as Markdown; the rest of a longer body follows as plain text. */
 export const MARKDOWN_LIMIT = 100_000;
 const BLOCK_DEPTH = 8, INLINE_DEPTH = 6, URL_LIMIT = 2048;
+
+/** A local item target, using the core's positive safe-integer dotted identity syntax. */
+export function itemReference(raw: string): string | null {
+  if (!raw.startsWith('item:')) return null;
+  const id = raw.slice(5);
+  return id.split('.').every(segment => {
+    const ordinal = Number(segment);
+    return ordinal > 0 && Number.isSafeInteger(ordinal) && String(ordinal) === segment;
+  }) ? id : null;
+}
 
 /** The link target when it is a safe external URL (http, https or mailto), else null. */
 export function safeHref(raw: string): string | null {
@@ -362,6 +376,63 @@ function referenceEnd(text: string, start: number, to: number): number {
   return end;
 }
 
+const SOURCE_EXTENSIONS = new Set([
+  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'json', 'md', 'mdx', 'rs', 'py', 'go', 'java', 'kt', 'swift', 'c', 'h', 'cc', 'cpp', 'hpp', 'cs',
+  'rb', 'php', 'sh', 'zsh', 'bash', 'toml', 'yaml', 'yml', 'css', 'scss', 'html', 'sql', 'txt', 'lock', 'xml', 'gradle', 'vue', 'svelte', 'rst', 'ini', 'cfg',
+]);
+const REFERENCE_LIMIT = 512;
+export interface FileReference {
+  /** The path as written, without a `:line` suffix. */
+  readonly path: string;
+  /** The line the reference points at, when it names one. */
+  readonly line: number | null;
+}
+/**
+ * The path and line of `text` when the whole text reads as a reference to a file:
+ * `src/app.ts`, `crates/foo/src/bar.rs:123`, `./a.py`, `~/p/a.rs`, `/abs/a.rs:4:2`. A name must have a
+ * path separator or a known source extension (any extension when a line is given). Whether the file
+ * exists is for the desktop to say; this only keeps ordinary words and URLs from being asked about.
+ */
+export function fileReference(text: string): FileReference | null {
+  if (!text || text.length > REFERENCE_LIMIT || !/^[\w./@+~-]+(?::\d+){0,2}$/.test(text)) return null;
+  const match = /^(.*?)((?::\d+){1,2})?$/.exec(text)!;
+  const path = match[1], line = match[2] ? Number(match[2].split(':')[1]) : null;
+  if (path.startsWith('//') || path.endsWith('/') || path === '~' || (path.startsWith('~') && !path.startsWith('~/'))) return null;
+  const name = path.slice(path.lastIndexOf('/') + 1), dot = name.lastIndexOf('.');
+  if (!name || !/[A-Za-z]/.test(name) || name === '.' || name === '..') return null;
+  const extension = dot > 0 ? name.slice(dot + 1) : '';
+  const known = SOURCE_EXTENSIONS.has(extension.toLowerCase()) || (line !== null && /^[A-Za-z][A-Za-z0-9]*$/.test(extension));
+  return path.includes('/') || known ? { path, line } : null;
+}
+/** The words on a file link: "Open bar.rs (line 123) in your text editor". */
+export function fileLinkTitle(reference: FileReference): string {
+  const name = reference.path.slice(reference.path.lastIndexOf('/') + 1);
+  return `Open ${name}${reference.line === null ? '' : ` (line ${reference.line})`} in your text editor`;
+}
+/** Every distinct file-shaped text in `blocks` (code spans and bare paths; never fenced code), in reading order. */
+export function fileReferences(blocks: readonly Block[]): string[] {
+  const found = new Set<string>();
+  const visit = (nodes: readonly Inline[]) => {
+    for (const node of nodes) {
+      if (typeof node === 'string') continue;
+      if (node.t === 'ref' || node.t === 'path') found.add(node.text);
+      else if (node.t === 'code') { if (fileReference(node.text)) found.add(node.text); }
+      else if (node.t === 'strong' || node.t === 'em' || node.t === 'del') visit(node.children);
+      // A link keeps its own target; text inside it is its label.
+    }
+  };
+  const walk = (list: readonly Block[]) => {
+    for (const block of list) {
+      if (block.t === 'p' || block.t === 'h') visit(block.children);
+      else if (block.t === 'quote') walk(block.children);
+      else if (block.t === 'list') block.items.forEach(walk);
+      else if (block.t === 'table') { block.head.forEach(visit); block.rows.forEach(row => row.forEach(visit)); }
+    }
+  };
+  walk(blocks);
+  return [...found];
+}
+
 /** Inline content of `text`; `depth` caps nested emphasis and links. */
 export function inline(text: string, depth: number): Inline[] {
   return spans(text, scan(text), 0, text.length, depth, false);
@@ -414,11 +485,13 @@ function spans(text: string, found: Scan, from: number, to: number, depth: numbe
         // and no whitespace.
         const close = found.parenClose.get(end + 1) ?? -1;
         if (close >= 0 && close < to && close - end < URL_LIMIT && found.nextSpace[end + 2] > close) {
-          const href = safeHref(text.slice(end + 2, close));
+          const target = text.slice(end + 2, close), href = safeHref(target), itemId = itemReference(target);
           const label = depth < INLINE_DEPTH ? spans(text, found, index + 1, end, depth + 1, true) : [text.slice(index + 1, end)];
           flush();
           // An unsafe target keeps only the label, as text.
-          if (href) out.push({ t: 'link', href, children: label }); else out.push(...label);
+          if (itemId) out.push({ t: 'item', itemId, children: label });
+          else if (href) out.push({ t: 'link', href, children: label });
+          else out.push(...label);
           index = close + 1; continue;
         }
       }
@@ -445,6 +518,14 @@ function spans(text: string, found: Scan, from: number, to: number, depth: numbe
       // A whole path token is read (or skipped) at once, so each character is looked at once.
       const end = referenceEnd(text, index, to);
       if (end > 0) { flush(); out.push({ t: 'ref', text: text.slice(index, end) }); index = end; continue; }
+      // A bare path without a line: `src/app.ts`, read as one token, minus the sentence's own full stop.
+      if (!inLink && text[index - 1] !== ':') {
+        let stop = index;
+        while (stop < to && stop - index < REFERENCE_LIMIT && pathChar(text[stop])) stop++;
+        while (stop > index && text[stop - 1] === '.') stop--;
+        const token = text.slice(index, stop);
+        if (stop > index && fileReference(token)) { flush(); out.push({ t: 'path', text: token }); index = stop; continue; }
+      }
     }
     buffer += char; index++;
   }

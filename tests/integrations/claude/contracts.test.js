@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
 import { binding as fixtureBinding, host, ids, prepared as fixturePrepared } from './fixtures.js';
 import modEvents from '../../../fixtures/providers/claude/mod-events.json';
-import { bytes, claudeSessionEndEventId, clip, descriptorValid, envelope, hash, lifecycle, prepared, reportReceipt } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { bytes, claudeSessionEndEventId, clip, descriptorValid, envelope, hash, lifecycle, plainFailure, prepared, reportReceipt } from '../../../integrations/claude/plugin/hooks/contracts.js';
 
 const binding = { binding_id:'11111111-1111-4111-8111-111111111111', generation:'22222222-2222-4222-8222-222222222222' };
 const input = '33333333-3333-4333-8333-333333333333';
@@ -44,6 +44,21 @@ describe('published wire consumers', () => {
     expect(() => envelope(failed(error))).toThrow('delivery_uncertain');
     for (const invalid of [{...error,retryable:true},{...error,message:' '},{...error,hint:'x'.repeat(4097)},{...error,field_errors:[{field:'',message:'bad'}]}, {...error,unexpected:'raw'}]) {
       expect(() => envelope(failed(invalid))).toThrow('invalid error');
+    }
+  });
+  it('carries a plain owner sentence beside the diagnostic message for every helper failure', () => {
+    const failed = (code, details) => ({exitCode:4,stdout:JSON.stringify({api_version:1,ok:false,error:{code,message:'m',hint:'h',retryable:false,field_errors:[],...(details ? {details} : {})}})});
+    const plain = (code, details) => { try { envelope(failed(code,details)); } catch (error) { return error.plain; } };
+    expect(plain('host_unreachable')).toBe("Ariadne isn't open, so this session's work isn't being recorded. Open Ariadne and it will reconnect.");
+    for (const code of ['stale_generation','not_found','permission_denied','unsupported','protocol_conflict','binding_conflict','commit_uncertain','something_new']) {
+      expect(plain(code)).toMatch(/^[A-Z].*[.]$/);
+      expect(plain(code)).not.toMatch(/retain|original IDs|helper|_/);
+    }
+    expect(plain('invalid_transition',{reason:'session_closed'})).toContain('Reopen it in Ariadne');
+    expect(plain('invalid_transition',{reason:'constructor'})).toContain('Open Ariadne to see why');
+    expect(plainFailure('toString')).toContain('Open the Ariadne app');
+    for (const value of [{stdout:'not JSON',exitCode:0},{...result(null),exitCode:1},{stdout:'{"api_version":2,"ok":true,"data":null}',exitCode:0}]) {
+      try { envelope(value); } catch (error) { expect(error.plain).toMatch(/^[A-Z].*[.]$/); expect(error.plain).not.toMatch(/retain|JSON|envelope/); }
     }
   });
   it('validates exact marker, full UTF8 bytes and original generation with no reconstruction', async () => {

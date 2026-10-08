@@ -98,7 +98,13 @@ impl Fixture {
                 ("hooks/discovery.js", "// discovery"),
                 ("hooks/installed.js", "export default null;"),
                 ("skills/ariadne/SKILL.md", "# Fixture rules"),
-                ("skills/ariadne/playbook.md", "# Fixture playbook"),
+                ("skills/ariadne/inputs.md", "# Fixture"),
+                ("skills/ariadne/errors.md", "# Fixture"),
+                ("skills/ariadne/reconnect.md", "# Fixture"),
+                ("skills/ariadne/report.md", "# Fixture"),
+                ("skills/ariadne/review.md", "# Fixture"),
+                ("skills/ariadne/checklist.md", "# Fixture"),
+                ("skills/ariadne/follow-up.md", "# Fixture"),
             ] {
                 let path = root.join(name);
                 fs::create_dir_all(path.parent().unwrap()).unwrap();

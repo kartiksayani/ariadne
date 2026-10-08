@@ -62,7 +62,7 @@ describe('supported Mod entry convention', () => {
       expect(bound.at(-1)).toEqual(bound[0]);
       published = true;
       const retried = await hooks.get('ariadne-connect')(h.$,{args:ids.session});
-      expect(retried.text).toContain('connection connected');
+      expect(retried.text).toContain(`binding ${ids.binding}, generation ${ids.generation}`);
       expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
       expect(h.calls.filter(call => call.argv[2] === 'report')).toEqual([]);
       expect(h.prompts).toEqual([]);
@@ -175,16 +175,15 @@ describe('supported Mod entry convention', () => {
     const h = host();const hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);
     const result = await hooks.get('ariadne-connect')(h.$,{args:` ${ids.session} `});
-    const [summary,...guidance] = result.text.split('\n');
-    expect(summary).toContain(`session ${ids.session} in project ${ids.project}`);
-    expect(summary).toContain(`binding ${ids.binding}, generation ${ids.generation}`);
-    expect(summary).toContain('[ARIADNE_INPUT:');
-    expect(result.text).toContain('without waiting for an input');
-    expect(result.text).toContain('Never edit .ariadne/');
-    expect(result.text).not.toContain('Use published Ariadne domain commands.');
+    const [summary,command,advice,...guidance] = result.text.split('\n');
+    expect(summary).toBe(`Ariadne connected: binding ${ids.binding}, generation ${ids.generation}.`);
+    expect(command).toBe(`Command: ${descriptor.helperPath}`);
+    expect(advice).toBe('File your work as you go; the ariadne skill has the rest.');
+    // The inline rules live in the skill, not in the connect output.
+    expect(result.text).not.toContain('[ARIADNE_INPUT:');
+    expect(result.text).not.toContain('Never edit .ariadne/');
     expect(result.text).not.toContain('"instruction"');
-    expect(guidance.join('\n')).toContain(`project ${ids.project}, session ${ids.session}`);
-    expect(guidance.join('\n')).toContain('respect cancelled work');
+    expect(guidance.join('\n')).toBe('This resumes an earlier session: read reconnect.md in the ariadne skill first.');
     expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => JSON.parse(call.options.stdin).command.params.existing_session_id)).toEqual([ids.session]);
     expect(h.prompts).toEqual([]);
     // The command output carries the routing; no extra conversation note.
@@ -209,7 +208,8 @@ describe('supported Mod entry convention', () => {
     expect(h.commands[0].argumentHint).toBe('[session-id]');
     expect(h.timer().ms).toBe(1000);
     const result = await hooks.get('ariadne-connect')(h.$);
-    expect(result.text).toMatch(/^Ariadne connected: session /);
+    expect(result.text).toMatch(/^Ariadne connected: binding \S+, generation \S+\.\nCommand: \/\S+\nFile your work as you go; the ariadne skill has the rest\.$/);
+    expect(result.text).toContain(descriptor.helperPath);
     expect(result.text).not.toContain('{');
     expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.connection_state).toBe('connected');
     h.timer().callback();
@@ -510,6 +510,43 @@ describe('conversation changes, relaunch and removal', () => {
     expect(note.message.content[0].text).toMatch(/^Ariadne reconnected this conversation /);
     expect(note.message.content[0].text).toContain(`binding ${ids.binding} and generation ${ids.attempt}`);
     expect(note.message.content[0].text).not.toContain(ids.generation);
+    // A fresh context is sent to reconnect.md, which holds the one-time read.
+    expect(note.message.content[0].text).toContain('read reconnect.md in the ariadne skill first');
+    expect(note.message.content[0].text).not.toMatch(/run ariadne read/);
+    // The note carries the same Command line as the connect summary, so a fresh context can run it.
+    expect(note.message.content[0].text.split('\n')).toContain(`Command: ${descriptor.helperPath}`);
+  });
+  it('shell-quotes a helper path that needs it, in the connect summary and in the reconnect note', async () => {
+    for (const [helperPath,printed] of [
+      ['/Users/o wner/Ariadne App/bin/ariadne',`'/Users/o wner/Ariadne App/bin/ariadne'`],
+      ["/Users/o'wner/bin/ariadne",`'/Users/o'\\''wner/bin/ariadne'`],
+      ['/installed/ariadne-1.0_x/bin/ariadne','/installed/ariadne-1.0_x/bin/ariadne'],
+    ]) {
+      const config = {...descriptor,helperPath};
+      const h = rotatingApp();const hooks = callbacks(config);
+      await hooks.get('session.start')(h.$,{},next);
+      const summary = (await hooks.get('ariadne-connect')(h.$,{args:ids.session})).text;
+      expect(summary.split('\n')[1]).toBe(`Command: ${printed}`);
+      await hooks.get('session.end')(h.$,{reason:'clear'},next);
+      await h.timer().callback();
+      await vi.waitFor(() => expect(h.appended).toHaveLength(1));
+      expect(h.appended[0].message.content[0].text.split('\n')).toContain(`Command: ${printed}`);
+    }
+  });
+  it('prints the closed-app notice again in the new conversation after a conversation change', async () => {
+    const h = rotatingApp({before:argv => argv[2] === 'announce' ? failure('unsupported') : undefined});
+    const hooks = callbacks(descriptor);
+    const outage = 'Ariadne: could not reach the Ariadne app. This conversation will show there once the app is running.';
+    await hooks.get('session.start')(h.$,{},next);
+    const heartbeat = h.timers().find(timer => timer.ms === 30000);
+    await heartbeat.callback();
+    expect(h.logs.filter(log => log === outage)).toHaveLength(1);
+    h.switchSession('new-conversation');
+    await hooks.get('session.end')(h.$,{reason:'clear'},next);
+    await h.timer().callback();
+    await vi.waitFor(() => expect(h.logs.filter(log => log === outage)).toHaveLength(2));
+    await heartbeat.callback();
+    expect(h.logs.filter(log => log === outage)).toHaveLength(2);
   });
   it('after /clear while the app cannot save, never finishes the old message with the new conversation\'s answer', async () => {
     const value = await prepared();let claims = 0, down = false;
@@ -664,6 +701,52 @@ describe('conversation changes, relaunch and removal', () => {
     const last = announced(h).slice(-2);
     expect(last.map(body => body.binding_scope === null)).toEqual([false,true]);
     expect(h.logs.slice(before)).toEqual([]);
+  });
+  it('tells the owner once per outage, in plain words, and again only after the app recovered and failed again', async () => {
+    const closed = "Ariadne isn't open, so this session's work isn't being recorded. Open Ariadne and it will reconnect.";
+    let down = false;
+    const h = host({handler:argv => down && argv[1] !== '--version' ? failure('host_unreachable') : undefined});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
+    const quiet = h.logs.length;
+    down = true;
+    // The first heartbeat and every command in the outage share one notice, yet each command still answers.
+    const beat = h.timers().find(timer => timer.ms === 30000);
+    await beat.callback();
+    for (let i = 0; i < 3; i += 1) expect((await hooks.get('ariadne-status')(h.$)).text).toBe(`That did not complete. ${closed}`);
+    await beat.callback();
+    expect(h.logs.slice(quiet)).toEqual([closed]);
+    down = false;
+    await beat.callback();
+    expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.generation).toBe(ids.generation);
+    expect(h.logs.slice(quiet)).toEqual([closed]);
+    down = true;
+    await hooks.get('ariadne-status')(h.$);
+    await hooks.get('ariadne-status')(h.$);
+    expect(h.logs.slice(quiet)).toEqual([closed,closed]);
+    expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper/);
+  });
+  it('gives each helper failure code its own plain sentence with a next step, shown once per change of state', async () => {
+    let code = 'stale_generation', details, armed = false;
+    const h = host({handler:argv => armed && argv[2] === 'connection-status' ? failure(code,details) : undefined});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
+    armed = true;
+    const before = h.logs.length;
+    const say = async () => (await hooks.get('ariadne-status')(h.$)).text;
+    const gone = await say();
+    expect(gone).toContain('/ariadne-connect');
+    expect(await say()).toBe(gone);
+    expect(h.logs.slice(before)).toHaveLength(1);
+    expect(gone).toContain(h.logs[before]);
+    code = 'invalid_transition';details = {reason:'owner_paused'};
+    expect(await say()).toContain('paused in the app. Resume it in Ariadne');
+    code = 'delivery_uncertain';details = undefined;
+    expect(await say()).toContain('check before sending anything again');
+    code = 'invented_by_a_future_helper';
+    expect(await say()).toContain('Open the Ariadne app to see what happened');
+    expect(h.logs.slice(before)).toHaveLength(4);
+    expect(h.logs.slice(before).join(' ')).not.toMatch(/stale_generation|owner_paused|delivery_uncertain|invented|retain|original IDs/);
   });
   it('admits claims again after an owner command is refused', async () => {
     const value = await prepared();const submission = deferred();

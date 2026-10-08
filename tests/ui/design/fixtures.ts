@@ -324,7 +324,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
     return [...ids];
   };
   const transport = new DesignTransport(sessions, projects, summaries, spec.state === 'loading' ? route : null);
-  transport.preferences.global = { theme: spec.theme, window: null, pinned: false, notification_watermark: null,
+  transport.preferences.global = { theme: spec.theme, text_scale: 100, window: null, pinned: false, notification_watermark: null,
     selected_navigation: spec.scenario === 'sessions' ? { kind: 'all_sessions' } : spec.scenario === 'projects' || spec.scenario === 'first' ? { kind: 'projects' }
       : spec.scenario === 'projectpage' ? { kind: 'project', project_id: projectIds.get('payments')! } : { kind: 'session', session: route! } };
   transport.preferences.sessions = world.openTabs.map((id, order): SessionPreferences => {

@@ -31,14 +31,16 @@ fn setup_is_idempotent_and_agent_selection_merges_only_owned_resources() {
     let profile = tempfile::tempdir().unwrap();
     let version = version(profile.path());
     let first = owned::apply(&version, "claude", false).unwrap();
-    assert_eq!(first["changes"].as_array().unwrap().len(), 12);
-    assert!(!version.join("integrations/rules/codex.md").exists());
+    assert_eq!(first["changes"].as_array().unwrap().len(), 17);
+    assert!(!version
+        .join("integrations/codex-skills/ariadne/SKILL.md")
+        .exists());
     let receipt = version.join("integrations/setup.json");
     let bytes = fs::read(&receipt).unwrap();
     let modified = fs::metadata(&receipt).unwrap().modified().unwrap();
     let second = owned::apply(&version, "claude", false).unwrap();
     assert_eq!(second["changes"], serde_json::json!([]));
-    assert_eq!(second["already_present"].as_array().unwrap().len(), 12);
+    assert_eq!(second["already_present"].as_array().unwrap().len(), 17);
     assert_eq!(fs::read(&receipt).unwrap(), bytes);
     assert_eq!(
         fs::metadata(&receipt).unwrap().modified().unwrap(),
@@ -49,25 +51,27 @@ fn setup_is_idempotent_and_agent_selection_merges_only_owned_resources() {
             .as_array()
             .unwrap()
             .len(),
-        3
+        8
     );
     assert_eq!(
         owned::apply(&version, "codex", true).unwrap()["changes"]
             .as_array()
             .unwrap()
             .len(),
-        3
+        8
     );
     assert!(version
         .join("integrations/claude-mod/plugin/hooks/register.js")
         .exists());
-    assert!(!version.join("integrations/rules/codex.md").exists());
+    assert!(!version
+        .join("integrations/codex-skills/ariadne/SKILL.md")
+        .exists());
     assert_eq!(
         owned::apply(&version, "both", true).unwrap()["changes"]
             .as_array()
             .unwrap()
             .len(),
-        12
+        17
     );
     assert!(!receipt.exists());
     assert_eq!(
@@ -81,8 +85,8 @@ fn matching_foreign_files_remain_unowned_and_edited_owned_files_survive() {
     let profile = tempfile::tempdir().unwrap();
     let version = version(profile.path());
     let bundle = resources::bundle(&version.join("bin/ariadne"));
-    let foreign = version.join("integrations/rules/codex.md");
-    put(&foreign, &bundle["rules/codex.md"]);
+    let foreign = version.join("integrations/codex-skills/ariadne/SKILL.md");
+    put(&foreign, &bundle["codex-skills/ariadne/SKILL.md"]);
     let host = profile.path().join("claude-settings.json");
     fs::write(&host, b"foreign host config").unwrap();
     let session = profile.path().join("session.json");
@@ -90,15 +94,18 @@ fn matching_foreign_files_remain_unowned_and_edited_owned_files_survive() {
     let backup = profile.path().join("previous.json");
     fs::write(&backup, b"backup").unwrap();
     let installed = owned::apply(&version, "both", false).unwrap();
-    assert_eq!(installed["changes"].as_array().unwrap().len(), 14);
+    assert_eq!(installed["changes"].as_array().unwrap().len(), 24);
     assert_eq!(installed["already_present"][0]["owned"], false);
     let edited = version.join("integrations/claude-mod/plugin/hooks/register.js");
     put(&edited, b"owner edited bytes");
     let removed = owned::apply(&version, "both", true).unwrap();
-    assert_eq!(removed["changes"].as_array().unwrap().len(), 13);
+    assert_eq!(removed["changes"].as_array().unwrap().len(), 23);
     assert_eq!(removed["retained"].as_array().unwrap().len(), 1);
     assert_eq!(fs::read(edited).unwrap(), b"owner edited bytes");
-    assert_eq!(fs::read(foreign).unwrap(), bundle["rules/codex.md"]);
+    assert_eq!(
+        fs::read(foreign).unwrap(),
+        bundle["codex-skills/ariadne/SKILL.md"]
+    );
     assert_eq!(fs::read(host).unwrap(), b"foreign host config");
     assert_eq!(fs::read(session).unwrap(), b"history");
     assert_eq!(fs::read(backup).unwrap(), b"backup");
@@ -108,7 +115,7 @@ fn matching_foreign_files_remain_unowned_and_edited_owned_files_survive() {
 fn same_version_mismatch_or_symlink_never_replaces_existing_content() {
     let profile = tempfile::tempdir().unwrap();
     let version = version(profile.path());
-    let path = version.join("integrations/rules/codex.md");
+    let path = version.join("integrations/codex-skills/ariadne/SKILL.md");
     put(&path, b"edited same version");
     assert!(owned::apply(&version, "both", false).is_err());
     assert_eq!(fs::read(&path).unwrap(), b"edited same version");
@@ -132,7 +139,7 @@ fn malformed_receipt_and_replaced_owned_symlink_survive_uninstall() {
     assert!(owned::apply(&version, "both", true).is_err());
     assert_eq!(fs::read(&receipt).unwrap(), b"edited receipt");
     put(&receipt, &before);
-    let path = version.join("integrations/rules/codex.md");
+    let path = version.join("integrations/codex-skills/ariadne/SKILL.md");
     fs::remove_file(&path).unwrap();
     let foreign = profile.path().join("foreign");
     fs::write(&foreign, b"keep").unwrap();
@@ -153,13 +160,32 @@ fn packaged_inventory_renders_only_static_immutable_helper_identity() {
     let manifest: serde_json::Value =
         serde_json::from_slice(&files["claude-mod/plugin/.claude-plugin/plugin.json"]).unwrap();
     assert_eq!(manifest["version"], resources::VERSION);
-    assert_eq!(files.len(), 15);
+    assert_eq!(files.len(), 25);
+    // The skill folders hold all the rules: no separate rule sheets ship.
+    assert!(files.keys().all(|name| !name.starts_with("rules/")));
     assert!(files["codex-skills/ariadne/SKILL.md"].starts_with(b"---\nname: ariadne\n"));
-    // The skill names its on-demand playbook; both hosts ship it beside SKILL.md.
+    // The skill names each on-demand file; both hosts ship them beside SKILL.md,
+    // and the core stays small because everything else loads on demand.
     for skill in ["claude-mod/plugin/skills/ariadne", "codex-skills/ariadne"] {
         let text = std::str::from_utf8(&files[&format!("{skill}/SKILL.md")]).unwrap();
-        assert!(text.contains("`playbook.md`"), "{skill}");
-        assert!(files[&format!("{skill}/playbook.md")].starts_with(b"<!-- Generated by"));
+        assert!(
+            text.len() <= 10 * 1024,
+            "{skill} core is {} bytes",
+            text.len()
+        );
+        for name in [
+            "inputs",
+            "errors",
+            "reconnect",
+            "report",
+            "review",
+            "checklist",
+            "follow-up",
+        ] {
+            assert!(text.contains(&format!("`{name}.md`")), "{skill} {name}");
+            assert!(files[&format!("{skill}/{name}.md")].starts_with(b"<!-- Generated by"));
+        }
+        assert!(!files.contains_key(&format!("{skill}/playbook.md")));
     }
     assert!(files.contains_key("claude-mod/plugin/hooks/discovery.js"));
     assert_eq!(files.values().filter(|bytes| bytes.is_empty()).count(), 0);
@@ -168,21 +194,21 @@ fn packaged_inventory_renders_only_static_immutable_helper_identity() {
             .keys()
             .filter(|name| resources::selected(name, "claude"))
             .count(),
-        12
+        17
     );
     assert_eq!(
         files
             .keys()
             .filter(|name| resources::selected(name, "codex"))
             .count(),
-        3
+        8
     );
     assert_eq!(
         files
             .keys()
             .filter(|name| resources::selected(name, "both"))
             .count(),
-        15
+        25
     );
 }
 
@@ -208,7 +234,10 @@ fn host_commands_preserve_spaces_and_keep_trust_explicit() {
     assert!(commands[4].contains("paste the short setup instruction"));
     assert!(commands[4].contains("installed Ariadne skill holds the rules"));
     assert!(commands[4].contains("once per binding"));
-    assert!(commands[4].contains("/home/private profile/current/integrations/rules/codex.md"));
+    assert!(commands[4].contains(
+        "read /home/private profile/current/integrations/codex-skills/ariadne/SKILL.md first"
+    ));
+    assert!(!commands[4].contains("rules/codex.md"));
     assert_eq!(
         resources::host_commands(Path::new("/home/private/current/integrations"), "codex").len(),
         1
@@ -230,7 +259,7 @@ fn global_setup_does_not_infer_or_register_a_project_and_explicit_registration_r
     let result =
         ariadne_cli::setup::execute_in_installation(&args, false, &data, &version, &stable)
             .unwrap();
-    assert_eq!(result["changes"].as_array().unwrap().len(), 3);
+    assert_eq!(result["changes"].as_array().unwrap().len(), 8);
     assert!(!data.exists());
     assert_eq!(
         ariadne_cli::setup::execute_in_installation(&args, false, &data, &version, &stable)

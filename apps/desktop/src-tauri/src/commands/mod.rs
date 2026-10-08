@@ -7,8 +7,13 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{Emitter, Manager};
+mod clipboard;
 mod discovery;
+mod file_ref;
 mod open_link;
+pub use clipboard::{
+    __cmd__clipboard_write, __tauri_command_name_clipboard_write, clipboard_write,
+};
 pub(crate) use discovery::project as project_discovery;
 pub use discovery::{
     __cmd__codex_default_endpoint, __cmd__discovery_snapshot, __cmd__discovery_ui_open,
@@ -16,6 +21,11 @@ pub use discovery::{
     __tauri_command_name_discovery_snapshot, __tauri_command_name_discovery_ui_open,
     __tauri_command_name_supervisor_health, codex_default_endpoint, discovery_snapshot,
     discovery_ui_open, supervisor_health,
+};
+pub use file_ref::{
+    __cmd__file_reference_open, __cmd__file_references_resolve,
+    __tauri_command_name_file_reference_open, __tauri_command_name_file_references_resolve,
+    file_reference_open, file_references_resolve,
 };
 pub use open_link::{__cmd__open_link, __tauri_command_name_open_link, open_link};
 
