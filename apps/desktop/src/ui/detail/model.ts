@@ -101,14 +101,19 @@ export interface DetailInput {
 
 const ACTIVE_INPUT = new Set<Input['state']>(['queued', 'in_flight', 'needs_attention']);
 const TRACKED = new Set<InputKind>(['answer', 'bring', 'reply', 'drop', 'reopen']);
-
+/**
+ * Newest first, but a stopped delivery needing a decision before everything: later messages cannot go out until it
+ * is settled, so its Retry / Mark as done must stay in view (as on the tree row).
+ */
+const byDecisionThenNewest = (a: Immutable<Input>, b: Immutable<Input>) =>
+  Number(b.state === 'needs_attention') - Number(a.state === 'needs_attention') || b.seq - a.seq;
 
 /** The submission whose delivery the stepper follows: one being saved, else the latest unresolved input. */
 function submission(session: Immutable<Session>, item: Immutable<Item>, saving: InputKind | null) {
   if (saving) return { kind: saving, stage: 'sending' as DeliveryStage, label: '' };
   // Cancelled and skipped inputs never reached the agent; they leave no trace here.
   const inputs = Object.values(session.inputs).filter((input): input is Immutable<Input> => !!input && input.target.item_id === item.id
-    && (ACTIVE_INPUT.has(input.state) || (input.state === 'handled' && TRACKED.has(input.kind)))).sort((a, b) => b.seq - a.seq);
+    && (ACTIVE_INPUT.has(input.state) || (input.state === 'handled' && TRACKED.has(input.kind)))).sort(byDecisionThenNewest);
   const latest = inputs.find(input => ACTIVE_INPUT.has(input.state)) ?? inputs[0];
   if (!latest) return null;
   const option = latest.payload.selected_option_id ? latest.payload.target_snapshot.options.find(value => value.id === latest.payload.selected_option_id) : null;
@@ -184,10 +189,10 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const readOnly = session.state !== 'active' || !topic || topic.archived_at !== null;
   const offline = connectionOf(binding, presence) === 'reconnecting';
   const sub = submission(session, item, saving);
-  // The latest unsettled message to this item. A held one (written for an older question)
+  // The latest unsettled message to this item, or a stopped one needing a decision. A held one (written for an older question)
   // doesn't hold the answer box: the newer ask wins and the owner answers it.
   const tracked = Object.values(session.inputs).filter((input): input is Immutable<Input> => !!input && input.target.item_id === item.id
-    && ACTIVE_INPUT.has(input.state)).sort((a, b) => b.seq - a.seq)[0] ?? null;
+    && ACTIVE_INPUT.has(input.state)).sort(byDecisionThenNewest)[0] ?? null;
   const held = !saving && !!tracked && heldInput(session, tracked);
   const stuck = !saving && tracked ? stuckInput(session, tracked, presence, health) : null;
   const pending = !!sub?.stage && sub.stage !== 'failed' && !held;

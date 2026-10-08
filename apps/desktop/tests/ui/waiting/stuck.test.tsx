@@ -248,4 +248,13 @@ describe('stuck inputs explain themselves', () => {
     input.active_attempt_id = null;
     expect(stuckInput(immutable(session), immutable(input))).toMatchObject({ retry: false, settle: null });
   });
+  it('keeps the decision in the detail panel when a later message is queued behind the stopped delivery on the same item', () => {
+    const session = seed(), stopped = session.inputs[id('74')]!, successor = structuredClone(stopped);
+    successor.id = id('f4'); successor.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1;
+    successor.state = 'queued'; successor.attempts = []; successor.active_attempt_id = null;
+    session.inputs[successor.id] = successor;
+    const detail = detailModel({ session: immutable(session), itemId: '7', now: Date.parse('2026-10-03T12:00:00.000Z'), mode: null, later: false, saving: null });
+    expect(detail?.stuck?.input.id).toBe(stopped.id);
+    expect(detail?.stuck?.note).toMatchObject({ kind: 'decision', retry: true, settle: 'skip' });
+  });
 });
