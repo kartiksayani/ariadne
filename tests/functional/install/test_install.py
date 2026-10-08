@@ -42,7 +42,7 @@ class InstallationTests(unittest.TestCase):
         app = self.artifacts / "bundle/macos/Ariadne.app/Contents"
         app.mkdir(parents=True, exist_ok=True)
         with (app / "Info.plist").open("wb") as output:
-            plistlib.dump({"CFBundleShortVersionString": version}, output)
+            plistlib.dump({"CFBundleShortVersionString": version, "CFBundleIdentifier": "dev.ariadne.fixture"}, output)
         (app / "MacOS").mkdir(exist_ok=True)
         (app / "MacOS/ariadne-desktop").write_bytes(b"fixture desktop executable")
         (app / "MacOS/ariadne-desktop").chmod(0o755)
@@ -87,9 +87,12 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual((final / "integrations/claude-mod/plugin/hooks/installed.js").read_text(), str(final / "bin/ariadne"))
         self.assertEqual(stat.S_IMODE((final / "bin/ariadne").stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE((final / "integrations/rules/claude.md").stat().st_mode), 0o600)
-        before = (final / "install.json").stat().st_mtime_ns
+        before = (final / "install.json").read_bytes()
         self.assertEqual(self.install(), final)
-        self.assertEqual((final / "install.json").stat().st_mtime_ns, before)
+        self.assertIn("Replacing the Ariadne 0.1.0 already installed (your projects and history are kept).",
+                      self.output.getvalue())
+        self.assertEqual((final / "install.json").read_bytes(), before)
+        self.assertEqual(history.read_bytes(), b"session and backups survive")
         self.assertEqual(installer.uninstall(self.home), [])
         self.assertFalse(final.exists())
         self.assertFalse(installer.exists(self.root / "current"))
@@ -115,9 +118,9 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(self.skill.resolve(), final / "integrations/codex-skills/ariadne")
         self.assertEqual((self.skill / "SKILL.md").read_text(), "fixture codex skill")
         self.assertIn(installer.SKILL_LINK, installer.json_read(final / "install.json")["owned_links"])
-        before = (final / "install.json").stat().st_mtime_ns
+        before = (final / "install.json").read_bytes()
         self.assertEqual(self.install(), final)
-        self.assertEqual((final / "install.json").stat().st_mtime_ns, before)
+        self.assertEqual((final / "install.json").read_bytes(), before)
         self.assertTrue(self.skill.is_symlink())
         self.assertEqual(installer.uninstall(self.home), [])
         self.assertFalse(installer.exists(self.skill))
@@ -140,7 +143,7 @@ class InstallationTests(unittest.TestCase):
             elif kind == "file":
                 self.skill.write_bytes(b"owner file")
             else:
-                self.skill.symlink_to(installer.links(self.home)[installer.SKILL_LINK])
+                self.skill.symlink_to(self.base / "owner-skill")
             self.output.truncate(0)
             self.output.seek(0)
             final = self.install()
@@ -188,7 +191,8 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("Skipped the Codex skill link", self.output.getvalue())
         self.assertIn("link", self.output.getvalue())
         self.assertEqual(self.skill.read_bytes(), b"owner replacement")
-        self.assertIn(str(self.skill), installer.uninstall(self.home))
+        self.assertNotIn(installer.SKILL_LINK, installer.json_read(final / "install.json")["owned_links"])
+        self.assertEqual(installer.uninstall(self.home), [])
         self.assertEqual(self.skill.read_bytes(), b"owner replacement")
 
     def test_same_version_reinstall_with_redirected_agents_skips_without_error(self):
@@ -203,18 +207,17 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("Skipped the Codex skill link", self.output.getvalue())
         self.assertEqual(list((outside / "skills").iterdir()), [])
 
-    def test_same_version_older_receipt_without_link_does_not_create_or_fail(self):
+    def test_same_version_older_receipt_without_link_is_replaced_with_a_complete_receipt(self):
         final = self.install()
         receipt = installer.json_read(final / "install.json")
         del receipt["owned_links"][installer.SKILL_LINK]
         (final / "install.json").write_bytes(installer.encode(receipt))
         self.skill.unlink()
-        self.output.truncate(0)
-        self.output.seek(0)
         self.assertEqual(self.install(), final)
-        self.assertIn("does not record it", self.output.getvalue())
-        self.assertFalse(installer.exists(self.skill))
+        self.assertTrue(self.skill.is_symlink())
+        self.assertIn(installer.SKILL_LINK, installer.json_read(final / "install.json")["owned_links"])
         self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(installer.exists(self.skill))
 
     def test_replaced_owned_codex_skill_link_survives_uninstall(self):
         self.install()
@@ -234,18 +237,19 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual((self.root / "current").resolve(), second)
         self.assertEqual(installer.uninstall(self.home), [])
 
-    def test_same_version_changed_source_and_edited_install_are_refused(self):
+    def test_same_version_changed_source_replaces_and_edited_install_is_refused_untouched(self):
         final = self.install()
-        original = (final / "bin/ariadne").read_bytes()
         (self.artifacts / "bundle/macos/Ariadne.app/Contents/Info.plist").write_bytes(
             plistlib.dumps({"CFBundleShortVersionString": self.version, "Changed": True}))
-        with self.assertRaisesRegex(installer.InstallError, "Same-version"):
-            self.install()
-        self.assertEqual((final / "bin/ariadne").read_bytes(), original)
+        self.assertEqual(self.install(), final)
+        self.assertTrue(plistlib.loads((final / "Ariadne.app/Contents/Info.plist").read_bytes())["Changed"])
         (final / "integrations/rules/claude.md").write_bytes(b"owner edited rule")
-        with self.assertRaisesRegex(installer.InstallError, "contains edits"):
+        with self.assertRaisesRegex(installer.InstallError, f"Move the folder {final} somewhere else"):
             self.install()
         self.assertEqual((final / "integrations/rules/claude.md").read_bytes(), b"owner edited rule")
+        self.assertTrue((final / "bin/ariadne").exists())
+        self.assertTrue(self.app.is_dir())
+        self.assertTrue((self.home / ".local/bin/ariadne").is_symlink())
 
     def test_edited_and_foreign_package_files_and_links_survive_uninstall(self):
         final = self.install()
@@ -303,7 +307,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(self.install(), final)
         self.assertTrue(self.app.is_dir() and not self.app.is_symlink())
         self.assertEqual(self.leftovers(), [])
-        self.assertEqual(installer.json_read(final / "install.json")["inventory_version"], 1)
+        self.assertEqual(installer.json_read(final / "install.json")["inventory_version"], 2)
         self.assertEqual(self.install(), final)
         self.assertEqual(installer.uninstall(self.home), [])
         self.assertFalse(installer.exists(self.app))
@@ -897,12 +901,112 @@ class PackageTests(unittest.TestCase):
         foreign.write_bytes(b"foreign notes")
         edited = final / "integrations/rules/claude.md"
         edited.write_bytes(b"owner edited")
+        before = self.snapshot()
         with self.assertRaises(installer.InstallError) as stopped:
             self.install_over(package)
-        self.assertIn(f"Move the folder {final} somewhere else", str(stopped.exception))
-        self.assertIn(f"Retained edited, foreign or unverifiable path: {edited}", self.output.getvalue())
+        self.assertIn(f"Move the folder {final} somewhere else, then run ./install.sh again.", str(stopped.exception))
+        self.assertNotIn("Replacing", self.output.getvalue())
+        self.assertEqual(self.snapshot(), before)
         self.assertEqual(foreign.read_bytes(), b"foreign notes")
         self.assertEqual(edited.read_bytes(), b"owner edited")
+
+    def snapshot(self):
+        """Every path under the temp HOME with its kind and content, to prove nothing was touched."""
+        found = {}
+        for path in sorted(self.home.rglob("*")):
+            name = str(path.relative_to(self.home))
+            if path.is_symlink():
+                found[name] = ("link", os.readlink(path))
+            elif path.is_dir():
+                found[name] = ("dir", stat.S_IMODE(path.stat().st_mode))
+            else:
+                found[name] = ("file", path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+        return found
+
+    def test_failed_checks_leave_the_old_install_fully_intact(self):
+        _, package = self.extract()
+        final = self.install_over(package)
+        # A new package whose helpers report another version.
+        (package / "ariadne-mcp").write_text(f"#!{sys.executable}\nprint('ariadne-mcp 9.9.9')\n")
+        before = self.snapshot()
+        with self.assertRaisesRegex(installer.InstallError, "versions differ"):
+            self.install_over(package)
+        self.assertEqual(self.snapshot(), before)
+        self.assertNotIn("Replacing", self.output.getvalue())
+        # A foreign link and an edited app copy are found before anything is removed.
+        _, package = self.extract_again()
+        link = self.home / ".local/bin/ariadne"
+        link.unlink()
+        link.write_bytes(b"owner's own helper")
+        before = self.snapshot()
+        with self.assertRaisesRegex(installer.InstallError, "Foreign or edited"):
+            self.install_over(package)
+        self.assertEqual(self.snapshot(), before)
+        link.unlink()
+        link.symlink_to(installer.links(self.home)[".local/bin/ariadne"])
+        (self.home / "Applications/Ariadne.app/Contents/MacOS/ariadne-desktop").write_bytes(b"patched")
+        before = self.snapshot()
+        with self.assertRaisesRegex(installer.InstallError, "Foreign or edited"):
+            self.install_over(package)
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue((final / "bin/ariadne").is_file())
+
+    def test_moving_the_blocking_folder_aside_lets_the_rerun_succeed(self):
+        _, package = self.extract()
+        final = self.install_over(package)
+        (final / "owner-notes.txt").write_bytes(b"foreign notes")
+        with self.assertRaisesRegex(installer.InstallError, "Move the folder"):
+            self.install_over(package)
+        aside = self.base / "moved aside"
+        final.rename(aside)
+        self.assertTrue((self.root / "current").is_symlink() and not (self.root / "current").exists())
+        again = self.install_over(package)
+        self.assertEqual((self.root / "current").resolve(), again)
+        self.assertEqual((self.home / ".local/bin/ariadne").resolve(), again / "bin/ariadne")
+        self.assertEqual((aside / "owner-notes.txt").read_bytes(), b"foreign notes")
+        self.assertEqual(installer.app_inventory(self.home / "Applications/Ariadne.app"),
+                         installer.bundle_files(installer.inventory(again)))
+        self.assertEqual(installer.uninstall(self.home), [])
+
+    def test_a_dangling_current_pointer_or_missing_root_counts_as_no_install(self):
+        _, package = self.extract()
+        final = self.install_over(package)
+        shutil.rmtree(final)
+        self.assertTrue((self.root / "current").is_symlink() and not (self.root / "current").exists())
+        again = self.install_over(package)
+        self.assertEqual((self.root / "current").resolve(), again)
+        self.assertNotIn("Replacing", self.output.getvalue())
+        self.assertEqual(installer.uninstall(self.home), [])
+        # The whole Ariadne folder gone, links and app copy left behind.
+        final = self.install_over(package)
+        shutil.rmtree(self.root)
+        self.assertTrue(self.install_over(package).is_dir())
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(installer.exists(self.home / "Applications/Ariadne.app"))
+
+    def test_replacing_names_every_version_it_removes(self):
+        _, package = self.extract()
+        self.make_artifacts("0.0.9")
+        installer.install(self.home, self.artifacts, self.facts)
+        self.make_artifacts()
+        final = self.install_over(package)
+        self.assertEqual(sorted(os.listdir(self.root / "versions")), ["0.0.9", "0.1.0"])
+        self.output.truncate(0)
+        self.output.seek(0)
+        self.install_over(package)
+        self.assertIn("Replacing the Ariadne 0.1.0 already installed, and removing the other installed versions "
+                      "0.0.9 with it (your projects and history are kept).", self.output.getvalue())
+        self.assertEqual(os.listdir(self.root / "versions"), ["0.1.0"])
+        # A changed file in the other version blocks the replacement before anything is removed.
+        self.make_artifacts("0.0.9")
+        installer.install(self.home, self.artifacts, self.facts)
+        self.make_artifacts()
+        (self.root / "versions/0.0.9/integrations/rules/claude.md").write_bytes(b"owner edited")
+        before = self.snapshot()
+        with self.assertRaisesRegex(installer.InstallError, f"Move the folder {self.root / 'versions/0.0.9'} somewhere"):
+            self.install_over(package)
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue(final.is_dir())
 
     def test_install_script_no_longer_blocks_on_an_existing_version(self):
         script = (SOURCE.parent / "install.sh").read_text()

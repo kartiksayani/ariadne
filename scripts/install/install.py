@@ -251,8 +251,24 @@ def receipts(root, home, versions_fd):
     return found
 
 
-def app_state(home, known):
-    """Classify ~/Applications/Ariadne.app: absent, link (old layout), copy (ours) or None (not provably ours)."""
+def bundle_identifier(app):
+    """The CFBundleIdentifier an app copy names itself with, or None when it has none we can read."""
+    info = app / "Contents/Info.plist"
+    try:
+        if info.is_symlink() or not info.is_file() or info.stat().st_size > LIMIT:
+            return None
+        with info.open("rb") as source:
+            value = plistlib.load(source).get("CFBundleIdentifier")
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return None
+    return value if isinstance(value, str) and value else None
+
+
+def app_state(home, known, bundle_id=None):
+    """Classify ~/Applications/Ariadne.app: absent, link (old layout), copy (ours) or None (not provably ours).
+
+    With no receipt left at all (the version folder was moved aside), a copy that names the same
+    bundle identifier as the package being installed is adopted; the bytes can no longer be proven."""
     path = home / APP_PATH
     if not exists(path):
         return "absent"
@@ -268,7 +284,9 @@ def app_state(home, known):
         return None
     # Receipts of inventory_version 1 predate owned_app; the bytes are the proof for them.
     claims = (item for item in known if item.get("owned_app", True))
-    return "copy" if any(bundle_files(item["owned_files"]) == seen for item in claims) else None
+    if any(bundle_files(item["owned_files"]) == seen for item in claims):
+        return "copy"
+    return "copy" if not known and bundle_id and bundle_identifier(path) == bundle_id else None
 
 
 def discard(parent_fd, name):
@@ -323,16 +341,95 @@ def links(home):
     }
 
 
-def skill_link_conflict(home, before, target):
+def link_is_ours(home, name, target, known):
+    """A symlink with exactly our target that a receipt owns, or that dangles because its package is gone."""
+    path = home / name
+    if not path.is_symlink() or os.readlink(path) != target:
+        return False
+    return not path.exists() or any(item["owned_links"].get(name) == target for item in known)
+
+
+def skill_link_conflict(home, known, target):
     """Return why the Codex skill link must be skipped, or None when it is ours or absent."""
     path = home / SKILL_LINK
     for parent in (home / ".agents", path.parent):
         if exists(parent) and (parent.is_symlink() or not parent.is_dir()):
             return f"{parent} is not a plain directory"
-    if exists(path) and not (before and before[1]["owned_links"].get(SKILL_LINK) == target and
-                             path.is_symlink() and os.readlink(path) == target):
+    if exists(path) and not link_is_ours(home, SKILL_LINK, target, known):
         return f"{path} already exists and is not Ariadne's link"
     return None
+
+
+def external_plan(home, root, known, bundle_id):
+    """Decide what to do with ~/Applications/Ariadne.app and the links; raises before anything is touched
+    when one of them is not provably ours. Returns the app state, the links to own and notes to print."""
+    if exists(home / "Applications"):
+        directory(home / "Applications")
+    # The app copy is replaced only when a receipt proves we made it (ADR-0080).
+    state = app_state(home, known, bundle_id) if exists(home / APP_PATH) else "absent"
+    require(state is not None, f"Foreign or edited install path: {home / APP_PATH}")
+    owned_links = {}
+    notes = []
+    for name, target in links(home).items():
+        path = home / name
+        if name.startswith(".local/bin/") and not exists(path.parent):
+            continue
+        if name == SKILL_LINK:
+            conflict = skill_link_conflict(home, known, target)
+            if conflict:
+                notes.append(f"Skipped the Codex skill link: {conflict}. Codex will not see the Ariadne skill. "
+                             f"Move that path aside and run ./install.sh again, or link {path} to "
+                             f"{root / 'current/integrations/codex-skills/ariadne'} yourself.")
+                continue
+        if exists(path):
+            require(link_is_ours(home, name, target, known), f"Foreign or edited install path: {path}")
+        if exists(path.parent):
+            directory(path.parent)
+        owned_links[name] = target
+    return state, owned_links, notes
+
+
+def foreign_inside(package, receipt):
+    """The first path in an installed version that Ariadne did not create or that was changed, else None.
+    Missing files are fine; uninstall counts them as removed."""
+    def visit(path):
+        for child in sorted(path.iterdir()):
+            name = str(child.relative_to(package))
+            if child.is_dir() and not child.is_symlink():
+                if name not in receipt["owned_directories"]:
+                    return child
+                found = visit(child)
+                if found:
+                    return found
+                continue
+            if name == "install.json":
+                continue
+            try:
+                same = receipt["owned_files"].get(name) == record(child, package / "Ariadne.app")
+            except (InstallError, OSError):
+                same = False
+            if not same:
+                return child
+        return None
+    return visit(package)
+
+
+def blocked_versions(root, home, versions_fd, final):
+    """Version folders that replacing would have to remove but that hold foreign or changed files.
+    An unverifiable receipt blocks only the version being replaced; uninstall leaves the others alone."""
+    blocked = []
+    for name in sorted(os.listdir(versions_fd)):
+        if name.startswith("."):
+            continue
+        package = root / "versions" / name
+        try:
+            receipt = descriptor(package, home, partial=True)
+            if foreign_inside(package, receipt):
+                blocked.append(package)
+        except (InstallError, OSError, ValueError):
+            if package == final:
+                blocked.append(package)
+    return blocked
 
 
 def manifest(root, home, version, files, directories, owned_links, preflight):
@@ -581,34 +678,18 @@ def resources(helper, final_helper):
     return value["files"]
 
 
+def stop_sentence(folders):
+    names = " and ".join(str(folder) for folder in folders)
+    return ("The Ariadne already installed could not be replaced, because it holds files Ariadne did not create "
+            f"or that were changed (nothing was removed). Move the {'folder' if len(folders) == 1 else 'folders'} "
+            f"{names} somewhere else, then run ./install.sh again.")
+
+
 def install(home, artifacts, facts, resource_loader=resources):
+    """Install under one lock. Everything is checked before anything is removed: the new package, then the
+    old install. A same-version install that Ariadne owns is then removed and replaced."""
     with locked(home) as (root, home_fd, root_fd, versions_fd):
-        before = current(root, home)
-        require(not exists(root / ".current-next"), "Unexpected pointer staging path.")
-        if exists(home / "Applications"):
-            directory(home / "Applications")
-        # The app copy is replaced only when a receipt proves we made it (ADR-0080).
-        state = app_state(home, receipts(root, home, versions_fd) if exists(home / APP_PATH) else [])
-        require(state is not None, f"Foreign or edited install path: {home / APP_PATH}")
-        expected_links = links(home)
-        owned_links = {}
-        for name, target in expected_links.items():
-            path = home / name
-            if name.startswith(".local/bin/") and not exists(path.parent):
-                continue
-            if name == SKILL_LINK:
-                conflict = skill_link_conflict(home, before, target)
-                if conflict:
-                    print(f"Skipped the Codex skill link: {conflict}. Codex will not see the Ariadne skill. "
-                          f"Move that path aside and run make install again, or link {path} to "
-                          f"{root / 'current/integrations/codex-skills/ariadne'} yourself.", flush=True)
-                    continue
-            if exists(path):
-                require(before and before[1]["owned_links"].get(name) == target and
-                        path.is_symlink() and os.readlink(path) == target, f"Foreign or edited install path: {path}")
-            if exists(path.parent):
-                directory(path.parent)
-            owned_links[name] = target
+        # 1. The new package.
         app = artifacts / "bundle/macos/Ariadne.app"
         directory(app)
         directory(app / "Contents")
@@ -616,15 +697,37 @@ def install(home, artifacts, facts, resource_loader=resources):
         require(not info.is_symlink() and info.is_file() and info.stat().st_size <= LIMIT,
                 "App Info.plist is not a bounded regular file.")
         with info.open("rb") as source:
-            version = component(plistlib.load(source)["CFBundleShortVersionString"])
+            plist = plistlib.load(source)
+        version = component(plist["CFBundleShortVersionString"])
         final = root / "versions" / version
         for name in BINARIES:
             binary = artifacts / name
             require(not binary.is_symlink() and binary.is_file() and os.access(binary, os.X_OK), f"Missing executable: {binary}")
             require(run([binary, "--version"], capture=True).strip() == f"{name} {version}", "App/helper versions differ.")
         bundle = resource_loader(artifacts / "ariadne", final / "bin/ariadne")
-        if before:
+        # 2. What is installed now. A pointer whose version folder is gone counts as no install.
+        selected = current(root, home, partial=True)
+        before = selected if selected and selected[1] else None
+        require(not exists(root / ".current-next"), "Unexpected pointer staging path.")
+        known = receipts(root, home, versions_fd)
+        state, owned_links, notes = external_plan(home, root, known, plist.get("CFBundleIdentifier"))
+        if exists(final):
+            blocked = blocked_versions(root, home, versions_fd, final)
+            if blocked:
+                raise InstallError(stop_sentence(blocked))
+            others = sorted(item["version"] for item in known if item["version"] != version)
+            extra = f", and removing the other installed versions {', '.join(others)} with it" if others else ""
+            print(f"Replacing the Ariadne {version} already installed{extra} (your projects and history are kept).",
+                  flush=True)
+            for path in remove_installed(home, root, home_fd, root_fd, versions_fd):
+                print(f"Retained edited, foreign or unverifiable path: {path}")
+            require(not exists(final), stop_sentence([final]))
+            before = None
+            state, owned_links, notes = external_plan(home, root, [], None)
+        elif before:
             require(inventory(before[0]) == before[1]["owned_files"], "Installed package contains edits or foreign files; preserve it and inspect manually.")
+        for note in notes:
+            print(note, flush=True)
         stage = root / "versions" / f".stage-{uuid.uuid4()}"
         os.mkdir(stage.name, mode=0o700, dir_fd=versions_fd)
         created_links = []
@@ -653,26 +756,8 @@ def install(home, artifacts, facts, resource_loader=resources):
             receipt = manifest(final, home, version, files, directories, owned_links, facts)
             (stage / "install.json").write_bytes(encode(receipt))
             (stage / "install.json").chmod(0o600)
-            if exists(final):
-                directory(final)
-                existing = descriptor(final, home)
-                if SKILL_LINK in owned_links and SKILL_LINK not in existing["owned_links"]:
-                    # The receipt on disk cannot record a link it never owned; leave it uncreated.
-                    del owned_links[SKILL_LINK]
-                    print("Skipped the Codex skill link: the installed receipt for this version does not "
-                          "record it, so it is neither created nor adopted. "
-                          "Uninstall and install again to add it.", flush=True)
-                # A link the receipt owns but this run skipped is left alone, as uninstall does.
-                # A version-1 receipt also records the old app symlink; the app copy is handled separately.
-                kept = {k: v for k, v in existing["owned_links"].items() if k not in (SKILL_LINK, APP_PATH)}
-                require(existing["owned_files"] == files and inventory(final) == files and
-                        existing["owned_directories"] == directories and
-                        kept == {k: v for k, v in owned_links.items() if k != SKILL_LINK},
-                        "Same-version package identity differs; use a new release version.")
-                shutil.rmtree(stage.name, dir_fd=versions_fd)
-            else:
-                os.rename(stage.name, final.name, src_dir_fd=versions_fd, dst_dir_fd=versions_fd)
-                published = True
+            os.rename(stage.name, final.name, src_dir_fd=versions_fd, dst_dir_fd=versions_fd)
+            published = True
             for name, target in owned_links.items():
                 path = home / name
                 directory(path.parent, True)
@@ -778,7 +863,6 @@ def install_package(home, package_dir):
     require(built["architecture"] == facts["architecture"],
             f"This package is for {built['architecture']} Macs; this Mac is {facts['architecture']}.")
     require(built["app_version"] == app_version(package_dir), "Package description does not match its app.")
-    replace_existing(home, built["app_version"])
     return install(home, package_dir, {**facts, "built": built})
 
 
@@ -788,20 +872,8 @@ def uninstall(home, announce=True):
         if announce:
             print("No personal Ariadne package installed.")
         return []
-    retained = []
     with locked(home) as (root, home_fd, root_fd, versions_fd):
-        selected = current(root, home, partial=True)
-        packages = []
-        # Validate every receipt before removing anything; unknown versions are retained.
-        with contextlib.ExitStack() as anchors:
-            for name in sorted(os.listdir(versions_fd)):
-                child = root / "versions" / name
-                try:
-                    package_fd = anchors.enter_context(anchored_directory(name, parent_fd=versions_fd))
-                    packages.append((child, descriptor(child, home, partial=True), package_fd))
-                except (InstallError, OSError, ValueError):
-                    retained.append(str(child))
-            _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained)
+        retained = remove_installed(home, root, home_fd, root_fd, versions_fd)
     for path in sorted(set(retained)):
         print(f"Retained edited, foreign or unverifiable path: {path}")
     if announce:
@@ -809,20 +881,22 @@ def uninstall(home, announce=True):
     return retained
 
 
-def replace_existing(home, version):
-    """Remove a same-version install (complete or partial) that Ariadne owns, so a fresh one can follow."""
-    final = home / ".local/share/ariadne/versions" / component(version)
-    if not exists(final):
-        return
-    print(f"Replacing the Ariadne {version} already installed (your projects and history are kept).", flush=True)
-    stop = (f"The Ariadne {version} already installed could not be replaced safely, because it holds files "
-            f"Ariadne did not create or that were changed. Move the folder {final} somewhere else, "
-            "then run ./install.sh again.")
-    try:
-        uninstall(home, announce=False)
-    except (InstallError, OSError, ValueError) as error:
-        raise InstallError(f"{stop} ({error})") from error
-    require(not exists(final), stop)
+def remove_installed(home, root, home_fd, root_fd, versions_fd):
+    """Remove everything Ariadne owns, under the lock the caller holds. Returns the paths it kept."""
+    retained = []
+    selected = current(root, home, partial=True)
+    packages = []
+    # Validate every receipt before removing anything; unknown versions are retained.
+    with contextlib.ExitStack() as anchors:
+        for name in sorted(os.listdir(versions_fd)):
+            child = root / "versions" / name
+            try:
+                package_fd = anchors.enter_context(anchored_directory(name, parent_fd=versions_fd))
+                packages.append((child, descriptor(child, home, partial=True), package_fd))
+            except (InstallError, OSError, ValueError):
+                retained.append(str(child))
+        _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained)
+    return retained
 
 
 def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained):
@@ -887,7 +961,6 @@ def main(argv=None):
         run([installed / "bin/ariadne", "doctor"])
     else:
         artifacts, facts = build()
-        replace_existing(home, app_version(artifacts))
         installed = install(home, artifacts, facts)
         run([installed / "bin/ariadne", "doctor"])
 
