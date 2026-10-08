@@ -335,12 +335,12 @@ describe('saved receipts and copied provenance', () => {
     item.origin = { project_id: op, session_id: op, topic_id: topic.id, entity_id: '77', source_revision: 1 };
     ++transport.source.revision; await store.refresh();
     let code: CoreFailure['error']['code'] = 'io_error';
-    render(<CopiedProvenance store={store} itemId={item.id} projectPath={id => id === op ? '/work/charge-api' : null} revealItem={async () => {
+    render(<CopiedProvenance store={store} itemId={item.id} projectPath={id => id === op ? '/work/sync-api' : null} revealItem={async () => {
       throw new CoreFailure({ code, message: 'No such file or directory (os error 2)', hint: 'Check the path.', retryable: false, field_errors: [] });
     }} />);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item 77' })); });
     const status = screen.getByRole('status').textContent ?? '';
-    expect(status).toContain('The original project folder (/work/charge-api) is missing or can’t be read. Restore it or move it back, then try again.');
+    expect(status).toContain('The original project folder (/work/sync-api) is missing or can’t be read. Restore it or move it back, then try again.');
     expect(status).toContain('Full copied history remains here.');
     expect(status).not.toMatch(/Try again\.|couldn’t read or save|os error/);
     // Another kind of failure is not blamed on the folder.

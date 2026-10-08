@@ -95,8 +95,8 @@ describe('markdown parser', () => {
   });
 
   it('marks file:line references as code', () => {
-    expect(inline('see internal/billing/pricing.go:123 and a.ts:4:2, not 10.30:45', 0)).toEqual([
-      'see ', { t: 'ref', text: 'internal/billing/pricing.go:123' }, ' and ', { t: 'ref', text: 'a.ts:4:2' }, ', not 10.30:45',
+    expect(inline('see internal/sync/search.go:123 and a.ts:4:2, not 10.30:45', 0)).toEqual([
+      'see ', { t: 'ref', text: 'internal/sync/search.go:123' }, ' and ', { t: 'ref', text: 'a.ts:4:2' }, ', not 10.30:45',
     ]);
   });
 

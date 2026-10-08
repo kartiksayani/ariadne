@@ -36,12 +36,12 @@ export interface PrototypeData {
   readonly EARLIER_TOPICS: ProtoTopic[]; readonly EARLIER_MSGS: ProtoMessage[]; readonly EARLIER_ITEMS: ProtoItem[];
   readonly ARCHIVED_TOPICS: ProtoTopic[]; readonly ARCHIVED_ITEMS: ProtoItem[]; readonly PROJECTS: ProtoProject[];
   readonly PROJECT_SESSIONS: ProtoSession[]; readonly SESSION_BASE: Record<string, number>; readonly OTHER_TOPICS: ProtoTopic[];
-  readonly OTHER_ITEMS: ProtoItem[]; readonly CHARGE_MSGS: ProtoMessage[]; readonly TOPIC_SESSIONS: Record<string, string[]>;
+  readonly OTHER_ITEMS: ProtoItem[]; readonly SYNC_MSGS: ProtoMessage[]; readonly TOPIC_SESSIONS: Record<string, string[]>;
   readonly REVIEW_TOPIC: ProtoTopic; readonly REVIEW_ITEMS: ProtoItem[]; readonly REVIEW_MSGS: ProtoMessage[];
   readonly THREAD_MSGS: ProtoMessage[]; readonly THREAD_PATCH: Partial<ProtoItem>; readonly THREAD_KIDS: ProtoItem[];
 }
 const dataNames = ['TOPICS', 'ITEMS', 'DEMO', 'MSGS', 'EARLIER_TOPICS', 'EARLIER_MSGS', 'EARLIER_ITEMS', 'ARCHIVED_TOPICS', 'ARCHIVED_ITEMS',
-  'PROJECTS', 'PROJECT_SESSIONS', 'SESSION_BASE', 'OTHER_TOPICS', 'OTHER_ITEMS', 'CHARGE_MSGS', 'TOPIC_SESSIONS',
+  'PROJECTS', 'PROJECT_SESSIONS', 'SESSION_BASE', 'OTHER_TOPICS', 'OTHER_ITEMS', 'SYNC_MSGS', 'TOPIC_SESSIONS',
   'REVIEW_TOPIC', 'REVIEW_ITEMS', 'REVIEW_MSGS', 'THREAD_MSGS', 'THREAD_PATCH', 'THREAD_KIDS'] as const;
 
 /** Evaluates the prototype's data constants from the text of Ariadne.dc.html. */
@@ -79,7 +79,7 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     : review ? [...data.TOPICS, data.REVIEW_TOPIC] : data.TOPICS;
   const items: ProtoItem[] = blank ? [] : structuredClone(project ? [...data.EARLIER_ITEMS, ...data.ITEMS, ...data.ARCHIVED_ITEMS, ...data.OTHER_ITEMS]
     : review ? [...data.ITEMS, ...data.REVIEW_ITEMS, ...(thread ? data.THREAD_KIDS : [])] : data.ITEMS);
-  const msgs: ProtoMessage[] = blank ? [] : structuredClone(project ? [...data.EARLIER_MSGS, ...data.CHARGE_MSGS, ...data.MSGS]
+  const msgs: ProtoMessage[] = blank ? [] : structuredClone(project ? [...data.EARLIER_MSGS, ...data.SYNC_MSGS, ...data.MSGS]
     : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
   // The thread scenario: the backoff finding on its third round (Ariadne.dc.html:914).
   if (thread && !blank) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
@@ -326,7 +326,7 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
   const transport = new DesignTransport(sessions, projects, summaries, spec.state === 'loading' ? route : null);
   transport.preferences.global = { theme: spec.theme, text_scale: 100, window: null, pinned: false, notification_watermark: null,
     selected_navigation: spec.scenario === 'sessions' ? { kind: 'all_sessions' } : spec.scenario === 'projects' || spec.scenario === 'first' ? { kind: 'projects' }
-      : spec.scenario === 'projectpage' ? { kind: 'project', project_id: projectIds.get('payments')! } : { kind: 'session', session: route! } };
+      : spec.scenario === 'projectpage' ? { kind: 'project', project_id: projectIds.get('notes')! } : { kind: 'session', session: route! } };
   transport.preferences.sessions = world.openTabs.map((id, order): SessionPreferences => {
     const session = sessions.find(value => value.id === refs.get(id)!.session_id)!, current = id === world.tab;
     return { session: refs.get(id)!, tab_open: true, tab_order: order, selected_item_id: current ? spec.selected ?? null : null, expanded_item_ids: expanded(session),

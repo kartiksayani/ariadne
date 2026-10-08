@@ -43,4 +43,3 @@ gate.
 
 - [VERIFICATION](../planning/low-level/VERIFICATION.md)
 - [PERSONAL_RELEASE](../planning/PERSONAL_RELEASE.md)
-- [Release evidence matrix](../planning/evidence/release/MATRIX.md)

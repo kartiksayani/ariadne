@@ -5,12 +5,6 @@
 Questions, replies and decisions stay as a history you can follow, like a thread
 through a labyrinth. Local only: no account, no cloud, no telemetry.
 
-![The Ariadne window, dark theme: the Waiting list on the left, the tree of
-topics and items in the middle, and the Messages rail on the right](docs/planning/assets/paperwhite-tree.png)
-
-*The app in the Paperwhite design (frame 1a of the design harness, `npm run test:design`), 1600×960.
-More: [graph](docs/planning/assets/paperwhite-graph.png), [item detail](docs/planning/assets/paperwhite-detail.png).*
-
 ## Why
 
 - **Questions get buried.** With several terminals open, an agent's question
@@ -70,8 +64,6 @@ Early preview, macOS 13 or newer (Apple Silicon or Intel).
 - **Testing:** CI runs the automated tests without the real tools. On
   2026-10-06 the core loop also ran live against Claude Code 2.1.291 and Codex.
   Not yet run live: recovery paths, several sessions at once and app quit/relaunch.
-  Evidence: [Claude](docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md),
-  [Codex](docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md).
 - **Looks:** the interface works but the visual design is a preview; a polish
   pass is planned.
 - **Moving targets:** Ariadne relies on integration surfaces of Claude Code and

@@ -82,7 +82,7 @@ Do not fake passes or add machine receipts. Independent review stays at exact he
 ## Mechanical bootstrap recipe (implementation session)
 
 The scaffold already pins Rust 1.98.1, Node 22.23.2, npm 10.9.8 and Tauri 2.12.1;
-use lockfiles and the [platform ledger](evidence/platform-ledger.md). Do not
+use the checked-in lockfiles and toolchain pins. Do not
 regenerate a template over this nonempty repository or upgrade unrelated dependencies.
 Use the installed native tools documented in [Mac setup](../development/MACOS_TEST_SETUP.md).
 Deployment target remains macOS 13.0 on the owner's arm64 reference Mac.
