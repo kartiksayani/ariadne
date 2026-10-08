@@ -189,11 +189,15 @@ async function renderedBodies(selector) {
 }
 // An exchange of the Conversation shows its ask, the owner's answer and the result's explanation.
 // Exchanges carry no visible number; `data-round` is their ordinal for tests.
+// The explanation shows as soon as the result is applied, while the owner's message is still on its way; that message
+// is a pending bubble at the end of the Conversation (`data-pending`), not yet part of its round. It joins the round only
+// when the host's completion reaches the view, so wait for no pending bubble before reading what the owner said.
 export async function waitForRoundResult(round, explanation) {
   await wait(async () => {
     const section = await browser.$(`.detail-chat-list [data-round="${round.ordinal}"]`);
-    return await section.isExisting() && folded(await section.getText()).includes(folded(explanation));
-  }, 'Native detail did not publish the final closed round and its complete correlated result');
+    return await section.isExisting() && folded(await section.getText()).includes(folded(explanation))
+      && (await browser.$$('.detail-chat-list [data-pending]')).length === 0;
+  }, 'Native detail did not publish the final closed round, its complete correlated result and the settled owner message');
 }
 async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
   // The Conversation and the Timeline are sections of the detail body, both always shown.
