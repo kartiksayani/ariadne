@@ -34,7 +34,8 @@ import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
 import { connectionOf } from './ui/shared/connection';
 import { earlierAgent } from './ui/shared/excerpt';
-import { FileRefs, LinkOpener, type FileOpener } from './ui/shared/MarkdownText';
+import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
+import { fileOpener, linkOpener } from './ui/shared/openers';
 import type { ViewTab } from './ui/shell/Header';
 import { useWorkspaceKeys, type WorkspaceHandlers, type WorkspaceIntent } from './ui/keys';
 
@@ -479,13 +480,10 @@ export function DesktopApp({ service }: { service: RendererService }) {
     // Leaving the app runs the removals still in their window rather than dropping them.
     return () => { detach(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); next.navigation.stop(); };
   }, [service]);
-  // Links in agent text open in the system browser; a failure leaves the app where it is.
-  const openLink = useCallback((url: string) => { void service.openLink?.(url).catch(() => {}); }, [service]);
+  // Links in agent text open in the system browser; a failure leaves the app where it is and says so.
+  const openLink = useMemo(() => linkOpener(service), [service]);
   // Files named in agent text open in the owner's text editor, only when they sit inside the item's project folder.
-  const files = useMemo<FileOpener | null>(() => service.resolveFileReferences && service.openFileReference ? {
-    resolve: (projectId, references) => service.resolveFileReferences!(projectId, references),
-    open: (projectId, reference) => { void service.openFileReference!(projectId, reference).catch(() => {}); },
-  } : null, [service]);
+  const files = useMemo(() => fileOpener(service), [service]);
   return application ? <LinkOpener.Provider value={openLink}><FileRefs.Provider value={files}><Workspace application={application} /></FileRefs.Provider></LinkOpener.Provider> : <p role="status">Opening Ariadne…</p>;
 }
 export default function App() {

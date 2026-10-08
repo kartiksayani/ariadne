@@ -200,9 +200,13 @@ function roundView(session: Immutable<Session>, item: Immutable<Item>, round: Im
   const agent = messages(round.agent_message_ids);
   const results = round.result_input_ids.flatMap(id => session.inputs[id]?.attempts.flatMap(attempt => attempt.domain_result ? [attempt.domain_result] : []) ?? []);
   const result = results.at(-1)?.explanation ?? agent.at(-1)?.body ?? '';
+  // A message is only answered by a result or agent message that comes after it: an older agent message in the round is not its answer.
+  const answeredAfter = (message: Immutable<Message>) => !!result
+    && (agent.some(value => value.number > message.number)
+      || round.result_input_ids.some(id => session.inputs[id]?.attempts.some(attempt => attempt.domain_result && attempt.domain_result.handled_through_message_number >= message.number)));
   const owner = messages(round.owner_message_ids).filter(message => {
     if (!pending.has(message.id)) return true;
-    if (!result || !delivered.has(message.id)) return false;
+    if (!delivered.has(message.id) || !answeredAfter(message)) return false;
     kept.add(message.id);
     return true;
   });
