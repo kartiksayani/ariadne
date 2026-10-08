@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import projects from '../../../../../fixtures/domain/projections/projects.json';
 import sessions from '../../../../../fixtures/domain/projections/sessions.json';
@@ -87,6 +87,17 @@ describe('explicit discovery registration and binding', () => {
     expect(screen.getByRole('note')).toHaveTextContent('This Codex version is newer than the one Ariadne was tested with. It should work, but has not been verified.');
     expect(screen.getByText(/untested/)).toBeInTheDocument();
   });
+  it('holds the host sessions in their own framed list, with Refresh above it', async () => {
+    const context = setup(); await context.store.start();
+    context.reads.mockResolvedValue({ candidates: [candidate()], error: null });
+    bind(context);
+    await screen.findByText('Discovered conversation');
+    const list = screen.getByRole('group', { name: 'Host sessions' });
+    expect(list.classList.contains('nav-discovery-list')).toBe(true);
+    expect(within(list).getByRole('button', { name: 'Use host session' })).toBeInTheDocument();
+    expect(within(list).queryByRole('button', { name: 'Refresh host sessions' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Refresh host sessions' }).compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
   it('disables Use host session for an incompatible row and says why', async () => {
     const context = setup(); await context.store.start();
     context.reads.mockResolvedValue({ candidates: [{ ...candidate(), adapter_id: 'claude-mod', host_version: '2.1.286', compatibility: 'incompatible' }], error: null });
@@ -115,7 +126,7 @@ describe('explicit discovery registration and binding', () => {
     expect(original.command).toMatchObject({ command: 'binding_connect', params: { adapter_id: 'codex', external_session_id: 'discovered-thread',
       endpoint: { kind: 'unix_socket', path: '/tmp/daemon.sock' }, existing_session_id: demo.id } });
     fireEvent.change(screen.getByLabelText('External session ID'), { target: { value: 'manual-edit-after-uncertain' } });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile operation' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check again' })); });
     expect(context.mutations[1]).toEqual(original); expect(context.store.getSnapshot().setup?.data.kind).toBe('binding_connect');
   });
   it('refresh preserves manual fields and visibly invalidates a removed, stale or changed endpoint selection', async () => {

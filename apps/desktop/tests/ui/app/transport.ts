@@ -51,6 +51,9 @@ export class AppTransport implements DesktopTransport {
     return () => { set.delete(receive as (hint: never) => void); };
   }
   emit<E extends keyof HintPayloads>(event: E, hint: HintPayloads[E]) { this.listeners.get(event)?.forEach(callback => callback(hint as never)); }
+  /** The desktop supervisor's health entries (`supervisor_health`); empty like a Claude Code-only desktop. */
+  health: unknown[] = [];
+  async supervisorHealth(): Promise<unknown> { return structuredClone(this.health); }
   async invoke<T>(name: string, { request }: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
     assertOwnerWire(request);
     if ('command' in request) {
@@ -79,11 +82,35 @@ export class AppTransport implements DesktopTransport {
       }
       const session = this.sessions.get(request.session!.session_id)!;
       const binding = session.bindings[session.active_binding_id!]!;
-      if (command.command === 'binding_pause') {
-        binding.owner_paused = true; binding.dispatch_state = 'paused'; ++session.revision;
+      if (command.command === 'binding_pause' || command.command === 'binding_resume') {
+        const paused = command.command === 'binding_pause';
+        binding.owner_paused = paused; binding.dispatch_state = paused ? 'paused' : 'enabled'; ++session.revision;
+        this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
         return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
-          data: { kind: 'binding_state', binding_id: binding.id, generation: binding.generation, owner_paused: true,
-            dispatch_state: 'paused', pause_reason: binding.pause_reason, connection_state: binding.connection_state } } } as T;
+          data: { kind: 'binding_state', binding_id: binding.id, generation: binding.generation, owner_paused: paused,
+            dispatch_state: binding.dispatch_state, pause_reason: binding.pause_reason, connection_state: binding.connection_state } } } as T;
+      }
+      if (command.command === 'session_label_set') {
+        // Core stores the trimmed text and clears a blank field (history_actions/label.rs).
+        const name = command.params.name?.trim() || undefined, description = command.params.description?.trim() || undefined;
+        session.name = name; session.description = description; ++session.revision;
+        this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+        return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
+          data: { kind: 'session_label', name: name ?? null, description: description ?? null } } } as T;
+      }
+      if (command.command === 'input_cancel') {
+        const input = session.inputs[command.params.input_id]!;
+        input.state = 'cancelled'; input.active_attempt_id = null; ++session.revision;
+        this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+        return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
+          data: { kind: 'input_cancel', input_id: input.id, state: 'cancelled' } } } as T;
+      }
+      if (command.command === 'input_resolve') {
+        const input = session.inputs[command.params.input_id]!, decision = command.params.decision as string;
+        input.state = decision === 'resend' ? 'queued' : decision === 'skip' ? 'skipped' : 'handled'; ++session.revision;
+        this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+        return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
+          data: { kind: 'input_resolve', input_id: input.id, attempt_id: command.params.attempt_id, resolution_kind: command.params.decision, state: input.state } } } as T;
       }
       if (command.command === 'input_submit') {
         const input = structuredClone(Object.values(session.inputs).find(input => input?.state === 'queued')!);
@@ -92,7 +119,8 @@ export class AppTransport implements DesktopTransport {
         message.item_id = command.params.target.item_id; message.topic_id = command.params.target.topic_id;
         input.id = crypto.randomUUID(); input.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1; input.kind = command.params.kind;
         input.message_id = message.id; input.target = structuredClone(command.params.target); input.payload.intent = command.params.kind; input.payload.text = command.params.text;
-        input.payload.target_snapshot.item_question = session.items[message.item_id!]!.question;
+        // A topic reply has no item, so no question to snapshot.
+        input.payload.target_snapshot.item_question = message.item_id ? session.items[message.item_id]!.question : null;
         // Core binds an answer to the item's open round (the Waiting card reads it).
         input.payload.selected_option_id = command.params.selected_option_id;
         input.payload.context = { ...input.payload.context, round_id: command.params.kind === 'answer' ? session.items[message.item_id!]!.current_round_id : null };
@@ -125,6 +153,7 @@ export class AppTransport implements DesktopTransport {
     }
     if (query.command === 'session_list') return { sessions: page([...this.sessions.values()].map(session => ({
       ...structuredClone(sessionsFixture.items[0]), session_id: session.id, title: session.title, revision: session.revision,
+      ...session.name ? { name: session.name } : {}, ...session.description ? { description: session.description } : {},
     })) as SessionSummary[], 1), counts, active_total: this.sessions.size, closed_total: 0 };
     const session = this.sessions.get(request.session!.session_id)!;
     if (query.command === 'session_get') return { session, freshness: 'fresh' };

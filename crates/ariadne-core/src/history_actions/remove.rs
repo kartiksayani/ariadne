@@ -102,9 +102,10 @@ impl HistoryActionService<'_> {
                 registry_route(context)?;
                 let store = self.open_store(&params.project_id)?;
                 let backup = store
+                    // Inputs in any state go with the session; agents still
+                    // reporting on its binding learn it was removed.
                     .remove_session(&params.session_id, command.operation_id(), &stamp, |live| {
-                        revision(params.expected_revision, live.revision)?;
-                        in_flight(std::slice::from_ref(live))
+                        revision(params.expected_revision, live.revision)
                     })?
                     .ok_or_else(|| core(CoreErrorCode::NotFound, "The session does not exist"))?;
                 // Retire the session's binding route; the removal itself is durable.
@@ -123,7 +124,7 @@ impl HistoryActionService<'_> {
                     &params.project_id,
                     command.operation_id(),
                     &stamp,
-                    |sessions| in_flight(sessions).map_err(HistoryActionError::from),
+                    |_| Ok::<(), HistoryActionError>(()),
                 )?;
                 Ok(MutationReceipt::Removed(RemovedReceipt {
                     operation_id: removal.operation_id,
@@ -160,7 +161,7 @@ impl HistoryActionService<'_> {
             None => {
                 let members = self.family(route, &params.topic_id)?;
                 for (session, topics) in members.values() {
-                    blocking(session, &subtree_of_topics(session, topics), topics)?;
+                    blocking(session, &subtree_of_topics(session, topics))?;
                 }
                 // Tell only the copy most recently continued into, else the original.
                 let told = members
@@ -472,30 +473,6 @@ fn details(
     }))
 }
 
-/// Session and project removal refuse while any input is in flight. Uses the
-/// session-close code and details so the UI shows the same blockers.
-fn in_flight(sessions: &[Session]) -> Result<(), CoreError> {
-    let ids: Vec<_> = sessions
-        .iter()
-        .flat_map(|s| s.inputs.0.values())
-        .filter(|input| input.state == InputState::InFlight)
-        .map(|input| input.id.clone())
-        .collect();
-    if ids.is_empty() {
-        return Ok(());
-    }
-    let mut error = core(
-        CoreErrorCode::SessionNotClosable,
-        "An input is in flight; wait for it to finish or resolve it before removing",
-    );
-    error.details = details(
-        sessions.first().filter(|_| sessions.len() == 1),
-        vec![],
-        ids,
-    );
-    Err(error)
-}
-
 /// The item and every item below it, following actual parent links.
 fn subtree(session: &Session, root: &ItemRef) -> BTreeSet<ItemRef> {
     let mut scope = BTreeSet::from([root.clone()]);
@@ -549,26 +526,9 @@ fn targeted(input: &Input, items: &BTreeSet<ItemRef>, topics: &BTreeSet<UuidV4>)
         || topics.contains(&input.target.topic_id)
 }
 
-/// Refuse while work on the scope is in flight or awaiting recovery, or while a
-/// remaining item names a removed item as its replacement.
-fn blocking(
-    session: &Session,
-    items: &BTreeSet<ItemRef>,
-    topics: &BTreeSet<UuidV4>,
-) -> Result<(), CoreError> {
-    let blocking_input_ids: Vec<_> = session
-        .inputs
-        .0
-        .values()
-        .filter(|input| {
-            targeted(input, items, topics)
-                && matches!(
-                    input.state,
-                    InputState::InFlight | InputState::NeedsAttention
-                )
-        })
-        .map(|input| input.id.clone())
-        .collect();
+/// Refuse while a remaining item names a removed item as its replacement.
+/// Inputs on the work never block: removal deletes them, whatever their state.
+fn blocking(session: &Session, items: &BTreeSet<ItemRef>) -> Result<(), CoreError> {
     let blocking_item_ids: Vec<_> = session
         .items
         .0
@@ -579,14 +539,14 @@ fn blocking(
         })
         .map(|item| item.id.clone())
         .collect();
-    if blocking_input_ids.is_empty() && blocking_item_ids.is_empty() {
+    if blocking_item_ids.is_empty() {
         return Ok(());
     }
     let mut error = core(
         CoreErrorCode::InvalidTransition,
-        "An input on this work is in flight or needs attention, or a remaining item was replaced by it",
+        "A remaining item was replaced by this work",
     );
-    error.details = details(Some(session), blocking_item_ids, blocking_input_ids);
+    error.details = details(Some(session), blocking_item_ids, vec![]);
     Err(error)
 }
 
@@ -652,13 +612,14 @@ fn remove_member(
 }
 
 /// Hard-delete the scope and every record that exists only for it, then strip
-/// references to deleted records from what remains.
+/// references to deleted records from what remains. Inputs on the scope go in
+/// any state; a binding they held busy or behind a barrier is released.
 fn purge(
     session: &mut Session,
     items: BTreeSet<ItemRef>,
     topics: BTreeSet<UuidV4>,
 ) -> Result<Purged, CoreError> {
-    blocking(session, &items, &topics)?;
+    blocking(session, &items)?;
     let item_topic = if topics.is_empty() {
         items
             .iter()
@@ -778,10 +739,26 @@ fn purge(
             }),
     );
 
+    let released: BTreeSet<UuidV4> = inputs
+        .iter()
+        .map(|id| session.inputs.0[id].binding_id.clone())
+        .collect();
     session.items.0.retain(|id, _| !items.contains(id));
     session.topics.0.retain(|id, _| !topics.contains(id));
     session.rounds.0.retain(|id, _| !rounds.contains(id));
     session.inputs.0.retain(|id, _| !inputs.contains(id));
+    for binding_id in &released {
+        if let Some(binding) = session.bindings.0.get_mut(binding_id) {
+            if binding
+                .active_input_id
+                .as_ref()
+                .is_some_and(|id| inputs.contains(id))
+            {
+                binding.active_input_id = None;
+            }
+        }
+        crate::delivery_join::release_barrier(session, binding_id);
+    }
     session
         .continuations
         .0
@@ -1058,6 +1035,7 @@ fn enqueue(
             attempts: vec![],
             active_attempt_id: None,
             resolution_history: vec![],
+            cancel_cause: None,
         };
         // Capacity check only: a UUID-length stand-in sizes the future attempt id.
         match crate::delivery::format::body(session, &input, input_id) {

@@ -6,5 +6,6 @@ mod feed;
 mod menu;
 mod projection;
 pub use capture::{capture, WaitingCapture, WaitingRow};
+pub use diagnostics::LifecycleNote;
 pub use feed::NativeTray;
 pub use projection::TrayProjection;

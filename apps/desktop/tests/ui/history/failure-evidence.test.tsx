@@ -8,7 +8,7 @@ describe('native history failure evidence', () => {
   it('reports the disabled Messages toggle, pending navigation state and owner-input lock', () => {
     document.body.innerHTML = `<header class="shell-header"><button title="Messages (m)" aria-label="Messages (m)" disabled></button></header>
       <div class="nav-banner" role="alert"><p>Preferences revision changed</p></div>
-      <button disabled>Refreshing…</button><button>Reconcile operation</button>
+      <button disabled>Refreshing…</button><button>Check again</button>
       <input data-shell-search disabled value="needle"><p role="status">Search preview · save pending</p>
       <div role="treeitem" data-item-id="1.1" aria-selected="true"></div>
       <div class="detail-box" data-owner-input="1"><textarea disabled>abc</textarea>
@@ -17,7 +17,7 @@ describe('native history failure evidence', () => {
     expect(facts.messagesToggle).toMatchObject({ titled: { disabled: true }, ariaLabel: 'Messages (m)', railOpen: false });
     expect(facts.navigation.banners).toEqual([{ role: 'alert', text: 'Preferences revision changed' }]);
     expect(facts.navigation.stateButtons).toEqual([{ text: 'Refreshing…', disabled: true, ariaPressed: null },
-      { text: 'Reconcile operation', disabled: false, ariaPressed: null }]);
+      { text: 'Check again', disabled: false, ariaPressed: null }]);
     expect(facts.navigation.disabledHeaderButtons).toEqual(['Messages (m)']);
     expect(facts.search).toMatchObject({ present: true, disabled: true, value: 'needle', statusLabel: 'Search preview · save pending' });
     expect(facts.selected.treeItemIds).toEqual(['1.1']);

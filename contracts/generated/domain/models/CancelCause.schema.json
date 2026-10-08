@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CancelCause",
+  "description": "Who or what cancelled an input before it was delivered.",
+  "oneOf": [
+    {
+      "description": "The owner deleted it.",
+      "type": "string",
+      "const": "owner"
+    },
+    {
+      "description": "The owner took it back to edit: its words go back to the owner's editor.",
+      "type": "string",
+      "const": "owner_edit"
+    },
+    {
+      "description": "Its topic was archived.",
+      "type": "string",
+      "const": "topic_archived"
+    },
+    {
+      "description": "Its session was closed.",
+      "type": "string",
+      "const": "session_closed"
+    }
+  ]
+}

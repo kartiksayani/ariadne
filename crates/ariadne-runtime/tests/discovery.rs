@@ -79,6 +79,7 @@ impl ClaudeFiles {
                 ("hooks/discovery.js", "// discovery"),
                 ("hooks/installed.js", "export default null;"),
                 ("skills/ariadne/SKILL.md", "# Structured context"),
+                ("skills/ariadne/playbook.md", "# Playbook"),
             ] {
                 let path = root.join(name);
                 fs::create_dir_all(path.parent().unwrap()).unwrap();

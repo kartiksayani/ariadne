@@ -261,11 +261,12 @@ fn ping_is_scoped_reachability_and_connection_status_uses_actual_core_binding() 
     unknown.binding_id = r.attempt_id.clone();
     let unknown =
         ControlRequest::new(r.source_input_id.clone(), ControlMethod::Ping(unknown)).unwrap();
+    let unknown = rt.block_on(call(home.path().into(), unknown)).unwrap_err();
+    assert_eq!(unknown.code, CoreErrorCode::NotFound);
+    // The scripted core cannot show the binding gone: no lease is not terminal.
     assert_eq!(
-        rt.block_on(call(home.path().into(), unknown))
-            .unwrap_err()
-            .code,
-        CoreErrorCode::NotFound
+        unknown.details.unwrap().reason,
+        Some(BarrierReason::LeaseInvalid)
     );
     let status = ControlRequest::new(
         r.source_input_id.clone(),
@@ -283,6 +284,49 @@ fn ping_is_scoped_reachability_and_connection_status_uses_actual_core_binding() 
     assert_eq!(actual.connection_state, binding.connection_state);
     assert!(actual.presence.is_none());
     assert_eq!(core.remaining().unwrap(), 0);
+    server.stop(&rt);
+}
+#[test]
+fn lease_less_binding_reports_session_removed_only_when_no_session_holds_it() {
+    let corpus = corpus();
+    let r = corpus.routing;
+    let home = home();
+    let rt = runtime();
+    let unknown = |home: &Path, rt: &Runtime| {
+        let mut gone = scope(&r);
+        gone.binding_id = r.attempt_id.clone();
+        let request =
+            ControlRequest::new(r.source_input_id.clone(), ControlMethod::Ping(gone)).unwrap();
+        rt.block_on(call(home.into(), request)).unwrap_err()
+    };
+    // The native core finds no registered session holding the binding: removed.
+    let data = home.path().join("data");
+    fs::create_dir(&data).unwrap();
+    fs::set_permissions(&data, fs::Permissions::from_mode(0o700)).unwrap();
+    let registry = native::AgentResolver::open_data_directory(&data).unwrap();
+    let native: Arc<dyn CoreService> = Arc::new(native::NativeCoreService::new(
+        registry,
+        || panic!("lookup allocates nothing"),
+        || panic!("lookup reads no clock"),
+        |_| panic!("lookup contacts no host"),
+    ));
+    let server = Running::start(&rt, home.path(), native, &r);
+    let removed = unknown(home.path(), &rt);
+    assert_eq!(removed.code, CoreErrorCode::NotFound);
+    let details = removed.details.unwrap();
+    assert_eq!(details.reason, Some(BarrierReason::SessionRemoved));
+    assert_eq!(details.binding_id, Some(r.attempt_id.clone()));
+    assert!(!details.dispatch_must_pause);
+    server.stop(&rt);
+    // A core that cannot rule the binding out keeps the retryable reason.
+    let scripted = Arc::new(ScriptedCoreService::new([]));
+    let server = Running::start(&rt, home.path(), scripted.clone(), &r);
+    let no_lease = unknown(home.path(), &rt);
+    assert_eq!(no_lease.code, CoreErrorCode::NotFound);
+    let details = no_lease.details.unwrap();
+    assert_eq!(details.reason, Some(BarrierReason::LeaseInvalid));
+    assert_eq!(details.binding_id, Some(r.attempt_id.clone()));
+    assert!(scripted.history().unwrap().is_empty());
     server.stop(&rt);
 }
 #[test]

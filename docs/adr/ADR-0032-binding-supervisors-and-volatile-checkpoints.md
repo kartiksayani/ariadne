@@ -3,6 +3,7 @@
 Status: accepted
 Supersedes: none
 Superseded by: none
+Amended by: [ADR-0087](ADR-0087-supervisor-retry-health-and-log.md) (only the "on receipt failure upstream stops" rule; every other control is retained)
 
 ## Context
 

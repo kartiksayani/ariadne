@@ -71,3 +71,27 @@ An absent label in `item.edit` keeps it, `null` clears it; older stores load unc
 desktop design: a ported presentation layer under `apps/desktop/src/ui/`, tokens
 verbatim, JetBrains Mono, one keymap and one agent connection value. The pixel
 harness (`npm run test:design`, thresholds = measured + 0.01) is the fidelity gate.
+
+[ADR-0087](ADR-0087-supervisor-retry-health-and-log.md) amends ADR-0032. A binding
+supervisor now logs a failure and retries with backoff (1 s to 30 s) and the same IDs.
+It stops only when its scope has ended. Each Codex binding publishes running,
+backing off or stopped health in plain words. The app writes
+`$ARIADNE_HOME/logs/ariadne.log` and a health file that `ariadne doctor` reads.
+
+[ADR-0088](ADR-0088-core-never-dead-ends.md) makes core lifecycle and delivery do the
+safe thing itself. A committed result handles its input, resolve resumes dispatch,
+close is one step, and removal and cancel take pending inputs. A `/clear` rebind
+carries pending inputs to the new conversation.
+
+[ADR-0089](ADR-0089-slim-input-envelope.md) slims the per-input envelope to about
+500 bytes for a one-line answer. Context is pulled with `ariadne read`, never pushed,
+and an input written for an older question is held for the owner's review instead of
+being sent.
+
+[ADR-0090](ADR-0090-archive-never-refuses.md) lets the owner archive a topic with
+open items. Archive cancels the topic's unsent messages, items keep their status,
+and agent writes to an archived topic return `topic_archived`.
+
+[ADR-0091](ADR-0091-owner-session-names.md) lets the owner name a session and give it a
+short description (`session_label_set`). The name leads on cards, the session bar, tabs,
+pickers and confirmations; the agent line becomes the quieter label.

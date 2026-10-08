@@ -326,6 +326,16 @@
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
+/* The owner's description sits under the name; the agent line stays quieter beneath it. */
+.pw-session-description {
+  font-size: 13px;
+}
+
+.pw-session-secondary {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 54%, transparent);
+}
+
 .pw-run {
   display: inline-flex;
   align-items: center;

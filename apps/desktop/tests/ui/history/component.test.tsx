@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { DetailPath, ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { MessageRail } from '../../../src/ui/rail/MessageRail';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
+import { withdrawn } from '../../../src/selectors/waiting/stuck';
+import { immutable } from '../../../src/data';
 import { extraMessage, setup } from './fixtures';
 
 const opened: ReturnType<typeof setup>[] = [];
@@ -11,10 +13,25 @@ async function ready(change?: (session: ReturnType<typeof setup>['transport']['s
   const value = setup(); opened.push(value); change?.(value.transport.session); await value.store.refresh(); return value;
 }
 afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); });
+type FixtureSession = ReturnType<typeof setup>['transport']['session'];
+/** The rail's message count: the owner messages cancelled before they were sent are left out. */
+const shown = (session: FixtureSession) => session.messages.filter(message => !withdrawn(immutable(session), immutable(message))).length;
 
 describe('item detail panel', () => {
   const panel = (value: Awaited<ReturnType<typeof ready>>, itemId = '1', open = vi.fn()) =>
     <ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId={itemId} later={false} onOpenItem={open} />;
+
+  it('names the agent in an earlier session’s message numbers, in the detail and the rail', async () => {
+    const value = await ready(), session = value.transport.session, item = session.items['1']!;
+    const created = session.messages.find(message => message.id === item.created_message_id)!;
+    render(<><ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} earlierAgent="codex" />
+      <MessageRail {...value} onHighlight={() => {}} earlierAgent="codex" /></>);
+    await screen.findByRole('heading', { name: item.question });
+    expect(screen.getByText(`Decision · next action: you · raised in codex #${created.number}`)).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Timeline' })).getAllByText(`codex #${created.number}`).length).toBeGreaterThan(0);
+    const log = await screen.findByRole('log');
+    await waitFor(() => expect(log.querySelector(`[data-message-id="${created.id}"] .pw-excerpt-number`)?.textContent).toBe(`codex #${created.number}`));
+  });
 
   it('reads every section from the session snapshot in the handoff order', async () => {
     const value = await ready(), session = value.transport.session, item = session.items['1']!, open = vi.fn();
@@ -22,6 +39,7 @@ describe('item detail panel', () => {
     await screen.findByRole('heading', { name: item.question });
     const created = session.messages.find(message => message.id === item.created_message_id)!;
     expect(screen.getByText(`Decision · next action: you · raised in #${created.number}`)).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Timeline' })).getAllByText(`#${created.number}`).length).toBeGreaterThan(0);
     expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toBe(`Done${item.outcome}`);
     expect(screen.getByText(item.why!)).toBeTruthy();
     const order = [...document.querySelectorAll('.item-detail > section, .item-detail > div')].map(element => element.getAttribute('aria-label') ?? element.className);
@@ -45,6 +63,45 @@ describe('item detail panel', () => {
     expect(timeline.querySelector('.excerpt-created .excerpt-mark')!.textContent).toBe('Agent raised this');
     expect([...timeline.querySelectorAll('.excerpt-mark')].map(mark => mark.textContent)).toContain('You replied');
     expect(screen.getByText('Agent reference').parentElement!.querySelector('code')!.textContent).toBe('1');
+  });
+  it('does not count an answer that archive cancelled as the owner’s answer: Waiting on you, with the not-sent line', async () => {
+    const value = await ready(session => {
+      // Item 2 is asked a second time (round 2); the owner answers it with a message that is still queued.
+      const item = session.items['2']!, first = session.rounds[item.current_round_id!]!, second = structuredClone(first);
+      second.id = '00000000-0000-4000-8000-000000000943'; second.ordinal = 2; second.owner_message_ids = ['00000000-0000-4000-8000-000000000944'];
+      session.rounds[second.id] = second; item.current_round_id = second.id;
+      const input = structuredClone(session.inputs['00000000-0000-4000-8000-000000000071']!);
+      input.id = '00000000-0000-4000-8000-000000000945'; input.kind = 'answer'; input.state = 'queued'; input.attempts = [];
+      input.message_id = second.owner_message_ids[0]!; input.answer_id = '00000000-0000-4000-8000-000000000946';
+      input.payload.selected_option_id = session.answers[0]!.selected_option_id;
+      session.inputs[input.id] = input;
+      const message = structuredClone(session.messages.find(entry => entry.id === first.owner_message_ids[0])!);
+      message.id = second.owner_message_ids[0]!; message.number = 40; message.input_id = input.id; message.round_id = second.id;
+      session.messages.push(message);
+      const answer = structuredClone(session.answers[0]!);
+      answer.id = input.answer_id; answer.item_id = item.id; answer.input_id = input.id; answer.message_id = message.id; answer.seq = 99; answer.supersedes_answer_id = null;
+      answer.question_revision = item.question_revision;
+      session.answers.push(answer);
+    }), session = value.transport.session;
+    render(panel(value, '2'));
+    const round = await screen.findByLabelText('Round 2');
+    // On its way, the answer counts: the round shows it and no longer waits on the owner.
+    expect(round.textContent).toContain('You chose');
+    expect(within(round).queryByText('Waiting on you')).toBeNull();
+    const input = session.inputs['00000000-0000-4000-8000-000000000945']!;
+    input.state = 'cancelled'; input.cancel_cause = 'topic_archived'; session.revision++;
+    await act(() => value.store.refresh());
+    // Cancelled by archive, it never reached the agent: not "You chose", and Waiting on you again.
+    await waitFor(() => expect(within(screen.getByLabelText('Round 2')).getByText('Waiting on you')).toBeTruthy());
+    expect(screen.getByLabelText('Round 2').textContent).not.toContain('You chose');
+    expect(within(screen.getByRole('region', { name: 'Timeline' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
+    // Restore the topic: the cancelled answer stays cancelled, so it is still the owner's turn and the line stays.
+    const topic = session.topics[session.items['2']!.topic_id]!;
+    topic.archived_at = '2026-10-04T12:00:00.000Z'; session.revision++; await act(() => value.store.refresh());
+    topic.archived_at = null; session.revision++; await act(() => value.store.refresh());
+    await waitFor(() => expect(within(screen.getByLabelText('Round 2')).getByText('Waiting on you')).toBeTruthy());
+    expect(screen.getByLabelText('Round 2').textContent).not.toContain('You chose');
+    expect(within(screen.getByRole('region', { name: 'Timeline' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
   });
   it('deduplicates a message that both created and updated the item into one timeline entry', async () => {
     const value = await ready(session => {
@@ -113,7 +170,7 @@ describe('complete message rail', () => {
     }
     const rendered = render(<Parent />);
     const log = screen.getByRole('log');
-    await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(value.transport.session.messages.length));
+    await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
     expect(renders).toBeLessThan(10);
     const before = calls;
     fireEvent.click(screen.getByRole('button', { name: 'New parent callback' }));
@@ -137,7 +194,7 @@ describe('complete message rail', () => {
   it('cross-highlights the items a message touched on hover and pin, and the messages of the selected or hovered item', async () => {
     const value = await ready(), highlight = vi.fn();
     const rendered = render(<MessageRail {...value} selectedItemId="2" onHighlight={highlight} />);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(value.transport.session.messages.length));
+    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
     const message = value.transport.session.messages.find(message => message.item_id === '1')!;
     const card = log.querySelector(`[data-message-id="${message.id}"]`)!;
     fireEvent.mouseEnter(card);
@@ -159,8 +216,8 @@ describe('complete message rail', () => {
     const value = await ready(), close = vi.fn();
     render(<MessageRail {...value} onHighlight={vi.fn()} onClose={close} />);
     const rail = screen.getByRole('complementary', { name: 'Messages' });
-    await waitFor(() => expect(rail.querySelectorAll('[data-message-id]')).toHaveLength(value.transport.session.messages.length));
-    expect(within(rail).getByText(String(value.transport.session.messages.length), { selector: '.pw-rail-count' })).toBeTruthy();
+    await waitFor(() => expect(rail.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
+    expect(within(rail).getByText(String(shown(value.transport.session)), { selector: '.pw-rail-count' })).toBeTruthy();
     expect(within(rail).getByRole('button', { name: 'Following latest' })).toBeTruthy();
     const first = value.transport.session.messages[0]!;
     const card = rail.querySelector(`[data-message-id="${first.id}"]`)!;
@@ -169,10 +226,48 @@ describe('complete message rail', () => {
     fireEvent.click(within(rail).getByRole('button', { name: 'Hide messages' }));
     expect(close).toHaveBeenCalledOnce();
   });
+  it('leaves out a message deleted before it was sent, and drops one the moment it is deleted', async () => {
+    const value = await ready(), session = value.transport.session;
+    render(<MessageRail {...value} onHighlight={vi.fn()} />);
+    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
+    const gone = session.messages.filter(message => withdrawn(immutable(session), immutable(message)));
+    expect(gone.length).toBeGreaterThan(0);
+    for (const message of gone) expect(log.querySelector(`[data-message-id="${message.id}"]`)).toBeNull();
+    const queued = Object.values(session.inputs).find(input => input?.state === 'queued' && input.attempts.length === 0 && input.kind !== 'continue')!;
+    expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)).not.toBeNull();
+    queued.state = 'cancelled'; session.revision++;
+    await act(() => value.store.refresh());
+    await waitFor(() => expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)).toBeNull());
+  });
+  it('keeps a message that archive or close cancelled, marked as not sent', async () => {
+    const value = await ready(), session = value.transport.session;
+    render(<MessageRail {...value} onHighlight={vi.fn()} />);
+    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
+    const queued = Object.values(session.inputs).find(input => input?.state === 'queued' && input.attempts.length === 0 && input.kind !== 'continue')!;
+    queued.state = 'cancelled'; queued.cancel_cause = 'topic_archived'; session.revision++;
+    await act(() => value.store.refresh());
+    const card = await waitFor(() => { const found = log.querySelector(`[data-message-id="${queued.message_id}"]`); expect(found).not.toBeNull(); return found!; });
+    // The Not sent line sits beside the message button, in the same group.
+    expect(card.parentElement!.textContent).toContain('Not sent: cancelled when you archived this topic');
+  });
+  it('offers Put back on a topic reply that archive cancelled, in the rail too', async () => {
+    const value = await ready(), session = value.transport.session, drafts = new OwnerDraftStore(value.service);
+    render(<MessageRail {...value} drafts={drafts} onHighlight={vi.fn()} />);
+    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
+    const queued = Object.values(session.inputs).find(input => input?.state === 'queued' && input.attempts.length === 0 && input.kind !== 'continue')!;
+    const topicId = queued.target.topic_id;
+    queued.kind = 'topic_reply'; queued.target = { topic_id: topicId, item_id: null };
+    queued.state = 'cancelled'; queued.cancel_cause = 'topic_archived'; session.revision++;
+    await act(() => value.store.refresh());
+    const card = await waitFor(() => { const found = log.querySelector(`[data-message-id="${queued.message_id}"]`); expect(found).not.toBeNull(); return found!; });
+    // The button shows wherever the Not sent line shows.
+    expect(card.parentElement!.textContent).toContain('Not sent: cancelled when you archived this topic');
+    expect(within(card.parentElement!).getByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+  });
   it('an update landing before the scroll event is delivered does not yank a reader scrolled up', async () => {
     const value = await ready();
     render(<MessageRail {...value} onHighlight={vi.fn()} />);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(15));
+    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
     Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
     log.scrollTop = 800; fireEvent.scroll(log);
     log.scrollTop = 250; // programmatic scroll whose scroll event has not been dispatched yet
@@ -185,7 +280,7 @@ describe('complete message rail', () => {
   it('upward scrolling pauses follow; new messages count without changing focus/scroll until an explicit jump', async () => {
     const value = await ready();
     render(<><input aria-label="Unsent draft" defaultValue="exact draft  " /><MessageRail {...value} onHighlight={vi.fn()} /></>);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(15));
+    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
     Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
     log.scrollTop = 800; fireEvent.scroll(log); log.scrollTop = 250; fireEvent.scroll(log);
     const input = screen.getByLabelText('Unsent draft'); input.focus();
@@ -205,7 +300,7 @@ describe('complete message rail', () => {
   it('a scrollTop that shrank only because the viewport grew keeps following after a jump', async () => {
     const value = await ready();
     render(<MessageRail {...value} onHighlight={vi.fn()} />);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(15));
+    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
     Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, writable: true, value: 200 } });
     log.scrollTop = 800; fireEvent.scroll(log); log.scrollTop = 250; fireEvent.scroll(log);
     value.transport.session.messages.push(extraMessage(value.transport.session, 16));

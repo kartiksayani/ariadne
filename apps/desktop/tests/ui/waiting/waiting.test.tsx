@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
 import summariesFixture from '../../../../../fixtures/domain/projections/sessions.json';
@@ -100,13 +100,14 @@ describe('current Waiting and immutable Sent selection', () => {
     expect(row.input.payload.target_snapshot.options[0].label).toBe('Original choice');
     expect(Object.isFrozen(row.input.payload)).toBe(true);
   });
-  it.each(['queued', 'in_flight', 'handled', 'needs_attention'] as const)('a %s answer suppresses the same waiting episode', state => {
+  it.each(['queued', 'in_flight', 'handled'] as const)('a %s answer suppresses the same waiting episode', state => {
     const seed = fixture(), session = seed.session as Session, old = session.inputs[inputId('71')]!;
     old.state = state;
     session.answers.push({ ...session.answers[0], id: inputId('89'), item_id: '2', input_id: old.id, question_revision: 1, supersedes_answer_id: null });
     expect(waitingRows([seed])).toHaveLength(0);
   });
-  it.each(['cancelled', 'skipped'] as const)('a %s answer leaves the current episode waiting', state => {
+  // A failed delivery needs the owner's decision, so it stays Waiting on me.
+  it.each(['cancelled', 'skipped', 'needs_attention'] as const)('a %s answer leaves the current episode waiting', state => {
     const seed = fixture(), session = seed.session as Session, old = session.inputs[inputId('71')]!;
     old.state = state;
     session.answers.push({ ...session.answers[0], id: inputId('89'), item_id: '2', input_id: old.id, question_revision: 1, supersedes_answer_id: null });
@@ -324,6 +325,8 @@ describe('source-backed Waiting and Sent panel', () => {
     const { store, transport, drafts } = setup(), seed = withOptions(), summary = fixture().summary;
     summary.active_binding!.presence = null;
     const queued = seed.inputs[inputId('76')]!; queued.state = 'queued'; queued.active_attempt_id = null;
+    // Nothing ahead of it on the binding: its note follows the agent's presence.
+    seed.inputs[inputId('72')]!.state = 'handled';
     transport.push('project_list', projectPage()); transport.push('session_list', sessionPage([summary])); transport.push('session_get', loaded(seed));
     await store.start(); const answers = drafts();
     render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
@@ -331,7 +334,7 @@ describe('source-backed Waiting and Sent panel', () => {
     const option = screen.getByTitle('Press 2 to select'); option.focus();
     const before = store.getSnapshot(), reads = transport.calls.length;
     const row = sentRow(queued.payload.target_snapshot.item_question!);
-    expect(row.textContent).toContain('Sending your drop request…');
+    expect(row.textContent).toContain('demo.local hasn’t picked it up yet');
     const active = summary.active_binding!, observation = { ...structuredClone(binding.presence!), freshness: 'fresh' as const,
       generation: active.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
     for (const [index, execution] of ['running', 'idle', 'running'].entries()) {
@@ -340,7 +343,7 @@ describe('source-backed Waiting and Sent panel', () => {
       expect(screen.getByTitle('Press 2 to select')).toBe(option); expect(document.activeElement).toBe(option);
       expect(store.getSnapshot().status).toBe('ready'); expect(store.getSnapshot().waiting).toBe(before.waiting);
       expect(store.getSnapshot().sent).toBe(before.sent); expect(store.getSnapshot().counts).toBe(before.counts);
-      expect(row.textContent).toContain(execution === 'running' ? 'Queued for demo.local · delivers when it’s running again' : 'Sending your drop request…');
+      expect(row.textContent).toContain(execution === 'running' ? 'Waiting for demo.local to finish what it’s doing' : 'demo.local hasn’t picked it up yet');
       expect(transport.calls).toHaveLength(reads);
     }
     fireEvent.keyDown(option, { key: '2' });
@@ -375,15 +378,15 @@ describe('source-backed Waiting and Sent panel', () => {
     const { store, transport, opened, drafts } = setup(), seed = mutableSession();
     const summary = fixture().summary; summary.active_binding!.presence = null;
     const queued = seed.inputs[inputId('76')]!;
-    queued.state = 'queued'; queued.active_attempt_id = null;
+    queued.state = 'queued'; queued.active_attempt_id = null; seed.inputs[inputId('72')]!.state = 'handled';
     transport.push('project_list', projectPage()); transport.push('session_list', sessionPage([summary])); transport.push('session_get', loaded(seed));
     await store.start(); render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    const row = sentRow(queued.payload.target_snapshot.item_question!), saved = 'Sending your drop request…';
+    const row = sentRow(queued.payload.target_snapshot.item_question!), saved = 'demo.local hasn’t picked it up yet';
     expect(row.textContent).toContain(saved);
     const active = summary.active_binding!, running = { ...structuredClone(binding.presence!), freshness: 'fresh' as const,
       generation: active.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
-    expect(row.textContent).toContain('Queued for demo.local');
+    expect(row.textContent).toContain('Waiting for demo.local to finish what it’s doing');
     expect(opened.open(route).getSnapshot().presence[active.id].execution_state).toBe('running');
     expect(store.getSnapshot().sessions[0].summary.active_binding!.presence).toBeNull();
     for (const observation of [
@@ -427,7 +430,112 @@ describe('source-backed Waiting and Sent panel', () => {
     expect(screen.getByText(/Queue counts are incomplete/)).toBeTruthy();
     expect(screen.getByText(`Unavailable session ${inputId('99')}`)).toBeTruthy();
     expect(screen.queryByText('Nothing waiting on you')).toBeNull();
-    expect(sentRow('Replace the old retry question').textContent).toMatch(/“Old choice”/);
+    const stopped = sentRow('Replace the old retry question');
+    expect(stopped.textContent).toMatch(/You sent “Old choice”/);
+    expect(stopped.textContent).toMatch(/Couldn’t deliver “Old choice”\. /);
+  });
+  it('deletes a queued Sent message from its row without opening it; a drop request has no words, so no Edit', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
+    const open = vi.fn(), reveal = vi.fn();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={open} />);
+    const row = sentRow('Record retry limits');
+    expect(row.textContent).toContain('Queued behind your message on “Implement receipt lookup”');
+    // Not sent yet: Delete (input 76 is a drop request, which has no text to edit), never Cancel message.
+    expect(within(row).queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(within(row).queryByRole('button', { name: 'Cancel message' })).toBeNull();
+    fireEvent.click(within(row).getByRole('button', { name: 'Delete' }));
+    const cancel = transport.calls.find(call => call.name === 'input_cancel')!.request as { command: { params: unknown } };
+    expect(cancel.command.params).toEqual({ input_id: inputId('76'), expected_revision: demo.revision });
+    expect(reveal).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+  });
+  it('says why a queued Sent message is not sending while the supervisor backs off, and clears once it runs again', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    const row = () => sentRow('Record retry limits'), binding = (demo as unknown as Session).bindings[(demo as unknown as Session).active_binding_id!]!;
+    await waitFor(() => expect(transport.listeners.get('ariadne://supervisor_health')?.size).toBe(1));
+    const health = { binding_id: binding.id, generation: binding.generation, state: 'backing_off' as const, reason: 'codex exited', retry_in_seconds: 30,
+      updated_at: new Date().toISOString() };
+    act(() => { transport.emit('ariadne://supervisor_health', health); });
+    await waitFor(() => expect(row().textContent).toMatch(/Not sending: codex exited · retrying in \d+s/));
+    act(() => { transport.emit('ariadne://supervisor_health', { ...health, state: 'running', reason: null, retry_in_seconds: null, updated_at: new Date(Date.now() + 1_000).toISOString() }); });
+    await waitFor(() => expect(row().textContent).toContain('Queued behind your message on “Implement receipt lookup”'));
+  });
+  it('cancels an in-flight Sent message too, keeping its delivery line', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
+    const open = vi.fn(), reveal = vi.fn();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={open} />);
+    const row = sentRow('Implement receipt lookup');
+    expect(row.querySelector('.waiting-sent-line')).toBeTruthy();
+    expect(row.querySelector('[data-stuck="sent"]')).toBeTruthy();
+    // On its way: it can be called back, not edited or deleted.
+    expect(within(row).queryByRole('button', { name: 'Edit' })).toBeNull(); expect(within(row).queryByRole('button', { name: 'Delete' })).toBeNull();
+    fireEvent.click(within(row).getByRole('button', { name: 'Cancel message' }));
+    const cancel = transport.calls.find(call => call.name === 'input_cancel')!.request as { command: { params: unknown } };
+    expect(cancel.command.params).toEqual({ input_id: inputId('72'), expected_revision: demo.revision });
+    expect(reveal).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+  });
+  it('retries a stopped Sent message in one click, as the owner’s word that the agent is idle', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    const row = sentRow('Replace the old retry question');
+    expect(row.textContent).toContain('Couldn’t deliver “Followup request for item 7. Preserve…”. Ariadne isn’t sure it reached demo.local.');
+    fireEvent.click(within(row).getByRole('button', { name: 'Retry' }));
+    const resolve = transport.calls.find(call => call.name === 'input_resolve')!.request as { command: { params: Record<string, unknown> } };
+    expect(resolve.command.params).toMatchObject({ input_id: inputId('74'), attempt_id: inputId('63'), decision: 'resend', reason: '',
+      evidence: { source: 'owner_attestation', owner_attested_idle: true } });
+  });
+  it('marks a stopped Sent message done in one click, and cancels it too', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
+    const reveal = vi.fn();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={vi.fn()} />);
+    const row = sentRow('Replace the old retry question');
+    fireEvent.click(within(row).getByRole('button', { name: 'Mark as done' }));
+    const skip = transport.calls.find(call => call.name === 'input_resolve')!.request as { command: { params: Record<string, unknown> } };
+    expect(skip.command.params).toMatchObject({ input_id: inputId('74'), attempt_id: inputId('63'), decision: 'skip', reason: '',
+      evidence: { source: 'owner_attestation', owner_attested_idle: true } });
+    expect(reveal).not.toHaveBeenCalled();
+    // Core (rule B) cancels any message that hasn't settled, a stopped one included.
+    expect(within(row).getByRole('button', { name: 'Cancel message' })).toBeTruthy();
+  });
+  it('leaves the questions of an archived topic out of Waiting on me, and brings them back on restore', () => {
+    const seed = fixture(), session = seed.session as Session, topic = session.topics[session.items['2']!.topic_id]!;
+    expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
+    topic.archived_at = session.updated_at;
+    // Archive leaves the item's status as it is; only the panel stops counting it.
+    expect(session.items['2']!.status).toBe('waiting_on_me'); expect(waitingRows([seed])).toHaveLength(0);
+    topic.archived_at = null;
+    expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
+  });
+  it('leaves a question the owner replied to out of Waiting on me', () => {
+    const seed = fixture(), session = seed.session as Session, reply = session.inputs[inputId('76')]!;
+    reply.target = { ...reply.target, item_id: '2' }; reply.kind = 'reply';
+    expect(waitingRows([seed])).toHaveLength(0);
+    reply.state = 'cancelled';
+    expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
+  });
+  it('keeps a failed answer to the still-open question on its Waiting card, with the owner’s fix', async () => {
+    const { store, transport, drafts } = setup(), seed = withOptions(), failed = seed.inputs[inputId('74')]!;
+    failed.kind = 'answer'; failed.target = { ...failed.target, item_id: '2' }; failed.payload.selected_option_id = 'yes';
+    failed.payload.target_snapshot = { ...failed.payload.target_snapshot, question_revision: seed.items['2']!.question_revision, options: seed.items['2']!.options };
+    // The agent turned it down: a failed delivery, not an uncertain one.
+    const tried = failed.attempts.find(value => value.id === failed.active_attempt_id)!; tried.acceptance = 'rejected'; tried.error = null;
+    transport.capture(seed); await store.start();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    // The failed answer leaves it Waiting on me: one card, carrying the failed delivery, and no Sent row.
+    const cards = [...document.querySelectorAll('.waiting-card')].filter(card => card.textContent?.includes('Keep the design'));
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.textContent).toContain('Couldn’t deliver “Keep the design”');
+    expect(screen.getAllByRole('button').some(element => element.classList.contains('waiting-sent') && element.textContent?.includes('Keep the design'))).toBe(false);
+  });
+  it('warns on the card that sending is paused, with Resume', async () => {
+    const { store, transport, drafts } = setup(), seed = mutableSession();
+    seed.bindings[seed.active_binding_id!]!.owner_paused = true;
+    transport.capture(seed); await store.start();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    const note = document.querySelector('.waiting-card [data-dispatch-note="paused"]')!;
+    expect(note.textContent).toContain('Sending is paused — your message waits here until you resume.');
+    fireEvent.click(within(note as HTMLElement).getByRole('button', { name: 'Resume' }));
+    expect(transport.calls.some(call => call.name === 'binding_resume')).toBe(true);
   });
   it('keeps stale rows but blocks sending after a read failure', async () => {
     const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start(); const answers = drafts();
@@ -437,7 +545,8 @@ describe('source-backed Waiting and Sent panel', () => {
     transport.push('project_list', { api_version: 1, ok: false, error });
     await act(async () => { await store.refresh(); });
     expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(error.hint)).toBeTruthy(); expect(screen.getByRole('button', { name: 'Details' })).toBeTruthy();
+    expect(screen.getByText('Ariadne couldn’t read or save its data. Try again.')).toBeTruthy(); expect(screen.queryByText(error.hint)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Refresh queue' })).toBeTruthy();
   });
   it('shows the empty state, the loading skeleton and the selected ring', async () => {
@@ -460,7 +569,7 @@ describe('source-backed Waiting and Sent panel', () => {
     // A preference write that cannot be confirmed locks the drafts until it is retried.
     drafts(); transport.push('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'commit_uncertain' } });
     fireEvent.click(screen.getByTitle('Press 2 to select'));
-    expect(await screen.findByRole('button', { name: 'Retry saving draft preferences' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Try saving your draft again' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(true);
   });
 });

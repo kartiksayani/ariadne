@@ -1,7 +1,7 @@
 // The topic band of the session tree (Ariadne.dc.html:137-148): chevron, name,
 // session chip, hover actions, counts, the delivery line and the all-closed
 // prompt.
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 import type { TopicRow as Row } from './model';
 
 export interface TopicAction { readonly icon: string; readonly label: string; readonly title: string; readonly run: () => void; readonly archive?: boolean }
@@ -16,9 +16,13 @@ export interface TopicRowProps {
   readonly onFocus: (key: string) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   readonly onToggle: (topicId: string) => void;
+  /** The open "Reply to topic" box (ui/answer/TopicReply), under the band. */
+  readonly reply?: ReactNode;
+  /** A stopped delivery's inline fix (ui/answer/StuckNote); it takes the delivery line's place. */
+  readonly fix?: ReactNode;
 }
 
-export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onKeyDown, onToggle }: TopicRowProps) {
+export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onKeyDown, onToggle, reply, fix }: TopicRowProps) {
   const topic = row.topic;
   // A click focuses the band, which tints it and shows its actions; the chevron folds.
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={1} aria-expanded={row.expanded} aria-label={topic.name}
@@ -36,8 +40,10 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
         {row.counts.map(count => <span key={count.text} className="tree-count"><i className={count.icon} style={{ color: count.color }} />{count.text}</span>)}
       </span>
     </div>
-    {row.delivery && <div className="tree-topic-line" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
+    {row.delivery?.stuck && fix ? <div className="tree-topic-fix">{fix}</div>
+      : row.delivery && <div className="tree-topic-line" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
     {prompt && <div className="tree-topic-line tree-prompt"><i className="ph ph-check-circle" /><span>Everything here is closed.</span>
       <button type="button" className="btn btn-ghost" onClick={event => { event.stopPropagation(); prompt(); }}><i className="ph ph-archive" />Archive topic</button></div>}
+    {reply}
   </div>;
 }

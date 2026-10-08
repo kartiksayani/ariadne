@@ -1,4 +1,7 @@
-use super::{geometry::WorkArea, preferences::WindowPreferenceWrite};
+use super::{
+    geometry::{MinimumSize, WorkArea},
+    preferences::WindowPreferenceWrite,
+};
 use crate::commands::DesktopService;
 use ariadne_core::{CoreError, CoreErrorCode, WindowGeometry};
 use ariadne_domain::models::UuidV4;
@@ -19,6 +22,9 @@ pub struct NativeWindow {
     movement: Arc<AtomicU64>,
     stopped: Arc<AtomicBool>,
 }
+type AfterReconcile<R> = Box<dyn FnOnce(&tauri::AppHandle<R>) + Send>;
+/// How long launch waits for the saved size before showing the window anyway.
+const LAUNCH_FALLBACK: std::time::Duration = std::time::Duration::from_secs(3);
 fn unavailable() -> CoreError {
     CoreError::new(
         CoreErrorCode::IoError,
@@ -53,6 +59,80 @@ fn geometry<R: tauri::Runtime>(window: &tauri::Window<R>) -> Result<WindowGeomet
             .map(monitor_id),
     })
 }
+/// The configured minimum content size of the main window (tauri.conf.json).
+fn content_minimum<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> MinimumSize {
+    window
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|config| config.label == window.label())
+        .map(|config| MinimumSize {
+            width: config.min_width.unwrap_or(0.0),
+            height: config.min_height.unwrap_or(0.0),
+        })
+        .unwrap_or_default()
+}
+/// Whether the window's current frame is a resting size worth saving: not the
+/// full-screen Space, a minimized or hidden window, or a size mid-transition.
+fn resting<R: tauri::Runtime>(window: &tauri::Window<R>) -> bool {
+    window.is_visible().unwrap_or(false)
+        && !window.is_minimized().unwrap_or(true)
+        && !window.is_fullscreen().unwrap_or(true)
+}
+/// Brings the main window forward with keyboard focus inside the webview, so
+/// shortcuts work without a click first.
+pub(crate) fn present<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
+    window.show()?;
+    window.unminimize()?;
+    window.set_focus()?;
+    focus_webview(window);
+    Ok(())
+}
+/// Makes the webview the window's first responder. A failure leaves focus
+/// where it was; the renderer still handles keys at window level.
+pub(crate) fn focus_webview<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let webview: &tauri::Webview<R> = window.as_ref();
+    let _ = webview.set_focus();
+}
+/// The window's first show, run once by whichever launch path gets there
+/// first. It always releases a held startup route, even if the window
+/// could not be shown, so the route can still present it.
+pub(crate) fn first_show<R: tauri::Runtime>(
+) -> impl Fn(&tauri::AppHandle<R>) + Clone + Send + 'static {
+    let shown = Arc::new(AtomicBool::new(false));
+    move |app: &tauri::AppHandle<R>| {
+        if shown.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if let Some(window) = app.get_webview_window("main") {
+            if present(&window).is_err() {
+                eprintln!("Ariadne could not show its main window.");
+            }
+        }
+        crate::native::routes::window_shown(app);
+    }
+}
+/// The launch fallback: shows the window after `delay` even if the saved
+/// preferences never arrive.
+pub(crate) fn show_after<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    show: impl Fn(&tauri::AppHandle<R>) + Send + 'static,
+    delay: std::time::Duration,
+) {
+    let spawned = std::thread::Builder::new()
+        .name("ariadne-window-launch".into())
+        .spawn(move || {
+            std::thread::sleep(delay);
+            let handle = app.clone();
+            if app.run_on_main_thread(move || show(&handle)).is_err() {
+                eprintln!("Ariadne could not show its main window.");
+            }
+        });
+    if spawned.is_err() {
+        eprintln!("Ariadne could not start its window launch fallback.");
+    }
+}
 fn restore_geometry<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     saved: &WindowGeometry,
@@ -76,7 +156,6 @@ fn restore_geometry<R: tauri::Runtime>(
             height: f64::from(area.size.height) / scale,
         });
     }
-    let saved = super::geometry::clamp_geometry(saved, &areas)?;
     let scale = window.scale_factor().map_err(|_| unavailable())?;
     if !scale.is_finite() || scale <= 0.0 {
         return Err(unavailable());
@@ -86,6 +165,12 @@ fn restore_geometry<R: tauri::Runtime>(
     // Saved dimensions cover the whole frame; set_size sets the inner content.
     let chrome_width = f64::from(outer.width.saturating_sub(inner.width)) / scale;
     let chrome_height = f64::from(outer.height.saturating_sub(inner.height)) / scale;
+    let content = content_minimum(window);
+    let minimum = MinimumSize {
+        width: content.width + chrome_width,
+        height: content.height + chrome_height,
+    };
+    let saved = super::geometry::clamp_geometry(saved, &areas, minimum)?;
     window
         .set_size(tauri::LogicalSize::new(
             (saved.width - chrome_width).max(1.0),
@@ -101,6 +186,17 @@ impl NativeWindow {
     /// The existing synchronous preferences backend runs off the UI executor.
     /// A saved receipt remains saved even if an OS window action fails.
     pub(crate) fn reconcile<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>, restore: bool) {
+        self.reconcile_then(app, restore, None);
+    }
+
+    /// `then` runs on the UI thread after the saved preferences are applied,
+    /// or once the read fails.
+    fn reconcile_then<R: tauri::Runtime>(
+        &self,
+        app: tauri::AppHandle<R>,
+        restore: bool,
+        then: Option<AfterReconcile<R>>,
+    ) {
         let service = app.state::<DesktopService>().inner().clone();
         let revision = self.applied_revision.clone();
         let movement = self.movement.clone();
@@ -108,33 +204,44 @@ impl NativeWindow {
         tauri::async_runtime::spawn(async move {
             let result =
                 tauri::async_runtime::spawn_blocking(move || service.native_preferences()).await;
-            if let Ok(Ok(snapshot)) = result {
-                let handle = app.clone();
-                let _ = app.run_on_main_thread(move || {
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Ok(Ok(snapshot)) = result {
                     let observed = snapshot.revision.value();
-                    if observed < revision.load(Ordering::Acquire) {
-                        return;
-                    }
-                    revision.fetch_max(observed, Ordering::AcqRel);
-                    if let Some(window) = handle.get_webview_window("main") {
-                        if window.set_always_on_top(snapshot.global.pinned).is_err() {
-                            eprintln!("Ariadne could not apply the saved native pin preference.");
-                        }
-                        if restore && movement.load(Ordering::Acquire) == captured_movement {
-                            if let Some(saved) = snapshot.global.window {
-                                if restore_geometry(&window,&saved).is_err() {
-                                    eprintln!("Ariadne could not restore the saved native window geometry.");
+                    if observed >= revision.load(Ordering::Acquire) {
+                        revision.fetch_max(observed, Ordering::AcqRel);
+                        if let Some(window) = handle.get_webview_window("main") {
+                            if window.set_always_on_top(snapshot.global.pinned).is_err() {
+                                eprintln!("Ariadne could not apply the saved native pin preference.");
+                            }
+                            if restore && movement.load(Ordering::Acquire) == captured_movement {
+                                if let Some(saved) = snapshot.global.window {
+                                    if restore_geometry(&window, &saved).is_err() {
+                                        eprintln!("Ariadne could not restore the saved native window geometry.");
+                                    }
                                 }
                             }
                         }
                     }
-                });
-            }
+                }
+                if let Some(then) = then {
+                    then(&handle);
+                }
+            });
         });
     }
 
+    /// First show at startup. The window is created hidden (tauri.conf.json),
+    /// so it appears once, at its saved size, instead of growing from the
+    /// default. A failed or slow preference read still shows it.
+    pub(crate) fn launch<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>) {
+        let show = first_show::<R>();
+        show_after(app.clone(), show.clone(), LAUNCH_FALLBACK);
+        self.reconcile_then(app, true, Some(Box::new(show)));
+    }
+
     pub(crate) fn moved<R: tauri::Runtime>(&self, window: &tauri::Window<R>) {
-        if self.stopped.load(Ordering::Acquire) {
+        if self.stopped.load(Ordering::Acquire) || !resting(window) {
             return;
         }
         self.movement.fetch_add(1, Ordering::AcqRel);

@@ -34,15 +34,33 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
       const active = [...document.querySelectorAll('h3')].find(heading => heading.textContent?.startsWith('Active sessions · '));
       return !!card && !!active && !!(card.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING);
     })).toBe(true);
+    // The instruction starts collapsed; opened, it scrolls inside its own frame and its last line is readable there.
+    const card = page.getByRole('region', { name: 'Session setup' });
+    await expect(card.locator('pre')).toBeHidden();
+    await card.getByText('Show instruction').click();
+    const instruction = await card.locator('pre').evaluate(element => {
+      const node = element.firstChild!, range = document.createRange();
+      range.setStart(node, node.textContent!.lastIndexOf('Setup step 30:'));
+      range.setEnd(node, node.textContent!.length);
+      element.scrollTop += range.getBoundingClientRect().top - element.getBoundingClientRect().top - element.clientHeight / 2;
+      const line = range.getBoundingClientRect(), bounds = element.getBoundingClientRect();
+      return { lineTop: line.top, lineBottom: line.bottom, top: bounds.top, bottom: bounds.bottom, scrolls: element.scrollHeight > element.clientHeight };
+    });
+    expect(instruction.scrolls).toBe(true);
+    expect(instruction.lineTop).toBeGreaterThanOrEqual(instruction.top);
+    expect(instruction.lineBottom).toBeLessThanOrEqual(instruction.bottom);
     await page.locator('button[data-session-id]').first().click();
     const tree = page.getByRole('tree'), setup = page.getByRole('region', { name: 'Session setup' });
     await expect(tree.locator('.tree-item')).toHaveCount(2000);
-    await expect(setup.getByRole('heading', { name: 'Session connected' })).toBeVisible();
+    // The connect card belongs to the project page; the session view does not carry it.
+    await expect(setup).toHaveCount(0);
     const geometry = () => page.evaluate(() => {
       const rows = document.querySelector<HTMLElement>('.tree-scroll')!, center = document.querySelector<HTMLElement>('.shell-center')!;
       return { rowsHeight: rows.clientHeight, rowsScrollHeight: rows.scrollHeight, rowsScrollTop: rows.scrollTop,
         centerScrollTop: center.scrollTop, centerHeight: center.clientHeight, centerScrollHeight: center.scrollHeight,
-        toolbarTop: document.querySelector('.tree-filters')!.getBoundingClientRect().top,
+        // The toolbar's offset under the session bar. The body never scrolls sideways, so opening the detail
+        // column narrows the centre and the session bar may wrap; the toolbar must still sit right under it.
+        toolbarGap: document.querySelector('.tree-filters')!.getBoundingClientRect().top - document.querySelector('.tree-session-bar')!.getBoundingClientRect().bottom,
         headerTop: document.querySelector('.shell-header')!.getBoundingClientRect().top };
     });
     const before = await geometry();
@@ -61,13 +79,12 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     expect(after.rowsScrollHeight).toBeGreaterThan(after.rowsHeight);
     expect(after.centerScrollTop).toBe(0);
     expect(after.centerScrollHeight).toBeLessThanOrEqual(after.centerHeight + 1);
-    expect(after.toolbarTop).toBe(before.toolbarTop);
+    expect(after.toolbarGap).toBe(before.toolbarGap);
     expect(after.headerTop).toBe(before.headerTop);
     await expect(page.getByRole('group', { name: 'Filter items' }).getByRole('button', { name: /\bOpen \d+$/ })).toBeInViewport();
-    await expect(setup.getByRole('heading', { name: 'Session connected' })).toBeInViewport();
     for (const viewport of [{ width: 1000, height: 668 }, { width: 900, height: 650 }]) {
       await page.setViewportSize(viewport);
-      // The tree keeps only Close session; pause and connect live on the project page.
+      // The bar keeps Close session and the sending chip (details, Pause); connect lives on the project page.
       const bar = page.locator('.tree-session-bar');
       await expect(bar.getByRole('button', { name: 'Close session' })).toBeInViewport();
       for (const action of await bar.getByRole('button').all()) {
@@ -77,25 +94,26 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
           const bounds = element.getBoundingClientRect();
           return document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === element;
         })).toBe(true);
+        // Pause and Resume write at once; Close session and the sending details open a dialog to dismiss.
+        // Pause and Resume are icon buttons: their name is the aria-label.
+        const label = ((await action.getAttribute('aria-label')) ?? (await action.innerText())).trim();
+        if (/Pause|Resume|Try again/.test(label)) continue;
+        // Rename opens its fields in the bar, not a dialog; Esc closes them and focus returns to the button.
+        if (label === 'Rename') {
+          await action.click();
+          const field = bar.getByLabel('Session name');
+          await expect(field).toBeInViewport();
+          await page.keyboard.press('Escape');
+          await expect(field).toHaveCount(0);
+          continue;
+        }
         await action.click();
         const review = page.getByRole('dialog');
         await expect(review).toBeInViewport();
-        await review.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await review.getByRole('button', { name: label === 'Close session' ? 'Cancel' : 'Done', exact: true }).click();
         await expect(review).toHaveCount(0);
         await expect(action).toBeFocused();
       }
-      // A rectangle for the whole pre cannot prove the last instruction is
-      // readable. Scroll its actual text range into this notice's viewport.
-      const instruction = await setup.evaluate(element => {
-        const node = element.querySelector('pre')!.firstChild!, range = document.createRange();
-        range.setStart(node, node.textContent!.lastIndexOf('Setup step 30:'));
-        range.setEnd(node, node.textContent!.length);
-        element.scrollTop += range.getBoundingClientRect().top - element.getBoundingClientRect().top - element.clientHeight / 2;
-        const line = range.getBoundingClientRect(), bounds = element.getBoundingClientRect();
-        return { lineTop: line.top, lineBottom: line.bottom, top: bounds.top, bottom: bounds.bottom };
-      });
-      expect(instruction.lineTop).toBeGreaterThanOrEqual(instruction.top);
-      expect(instruction.lineBottom).toBeLessThanOrEqual(instruction.bottom);
       const current = await geometry();
       expect(current.rowsHeight).toBeGreaterThan(usefulRows);
       expect(current.centerScrollTop).toBe(0);
@@ -130,8 +148,7 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     expect(await page.locator('.nav-session-content').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
     await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
-    await setup.evaluate(element => element.scrollIntoView({ block: 'end' }));
-    expect(await page.locator('.shell-center').evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    await expect(setup).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally { await server.close(); }
 });
@@ -163,8 +180,10 @@ test('keeps a sent answer between the item question and its timeline in the ordi
     await detail.getByLabel('Reply in your own words').fill('Use the saved native delivery option.');
     await detail.getByRole('button', { name: 'Send reply', exact: true }).click();
     // A sent answer becomes the delivery stepper and its status line, and the
-    // reply joins the timeline (handoff README §5 "Item detail").
-    const receipt = detail.getByRole('region', { name: 'Your answer' }).getByRole('status').filter({ hasText: 'Use the saved native delivery option.' });
+    // reply joins the timeline (handoff README §5 "Item detail"). The fixture's
+    // session already has a message in flight, so the line says what the reply
+    // waits behind instead of echoing it.
+    const receipt = detail.getByRole('region', { name: 'Your answer' }).getByRole('status').filter({ hasText: 'Queued behind your message' });
     const sent = detail.getByRole('region', { name: 'Timeline' }).getByText('Use the saved native delivery option.');
     await expect(receipt).toBeVisible(); await expect(sent).toBeAttached();
     await expect(detail.getByLabel('Reply in your own words')).toHaveCount(0);

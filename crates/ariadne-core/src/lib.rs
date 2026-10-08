@@ -59,6 +59,15 @@ pub mod service {
             context: AdapterContext,
             event: ariadne_agent_protocol::NormalizedEvent,
         ) -> Result<EventReceipt, CoreError>;
+        /// For a binding no desktop lease holds: `Some` (reason `session_removed`)
+        /// when no registered session retains it, `None` when it still exists or
+        /// that cannot be told. Never contacts a host.
+        fn unknown_binding_error(
+            &self,
+            _binding_id: &ariadne_domain::models::UuidV4,
+        ) -> Result<Option<CoreError>, CoreError> {
+            Ok(None)
+        }
     }
 }
 pub use service::*;

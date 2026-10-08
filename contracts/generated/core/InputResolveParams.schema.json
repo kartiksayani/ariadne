@@ -82,13 +82,22 @@
       "minimum": 1
     },
     "ResolutionKind": {
-      "type": "string",
-      "enum": [
-        "retry_unexecuted",
-        "resend",
-        "skip",
-        "request_result_repair",
-        "confirm_evidence"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "retry_unexecuted",
+            "resend",
+            "skip",
+            "request_result_repair",
+            "confirm_evidence"
+          ]
+        },
+        {
+          "description": "The attempt already committed its result; the input is handled.",
+          "type": "string",
+          "const": "accept_result"
+        }
       ]
     },
     "TurnState": {

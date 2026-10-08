@@ -16,10 +16,23 @@ export type QueryCall<C extends QueryCommand> = OwnerQueryRequest & {
 export type Unsubscribe = () => void;
 // Native-only hint: a native writer (window geometry, pin/notification settings) saved this revision.
 export interface PreferencesChangedHint { revision: number }
+/**
+ * The desktop delivery supervisor's health for one binding generation (runtime,
+ * hand-written: not generated). `reason` is owner-facing text, null while running.
+ */
+export interface SupervisorHealth {
+  readonly binding_id: string;
+  readonly generation: string;
+  readonly state: 'running' | 'backing_off' | 'stopped';
+  readonly reason: string | null;
+  readonly retry_in_seconds: number | null;
+  readonly updated_at: string;
+}
 export interface HintPayloads {
   'ariadne://session_changed': SessionChangedHint;
   'ariadne://preferences_changed': PreferencesChangedHint;
   'ariadne://presence_changed': PresenceChangedHint;
+  'ariadne://supervisor_health': SupervisorHealth;
   'ariadne://route': OpenRoute;
 }
 export interface RendererService {
@@ -27,6 +40,10 @@ export interface RendererService {
   setConnectionUiOpen(open: boolean): Promise<void>;
   /** Configured Codex app-server socket path, or null when Codex is not configured. */
   codexDefaultEndpoint?(): Promise<string | null>;
+  /** Opens an http, https or mailto link in the system browser; the native side checks it again. */
+  openLink?(url: string): Promise<void>;
+  /** The latest supervisor health per binding; invalid entries are dropped. */
+  supervisorHealth?(): Promise<SupervisorHealth[]>;
   query<C extends QueryCommand>(request: QueryCall<C>): Promise<QueryData<C>>;
   executeOwner(request: OwnerMutationRequest): Promise<MutationReceipt>;
   // Remove is permanent in Ariadne; the 5-second undo lives in the caller, which
@@ -57,6 +74,8 @@ export interface DesktopTransport {
   discovery?(): Promise<DesktopDiscoverySnapshot>;
   setConnectionUiOpen?(open: boolean): Promise<void>;
   codexDefaultEndpoint?(): Promise<string | null>;
+  openLink?(url: string): Promise<void>;
+  supervisorHealth?(): Promise<unknown>;
   invoke<T>(command: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T>;
   listen<E extends keyof HintPayloads>(event: E, receive: (hint: HintPayloads[E]) => void): Promise<Unsubscribe>;
 }
@@ -64,6 +83,8 @@ const tauriTransport: DesktopTransport = {
   discovery: () => invoke('discovery_snapshot'),
   setConnectionUiOpen: open => invoke('discovery_ui_open', { request: { open } }),
   codexDefaultEndpoint: () => invoke('codex_default_endpoint'),
+  openLink: url => invoke('open_link', { url }),
+  supervisorHealth: () => invoke('supervisor_health'),
   invoke: (command, args) => invoke(command, args),
   async listen(event, receive) {
     const unsubscribe = await listen<HintPayloads[typeof event]>(event, (message) => receive(message.payload));
@@ -145,6 +166,17 @@ export function createDesktopService(transport: DesktopTransport = tauriTranspor
         return typeof path === 'string' && path !== '' ? path : null;
       } catch { throw new ServiceFailure('transport'); }
     },
+    async openLink(url) {
+      if (!transport.openLink) throw new ServiceFailure('transport');
+      try { await transport.openLink(url); } catch { throw new ServiceFailure('transport'); }
+    },
+    async supervisorHealth() {
+      if (!transport.supervisorHealth) return [];
+      let entries: unknown;
+      try { entries = await transport.supervisorHealth(); } catch { throw new ServiceFailure('transport'); }
+      if (!Array.isArray(entries)) throw new ServiceFailure('invalid_response');
+      return entries.filter(validHealth);
+    },
     async setConnectionUiOpen(open) {
       try {
         if (!transport.setConnectionUiOpen) throw new Error('Discovery unavailable');
@@ -199,6 +231,17 @@ export function createDesktopService(transport: DesktopTransport = tauriTranspor
     },
   };
   return service;
+}
+
+/** A well-formed SupervisorHealth entry; the reason is bounded owner text. */
+export function validHealth(value: unknown): value is SupervisorHealth {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Record<string, unknown>;
+  const text = (field: unknown) => typeof field === 'string' && field.length > 0 && field.length <= 4096 && !field.includes('\0');
+  return text(entry.binding_id) && text(entry.generation) && ['running', 'backing_off', 'stopped'].includes(entry.state as string)
+    && (entry.reason === null || text(entry.reason))
+    && (entry.retry_in_seconds === null || (typeof entry.retry_in_seconds === 'number' && Number.isFinite(entry.retry_in_seconds) && entry.retry_in_seconds >= 0))
+    && typeof entry.updated_at === 'string' && Number.isFinite(Date.parse(entry.updated_at));
 }
 
 export function validateDiscovery(snapshot: DesktopDiscoverySnapshot): void {

@@ -8,6 +8,7 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
 import { CoreFailure, type RendererService } from '../../data/service';
 import type { Immutable } from '../../data/session-store';
+import { plainFailure } from '../../data/plain';
 import type { SessionRef } from '../../generated/core';
 import type { Session } from '../../generated/domain/models';
 import type { RemoveSubject, RemoveTarget } from '../dialogs/remove';
@@ -134,7 +135,7 @@ export class RemovalQueue {
       entry.stage = 'failed';
       // A definite rejection committed nothing: the retry reads the revision again under the same op id.
       if (!uncertain(error)) entry.params = null;
-      this.note(entry, error instanceof Error ? error.message : 'Ariadne could not finish it.');
+      this.note(entry, plainFailure(error, 'Ariadne couldn’t finish removing it. Try again.'));
     } finally { entry.running = null; this.republish(); }
   }
   /** The command for the target against the session as it is now. */

@@ -30,7 +30,22 @@ pub struct GlobalPreferences {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[ts(as = "Option<bool>", optional)]
     pub notification_preview: bool,
+    // Width of the item detail panel in CSS pixels, as the owner dragged it; absent means the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = DETAIL_WIDTH_MIN, max = DETAIL_WIDTH_MAX))]
+    #[ts(optional)]
+    pub detail_width: Option<u32>,
+    // The owner collapsed the left "Waiting on me" column.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(as = "Option<bool>", optional)]
+    pub waiting_collapsed: bool,
 }
+
+/// Bounds of `GlobalPreferences::detail_width`; the renderer clamps to the same range.
+pub const DETAIL_WIDTH_MIN: u32 = 320;
+pub const DETAIL_WIDTH_MAX: u32 = 720;
+/// Most folded topic bands kept per session.
+pub const COLLAPSED_TOPICS_CAPACITY: usize = 256;
 
 pub const NOTIFICATION_LEDGER_CAPACITY: usize = 256;
 
@@ -77,6 +92,11 @@ pub struct SessionPreferences {
     pub filters: ViewFilters,
     pub rail: RailView,
     pub scroll: Option<ScrollAnchor>,
+    // Topic bands the owner folded in this session's tree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 256))]
+    #[ts(as = "Option<Vec<UuidV4>>", optional)]
+    pub collapsed_topic_ids: Vec<UuidV4>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]

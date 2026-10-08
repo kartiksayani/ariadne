@@ -2,12 +2,6 @@ use super::core;
 use crate::*;
 use ariadne_domain::models::*;
 
-fn terminal(item: &Item) -> bool {
-    matches!(
-        item.status,
-        ItemStatus::Decided | ItemStatus::Done | ItemStatus::Dropped | ItemStatus::Replaced
-    )
-}
 fn pending(input: &Input) -> bool {
     matches!(
         input.state,
@@ -25,44 +19,32 @@ fn revision(expected: PositiveSafeInteger, current: PositiveSafeInteger) -> Resu
     error.current_revision = Some(current);
     Err(error)
 }
-fn blockers(
-    session: &Session,
-    topic: Option<&UuidV4>,
-    must_pause: bool,
-    code: CoreErrorCode,
-) -> Result<(), CoreError> {
-    let blocking_item_ids: Vec<_> = session
-        .items
-        .0
-        .values()
-        .filter(|item| topic.is_none_or(|topic| &item.topic_id == topic) && !terminal(item))
-        .map(|item| item.id.clone())
-        .collect();
-    let blocking_input_ids: Vec<_> = session
+/// Archive takes the topic's unsent owner inputs with it, as close does for the
+/// session: queued ones cancel, in-flight and needs-attention ones are
+/// abandoned, and one whose result already committed is handled instead.
+/// Items keep their status. Returns the inputs it cancelled.
+fn archive_inputs(session: &mut Session, topic: &UuidV4, at: &UtcMillis) -> Vec<UuidV4> {
+    let targeted: Vec<_> = session
         .inputs
         .0
         .values()
-        .filter(|input| topic.is_none_or(|topic| &input.target.topic_id == topic) && pending(input))
-        .map(|input| input.id.clone())
+        .filter(|input| &input.target.topic_id == topic && pending(input))
+        .map(|input| (input.id.clone(), input.binding_id.clone()))
         .collect();
-    if blocking_item_ids.is_empty() && blocking_input_ids.is_empty() && !must_pause {
-        return Ok(());
+    let mut cancelled = vec![];
+    let mut bindings = std::collections::BTreeSet::new();
+    for (id, binding) in targeted {
+        if crate::delivery_join::abandon(session, &id, CancelCause::TopicArchived, at)
+            == Some(InputState::Cancelled)
+        {
+            cancelled.push(id);
+        }
+        bindings.insert(binding);
     }
-    let mut error = core(
-        code,
-        "Active items, pending inputs or dispatch prevent this lifecycle action",
-    );
-    error.details = Some(Box::new(ErrorDetails {
-        reason: None,
-        binding_id: session.active_binding_id.clone(),
-        input_id: None,
-        attempt_id: None,
-        blocking_item_ids,
-        blocking_input_ids,
-        dispatch_must_pause: must_pause,
-        partial_removal: None,
-    }));
-    Err(error)
+    for binding in &bindings {
+        crate::delivery_join::release_barrier(session, binding);
+    }
+    cancelled
 }
 
 pub(super) fn apply(
@@ -85,14 +67,13 @@ pub(super) fn apply(
                     "The topic already has the requested lifecycle state",
                 ));
             }
-            if archive {
-                blockers(
-                    session,
-                    Some(&params.topic_id),
-                    false,
-                    CoreErrorCode::TopicNotArchivable,
-                )?;
-            }
+            // Archive never refuses for open items or pending inputs; restore
+            // changes only the lifecycle, so cancelled inputs stay cancelled.
+            let cancelled_input_ids = if archive {
+                archive_inputs(session, &params.topic_id, at)
+            } else {
+                vec![]
+            };
             let topic = session.topics.0.get_mut(&params.topic_id).unwrap();
             topic.revision = PositiveSafeInteger::new(
                 topic.revision.value().checked_add(1).ok_or_else(|| {
@@ -113,6 +94,7 @@ pub(super) fn apply(
                 topic_id: topic.id.clone(),
                 topic_revision: topic.revision,
                 archived_at: topic.archived_at.clone(),
+                cancelled_input_ids,
             })
         }
         OwnerCommand::SessionClose { params, .. } | OwnerCommand::SessionReopen { params, .. } => {
@@ -124,29 +106,38 @@ pub(super) fn apply(
                     "The session already has the requested lifecycle state",
                 ));
             }
+            // Close is one step: it pauses dispatch, cancels every pending input
+            // (abandoning one in flight, unless its result committed: that one
+            // is handled) and leaves items as they are. Reopen carries on: it
+            // lifts the owner pause, including one made earlier.
+            let mut cancelled_input_ids = vec![];
             if close {
-                // A missing binding record (dangling active_binding_id) counts as
-                // quiesced on purpose: there is nothing to pause.
-                let quiesced = session
-                    .active_binding_id
-                    .as_ref()
-                    .and_then(|id| session.bindings.0.get(id))
-                    .is_none_or(|binding| binding.dispatch_quiesced());
-                blockers(session, None, !quiesced, CoreErrorCode::SessionNotClosable)?;
-                // Invariant: a closed session carries an owner pause, so a later
-                // reconnect plus reopen never implicitly resumes dispatch. The binding
-                // lives inside the session, so this commits with the close itself.
-                if let Some(binding) = session
-                    .active_binding_id
-                    .clone()
-                    .and_then(|id| session.bindings.0.get_mut(&id))
-                {
-                    binding.owner_paused = true;
-                    binding.dispatch_state = crate::bindings::dispatch(
-                        binding,
-                        binding.dispatch_state == DispatchState::RecoveryRequired,
-                    );
+                let pending: Vec<_> = session
+                    .inputs
+                    .0
+                    .values()
+                    .filter(|input| pending(input))
+                    .map(|input| input.id.clone())
+                    .collect();
+                for id in pending {
+                    if crate::delivery_join::abandon(session, &id, CancelCause::SessionClosed, at)
+                        == Some(InputState::Cancelled)
+                    {
+                        cancelled_input_ids.push(id);
+                    }
                 }
+            }
+            let bindings: Vec<_> = session.bindings.0.keys().cloned().collect();
+            for id in &bindings {
+                crate::delivery_join::release_barrier(session, id);
+            }
+            if let Some(binding) = session
+                .active_binding_id
+                .clone()
+                .and_then(|id| session.bindings.0.get_mut(&id))
+            {
+                binding.owner_paused = close;
+                binding.dispatch_state = crate::bindings::dispatch(binding, false);
             }
             session.state = if close {
                 SessionState::Closed
@@ -157,6 +148,7 @@ pub(super) fn apply(
             Ok(SavedReceiptData::SessionLifecycle {
                 state: session.state.clone(),
                 closed_at: session.closed_at.clone(),
+                cancelled_input_ids,
             })
         }
         _ => unreachable!("validated lifecycle command"),

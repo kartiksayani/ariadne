@@ -1,6 +1,7 @@
 import type { Input, Item, ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
 import type { ItemRoute, SessionRef } from '../../generated/core';
 import type { Immutable } from '../../data';
+import { ownerReplied } from './replied';
 
 export interface WaitingSession {
   readonly summary: Immutable<SessionSummary>;
@@ -28,12 +29,8 @@ export interface SentRow {
 
 // Select rows from canonical facts. Totals remain the backend SummaryCounts,
 // including partial/unavailable metadata; visible rows never replace them.
-function unanswered(session: Immutable<Session>, item: Immutable<Item>): boolean {
-  return item.status === 'waiting_on_me' && !session.answers.some(answer =>
-    answer.item_id === item.id && answer.question_revision === item.question_revision
-    && !session.answers.some(newer => newer.supersedes_answer_id === answer.id)
-    && !['cancelled', 'skipped'].includes(session.inputs[answer.input_id]?.state ?? 'handled'));
-}
+// A question the owner already replied to waits on the agent, not on the owner.
+const unanswered = (session: Immutable<Session>, item: Immutable<Item>) => item.status === 'waiting_on_me' && !ownerReplied(session, item);
 function itemOrder(left: string, right: string): number {
   const a = left.split('.').map(Number), b = right.split('.').map(Number);
   for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];

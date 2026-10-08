@@ -2,6 +2,7 @@ import type { ItemRoute, OpenRoute } from '../generated/core';
 import { OpenSessions, type SessionStore } from './session-store';
 import { revealAncestors } from './selectors';
 import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } from './service';
+import { plainFailure } from './plain';
 
 interface ItemReveal {
   readonly kind: 'item';
@@ -30,7 +31,7 @@ export class RegisteredRoutes {
     } catch (error: unknown) {
       if (request !== this.request) return null;
       if (!(error instanceof CoreFailure) || error.error.code !== 'not_found') throw error;
-      missingBanner = error.message;
+      missingBanner = plainFailure(error);
     }
     if (request !== this.request) return null;
     if (registered && (registered.project_id !== route.project_id || registered.session_id !== route.session_id || registered.item_id !== route.item_id)) {

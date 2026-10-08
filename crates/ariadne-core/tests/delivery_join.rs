@@ -4,7 +4,9 @@ use ariadne_agent_protocol::{
 use ariadne_core::{
     apply::ApplyService,
     delivery::{DeliveryError, DeliveryService},
+    history_actions::HistoryActionService,
     inputs::InputService,
+    recovery::RecoveryService,
     *,
 };
 use ariadne_domain::models::*;
@@ -178,6 +180,50 @@ impl Setup {
             .unwrap();
     }
     fn result(&self, p: &PreparedAttempt, n: u64) {
+        self.try_result(p, n).unwrap();
+    }
+    fn resolve(&self, p: &PreparedAttempt, decision: ResolutionKind, n: u64) {
+        let command = OwnerCommand::InputResolve {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: id(n),
+            params: InputResolveParams {
+                input_id: p.input_id.clone(),
+                attempt_id: p.attempt_id.clone(),
+                decision,
+                reason: String::new(),
+                expected_revision: self.saved().revision,
+                evidence: Some(OwnerResolutionEvidence {
+                    source: OwnerEvidenceSource::OwnerAttestation,
+                    turn_state: TurnState::Unknown,
+                    host_turn_id: None,
+                    owner_attested_idle: true,
+                    at: at("04"),
+                }),
+            },
+        };
+        RecoveryService::new(&self.registry)
+            .execute(
+                &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route())),
+                &command,
+                None,
+                at("05"),
+            )
+            .unwrap();
+    }
+    /// Reports a fact Core must answer with no effect and no saved receipt.
+    fn ignored(&self, e: &NormalizedEvent) {
+        let bytes = self.bytes();
+        let receipt = DeliveryService::new(&self.registry)
+            .report(&self.context(), e, || panic!("no allocation"))
+            .unwrap_or_else(|error| panic!("{} was refused: {error:?}", e.event_id));
+        assert!(!receipt.durable_effect, "{}", e.event_id);
+        assert_eq!(bytes, self.bytes(), "{}", e.event_id);
+    }
+    fn try_result(
+        &self,
+        p: &PreparedAttempt,
+        n: u64,
+    ) -> Result<ApplyReceipt, ariadne_core::apply::ApplyError> {
         let s = self.saved();
         let owner = s
             .messages
@@ -223,9 +269,7 @@ impl Setup {
                 handled_through_message_number: owner.number,
             }),
         };
-        ApplyService::new(&self.registry)
-            .execute(&context, &request, || self.uuid(), at("06"))
-            .unwrap();
+        ApplyService::new(&self.registry).execute(&context, &request, || self.uuid(), at("06"))
     }
     fn expire(
         &self,
@@ -505,7 +549,9 @@ fn changed_incoming_ids_never_retarget_the_original_event_barrier() {
     assert_eq!(s.inputs.0[&p.input_id].state, InputState::NeedsAttention);
 }
 #[test]
-fn failures_and_uncertain_facts_never_seal_or_authorize_resend_even_with_result() {
+fn committed_result_wins_over_later_failure_interruption_or_doubt() {
+    // Owner rule: a committed input_result handles the input whatever the host
+    // reports about its turn afterwards; no barrier, dispatch carries on.
     for payload in [
         EventPayload::TurnFinished {
             status: TurnFinishedStatus::Failed,
@@ -527,20 +573,60 @@ fn failures_and_uncertain_facts_never_seal_or_authorize_resend_even_with_result(
         t.queue(100);
         let p = t.claim(200);
         t.result(&p, 300);
+        assert_eq!(t.saved().inputs.0[&p.input_id].state, InputState::InFlight);
         t.report(&t.event(&p, "failure", payload)).unwrap();
         let s = t.saved();
         let input = &s.inputs.0[&p.input_id];
-        assert_eq!(input.state, InputState::NeedsAttention);
+        assert_eq!(input.state, InputState::Handled);
         assert!(input.attempts[0].domain_result.is_some());
-        assert!(input.attempts[0].sealed_at.is_none());
-        assert_eq!(
-            s.bindings.0[&id(3)].dispatch_state,
-            DispatchState::RecoveryRequired
-        );
+        assert!(input.attempts[0].sealed_at.is_some());
+        let binding = &s.bindings.0[&id(3)];
+        assert_eq!(binding.dispatch_state, DispatchState::Enabled);
+        assert_eq!(binding.pause_reason, None);
+        assert_eq!(binding.active_input_id, None);
+        // A later contradiction about the handled input is ignored, never a barrier.
+        t.ignored(&t.event(
+            &p,
+            "late",
+            EventPayload::Uncertain {
+                reason: "late doubt".into(),
+            },
+        ));
+        assert_eq!(t.saved().inputs.0[&p.input_id].state, InputState::Handled);
+        assert_eq!(t.saved().bindings.0[&id(3)].pause_reason, None);
         assert!(DeliveryService::new(&t.registry)
             .claim(&t.lease(), &t.request(201), || panic!(), at("09"))
-            .is_err());
+            .unwrap()
+            .is_none());
     }
+}
+#[test]
+fn committed_result_after_failure_heals_the_needs_attention_input() {
+    // Owner rule: the result wins even when the failure was reported first.
+    let t = Setup::new();
+    t.queue(100);
+    let p = t.claim(200);
+    let failed = EventPayload::TurnFinished {
+        status: TurnFinishedStatus::Interrupted,
+        reason: None,
+        diagnostic_text: None,
+        truncated: false,
+    };
+    t.report(&t.event(&p, "interrupted", failed)).unwrap();
+    let s = t.saved();
+    assert_eq!(s.inputs.0[&p.input_id].state, InputState::NeedsAttention);
+    assert_eq!(
+        s.bindings.0[&id(3)].dispatch_state,
+        DispatchState::RecoveryRequired
+    );
+    t.result(&p, 300);
+    let s = t.saved();
+    let input = &s.inputs.0[&p.input_id];
+    assert_eq!(input.state, InputState::Handled);
+    assert!(input.attempts[0].sealed_at.is_some());
+    let binding = &s.bindings.0[&id(3)];
+    assert_eq!(binding.pause_reason, None);
+    assert_eq!(binding.dispatch_state, DispatchState::Enabled);
 }
 #[test]
 fn grace_is_five_seconds_from_saved_completion_and_late_result_keeps_warning_owner_pause() {
@@ -589,7 +675,8 @@ fn grace_is_five_seconds_from_saved_completion_and_late_result_keeps_warning_own
     }
 }
 #[test]
-fn missing_result_conflict_remains_a_barrier_after_late_result() {
+fn late_result_clears_the_barrier_of_a_missing_result_conflict() {
+    // Owner rule: a committed result wins over an earlier contradiction too.
     let t = Setup::new();
     t.queue(100);
     let p = t.claim(200);
@@ -607,21 +694,19 @@ fn missing_result_conflict_remains_a_barrier_after_late_result() {
         },
     );
     assert!(t.report(&contradiction).is_err());
+    assert_eq!(
+        t.saved().inputs.0[&p.input_id].state,
+        InputState::NeedsAttention
+    );
     t.result(&p, 300);
     let s = t.saved();
     let input = &s.inputs.0[&p.input_id];
-    assert_eq!(input.state, InputState::NeedsAttention);
+    assert_eq!(input.state, InputState::Handled);
     assert_eq!(input.attempts[0].result_state, ResultState::Committed);
     assert_eq!(input.attempts[0].error, warning);
-    assert!(input.attempts[0].sealed_at.is_none());
-    assert_eq!(
-        s.bindings.0[&id(3)].pause_reason,
-        Some(PauseReason::Uncertain)
-    );
-    assert_eq!(
-        s.bindings.0[&id(3)].dispatch_state,
-        DispatchState::RecoveryRequired
-    );
+    assert!(input.attempts[0].sealed_at.is_some());
+    assert_eq!(s.bindings.0[&id(3)].pause_reason, None);
+    assert_eq!(s.bindings.0[&id(3)].dispatch_state, DispatchState::Enabled);
     let bytes = t.bytes();
     assert!(t.report(&contradiction).is_err());
     assert_eq!(t.bytes(), bytes);
@@ -805,12 +890,13 @@ fn native_clock_rejects_stale_selection_generation_and_cross_binding_without_wri
         let error = DeliveryService::new(&t.registry)
             .expire_missing_result_native(&context, &p.input_id, &p.attempt_id, &id(400), at("06"))
             .unwrap_err();
+        // A binding no longer selected was replaced by a rebind: stale.
         assert_eq!(
             code(error),
-            if changed == "generation" {
-                CoreErrorCode::StaleGeneration
-            } else {
+            if changed == "binding" {
                 CoreErrorCode::BindingMismatch
+            } else {
+                CoreErrorCode::StaleGeneration
             }
         );
         assert_eq!(t.bytes(), before);
@@ -846,6 +932,87 @@ fn stale_scope_and_malformed_facts_have_no_effects_or_uuid_allocations() {
     );
     assert_eq!(bytes, t.bytes());
 }
+fn owner_cancel(t: &Setup, input: &UuidV4, op: u64) {
+    let command = OwnerCommand::InputCancel {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(op),
+        params: InputCancelParams {
+            input_id: input.clone(),
+            expected_revision: t.saved().revision,
+            purpose: None,
+        },
+    };
+    InputService::new(&t.registry)
+        .execute(
+            &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route())),
+            &command,
+            || t.uuid(),
+            at("07"),
+        )
+        .unwrap();
+}
+
+#[test]
+fn owner_cancel_abandons_an_in_flight_input_and_late_reports_are_ignored() {
+    // Owner rule: cancel works in flight; the agent's late facts change nothing.
+    let t = Setup::new();
+    t.queue(100);
+    let next = t.queue(101);
+    let p = t.claim(200);
+    owner_cancel(&t, &p.input_id, 300);
+    let s = t.saved();
+    let input = &s.inputs.0[&p.input_id];
+    assert_eq!(input.state, InputState::Cancelled);
+    assert!(input.attempts[0].sealed_at.is_some());
+    assert_eq!(s.bindings.0[&id(3)].active_input_id, None);
+    let failed = EventPayload::TurnFinished {
+        status: TurnFinishedStatus::Failed,
+        reason: Some("stopped".into()),
+        diagnostic_text: None,
+        truncated: false,
+    };
+    t.report(&t.event(&p, "late-failure", failed)).unwrap();
+    let error = match t.try_result(&p, 301).unwrap_err() {
+        ariadne_core::apply::ApplyError::Core(error) => error,
+        other => panic!("core error, got {other:?}"),
+    };
+    assert_eq!(error.code, CoreErrorCode::AttemptSealed);
+    assert_eq!(
+        error.details.unwrap().reason,
+        Some(BarrierReason::InputCancelled)
+    );
+    let s = t.saved();
+    assert_eq!(s.inputs.0[&p.input_id].state, InputState::Cancelled);
+    let binding = &s.bindings.0[&id(3)];
+    assert_eq!(binding.pause_reason, None);
+    assert_eq!(binding.dispatch_state, DispatchState::Enabled);
+    assert_eq!(t.claim(201).input_id, next);
+}
+
+#[test]
+fn owner_cancel_of_the_input_needing_attention_lifts_the_barrier() {
+    let t = Setup::new();
+    t.queue(100);
+    let p = t.claim(200);
+    let interrupted = EventPayload::TurnFinished {
+        status: TurnFinishedStatus::Interrupted,
+        reason: None,
+        diagnostic_text: None,
+        truncated: false,
+    };
+    t.report(&t.event(&p, "interrupted", interrupted)).unwrap();
+    assert_eq!(
+        t.saved().bindings.0[&id(3)].dispatch_state,
+        DispatchState::RecoveryRequired
+    );
+    owner_cancel(&t, &p.input_id, 300);
+    let s = t.saved();
+    assert_eq!(s.inputs.0[&p.input_id].state, InputState::Cancelled);
+    let binding = &s.bindings.0[&id(3)];
+    assert_eq!(binding.pause_reason, None);
+    assert_eq!(binding.dispatch_state, DispatchState::Enabled);
+}
+
 #[test]
 fn rejected_before_delivery_remains_recovery_and_later_start_is_conflict() {
     let t = Setup::new();
@@ -903,7 +1070,7 @@ fn presence_visible_output_and_connected_duplicates_are_non_durable_noops() {
 }
 
 #[test]
-fn sealed_redundant_facts_are_unchanged_contradictions_pause_binding_without_rewriting_input() {
+fn fresh_facts_about_a_sealed_attempt_are_ignored_and_a_changed_known_fact_raises_no_barrier() {
     let t = Setup::new();
     t.queue(100);
     let p = t.claim(200);
@@ -911,17 +1078,10 @@ fn sealed_redundant_facts_are_unchanged_contradictions_pause_binding_without_rew
     t.report(&good).unwrap();
     t.result(&p, 300);
     let before = t.saved().inputs.clone();
-    let bytes = t.bytes();
     let mut redundant = good.clone();
     redundant.event_id = "fresh-redundant-completion".into();
-    assert!(
-        !DeliveryService::new(&t.registry)
-            .report(&t.context(), &redundant, || panic!())
-            .unwrap()
-            .durable_effect
-    );
-    assert_eq!(bytes, t.bytes());
-    let nonredundant = t.event(
+    t.ignored(&redundant);
+    t.ignored(&t.event(
         &p,
         "new-provider-receipt-after-seal",
         EventPayload::Accepted {
@@ -930,12 +1090,7 @@ fn sealed_redundant_facts_are_unchanged_contradictions_pause_binding_without_rew
                 observed_at: at("08"),
             }),
         },
-    );
-    assert_eq!(
-        code(t.report(&nonredundant).unwrap_err()),
-        CoreErrorCode::AttemptSealed
-    );
-    assert_eq!(bytes, t.bytes());
+    ));
     let mut bad = good.clone();
     bad.event_id = "fresh-contradiction".into();
     bad.event = EventPayload::TurnFinished {
@@ -944,27 +1099,360 @@ fn sealed_redundant_facts_are_unchanged_contradictions_pause_binding_without_rew
         diagnostic_text: None,
         truncated: false,
     };
-    assert_eq!(
-        code(t.report(&bad).unwrap_err()),
-        CoreErrorCode::ProtocolConflict
-    );
+    // Owner rule: the committed result wins; a later contradiction is ignored.
+    t.ignored(&bad);
     let saved = t.saved();
     assert_eq!(saved.inputs, before);
     assert_eq!(
         saved.bindings.0[&id(3)].dispatch_state,
-        DispatchState::RecoveryRequired
+        DispatchState::Enabled
     );
-    assert_eq!(
-        saved.bindings.0[&id(3)].pause_reason,
-        Some(PauseReason::Uncertain)
-    );
+    assert_eq!(saved.bindings.0[&id(3)].pause_reason, None);
+    // A changed fact under a known event ID is retained, without a barrier.
     let mut known = good;
     known.host_turn_id = Some("wrong-host-turn".into());
     assert_eq!(
         code(t.report(&known).unwrap_err()),
         CoreErrorCode::ProtocolConflict
     );
-    assert_eq!(t.saved().inputs, before);
+    let saved = t.saved();
+    assert_eq!(saved.inputs, before);
+    assert_eq!(
+        saved.bindings.0[&id(3)].dispatch_state,
+        DispatchState::Enabled
+    );
+    assert!(saved
+        .operation_receipts
+        .0
+        .values()
+        .flatten()
+        .any(|r| matches!(r.result.data, SavedReceiptData::EventConflict { .. })));
+}
+
+#[test]
+fn late_history_after_doubt_and_a_committed_result_is_ignored_and_the_queue_moves_on() {
+    // A submit that timed out is uncertain; the agent still commits its result,
+    // so the attempt seals with an unknown turn. History reports the turn later.
+    let t = Setup::new();
+    t.queue(100);
+    let next = t.queue(101);
+    let p = t.claim(200);
+    t.report(&t.event(
+        &p,
+        "submit-timed-out",
+        EventPayload::Uncertain {
+            reason: "timed out".into(),
+        },
+    ))
+    .unwrap();
+    t.result(&p, 300);
+    let s = t.saved();
+    let input = &s.inputs.0[&p.input_id];
+    assert_eq!(input.state, InputState::Handled);
+    assert_eq!(input.attempts[0].turn_state, TurnState::Unknown);
+    assert!(input.attempts[0].sealed_at.is_some());
+    let before = s.inputs.clone();
+    t.ignored(&t.event(
+        &p,
+        "history-accepted",
+        EventPayload::Accepted { receipt: None },
+    ));
+    t.ignored(&t.event(&p, "history-started", EventPayload::TurnStarted {}));
+    t.ignored(&t.event(&p, "history-completed", completed()));
+    t.ignored(&t.event(
+        &p,
+        "history-failed",
+        EventPayload::TurnFinished {
+            status: TurnFinishedStatus::Failed,
+            reason: None,
+            diagnostic_text: None,
+            truncated: false,
+        },
+    ));
+    let s = t.saved();
+    assert_eq!(s.inputs, before);
+    assert_eq!(s.bindings.0[&id(3)].dispatch_state, DispatchState::Enabled);
+    assert_eq!(t.claim(201).input_id, next);
+}
+
+#[test]
+fn late_facts_about_an_attempt_the_owner_resent_or_skipped_are_ignored() {
+    for decision in [ResolutionKind::Resend, ResolutionKind::Skip] {
+        let t = Setup::new();
+        t.queue(100);
+        let p = t.claim(200);
+        let interrupted = EventPayload::TurnFinished {
+            status: TurnFinishedStatus::Interrupted,
+            reason: None,
+            diagnostic_text: None,
+            truncated: false,
+        };
+        t.report(&t.event(&p, "interrupted", interrupted)).unwrap();
+        t.resolve(&p, decision.clone(), 300);
+        let s = t.saved();
+        assert!(s.inputs.0[&p.input_id].attempts[0].sealed_at.is_some());
+        let binding = s.bindings.0[&id(3)].clone();
+        assert_ne!(binding.dispatch_state, DispatchState::RecoveryRequired);
+        t.ignored(&t.event(&p, "late-start", EventPayload::TurnStarted {}));
+        t.ignored(&t.event(&p, "late-completed", completed()));
+        t.ignored(&t.event(
+            &p,
+            "late-rejected",
+            EventPayload::Rejected {
+                reason: "late".into(),
+            },
+        ));
+        t.ignored(&t.event(
+            &p,
+            "late-uncertain",
+            EventPayload::Uncertain {
+                reason: "late".into(),
+            },
+        ));
+        let s = t.saved();
+        assert_eq!(s.bindings.0[&id(3)], binding, "{decision:?}");
+    }
+}
+
+#[test]
+fn cancel_and_close_hand_an_in_flight_input_whose_result_committed() {
+    // Owner rule: a committed result always wins, even over a cancel or close.
+    for close in [false, true] {
+        let t = Setup::new();
+        t.queue(100);
+        let p = t.claim(200);
+        t.report(&t.event(&p, "started", EventPayload::TurnStarted {}))
+            .unwrap();
+        t.result(&p, 300);
+        assert_eq!(t.saved().inputs.0[&p.input_id].state, InputState::InFlight);
+        if close {
+            let MutationReceipt::Session(receipt) = HistoryActionService::new(&t.registry)
+                .execute(
+                    &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route())),
+                    &OwnerCommand::SessionClose {
+                        api_version: SchemaVersion::new(1).unwrap(),
+                        op_id: id(301),
+                        params: SessionLifecycleParams {
+                            expected_revision: t.saved().revision,
+                        },
+                    },
+                    at("07"),
+                )
+                .unwrap()
+            else {
+                panic!("session receipt")
+            };
+            let SavedReceiptData::SessionLifecycle {
+                cancelled_input_ids,
+                ..
+            } = receipt.data
+            else {
+                panic!("lifecycle receipt")
+            };
+            assert!(!cancelled_input_ids.contains(&p.input_id));
+        } else {
+            let MutationReceipt::Session(receipt) = InputService::new(&t.registry)
+                .execute(
+                    &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route())),
+                    &OwnerCommand::InputCancel {
+                        api_version: SchemaVersion::new(1).unwrap(),
+                        op_id: id(301),
+                        params: InputCancelParams {
+                            input_id: p.input_id.clone(),
+                            expected_revision: t.saved().revision,
+                            purpose: None,
+                        },
+                    },
+                    || t.uuid(),
+                    at("07"),
+                )
+                .unwrap()
+            else {
+                panic!("session receipt")
+            };
+            assert_eq!(
+                receipt.data,
+                SavedReceiptData::InputCancel {
+                    input_id: p.input_id.clone(),
+                    state: InputState::Handled,
+                }
+            );
+        }
+        let s = t.saved();
+        let input = &s.inputs.0[&p.input_id];
+        assert_eq!(input.state, InputState::Handled, "close={close}");
+        assert!(input.attempts[0].domain_result.is_some());
+        assert!(input.attempts[0].sealed_at.is_some());
+        assert_eq!(s.bindings.0[&id(3)].active_input_id, None);
+    }
+}
+
+fn archive(t: &Setup, op: u64) -> Vec<UuidV4> {
+    let s = t.saved();
+    let MutationReceipt::Session(receipt) = HistoryActionService::new(&t.registry)
+        .execute(
+            &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route())),
+            &OwnerCommand::TopicArchive {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(op),
+                params: TopicLifecycleParams {
+                    topic_id: id(5),
+                    expected_revision: s.topics.0[&id(5)].revision,
+                },
+            },
+            at("07"),
+        )
+        .unwrap()
+    else {
+        panic!("session receipt")
+    };
+    let SavedReceiptData::TopicLifecycle {
+        cancelled_input_ids,
+        ..
+    } = receipt.data
+    else {
+        panic!("lifecycle receipt")
+    };
+    cancelled_input_ids
+}
+
+#[test]
+fn archive_cancels_queued_and_in_flight_inputs_and_claim_delivers_none_of_them() {
+    let t = Setup::new();
+    let first = t.queue(100);
+    let second = t.queue(101);
+    let p = t.claim(200);
+    assert_eq!(p.input_id, first);
+    let mut cancelled = archive(&t, 300);
+    cancelled.sort();
+    let mut expected = vec![first.clone(), second.clone()];
+    expected.sort();
+    assert_eq!(cancelled, expected);
+    let s = t.saved();
+    for input in [&first, &second] {
+        assert_eq!(s.inputs.0[input].state, InputState::Cancelled);
+    }
+    assert!(s.inputs.0[&first].attempts[0].sealed_at.is_some());
+    let binding = &s.bindings.0[&id(3)];
+    assert_eq!(binding.active_input_id, None);
+    assert_eq!(binding.dispatch_state, DispatchState::Enabled);
+    // The agent's late result for the cancelled attempt changes nothing.
+    let error = match t.try_result(&p, 301).unwrap_err() {
+        ariadne_core::apply::ApplyError::Core(error) => error,
+        other => panic!("core error, got {other:?}"),
+    };
+    assert_eq!(error.code, CoreErrorCode::AttemptSealed);
+    assert!(DeliveryService::new(&t.registry)
+        .claim(&t.lease(), &t.request(201), || panic!(), at("08"))
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn archive_hands_an_in_flight_input_whose_result_committed_and_does_not_list_it() {
+    let t = Setup::new();
+    t.queue(100);
+    let p = t.claim(200);
+    t.result(&p, 300);
+    assert!(archive(&t, 301).is_empty());
+    let s = t.saved();
+    assert_eq!(s.inputs.0[&p.input_id].state, InputState::Handled);
+    assert_eq!(s.bindings.0[&id(3)].active_input_id, None);
+}
+
+#[test]
+fn claim_never_delivers_a_queued_input_for_an_archived_topic() {
+    // Defence in depth: archive cancels these, but a queued input that
+    // targets an archived topic is skipped regardless.
+    let t = Setup::new();
+    t.queue(100);
+    t.write(|s| s.topics.0.get_mut(&id(5)).unwrap().archived_at = Some(at("01")));
+    let bytes = t.bytes();
+    assert!(DeliveryService::new(&t.registry)
+        .claim(&t.lease(), &t.request(200), || panic!(), at("02"))
+        .unwrap()
+        .is_none());
+    assert_eq!(bytes, t.bytes());
+}
+
+#[test]
+fn a_cancelled_queued_input_is_never_claimed_and_a_stale_cancel_after_claim_conflicts() {
+    let t = Setup::new();
+    let first = t.queue(100);
+    let second = t.queue(101);
+    owner_cancel(&t, &first, 300);
+    let p = t.claim(200);
+    assert_eq!(p.input_id, second);
+    assert!(t.saved().inputs.0[&first].attempts.is_empty());
+    // A cancel prepared before the claim committed carries a stale revision:
+    // the claim won, the cancel is refused and nothing changes.
+    let third = t.queue(102);
+    let stale = t.saved().revision;
+    owner_cancel(&t, &p.input_id, 301);
+    let p = t.claim(201);
+    assert_eq!(p.input_id, third);
+    let bytes = t.bytes();
+    let refused = InputService::new(&t.registry)
+        .execute(
+            &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route())),
+            &OwnerCommand::InputCancel {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(302),
+                params: InputCancelParams {
+                    input_id: third.clone(),
+                    expected_revision: stale,
+                    purpose: None,
+                },
+            },
+            || t.uuid(),
+            at("08"),
+        )
+        .unwrap_err();
+    let ariadne_core::inputs::InputError::Core(refused) = refused else {
+        panic!("core error")
+    };
+    assert_eq!(refused.code, CoreErrorCode::RevisionConflict);
+    assert_eq!(bytes, t.bytes());
+    assert_eq!(t.saved().inputs.0[&third].state, InputState::InFlight);
+    // A refresh shows the truth; cancelling then abandons the in-flight input.
+    owner_cancel(&t, &third, 303);
+    assert_eq!(t.saved().inputs.0[&third].state, InputState::Cancelled);
+}
+
+#[test]
+fn separate_cancel_and_claim_writers_agree_on_whichever_committed_first() {
+    for round in 0..4 {
+        let t = Setup::new();
+        let input = t.queue(100);
+        let mut a = writer(&t, "cancel", 10 + round);
+        let mut b = writer(&t, "claim", round);
+        assert!(a.wait().unwrap().success());
+        assert!(b.wait().unwrap().success());
+        let claimed: Option<PreparedAttempt> = serde_json::from_slice(
+            &fs::read(t.root.path().join(format!("child-{round}.json"))).unwrap(),
+        )
+        .unwrap();
+        let cancel =
+            fs::read_to_string(t.root.path().join(format!("child-{}.json", 10 + round))).unwrap();
+        let s = t.saved();
+        let saved = &s.inputs.0[&input];
+        match (claimed.is_some(), cancel.as_str()) {
+            // Cancel first: the input never had an attempt.
+            (false, "cancelled") => assert!(saved.attempts.is_empty()),
+            // Claim first, cancel read the fresh revision: abandoned in flight.
+            (true, "cancelled") => {
+                assert_eq!(saved.attempts.len(), 1);
+                assert!(saved.attempts[0].sealed_at.is_some());
+            }
+            // Claim first, cancel read a stale revision: refused, still in flight.
+            (true, "conflict") => assert_eq!(saved.state, InputState::InFlight),
+            other => panic!("inconsistent race outcome {other:?}"),
+        }
+        if cancel == "cancelled" {
+            assert_eq!(saved.state, InputState::Cancelled);
+            assert_eq!(s.bindings.0[&id(3)].active_input_id, None);
+        }
+    }
 }
 
 #[test]
@@ -995,6 +1483,33 @@ fn writer_child() {
             .claim(&lease, &request, || id(9000 + ordinal), at("00"))
             .unwrap();
         fs::write(output, serde_json::to_vec(&p).unwrap()).unwrap();
+    } else if action == "cancel" {
+        // The owner's cancel carries the revision it last saw.
+        let input = s.inputs.0.keys().next().unwrap().clone();
+        let outcome = InputService::new(&registry).execute(
+            &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route())),
+            &OwnerCommand::InputCancel {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(400 + ordinal),
+                params: InputCancelParams {
+                    input_id: input,
+                    expected_revision: s.revision,
+                    purpose: None,
+                },
+            },
+            || id(9300 + ordinal),
+            at("07"),
+        );
+        let word = match outcome {
+            Ok(_) => "cancelled",
+            Err(ariadne_core::inputs::InputError::Core(e))
+                if e.code == CoreErrorCode::RevisionConflict =>
+            {
+                "conflict"
+            }
+            Err(other) => panic!("{other:?}"),
+        };
+        fs::write(output, word).unwrap();
     } else {
         let input = s
             .inputs
@@ -1482,39 +1997,28 @@ fn explicit_claude_reconnect_rotates_generation_past_the_prior_terminal_receipt(
     );
 }
 #[test]
-fn claim_reads_current_target_but_keeps_frozen_input_and_rejects_capacity_before_allocation() {
+fn claim_carries_exact_text_and_current_revisions_and_rejects_capacity_before_allocation() {
     let t = Setup::new();
     let input = t.queue(100);
     let frozen = t.saved().inputs.0[&input].payload.clone();
     t.write(|s| {
-        s.items
-            .0
-            .get_mut(&ItemRef::new("1").unwrap())
-            .unwrap()
-            .question = "Current clarified target?".into();
+        let item = s.items.0.get_mut(&ItemRef::new("1").unwrap()).unwrap();
+        item.revision = PositiveSafeInteger::new(item.revision.value() + 4).unwrap();
     });
     let p = t.claim(200);
     let (_, body) = p.formatted_payload.split_once('\n').unwrap();
     let body: serde_json::Value = serde_json::from_str(body).unwrap();
-    assert_eq!(
-        body["current_item"]["question"],
-        "Current clarified target?"
-    );
-    assert_eq!(body["saved_input"], serde_json::to_value(&frozen).unwrap());
+    let item = &t.saved().items.0[&ItemRef::new("1").unwrap()];
+    assert_eq!(body["item_id"], "1");
+    assert_eq!(body["item_revision"], item.revision.value());
+    assert_eq!(body["question_revision"], item.question_revision.value());
+    assert_eq!(body["text"], frozen.text);
+    // The item body and the frozen snapshot are never shipped.
+    assert!(body.get("current_item").is_none() && body.get("saved_input").is_none());
     assert_eq!(t.saved().inputs.0[&input].payload, frozen);
+    // Owner text within its 16 KiB bound can still escape past the 64 KiB budget.
     let t = Setup::new();
-    t.write(|s| {
-        let item = s.items.0.get_mut(&ItemRef::new("1").unwrap()).unwrap();
-        item.options = (0..12)
-            .map(|i| ItemOption {
-                id: format!("choice{i}"),
-                label: "x".repeat(1024),
-                consequence: "x".repeat(1024),
-                recommended: false,
-            })
-            .collect();
-    });
-    t.queue_text(100, &"o".repeat(16 * 1024));
+    t.queue_text(100, &format!("x{}", "\u{1}".repeat(16 * 1024 - 1)));
     let before = t.bytes();
     assert_eq!(
         code(

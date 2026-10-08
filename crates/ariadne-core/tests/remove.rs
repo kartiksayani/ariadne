@@ -2,7 +2,7 @@
 use ariadne_agent_protocol::{EventPayload, NormalizedEvent, TurnFinishedStatus};
 use ariadne_core::{
     apply::ApplyService,
-    delivery::{DeliveryService, REMOVED_INSTRUCTION},
+    delivery::DeliveryService,
     history_actions::{HistoryActionError, HistoryActionService},
     inputs::InputService,
     *,
@@ -384,17 +384,10 @@ fn item_remove_drops_the_subtree_with_rounds_and_inputs_and_tells_the_agent() {
 }
 
 #[test]
-fn item_remove_refuses_in_flight_work_and_live_replacements_without_writing() {
+fn item_remove_refuses_live_replacements_without_writing_and_takes_pending_inputs() {
     let t = Setup::new(&[(1, &[demo()])]);
     let bytes = fs::read(t.file(1, 2)).unwrap();
     let session = t.read(1, 2);
-    // Item 3 has an input in flight.
-    let busy = core_error(t.remove(
-        &owner(1, 2),
-        &item_remove("3", session.items.0[&r("3")].revision, 100),
-    ));
-    assert_eq!(busy.code, CoreErrorCode::InvalidTransition);
-    assert_eq!(busy.details.unwrap().blocking_input_ids, vec![id(0x72)]);
     // Item 7 was replaced by item 4, so item 4 must stay.
     let replaced = core_error(t.remove(
         &owner(1, 2),
@@ -408,6 +401,127 @@ fn item_remove_refuses_in_flight_work_and_live_replacements_without_writing() {
     assert!(fs::read_dir(t.dir(1).join("backups"))
         .map(|dir| dir.count() == 0)
         .unwrap_or(true));
+    // Owner rule: pending inputs never block removal. Item 3's input is in
+    // flight; it goes with the item and frees its binding.
+    let data = removal(&saved(
+        t.remove(
+            &owner(1, 2),
+            &item_remove("3", session.items.0[&r("3")].revision, 100),
+        )
+        .unwrap(),
+    ));
+    assert!(data.input_ids.contains(&id(0x72)));
+    let live = t.read(1, 2);
+    assert!(!live.inputs.0.contains_key(&id(0x72)));
+    assert_eq!(live.bindings.0[&id(0x20)].active_input_id, None);
+    assert_eq!(live.bindings.0[&id(0x20)].pause_reason, None);
+    // Item 7's input needs attention; its barrier lifts with it.
+    let data = removal(&saved(
+        t.remove(
+            &owner(1, 2),
+            &item_remove("7", live.items.0[&r("7")].revision, 101),
+        )
+        .unwrap(),
+    ));
+    assert!(data.input_ids.contains(&id(0x74)));
+    let live = t.read(1, 2);
+    let binding = &live.bindings.0[&id(0x21)];
+    assert_eq!(binding.pause_reason, None);
+    assert_eq!(binding.active_input_id, None);
+    assert_ne!(binding.dispatch_state, DispatchState::RecoveryRequired);
+}
+
+#[test]
+fn removal_takes_an_in_flight_input_and_late_agent_reports_are_ignored() {
+    let t = Setup::new(&[(1, &[seed()])]);
+    let route = RegisteredSession::from_trusted_entrypoint(id(1), id(2));
+    let submit = OwnerCommand::InputSubmit {
+        api_version: version(),
+        op_id: id(90),
+        params: InputSubmitParams {
+            binding_id: id(3),
+            target: InputTarget {
+                topic_id: id(5),
+                item_id: Some(r("1")),
+            },
+            kind: InputKind::Reply,
+            text: "Owner text in flight".into(),
+            selected_option_id: None,
+            expected_question_revision: None,
+            supersedes_answer_id: None,
+        },
+    };
+    InputService::new(&t.registry)
+        .execute(&owner(1, 2), &submit, || t.uuid(), at())
+        .unwrap();
+    let generation = t.read(1, 2).bindings.0[&id(3)].generation.clone();
+    let lease = ValidatedDispatchContext::from_trusted_current_lease(
+        route.clone(),
+        id(3),
+        generation.clone(),
+    );
+    let claim = ClaimRequest {
+        binding_id: id(3),
+        generation: generation.clone(),
+        request_id: id(200),
+    };
+    let attempt = DeliveryService::new(&t.registry)
+        .claim(&lease, &claim, || t.uuid(), at())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        t.read(1, 2).inputs.0[&attempt.input_id].state,
+        InputState::InFlight
+    );
+    let revision = t.read(1, 2).items.0[&r("1")].revision;
+    let data = removal(&saved(
+        t.remove(&owner(1, 2), &item_remove("1", revision, 100))
+            .unwrap(),
+    ));
+    assert_eq!(data.input_ids, vec![attempt.input_id.clone()]);
+    let binding = &t.read(1, 2).bindings.0[&id(3)];
+    assert_eq!(binding.active_input_id, None);
+    assert_eq!(binding.pause_reason, None);
+    // The host still reports the turn failed: ignored, no barrier.
+    let adapter = AdapterContext::from_trusted_entrypoint(route, id(3), generation.clone(), None);
+    DeliveryService::new(&t.registry)
+        .report(
+            &adapter,
+            &NormalizedEvent {
+                event_id: "late-failure".into(),
+                binding_id: id(3),
+                generation: generation.clone(),
+                input_id: Some(attempt.input_id.clone()),
+                attempt_id: Some(attempt.attempt_id.clone()),
+                host_turn_id: Some("turn".into()),
+                observed_at: at(),
+                event: EventPayload::TurnFinished {
+                    status: TurnFinishedStatus::Failed,
+                    reason: Some("stopped".into()),
+                    diagnostic_text: None,
+                    truncated: false,
+                },
+            },
+            || t.uuid(),
+        )
+        .unwrap();
+    let binding = &t.read(1, 2).bindings.0[&id(3)];
+    assert_eq!(binding.pause_reason, None);
+    assert_ne!(binding.dispatch_state, DispatchState::RecoveryRequired);
+    // The agent's late apply learns the work was removed, as a cancelled input.
+    let error = ariadne_core::native::AgentResolver::resolve(
+        &t.registry,
+        id(3),
+        generation,
+        Some(attempt.input_id.clone()),
+        Some(attempt.attempt_id.clone()),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, CoreErrorCode::AttemptSealed);
+    assert_eq!(
+        error.details.unwrap().reason,
+        Some(BarrierReason::InputCancelled)
+    );
 }
 
 #[test]
@@ -466,15 +580,26 @@ fn removal_notice_is_delivered_and_acknowledged_without_replies() {
     assert_eq!(attempt.input_id, notice.id);
     let json = &attempt.formatted_payload[attempt.formatted_payload.find('{').unwrap()..];
     let envelope: serde_json::Value = serde_json::from_str(json).unwrap();
-    assert_eq!(envelope["instruction"], REMOVED_INSTRUCTION);
+    // The rules for a removal notice live in the skill; the envelope carries
+    // only the routing IDs and the saved notice.
+    let keys: Vec<_> = envelope.as_object().unwrap().keys().cloned().collect();
+    assert_eq!(
+        keys,
+        [
+            "attempt_id",
+            "binding_id",
+            "generation",
+            "input_kind",
+            "owner_message_number",
+            "removed",
+            "source_input_id"
+        ]
+    );
     assert_eq!(envelope["input_kind"], "removed");
     assert_eq!(envelope["source_input_id"], notice.id.as_str());
     assert_eq!(envelope["removed"]["refs"][0]["kind"], "item");
     assert_eq!(envelope["removed"]["refs"][0]["ref"], "1");
-    assert_eq!(envelope["tools"], serde_json::json!({"mutation":"apply"}));
     // The removed records and their context are not in the envelope.
-    assert!(envelope.get("current_item").is_none());
-    assert!(envelope.get("recent_context").is_none());
     assert!(!json.contains("Queued owner text"));
 
     let session = t.read(1, 2);
@@ -667,7 +792,7 @@ fn topic_remove_takes_the_continuation_family_and_tells_only_the_latest_copy() {
 }
 
 #[test]
-fn session_remove_keeps_shared_topic_copies_and_refuses_in_flight_inputs() {
+fn session_remove_keeps_shared_topic_copies_and_takes_in_flight_inputs() {
     let t = Setup::new(&[(1, &[demo()]), (0x901, &[source()])]);
     let bytes = fs::read(t.file(0x901, 0x902)).unwrap();
     let receipt = removed(
@@ -693,11 +818,6 @@ fn session_remove_keeps_shared_topic_copies_and_refuses_in_flight_inputs() {
     let gone = core_error(t.remove(&registry_scope(), &session_remove(0x901, 0x902, p(12), 101)));
     assert_eq!(gone.code, CoreErrorCode::NotFound);
 
-    // A session with an input in flight is refused with the close blockers.
-    let busy = core_error(t.remove(&registry_scope(), &session_remove(1, 2, copy.revision, 102)));
-    assert_eq!(busy.code, CoreErrorCode::SessionNotClosable);
-    assert_eq!(busy.details.unwrap().blocking_input_ids, vec![id(0x72)]);
-    assert!(t.file(1, 2).exists());
     // Session removal needs the registry scope, item removal a session route.
     assert_eq!(
         core_error(t.remove(&owner(1, 2), &session_remove(1, 2, copy.revision, 103))).code,
@@ -707,6 +827,13 @@ fn session_remove_keeps_shared_topic_copies_and_refuses_in_flight_inputs() {
         core_error(t.remove(&registry_scope(), &item_remove("2", p(2), 104))).code,
         CoreErrorCode::PermissionDenied
     );
+    // Owner rule: a session with an input in flight is removed with it.
+    assert_eq!(t.read(1, 2).inputs.0[&id(0x72)].state, InputState::InFlight);
+    removed(
+        t.remove(&registry_scope(), &session_remove(1, 2, copy.revision, 102))
+            .unwrap(),
+    );
+    assert!(!t.file(1, 2).exists());
 }
 
 #[test]
@@ -812,19 +939,16 @@ fn project_remove_deletes_only_the_project_store_under_the_data_root() {
         ),
         receipt
     );
-    // A project whose session has an input in flight is refused untouched,
-    // without even an empty backup directory.
-    let busy = core_error(t.remove(&registry_scope(), &project_remove(1, 101)));
-    assert_eq!(busy.code, CoreErrorCode::SessionNotClosable);
-    assert!(t.file(1, 2).exists());
-    assert_eq!(t.registry.registered_projects().unwrap().len(), 1);
-    assert_eq!(
-        removal_backups(&t.data_backups()),
-        vec![format!(
-            "pre-remove-20261004T120000000Z-{}",
-            id(100).as_str()
-        )]
+    // Owner rule: a project whose session has an input in flight is removed too.
+    assert_eq!(t.read(1, 2).inputs.0[&id(0x72)].state, InputState::InFlight);
+    let receipt = removed(
+        t.remove(&registry_scope(), &project_remove(1, 101))
+            .unwrap(),
     );
+    assert_eq!(receipt.session_ids, vec![id(2)]);
+    assert!(!t.dir(1).exists());
+    assert!(t.registry.registered_projects().unwrap().is_empty());
+    assert_eq!(removal_backups(&t.data_backups()).len(), 2);
 }
 
 #[test]

@@ -101,8 +101,11 @@ Project: `{schema_version:1,id,display_name}`.
 
 Session: `{schema_version:1,id,project_id,title,state,created_at,updated_at,
 revision,closed_at,counters,active_binding_id,topics,items,messages,rounds,
-answers,bindings,inputs,operation_receipts,continuations}`.
-`state=active|closed`. Counters: `next_root,next_topic_order,next_message,
+answers,bindings,inputs,operation_receipts,continuations,name?,description?}`.
+`name` and `description` are the owner's own label for the session: trimmed, a
+name of 1 to 60 characters and a one-line description of at most 200, both
+omitted when unset (ADR-0091). `title` holds the external session id and is not
+shown to the owner. `state=active|closed`. Counters: `next_root,next_topic_order,next_message,
 next_input,next_answer`. Collections except messages/answers are ID-keyed maps;
 messages and answers are ordered arrays. Binding, not provider name, routes work.
 `operation_receipts` maps operation UUIDs to ordered arrays of actor-scoped
@@ -410,7 +413,7 @@ union of exact saved outcome shapes:
 | input_submit | input_id, message_id, message_number, answer_id nullable, input_seq |
 | input_cancel | input_id, state |
 | input_resolve | input_id, attempt_id, resolution_kind, state |
-| topic_lifecycle | topic_id, topic_revision, archived_at nullable |
+| topic_lifecycle | topic_id, topic_revision, archived_at nullable, cancelled_input_ids (omitted when empty) |
 | session_lifecycle | state, closed_at nullable |
 | binding_connect | binding_id, generation, capabilities, setup_instruction |
 | binding_state | binding_id, generation, dispatch_state, owner_paused, pause_reason nullable, connection_state |
@@ -455,9 +458,10 @@ behavior belong to P0.6 and the core tasks.
   Waiting while an older input is in Sent. This never changes the item status.
 - Item timelines deduplicate by message ID and include parent-creation context
   separately; rounds, replies, status history and references never silently prune.
-- Archive requires every topic item terminal and no queued/in-flight/unresolved
-  input targeting it. Close session requires all items terminal, no unresolved
-  inputs and dispatch paused. Restore/reopen changes presentation lifecycle only.
+- Archive always succeeds (ADR-0090): it cancels the owner inputs targeting the
+  topic as close does, and items keep their status. Agent writes to an archived
+  topic return `topic_archived`. Close session is one step (ADR-0088).
+  Restore/reopen changes presentation lifecycle only.
 - Full validation runs for every commit; expected revisions are per touched item,
   question, topic or session lifecycle, not unrelated snapshot edits.
 
@@ -772,14 +776,14 @@ immediate source route. Activity/Lifecycle contextual topic grouping stays intac
 These source pointers never grant target routing/authority or create item
 conversation links through `items_touched`.
 
-The native `HistoryActionService` implements guarded archive/restore, close/reopen,
-read-only preview and target-only continuation. Archive/close errors identify the
-actual blocking item/input IDs; close requires the active binding to be quiesced
-(persisted Paused or Disconnected dispatch state, a non-connected connection, or no
-binding record) and records an owner pause on it in the same commit, so a closed
-session always carries an owner pause and reopen never resumes dispatch. Restore/reopen preserve domain/delivery history, IDs and
-binding state and never resume dispatch implicitly. CLI/CoreService consumer
-routing is a separate composition task.
+The native `HistoryActionService` implements archive/restore, close/reopen,
+read-only preview and target-only continuation. Archive is one step (ADR-0090): it
+cancels the topic's queued inputs, abandons its in-flight and needs-attention
+inputs, and lists them in `cancelled_input_ids`. Close is one step (ADR-0088). In one commit it records an
+owner pause on the active binding, cancels queued inputs and abandons in-flight and
+needs-attention inputs, and leaves items as they are. Reopen clears that owner
+pause. Restore/reopen preserve domain/delivery history and IDs. CLI/CoreService
+consumer routing is a separate composition task.
 
 Continue is a **copy**, not shared mutable topic membership. Read a validated
 source snapshot and include source revision/hash in preview. Owner chooses an

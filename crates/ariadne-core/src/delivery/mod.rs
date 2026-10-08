@@ -3,11 +3,13 @@ mod claim;
 mod error;
 mod expiry;
 pub(crate) mod format;
+mod hold;
 mod report;
 use crate::*;
 use ariadne_store::{registry::Registry, session::Store};
 pub use error::DeliveryError;
-pub use format::{AGENT_QUERY_TOOLS, REMOVED_INSTRUCTION};
+pub use format::AGENT_QUERY_TOOLS;
+pub use hold::held_for_review;
 
 pub struct DeliveryService<'a> {
     registry: &'a Registry,

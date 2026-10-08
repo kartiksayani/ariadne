@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CoreFailure, type RendererService } from '../../data/service';
+import { plainFailure } from '../../data/plain';
 import { immutable, useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import type { SessionRef } from '../../generated/core';
 
@@ -31,7 +32,7 @@ export function useHistory<T>(service: RendererService, store: SessionStore, sel
     }).catch((error: unknown) => {
       if (generation.current !== call) return;
       setState(previous => ({ ...previous, loading: false,
-        error: error instanceof Error ? error.message : 'The complete history could not be read.' }));
+        error: plainFailure(error, 'The messages could not be read. Try again.') }));
       if (error instanceof CoreFailure && error.error.code === 'snapshot_changed') void store.refresh();
     });
     return () => { controller.abort(); ++generation.current; };

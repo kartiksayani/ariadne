@@ -11,10 +11,6 @@
   margin: 0;
 }
 
-.history-action-dialog section > div {
-  margin-block: 8px;
-}
-
 .copied-provenance {
   display: inline-flex;
   gap: 8px;

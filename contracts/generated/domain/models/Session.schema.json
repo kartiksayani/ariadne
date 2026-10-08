@@ -41,6 +41,12 @@
     "created_at": {
       "$ref": "#/$defs/UtcMillis"
     },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "id": {
       "$ref": "#/$defs/UuidV4"
     },
@@ -55,6 +61,12 @@
       "items": {
         "$ref": "#/$defs/Message"
       }
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "operation_receipts": {
       "$ref": "#/$defs/UniqueMap7"
@@ -559,6 +571,31 @@
         "adapter_config"
       ]
     },
+    "CancelCause": {
+      "description": "Who or what cancelled an input before it was delivered.",
+      "oneOf": [
+        {
+          "description": "The owner deleted it.",
+          "type": "string",
+          "const": "owner"
+        },
+        {
+          "description": "The owner took it back to edit: its words go back to the owner's editor.",
+          "type": "string",
+          "const": "owner_edit"
+        },
+        {
+          "description": "Its topic was archived.",
+          "type": "string",
+          "const": "topic_archived"
+        },
+        {
+          "description": "Its session was closed.",
+          "type": "string",
+          "const": "session_closed"
+        }
+      ]
+    },
     "Capabilities": {
       "type": "object",
       "properties": {
@@ -856,6 +893,16 @@
         "binding_id": {
           "$ref": "#/$defs/UuidV4"
         },
+        "cancel_cause": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CancelCause"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "created_at": {
           "$ref": "#/$defs/UtcMillis"
         },
@@ -978,6 +1025,11 @@
           "description": "The owner removed items or topics; the agent stops work on them.",
           "type": "string",
           "const": "removed"
+        },
+        {
+          "description": "The owner's instruction for a whole topic (target has no item).",
+          "type": "string",
+          "const": "topic_reply"
         }
       ]
     },
@@ -1978,13 +2030,22 @@
       ]
     },
     "ResolutionKind": {
-      "type": "string",
-      "enum": [
-        "retry_unexecuted",
-        "resend",
-        "skip",
-        "request_result_repair",
-        "confirm_evidence"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "retry_unexecuted",
+            "resend",
+            "skip",
+            "request_result_repair",
+            "confirm_evidence"
+          ]
+        },
+        {
+          "description": "The attempt already committed its result; the input is handled.",
+          "type": "string",
+          "const": "accept_result"
+        }
       ]
     },
     "ResultOutcome": {
@@ -2256,6 +2317,12 @@
                 }
               ]
             },
+            "cancelled_input_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UuidV4"
+              }
+            },
             "kind": {
               "type": "string",
               "const": "topic_lifecycle"
@@ -2278,6 +2345,12 @@
         {
           "type": "object",
           "properties": {
+            "cancelled_input_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UuidV4"
+              }
+            },
             "closed_at": {
               "anyOf": [
                 {
@@ -2301,6 +2374,34 @@
             "kind",
             "state",
             "closed_at"
+          ]
+        },
+        {
+          "description": "Owner rename: the name and description now stored (`None` when cleared).",
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "session_label"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name",
+            "description"
           ]
         },
         {

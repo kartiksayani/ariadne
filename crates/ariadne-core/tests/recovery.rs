@@ -356,7 +356,7 @@ fn resume(s: &Setup, n: u64) {
 }
 
 #[test]
-fn proven_retry_preserves_fifo_history_and_requires_resume_with_exact_old_replay() {
+fn proven_retry_preserves_fifo_history_and_resumes_dispatch_with_exact_old_replay() {
     let s = Setup::new();
     let first = s.queue(100);
     s.queue(101);
@@ -384,14 +384,14 @@ fn proven_retry_preserves_fifo_history_and_requires_resume_with_exact_old_replay
     old.sealed_at = Some(at("08"));
     assert_eq!(i.attempts[0], old);
     assert!(i.active_attempt_id.is_none());
-    assert!(queued.bindings.0[&id(3)].owner_paused);
+    // Owner rule: settling the last input needing attention re-enables
+    // dispatch; no owner pause and no resume step.
+    assert!(!queued.bindings.0[&id(3)].owner_paused);
+    assert_eq!(queued.bindings.0[&id(3)].pause_reason, None);
     assert_eq!(
         queued.bindings.0[&id(3)].dispatch_state,
-        DispatchState::Paused
+        DispatchState::Enabled
     );
-    assert!(DeliveryService::new(&s.registry)
-        .claim(&s.lease(), &s.request(104), || s.uuid(), at("09"))
-        .is_err());
     let bytes = s.bytes();
     assert_eq!(
         execute(&s, &c, Some(&presence(&s, ExecutionState::Running))).unwrap(),
@@ -410,7 +410,6 @@ fn proven_retry_preserves_fifo_history_and_requires_resume_with_exact_old_replay
             .unwrap(),
         p
     );
-    resume(&s, 105);
     let next = s.claim(106);
     assert_eq!(next.input_id, first);
     assert_ne!(next.attempt_id, p.attempt_id);
@@ -573,7 +572,7 @@ fn envelope(prepared: &PreparedAttempt) -> serde_json::Value {
 }
 
 #[test]
-fn work_envelope_carries_attempt_id_and_names_only_real_query_tools() {
+fn work_envelope_carries_attempt_id_and_skill_query_tools_are_real() {
     let s = Setup::new();
     let input = s.queue_text(170, "work");
     let p = s.claim(171);
@@ -583,13 +582,9 @@ fn work_envelope_carries_attempt_id_and_names_only_real_query_tools() {
     assert!(p
         .wire_marker
         .ends_with(&format!(":{}]", body["attempt_id"].as_str().unwrap())));
-    let tools: Vec<&str> = body["tools"]["queries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|name| name.as_str().unwrap())
-        .collect();
-    assert_eq!(tools, AGENT_QUERY_TOOLS);
+    // Tools are named once in the skill, not in every envelope.
+    assert!(body.get("tools").is_none());
+    let tools = AGENT_QUERY_TOOLS;
     let manifest: serde_json::Value = serde_json::from_str(include_str!(
         "../../../contracts/generated/core/mcp-tools.json"
     ))
@@ -600,11 +595,8 @@ fn work_envelope_carries_attempt_id_and_names_only_real_query_tools() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    for name in tools
-        .iter()
-        .chain([&body["tools"]["mutation"].as_str().unwrap()])
-    {
-        assert!(real.contains(name), "envelope names unknown tool {name}");
+    for name in tools.iter().chain([&"apply"]) {
+        assert!(real.contains(name), "skill names unknown tool {name}");
     }
 }
 
@@ -631,7 +623,7 @@ fn repair_claim_is_result_only_and_repeated_repair_keeps_original_effect_referen
     assert_eq!(a.purpose, AttemptPurpose::ResultRepair);
     assert_eq!(a.repair_for_attempt_id, Some(p.attempt_id.clone()));
     assert!(!repair.formatted_payload.contains(text));
-    assert!(repair.formatted_payload.contains("result-only"));
+    assert_eq!(envelope(&repair)["purpose"], "result_repair");
     assert_eq!(
         envelope(&repair)["attempt_id"],
         repair.attempt_id.as_str(),
@@ -850,7 +842,7 @@ fn rejected_and_uncertain_repair_preparations_never_repeat_the_original_action()
         let attempt = &saved.inputs.0[&input].attempts[2];
         assert_eq!(attempt.purpose, AttemptPurpose::ResultRepair);
         assert_eq!(attempt.repair_for_attempt_id, Some(work.attempt_id.clone()));
-        assert!(retry.formatted_payload.contains("result-only"));
+        assert_eq!(envelope(&retry)["purpose"], "result_repair");
         assert!(!retry.formatted_payload.contains(text));
         let mut sealed = old;
         sealed.sealed_at = Some(at("08"));
@@ -867,7 +859,8 @@ fn rejected_and_uncertain_repair_preparations_never_repeat_the_original_action()
 }
 
 #[test]
-fn sealed_conflicts_require_each_exact_acknowledgement_and_new_conflicts_stay_blocked() {
+fn late_contradictions_of_committed_results_are_ignored_without_a_barrier() {
+    // Owner rule: a committed result wins over any later host turn status.
     let s = Setup::new();
     s.queue(170);
     let p = s.claim(171);
@@ -886,44 +879,29 @@ fn sealed_conflicts_require_each_exact_acknowledgement_and_new_conflicts_stay_bl
         diagnostic_text: None,
         truncated: false,
     };
-    assert!(s.report(&s.event(&p, "late-first", failed())).is_err());
-    assert!(s.report(&s.event(&q, "late-second", failed())).is_err());
-    let first = command(&s, &p, 176, ResolutionKind::ConfirmEvidence, true);
-    execute(&s, &first, None).unwrap();
-    assert_eq!(
-        s.saved().bindings.0[&id(3)].pause_reason,
-        Some(PauseReason::Uncertain)
-    );
-    let second = command(&s, &q, 177, ResolutionKind::ConfirmEvidence, true);
-    let receipt = execute(&s, &second, None).unwrap();
-    let ack = s.saved();
-    assert_eq!(ack.bindings.0[&id(3)].pause_reason, None);
-    assert!(ack.bindings.0[&id(3)].owner_paused);
-    assert_eq!(ack.bindings.0[&id(3)].dispatch_state, DispatchState::Paused);
+    for (input, name) in [(&p, "late-first"), (&q, "late-second")] {
+        // Ignored, so the reporter's queue never stalls on it.
+        assert!(
+            !s.report(&s.event(input, name, failed()))
+                .unwrap()
+                .durable_effect
+        );
+    }
+    let after = s.saved();
+    let binding = &after.bindings.0[&id(3)];
+    assert_eq!(binding.pause_reason, None);
+    assert!(!binding.owner_paused);
+    assert_eq!(binding.dispatch_state, DispatchState::Enabled);
     for id in [&p.input_id, &q.input_id] {
-        assert_eq!(ack.inputs.0[id].attempts, before.inputs.0[id].attempts);
-        assert_eq!(ack.inputs.0[id].state, InputState::Handled);
-        assert_eq!(ack.inputs.0[id].payload, before.inputs.0[id].payload);
+        assert_eq!(after.inputs.0[id].attempts, before.inputs.0[id].attempts);
+        assert_eq!(after.inputs.0[id].state, InputState::Handled);
+        assert_eq!(after.inputs.0[id].payload, before.inputs.0[id].payload);
     }
-    assert_eq!(ack.messages, before.messages);
-    assert_eq!(ack.items, before.items);
-    assert!(s.report(&s.event(&q, "new-after-ack", failed())).is_err());
-    let bytes = s.bytes();
-    assert_eq!(execute(&s, &second, None).unwrap(), receipt);
-    assert_eq!(s.bytes(), bytes);
-    assert_eq!(
-        s.saved().bindings.0[&id(3)].pause_reason,
-        Some(PauseReason::Uncertain)
-    );
-    let mut stale = second.clone();
-    if let OwnerCommand::InputResolve { op_id, .. } = &mut stale {
-        *op_id = id(178);
-    }
-    assert_eq!(
-        code(execute(&s, &stale, None).unwrap_err()),
-        CoreErrorCode::RevisionConflict
-    );
-    assert_eq!(s.bytes(), bytes);
+    assert_eq!(after.messages, before.messages);
+    assert_eq!(after.items, before.items);
+    // Dispatch carries on with the next input.
+    let next = s.queue(176);
+    assert_eq!(s.claim(177).input_id, next);
 }
 
 #[test]

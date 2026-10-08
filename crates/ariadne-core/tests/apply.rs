@@ -649,7 +649,8 @@ fn incremental_same_attempt_effects_qualify_but_unrelated_existing_items_do_not(
     setup.execute(&final_r).unwrap();
 }
 #[test]
-fn failed_interrupted_or_uncertain_turn_keeps_published_domain_data_without_handling() {
+fn committed_result_handles_input_after_failed_interrupted_or_uncertain_turn() {
+    // Owner rule: a committed input_result wins over any host turn status.
     for turn in [
         TurnState::Failed,
         TurnState::Interrupted,
@@ -666,13 +667,13 @@ fn failed_interrupted_or_uncertain_turn_keeps_published_domain_data_without_hand
         setup.execute(&setup.dispatched(10, &input)).unwrap();
         let s = setup.saved();
         let i = &s.inputs.0[&input];
-        assert_eq!(i.state, InputState::NeedsAttention);
+        assert_eq!(i.state, InputState::Handled, "{turn:?}");
         assert!(i.attempts[0].domain_result.is_some());
-        assert!(i.attempts[0].sealed_at.is_none());
-        assert_eq!(
-            s.bindings.0[&id(3)].dispatch_state,
-            DispatchState::RecoveryRequired
-        );
+        assert!(i.attempts[0].sealed_at.is_some());
+        let binding = &s.bindings.0[&id(3)];
+        assert_ne!(binding.dispatch_state, DispatchState::RecoveryRequired);
+        assert_eq!(binding.pause_reason, None);
+        assert_eq!(binding.active_input_id, None);
         assert!(s
             .messages
             .iter()
@@ -861,6 +862,42 @@ fn archived_closed_wrong_topic_and_invalid_waiting_candidates_have_no_effects() 
         s.closed_at = Some(at());
     });
     setup.rejected(&r, CoreErrorCode::InvalidTransition);
+}
+
+#[test]
+fn agent_writes_to_an_archived_topic_refuse_with_topic_archived_until_restore() {
+    // Owner rule: an archived topic takes no agent edits, status changes,
+    // replies or new items; restore reopens it to the agent.
+    let setup = Setup::new(&seed());
+    setup.write(11, |s| {
+        s.topics.0.get_mut(&id(5)).unwrap().archived_at = Some(at())
+    });
+    let mut status = guarded(20, "1", 1);
+    status.operations = vec![Operation::ItemStatus {
+        item: existing("1"),
+        status: ItemStatus::Done,
+        outcome: Some("Resolved explicitly".into()),
+        why: Some("Evidence inspected".into()),
+        reason: None,
+    }];
+    let mut answer = guarded(21, "1", 1);
+    answer.operations = vec![reply(existing("1"), "response", "Archived")];
+    let mut added = request(22);
+    added.operations = vec![add("new", uuid(5), None, false)];
+    for r in [&status, &answer, &added] {
+        let before = setup.bytes();
+        let e = core_error(setup.execute(r).unwrap_err());
+        assert_eq!(e.code, CoreErrorCode::InvalidTransition, "{e:?}");
+        assert_eq!(
+            e.details.unwrap().reason,
+            Some(BarrierReason::TopicArchived)
+        );
+        assert_eq!(setup.bytes(), before);
+    }
+    setup.write(12, |s| {
+        s.topics.0.get_mut(&id(5)).unwrap().archived_at = None
+    });
+    setup.execute(&answer).unwrap();
 }
 
 #[test]

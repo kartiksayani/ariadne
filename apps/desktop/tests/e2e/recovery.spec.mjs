@@ -8,7 +8,7 @@ import { openSessionButton } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
-const sessionPresence = () => browser.$('.tree-session-bar .tree-run');
+const sendingLabel = () => browser.$('.tree-session-bar .dispatch-chip .dispatch-label');
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.scrollIntoView({ block: 'center' }); await control.click(); }
 
 export function originalReplyRequest(configuration, admission, session, text) {
@@ -29,11 +29,14 @@ export function assertRepairAdmission(configuration, admission, session, origina
   assert.equal(body.purpose, 'result_repair'); assert.equal(body.repair_for_attempt_id, original.attemptId);
   assert.equal(body.binding_id, configuration.bindingId); assert.equal(body.generation, configuration.generation);
   assert.equal(body.source_input_id, input.id); assert.ok(body.original_message_ids.includes(reply.id), 'Repair must reference the retained original reply');
-  assert.ok(body.instruction.includes('result-only')); assert.equal(body.original_domain_result, null);
+  assert.equal(body.original_domain_result, null);
   assert.equal(Object.hasOwn(body, 'saved_input'), false, 'Repair cannot include the original action payload');
+  assert.equal(Object.hasOwn(body, 'text'), false, 'Repair cannot include the original owner text');
   const repeatsOriginalWork = value => typeof value === 'string' ? value.includes(input.payload.text)
     : value !== null && typeof value === 'object' && Object.values(value).some(repeatsOriginalWork);
   assert.equal(repeatsOriginalWork(body), false, 'Repair cannot repeat the original owner work');
+  // The repair rules live in the skill; the envelope carries no instruction.
+  assert.equal(Object.hasOwn(body, 'instruction'), false, 'Repair envelope carries no instruction');
   assert.notEqual(attempt.id, original.attemptId); assert.notEqual(admission.turnId, original.turnId);
   return body;
 }
@@ -72,11 +75,11 @@ async function openPrimary(configuration) {
   await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === configuration.itemId, 'Recovery selected a different item');
 }
 
-/** Opens the session card's dispatch dialog from All sessions (the "Agent running" control, title "Dispatch and connection"). */
+/** Opens the "Sending to <agent>" dialog from the session card in All sessions (its sending button, title "Sending and connection"). */
 async function openDispatch(configuration) {
   await click(await browser.$('button[data-shell-tab="all_sessions"]'));
-  await click(await browser.$(`[data-session-card="${configuration.sessionId}"] button[title="Dispatch and connection"]`));
-  await wait(async () => (await dialog().getText()).includes('dispatch and connection'), 'Dispatch dialog did not open');
+  await click(await browser.$(`[data-session-card="${configuration.sessionId}"] button[title="Sending and connection"]`));
+  await wait(async () => (await dialog().getText()).includes('Sending to'), 'Sending dialog did not open');
 }
 
 // The primary item is still waiting: with nothing pending its answer slot takes the reply; once an
@@ -129,20 +132,28 @@ export async function runRecoveryAcceptance(configuration) {
   assert.ok(Date.parse(originalAttempt.error.observed_at) - Date.parse(originalAttempt.turn_observed_at) >= 5000, 'Missing result must wait the natural grace period');
   assert.equal(expired.bindings[configuration.bindingId].dispatch_state, 'recovery_required');
   assert.equal(expired.bindings[configuration.bindingId].pause_reason, 'result_missing');
-  const recoveryRow = () => browser.$(`[aria-label="Delivery recovery"] [data-input-id="${input.id}"][data-attempt-id="${original.attemptId}"]`);
+  // The stopped delivery is answered on its tree row; with that row visible there is no recovery banner.
+  const recoveryRow = () => browser.$(`[role="tree"] .stuck-note[data-stuck="decision"][data-stuck-input="${input.id}"]`);
   const row = await recoveryRow();
-  await wait(async () => await row.isExisting() && (await row.getText()).includes('Missing result'), 'Missing result was not visible in real recovery UI');
-  // Resume dispatch lives in the session card's dispatch dialog (All sessions / project page, P8.3).
-  await wait(async () => (await sessionPresence().getText()) === 'Agent running', 'Recovery requires the agent running');
+  await wait(async () => await row.isExisting() && (await row.getText()).includes('finished without saving its answer'), 'Missing result was not visible on its tree row');
+  assert.ok((await row.getText()).includes('Couldn’t deliver'), 'The tree row must say the message could not be delivered');
+  assert.equal(await browser.$('[aria-label="Delivery recovery"]').isExisting(), false, 'A decision on a visible row must not also raise a banner');
+  // The session bar says why nothing is sent, with no Resume while a decision is open.
+  await wait(async () => (await sendingLabel().getText()) === 'Not sending: the agent finished without saving its answer', 'Session bar did not explain the missing result');
+  assert.equal(await browser.$('.tree-session-bar .dispatch-chip').$('button[aria-label="Resume"]').isExisting(), false, 'Missing result must not offer Resume');
   await openDispatch(configuration);
-  assert.equal(await dialog().$('button=Resume dispatch').isEnabled(), false, 'Missing result must block Resume');
+  assert.equal(await dialog().$('button=Resume sending').isEnabled(), false, 'Missing result must block Resume');
   await browser.saveScreenshot(join(evidence, 'native-result-missing.png'));
   await click(await dialog().$('button=Done'));
   await wait(async () => !(await dialog().isExisting()), 'Dispatch dialog remained open');
   await openPrimary(configuration);
-  await click(await (await recoveryRow()).$('button=Review recovery'));
+  // The row offers Retry / Mark as done in one click; the result-only repair sits behind More options.
+  assert.ok(await (await recoveryRow()).$('button=Retry').isExisting(), 'The tree row must offer Retry');
+  assert.ok(await (await recoveryRow()).$('button=Mark as done').isExisting(), 'The tree row must offer Mark as done');
+  await click(await (await recoveryRow()).$('button=More options'));
   const reviewed = await dialog().getText();
-  assert.ok(reviewed.includes(input.id)); assert.ok(reviewed.includes(original.attemptId)); assert.ok(reviewed.includes(workText));
+  assert.ok(reviewed.includes(workText.split('\n')[0]), 'Recovery dialog must show the owner’s message');
+  assert.equal(reviewed.includes(input.id) || reviewed.includes(original.attemptId), false, 'Recovery dialog shows no internal ids');
   // The embedded driver's option click neither changes the select value nor fires change, so set it natively.
   const choice = await dialog().$('select');
   await browser.execute(select => {
@@ -163,17 +174,16 @@ export async function runRecoveryAcceptance(configuration) {
   assert.equal(resolution.attempt_id, original.attemptId); assert.equal(resolution.reason, reason); assert.equal(resolution.evidence, null);
   const receipt = Object.values(prepared.operation_receipts).flat().find(receipt => receipt.operation_id === resolution.op_id && receipt.actor_scope.kind === 'owner');
   assert.ok(receipt); assert.equal(receipt.result.data.kind, 'input_resolve'); assert.equal(receipt.result.data.resolution_kind, 'request_result_repair');
-  assert.equal(preparedInput.state, 'queued'); assert.equal(preparedInput.active_attempt_id, null); assert.equal(preparedInput.attempts.length, 1);
-  assert.ok(preparedInput.attempts[0].sealed_at); assert.equal(prepared.bindings[configuration.bindingId].owner_paused, true);
-  assert.equal(prepared.bindings[configuration.bindingId].dispatch_state, 'paused'); assert.equal(prepared.bindings[configuration.bindingId].pause_reason, null);
-  await holdSuccessor(configuration, queuedBefore.length + 1, successor.id, 'Repair preparation cannot dispatch before separate Resume');
-  await openDispatch(configuration);
-  assert.equal((await snapshot(configuration)).bindings[configuration.bindingId].dispatch_state, 'paused', 'Opening the dispatch dialog must not enable dispatch');
-  await click(await dialog().$('button=Resume dispatch'));
-  await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 2, 'Explicit Resume did not deliver the result-only repair');
-  await click(await dialog().$('button=Done'));
-  await wait(async () => !(await dialog().isExisting()), 'Dispatch dialog remained open');
-  await openPrimary(configuration);
+  // A saved decision is the owner's go-ahead: with no other input blocking this binding, sending
+  // resumes by itself (no Resume click) and the result-only repair goes out next.
+  assert.ok(['queued', 'in_flight'].includes(preparedInput.state)); assert.ok(preparedInput.attempts[0].sealed_at);
+  assert.equal(Object.values(prepared.inputs).some(other => other.id !== input.id && other.binding_id === configuration.bindingId
+    && ['in_flight', 'needs_attention'].includes(other.state)), false, 'No other input may block the binding for auto-resume');
+  assert.equal(prepared.bindings[configuration.bindingId].owner_paused, false, 'Saving a recovery decision must not pause sending');
+  assert.equal(prepared.bindings[configuration.bindingId].pause_reason, null);
+  assert.notEqual(prepared.bindings[configuration.bindingId].dispatch_state, 'recovery_required');
+  await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 2, 'Sending did not resume by itself to deliver the result-only repair');
+  await wait(async () => (await sendingLabel().getText()) === 'Sending', 'Session bar did not return to Sending after the decision');
   const repair = (await admissions(configuration)).at(-1);
   session = await snapshot(configuration);
   const repairBody = assertRepairAdmission(configuration, repair, session, original, reply);

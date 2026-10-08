@@ -54,10 +54,24 @@ pub enum SavedReceiptData {
         topic_id: UuidV4,
         topic_revision: PositiveSafeInteger,
         archived_at: Option<UtcMillis>,
+        // Unsent owner inputs an archive cancelled (queued, in flight or
+        // needing attention), as session close lists them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[ts(as = "Option<Vec<UuidV4>>", optional)]
+        cancelled_input_ids: Vec<UuidV4>,
     },
     SessionLifecycle {
         state: SessionState,
         closed_at: Option<UtcMillis>,
+        // Inputs a close cancelled (queued, in flight or needing attention).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[ts(as = "Option<Vec<UuidV4>>", optional)]
+        cancelled_input_ids: Vec<UuidV4>,
+    },
+    /// Owner rename: the name and description now stored (`None` when cleared).
+    SessionLabel {
+        name: Option<String>,
+        description: Option<String>,
     },
     BindingConnect {
         binding_id: UuidV4,

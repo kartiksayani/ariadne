@@ -1,5 +1,8 @@
 //! One native registered-binding resolver shared by installed agent transports.
-use crate::{AgentContext, AgentReadScope, CoreError, CoreErrorCode, RegisteredSession};
+use crate::{
+    AgentContext, AgentReadScope, BarrierReason, CoreError, CoreErrorCode, ErrorDetails,
+    RegisteredSession,
+};
 use ariadne_domain::models::*;
 use ariadne_store::registry::{Registry, RegistryCatalogue};
 use std::path::Path;
@@ -60,13 +63,7 @@ impl AgentResolver {
                 }
             }
         }
-        let session = found.ok_or_else(|| {
-            CoreError::new(
-                CoreErrorCode::NotFound,
-                "Binding ID is not retained in any registered session.",
-                "Use an explicitly registered binding ID.",
-            )
-        })?;
+        let session = found.ok_or_else(|| session_removed(&binding_id))?;
         let binding = &session.bindings.0[&binding_id];
         let issued = binding.issued_through_message_number;
         let scope = match (source, attempt_id) {
@@ -74,6 +71,18 @@ impl AgentResolver {
                 issued_through_message_number: issued,
             },
             (Some(source_input_id), Some(attempt_id)) => {
+                if crate::delivery_join::removed_input(session, &source_input_id) {
+                    let mut error = super::errors::local(
+                        CoreErrorCode::AttemptSealed,
+                        "The owner removed the work of this input; drop it and carry on.",
+                    );
+                    error.details = Some(details(
+                        &binding_id,
+                        BarrierReason::InputCancelled,
+                        Some((source_input_id, attempt_id)),
+                    ));
+                    return Err(error);
+                }
                 let input = session
                     .inputs
                     .0
@@ -123,4 +132,34 @@ impl AgentResolver {
 }
 fn invalid(message: &str) -> CoreError {
     super::errors::local(CoreErrorCode::InvalidArgument, message)
+}
+
+/// A binding no registered session holds: its session was removed (or it never
+/// existed). Terminal for the agent side, unlike a desktop holding no lease.
+pub(crate) fn session_removed(binding_id: &UuidV4) -> CoreError {
+    let mut error = CoreError::new(
+        CoreErrorCode::NotFound,
+        "The owner removed this Ariadne session; its binding is gone.",
+        "Stop using this binding. The owner can connect the conversation to a new session.",
+    );
+    error.details = Some(details(binding_id, BarrierReason::SessionRemoved, None));
+    error
+}
+
+fn details(
+    binding_id: &UuidV4,
+    reason: BarrierReason,
+    scope: Option<(UuidV4, UuidV4)>,
+) -> Box<ErrorDetails> {
+    let (input_id, attempt_id) = scope.unzip();
+    Box::new(ErrorDetails {
+        reason: Some(reason),
+        binding_id: Some(binding_id.clone()),
+        input_id,
+        attempt_id,
+        blocking_item_ids: vec![],
+        blocking_input_ids: vec![],
+        dispatch_must_pause: false,
+        partial_removal: None,
+    })
 }

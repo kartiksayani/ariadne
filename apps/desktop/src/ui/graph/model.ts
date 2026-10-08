@@ -7,13 +7,15 @@ import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 import { normalizeSearch, sentenceRows, type SentenceRow } from '../../selectors/tree/rows';
 import { shortLabel } from '../shared/short';
+import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 
-export type GraphStatus = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
+export type GraphStatus = 'open' | 'waiting' | 'agent' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
 
 /** Status icons and labels of the handoff's Status Badge. */
 export const statusVisual: Readonly<Record<GraphStatus, { readonly label: string; readonly icon: string }>> = {
   open: { label: 'Open', icon: 'ph ph-circle' },
   waiting: { label: 'Waiting on me', icon: 'ph-fill ph-question' },
+  agent: { label: 'Waiting on agent', icon: 'ph ph-hourglass-medium' },
   progress: { label: 'In progress', icon: 'ph ph-circle-half' },
   decided: { label: 'Decided', icon: 'ph ph-check-circle' },
   done: { label: 'Done', icon: 'ph-fill ph-check-circle' },
@@ -21,8 +23,8 @@ export const statusVisual: Readonly<Record<GraphStatus, { readonly label: string
   replaced: { label: 'Replaced', icon: 'ph ph-arrow-circle-right' },
 };
 
-export const graphStatus = (status: Item['status']): GraphStatus =>
-  status === 'waiting_on_me' ? 'waiting' : status === 'in_progress' ? 'progress' : status;
+export const graphStatus = (status: DisplayStatus): GraphStatus =>
+  status === 'waiting_on_me' ? 'waiting' : status === 'waiting_on_agent' ? 'agent' : status === 'in_progress' ? 'progress' : status;
 
 const closedStatuses: ReadonlySet<Item['status']> = new Set(['decided', 'done', 'dropped', 'replaced']);
 export const isClosed = (status: Item['status']): boolean => closedStatuses.has(status);
@@ -95,11 +97,13 @@ export function descendantCount(session: Immutable<Session>, id: string): number
   return total;
 }
 
-/** "1 waiting on you · 1 open · 8 closed" over every item of the topic (Ariadne.dc.html:1909). */
-export function topicCounts(items: readonly Immutable<Item>[]): string {
-  const count = (status: Item['status']) => items.filter(item => item.status === status).length;
+/** "1 waiting on you · 1 waiting on agent · 1 open · 8 closed" over every item of the topic (Ariadne.dc.html:1909). */
+export function topicCounts(items: readonly Immutable<Item>[], session?: Immutable<Session>): string {
+  const shown = (item: Immutable<Item>): DisplayStatus => session ? displayStatus(session, item) : item.status;
+  const count = (status: DisplayStatus) => items.filter(item => shown(item) === status).length;
   const closed = items.filter(item => isClosed(item.status)).length;
-  return [[count('waiting_on_me'), 'waiting on you'], [count('open'), 'open'], [count('in_progress'), 'in progress'], [closed, 'closed']]
+  return [[count('waiting_on_me'), 'waiting on you'], [count('waiting_on_agent'), 'waiting on agent'], [count('open'), 'open'],
+    [count('in_progress'), 'in progress'], [closed, 'closed']]
     .filter(([n]) => n).map(([n, words]) => `${n} ${words}`).join(' · ');
 }
 
@@ -165,13 +169,13 @@ export function sessionGraph(input: GraphInput): SessionGraph {
       }
       const below = descendantCount(session, item.id), shown = (children.get(item.id)?.length ?? 0) > 0;
       const collapsed = row.childCount > 0 && !shown, selected = selectedId === item.id;
-      const node: GraphNode = { item, status: graphStatus(item.status), short: shortLabel(item), x: at.x, y: at.y, below,
+      const node: GraphNode = { item, status: graphStatus(displayStatus(session, item)), short: shortLabel(item), x: at.x, y: at.y, below,
         collapsed: collapsed && below > 0, canCollapse: !filtering && !collapsed && below > 0, selected,
         onThread: thread.has(item.id) && !selected, closed: isClosed(item.status), dimmed: filtering && row.context && !selected };
       nodes.set(item.id, node);
       return node;
     });
-    return { topic, counts: topicCounts(allByTopic.get(topic.id) ?? []), width: columnX(deepest) + NODE_WIDTH + pad, height: y + 20,
+    return { topic, counts: topicCounts(allByTopic.get(topic.id) ?? [], session), width: columnX(deepest) + NODE_WIDTH + pad, height: y + 20,
       nodes: topicNodes, edges, replacements };
   });
   return { topics: graphs, order, nodes, children, filtering };

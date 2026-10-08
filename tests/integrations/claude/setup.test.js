@@ -108,6 +108,27 @@ describe('installed owner helper setup', () => {
     await expect(pending.connect(other.$)).rejects.toThrow('changed with a pending');
     expect(other.calls).toHaveLength(1);
   });
+  it('forget drops the old conversation and its pending connect so a new conversation can connect', async () => {
+    let failing = true;
+    const h = host({handler:argv => argv[1] === 'binding' && failing ? failure('commit_uncertain') : undefined});
+    const owner = setup(descriptor.helperPath);
+    await expect(owner.connect(h.$,ids.session)).rejects.toThrow('commit_uncertain');
+    h.switchSession('conversation-after-clear');
+    await expect(owner.connect(h.$,ids.session)).rejects.toThrow('changed with a pending');
+    owner.forget();failing = false;
+    const before = h.calls.length;
+    // Status is read for the new conversation.
+    const statusFor = host({handler:argv => argv[2] === 'connection-status'
+      ? success({...status,external_session_id:'conversation-after-clear'}) : undefined});
+    statusFor.switchSession('conversation-after-clear');
+    const {binding} = await owner.connect(statusFor.$,ids.session);
+    expect(binding.external_session_id).toBe('conversation-after-clear');
+    expect(owner.current()).toEqual(binding);
+    expect(JSON.parse(statusFor.calls.find(call => call.argv[1] === 'binding').options.stdin).command.params)
+      .toMatchObject({external_session_id:'conversation-after-clear',existing_session_id:ids.session});
+    expect(h.calls).toHaveLength(before);
+    owner.forget();expect(owner.current()).toBe(null);
+  });
   it('disconnect uses registered SessionRef, saved receipt, and preserves operation ID across failure', async () => {
     let failDisconnect = true;
     const h = host({handler:argv => argv[2] === 'disconnect' && failDisconnect ? failure() : undefined});

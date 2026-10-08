@@ -192,7 +192,7 @@ fn installed_remove_commands_print_the_backup_and_replay_exact_retries() {
 }
 
 #[test]
-fn installed_lifecycle_commands_keep_history_and_exact_receipts_without_resuming() {
+fn installed_lifecycle_commands_keep_history_and_exact_receipts_and_reopen_resumes() {
     let mut original = seed();
     for item in original.items.0.values_mut() {
         item.status = ItemStatus::Done;
@@ -249,7 +249,12 @@ fn installed_lifecycle_commands_keep_history_and_exact_receipts_without_resuming
     assert_eq!(live.state, SessionState::Active);
     assert_eq!(live.items, original.items);
     assert_eq!(live.messages, original.messages);
-    assert_eq!(live.bindings, original.bindings);
+    // Reopen lifts the owner pause, including the one set before close.
+    let mut resumed = original.bindings.clone();
+    let binding = resumed.0.get_mut(&id(3)).unwrap();
+    binding.owner_paused = false;
+    binding.dispatch_state = DispatchState::Enabled;
+    assert_eq!(live.bindings, resumed);
     let stale = OwnerCommand::SessionClose {
         api_version: SchemaVersion::new(1).unwrap(),
         op_id: id(104),
@@ -352,7 +357,7 @@ fn installed_preview_and_continue_copy_full_history_once_and_replay_without_sour
 }
 
 #[test]
-fn installed_recovery_requires_new_attestation_preserves_attempt_and_pauses_until_resume() {
+fn installed_recovery_requires_new_attestation_preserves_attempt_and_resumes_dispatch() {
     let s = Setup::new(&seed());
     let command = OwnerCommand::InputSubmit {
         api_version: SchemaVersion::new(1).unwrap(),
@@ -431,10 +436,12 @@ fn installed_recovery_requires_new_attestation_preserves_attempt_and_pauses_unti
     assert!(input.attempts[0].sealed_at.is_some());
     assert_eq!(input.attempts[0].turn_state, prior.attempts[0].turn_state);
     assert_eq!(input.resolution_history.len(), 1);
-    assert!(saved.bindings.0[&id(3)].owner_paused);
+    // The saved decision is the owner's go-ahead: dispatch resumes on its own.
+    assert!(!saved.bindings.0[&id(3)].owner_paused);
+    assert_eq!(saved.bindings.0[&id(3)].pause_reason, None);
     assert_eq!(
         saved.bindings.0[&id(3)].dispatch_state,
-        DispatchState::Paused
+        DispatchState::Enabled
     );
     let bytes = s.bytes(2);
     assert_eq!(s.mutation("input", "resolve", 2, request), (0, receipt));

@@ -6,7 +6,7 @@ import { useCallback, useRef, type KeyboardEvent } from 'react';
 export type IntentKind =
   | 'move-down' | 'move-up' | 'first' | 'last' | 'unfold' | 'fold' | 'enter' | 'send'
   | 'answer' | 'choose' | 'bring' | 'respond' | 'drop' | 'later' | 'reopen' | 'archive'
-  | 'search' | 'graph' | 'messages' | 'escape' | 'remove';
+  | 'search' | 'graph' | 'messages' | 'waiting' | 'escape' | 'remove';
 
 export type WorkspaceIntent =
   | { readonly kind: Exclude<IntentKind, 'choose'> }
@@ -23,7 +23,7 @@ const plain: Readonly<Record<string, Exclude<IntentKind, 'choose'>>> = {
   ArrowDown: 'move-down', j: 'move-down', ArrowUp: 'move-up', k: 'move-up', Home: 'first', End: 'last',
   ArrowRight: 'unfold', l: 'unfold', ArrowLeft: 'fold', h: 'fold', Enter: 'enter',
   a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', o: 'reopen', e: 'archive',
-  '/': 'search', g: 'graph', m: 'messages', Escape: 'escape', Backspace: 'remove', Delete: 'remove',
+  '/': 'search', g: 'graph', m: 'messages', w: 'waiting', Escape: 'escape', Backspace: 'remove', Delete: 'remove',
 };
 
 /** The intent a key press means, or null when it is not a workspace key. */

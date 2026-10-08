@@ -166,6 +166,25 @@ fn session() -> Value {
 }
 
 #[test]
+fn cancel_cause_is_optional_for_older_stores_and_round_trips() {
+    let mut cancelled = input();
+    cancelled["state"] = json!("cancelled");
+    for cause in ["owner", "owner_edit", "topic_archived", "session_closed"] {
+        cancelled["cancel_cause"] = json!(cause);
+        assert_eq!(assert_wire::<Input>(cancelled.clone()), cancelled);
+    }
+    // An older store has no field: it reads as no recorded cause and is written back without one.
+    let old: Input = serde_json::from_value(input()).unwrap();
+    assert_eq!(old.cancel_cause, None);
+    assert!(serde_json::to_value(&old)
+        .unwrap()
+        .get("cancel_cause")
+        .is_none());
+    cancelled["cancel_cause"] = json!("somebody_else");
+    assert!(serde_json::from_value::<Input>(cancelled).is_err());
+}
+
+#[test]
 fn stored_inventory_round_trips_complete_nested_records() {
     let value = session();
     assert_eq!(assert_wire::<Session>(value.clone()), value);

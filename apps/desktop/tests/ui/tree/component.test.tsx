@@ -14,6 +14,7 @@ import { TreeView, type RowIntent, type TreeViewProps } from '../../../src/ui/tr
 import type { PendingSubmission } from '../../../src/ui/answer/useSubmit';
 import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
+import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
 
 const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); vi.restoreAllMocks(); });
@@ -39,11 +40,10 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   function Harness(extra: Partial<TreeViewProps>) {
     const [selected, setSelected] = useState<string | null>(null);
     return <TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
-      detailOpen={false} railOpen={false} highlightedItems={none} highlightedMessages={none} summaries={[]} continueTargets={[]}
-      actionsForTarget={() => actions} now={now} onHoverItem={hover}
+      detailOpen={false} railOpen={false} highlightedItems={none} highlightedMessages={none} summaries={[]} now={now} onHoverItem={hover}
       onSelected={result => { calls.selected.push(result); if (result.kind === 'item') setSelected(result.route.item_id); }}
       onDismissReveal={() => { calls.dismissed++; }} onResume={() => { calls.resumed++; }} onAct={(intent, target) => { calls.acts.push([intent, target]); }}
-      onClearFilters={() => { calls.cleared++; }} onShowArchive={() => { calls.archive++; }} revealItem={() => {}} openSession={() => {}}
+      onClearFilters={() => { calls.cleared++; }} onShowArchive={() => { calls.archive++; }}
       onRemove={() => { calls.removed++; }} {...props} {...extra} />;
   }
   const view = render(<Harness />);
@@ -67,7 +67,8 @@ describe('session tree rows', () => {
     // The bar names the agent (the binding's adapter); the session title is the tab's.
     expect(document.querySelector('.tree-session-title')?.textContent).toBe('demo.local');
     expect(document.querySelector('.tree-session-meta')?.textContent).toMatch(/· 2 topics$/);
-    expect(document.querySelector('.tree-run')?.textContent).toBe('Agent running');
+    expect(document.querySelector('.tree-run .dispatch-label')?.textContent).toBe('Sending');
+    expect(within(screen.getByRole('group', { name: 'Sending to the agent' })).getByRole('button', { name: 'Pause' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Close session' })).toBeTruthy();
     expect(chip('All').textContent).toContain('9'); expect(chip('Open').textContent).toContain('3');
     expect(chip('Closed').textContent).toContain('4'); expect(chip('All').getAttribute('aria-pressed')).toBe('true');
@@ -104,17 +105,89 @@ describe('session tree rows', () => {
     fireEvent.keyDown(row('1'), { key: 'ArrowLeft' });
     await waitFor(() => expect(ids()).not.toContain('1.1'));
   });
-  it('folds a topic locally without a preference write and drops a temporary reveal', async () => {
-    const { transport, calls } = await mount(), writes = patches(transport).length;
+  it('folds a topic at once, saves the fold with the session view and drops a temporary reveal', async () => {
+    const { transport, calls } = await mount();
+    const topicId = topicRow('Delivery decisions').getAttribute('data-topic-id')!;
     const band = topicRow('Delivery decisions');
     fireEvent.click(within(band).getByRole('button', { name: 'Expand or collapse topic' }));
     expect(band.getAttribute('aria-expanded')).toBe('false'); expect(ids()).toEqual(['8']);
     expect(calls.dismissed).toBe(1);
+    await waitFor(() => expect(viewOf(transport).collapsed_topic_ids).toEqual([topicId]));
     band.focus(); fireEvent.keyDown(band, { key: 'ArrowRight' });
     expect(band.getAttribute('aria-expanded')).toBe('true'); expect(ids()).toHaveLength(9);
+    await waitFor(() => expect(viewOf(transport).collapsed_topic_ids ?? []).toEqual([]));
     fireEvent.keyDown(band, { key: 'ArrowLeft' }); expect(band.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.keyDown(band, { key: 'Enter' }); expect(band.getAttribute('aria-expanded')).toBe('true');
-    expect(patches(transport)).toHaveLength(writes);
+    await waitFor(() => expect(viewOf(transport).collapsed_topic_ids).toEqual([topicId]));
+    // The fold survives reopening the session.
+    cleanup();
+    await mount({ transport });
+    expect(topicRow('Delivery decisions').getAttribute('aria-expanded')).toBe('false'); expect(ids()).toEqual(['8']);
+  });
+  it('keeps the band of a topic that has no items', async () => {
+    await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!, topic = session.items['8']!.topic_id;
+      for (const [id, item] of Object.entries(session.items)) if (item?.topic_id === topic) delete session.items[id];
+    } });
+    expect(topicRow('Continued context')).toBeTruthy();
+    expect(topicRow('Delivery decisions')).toBeTruthy();
+    expect(screen.queryByText('No items yet')).toBeNull();
+  });
+  it('offers Archive and Remove on a topic band while its delivery line shows', async () => {
+    await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!, topic = session.items['8']!.topic_id;
+      const input = Object.values(session.inputs).find(value => value?.target.topic_id === topic)!;
+      input.state = 'in_flight'; input.kind = 'topic_reply'; input.target = { topic_id: topic, item_id: null };
+    } });
+    const band = topicRow('Continued context');
+    expect(band.querySelector('.tree-topic-line')).not.toBeNull();
+    expect(within(band).getByRole('button', { name: 'Remove' })).toBeTruthy();
+    expect(within(band).getByRole('button', { name: 'Archive' })).toBeTruthy();
+  });
+  const text = 'Keep the retry limits as they are';
+  // The first input on item 8's topic becomes a queued reply to the whole topic.
+  const queuedReply = (transport: AppTransport) => {
+    const session = transport.sessions.get(route.session_id)!, topic = session.items['8']!.topic_id;
+    const input = Object.values(session.inputs).find(value => value?.target.topic_id === topic)!;
+    input.state = 'queued'; input.kind = 'topic_reply'; input.target = { topic_id: topic, item_id: null }; input.attempts = []; input.active_attempt_id = null;
+    input.binding_id = session.active_binding_id!; input.payload.text = text; input.payload.selected_option_id = null;
+    input.payload.target_snapshot.question_revision = null; input.payload.target_snapshot.item_question = null;
+    return input.id;
+  };
+  const cancels = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_cancel');
+  it('deletes a topic reply not sent yet from its band in one click', async () => {
+    let id = '';
+    const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
+    const band = topicRow('Continued context');
+    expect(within(band).getByRole('button', { name: 'Archive' })).toBeTruthy();
+    await act(async () => { fireEvent.click(within(band).getByRole('button', { name: 'Delete' })); });
+    expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id }]);
+    await waitFor(() => expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Delete' })).toBeNull());
+    expect(transport.preferences.drafts.filter(draft => draft.target.item_id === null)).toHaveLength(0);
+  });
+  it('edits a topic reply not sent yet: the queued reply is taken back first, then its text goes into the topic’s reply box', async () => {
+    let id = '';
+    const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
+    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Edit' })); });
+    await waitFor(() => expect((screen.getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe(text));
+    expect(transport.preferences.drafts.find(draft => draft.target.item_id === null)).toMatchObject({ intent: 'topic_reply', text });
+    expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id, purpose: 'edit' }]);
+    // No draft held the words before the cancel went out: they could have been sent twice.
+    const cancelAt = transport.mutations.findIndex(request => request.command.command === 'input_cancel');
+    expect(transport.mutations.slice(0, cancelAt).some(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'upsert_draft' && entry.draft.text === text))).toBe(false);
+    expect(transport.mutations.slice(cancelAt).some(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'upsert_draft' && entry.draft.text === text))).toBe(true);
+  });
+  it('never overwrites a topic reply the owner already started: the queued one stays and its text is offered to copy', async () => {
+    const { transport, drafts, store } = await mount({ configure: queuedReply });
+    const session = store.getSnapshot().snapshot!.session, topic = session.items['8']!.topic_id;
+    await act(async () => { await drafts.load(); });
+    const started = drafts.beginTopic(session, topic)!;
+    await act(async () => { await drafts.editSaved(started, { text: 'Something else' }); });
+    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Edit' })); });
+    expect((await screen.findByLabelText('Your earlier message') as HTMLTextAreaElement).value).toBe(text);
+    expect(drafts.findTopic(route, topic)?.draft.text).toBe('Something else');
+    expect(cancels(transport)).toHaveLength(0);
   });
   it('reports hover, highlights touched rows and notes touches folded inside', async () => {
     const { calls, rerender } = await mount();
@@ -229,7 +302,8 @@ describe('session tree column states', () => {
       const binding = session.bindings[session.active_binding_id!]!; binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected';
     } });
     expect(document.querySelector('.tree-empty-connection')?.textContent).toMatch(/is not running · items appear when it writes$/);
-    expect(document.querySelector('.tree-run')?.textContent).toBe('Agent not running');
+    expect(document.querySelector('.tree-run .dispatch-label')?.textContent).toBe('Disconnected');
+    expect(document.querySelector('.tree-run')?.getAttribute('data-running')).toBeNull();
   });
   it('shows graph content in place of the rows and clears the hover', async () => {
     const { calls, rerender } = await mount();
@@ -271,26 +345,39 @@ describe('session tree lifecycle', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'View archive' }));
     expect(calls.archive).toBe(1); expect(screen.queryByText('Archived “Continued context”.')).toBeNull();
   });
-  it('reviews the blockers before archiving a topic with open work', async () => {
+  it('archives a topic with open work after one confirmation, leaving its items and cancelling its unsent messages', async () => {
     const transport = new HistoryTransport();
     await mount({ transport });
+    const session = transport.sessions.get(route.session_id)!, topicId = session.items['4']!.topic_id;
+    const unsent = Object.values(session.inputs).filter(input => input?.target.topic_id === topicId
+      && ['queued', 'in_flight', 'needs_attention'].includes(input.state)).map(input => input!.id);
+    const statuses = Object.values(session.items).map(item => item!.status);
+    expect(unsent.length).toBeGreaterThan(1);
+    // Archive is offered on a topic with open items; it asks first and never refuses.
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Archive' }));
-    const dialog = within(screen.getByRole('dialog'));
-    expect((dialog.getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' })); expect(transport.mutations).toHaveLength(0);
+    const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
+    expect(dialog.getByText(/open items? stays? as (it is|they are)\. .*archiving cancels them\. You can restore it any time\.$/)).toBeTruthy();
+    await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
+    expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
+    expect(await screen.findByText(new RegExp(`${unsent.length} unsent messages were cancelled\\.`))).toBeTruthy();
+    expect(unsent.every(id => session.inputs[id]!.state === 'cancelled')).toBe(true);
+    expect(Object.values(session.items).map(item => item!.status)).toEqual(statuses);
   });
   it('archives the focused row’s topic with e', async () => {
     const transport = new HistoryTransport();
     await mount({ transport });
     row('4').focus(); fireEvent.keyDown(row('4'), { key: 'e' });
-    expect(screen.getByRole('dialog', { name: 'Confirm topic archive' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' })).toBeTruthy();
   });
-  it('offers Continue here on an earlier topic and opens the continue dialog', async () => {
-    await mount();
+  it('offers Continue here on an earlier topic and asks which other session takes it', async () => {
+    const { navigation, rerender } = await mount();
+    rerender({ summaries: navigation.getSnapshot().sessions!.sessions.items });
     expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Continue here' })).toBeNull();
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue here' }));
-    const dialog = screen.getByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Continue “Delivery decisions” in another session' }));
+    expect(dialog.getAllByRole('button').map(button => button.getAttribute('aria-labelledby') ? button.textContent : null).filter(Boolean))
+      .toEqual([expect.stringMatching(/^Separate session/)]);
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
   it('offers Continue here on a topic from a session created today', async () => {
@@ -302,7 +389,7 @@ describe('session tree lifecycle', () => {
   it('offers Reopen session on a closed session', async () => {
     await mount({ configure: transport => { const session = transport.sessions.get(route.session_id)!; session.state = 'closed'; session.closed_at = session.updated_at; } });
     fireEvent.click(screen.getByRole('button', { name: 'Reopen session' }));
-    expect(screen.getByRole('dialog', { name: 'Confirm session reopen' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Reopen this session?' })).toBeTruthy();
   });
   it('keeps an uncertain session action for an exact reconcile from the column', async () => {
     const transport = new HistoryTransport();
@@ -313,14 +400,105 @@ describe('session tree lifecycle', () => {
     } });
     transport.replies.push(new Error('Lost acknowledgement'));
     fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
-    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm session close' })); });
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close session' })); });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByText('The saved session close is not confirmed. Reconcile it before another change.')).toBeTruthy();
+    expect(screen.getByText('Closing the session isn’t confirmed yet. Check whether your last change was saved before making another.')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Close session' }) as HTMLButtonElement).disabled).toBe(true);
     const request = structuredClone(transport.mutations[0]);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check again' })); });
     expect(transport.mutations).toEqual([request, request]);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Reopen session' })).toBeTruthy());
+  });
+});
+
+describe('stopped deliveries in the tree', () => {
+  const stopped = '00000000-0000-4000-8000-000000000074';
+  // Input 74 (item 7) stopped mid-delivery; on the active binding it is a recovery target.
+  const active = (transport: AppTransport) => { const session = transport.sessions.get(route.session_id)!; session.inputs[stopped]!.binding_id = session.active_binding_id!; };
+  const banner = () => screen.queryByRole('region', { name: 'Delivery recovery' });
+  it('answers it on the item row: Couldn’t deliver, Retry in one click, without selecting the row', async () => {
+    // On its own (old) binding there is no presence: Retry is the owner's word that the agent is idle.
+    const { transport, calls } = await mount();
+    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
+    expect(fix.textContent).toContain('Couldn’t deliver “Followup request for item 7. Preserve…”. Ariadne isn’t sure it reached demo.local.');
+    expect(within(fix).getByRole('button', { name: 'Mark as done' })).toBeTruthy();
+    expect((within(fix).getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { fireEvent.click(within(fix).getByRole('button', { name: 'Retry' })); });
+    expect(transport.mutations.find(request => request.command.command === 'input_resolve')!.command).toMatchObject({ params: {
+      input_id: stopped, attempt_id: '00000000-0000-4000-8000-000000000063', decision: 'resend', reason: '', evidence: { source: 'owner_attestation', owner_attested_idle: true } } });
+    expect(calls.selected).toHaveLength(0);
+  });
+  it('keeps the decision on the row when a later message is queued behind it on the same item', async () => {
+    const { transport } = await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!, successor = structuredClone(session.inputs[stopped]!);
+      successor.id = '00000000-0000-4000-8000-0000000000f4'; successor.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1;
+      successor.state = 'queued'; successor.attempts = []; successor.active_attempt_id = null;
+      session.inputs[successor.id] = successor;
+    } });
+    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
+    expect(fix.getAttribute('data-stuck-input')).toBe(stopped);
+    fireEvent.click(within(fix).getByRole('button', { name: 'Mark as done' }));
+    await waitFor(() => expect(transport.mutations.find(request => request.command.command === 'input_resolve')).toBeTruthy());
+  });
+  it('opens the audited form from More options, and keys typed there never reach the tree', async () => {
+    const { transport } = await mount({ configure: active });
+    fireEvent.click(within(row('7')).getByRole('button', { name: 'More options' }));
+    const dialog = screen.getByRole('dialog', { name: 'Resolve delivery' });
+    fireEvent.keyDown(within(dialog).getByLabelText('Reason'), { key: 'e' });
+    expect(screen.queryByRole('dialog', { name: /^Archive “/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Resolve delivery' })).toBeNull(); expect(transport.mutations).toHaveLength(0);
+  });
+  it('shows no recovery banner while the row is visible, and the banner when a filter hides the row', async () => {
+    const view = await mount({ configure: active });
+    view.rerender({ notices: <RecoveryPanel actions={view.actions} /> });
+    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
+    expect(banner()).toBeNull();
+    // The agent is running on the active binding: Retry and Mark as done wait, and say why.
+    const retry = within(fix).getByRole('button', { name: 'Retry' }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true); expect(retry.title).toBe('demo.local is still working. Wait, or stop it in the terminal first.');
+    expect((within(fix).getByRole('button', { name: 'Mark as done' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(ids()).toEqual(['1', '1.1', '4', '8']));
+    expect(within(banner()!).getByText('A message needs your decision')).toBeTruthy();
+    fireEvent.click(chip('All'));
+    await waitFor(() => expect(banner()).toBeNull());
+  });
+});
+
+describe('Reply to topic', () => {
+  const box = () => document.querySelector<HTMLElement>('[data-owner-input^="topic:"]');
+  it('opens a box on the topic band and sends a topic reply with no item', async () => {
+    const { transport, drafts } = await mount();
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    await waitFor(() => expect(box()).not.toBeNull());
+    await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
+    const text = within(box()!).getByLabelText('Reply to this topic');
+    await waitFor(() => expect((text as HTMLTextAreaElement).disabled).toBe(false));
+    fireEvent.change(text, { target: { value: 'Keep the retry limit at three across this topic.' } });
+    fireEvent.keyDown(text, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(true));
+    const topicId = topicRow('Delivery decisions').getAttribute('data-topic-id');
+    expect(transport.mutations.find(request => request.command.command === 'input_submit')!.command).toMatchObject({ params: {
+      kind: 'topic_reply', target: { topic_id: topicId, item_id: null }, text: 'Keep the retry limit at three across this topic.',
+      expected_question_revision: null, supersedes_answer_id: null, selected_option_id: null,
+    } });
+    await waitFor(() => expect(box()).toBeNull());
+  });
+  it('closes on Escape and keeps the draft for next time', async () => {
+    await mount();
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).disabled).toBe(false));
+    const text = within(box()!).getByLabelText('Reply to this topic');
+    fireEvent.change(text, { target: { value: 'Half a thought' } });
+    fireEvent.keyDown(text, { key: 'Escape' });
+    expect(box()).toBeNull(); expect(document.activeElement).toBe(topicRow('Delivery decisions'));
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe('Half a thought'));
+  });
+  it('is not offered in a closed session', async () => {
+    await mount({ configure: transport => { const session = transport.sessions.get(route.session_id)!; session.state = 'closed'; session.closed_at = session.updated_at; } });
+    expect(within(topicRow('Delivery decisions')).queryByRole('button', { name: 'Reply to topic' })).toBeNull();
   });
 });
 
@@ -411,5 +589,41 @@ describe('session tree reading position', () => {
     await mount({ transport });
     expect(screen.getByRole('tree')).toBeTruthy();
     outside.remove();
+  });
+  // A 400 px scroller over rows 100 px apart that move with its scrollTop.
+  const layout = () => {
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, 300, 400);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1;
+      if (this.getAttribute('role') === 'treeitem' && at >= 0) return new DOMRect(0, at * 100 - (box?.scrollTop ?? 0), 300, 40);
+      return rectangle.call(this);
+    });
+  };
+  const top = (id: string) => row(id).getBoundingClientRect().top;
+  const savedAtTop = (transport: AppTransport) => {
+    transport.preferences.sessions = transport.preferences.sessions.map(view =>
+      view.session.session_id === route.session_id ? { ...view, scroll: { item_id: '1', offset: 0 } } : view);
+  };
+  it('restores the reading position unless it leaves the open item off-screen', async () => {
+    layout();
+    await mount({ configure: savedAtTop, props: { selectedId: '8' } });
+    // Detail closed: the saved position wins.
+    expect(top('1')).toBe(0); expect(top('8')).toBe(800);
+    cleanup();
+    await mount({ configure: savedAtTop, props: { selectedId: '8', detailOpen: true } });
+    expect(top('8')).toBeGreaterThanOrEqual(0); expect(top('8') + 40).toBeLessThanOrEqual(400);
+  });
+  it('brings the selected row back into view when the detail panel opens', async () => {
+    layout();
+    const { rerender } = await mount({ configure: savedAtTop, props: { selectedId: '8' } });
+    expect(top('8')).toBe(800);
+    rerender({ detailOpen: true });
+    expect(top('8')).toBeGreaterThanOrEqual(0); expect(top('8') + 40).toBeLessThanOrEqual(400);
+    // A row already in view stays put.
+    const before = top('8');
+    rerender({ detailOpen: true, railOpen: true });
+    expect(top('8')).toBe(before);
   });
 });

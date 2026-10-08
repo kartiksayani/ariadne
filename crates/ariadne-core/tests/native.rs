@@ -99,6 +99,7 @@ fn view() -> SessionPreferences {
             item_id: None,
             offset: 37.5,
         }),
+        collapsed_topic_ids: vec![id(703)],
     }
 }
 struct Setup {
@@ -274,6 +275,7 @@ fn absent_preferences_are_canonical_defaults_without_a_data_write() {
     assert!(!value.global.pinned);
     assert!(value.global.window.is_none());
     assert!(value.global.notification_watermark.is_none());
+    assert!(value.global.detail_width.is_none() && !value.global.waiting_collapsed);
     assert!(value.sessions.is_empty() && value.later.is_empty() && value.drafts.is_empty());
     assert!(!s.live().exists());
     assert!(!s.backup().exists());
@@ -296,6 +298,8 @@ fn all_typed_patch_effects_are_durable_preserving_stale_routes_and_inert_exact_d
         monitor_id: Some("display✓".into()),
     });
     global.notification_watermark = Some(at());
+    global.detail_width = Some(DETAIL_WIDTH_MAX);
+    global.waiting_collapsed = true;
     global.selected_navigation = NavigationSelection::Session {
         session: reference(700),
     };
@@ -551,6 +555,47 @@ fn invalid_patch_and_response_capacity_reject_before_publication() {
             .unwrap_err()
             .code,
         CoreErrorCode::InvalidArgument
+    );
+    assert!(!s.live().exists());
+    // Layout preferences stay inside the renderer's bounds.
+    let mut global = s.preferences().get(&owner()).unwrap().global;
+    for width in [DETAIL_WIDTH_MIN - 1, DETAIL_WIDTH_MAX + 1] {
+        global.detail_width = Some(width);
+        let entries = vec![PreferencesPatchEntry::SetGlobal {
+            preferences: global.clone(),
+        }];
+        assert_eq!(
+            s.preferences()
+                .patch(&owner(), &patch(11, 1, entries))
+                .unwrap_err()
+                .code,
+            CoreErrorCode::InvalidArgument
+        );
+    }
+    let mut folded = view();
+    folded.collapsed_topic_ids = vec![id(703), id(703)];
+    let entries = vec![PreferencesPatchEntry::SetSessionView {
+        preferences: folded.clone(),
+    }];
+    assert_eq!(
+        s.preferences()
+            .patch(&owner(), &patch(12, 1, entries))
+            .unwrap_err()
+            .code,
+        CoreErrorCode::InvalidArgument
+    );
+    folded.collapsed_topic_ids = (0..=COLLAPSED_TOPICS_CAPACITY as u64)
+        .map(|n| id(5000 + n))
+        .collect();
+    let entries = vec![PreferencesPatchEntry::SetSessionView {
+        preferences: folded,
+    }];
+    assert_eq!(
+        s.preferences()
+            .patch(&owner(), &patch(13, 1, entries))
+            .unwrap_err()
+            .code,
+        CoreErrorCode::CapacityExceeded
     );
     assert!(!s.live().exists());
     // Each request is below512KiB; their aggregate response must remain retrievable.
@@ -1009,6 +1054,7 @@ fn concrete_native_expiry_and_cancel_delegate_preserve_owned_history() {
             params: InputCancelParams {
                 input_id: cancelled.clone(),
                 expected_revision: before.revision,
+                purpose: None,
             },
         },
     )
@@ -1069,21 +1115,119 @@ fn concrete_native_expiry_and_cancel_delegate_preserve_owned_history() {
         saved.bindings.0[&id(3)].pause_reason,
         Some(PauseReason::ResultMissing)
     );
-    assert_eq!(
-        core.execute_owner(
+    // Owner rule: close is one step; it abandons the input needing attention
+    // and lifts the barrier it caused, leaving only the owner pause.
+    let MutationReceipt::Session(closed) = core
+        .execute_owner(
             session_owner(),
             OwnerCommand::SessionClose {
                 api_version: one(),
                 op_id: id(107),
                 params: SessionLifecycleParams {
-                    expected_revision: saved.revision
-                }
-            }
+                    expected_revision: saved.revision,
+                },
+            },
         )
-        .unwrap_err()
-        .code,
-        CoreErrorCode::SessionNotClosable
+        .unwrap()
+    else {
+        panic!("session receipt")
+    };
+    assert!(matches!(
+        &closed.data,
+        SavedReceiptData::SessionLifecycle { cancelled_input_ids, .. }
+            if cancelled_input_ids == &vec![input.clone()]
+    ));
+    let saved = Store::open_registered(&store_dir(home.path(), 1), id(1))
+        .unwrap()
+        .read(&id(2))
+        .unwrap();
+    assert_eq!(saved.inputs.0[&input].state, InputState::Cancelled);
+    assert_eq!(
+        saved.inputs.0[&input].cancel_cause,
+        Some(CancelCause::SessionClosed)
     );
+    // The one the owner cancelled earlier keeps its own cause.
+    assert_eq!(
+        saved.inputs.0[&cancelled].cancel_cause,
+        Some(CancelCause::Owner)
+    );
+    let binding = &saved.bindings.0[&id(3)];
+    assert_eq!(binding.pause_reason, None);
+    assert!(binding.owner_paused);
+    assert_eq!(binding.dispatch_state, DispatchState::Paused);
+}
+
+/// Reads the saved session back from the store.
+fn read_saved(home: &std::path::Path) -> Session {
+    Store::open_registered(&store_dir(home, 1), id(1))
+        .unwrap()
+        .read(&id(2))
+        .unwrap()
+}
+fn cancel_command(
+    op: u64,
+    input_id: &UuidV4,
+    expected_revision: PositiveSafeInteger,
+) -> OwnerCommand {
+    OwnerCommand::InputCancel {
+        api_version: one(),
+        op_id: id(op),
+        params: InputCancelParams {
+            input_id: input_id.clone(),
+            expected_revision,
+            purpose: None,
+        },
+    }
+}
+
+#[test]
+fn cancelling_a_queued_input_ignores_unrelated_session_changes_but_never_beats_a_claim() {
+    let (home, _root, core) = native_with_seed();
+    let first = submit(&core, 100);
+    let reviewed = read_saved(home.path()).revision;
+    // Later submits (and in real life agent reports or applies) bump the session revision.
+    let second = submit(&core, 101);
+    let third = submit(&core, 102);
+    assert!(read_saved(home.path()).revision > reviewed);
+    // A queued input cancels against a stale revision: it has not reached the agent.
+    core.execute_owner(session_owner(), cancel_command(110, &third, reviewed))
+        .unwrap();
+    let saved = read_saved(home.path());
+    assert_eq!(saved.inputs.0[&third].state, InputState::Cancelled);
+    assert_eq!(
+        saved.inputs.0[&third].cancel_cause,
+        Some(CancelCause::Owner)
+    );
+    // The claim takes the oldest queued input, and bumps the revision.
+    let reviewed = saved.revision;
+    let prepared = core
+        .claim(
+            lease(),
+            ClaimRequest {
+                binding_id: id(3),
+                generation: id(4),
+                request_id: id(120),
+            },
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(prepared.input_id, first);
+    let claimed = read_saved(home.path());
+    assert_eq!(claimed.inputs.0[&first].state, InputState::InFlight);
+    assert!(claimed.revision > reviewed);
+    // A cancel that was reviewed before the claim is the in-flight path: it conflicts
+    // instead of silently abandoning the attempt, and nothing changes.
+    let error = core
+        .execute_owner(session_owner(), cancel_command(111, &first, reviewed))
+        .unwrap_err();
+    assert_eq!(error.code, CoreErrorCode::RevisionConflict);
+    assert_eq!(read_saved(home.path()), claimed);
+    // The one still queued behind it cancels regardless of the claim's bump.
+    core.execute_owner(session_owner(), cancel_command(112, &second, reviewed))
+        .unwrap();
+    let saved = read_saved(home.path());
+    assert_eq!(saved.inputs.0[&second].state, InputState::Cancelled);
+    assert_eq!(saved.inputs.0[&first].state, InputState::InFlight);
 }
 
 #[test]
@@ -1173,6 +1317,7 @@ fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay()
             params: InputCancelParams {
                 input_id: old_input,
                 expected_revision: current.revision,
+                purpose: None,
             },
         },
     )

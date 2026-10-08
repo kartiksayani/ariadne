@@ -132,6 +132,7 @@ fn captured_reads_release_project_and_session_guards_before_validation() {
                             Ok::<_, StoreError>(SavedReceiptData::SessionLifecycle {
                                 state: session.state.clone(),
                                 closed_at: session.closed_at.clone(),
+                                cancelled_input_ids: vec![],
                             })
                         },
                     )

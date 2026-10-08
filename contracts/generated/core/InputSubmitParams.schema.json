@@ -72,6 +72,11 @@
           "description": "The owner removed items or topics; the agent stops work on them.",
           "type": "string",
           "const": "removed"
+        },
+        {
+          "description": "The owner's instruction for a whole topic (target has no item).",
+          "type": "string",
+          "const": "topic_reply"
         }
       ]
     },

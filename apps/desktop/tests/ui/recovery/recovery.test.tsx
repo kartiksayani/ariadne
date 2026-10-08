@@ -76,7 +76,9 @@ async function setup() {
 }
 afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); vi.useRealTimers(); });
 function dialog() { return within(screen.getByRole('dialog')); }
+/** The detailed audited form sits behind "Advanced". */
 function chooseRecovery(choice: string) {
+  fireEvent.click(screen.getByText('Advanced'));
   fireEvent.click(screen.getByRole('button', { name: 'Review recovery' }));
   fireEvent.change(dialog().getByLabelText('Recovery choice'), { target: { value: choice } });
   fireEvent.change(dialog().getByLabelText('Reason'), { target: { value: 'Reviewed terminal and prior effects.' } });
@@ -90,10 +92,13 @@ describe('explicit binding lifecycle', () => {
     render(dispatch(actions));
     transport.replies.push(transport.receipt('binding_state')); currentBinding(transport.session).owner_paused = true;
     currentBinding(transport.session).dispatch_state = 'paused'; transport.session.revision += 1;
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Pause dispatch' })); });
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Pause sending' })); });
     expect(transport.mutations).toEqual([{ session: route, command: { command: 'binding_pause', api_version: 1, op_id: opId,
       params: { binding_id: currentBinding(transport.session).id, expected_generation: currentBinding(transport.session).generation } } }]);
-    expect(screen.getByText(/paused by you/)).toBeDefined(); await act(async () => { await store.refresh(); });
+    // The recovery blocker still reads first; the owner's pause shows beside it.
+    expect(screen.getByText(/Not sending: Ariadne isn’t sure your last message arrived · paused by you/)).toBeDefined();
+    expect((dialog().getByRole('button', { name: 'Pause sending' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { await store.refresh(); });
     expect(transport.mutations).toHaveLength(1); expect(screen.queryByRole('button', { name: /stop agent|approve|retarget/i })).toBeNull();
   });
   it('same-host Reconnect preserves endpoint and configuration', async () => {
@@ -101,10 +106,75 @@ describe('explicit binding lifecycle', () => {
     const binding = currentBinding(transport.session);
     transport.replies.push(transport.receipt('binding_connect'));
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Reconnect' })); });
+    // binding_connect is project-scoped on the wire: no session route.
+    expect(transport.mutations[0].session).toBeNull();
     expect(transport.mutations[0].command).toEqual({ command: 'binding_connect', api_version: 1, op_id: opId, params: {
       project_id: route.project_id, existing_session_id: route.session_id, adapter_id: binding.adapter_id,
       external_session_id: binding.external_session_id, endpoint: binding.endpoint, configuration: binding.adapter_config } });
+    expect(transport.mutations).toHaveLength(1); expect(actions.getSnapshot().pending).toBeNull();
+  });
+  it.each(['binding_conflict', 'host_unreachable', 'invalid_argument', 'incompatible_adapter'] as const)('a Reconnect refused with %s never locks the session', async code => {
+    const { actions, transport } = await setup(); render(dispatch(actions));
+    transport.replies.push(failure(code));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Reconnect' })); });
+    expect(actions.getSnapshot().pending).toBeNull();
+    expect((dialog().getByRole('button', { name: 'Reconnect' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(dialog().queryByRole('button', { name: 'Check again' })).toBeNull();
+  });
+  it('words the dialog plainly: no internal states or session ids', async () => {
+    const { actions, transport } = await setup(); render(dispatch(actions));
+    const text = screen.getByRole('dialog').textContent!;
+    expect(text).not.toContain(currentBinding(transport.session).external_session_id);
+    expect(text).not.toMatch(/dispatch|recovery_required|uncertain\b/i);
+    expect(screen.getByRole('dialog', { name: 'Sending to claude-code' })).toBeDefined();
+  });
+});
+
+const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+describe('plain recovery decisions', () => {
+  it('offers one button when the agent saved its answer: accept_result with no reason or evidence', async () => {
+    const { actions, transport, store } = await setup(); const input = currentInput(transport.session), attempt = input.attempts[0];
+    attempt.acceptance = 'accepted'; attempt.turn_state = 'completed'; attempt.result_state = 'committed'; transport.session.revision += 1; await store.refresh();
+    render(<RecoveryPanel actions={actions} />);
+    expect(screen.getByText(/saved its answer, but the message wasn’t marked handled/)).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Send again' })).toBeNull(); expect(screen.queryByRole('button', { name: 'Mark as done' })).toBeNull();
+    transport.replies.push(transport.receipt('input_resolve', 'accept_result'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Mark as handled — the agent saved its answer' })); });
     expect(transport.mutations).toHaveLength(1);
+    expect(transport.mutations[0].command).toMatchObject({ command: 'input_resolve', params: { input_id: input.id, attempt_id: attempt.id,
+      decision: 'accept_result', reason: '', evidence: null, expected_revision: transport.session.revision } });
+  });
+  it('asks one plain question; without machine evidence the owner checks the agent is idle first', async () => {
+    const { actions, transport } = await setup(); render(<RecoveryPanel actions={actions} />);
+    expect(screen.getByText('Ariadne isn’t sure it reached demo.local. Send it again, or mark it done?')).toBeDefined();
+    const again = screen.getByRole('button', { name: 'Send again' }) as HTMLButtonElement;
+    expect(again.disabled).toBe(true); expect((screen.getByRole('button', { name: 'Mark as done' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText('I checked: demo.local isn’t working on this now.'));
+    transport.replies.push(transport.receipt('input_resolve'));
+    await act(async () => { fireEvent.click(again); });
+    expect(transport.mutations[0].command).toMatchObject({ params: { decision: 'resend', reason: '',
+      evidence: { source: 'owner_attestation', owner_attested_idle: true, turn_state: 'unknown', host_turn_id: null } } });
+  });
+  it('marks done in one click when the agent is known idle, and waits while it is busy', async () => {
+    const { actions, transport } = await setup(); transport.presence(); render(<RecoveryPanel actions={actions} />);
+    expect(screen.queryByLabelText(/I checked/)).toBeNull();
+    transport.replies.push(transport.receipt('input_resolve', 'skip'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Mark as done' })); });
+    expect(transport.mutations[0].command).toMatchObject({ params: { decision: 'skip', reason: '', evidence: null } });
+    cleanup();
+    const busy = await setup(); busy.transport.presence({ execution_state: 'running' }); render(<RecoveryPanel actions={busy.actions} />);
+    expect((screen.getByRole('button', { name: 'Send again' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('alert').textContent).toMatch(/still working/);
+  });
+  it('shows no internal ids in the banner, the advanced form or an unconfirmed save', async () => {
+    const { actions, transport } = await setup(); const view = render(<RecoveryPanel actions={actions} />);
+    expect(view.container.textContent).not.toMatch(uuidPattern);
+    chooseRecovery('skip'); fireEvent.click(dialog().getByLabelText(/I confirm the terminal/));
+    expect(screen.getByRole('dialog').textContent).not.toMatch(uuidPattern);
+    transport.replies.push(new Error('Lost acknowledgement'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Save recovery decision' })); });
+    expect(screen.getByRole('dialog').textContent).toContain('Ariadne isn’t sure your decision (mark as done) was saved.');
+    expect(screen.getByRole('dialog').textContent).not.toMatch(uuidPattern);
   });
 });
 
@@ -121,7 +191,7 @@ describe('audited recovery', () => {
     expect(request.command.params).toMatchObject({ input_id: currentInput(transport.session).id, attempt_id: currentInput(transport.session).active_attempt_id,
       decision: 'resend', expected_revision: demo.revision, reason: 'Reviewed terminal and prior effects.', evidence: { source: 'owner_attestation', owner_attested_idle: true, turn_state: 'unknown' } });
     expect(request.command.params.evidence?.at).toMatch(/^\d{4}-.*\.\d{3}Z$/); expect(transport.mutations).toHaveLength(1);
-    expect(screen.getByText(/Resume dispatch is a separate/)).toBeDefined();
+    expect(screen.getByText(/Sending resumes by itself/)).toBeDefined();
   });
   it('uses machine-qualified idle without falsely recording owner attestation', async () => {
     const { actions, transport } = await setup(); transport.presence(); render(<RecoveryPanel actions={actions} />); chooseRecovery('skip');
@@ -226,14 +296,15 @@ describe('receipt uncertainty across navigation', () => {
     expect(transport.mutations).toHaveLength(1); expect(actions.getSnapshot().pending).toEqual(request);
     expect((screen.getByRole('button', { name: 'Reconnect' }) as HTMLButtonElement).disabled).toBe(true);
     transport.replies.push(transport.receipt('input_resolve'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check again' })); });
     expect(transport.mutations).toEqual([request, request]); expect(actions.getSnapshot().pending).toBeNull(); view.unmount();
   });
   it.each(['commit_uncertain', 'revision_conflict', 'stale_generation', 'delivery_uncertain', 'host_unreachable', 'not_found', 'invalid_argument', 'invalid_ref', 'store_busy', 'io_error', 'operation_reused'] as const)('keeps uncertain lifecycle requests after Core %s', async code => {
     const { actions, transport, store } = await setup(); transport.replies.push(failure(code));
     const binding = currentBinding(transport.session);
     expect(await actions.execute({ api_version: 1, op_id: '', command: 'binding_pause', params: { binding_id: binding.id, expected_generation: binding.generation } }, store.getSnapshot().snapshot!.session.revision)).toBe(false);
-    expect(actions.getSnapshot().pending !== null).toBe(!['revision_conflict', 'stale_generation'].includes(code));
+    // Wire validation (invalid_argument) rejects before any store opens, so it never holds the session.
+    expect(actions.getSnapshot().pending !== null).toBe(!['revision_conflict', 'stale_generation', 'invalid_argument'].includes(code));
   });
   it('retains a saved-possibly Resume after a bridge error before Core replay', async () => {
     const { actions, transport, store } = await setup(), binding = currentBinding(transport.session);
@@ -319,7 +390,7 @@ describe('edge states preserve mounted content', () => {
 describe('binding lifecycle surface (P4.7 acceptance gaps)', () => {
   it('Resume is blocked by a recovery pause reason, then sends a generation-fenced binding_resume once cleared', async () => {
     const { actions, transport, store } = await setup(); render(dispatch(actions));
-    const resume = () => dialog().getByRole('button', { name: 'Resume dispatch' }) as HTMLButtonElement;
+    const resume = () => dialog().getByRole('button', { name: 'Resume sending' }) as HTMLButtonElement;
     expect(resume().disabled).toBe(true);
     currentBinding(transport.session).pause_reason = null; currentBinding(transport.session).owner_paused = true;
     currentInput(transport.session).state = 'queued'; transport.session.revision += 1;

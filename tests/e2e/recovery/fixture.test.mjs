@@ -13,7 +13,7 @@ function fixture() {
   const configuration = { bindingId, generation, itemId: '1' };
   const original = { inputId, attemptId: randomUUID(), bindingId, generation, turnId: 'original-turn' };
   const reply = { id: randomUUID(), body: 'Original complete reply', input_id: inputId, attempt_id: original.attemptId };
-  const body = { instruction: 'Explicit result-only repair: inspect prior references.', purpose: 'result_repair',
+  const body = { purpose: 'result_repair',
     repair_for_attempt_id: original.attemptId, source_input_id: inputId, binding_id: bindingId, generation,
     original_message_ids: [reply.id], original_domain_result: null };
   const admission = { inputId, attemptId: randomUUID(), bindingId, generation, turnId: 'repair-turn', ordinal: 2 };
@@ -41,7 +41,8 @@ test('repair assertion rejects replayed original work, missing retained effects 
     state => { state.admission.turnId = state.original.turnId; },
     state => { payload(state, { ...state.body, original_message_ids: [] }); },
     state => { payload(state, { ...state.body, saved_input: state.input.payload }); },
-    state => { payload(state, { ...state.body, instruction: `result-only ${state.input.payload.text}` }); },
+    state => { payload(state, { ...state.body, instruction: 'result-only repair' }); },
+    state => { payload(state, { ...state.body, text: state.input.payload.text }); },
     state => { payload(state, { ...state.body, context: [{ original_work: state.input.payload.text }] }); },
     state => { payload(state, { ...state.body, source_input_id: randomUUID() }); },
   ];

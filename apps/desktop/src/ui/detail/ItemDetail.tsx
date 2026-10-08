@@ -1,12 +1,19 @@
 // The item detail panel (handoff README §5 "Item detail"; Ariadne.dc.html
 // lines 324-464). The shell's aside holds the header and scroll container;
 // DetailPath fills the header's breadcrumb and ItemDetail the scroll body.
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
+import { sessionActionsFor } from '../../components/bindings/actions';
+import { PausedNote } from '../../components/bindings/DispatchChip';
+import { useSupervisorHealth } from '../../components/bindings/health';
 import type { OwnerFocusRequest, PendingSubmission } from '../answer/useSubmit';
+import { StuckNote } from '../answer/StuckNote';
+import { NotSentLine } from '../answer/NotSentLine';
+import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled } from '../answer/held';
 import { AnswerSlot, changedText } from './AnswerSlot';
 import { TimelineExcerpt } from '../shared/MessageExcerpt';
+import { Markdown, singleParagraph } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
 import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type OpenMode } from './model';
 import { useDetailSubmit } from './submit';
@@ -44,9 +51,17 @@ export interface ItemDetailProps {
   readonly highlightedMessageIds?: ReadonlySet<string>;
   /** A send while the agent isn't running opens the "Agent isn't running" dialog (1ad). */
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
+  /** Set for an earlier session's item: its message numbers read "codex #19" (shared/excerpt earlierAgent). */
+  readonly earlierAgent?: string | null;
 }
 
 const sectionLabel = (text: string) => <div className="detail-label">{text}</div>;
+
+/** "You replied: “…”" for a one-paragraph reply; a longer reply keeps its paragraphs and lists below the words. */
+function OwnerReply({ text }: { readonly text: string }) {
+  if (singleParagraph(text)) return <span>You replied: “<Markdown text={text} inline />”</span>;
+  return <div className="detail-round-reply"><span>You replied:</span><Markdown text={text} /></div>;
+}
 
 function KidButton({ kid, onOpen }: { readonly kid: Kid; readonly onOpen: (id: string) => void }) {
   return <button type="button" className={`detail-kid${kid.closed ? ' detail-kid-closed' : ''}`} onClick={() => onOpen(kid.id)}>
@@ -54,11 +69,11 @@ function KidButton({ kid, onOpen }: { readonly kid: Kid; readonly onOpen: (id: s
   </button>;
 }
 
-export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning }: ItemDetailProps) {
+export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
   const submit = useDetailSubmit(drafts, store, itemId);
   const draftState = useOwnerDrafts(drafts);
-  // An attempted answer stays reachable here (Retry saved input) after the item stops waiting.
+  // An attempted answer stays reachable here (Try sending again) after the item stops waiting.
   const retained = session && draftState.ready ? drafts.find({ project_id: session.project_id, session_id: session.id }, itemId, 'answer') : undefined;
   const retainedAnswer = !!retained?.uncertain;
   const [mode, setMode] = useState<OpenMode | null>(null);
@@ -70,7 +85,12 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const box = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
   const handled = useRef<number | null>(null);
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
-  const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence }) : null;
+  // The session's write barrier, shared with the session bar: Resume, Cancel and Retry go through it.
+  const actions = useMemo(() => sessionActionsFor(drafts.service, store), [drafts, store]);
+  const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
+  const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
+  const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
+    replyDraft: mode === 'reply' || !!submit.text('reply').trim() }) : null;
   const item = session?.items[itemId];
 
   const openBox = (next: OpenMode) => { setMode(next); setFocusBox(value => value + 1); };
@@ -130,9 +150,11 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   };
   // The open box: the Open section's actions, or the follow-up of a waiting item whose input is pending.
   // data-owner-input marks it with its changed-target warning, like the answer slot (native tests).
-  const ownerBox = (stale || mode) && <div className="detail-owner-input" data-owner-input={itemId}>
-    {stale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
-      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked(stale)} onClick={() => submit.review(stale)}>Review current target</button></div>}
+  // The Follow-up section shows only its own (reply) warning, never the reopen one.
+  const ownerBox = (warn: typeof stale) => (warn || mode) && <div className="detail-owner-input" data-owner-input={itemId}>
+    <PausedNote actions={actions} />
+    {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
+      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked(warn)} onClick={() => submit.review(warn)}>Review current target</button></div>}
     {text && mode && <div className="detail-box">
       <textarea ref={box} className="input" rows={3} aria-label={text.label} placeholder={text.placeholder} value={submit.text(mode)} disabled={submit.locked(mode)}
         onChange={event => submit.edit(mode, event.target.value)} onKeyDown={boxKey} />
@@ -158,9 +180,9 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   return <article className="item-detail" data-status={model.status} aria-label={`Detail of #${model.id}`}>
     <div className="detail-head">
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
-      <div className="detail-status"><div className="detail-badge"><StatusBadge status={model.status} label={model.badgeLabel} /></div>
+      <div className="detail-status"><div className="detail-badge"><StatusBadge status={model.display} label={model.badgeLabel} /></div>
         <span className="detail-meta">{model.meta}</span></div>
-      <h2 className="detail-question">{model.question}</h2>
+      <h2 className="detail-question"><Markdown text={model.question} inline /></h2>
     </div>
 
     {model.steps && <section className="detail-section detail-steps" aria-label={model.stepsTitle}>
@@ -172,6 +194,13 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </div>)}</div>
       {model.delivery && <div className="detail-delivery" role="status" style={{ color: model.delivery.color }}>
         <i className={model.delivery.icon} aria-hidden="true" /><span>{model.delivery.text}</span></div>}
+      {model.stuck && <StuckNote actions={actions} input={model.stuck.input} stuck={model.stuck.note}
+        onEdit={async () => {
+          // An answer goes back to the answer slot below; anything else opens the box that now holds it.
+          const outcome = await editQueued(drafts, session, model.stuck!.input, actions);
+          if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
+          return outcome;
+        }} />}
     </section>}
 
     {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
@@ -184,7 +213,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         </button>)}
       </div>
       <div className="detail-hint">{model.open.hint}</div>
-      {ownerBox}
+      {ownerBox(stale) || <PausedNote actions={actions} />}
       {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
       {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
     </section>}
@@ -197,25 +226,28 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         </button>
       </div>
       <div className="detail-hint">{model.followUp.hint}</div>
-      {(mode === 'reply' || stale === 'reply') && ownerBox}
+      {(mode === 'reply' || stale === 'reply') && ownerBox(stale === 'reply' ? 'reply' : null)}
       {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
     </section>}
 
     {(model.answer || retainedAnswer) && <section className="detail-section detail-answer" aria-label="Your answer">
       {model.answer?.heading && <div className="detail-label detail-label-accent">Your answer</div>}
-      {model.answer?.ask && <div className="detail-ask">{model.answer.ask}</div>}
+      {model.answer?.ask && <Markdown className="detail-ask" text={model.answer.ask} />}
+      {model.answer && <PausedNote actions={actions} />}
+      {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
       <AnswerSlot drafts={drafts} store={store} itemId={itemId} blocked={model.answer?.blocked} focusRequest={answerFocus}
+        marked={!(model.followUp && (mode === 'reply' || stale === 'reply'))}
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} />
     </section>}
 
     {model.outcome && <section className="detail-section detail-outcome" aria-label="Current outcome">
       <div className="detail-label" style={{ color: model.outcome.color }}>{model.outcome.label}</div>
-      <p>{model.outcome.text}</p>
+      <Markdown className="detail-outcome-text" text={model.outcome.text} />
     </section>}
 
-    {model.note && <div className="detail-note"><i className="ph ph-robot" aria-hidden="true" />{model.note}</div>}
+    {model.note && <div className="detail-note"><i className="ph ph-robot" aria-hidden="true" /><Markdown text={model.note} inline /></div>}
 
-    {model.why && <section className="detail-section detail-why">{sectionLabel('Why')}<p>{model.why}</p></section>}
+    {model.why && <section className="detail-section detail-why">{sectionLabel('Why')}<Markdown className="detail-why-text" text={model.why} /></section>}
 
     {model.replaced && <section className="detail-section">
       {sectionLabel('Replaced by')}
@@ -238,7 +270,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {model.prev && <section className="detail-section" aria-label="Former outcome">
       <div className="detail-label detail-label-row"><span>Before you reopened it</span><StatusBadge status={model.prev.status} variant="text" /></div>
-      <p className="detail-prev">{model.prev.outcome}</p>
+      <Markdown className="detail-prev" text={model.prev.outcome} />
     </section>}
 
     {model.rounds.length > 0 && <section className="detail-section detail-rounds" aria-label="Back and forth">
@@ -246,10 +278,10 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       {model.rounds.map(round => <div className={`detail-round${round.now ? ' detail-round-now' : ''}`} key={round.label} aria-label={round.label}>
         <div className="detail-round-head"><span>{round.label}</span><span className="detail-round-range">{round.range}</span>
           {round.now && <span className="tag tag-accent detail-round-tag">Waiting on you</span>}</div>
-        <div className="detail-round-line"><i className="ph ph-robot" aria-hidden="true" /><span>{round.ask}</span></div>
+        <div className="detail-round-line"><i className="ph ph-robot" aria-hidden="true" /><Markdown text={round.ask} inline /></div>
         {round.you && <div className="detail-round-line detail-round-you"><i className={round.you.chosen ? 'ph ph-check-circle' : 'ph ph-user'} aria-hidden="true" />
-          <span>{round.you.chosen ? `You chose “${round.you.text}”` : `You replied: “${round.you.text}”`}</span></div>}
-        {round.result && <div className="detail-round-line detail-round-result"><i className="ph ph-arrow-elbow-down-right" aria-hidden="true" /><span>{round.result}</span></div>}
+          {round.you.chosen ? <span>{`You chose “${round.you.text}”`}</span> : <OwnerReply text={round.you.text} />}</div>}
+        {round.result && <div className="detail-round-line detail-round-result"><i className="ph ph-arrow-elbow-down-right" aria-hidden="true" /><Markdown text={round.result} inline /></div>}
         {round.forks.map(fork => <button type="button" className="detail-fork" key={fork.id} onClick={() => onOpenItem(fork.id)}>
           <i className="ph ph-git-fork" aria-hidden="true" /><span>{fork.question}</span><StatusBadge status={fork.status} variant="text" /></button>)}
       </div>)}
@@ -258,7 +290,14 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     <section className="detail-section detail-timeline" aria-label="Timeline">
       {sectionLabel('Timeline')}
       <div className="detail-timeline-list">{model.timeline.map(entry => <TimelineExcerpt key={entry.id} id={entry.id} message={entry.message} mark={entry.mark} label={entry.label}
-        note={entry.note} last={entry.last} highlighted={highlightedMessageIds?.has(entry.id)} />)}</div>
+        note={entry.note} last={entry.last} highlighted={highlightedMessageIds?.has(entry.id)}
+        after={entry.unsent && <NotSentLine line={entry.unsent.line} again={entry.unsent.again}
+          restoreHint={editable(entry.unsent.input.kind) ? putBackBlocked(session, entry.unsent.input) : null}
+          onPutBack={putBackBlocked(session, entry.unsent.input) || !editable(entry.unsent.input.kind) ? null : async () => {
+            const outcome = await putBackCancelled(drafts, session, entry.unsent!.input);
+            if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
+            return outcome;
+          }} />} />)}</div>
     </section>
 
     <div className="detail-reference">

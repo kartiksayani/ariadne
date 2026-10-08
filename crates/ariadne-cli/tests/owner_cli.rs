@@ -47,6 +47,7 @@ fn canonical_stdin_preserves_exact_command_and_stale_guards_for_core_replay() {
         data: SavedReceiptData::SessionLifecycle {
             state: SessionState::Closed,
             closed_at: None,
+            cancelled_input_ids: vec![],
         },
     }));
     let recorded = RecordedRequest::Owner(
@@ -160,6 +161,7 @@ fn mismatched_core_receipt_is_not_printed_as_owner_success() {
                 data: SavedReceiptData::SessionLifecycle {
                     state: SessionState::Closed,
                     closed_at: None,
+                    cancelled_input_ids: vec![],
                 },
             },
         ))))),

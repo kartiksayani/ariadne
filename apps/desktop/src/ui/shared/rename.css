@@ -1,0 +1,48 @@
+/* Rename a session in place (ui/shared/SessionRename.tsx). */
+
+.pw-rename {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pw-rename .input {
+  min-height: 30px;
+  height: 30px;
+  font-size: 13px;
+}
+
+.pw-rename-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.pw-rename-error {
+  margin: 0;
+}
+
+/* The session bar keeps its one-line height: both fields and the buttons sit in a row. */
+.pw-rename[data-layout="bar"] {
+  flex: 1;
+  flex-flow: row wrap;
+  align-items: center;
+}
+
+.pw-rename[data-layout="bar"] .pw-rename-name {
+  flex: 0 1 180px;
+  min-width: 120px;
+}
+
+.pw-rename[data-layout="bar"] .pw-rename-description {
+  flex: 1 1 220px;
+  min-width: 140px;
+}
+
+.pw-rename[data-layout="bar"] .btn {
+  margin-left: 0;
+}
+
+.pw-rename[data-layout="bar"] .pw-rename-error {
+  flex-basis: 100%;
+}

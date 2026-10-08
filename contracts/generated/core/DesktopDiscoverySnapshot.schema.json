@@ -35,17 +35,41 @@
       ]
     },
     "BarrierReason": {
-      "type": "string",
-      "enum": [
-        "owner_paused",
-        "recovery_required",
-        "disconnected",
-        "lease_invalid",
-        "incompatible",
-        "result_missing",
-        "delivery_uncertain",
-        "host_failure",
-        "store_error"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "owner_paused",
+            "recovery_required",
+            "disconnected",
+            "lease_invalid",
+            "incompatible",
+            "result_missing",
+            "delivery_uncertain",
+            "host_failure",
+            "store_error"
+          ]
+        },
+        {
+          "description": "The binding's session is closed; reopening it resumes dispatch.",
+          "type": "string",
+          "const": "session_closed"
+        },
+        {
+          "description": "The binding exists in no registered session (removed or unknown).",
+          "type": "string",
+          "const": "session_removed"
+        },
+        {
+          "description": "The owner cancelled or removed the input the agent names.",
+          "type": "string",
+          "const": "input_cancelled"
+        },
+        {
+          "description": "The owner archived the topic an agent write targets; restore reopens it.",
+          "type": "string",
+          "const": "topic_archived"
+        }
       ]
     },
     "Compatibility": {

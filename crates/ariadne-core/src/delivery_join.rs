@@ -25,6 +25,21 @@ pub(crate) fn join(session: &mut Session, input_id: &UuidV4, attempt_id: &UuidV4
     if attempt.sealed_at.is_some() {
         return;
     }
+    // A committed result wins over every host turn signal: the agent did the
+    // work, so the input is handled once the turn is over (or reported failed,
+    // interrupted or uncertain). It never becomes a recovery barrier.
+    if attempt.result_state == ResultState::Committed && attempt.domain_result.is_some() {
+        let ended = !matches!(attempt.turn_state, TurnState::Unknown | TurnState::Running);
+        let troubled = matches!(
+            attempt.acceptance,
+            AcceptanceState::Uncertain | AcceptanceState::Rejected
+        ) || attempt.error.is_some()
+            || contradictory_receipt;
+        if ended || troubled {
+            handle_committed(session, input_id, attempt_id, at);
+        }
+        return;
+    }
     let failed = matches!(
         attempt.turn_state,
         TurnState::Failed | TurnState::Interrupted
@@ -49,35 +64,134 @@ pub(crate) fn join(session: &mut Session, input_id: &UuidV4, attempt_id: &UuidV4
                 PauseReason::Uncertain
             });
         }
-        return;
     }
-    if attempt.turn_state != TurnState::Completed
-        || attempt.result_state != ResultState::Committed
-        || attempt.domain_result.is_none()
-    {
-        return;
-    }
+}
+
+/// Handle an input whose unsealed attempt committed its result: seal the
+/// attempt, free the binding and lift any barrier the input caused.
+pub(crate) fn handle_committed(
+    session: &mut Session,
+    input_id: &UuidV4,
+    attempt_id: &UuidV4,
+    at: &UtcMillis,
+) {
+    let input = session.inputs.0.get_mut(input_id).expect("validated input");
+    let attempt = input
+        .attempts
+        .iter_mut()
+        .find(|a| &a.id == attempt_id)
+        .expect("validated attempt");
     attempt.sealed_at = Some(at.clone());
     input.state = InputState::Handled;
     input.active_attempt_id = None;
+    let binding_id = input.binding_id.clone();
+    let binding = session
+        .bindings
+        .0
+        .get_mut(&binding_id)
+        .expect("validated binding");
     if binding.active_input_id.as_ref() == Some(input_id) {
         binding.active_input_id = None;
     }
-    if binding.pause_reason == Some(PauseReason::ResultMissing) {
+    release_barrier(session, &binding_id);
+}
+
+/// Lift the recovery barrier a settled queue no longer needs. Once no input on
+/// the binding is in flight or needs attention, the input-caused pause reasons
+/// clear and dispatch returns to what connection and owner pause allow. A
+/// binding-level contradiction or another pause reason stays.
+pub(crate) fn release_barrier(session: &mut Session, binding_id: &UuidV4) {
+    let unsettled = session.inputs.0.values().any(|input| {
+        &input.binding_id == binding_id
+            && matches!(
+                input.state,
+                InputState::InFlight | InputState::NeedsAttention
+            )
+    });
+    let binding_conflict = session
+        .operation_receipts
+        .0
+        .values()
+        .flatten()
+        .any(|entry| {
+            matches!(&entry.actor_scope, ReceiptActorScope::Adapter { binding_id: actor }
+            if actor == binding_id)
+                && matches!(
+                    &entry.result.data,
+                    SavedReceiptData::EventConflict { input_id: None, .. }
+                )
+        });
+    let Some(binding) = session.bindings.0.get_mut(binding_id) else {
+        return;
+    };
+    if unsettled || binding_conflict {
+        return;
+    }
+    if matches!(
+        binding.pause_reason,
+        Some(PauseReason::HostFailure | PauseReason::Uncertain | PauseReason::ResultMissing)
+    ) {
         binding.pause_reason = None;
-        // Clearing only the automatic missing-result barrier grants no connection
-        // or recovery authority and never clears the owner's deliberate pause.
-        if binding.connection_state != ConnectionState::Connected {
-            binding.dispatch_state = DispatchState::Disconnected;
-        } else if binding.owner_paused {
-            binding.dispatch_state = DispatchState::Paused;
-        } else if matches!(
-            binding.dispatch_state,
-            DispatchState::Paused | DispatchState::RecoveryRequired
-        ) {
-            binding.dispatch_state = DispatchState::Enabled;
+    }
+    binding.dispatch_state = crate::bindings::dispatch(binding, false);
+}
+
+/// Owner cancellation of a pending input, also used by session close. An
+/// in-flight attempt is sealed and abandoned: later host facts about it are
+/// ignored. A committed result still wins: that input is handled instead.
+/// Returns the input's new state, or None when it was already settled. `cause`
+/// is recorded on the input only when it ends cancelled.
+pub(crate) fn abandon(
+    session: &mut Session,
+    input_id: &UuidV4,
+    cause: CancelCause,
+    at: &UtcMillis,
+) -> Option<InputState> {
+    let input = session.inputs.0.get_mut(input_id)?;
+    if !matches!(
+        input.state,
+        InputState::Queued | InputState::InFlight | InputState::NeedsAttention
+    ) {
+        return None;
+    }
+    if let Some(attempt) = input.attempts.iter().find(|attempt| {
+        attempt.sealed_at.is_none()
+            && attempt.result_state == ResultState::Committed
+            && attempt.domain_result.is_some()
+    }) {
+        let attempt_id = attempt.id.clone();
+        handle_committed(session, input_id, &attempt_id, at);
+        return Some(InputState::Handled);
+    }
+    input.state = InputState::Cancelled;
+    input.cancel_cause = Some(cause);
+    for attempt in &mut input.attempts {
+        if attempt.sealed_at.is_none() {
+            attempt.sealed_at = Some(at.clone());
         }
     }
+    input.active_attempt_id = None;
+    let binding_id = input.binding_id.clone();
+    if let Some(binding) = session.bindings.0.get_mut(&binding_id) {
+        if binding.active_input_id.as_ref() == Some(input_id) {
+            binding.active_input_id = None;
+        }
+    }
+    Some(InputState::Cancelled)
+}
+
+/// An input the owner's item/topic removal deleted, named by its saved receipt.
+pub(crate) fn removed_input(session: &Session, input_id: &UuidV4) -> bool {
+    !session.inputs.0.contains_key(input_id)
+        && session
+            .operation_receipts
+            .0
+            .values()
+            .flatten()
+            .any(|entry| {
+                matches!(&entry.result.data,
+                SavedReceiptData::Removal { input_ids, .. } if input_ids.contains(input_id))
+            })
 }
 
 #[cfg(test)]

@@ -247,14 +247,9 @@ fn saved_report_replays_after_generation_and_selected_binding_rebind_but_new_fac
         fresh.event_id = "new-old-generation-fact".into();
         let (exit, rejected) = setup.report(&fresh);
         assert_ne!(exit, 0);
-        assert_eq!(
-            rejected["error"]["code"],
-            if replacement_selected {
-                "binding_mismatch"
-            } else {
-                "stale_generation"
-            }
-        );
+        // A rotated generation and a binding replaced by a rebind are both
+        // stale: the old conversation's loop drops the report.
+        assert_eq!(rejected["error"]["code"], "stale_generation");
         assert_eq!(before, setup.bytes());
         // Changing flags to the current generation cannot grant historical scope.
         fresh.generation = id(777);

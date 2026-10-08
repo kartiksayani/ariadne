@@ -4,6 +4,7 @@
 // keyboard focus requests and the saved-input states of the draft store.
 import { useEffect, useRef } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
+import { plainFailure } from '../../data/plain';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { AnswerControl, defaultSelection } from '../answer/AnswerControl';
 import { useSubmit, type OwnerFocusRequest, type PendingSubmission } from '../answer/useSubmit';
@@ -23,9 +24,12 @@ export interface AnswerSlotProps {
   readonly onEscape: () => void;
   /** Send while the agent isn't running: the "Agent isn't running" dialog (1ad). */
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
+  /** False when another box (the follow-up) is the detail's owner input: the slot then carries no data-owner-input. */
+  readonly marked?: boolean;
 }
 
-export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning }: AnswerSlotProps) {
+export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, marked = true }: AnswerSlotProps) {
+  const mark = marked ? itemId : undefined;
   const root = useRef<HTMLDivElement>(null), handled = useRef<number | null>(null);
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
@@ -49,20 +53,20 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   }, [focusRequest, entry, item, drafts, state.preferenceUncertain, onFocusRequestConsumed]);
   if (!item) return null;
   // data-owner-input marks every owner input of the detail (this slot and the action box) for native tests.
-  if (!state.ready || !entry) return <div className="detail-answer-slot" data-owner-input={itemId} role="status">Loading saved drafts…{state.error && <p role="alert">{state.error.message}</p>}</div>;
-  const preferences = state.preferenceUncertain && <button type="button" className="btn btn-secondary" onClick={submit.retryPreferences}>Retry saving draft preferences</button>;
+  if (!state.ready || !entry) return <div className="detail-answer-slot" data-owner-input={mark} role="status">Loading saved drafts…{state.error && <p role="alert">{plainFailure(state.error)}</p>}</div>;
+  const preferences = state.preferenceUncertain && <button type="button" className="btn btn-secondary" onClick={submit.retryPreferences}>Try saving your draft again</button>;
   // Saved: the input is queued; the stepper above follows it once the session shows it.
-  if (entry.receipt?.data.kind === 'input_submit') return <div className="detail-answer-slot" data-owner-input={itemId}>
+  if (entry.receipt?.data.kind === 'input_submit') return <div className="detail-answer-slot" data-owner-input={mark}>
     <p role="status">Saved · Queue position #{entry.receipt.data.input_seq}</p>
     <div className="detail-actions"><button type="button" className="btn btn-secondary" disabled={state.preferenceUncertain || entry.saving || !live} onClick={submit.another}>Write another input</button></div>
-    {state.error && <p className="detail-error" role="alert">{state.error.message}</p>}
+    {state.error && <p className="detail-error" role="alert">{plainFailure(state.error)}</p>}
     {preferences}
   </div>;
   const draft = entry.draft, options = item.options;
   // The frozen choice of an attempted answer, else the draft's or the recommended one.
   const selected = entry.uncertain ? options.findIndex(option => option.id === draft.selected_option_id) : defaultSelection(options, draft.selected_option_id);
   const review = { label: 'Review current target', onAction: submit.review };
-  return <div ref={root} className="detail-answer-slot" data-owner-input={itemId}>
+  return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
     <AnswerControl variant="full" options={options} selected={selected} draft={draft.text} label="Answer"
       locked={submit.locked || submit.changed || !live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
@@ -71,10 +75,10 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
       onDraft={submit.write} onSendOption={index => { const option = options[index]; if (option) submit.sendOption(option.id); }}
       onSendText={submit.sendText} onEscape={onEscape} />
     {entry.uncertain && <div className="detail-answer-retry">
-      <p role="status">{entry.rejected ? 'This input was rejected before save.' : 'Save completion is unknown.'} Retry the same saved input to confirm it; its operation and contents are retained.</p>
+      <p role="status">{entry.rejected ? 'This reply was rejected before it was saved.' : 'Ariadne isn’t sure this reply was saved.'} Retry it to confirm; your text is kept.</p>
       <div className="detail-actions">
-        <button type="button" className="btn btn-secondary" disabled={entry.saving || state.preferenceUncertain} onClick={() => { void submit.retry(); }}>Retry saved input</button>
-        {entry.rejected && <button type="button" className="btn btn-secondary" disabled={entry.saving || state.preferenceUncertain} onClick={submit.prepareRevised}>Prepare revised input</button>}
+        <button type="button" className="btn btn-secondary" disabled={entry.saving || state.preferenceUncertain} onClick={() => { void submit.retry(); }}>Try sending again</button>
+        {entry.rejected && <button type="button" className="btn btn-secondary" disabled={entry.saving || state.preferenceUncertain} onClick={submit.prepareRevised}>Edit and send again</button>}
       </div>
     </div>}
     {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}

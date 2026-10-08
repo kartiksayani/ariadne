@@ -2,19 +2,19 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { EndpointRef, ProjectSummary, SessionSummary } from '../../generated/domain/models';
 import type { Immutable } from '../../data/session-store';
 import { useNavigation, type NavigationStore } from '../../state/navigation/store';
-import { CoreFailure } from '../../data/service';
+import { registrationFailure } from '../../data/plain';
 import type { AdapterChoice } from './NavigationWorkspace';
 import { Dialog } from '../../ui/dialogs/Dialog';
+import { ownerName } from '../../ui/shell/model';
 import { candidateIdentity, useDiscovery, type DiscoveryController } from '../../data/discovery';
 import { CandidateList } from './Discovery';
 
 function RegistrationFailure({ store }: { store: NavigationStore }) {
   const state = useNavigation(store);
   if (!state.error) return null;
-  return <div className="nav-banner" role="alert"><p>{state.error.message}</p>
-    {state.error instanceof CoreFailure && <p>{state.error.error.hint}</p>}
+  return <div className="nav-banner" role="alert"><p>{registrationFailure(state.error)}</p>
     {state.pendingOperationId && <button type="button" className="btn btn-secondary" disabled={state.writing}
-      onClick={() => { void store.retryMutation(); }}>Reconcile operation</button>}
+      onClick={() => { void store.retryMutation(); }}>Check again</button>}
   </div>;
 }
 
@@ -22,9 +22,9 @@ export function RegisterProject({ store, disabled, close, initialRoot = '' }: { 
   const [root, setRoot] = useState(initialRoot);
   const submit = async (event: FormEvent) => { event.preventDefault(); if (await store.register(root)) close(); };
   return <Dialog label="Register project" width={520} onCancel={close}><div className="dialog-title">Register project</div><div className="nav-registration">
-    <p>Choose the existing local project root.</p>
+    <p>Enter the project’s folder. A path starting with ~/ starts in your home folder.</p>
     <RegistrationFailure store={store} />
-    <form onSubmit={event => { void submit(event); }}><fieldset disabled={disabled}><label>Project root<input required value={root} onChange={event => setRoot(event.target.value)} placeholder="/path/to/project" /></label>
+    <form onSubmit={event => { void submit(event); }}><fieldset disabled={disabled}><label>Project root<input required value={root} onChange={event => setRoot(event.target.value)} placeholder="~/path/to/project" /></label>
       <div className="nav-dialog-actions"><button type="button" className="btn btn-ghost" onClick={close}>Cancel</button>
         <button type="submit" className="btn btn-primary">Register project</button></div></fieldset></form>
   </div></Dialog>;
@@ -81,7 +81,7 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
         <label><input type="radio" name="session-choice" checked={sessionChoice === 'existing'} onChange={() => setSessionChoice('existing')} />Attach to an existing Ariadne session</label>
       </fieldset>
       {sessionChoice === 'existing' && <><label>Registered Ariadne session<select tabIndex={0} required value={existingSession} onChange={event => setExistingSession(event.target.value)}><option value="">Choose a session</option>
-        {sessions.map(session => <option key={session.session_id} value={session.session_id}>{session.title} · {session.state}</option>)}</select></label>
+        {sessions.map(session => <option key={session.session_id} value={session.session_id}>{ownerName(session) ?? session.title} · {session.state}</option>)}</select></label>
         <p>Ariadne keeps this session’s topics, items and history. Follow the saved setup instruction to attach this host conversation.</p></>}
       <div className="nav-dialog-actions"><button type="button" className="btn btn-ghost" onClick={close}>Cancel</button>
         <button type="submit" className="btn btn-primary" disabled={invalidSelection}>Connect existing session</button></div>

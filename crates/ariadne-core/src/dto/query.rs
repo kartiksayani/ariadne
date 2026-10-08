@@ -154,6 +154,9 @@ pub enum RoundPageRequest {
     rename_all = "snake_case",
     deny_unknown_fields
 )]
+// One result is built per query and sent straight to the wire; boxing the session snapshot
+// would change this public enum and every consumer for no saving.
+#[allow(clippy::large_enum_variant)]
 pub enum QueryResult {
     ProjectList(ProjectListResult),
     SessionList(SessionListResult),

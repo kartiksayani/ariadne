@@ -2,6 +2,7 @@
 use crate::{
     control::{BindingScope, ControlRoutes, NativeAnnouncement, NativeConnect},
     discovery::AnnouncementBinding,
+    health::HealthObserver,
     leases::DesktopOwner,
     providers::{within, ProviderFactory, QualifiedProvider},
     supervisor::{
@@ -57,6 +58,7 @@ pub struct NativeActivation {
     runtime: tokio::runtime::Handle,
     outcomes: Arc<OutcomeHandler>,
     presence: Option<Arc<PresenceObserver>>,
+    health: Option<Arc<HealthObserver>>,
     state: Mutex<State>,
     stopping: AtomicBool,
 }
@@ -80,6 +82,22 @@ impl NativeActivation {
         outcomes: Arc<OutcomeHandler>,
         presence: Option<Arc<PresenceObserver>>,
     ) -> Arc<Self> {
+        Self::new_with_observers(
+            core, providers, owner, routes, runtime, outcomes, presence, None,
+        )
+    }
+    /// `health` receives push-delivery supervisor health; pull bindings never publish.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_observers(
+        core: Arc<NativeCoreService>,
+        providers: ProviderFactory,
+        owner: Arc<DesktopOwner>,
+        routes: ControlRoutes,
+        runtime: tokio::runtime::Handle,
+        outcomes: Arc<OutcomeHandler>,
+        presence: Option<Arc<PresenceObserver>>,
+        health: Option<Arc<HealthObserver>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             core,
             providers,
@@ -88,6 +106,7 @@ impl NativeActivation {
             runtime,
             outcomes,
             presence,
+            health,
             state: Mutex::new(State {
                 active: BTreeMap::new(),
                 admitting: BTreeSet::new(),
@@ -346,6 +365,10 @@ impl NativeActivation {
         .map_err(|_| unavailable())??;
         let connected = match &self.presence {
             Some(observer) => connected.with_presence_observer(observer.clone()),
+            None => connected,
+        };
+        let connected = match &self.health {
+            Some(observer) => connected.with_health_observer(observer.clone()),
             None => connected,
         };
         {

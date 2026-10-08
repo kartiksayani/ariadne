@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { alive, delay, identity, listeners, json, proveQuit } from '../../../../scripts/run-native-e2e.mjs';
-import { admissions, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
+import { admissions, assertSlimEnvelope, completeTurn, publishResult, seedJourney, snapshot } from './scripted-provider.mjs';
 import { openSessionButton } from './session-button.mjs';
 import { runAccessibilityAcceptance } from './accessibility.spec.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
@@ -175,8 +175,7 @@ async function delivery(configuration) {
     assert.equal(admission.inputId, input.id); assert.equal(admission.bindingId, configuration.bindingId); assert.equal(admission.generation, configuration.generation);
     assert.equal(input.attempts.length, 1); const attempt = input.attempts[0];
     assert.equal(admission.attemptId, attempt.id); assert.equal(admission.payload, attempt.formatted_payload); assert.equal(attempt.binding_generation, configuration.generation);
-    const payload = JSON.parse(admission.payload.slice(admission.payload.indexOf('\n') + 1));
-    assert.deepEqual(payload.saved_input, input.payload);
+    assertSlimEnvelope(admission, input);
     const reply = `native-explicit-reply-${nonce}-${index + 1}\nComplete reply for saved input ${index + 1}.`;
     results.push(await publishResult(configuration, admission, reply)); replies.push(reply); queued.push(admission);
     await delay(750);

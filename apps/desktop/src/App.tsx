@@ -3,6 +3,7 @@ import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
 import { useSession, type SessionState, type SessionStore } from './data/session-store';
 import type { RevealedItem } from './data/routes';
+import { plainFailure } from './data/plain';
 import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
 import { OwnerDraftStore } from './state/drafts/store';
@@ -30,7 +31,10 @@ import { RemovalContext, RemovalQueue } from './ui/remove/queue';
 import { nextSelection, removeSubject, subtree, targetSession } from './ui/remove/model';
 import { agentName, hostApp, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
+import { useWindowKeys } from './ui/shell/windowKeys';
 import { connectionOf } from './ui/shared/connection';
+import { earlierAgent } from './ui/shared/excerpt';
+import { LinkOpener } from './ui/shared/MarkdownText';
 import type { ViewTab } from './ui/shell/Header';
 import { useWorkspaceKeys, type WorkspaceHandlers, type WorkspaceIntent } from './ui/keys';
 
@@ -115,6 +119,12 @@ function workspaceKeys(app: {
     archive: onItem(({ item }) => app.archiveTopic(item.topic_id)),
     graph: () => { if (!app.store) return false; app.toggleGraph(); return true; },
     messages: () => { if (!app.store) return false; app.toggleRail(); return true; },
+    // The Waiting column's own fold button owns the fold (saved layout, narrow-window peek); the key presses it.
+    waiting: () => {
+      const control = document.querySelector<HTMLButtonElement>('[data-shortcut-waiting-fold]');
+      if (!control || control.disabled) return false;
+      control.click(); return true;
+    },
     // ⌫/Delete away from a row: ask to remove the focused or selected item (rows handle their own).
     remove: onItem(({ target }) => app.askRemove({ kind: 'item', item: target })),
   };
@@ -138,7 +148,7 @@ interface CenterProps {
   readonly highlightedItems: ReadonlySet<string>; readonly highlightedMessages: ReadonlySet<string>;
   readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
-  readonly onClearFilters: () => void; readonly onShowArchive: () => void; readonly revealItem: (route: ItemRoute) => void;
+  readonly onClearFilters: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void; readonly onRemoveTarget: RemoveHandler;
   readonly onAgentNotRunning: (submission: PendingSubmission) => void;
 }
@@ -152,9 +162,6 @@ function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...pr
   const notice = state.status !== 'loading' && <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />;
   return <TreeView {...props} navigation={application.navigation} store={view.store} actions={actions} drafts={application.drafts}
     reveal={reveal?.store === view.store ? reveal : null} summaries={summaries}
-    continueTargets={summaries.map(target => ({ route: { project_id: target.project_id, session_id: target.session_id }, label: target.title }))}
-    actionsForTarget={target => application.actions.forSession(application.navigation.opened.open(target))}
-    openSession={target => { void application.navigation.navigate({ kind: 'session', session: target }); }}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
     graph={graph && !view.preferences?.filters.archived ? <NavigationGraph navigation={application.navigation} store={view.store}
       tight={props.detailOpen || props.railOpen} onReveal={props.onSelected} onHoverItem={props.onHoverItem} /> : null} />;
@@ -172,6 +179,7 @@ function Workspace({ application }: { application: Application }) {
   const store: SessionStore | null = navigation.selectedSession();
   const sessionState = useSyncExternalStore(store?.subscribe ?? noSubscription, store?.getSnapshot ?? noSession, store?.getSnapshot ?? noSession);
   const route = sessionState?.route, key = route ? routeKey(route) : '';
+  const earlier = route ? earlierAgent(route, state.sessions?.sessions.items ?? []) : null;
   const preferences = state.preferences, view = preferences?.sessions.find(value => route && routeKey(value.session) === key);
   const shortcutSequence = useRef(0), bringing = useRef(new Set<string>());
   const [ownerFocus, setOwnerFocus] = useState<(OwnerFocusRequest & { route: string; itemId: string }) | null>(null);
@@ -255,7 +263,7 @@ function Workspace({ application }: { application: Application }) {
   const revealItem = (target: ItemRoute) => {
     setRouteError(null);
     void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
-      .catch((error: unknown) => setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'));
+      .catch((error: unknown) => setRouteError(plainFailure(error, 'This registered item could not be opened.')));
   };
   // Send while the session's agent isn't running asks first (1ad); see ui/answer/notRunning.
   const onAgentNotRunning = (submission: PendingSubmission) => {
@@ -269,7 +277,7 @@ function Workspace({ application }: { application: Application }) {
       const openedRequest = await reveal(result, token);
       if (openedRequest === null || shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex });
-    }).catch((error: unknown) => setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'));
+    }).catch((error: unknown) => setRouteError(plainFailure(error, 'This registered item could not be opened.')));
   };
   const queueBring = async (target: ItemRoute) => {
     const identity = JSON.stringify(target);
@@ -294,7 +302,7 @@ function Workspace({ application }: { application: Application }) {
       if (!operation) return;
       application.drafts.edit(operation, { text: 'Bring this up.' });
       await application.drafts.submit(operation);
-    } catch (error: unknown) { setRouteError(error instanceof Error ? error.message : 'This registered item could not be opened.'); }
+    } catch (error: unknown) { setRouteError(plainFailure(error, 'This registered item could not be opened.')); }
     finally { bringing.current.delete(identity); }
   };
   const saveView = (change: Partial<SessionPreferences>) => {
@@ -388,7 +396,10 @@ function Workspace({ application }: { application: Application }) {
     toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })), toggleRail,
     clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
   }), { scope: 'workspace' });
-  return <RemovalContext.Provider value={removals}><div className="product-app" onKeyDown={keys}>
+  // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
+  const appRoot = useRef<HTMLDivElement>(null);
+  useWindowKeys(appRoot);
+  return <RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget}
       session={store ? sessionFacts(sessionState, projectName) : undefined}
@@ -406,14 +417,14 @@ function Workspace({ application }: { application: Application }) {
       detail={store && selectedId && detailOpen && route ? <><ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
-        highlightedMessageIds={highlightedMessages} later={later} onAgentNotRunning={onAgentNotRunning}
+        highlightedMessageIds={highlightedMessages} later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} />
         <CopiedProvenance key={`source:${key}:${selectedId}`} store={store} itemId={selectedId} revealItem={async target => {
           const result = await navigation.routes.revealItem(target); if (result) reveal(result);
         }} /></> : undefined}
       onCloseDetail={closeDetail}
-      railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store}
-        selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} /> : undefined}
+      railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} drafts={application.drafts}
+        selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} earlierAgent={earlier} /> : undefined}
       renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
         selectedId={treeSelectedId} detailOpen={detailOpen && !!selectedId} railOpen={!!view && view.rail !== 'hidden'}
         highlightedItems={highlightedItems} highlightedMessages={highlightedMessages} onHoverItem={hoverItem} onSelected={selected}
@@ -423,7 +434,7 @@ function Workspace({ application }: { application: Application }) {
           else if (intent === 'later') toggleLater(target, target.item_id);
           else focusOwner(target, intent);
         }}
-        onClearFilters={clearFilters} onShowArchive={() => showView('archive')} revealItem={revealItem}
+        onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
         onRemove={target => { askRemove(target); }} onRemoveTarget={removeTarget} onAgentNotRunning={onAgentNotRunning} />} />
     {asking && <RemoveDialog subject={asking.subject} onCancel={() => setAsking(null)} onConfirm={() => removeTarget(asking.target, asking.subject)} />}
     <ContinueTopicHost navigation={navigation} actions={application.actions} onSent={target => {
@@ -467,7 +478,9 @@ export function DesktopApp({ service }: { service: RendererService }) {
     // Leaving the app runs the removals still in their window rather than dropping them.
     return () => { detach(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); next.navigation.stop(); };
   }, [service]);
-  return application ? <Workspace application={application} /> : <p role="status">Opening Ariadne…</p>;
+  // Links in agent text open in the system browser; a failure leaves the app where it is.
+  const openLink = useCallback((url: string) => { void service.openLink?.(url).catch(() => {}); }, [service]);
+  return application ? <LinkOpener.Provider value={openLink}><Workspace application={application} /></LinkOpener.Provider> : <p role="status">Opening Ariadne…</p>;
 }
 export default function App() {
   const [service] = useState(() => createDesktopService());

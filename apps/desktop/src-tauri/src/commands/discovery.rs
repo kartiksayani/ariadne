@@ -112,6 +112,16 @@ pub async fn codex_default_endpoint<R: tauri::Runtime>(
         .await
         .map_err(|()| invalid())?
 }
+/// Initial read for `ariadne://supervisor_health`; the event carries later changes.
+#[tauri::command]
+pub async fn supervisor_health<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<ariadne_runtime::health::SupervisorHealth>, CoreError> {
+    let service = app.state::<DesktopService>().inner().clone();
+    blocking(move || service.supervisor_health())
+        .await
+        .map_err(|()| invalid())?
+}
 #[tauri::command]
 pub async fn discovery_ui_open<R: tauri::Runtime>(
     request: DiscoveryUiOpenRequest,

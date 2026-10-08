@@ -153,15 +153,16 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `binding_connect` | op_id, project_id, adapter_id, external_session_id, endpoint config, existing_session_id? | validated session+binding IDs, generation, capabilities, setup instruction |
 | `binding_pause/resume/disconnect` | binding_id, expected_generation, op_id | persisted dispatch state; disconnect does not kill host |
 | `input_submit` | session_id, binding_id, item_id or topic_id, kind, text, selected_option_id?, expected_question_revision?, supersedes_answer_id? | atomically owner Message + Answer if applicable + Input; status unchanged |
-| `input_cancel` | queued input_id, expected_revision, op_id | only before any preparation; preserve history, persist cancelled state + receipt |
-| `input_resolve` | input_id, attempt_id, decision (retry_unexecuted/resend/skip/request_result_repair/confirm_evidence), reason, expected_revision, op_id | queue recovery; decisions in queue spec |
-| `topic_archive/restore` | topic_id, expected_revision, op_id | lifecycle only; archive guards active items/unresolved inputs |
-| `session_close/reopen` | session_id, expected_revision, op_id | close requires dispatch paused or the binding not connected, all items terminal and no unresolved inputs; never terminate host; close also records an owner pause on the active binding so reopen never resumes dispatch |
+| `input_cancel` | queued, in-flight or needs-attention input_id, expected_revision, op_id, optional purpose (`delete` default, or `edit`: queued only) | abandons the input (attempts sealed, late facts ignored); preserve history, persist cancelled state + receipt |
+| `input_resolve` | input_id, attempt_id, decision (retry_unexecuted/resend/skip/request_result_repair/confirm_evidence/accept_result), reason (optional), expected_revision, op_id | queue recovery; decisions in queue spec; settling the last input needing attention resumes dispatch unless owner-paused; `accept_result` needs only a committed result (ADR-0088) |
+| `topic_archive/restore` | topic_id, expected_revision, op_id | lifecycle only; archive cancels the topic's unsent inputs and lists `cancelled_input_ids` (ADR-0090) |
+| `session_label_set` | session_id (route), name\|null, description\|null, op_id | owner only; names a session in the owner's words. Both fields are replaced together; trimmed, blank clears. Name at most 60 characters, description at most 200 and one line. Allowed on active and closed sessions, refused (`not_found`) on a removed one. Does not touch `updated_at`; receipt `session_label {name, description}` carries the stored values (ADR-0091) |
+| `session_close/reopen` | session_id, expected_revision, op_id | close is one step: owner-pauses the binding, cancels queued and abandons in-flight/needs-attention inputs (receipt `cancelled_input_ids`), leaves items as they are; never terminate host; reopen clears the owner pause (ADR-0088) |
 | `topic_continue_preview` | source session/topic, target session | snapshot revision/hash, mapping preview, full summary, readiness |
 | `topic_continue` | source refs/revision/hash, target session/binding, op_id | atomic target copy + input + origin mapping; source untouched |
 | `item_remove` | session ref, item_id, expected_revision (item), op_id | hard-deletes the item and its subtree, their rounds, answers and inputs; queues a `removed` notice; saved `removal` receipt with backup path |
 | `topic_remove` | session ref, topic_id, expected_revision (topic), op_id | hard-deletes the topic's continuation family in every session that holds a copy, in any registered project; one `removed` notice to the latest copy; saved `removal` receipt |
-| `session_remove` | session:null, project_id, session_id, expected_revision, op_id | deletes the session file after a backup; refuses in-flight inputs; `Removed` receipt |
+| `session_remove` | session:null, project_id, session_id, expected_revision, op_id | deletes the session file after a backup, pending inputs included; `Removed` receipt |
 | `project_remove` | session:null, project_id, op_id | unregisters the project and deletes only its Ariadne store after a backup; `Removed` receipt |
 | `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry |
 | `preferences_get` | none | local owner-only versioned UI preferences, including unsent drafts |
@@ -175,11 +176,18 @@ staleness returns `question_changed`. `supersedes_answer_id` is valid only for
 Answer corrections. A changed current eligible Answer returns `revision_conflict`
 with the current session revision and guidance to reload that Answer.
 
-`input_cancel.expected_revision` guards the session revision. Cancellation requires
-queued state, no attempt history and no active attempt. It changes only Input state
-plus session update/revision and the durable `InputCancel` receipt; Message, Answer,
-frozen payload and round/item history remain intact. It creates no attempt-bound
-resolution history entry. Both commands replay the exact saved owner/session
+`input_submit` with kind `topic_reply` targets a topic alone (no item, option,
+question revision or superseded answer); its result may carry no replies.
+
+`input_cancel.expected_revision` guards the session revision. Cancellation accepts
+queued, in-flight and needs-attention inputs. It seals any unsealed attempt, clears
+the binding's active input and lifts the barrier the input caused; later host facts
+about it are ignored. Message, Answer, frozen payload and round/item history remain
+intact. It creates no attempt-bound resolution history entry. `purpose` records why:
+`delete` (the default when absent) sets `cancel_cause` `owner`; `edit` sets
+`owner_edit` and is accepted only for a queued input (anything else returns
+`invalid_transition`), so the words that go back to the owner's editor were never
+seen by the agent. The purpose is part of the operation's intent. Both commands replay the exact saved owner/session
 operation before mutable guards; changed normalized intent under the same operation
 key returns `operation_reused`. Native `inputs::InputService` supplies these real
 transactions; application composition delegates without changing CoreService.
@@ -204,11 +212,20 @@ attempt generations. Unresolved prepared work requires reconciliation; unsent
 queued work and resolved/sealed history alone do not imply uncertainty. Selected
 routes remain reserved while paused/disconnected/recovering or closed; a new
 connect to a closed session returns `invalid_transition` until explicit reopen.
-Different-host `existing_session_id` rebind requires active state, no queued,
-in-flight or needs-attention input and a paused/disconnected old binding. The old
-binding/history stays intact and its inactive former route is freed for a new
-default-connect session. A different enabled binding or route conflict returns
-`binding_conflict`; no queued message is silently retargeted.
+Different-host `existing_session_id` rebind requires active state. It goes through
+whatever the input state when the old binding is disconnected or has the same
+`adapter_id` (a fresh conversation after `/clear`); pending inputs follow the
+session (ADR-0088):
+- never-sent queued inputs move to the new binding in FIFO order;
+- an input whose attempt committed its result becomes handled;
+- other sent inputs move as `needs_attention`, the new binding's active input,
+  with `pause_reason: uncertain`, for the owner's resend or skip;
+- `owner_paused` carries over;
+- late facts from the retired binding return `stale_generation`.
+
+The old binding/history stays intact and its inactive former route is freed for a
+new default-connect session. A connected old binding of another adapter that has
+pending work or is not paused, or a route conflict, returns `binding_conflict`.
 
 Within that guarded different-host transaction, current item Agent owners and
 recipient bindings matching the retired selected binding move to the new binding,
@@ -306,7 +323,7 @@ Canonical P0.3b records make those projections explicit:
 - `ProjectSummary={project_id,project:Project|null,canonical_root,availability:available|unavailable,
   counts:SummaryCounts}`. `SessionSummary={project_id,session_id,title,state,
   revision,created_at,updated_at,closed_at,active_binding:BindingSummary|null,
-  counts:SummaryCounts,topic_count}`. `BindingSummary={id,adapter_id,external_session_id,
+  counts:SummaryCounts,topic_count,name?,description?}`. `BindingSummary={id,adapter_id,external_session_id,
   generation,dispatch_state,owner_paused,pause_reason,connection_state,
   presence:PresenceObservation|null,host_location?}`. Closed time and pause reason are nullable.
   `topic_count` counts every topic in the session, archived included
@@ -340,8 +357,10 @@ binding_* commands, topic.archive/restore→topic_*, session.close/reopen→sess
 topic.continue→topic_continue_preview then topic_continue. The agent `apply`
 operation tags keep dots exactly as specified below. No owner UI status-write API.
 Guard errors return `details.blocking_item_ids`, `blocking_input_ids` and
-`dispatch_must_pause`; unresolved means queued/in_flight/needs_attention. Handled,
-cancelled and explicitly skipped inputs do not block archive/close.
+`dispatch_must_pause`; unresolved means queued/in_flight/needs_attention. Archive
+and close never refuse for open items or unresolved inputs (ADR-0088, ADR-0090).
+An agent apply that touches an archived topic returns `invalid_transition` with
+`details.reason: topic_archived`; `read` still returns the archived topic.
 
 ### Service-owned read and preference records
 
@@ -806,15 +825,14 @@ message has no topic or item. `payload.removed={refs:RemovedRef[],note}` with
 full list would exceed the 64 KiB payload, questions are shortened to 200
 characters, then only the topic or root refs are kept.
 
-The delivered envelope carries no removed records or context:
+The delivered envelope carries no removed records or context; what to do with
+it is in the Ariadne skill ([ADR-0089](../../adr/ADR-0089-slim-input-envelope.md)):
 
 ```json
-{"instruction":"The owner removed the items and topics listed in removed.refs from Ariadne. They are gone for good. Stop all work on them now and never bring them up again: do not ask about them, reply on them, recreate them or mention them. Do not touch any files or the conversation because of this notice. Acknowledge it with one apply: put source_input_id and attempt_id from this envelope into the ApplyRequest, send no operations, and set input_result to outcome answered with empty reply_refs and followup_item_refs and handled_through_message_number set to owner_message_number.",
- "project_id":"…","session_id":"…","binding_id":"…","generation":"…",
- "source_input_id":"…","attempt_id":"…","owner_message_number":42,"input_kind":"removed",
+{"binding_id":"…","generation":"…","source_input_id":"…","attempt_id":"…",
+ "owner_message_number":42,"input_kind":"removed",
  "removed":{"refs":[{"kind":"item","ref":"1","question":"Pick the release date"},{"kind":"item","ref":"1.1","question":"Check the freeze window"}],
-  "note":"The owner removed item 1 \"Pick the release date\" and the 1 item below it from Ariadne. Stop working on them and never bring them up again."},
- "tools":{"mutation":"apply"}}
+  "note":"The owner removed item 1 \"Pick the release date\" and the 1 item below it from Ariadne. Stop working on them and never bring them up again."}}
 ```
 
 The acknowledgement is the one result shape allowed with no replies or follow-ups:

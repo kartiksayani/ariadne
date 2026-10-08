@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@te
 import { Shell, type ShellProps } from '../../../src/ui/shell/Shell';
 import { resolveTheme, useAppliedTheme } from '../../../src/ui/shell/theme';
 import { tabModels } from '../../../src/ui/shell/model';
+import { WaitingFrame } from '../../../src/ui/waiting/WaitingColumn';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.theme; });
 
@@ -63,6 +64,67 @@ describe('Paperwhite shell', () => {
     fireEvent.click(within(detail).getByRole('button', { name: 'Remove item' })); expect(remove).toHaveBeenCalled();
     fireEvent.click(within(detail).getByRole('button', { name: 'Close detail' })); expect(close).toHaveBeenCalled();
     expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('300px minmax(560px,1fr) 400px 240px');
+  });
+
+  it('folds the Waiting column to a strip with its count and saves the owner choice', () => {
+    const fold = vi.fn();
+    const { rerender } = render(<Shell {...props({ body: { waiting: <WaitingFrame count="3"><p>Card</p></WaitingFrame>, center: null, onFoldWaiting: fold } })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Waiting on me' }));
+    expect(fold).toHaveBeenCalledWith(true);
+    rerender(<Shell {...props({ body: { waiting: <WaitingFrame count="3"><p>Card</p></WaitingFrame>, center: null, onFoldWaiting: fold, waitingFolded: true } })} />);
+    expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('44px minmax(560px,1fr)');
+    // The list stays mounted but hidden; the strip keeps the count in view.
+    expect((screen.getByText('Card').closest('.waiting-scroll') as HTMLElement).hidden).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (3)' }));
+    expect(fold).toHaveBeenLastCalledWith(false);
+  });
+
+  it('folds the Waiting column by itself in a window too narrow for every column, and the owner can still open it', () => {
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private readonly receive: ResizeObserverCallback) {}
+      observe() { this.receive([{ contentRect: { width: 1300 } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+      disconnect() {}
+    });
+    const fold = vi.fn();
+    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>, rail: <aside>Rail</aside>, onFoldWaiting: fold } })} />);
+    const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
+    expect(grid()).toBe('44px minmax(560px,1fr) 400px 240px');
+    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
+    // Opening it in a narrow window is not saved as the owner's fold; the centre squeezes instead.
+    expect(fold).not.toHaveBeenCalled();
+    expect(grid()).toBe('300px minmax(0,1fr) 400px 240px');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Waiting on me' }));
+    expect(fold).toHaveBeenCalledWith(true);
+  });
+
+  it('resizes the detail panel from its left edge by pointer and keys, inside the bounds, and saves the width', () => {
+    vi.useFakeTimers();
+    try {
+      const resize = vi.fn();
+      const { rerender } = render(<Shell {...props({ body: { waiting: null, center: null, detail: <p>Detail</p>, onResizeDetail: resize } })} />);
+      const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
+      expect(edge.getAttribute('aria-valuenow')).toBe('400');
+      fireEvent.pointerDown(edge, { button: 0, clientX: 1000, pointerId: 1 });
+      fireEvent.pointerMove(edge, { clientX: 880, pointerId: 1 });
+      expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('300px minmax(560px,1fr) 520px');
+      fireEvent.pointerUp(edge, { clientX: 880, pointerId: 1 });
+      expect(resize).toHaveBeenCalledWith(520);
+      rerender(<Shell {...props({ body: { waiting: null, center: null, detail: <p>Detail</p>, onResizeDetail: resize, detailWidth: 520 } })} />);
+      // Dragging past the bounds stops at them.
+      fireEvent.pointerDown(edge, { button: 0, clientX: 1000, pointerId: 1 });
+      fireEvent.pointerMove(edge, { clientX: 1900, pointerId: 1 });
+      fireEvent.pointerUp(edge, { pointerId: 1 });
+      expect(resize).toHaveBeenLastCalledWith(320);
+      // Keys step it and save once they settle.
+      resize.mockClear();
+      fireEvent.keyDown(edge, { key: 'ArrowLeft' }); fireEvent.keyDown(edge, { key: 'ArrowLeft' });
+      expect(edge.getAttribute('aria-valuenow')).toBe('552');
+      expect(resize).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(resize).toHaveBeenCalledOnce(); expect(resize).toHaveBeenCalledWith(552);
+      fireEvent.doubleClick(edge);
+      expect(resize).toHaveBeenLastCalledWith(400);
+    } finally { vi.useRealTimers(); }
   });
 
   it('disables chrome controls while navigation writes', () => {
