@@ -92,6 +92,6 @@ Capture at 1600 × 960 in both themes: Projects, project page, All sessions, ses
 
 Use deterministic clocks and the canonical fixture from `DESIGN_PROMPT.md`. Compare layout, text wrapping, indentation, icons, colors, focus, selected ancestry, rail interactions, and responsive overflow to the supplied references. Raster antialiasing differences are acceptable. Missing states, lost history, clipped controls, inaccurate status/delivery claims, and spacing drift are not. Trace each board frame and requirement to an acceptance ID in `DESIGN_TRACEABILITY.md`.
 
-## Security guidance provenance
+## Security boundaries
 
 Security boundaries in these documents are grounded in the approved local-only architecture and user-provided decisions.

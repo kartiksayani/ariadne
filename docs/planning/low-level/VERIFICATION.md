@@ -8,8 +8,7 @@ recovery, or release packaging acceptance. Production implementation and qualifi
 merge evidence are recorded in the [task catalogue](../../delivery/tasks.json);
 current delivery state is in the [handoff](../../delivery/HANDOFF.md).
 
-Organization security guidance was not checked under the owner's explicit
-waiver. This ledger records project evidence only.
+This ledger records project evidence only.
 
 ## Evidence vocabulary
 

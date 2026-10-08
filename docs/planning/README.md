@@ -43,5 +43,6 @@ conversations; production domain tools/store/native app remain to be implemented
 Original ZIP has a [verified member checksum manifest](assets/design-manifest.json).
 Provider research and older smoke reports are preserved in the
 [planning archive](https://github.com/kartiksayani/ariadne/tree/reference/planning-and-pocs).
-Use the current LLD for implementation. Publishing this curated repository is
-authorized. Organization security guidance was not checked under the owner's waiver.
+Use the current LLD for implementation.
+
+Publishing this curated repository is authorized.
