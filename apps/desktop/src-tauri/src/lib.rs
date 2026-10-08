@@ -183,6 +183,8 @@ fn desktop_handler<R: tauri::Runtime>(
         commands::codex_default_endpoint,
         commands::supervisor_health,
         commands::open_link,
+        commands::file_references_resolve,
+        commands::file_reference_open,
         commands::reveal_item,
         commands::project_register,
         commands::binding_connect,

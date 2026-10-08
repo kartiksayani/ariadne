@@ -34,6 +34,10 @@ that `Ariadne.dc.html` repeats inline.
 The handoff also requests weight 600 from Google Fonts; the app bundles 400/500 only,
 and the design harness serves the same bundle to both sides.
 The Ariadne mark is the regular `ph ph-spiral`, U+E9FA.
+The woff2 files are the complete, unmodified Phosphor fonts; `phosphor.css` maps only the
+glyphs the app draws. Beyond the handoff's 62, `assets.json` lists those the app adds under
+`app_glyphs` (codepoints from `@phosphor-icons/web@2.1.1` `src/regular/style.css`). A test in
+`apps/desktop/tests/ui/shared/icons.test.ts` fails when the app uses a `ph-*` class the CSS lacks.
 Bundled CSS uses local URLs only. No prototype scripts or remote imports ship.
 
 ## Checks

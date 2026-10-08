@@ -123,6 +123,17 @@
   cursor: pointer;
 }
 
+/* A file the desktop found: it keeps its code look and takes the link's colour and underline. */
+.md-file {
+  text-decoration: none;
+}
+
+.md-file .md-code {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .md-rest {
   white-space: pre-wrap;
 }

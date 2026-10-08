@@ -34,7 +34,7 @@ import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
 import { connectionOf } from './ui/shared/connection';
 import { earlierAgent } from './ui/shared/excerpt';
-import { LinkOpener } from './ui/shared/MarkdownText';
+import { FileRefs, LinkOpener, type FileOpener } from './ui/shared/MarkdownText';
 import type { ViewTab } from './ui/shell/Header';
 import { useWorkspaceKeys, type WorkspaceHandlers, type WorkspaceIntent } from './ui/keys';
 
@@ -481,7 +481,12 @@ export function DesktopApp({ service }: { service: RendererService }) {
   }, [service]);
   // Links in agent text open in the system browser; a failure leaves the app where it is.
   const openLink = useCallback((url: string) => { void service.openLink?.(url).catch(() => {}); }, [service]);
-  return application ? <LinkOpener.Provider value={openLink}><Workspace application={application} /></LinkOpener.Provider> : <p role="status">Opening Ariadne…</p>;
+  // Files named in agent text open in the owner's text editor, only when they sit inside the item's project folder.
+  const files = useMemo<FileOpener | null>(() => service.resolveFileReferences && service.openFileReference ? {
+    resolve: (projectId, references) => service.resolveFileReferences!(projectId, references),
+    open: (projectId, reference) => { void service.openFileReference!(projectId, reference).catch(() => {}); },
+  } : null, [service]);
+  return application ? <LinkOpener.Provider value={openLink}><FileRefs.Provider value={files}><Workspace application={application} /></FileRefs.Provider></LinkOpener.Provider> : <p role="status">Opening Ariadne…</p>;
 }
 export default function App() {
   const [service] = useState(() => createDesktopService());

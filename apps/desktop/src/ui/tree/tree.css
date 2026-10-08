@@ -593,10 +593,12 @@
   align-self: stretch;
 }
 
+/* Every preview keeps the agent's own line breaks, so a bulleted ask or note reads as a list. */
 .tree-clamp {
   display: -webkit-box;
   min-width: 0;
   overflow: hidden;
+  white-space: pre-line;
   -webkit-line-clamp: var(--tree-clamp);
   -webkit-box-orient: vertical;
 }

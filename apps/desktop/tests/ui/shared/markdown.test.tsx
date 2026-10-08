@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { inline, MARKDOWN_LIMIT, parseMarkdown, safeHref } from '../../../src/ui/shared/markdown';
-import { LinkOpener, Markdown } from '../../../src/ui/shared/MarkdownText';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { fileLinkTitle, fileReference, fileReferences, inline, MARKDOWN_LIMIT, parseMarkdown, safeHref } from '../../../src/ui/shared/markdown';
+import { FileRefProject, FileRefs, LinkOpener, Markdown, type FileOpener } from '../../../src/ui/shared/MarkdownText';
 
 const blocks = (text: string) => parseMarkdown(text).blocks;
 
@@ -89,6 +89,46 @@ describe('markdown parser', () => {
     ]);
   });
 
+  it('marks bare paths with a separator or a source extension, and leaves ordinary words alone', () => {
+    expect(inline('Edit src/app.ts, then run.', 0)).toEqual(['Edit ', { t: 'path', text: 'src/app.ts' }, ', then run.']);
+    expect(inline('see ./a/b.py and config.json.', 0)).toEqual(['see ', { t: 'path', text: './a/b.py' }, ' and ', { t: 'path', text: 'config.json' }, '.']);
+    for (const plain of ['done. Then v1.2 or 10/20 on 2024/05/01, e.g. maybe', 'mail me@example.com', 'ftp://example.com/x.txt', 'a.b']) {
+      expect(JSON.stringify(inline(plain, 0))).not.toContain('"path"');
+    }
+  });
+
+  it('does not make a path of text inside a link label or a url', () => {
+    expect(inline('[src/app.ts](https://a.b/c) https://a.b/src/app.ts', 0)).toEqual([
+      { t: 'link', href: 'https://a.b/c', children: ['src/app.ts'] }, ' ',
+      { t: 'link', href: 'https://a.b/src/app.ts', children: ['https://a.b/src/app.ts'] },
+    ]);
+  });
+
+  it('reads a reference as a path and a line', () => {
+    expect(fileReference('crates/foo/src/bar.rs:123')).toEqual({ path: 'crates/foo/src/bar.rs', line: 123 });
+    expect(fileReference('src/app.ts')).toEqual({ path: 'src/app.ts', line: null });
+    expect(fileReference('a.ts:4:2')).toEqual({ path: 'a.ts', line: 4 });
+    expect(fileReference('~/p/a.rs')).toEqual({ path: '~/p/a.rs', line: null });
+    expect(fileReference('/abs/dir/a.rs:9')).toEqual({ path: '/abs/dir/a.rs', line: 9 });
+    expect(fileReference('Makefile')).toBeNull();
+    for (const text of ['', 'two words.ts', 'src/', '//host/x.ts', '~', '~user/a.ts', 'foo.bar', '10/20', 'https://a.b/c.ts', 'a b/c.ts', `${'a'.repeat(600)}.ts`]) {
+      expect(fileReference(text), text).toBeNull();
+    }
+    expect(fileLinkTitle({ path: 'crates/foo/src/bar.rs', line: 123 })).toBe('Open bar.rs (line 123) in your text editor');
+    expect(fileLinkTitle({ path: 'src/app.ts', line: null })).toBe('Open app.ts in your text editor');
+  });
+
+  it('collects each file-shaped text once, from code spans and prose but never fenced code or link labels', () => {
+    const found = fileReferences(blocks([
+      'Look at `src/app.ts` and src/app.ts and `not a path` and `x.rs:3`.',
+      '', '- item `lib/a.py`', '> quote b/c.go:7', '',
+      '| h |', '| - |', '| `t/d.ts` |', '',
+      '```', 'fenced/code.ts', '`fenced/inline.ts`', '```', '',
+      '[label `link/label.ts`](https://a.b)',
+    ].join('\n')));
+    expect(found).toEqual(['src/app.ts', 'x.rs:3', 'lib/a.py', 'b/c.go:7', 't/d.ts']);
+  });
+
   it('parses a very long line and a pathological input in linear time', () => {
     const long = `${'a'.repeat(60_000)} https://example.com/${'b'.repeat(1_000)} ${'x_'.repeat(20_000)}`;
     const started = performance.now();
@@ -157,5 +197,97 @@ describe('Markdown component', () => {
     expect(container.querySelector('strong')?.textContent).toBe('Done:');
     expect(container.querySelector('pre')?.textContent).toBe('code');
     expect(container.querySelector('li code')?.textContent).toBe('x');
+  });
+});
+
+describe('file references in Markdown', () => {
+  afterEach(cleanup);
+  const PROJECT = '11111111-1111-4111-8111-111111111111';
+  const files = (exists: readonly string[]) => {
+    const opener = {
+      resolve: vi.fn((_project: string, references: readonly string[]) => Promise.resolve(references.map(text => exists.includes(text)))),
+      open: vi.fn(),
+    } satisfies FileOpener;
+    return opener;
+  };
+  const view = (opener: FileOpener | null, text: string, project: string | null = PROJECT, inline = false) => render(
+    <FileRefs.Provider value={opener}><FileRefProject.Provider value={project}><Markdown text={text} inline={inline} /></FileRefProject.Provider></FileRefs.Provider>);
+
+  it('turns a found code span and a found bare path into links that open the file', async () => {
+    const opener = files(['crates/foo/src/bar.rs:123', 'src/app.ts']);
+    view(opener, 'See `crates/foo/src/bar.rs:123` and src/app.ts now.');
+    const code = await screen.findByRole('link', { name: 'crates/foo/src/bar.rs:123' });
+    expect(code.getAttribute('title')).toBe('Open bar.rs (line 123) in your text editor');
+    expect(code.textContent).toBe('crates/foo/src/bar.rs:123');
+    expect(code.querySelector('code')).not.toBeNull();
+    const bare = screen.getByRole('link', { name: 'src/app.ts' });
+    expect(bare.getAttribute('title')).toBe('Open app.ts in your text editor');
+    expect(opener.resolve).toHaveBeenCalledTimes(1);
+    expect(opener.resolve).toHaveBeenCalledWith(PROJECT, ['crates/foo/src/bar.rs:123', 'src/app.ts']);
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    fireEvent(code, click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(opener.open).toHaveBeenCalledWith(PROJECT, 'crates/foo/src/bar.rs:123');
+    fireEvent.click(bare);
+    expect(opener.open).toHaveBeenLastCalledWith(PROJECT, 'src/app.ts');
+  });
+
+  it('keeps a reference the desktop does not find as plain code or plain words', async () => {
+    const opener = files(['src/app.ts']);
+    const { container } = view(opener, 'Not `lib/gone.rs:4`, not lib/gone.rs, but `src/app.ts`.');
+    await screen.findByRole('link', { name: 'src/app.ts' });
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect([...container.querySelectorAll('code')].map(code => code.textContent)).toEqual(['lib/gone.rs:4', 'src/app.ts']);
+    expect(container.textContent).toContain('not lib/gone.rs, but');
+    expect(container.querySelector('a code.md-ref')?.textContent).toBe('src/app.ts');
+  });
+
+  it('renders every reference as before when nothing is found, there is no project, or the lookup fails', async () => {
+    const none = files([]);
+    const { container } = view(none, 'See `src/app.ts` and a/b.rs:2 and c/d.rs.');
+    await vi.waitFor(() => expect(none.resolve).toHaveBeenCalled());
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+    expect([...container.querySelectorAll('code')].map(code => code.textContent)).toEqual(['src/app.ts', 'a/b.rs:2']);
+    const idle = files(['src/app.ts']);
+    view(idle, 'See `src/app.ts`', null);
+    view(null, 'See `src/app.ts`');
+    const failing: FileOpener = { resolve: vi.fn(() => Promise.reject(new Error('x'))), open: vi.fn() };
+    view(failing, 'See `src/app.ts`');
+    await vi.waitFor(() => expect(failing.resolve).toHaveBeenCalled());
+    expect(idle.resolve).not.toHaveBeenCalled();
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+  });
+
+  it('leaves fenced code blocks and link labels untouched, and never asks about them', async () => {
+    const opener = files(['src/app.ts', 'fenced/code.ts', 'fenced/inline.ts', 'link/label.ts']);
+    const { container } = view(opener, ['```', 'fenced/code.ts', '`fenced/inline.ts`', '```', '[see `link/label.ts`](https://a.b/c)', '', 'and `src/app.ts`'].join('\n'));
+    await screen.findByRole('link', { name: 'src/app.ts' });
+    expect(opener.resolve).toHaveBeenCalledWith(PROJECT, ['src/app.ts']);
+    expect(container.querySelector('pre')?.textContent).toBe('fenced/code.ts\n`fenced/inline.ts`');
+    expect(container.querySelector('pre a')).toBeNull();
+    const web = screen.getByRole('link', { name: 'see link/label.ts' });
+    expect(web.querySelector('a')).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(2);
+  });
+
+  it('works in inline text and keeps web links working beside file links', async () => {
+    const open = vi.fn();
+    const opener = files(['src/app.ts']);
+    render(<LinkOpener.Provider value={open}><FileRefs.Provider value={opener}><FileRefProject.Provider value={PROJECT}>
+      <Markdown text={'Edit `src/app.ts` per https://github.com/o/r/pull/1'} inline />
+    </FileRefProject.Provider></FileRefs.Provider></LinkOpener.Provider>);
+    fireEvent.click(await screen.findByRole('link', { name: 'src/app.ts' }));
+    fireEvent.click(screen.getByRole('link', { name: 'https://github.com/o/r/pull/1' }));
+    expect(opener.open).toHaveBeenCalledWith(PROJECT, 'src/app.ts');
+    expect(open).toHaveBeenCalledWith('https://github.com/o/r/pull/1');
+  });
+
+  it('asks again for another project and drops the old answer meanwhile', async () => {
+    const opener = files(['src/app.ts']);
+    const { rerender } = view(opener, 'See `src/app.ts`');
+    await screen.findByRole('link', { name: 'src/app.ts' });
+    rerender(<FileRefs.Provider value={opener}><FileRefProject.Provider value="22222222-2222-4222-8222-222222222222"><Markdown text="See `src/app.ts`" /></FileRefProject.Provider></FileRefs.Provider>);
+    await vi.waitFor(() => expect(opener.resolve).toHaveBeenLastCalledWith('22222222-2222-4222-8222-222222222222', ['src/app.ts']));
+    expect(await screen.findByRole('link', { name: 'src/app.ts' })).toBeTruthy();
   });
 });

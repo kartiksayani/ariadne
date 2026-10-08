@@ -61,7 +61,8 @@ describe('item detail panel', () => {
     expect(open).toHaveBeenCalledWith('1.1');
     fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     expect(open).toHaveBeenCalledTimes(2);
-    expect(within(screen.getByRole('region', { name: 'Item links' })).getAllByRole('link').map(link => link.textContent)).toEqual(item.links.map(link => link.label));
+    // Without a desktop to open files, a link to a file is its label as plain text (see item-links.test.tsx).
+    expect([...screen.getByRole('region', { name: 'Item links' }).querySelectorAll('.detail-link')].map(link => link.textContent)).toEqual(item.links.map(link => link.label));
     const timeline = screen.getByRole('region', { name: 'Timeline' });
     // Owner messages on the item join as replies, as the handoff keeps them in `updated`.
     const replies = session.messages.filter(message => message.author === 'owner' && message.item_id === item.id).map(message => message.id);
