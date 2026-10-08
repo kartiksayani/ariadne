@@ -41,11 +41,15 @@ const formerOutcome = 'Full native completed outcome\nKeep the former outcome af
 const inputs = session => Object.values(session.inputs).sort((a, b) => a.seq - b.seq);
 const row = id => browser.$(`.tree-rows [data-item-id="${id}"]`);
 let navigationRecovered = false;
-const revisionConflict = 'Preferences revision changed; reload before applying this new patch';
+const revisionConflict = 'This changed while you were working. Look at it as it is now, then try again.';
 const preferencesSnapshot = async () => (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot;
-async function navigationRejection() {
+export async function navigationRejection() {
   const message = await browser.$('.nav-banner[role="alert"] p');
-  return await message.isExisting() && await message.getText() === revisionConflict;
+  if (!(await message.isExisting()) || await message.getText() !== revisionConflict) return false;
+  const banner = await browser.$('.nav-banner[role="alert"]');
+  const refresh = await banner.$('button=Refresh'), uncertain = await banner.$('button=Check again');
+  // Plain copy folds changed-view codes together; Refresh without Check again identifies a definitive rejection.
+  return await refresh.isExisting() && await refresh.isEnabled() && !(await uncertain.isExisting());
 }
 const option = ordinal => ({ id: `history-choice-${ordinal}`, label: `Use round ${ordinal} choice`,
   consequence: `Keep the exact consequence for round ${ordinal}.`, recommended: true });
@@ -147,6 +151,12 @@ async function reviewCurrentTarget() {
   await review.waitForEnabled(); await review.scrollIntoView(); await review.click();
   return true;
 }
+export async function waitForHistoryControl(control, label) {
+  await control.waitForEnabled();
+  // A refreshing answer control keeps focus with aria-disabled instead of native disabled.
+  await wait(async () => await control.isEnabled() && await control.getAttribute('aria-disabled') !== 'true',
+    `Native ${label} remained unavailable`);
+}
 async function answer(history, ordinal, text) {
   const another = await browser.$(ownerInput('1')).$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
@@ -158,9 +168,9 @@ async function answer(history, ordinal, text) {
   await wait(async () => await editor.isEnabled() || await reviewCurrentTarget(), 'The answer editor neither enabled nor offered Review current target');
   await editor.waitForEnabled();
   // Odd rounds send the chosen option alone; even rounds send a reply in the owner's own words.
-  if (ordinal % 2) { const choice = await browser.$(ownerInput('1')).$(`button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.scrollIntoView(); await choice.click(); }
+  if (ordinal % 2) { const choice = await browser.$(ownerInput('1')).$(`button*=${option(ordinal).label}`); await waitForHistoryControl(choice, `round ${ordinal} choice`); await choice.scrollIntoView(); await choice.click(); }
   else { await editor.scrollIntoView(); await editor.setValue(text); }
-  const send = await browser.$(`${ownerInput('1')} ${ordinal % 2 ? '.answer-send' : '.answer-reply-send'}`); await failureEvidence(`owner-input-send-${ordinal}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
+  const send = await browser.$(`${ownerInput('1')} ${ordinal % 2 ? '.answer-send' : '.answer-reply-send'}`); await failureEvidence(`owner-input-send-${ordinal}`, () => waitForHistoryControl(send, `round ${ordinal} Send`)); await send.scrollIntoView(); await send.click();
   await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal,
     'A genuine native round answer did not persist and reach its isolated host');
 }

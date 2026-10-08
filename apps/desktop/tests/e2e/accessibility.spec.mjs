@@ -41,9 +41,9 @@ export async function runAccessibilityAcceptance(configuration) {
   await wait(() => active(row), 'Editor Escape did not return focus to the item row');
   await browser.keys('Escape');
   await wait(async () => !(await browser.$('.shell-detail').isExisting()), 'Row Escape did not close detail');
-  // Draft saves patch preferences; the navigation store re-reads them only every
-  // 2 s. Let the saved file stay unchanged past one refresh so Reply is not
-  // issued with a stale preferences revision.
+  // Draft saves patch preferences; navigation re-reads on change events and its
+  // 2 s fallback poll. Let the saved file stay unchanged past one poll so Reply
+  // is not issued with a stale preferences revision.
   const preferencesPath = join(process.env.ARIADNE_HOME, 'ui.json');
   let settledSince = Date.now(); let lastSaved = await readFile(preferencesPath, 'utf8');
   await browser.waitUntil(async () => {

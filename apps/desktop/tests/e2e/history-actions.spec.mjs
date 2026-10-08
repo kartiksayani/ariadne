@@ -25,10 +25,14 @@ async function openSession(sessionId) {
   await sessionBar().waitForDisplayed();
 }
 // A topic band shows its actions while it holds focus (the prototype's hover).
-async function topicAction(name, label) {
+export async function topicAction(name, label) {
   const band = await topicBand(name); await band.waitForDisplayed();
   await browser.execute(element => element.focus(), band);
-  await click(await band.$(`button*=${label}`));
+  await click(await band.$(`button[aria-label="${label}"]`));
+}
+export async function archiveClosedTopic(topicId) {
+  // The all-closed prompt sits below the sticky band, in that topic's sibling content.
+  await click(await browser.$(`.tree-rows [data-topic-id="${topicId}"] + .tree-topic-content .tree-prompt button`));
 }
 async function lifecycle(button, confirmation, path, predicate) {
   await click(await sessionBar().$(`button*=${button}`));
@@ -111,7 +115,7 @@ export async function runHistoryActionsAcceptance(configuration) {
   const targetHistory = { items: target.items, messages: target.messages, rounds: target.rounds, answers: target.answers, bindings: target.bindings };
   // Nothing blocks an all-closed topic, so its prompt archives at once and the
   // column offers Undo, which restores it (no confirmation dialog either way).
-  await click(await topicBand(topicName).$('button*=Archive topic'));
+  await archiveClosedTopic(terminalTopic.id);
   await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at !== null, 'Direct topic archive was not visible on disk');
   assert.equal(await dialog().isExisting(), false, 'An unblocked archive must not open the review');
   await wait(async () => (await browser.$('.tree-column').getText()).includes(`Archived “${topicName}”.`), 'Archive did not report its Undo banner');
