@@ -44,7 +44,7 @@ export interface OpenAction {
 export interface OpenSection { readonly title: string; readonly hint: string; readonly actions: readonly OpenAction[] }
 export interface BoxText { readonly label: string; readonly placeholder: string; readonly button: string; readonly hint: string }
 export interface Kid { readonly id: string; readonly question: string; readonly status: StatusKey; readonly closed: boolean }
-export interface LinkView { readonly icon: string; readonly label: string; readonly meta: string }
+export interface LinkView { readonly icon: string; readonly label: string; readonly meta: string; /** Where the link points: a web address or a file path. */ readonly target: string }
 /** One exchange of the conversation: the agent's ask, the owner's reply, what the agent did with it, and the items it forked. */
 export interface RoundView {
   /** The round's number: a test hook only, never shown. */
@@ -352,7 +352,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     replaced: replacement ? kid(replacement) : null,
     kidLabel: `Branched into ${kids.length} item${kids.length > 1 ? 's' : ''}`,
     kids: kids.map(kid),
-    links: item.links.map(link => ({ icon: LINKICON[link.kind] ?? 'ph ph-link', label: link.label, meta: (link as typeof link & { meta?: string }).meta ?? '' })),
+    links: item.links.map(link => ({ icon: LINKICON[link.kind] ?? 'ph ph-link', target: link.target, label: link.label, meta: (link as typeof link & { meta?: string }).meta ?? '' })),
     prev: reopened ? { status: statusKey[reopened.old_status], outcome: reopened.previous_outcome ?? '' } : null,
     rounds: roundViews,
     timeline,

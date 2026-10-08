@@ -430,6 +430,18 @@
   text-underline-offset: 3px;
 }
 
+/* A file link has no web address, so it asks for the pointer itself. */
+.detail-link[role="link"] {
+  cursor: pointer;
+}
+
+/* A link the app cannot open reads as plain text. */
+.detail-link-plain,
+.detail-link-plain:hover {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
 .detail-link > i {
   flex: none;
   font-size: 15px;

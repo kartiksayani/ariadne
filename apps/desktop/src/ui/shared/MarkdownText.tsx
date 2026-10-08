@@ -1,7 +1,7 @@
 // Agent-written text rendered from Markdown (ui/shared/markdown.ts) as React
 // elements: no HTML strings, nothing injected. Links open in the system
 // browser through LinkOpener; a click never navigates the app's window.
-import { createContext, Fragment, useContext, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { fileLinkTitle, fileReference, fileReferences, parseMarkdown, safeHref, type Block, type Inline } from './markdown';
 import './markdown.css';
 
@@ -22,15 +22,36 @@ export const FileRefProject = createContext<string | null>(null);
 /** The references the desktop found, for the text being rendered. */
 const FoundFiles = createContext<{ readonly projectId: string; readonly found: ReadonlySet<string> } | null>(null);
 
+/** Props that make an element without a web address (a file link) act as a link: the keyboard reaches it and Enter opens it. */
+export function fileLinkProps(title: string, open: () => void) {
+  return {
+    role: 'link', tabIndex: 0, title,
+    onClick: (event: MouseEvent<HTMLElement>) => { event.preventDefault(); event.stopPropagation(); open(); },
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); open(); } },
+  } as const;
+}
+
+/**
+ * Whether `reference` is a file inside the project the text below belongs to, asked of the desktop once;
+ * when it is, `open` opens it in the text editor. Until the desktop answers, or when it is not a file, this is null.
+ */
+export function useProjectFile(reference: string): { readonly open: () => void } | null {
+  const files = useContext(FileRefs), projectId = useContext(FileRefProject);
+  const [answer, setAnswer] = useState<{ readonly projectId: string; readonly reference: string } | null>(null);
+  useEffect(() => {
+    if (!files || !projectId || !fileReference(reference)) return;
+    let live = true;
+    files.resolve(projectId, [reference]).then(flags => { if (live && flags[0] === true) setAnswer({ projectId, reference }); }, () => {});
+    return () => { live = false; };
+  }, [files, projectId, reference]);
+  return files && projectId && answer && answer.projectId === projectId && answer.reference === reference ? { open: () => files.open(projectId, reference) } : null;
+}
+
 /** A found file reference as a link; `code` keeps the code look an unfound one has. */
 function FileLink({ text }: { readonly text: string }) {
   const files = useContext(FileRefs), found = useContext(FoundFiles), reference = fileReference(text);
   if (!files || !found || !reference) return null;
-  const click = (event: MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault(); event.stopPropagation();
-    files.open(found.projectId, text);
-  };
-  return <a className="md-link md-file" href="#" title={fileLinkTitle(reference)} onClick={click}><code className="md-code md-ref">{text}</code></a>;
+  return <a className="md-link md-file" {...fileLinkProps(fileLinkTitle(reference), () => files.open(found.projectId, text))}><code className="md-code md-ref">{text}</code></a>;
 }
 
 function Spans({ nodes, plain = false }: { readonly nodes: readonly Inline[]; /** Inside a link label: no links within links. */ readonly plain?: boolean }) {

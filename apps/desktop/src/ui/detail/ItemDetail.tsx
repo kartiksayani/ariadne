@@ -4,7 +4,7 @@
 // item is (head, delivery, outcome, why, children, links, timeline) scrolls
 // and ends in the conversation, oldest first; the owner's composer stays
 // docked under it (quick replies above a reply box that grows as you type).
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { sessionActionsFor } from '../../components/bindings/actions';
@@ -17,9 +17,10 @@ import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendi
 import { useGrow } from '../answer/useGrow';
 import { AnswerSlot, changedText } from './AnswerSlot';
 import { TimelineExcerpt } from '../shared/MessageExcerpt';
-import { FileRefProject, Markdown, singleParagraph } from '../shared/MarkdownText';
+import { FileRefProject, fileLinkProps, LinkOpener, Markdown, singleParagraph, useProjectFile } from '../shared/MarkdownText';
+import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { StatusBadge } from '../shared/StatusBadge';
-import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type OpenMode, type PendingView, type WordsKind } from './model';
+import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type LinkView, type OpenMode, type PendingView, type WordsKind } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
 import './detail.css';
 
@@ -130,6 +131,22 @@ function KidButton({ kid, onOpen }: { readonly kid: Kid; readonly onOpen: (id: s
   return <button type="button" className={`detail-kid${kid.closed ? ' detail-kid-closed' : ''}`} onClick={() => onOpen(kid.id)}>
     <span className="detail-kid-icon"><StatusBadge status={kid.status} variant="icon" size={15} /></span><span className="detail-kid-text">{kid.question}</span>
   </button>;
+}
+
+/**
+ * One of the item's links. A web address opens in the browser (and is the link's real address, shown on hover);
+ * a file opens in the text editor once the desktop finds it in the project's folder; anything else is plain text.
+ */
+function ItemLink({ link }: { readonly link: LinkView }) {
+  const open = useContext(LinkOpener), file = useProjectFile(link.target), web = safeHref(link.target);
+  const body = <><i className={link.icon} aria-hidden="true" /><span className="detail-link-label">{link.label}</span>{link.meta && <span className="detail-link-meta">{link.meta}</span>}</>;
+  if (web) {
+    const click = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); event.stopPropagation(); open(web); };
+    return <a className="detail-link" href={web} title={web} rel="noreferrer noopener" onClick={click}>{body}</a>;
+  }
+  const reference = fileReference(link.target);
+  if (file && reference) return <a className="detail-link" {...fileLinkProps(fileLinkTitle(reference), file.open)}>{body}</a>;
+  return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
 export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance }: ItemDetailProps) {
@@ -333,9 +350,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {model.links.length > 0 && <section className="detail-section detail-links" aria-label="Item links">
       {sectionLabel('Links')}
-      {model.links.map((link, index) => <a href="#" key={index} className="detail-link" onClick={event => event.preventDefault()}>
-        <i className={link.icon} aria-hidden="true" /><span className="detail-link-label">{link.label}</span>{link.meta && <span className="detail-link-meta">{link.meta}</span>}
-      </a>)}
+      {model.links.map((link, index) => <ItemLink key={index} link={link} />)}
     </section>}
 
     {provenance && item.origin && <section className="detail-section detail-provenance" aria-label="Original item">
