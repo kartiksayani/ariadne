@@ -18,6 +18,7 @@ import { TreeView, type RowIntent, type TreeViewProps } from '../../../src/ui/tr
 import type { PendingSubmission } from '../../../src/ui/answer/useSubmit';
 import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
+import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
 
 const stores: NavigationStore[] = [];
@@ -40,18 +41,19 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   if (load) await store.refresh();
   const actions = new SessionActionControllers(service).forSession(store), drafts = new OwnerDraftStore(service);
   const calls: Recorded = { selected: [], hovered: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0 };
+  const openLink = vi.fn();
   const hover = (id: string | null) => { calls.hovered.push(id); };
   function Harness(extra: Partial<TreeViewProps>) {
     const [selected, setSelected] = useState<string | null>(null);
-    return <TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
+    return <LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
       detailOpen={false} railOpen={false} highlightedItems={none} highlightedMessages={none} summaries={[]} now={now} onHoverItem={hover}
       onSelected={result => { calls.selected.push(result); if (result.kind === 'item') setSelected(result.route.item_id); }}
       onDismissReveal={() => { calls.dismissed++; }} onResume={() => { calls.resumed++; }} onAct={(intent, target) => { calls.acts.push([intent, target]); }}
       onClearFilters={() => { calls.cleared++; }} onShowArchive={() => { calls.archive++; }}
-      onRemove={() => { calls.removed++; }} {...props} {...extra} />;
+      onRemove={() => { calls.removed++; }} {...props} {...extra} /></LinkOpener.Provider>;
   }
   const view = render(<Harness />);
-  return { transport, navigation, store, actions, drafts, calls, rerender: (extra: Partial<TreeViewProps>) => view.rerender(<Harness {...extra} />) };
+  return { transport, navigation, store, actions, drafts, calls, openLink, rerender: (extra: Partial<TreeViewProps>) => view.rerender(<Harness {...extra} />) };
 }
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 const topicRow = (name: string) => screen.getByRole('treeitem', { name });
@@ -668,15 +670,15 @@ describe('item details in the tree', () => {
   const longOutcome = (transport: AppTransport) => { transport.sessions.get(route.session_id)!.items['1']!.outcome = long; };
   const more = (id: string) => within(row(id)).queryByRole('button', { name: /^Show (more|less)$/ });
 
-  it('folds a long preview to six lines with Show more and Show less, and none for short text', async () => {
+  it('folds a long preview to two lines with Show more and Show less, and none for short text', async () => {
     measure();
     const { calls } = await mount({ configure: longOutcome });
     const preview = row('1').querySelector<HTMLElement>('.tree-preview')!;
-    expect(preview.style.getPropertyValue('--tree-clamp')).toBe('6');
+    expect(preview.style.getPropertyValue('--tree-clamp')).toBe('2');
     expect(preview.hasAttribute('data-open')).toBe(false);
-    // Short details have no control; the title is never folded.
+    // Short details and titles have no control.
     expect(more('5')).toBeNull(); expect(more('3')).toBeNull();
-    expect(row('1').querySelector('.tree-question .tree-clamp')).toBeNull();
+    expect(row('1').querySelector('.tree-question')!.classList.contains('tree-clamp')).toBe(true);
     const button = more('1')!;
     expect(button.textContent).toBe('Show more'); expect(button.tabIndex).toBe(0); expect(button.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(button);
@@ -692,6 +694,68 @@ describe('item details in the tree', () => {
     fireEvent.click(more('1')!);
     expect(more('1')!.textContent).toBe('Show more');
     expect(row('1').querySelector('.tree-preview')!.hasAttribute('data-open')).toBe(false);
+  });
+
+  it('expands a long title even when the item has no excerpt and keeps badges outside both clamps', async () => {
+    measure();
+    await mount({ configure: transport => {
+      const item = transport.sessions.get(route.session_id)!.items['4']!;
+      item.question = 'A long title that needs more room. '.repeat(15);
+      item.outcome = null;
+    } });
+    expect(more('4')?.textContent).toBe('Show more');
+    expect(row('4').querySelector('.tree-end .tree-clamp')).toBeNull();
+    expect(row('4').querySelector('.tree-end')).not.toBeNull();
+    fireEvent.click(more('4')!);
+    expect(row('4').hasAttribute('data-open')).toBe(true);
+    expect(more('4')?.textContent).toBe('Show less');
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    expect(css).toMatch(/-webkit-line-clamp: var\(--tree-clamp, 2\)/);
+    expect(css).toMatch(/\.tree-item\[data-open\] \.tree-clamp\s*\{[^}]*overflow: visible/s);
+  });
+
+  it('formats compact excerpts and opens external and item links without selecting their containing row', async () => {
+    const { calls, openLink } = await mount({ configure: transport => {
+      transport.sessions.get(route.session_id)!.items['1']!.outcome = '**Bold** and `code`, [website](https://example.com) and [next item](item:4).\n\n| Name | Value |\n| --- | --- |\n| Result | **Ready** |';
+    } });
+    const excerpt = row('1').querySelector('.tree-outcome')!;
+    expect(excerpt.querySelector('strong')?.textContent).toBe('Bold');
+    expect(excerpt.querySelector('code')?.textContent).toBe('code');
+    expect(excerpt.querySelector('table')).toBeNull();
+    expect(excerpt.textContent).not.toMatch(/\||---|\*\*|\]\(/);
+    fireEvent.click(within(row('1')).getByRole('link', { name: 'website' }));
+    expect(openLink).toHaveBeenCalledWith('https://example.com');
+    expect(calls.selected).toHaveLength(0);
+    expect(more('1')?.textContent).toBe('Show more');
+    fireEvent.click(within(row('1')).getByRole('link', { name: 'next item' }));
+    await waitFor(() => expect(calls.selected).toHaveLength(1));
+    expect(calls.selected[0]).toMatchObject({ kind: 'item', route: { item_id: '4' } });
+    expect(row('1').getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(more('1')!);
+    expect(within(row('1')).getByRole('table')).toBeTruthy();
+    expect(within(row('1')).getByRole('cell', { name: 'Ready' }).querySelector('strong')).toBeTruthy();
+    fireEvent.click(within(row('1')).getByRole('link', { name: 'website' }));
+    expect(openLink).toHaveBeenCalledTimes(2);
+    expect(calls.selected).toHaveLength(1);
+    fireEvent.click(more('1')!);
+  });
+
+  it('groups each topic with its items and separates roots more than children with continuous guides', async () => {
+    await mount();
+    const groups = document.querySelectorAll('.tree-topic-group');
+    expect(groups).toHaveLength(2);
+    expect(groups[0]!.firstElementChild).toBe(topicRow('Delivery decisions'));
+    expect(groups[0]!.contains(row('7'))).toBe(true);
+    expect(groups[0]!.contains(row('8'))).toBe(false);
+    expect(groups[1]!.lastElementChild).toBe(row('8'));
+    expect(row('1').classList.contains('tree-item-root')).toBe(true);
+    expect(row('1.1').classList.contains('tree-item-child')).toBe(true);
+    expect(row('1.1').querySelector('.tree-elbow')).not.toBeNull();
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0;[^}]*background: var\(--a-side\)/s);
+    expect(css).toMatch(/\.tree-item\s*\{[^}]*padding-top: 12px;[^}]*padding-bottom: 14px;[^}]*border-bottom: 1px solid var\(--color-divider\)/s);
+    expect(css).toMatch(/\.tree-item-root\s*\{[^}]*padding-top: 20px/s);
+    expect(css).toMatch(/scroll-padding-top: var\(--tree-header-height, 0\)/);
   });
 
   it('keeps an item’s details while a message to the agent is on its way', async () => {
@@ -822,6 +886,50 @@ describe('scrolling the tree', () => {
     // The last row's bottom (840) lands 8 px above the tree's bottom: 840 + 8 - 400.
     expect(scroller().scrollTop).toBe(448);
     expect(row('8').getBoundingClientRect().top).toBe(352);
+  });
+
+  it('reveals a row hidden by its topic header using the least movement and restores below that header', async () => {
+    layout();
+    const rect = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      return rect.call(this);
+    });
+    const view = await mount();
+    scroller().scrollTop = 190;
+    const target = link(view, '2'); // top 10: on screen, but behind the 60 px band.
+    view.rerender({ reveal: target, historyReveal: target, selectedId: '2' });
+    expect(row('2').getBoundingClientRect().top).toBe(60);
+    expect(scroller().scrollTop).toBe(140);
+    fireEvent.scroll(scroller());
+    expect(scroller().style.getPropertyValue('--tree-header-height')).toBe('60px');
+    const outside = document.createElement('button'); document.body.append(outside);
+    row('2').focus(); outside.focus();
+    await waitFor(() => expect(viewOf(view.transport).scroll).toEqual({ item_id: '2', offset: 0 }));
+    cleanup();
+    await mount({ transport: view.transport });
+    expect(row('2').getBoundingClientRect().top).toBe(60);
+    outside.remove();
+  });
+
+  it.each([12, -40])('restores the same reading position when a header is at %s px during a topic transition', async headerTop => {
+    layout();
+    const rect = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.tree-topic')) return new DOMRect(0, headerTop, 300, 60);
+      return rect.call(this);
+    });
+    const view = await mount();
+    scroller().scrollTop = 150;
+    fireEvent.scroll(scroller());
+    const before = row('2').getBoundingClientRect().top;
+    const outside = document.createElement('button'); document.body.append(outside);
+    row('2').focus(); outside.focus();
+    await waitFor(() => expect(viewOf(view.transport).scroll).toEqual({ item_id: '2', offset: before - 60 }));
+    cleanup();
+    await mount({ transport: view.transport });
+    expect(row('2').getBoundingClientRect().top).toBe(before);
+    outside.remove();
   });
 
   // The first row grows by `grow` px (a live edit made it longer); every row below it moves down with it.

@@ -126,6 +126,37 @@ function Blocks({ blocks }: { readonly blocks: readonly Block[] }): ReactNode {
   });
 }
 
+/** Line breaks also flatten inside emphasis and link labels. */
+function compactInline(nodes: readonly Inline[]): Inline[] {
+  return nodes.map(node => {
+    if (typeof node === 'string') return node;
+    if (node.t === 'br') return ' ';
+    if ('children' in node) return { ...node, children: compactInline(node.children) };
+    return node;
+  });
+}
+
+/** A compact excerpt keeps formatting and links while flattening blocks into one flowing sentence. */
+function compactSpans(blocks: readonly Block[]): Inline[] {
+  const out: Inline[] = [];
+  const append = (nodes: readonly Inline[]) => {
+    if (out.length) out.push(' · ');
+    out.push(...compactInline(nodes));
+  };
+  for (const block of blocks) {
+    switch (block.t) {
+      case 'p': case 'h': append(block.children); break;
+      case 'code': append([{ t: 'code', text: block.text.replace(/\n/g, ' ') }]); break;
+      case 'quote': append(compactSpans(block.children)); break;
+      case 'list': block.items.forEach(item => append(compactSpans(item))); break;
+      // Cell labels and values, without the pipe syntax or separator row.
+      case 'table': block.head.forEach(append); block.rows.forEach(row => row.forEach(append)); break;
+      case 'hr': break;
+    }
+  }
+  return out;
+}
+
 /** Whether `text` reads as one paragraph, so it can sit inline (inside quotes or a sentence). */
 export function singleParagraph(text: string): boolean {
   const { blocks, rest } = parseMarkdown(text);
@@ -136,10 +167,11 @@ export function singleParagraph(text: string): boolean {
  * Agent text as Markdown: paragraphs, line breaks, lists, quotes, code, tables, emphasis and safe links.
  * `inline` renders a one-paragraph text as a span, so short text keeps its line; longer text stays blocks.
  */
-export function Markdown({ text, className, inline = false }: { readonly text: string; readonly className?: string; readonly inline?: boolean }) {
+export function Markdown({ text, className, inline = false, compact = false }: { readonly text: string; readonly className?: string; readonly inline?: boolean; readonly compact?: boolean }) {
   const parsed = useMemo(() => parseMarkdown(text), [text]);
   const found = useFoundFiles(parsed.blocks);
   const name = className ? `md ${className}` : 'md', only = parsed.blocks[0];
+  if (compact) return <FoundFiles.Provider value={found}><span className={name}><Spans nodes={compactSpans(parsed.blocks)} />{parsed.rest && ' …'}</span></FoundFiles.Provider>;
   if (inline && !parsed.rest && parsed.blocks.length === 1 && only.t === 'p') return <FoundFiles.Provider value={found}><span className={name}><Spans nodes={only.children} /></span></FoundFiles.Provider>;
   return <FoundFiles.Provider value={found}><div className={name}>
     <Blocks blocks={parsed.blocks} />

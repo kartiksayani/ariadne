@@ -6,12 +6,14 @@ import { createDesktopService } from '../../../apps/desktop/src/data/service';
 import { AppTransport, route } from '../../../apps/desktop/tests/ui/app/transport';
 
 // The ordinary App over its real stores; only the native transport is replaced.
-// Item 1 carries a long finding (it must fold to six lines), item 5 a paragraph that
+// Item 1 carries a long finding (it must fold to two lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
   constructor() {
     super();
     const items = this.sessions.get(route.session_id)!.items;
+    items['1']!.question = 'A long item title with enough words to span several lines in a narrow tree. '.repeat(5);
+    for (let n = 9; n <= 18; n++) items[String(n)] = { ...items['8']!, id: String(n), ordinal: n, question: `Another item ${n}`, outcome: 'A short result.' };
     items['1']!.outcome = Array.from({ length: 20 }, (_, index) => `Line ${index + 1} of a long finding the agent wrote.`).join('\n');
     items['5']!.outcome = 'A decision paragraph that is long enough to wrap over several lines in the tree column, so that any change in the width of its '
       + 'column on hover would move words from one line to the next and show up as a different line count.';
