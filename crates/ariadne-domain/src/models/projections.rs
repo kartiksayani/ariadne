@@ -135,6 +135,9 @@ pub struct ItemSnapshot {
     #[serde(rename = "type")]
     pub item_type: ItemType,
     pub status: ItemStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub ack_to: Option<AckTarget>,
     pub owner: ItemOwner,
     pub revision: PositiveSafeInteger,
     pub question_revision: PositiveSafeInteger,

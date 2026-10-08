@@ -24,6 +24,7 @@ pub enum ItemChange {
     },
     Status {
         status: ItemStatus,
+        ack_to: Option<AckTarget>,
         outcome: Option<String>,
         why: Option<String>,
         reason: Option<String>,
@@ -150,6 +151,7 @@ pub fn transition_item(
         }
         ItemChange::Status {
             status,
+            ack_to,
             outcome,
             why,
             reason,
@@ -162,16 +164,22 @@ pub fn transition_item(
             if !validation::terminal(status) {
                 let reason = reason.as_ref().ok_or(TransitionError::MissingReason)?;
                 validation::text(reason, "status.reason", true, None)?;
-                if outcome.is_some() || why.is_some() {
+                if ack_to.or(old.ack_to).is_none() && (outcome.is_some() || why.is_some()) {
                     return Err(TransitionError::InvalidTransition);
                 }
             } else {
+                if old.ack_to.is_some() || ack_to.is_some() {
+                    return Err(TransitionError::InvalidTransition);
+                }
                 terminal_guard(session, old, context)?;
             }
             validation::optional_text(reason, "status.reason", true, None)?;
             item.status = status.clone();
-            item.outcome = outcome.clone();
-            item.why = why.clone();
+            item.ack_to = ack_to.or(old.ack_to);
+            item.outcome = outcome
+                .clone()
+                .or_else(|| item.ack_to.and(old.outcome.clone()));
+            item.why = why.clone().or_else(|| item.ack_to.and(old.why.clone()));
             item.replaced_by = None;
             leave_waiting(&mut item, old)?;
             history(&mut item, old, context, reason.clone());
@@ -181,7 +189,7 @@ pub fn transition_item(
             outcome,
             why,
         } => {
-            if old.status == ItemStatus::Replaced {
+            if old.status == ItemStatus::Replaced || old.ack_to.is_some() {
                 return Err(TransitionError::InvalidTransition);
             }
             terminal_guard(session, old, context)?;
@@ -192,6 +200,9 @@ pub fn transition_item(
             leave_waiting(&mut item, old)?;
             history(&mut item, old, context, None);
         }
+    }
+    if validation::terminal(&item.status) {
+        item.ack_to = None;
     }
     item.revision = increment(item.revision)?;
     item.updated_at = context.at.clone();

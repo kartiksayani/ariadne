@@ -84,6 +84,7 @@ fn add(name: &str, topic: UuidRef, parent: Option<EntityRef>, waiting: bool) -> 
         parent,
         question: "Complete new question?".into(),
         short: None,
+        ack_to: None,
         item_type: ItemType::Question,
         status: if waiting {
             ItemStatus::WaitingOnMe
@@ -781,6 +782,7 @@ fn terminal_status_watermark_and_reopen_replace_history_use_domain_guards() {
     setup.prepare(TurnState::Running);
     let mut r = guarded(10, "1", setup.saved().items.0[&item("1")].revision.value());
     r.operations = vec![Operation::ItemStatus {
+        ack_to: None,
         item: existing("1"),
         status: ItemStatus::Done,
         outcome: Some("Resolved explicitly".into()),
@@ -810,6 +812,7 @@ fn terminal_status_watermark_and_reopen_replace_history_use_domain_guards() {
     let mut next = guarded(11, "1", setup.saved().items.0[&item("1")].revision.value());
     next.operations = vec![
         Operation::ItemStatus {
+            ack_to: None,
             item: existing("1"),
             status: ItemStatus::Open,
             outcome: None,
@@ -874,6 +877,7 @@ fn agent_writes_to_an_archived_topic_refuse_with_topic_archived_until_restore() 
     });
     let mut status = guarded(20, "1", 1);
     status.operations = vec![Operation::ItemStatus {
+        ack_to: None,
         item: existing("1"),
         status: ItemStatus::Done,
         outcome: Some("Resolved explicitly".into()),
@@ -1399,4 +1403,207 @@ fn short_labels_are_stored_trimmed_and_absent_keeps_null_clears() {
         );
         setup.rejected(&r, CoreErrorCode::InvalidArgument);
     }
+}
+#[test]
+fn strict_creation_rejects_every_terminal_state_without_touching_store() {
+    let setup = Setup::new(&seed());
+    for status in [
+        ItemStatus::Decided,
+        ItemStatus::Done,
+        ItemStatus::Dropped,
+        ItemStatus::Replaced,
+    ] {
+        let mut request = request(990);
+        let mut operation = add("new", uuid(5), None, false);
+        let Operation::ItemAdd(draft) = &mut operation else {
+            unreachable!()
+        };
+        draft.status = status;
+        draft.outcome = Some("Proposed outcome".into());
+        draft.why = Some("Reason".into());
+        request.operations.push(operation);
+        assert_eq!(
+            request.validate_wire().unwrap_err().code,
+            CoreErrorCode::InvalidArgument
+        );
+        let before = setup.bytes();
+        assert_eq!(
+            core_error(setup.execute(&request).unwrap_err()).code,
+            CoreErrorCode::InvalidArgument
+        );
+        assert_eq!(setup.bytes(), before);
+    }
+}
+
+#[test]
+fn batch_cannot_complete_an_item_created_in_that_batch() {
+    let setup = Setup::new(&seed());
+    for status in [ItemStatus::Decided, ItemStatus::Done, ItemStatus::Dropped] {
+        let mut r = request(990);
+        r.operations.push(add("new", uuid(5), None, false));
+        r.operations.push(Operation::ItemStatus {
+            ack_to: None,
+            item: local("new"),
+            status,
+            outcome: Some("Outcome".into()),
+            why: Some("Reason".into()),
+            reason: None,
+        });
+        let before = setup.bytes();
+        assert_eq!(
+            core_error(setup.execute(&r).unwrap_err()).code,
+            CoreErrorCode::InvalidArgument
+        );
+        assert_eq!(setup.bytes(), before);
+    }
+    let mut r = guarded(990, "2", 1);
+    r.operations.push(add("new", uuid(5), None, false));
+    r.operations.push(Operation::ItemReplace {
+        item: local("new"),
+        replacement: existing("2"),
+        outcome: "Outcome".into(),
+        why: "Reason".into(),
+    });
+    assert_eq!(
+        core_error(setup.execute(&r).unwrap_err()).code,
+        CoreErrorCode::InvalidArgument
+    );
+}
+
+#[test]
+fn open_creation_with_ack_proposal_preserves_completion_prose() {
+    let setup = Setup::new(&seed());
+    let mut r = request(990);
+    let mut op = add("new", uuid(5), None, false);
+    let Operation::ItemAdd(draft) = &mut op else {
+        unreachable!()
+    };
+    draft.ack_to = Some(AckTarget::Done);
+    draft.outcome = Some("Exact complete result.".into());
+    draft.why = Some("Exact justification.".into());
+    r.operations.push(op);
+    let result = setup.execute(&r).unwrap();
+    let SavedReceiptData::Apply { allocated_refs, .. } = result.data else {
+        unreachable!()
+    };
+    let AllocatedRef::Item { id } = &allocated_refs.0[&RequestRef::new("new").unwrap()] else {
+        unreachable!()
+    };
+    let saved = setup.saved();
+    let item = &saved.items.0[id];
+    assert_eq!(item.status, ItemStatus::Open);
+    assert_eq!(item.ack_to, Some(AckTarget::Done));
+    assert_eq!(item.outcome.as_deref(), Some("Exact complete result."));
+    assert_eq!(item.why.as_deref(), Some("Exact justification."));
+}
+
+#[test]
+fn agents_finish_summaries_by_proposing_ack_and_cannot_close_them() {
+    for status in [ItemStatus::Open, ItemStatus::InProgress] {
+        let mut source = seed();
+        let summary = source.items.0.get_mut(&item("1")).unwrap();
+        summary.status = ItemStatus::InProgress;
+        summary.ask = None;
+        summary.waiting_since = None;
+        let setup = Setup::new(&source);
+        let mut r = guarded(991, "1", 1);
+        r.operations.push(Operation::ItemStatus {
+            item: existing("1"),
+            status: status.clone(),
+            ack_to: Some(AckTarget::Done),
+            outcome: Some("Exact finished summary\nwith all details.".into()),
+            why: Some("Verified locally.".into()),
+            reason: Some("Finished work.".into()),
+        });
+        setup.execute(&r).unwrap();
+        let saved = setup.saved();
+        let summary = &saved.items.0[&item("1")];
+        assert_eq!(summary.status, status);
+        assert_eq!(summary.ack_to, Some(AckTarget::Done));
+        for target in [ItemStatus::Decided, ItemStatus::Done, ItemStatus::Dropped] {
+            let mut close = guarded(992, "1", summary.revision.value());
+            close.operations.push(Operation::ItemStatus {
+                item: existing("1"),
+                status: target,
+                ack_to: None,
+                outcome: Some("Agent tried to finish.".into()),
+                why: Some("Done.".into()),
+                reason: None,
+            });
+            let err = core_error(setup.execute(&close).unwrap_err());
+            assert_eq!(err.code, CoreErrorCode::InvalidTransition);
+            assert!(err.message.contains("owner's Ack"));
+            assert_eq!(setup.saved(), saved);
+        }
+        let mut replace = guarded(993, "1", summary.revision.value());
+        replace.operations.push(Operation::ItemReplace {
+            item: existing("1"),
+            replacement: existing("2"),
+            outcome: "Replaced.".into(),
+            why: "Newer.".into(),
+        });
+        setup.rejected(&replace, CoreErrorCode::InvalidTransition);
+        let mut progress = guarded(994, "1", summary.revision.value());
+        progress.operations.push(Operation::ItemStatus {
+            item: existing("1"),
+            status: ItemStatus::InProgress,
+            ack_to: None,
+            outcome: None,
+            why: None,
+            reason: Some("Rechecking.".into()),
+        });
+        setup.execute(&progress).unwrap();
+        let retained = setup.saved();
+        let retained = &retained.items.0[&item("1")];
+        assert_eq!(retained.ack_to, summary.ack_to);
+        assert_eq!(retained.outcome, summary.outcome);
+        assert_eq!(retained.why, summary.why);
+    }
+}
+
+#[test]
+fn strict_filing_requires_an_answer_round_and_ack_never_hides_an_unanswered_question() {
+    let setup = Setup::new(&seed());
+    for status in [ItemStatus::Open, ItemStatus::InProgress] {
+        let mut r = request(995);
+        let mut op = add("ask", uuid(5), None, true);
+        let Operation::ItemAdd(draft) = &mut op else {
+            unreachable!()
+        };
+        draft.status = status;
+        draft.ack_to = Some(AckTarget::Done);
+        r.operations.push(op);
+        setup.rejected(&r, CoreErrorCode::InvalidArgument);
+    }
+    let mut r = request(996);
+    let mut op = add("ask", uuid(5), None, true);
+    let Operation::ItemAdd(draft) = &mut op else {
+        unreachable!()
+    };
+    draft.ack_to = Some(AckTarget::Done);
+    draft.outcome = Some("Proposed result.".into());
+    r.operations.push(op);
+    let receipt = setup.execute(&r).unwrap();
+    let SavedReceiptData::Apply { allocated_refs, .. } = receipt.data else {
+        unreachable!()
+    };
+    let AllocatedRef::Item { id: ask } = &allocated_refs.0[&RequestRef::new("ask").unwrap()] else {
+        unreachable!()
+    };
+    let saved = setup.saved();
+    assert!(saved.items.0[ask].current_round_id.is_some());
+    assert!(ariadne_core::queries::waiting_unanswered(
+        &saved,
+        &saved.items.0[ask]
+    ));
+    let mut hide = guarded(997, ask.as_str(), 1);
+    hide.operations.push(Operation::ItemStatus {
+        item: existing(ask.as_str()),
+        status: ItemStatus::Open,
+        ack_to: Some(AckTarget::Done),
+        outcome: None,
+        why: None,
+        reason: Some("Finished.".into()),
+    });
+    setup.rejected(&hide, CoreErrorCode::InvalidTransition);
 }

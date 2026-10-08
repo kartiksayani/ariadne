@@ -287,6 +287,52 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
         change: ItemChange,
     ) -> Result<(), CoreError> {
         self.target(session, id)?;
+        if matches!(&change, ItemChange::Status { status: ItemStatus::Open | ItemStatus::InProgress, ack_to, .. }
+            if ack_to.is_some() || session.items.0[id].ack_to.is_some())
+            && session.items.0[id].ask.is_some()
+            && crate::queries::question_unanswered(session, &session.items.0[id])
+        {
+            return Err(core(
+                CoreErrorCode::InvalidTransition,
+                "A question still waits for the owner; keep it waiting_on_me until they answer before proposing Ack",
+            ));
+        }
+        if session.items.0[id].ack_to.is_some()
+            && matches!(
+                &change,
+                ItemChange::Replace { .. }
+                    | ItemChange::Status {
+                        status: ItemStatus::Decided
+                            | ItemStatus::Done
+                            | ItemStatus::Dropped
+                            | ItemStatus::Replaced,
+                        ..
+                    }
+            )
+        {
+            return Err(core(
+                CoreErrorCode::InvalidTransition,
+                "This item is waiting for the owner's Ack; keep it open with ack_to until they acknowledge it",
+            ));
+        }
+        if !self.original_items.contains(id)
+            && matches!(
+                &change,
+                ItemChange::Replace { .. }
+                    | ItemChange::Status {
+                        status: ItemStatus::Decided
+                            | ItemStatus::Done
+                            | ItemStatus::Dropped
+                            | ItemStatus::Replaced,
+                        ..
+                    }
+            )
+        {
+            return Err(core(
+                CoreErrorCode::InvalidArgument,
+                "A newly created item must remain nonterminal; propose completion with ack_to",
+            ));
+        }
         let cause = self.cause(session, id);
         let context = TransitionContext {
             binding_id: self.context.binding_id().clone(),
@@ -369,6 +415,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             Operation::ItemStatus {
                 item,
                 status,
+                ack_to,
                 outcome,
                 why,
                 reason,
@@ -379,6 +426,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                     &id,
                     ItemChange::Status {
                         status: status.clone(),
+                        ack_to: *ack_to,
                         outcome: outcome.clone(),
                         why: why.clone(),
                         reason: reason.clone(),
@@ -540,6 +588,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             short: short_label(draft.short.as_deref())?,
             item_type: draft.item_type.clone(),
             status: draft.status.clone(),
+            ack_to: draft.ack_to,
             owner: draft.owner.clone(),
             revision: one(),
             question_revision: one(),

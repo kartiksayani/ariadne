@@ -459,9 +459,24 @@ fn copy(
                 reason: Some(why.clone()),
             });
             item.status = ItemStatus::Dropped;
+            item.ack_to = None;
             item.outcome = Some(outcome.clone());
             item.why = Some(why.clone());
             item.replaced_by = None;
+        }
+        if matches!(item.status, ItemStatus::Open | ItemStatus::InProgress)
+            && item.ask.is_some()
+            && item.current_round_id.is_none()
+            && crate::queries::question_unanswered(target, &item)
+        {
+            restore_question(
+                target,
+                &mut item,
+                &params.target_binding_id,
+                &mut ids,
+                allocate,
+                at,
+            )?;
         }
         item.origin = Some(ItemOrigin {
             project_id: source.project_id.clone(),
@@ -561,4 +576,86 @@ fn copy(
     // Capacity check only: a UUID-length stand-in sizes the future attempt id.
     crate::delivery::format::body(target, &target.inputs.0[&input_id], &input_id)?;
     Ok(SavedReceiptData::Continuation { continuation })
+}
+
+/// Legacy Open asks have no owner answer route. Continue makes their copied
+/// question visible and answerable without reopening completed/answered work.
+fn restore_question(
+    target: &mut Session,
+    item: &mut Item,
+    binding_id: &UuidV4,
+    ids: &mut BTreeSet<UuidV4>,
+    allocate: &mut impl FnMut() -> UuidV4,
+    at: &UtcMillis,
+) -> Result<(), CoreError> {
+    let round_id = fresh(ids, allocate)?;
+    let message_id = fresh(ids, allocate)?;
+    let ordinal = target
+        .rounds
+        .0
+        .values()
+        .filter(|round| round.item_id == item.id)
+        .map(|round| round.ordinal)
+        .max()
+        .map(increment)
+        .transpose()?
+        .unwrap_or_else(|| PositiveSafeInteger::new(1).unwrap());
+    item.status_history.push(StatusHistoryEntry {
+        old_status: item.status.clone(),
+        new_status: ItemStatus::WaitingOnMe,
+        previous_outcome: item.outcome.clone(),
+        previous_why: item.why.clone(),
+        previous_replaced_by: None,
+        cause_message_id: message_id.clone(),
+        at: at.clone(),
+        binding_id: None,
+        handled_through_message_number: NonnegativeSafeInteger::new(0).unwrap(),
+        reason: Some("Imported unanswered ask with an owner question round".into()),
+    });
+    item.status = ItemStatus::WaitingOnMe;
+    item.owner = ItemOwner::Me {};
+    item.waiting_since = Some(at.clone());
+    item.recipient_binding_id = Some(binding_id.clone());
+    item.current_round_id = Some(round_id.clone());
+    item.updated_at = at.clone();
+    item.updated_message_ids.push(message_id.clone());
+    target.rounds.0.insert(
+        round_id.clone(),
+        Round {
+            id: round_id.clone(),
+            item_id: item.id.clone(),
+            ordinal,
+            opened_message_id: message_id.clone(),
+            question_snapshot: item.question.clone(),
+            ask_snapshot: item.ask.clone(),
+            options_snapshot: item.options.clone(),
+            question_revision: item.question_revision,
+            owner_message_ids: vec![],
+            agent_message_ids: vec![],
+            result_input_ids: vec![],
+            fork_item_ids: vec![],
+            closed_at: None,
+            origin: None,
+        },
+    );
+    let number = target.counters.next_message;
+    target.counters.next_message = increment(number)?;
+    target.messages.push(Message {
+        id: message_id,
+        number,
+        author: MessageAuthor::System,
+        kind: MessageKind::Lifecycle,
+        body: "Imported unanswered ask as Waiting on me with an owner question round.".into(),
+        created_at: at.clone(),
+        item_id: Some(item.id.clone()),
+        topic_id: Some(item.topic_id.clone()),
+        items_touched: vec![item.id.clone()],
+        binding_id: None,
+        input_id: None,
+        attempt_id: None,
+        host_turn_id: None,
+        round_id: None,
+        origin: None,
+    });
+    Ok(())
 }

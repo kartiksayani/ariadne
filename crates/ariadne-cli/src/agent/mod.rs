@@ -25,8 +25,9 @@ Read source scope: add both --source-input UUID and --attempt UUID, or neither.
 --archived keeps only archived topics (and the items in them).
 Stdin is the complete canonical SessionReadRequest, ItemMessagesRequest,
 ItemRoundsRequest or ApplyRequest (not an actor/context envelope), at most 512KiB.
-Apply stdin may leave out defaulted fields (below); a fully explicit ApplyRequest
-works unchanged. A malformed stdin request fails with exit 2 and the parser's message
+Apply stdin may leave out defaulted fields (below); creation statuses decided,
+done and dropped are repaired to open with ack_to, including recursive children.
+A malformed stdin request fails with exit 2 and the parser's message
 (offending field, variant or type, with its position in operations); fix that
 and send the corrected request. An omitted op_id is derived from the request, so
 after an uncertain commit, a timeout or a killed call (exit 4 or no reply) the
@@ -52,15 +53,27 @@ validates it exactly as before):
   reply_refs and followup_item_refs = [].
   Nesting: item.add may carry "children": [item.add objects, recursively]. Each
   child's parent is its enclosing item, its topic is inherited, order is kept.
-  Still required: type and question on item.add; outcome and why for done,
-  decided and dropped; expected_item_revisions for every existing item you touch.
+  Owner Ack: new items stay nonterminal. Creation status decided/done/dropped
+  becomes open with ack_to = that status; outcome and why are preserved. An
+  explicit open with ack_to is accepted. Conflicting status and ack_to are refused;
+  replaced creation is refused. item.status open/in_progress can set ack_to;
+  finish summaries open with ack_to. Never close or replace an item with ack_to:
+  only the owner can Ack it. An ask can coexist, but Ack waits until no owner
+  question is pending. Legacy terminal status updates stay open for owner Ack.
+  An item.add with an ask stays waiting_on_me even if open/in_progress was given;
+  it may retain ack_to. item.ask also keeps an existing Ack target.
+  Still required: type and question on item.add; outcome and why when changing
+  an existing item to done/decided/dropped; expected_item_revisions for every
+  existing item you touch.
 Example (a topic, a summary item with one child, one ask with two options):
-  printf '%s' '{"operations":[{"op":"topic.add","name":"Cache PR review","short":"Cache PR"},{"op":"item.add","short":"Review result","type":"finding","question":"Review finished: one race, one choice","status":"done","outcome":"Reviewed","why":"Read every changed file","children":[{"short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"done","outcome":"Confirmed","why":"Reproduced locally"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Merge the fallback path now?","ask":"Merge now or wait?","options":[{"label":"Merge now","consequence":"Ships today"},{"label":"Wait","consequence":"Ships next week"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
+  printf '%s' '{"operations":[{"op":"topic.add","name":"Cache PR review","short":"Cache PR"},{"op":"item.add","short":"Review result","type":"finding","question":"Review finished: one race, one choice","status":"open","ack_to":"done","outcome":"Reviewed","why":"Read every changed file","children":[{"short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"open","ack_to":"done","outcome":"Confirmed","why":"Reproduced locally"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Merge the fallback path now?","ask":"Merge now or wait?","options":[{"label":"Merge now","consequence":"Ships today"},{"label":"Wait","consequence":"Ships next week"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
 Receipt (default, compact; data of the --json envelope):
   {"op_id":"...","session_revision":3,"topics":[{"id":"UUID","number":2,"short":"Cache PR","revision":1,"created":true}],"items":[{"id":"4","short":"Review result","revision":1,"created":true},{"id":"4.1","short":"Fill race","revision":1,"created":true}]}
   An item id is its number (1.2). revision is the value to send as the next
   expected_item_revisions entry. --full prints the complete saved receipt
-  (allocated_refs, messages, every revision). --dry-run runs every check against
+  (allocated_refs, messages, every revision). Repairs are explained in the compact
+  receipt's repairs array, or as stderr notes with --full, including retries.
+  --dry-run runs every check against
   the current session, commits nothing and prints the same compact form with
   "dry_run":true (--full adds the full receipt shape).
 
@@ -93,12 +106,8 @@ pub fn run(
             4
         };
     }
-    crate::output::write(
-        execute(args, input),
-        args.contains(&"--json"),
-        output,
-        errors,
-    )
+    let result = execute(args, input, errors);
+    crate::output::write(result, args.contains(&"--json"), output, errors)
 }
 
 enum Tool {
@@ -118,8 +127,13 @@ struct ApplyCall {
     full: bool,
     /// Set when the CLI chose the `op_id` itself.
     generated_op_id: Option<UuidV4>,
+    repairs: Vec<String>,
 }
-fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, CoreError> {
+fn execute(
+    args: &[&str],
+    input: &mut dyn Read,
+    errors: &mut dyn Write,
+) -> Result<serde_json::Value, CoreError> {
     let tool = parse(args, input)?;
     match &tool {
         Tool::Read(call) => call.request.validate_wire()?,
@@ -183,7 +197,20 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
     match tool {
         Tool::Apply(call) => {
             let generated = call.generated_op_id.clone();
-            run_apply(&core, context, call).map_err(|error| name_generated_op(error, generated))
+            let notes = if call.full {
+                call.repairs.clone()
+            } else {
+                vec![]
+            };
+            let result = run_apply(&core, context, call)
+                .map_err(|error| name_generated_op(error, generated));
+            if result.is_ok() {
+                for note in notes {
+                    // Advisory stderr must not turn a saved receipt into an apply failure.
+                    let _ = writeln!(errors, "Repair: {note}");
+                }
+            }
+            result
         }
         query => {
             let request = match query {
@@ -231,6 +258,9 @@ fn run_apply(
             if preview.replayed {
                 object.insert("replayed".into(), true.into());
             }
+            if !call.full && !call.repairs.is_empty() {
+                object.insert("repairs".into(), serde_json::json!(call.repairs));
+            }
         }
         return Ok(shown);
     }
@@ -249,6 +279,11 @@ fn run_apply(
     if replayed && !call.full {
         if let Some(object) = shown.as_object_mut() {
             object.insert("replayed".into(), true.into());
+        }
+    }
+    if !call.full && !call.repairs.is_empty() {
+        if let Some(object) = shown.as_object_mut() {
+            object.insert("repairs".into(), serde_json::json!(call.repairs));
         }
     }
     Ok(shown)
@@ -452,6 +487,7 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
                 dry_run: flags.contains_key("--dry-run"),
                 full: flags.contains_key("--full"),
                 generated_op_id: expanded.generated_op_id,
+                repairs: expanded.repairs,
             }))
         }
         "read" => {

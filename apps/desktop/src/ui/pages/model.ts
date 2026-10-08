@@ -200,7 +200,13 @@ export function archivedTopics(summaries: readonly Immutable<SessionSummary>[], 
 export interface ContinueGroup { readonly title: string; readonly icon: string; readonly color: string; readonly lines: readonly { readonly id: string; readonly text: string }[] }
 /** The four groups of the Continue dialog (Ariadne.dc.html:1745-1760), from the preview's mapping. */
 export function continueGroups(source: Immutable<Session>, preview: Immutable<ContinuePreview>): ContinueGroup[] {
-  const items = preview.mapping.flatMap(mapping => { const item = source.items[mapping.source_item_id]; return item && item.topic_id === preview.source_topic_id ? [item] : []; });
+  const items = preview.mapping.flatMap(mapping => {
+    const item = source.items[mapping.source_item_id];
+    if (!item || item.topic_id !== preview.source_topic_id) return [];
+    return [mapping.action.kind === 'imported_drop'
+      ? { ...item, status: 'dropped' as const, replaced_by: null, outcome: mapping.action.outcome, why: mapping.action.why }
+      : item];
+  });
   const group = (title: string, status: VisualStatus, statuses: readonly ItemStatus[], text: (item: Immutable<Item>) => string): ContinueGroup | null => {
     const list = items.filter(item => statuses.includes(item.status));
     return list.length ? { title: `${title} · ${list.length}`, icon: ICON[status], color: `var(--st-${status})`, lines: list.map(item => ({ id: item.id, text: text(item) })) } : null;

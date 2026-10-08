@@ -16,8 +16,22 @@
   send a string to replace it, `null` to clear it.
 - Limits: `question`, `ask`, `note`, `outcome`, `why` at most 4096 bytes, `reply`
   64 KiB, 100 operations, 12 options and 32 links per item.
-- Types: question, decision, finding, task, explanation. Statuses: `open` and
-  `in_progress` take a `reason` (only in `item.status`); `decided`, `done` and
+- `item.add` never creates terminal items. Read-only results use `open` with
+  `ack_to`: `decided`, `done` or `dropped` (never `replaced`). `ack_to` requires
+  a nonterminal item; it may coexist with an ask on `waiting_on_me`, but Ack is
+  offered only on `open` or `in_progress` when no owner question is pending.
+  `outcome` and `why` preserve the
+  result and evidence for Ack; acknowledgment does not answer a question.
+  The lenient CLI converts legacy
+  `decided`/`done`/`dropped` creation to Open with that Ack target; write the
+  explicit Open shape yourself. Strict API calls reject terminal creation.
+  `item.status` `open` or `in_progress` can set `ack_to` on existing work.
+  Strict calls refuse agent terminal status or replacement on an item with
+  `ack_to`. The lenient CLI converts every `item.status` request for `decided`,
+  `done` or `dropped` to Open with that Ack target, preserving result and evidence;
+  write the explicit Open shape yourself. Leave acknowledgment to the owner.
+- Types: question, decision, finding, task, explanation. Existing-item statuses:
+  `open` and `in_progress` take a `reason` (only in `item.status`); `decided`, `done` and
   `dropped` need `outcome` and `why`; `replaced` only through `item.replace`;
   `waiting_on_me` only through an `ask`.
 

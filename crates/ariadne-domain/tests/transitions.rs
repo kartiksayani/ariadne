@@ -56,6 +56,7 @@ fn item(id: &str, parent: Option<&str>, ordinal: u64) -> Item {
         parent: parent.map(reference),
         question: "Which approach?\nPreserve this exact text.".into(),
         short: None,
+        ack_to: None,
         item_type: ItemType::Question,
         status: ItemStatus::Open,
         owner: ItemOwner::Agent {
@@ -237,6 +238,7 @@ fn status(status: ItemStatus) -> ItemChange {
         ItemStatus::Decided | ItemStatus::Done | ItemStatus::Dropped | ItemStatus::Replaced
     );
     ItemChange::Status {
+        ack_to: None,
         status,
         outcome: terminal.then(|| "Completed result\nwithout truncation.".into()),
         why: terminal.then(|| "Reason for completion.".into()),
@@ -907,12 +909,14 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
     let s = session();
     for change in [
         ItemChange::Status {
+            ack_to: None,
             status: ItemStatus::Done,
             outcome: None,
             why: Some("Why".into()),
             reason: None,
         },
         ItemChange::Status {
+            ack_to: None,
             status: ItemStatus::Done,
             outcome: Some(" ".into()),
             why: Some("Why".into()),
@@ -951,6 +955,7 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
         ));
     }
     let change = ItemChange::Status {
+        ack_to: None,
         status: ItemStatus::Open,
         outcome: None,
         why: None,
@@ -961,6 +966,7 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
         TransitionError::MissingReason
     );
     let change = ItemChange::Status {
+        ack_to: None,
         status: ItemStatus::Open,
         outcome: None,
         why: None,
@@ -974,6 +980,7 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
         })
     ));
     let change = ItemChange::Status {
+        ack_to: None,
         status: ItemStatus::Open,
         outcome: Some("Unexpected".into()),
         why: None,
@@ -1629,4 +1636,78 @@ fn stored_records_without_short_load_and_serialize_unchanged() {
     assert!(item.get("short").is_none());
     item["short"] = json!(null);
     assert_eq!(serde_json::from_value::<Item>(item).unwrap().short, None);
+}
+#[test]
+fn ack_target_is_optional_on_old_data_and_restricted_on_wire() {
+    let old = session();
+    let value = serde_json::to_value(&old).unwrap();
+    assert!(value["items"]["1"].get("ack_to").is_none());
+    let loaded: Session = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(loaded).unwrap(), value);
+    for target in ["decided", "done", "dropped"] {
+        let mut value = value.clone();
+        value["items"]["1"]["ack_to"] = json!(target);
+        let stored: Session = serde_json::from_value(value).unwrap();
+        validate_session_items(&stored).unwrap();
+    }
+    for target in [
+        "open",
+        "waiting_on_me",
+        "in_progress",
+        "replaced",
+        "unknown",
+    ] {
+        let mut value = value.clone();
+        value["items"]["1"]["ack_to"] = json!(target);
+        assert!(
+            serde_json::from_value::<Session>(value).is_err(),
+            "{target}"
+        );
+    }
+}
+
+#[test]
+fn agents_cannot_finish_or_replace_items_awaiting_ack() {
+    for target in [AckTarget::Decided, AckTarget::Done, AckTarget::Dropped] {
+        let mut s = session();
+        let i = s.items.0.get_mut(&reference("1")).unwrap();
+        i.ack_to = Some(target);
+        i.outcome = Some("Preserve exact proposal.".into());
+        i.why = Some("Preserve reasoning.".into());
+        validate_session_items(&s).unwrap();
+        assert_eq!(
+            reject(&s, &status(target.status()), &context(&s)),
+            TransitionError::InvalidTransition
+        );
+        let kept = apply(&mut s, &status(ItemStatus::InProgress));
+        assert_eq!(kept.ack_to, Some(target));
+        assert_eq!(kept.outcome.as_deref(), Some("Preserve exact proposal."));
+        assert_eq!(kept.why.as_deref(), Some("Preserve reasoning."));
+    }
+    let mut s = session();
+    s.items.0.get_mut(&reference("1")).unwrap().ack_to = Some(AckTarget::Done);
+    s.counters.next_root = positive(3);
+    s.items.0.insert(reference("2"), item("2", None, 2));
+    assert_eq!(
+        reject(
+            &s,
+            &ItemChange::Replace {
+                replacement: reference("2"),
+                outcome: "Replacement".into(),
+                why: "Better choice".into(),
+            },
+            &context(&s)
+        ),
+        TransitionError::InvalidTransition
+    );
+    s.items.0.get_mut(&reference("1")).unwrap().ack_to = None;
+    apply(&mut s, &status(ItemStatus::Done));
+    s.items.0.get_mut(&reference("1")).unwrap().ack_to = Some(AckTarget::Done);
+    assert!(
+        validate_session_items(&s).is_err(),
+        "terminal items cannot retain Ack proposals"
+    );
+    let mut s = session();
+    s.items.0.get_mut(&reference("1")).unwrap().outcome = Some("Unproposed".into());
+    assert!(validate_session_items(&s).is_err());
 }

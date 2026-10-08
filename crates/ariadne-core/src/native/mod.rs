@@ -242,6 +242,9 @@ impl CoreService for NativeCoreService {
             | OwnerCommand::SessionLabelSet { .. } => HistoryActionService::new(&self.registry)
                 .execute(&context, &command, (self.now)())
                 .map_err(errors::history),
+            OwnerCommand::Ack { .. } => HistoryActionService::new(&self.registry)
+                .acknowledge(&context, &command, (self.now)(), || (self.allocate)())
+                .map_err(errors::history),
             OwnerCommand::TopicContinue { .. } => HistoryActionService::new(&self.registry)
                 .continue_topic(&context, &command, || (self.allocate)(), (self.now)())
                 .map_err(errors::history),

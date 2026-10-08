@@ -17,10 +17,11 @@ import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { AnswerControl } from '../answer/AnswerControl';
 import type { PendingSubmission } from '../answer/useSubmit';
 import { notices as noticeStore } from '../pages/notices';
-import { chipsOf, collapsedNote, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
+import { chipsOf, closed, collapsedNote, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { HiddenRow } from './HiddenRow';
 import { hiddenGroupKey, hiddenGroupsFor } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
+import { ackTarget, ackTitle, useAck } from '../shared/ack';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
 import { TopicReply } from '../answer/TopicReply';
@@ -120,6 +121,7 @@ export function TreeView(props: TreeViewProps) {
   const [sending, setSending] = useState(false);
   useOwnerDrafts(drafts);
   const lifecycle = useLifecycle(actions);
+  const ack = useAck(actions, selectedId);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const mounted = useRef(true), request = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
@@ -296,9 +298,9 @@ export function TreeView(props: TreeViewProps) {
   useEffect(() => { if (answering && !answerRow) setAnswering(null); }, [answering, answerRow]);
 
   // ------------------------------------------------------------ keyboard
-  const onRow = (act: (row: Row, index: number, intent: WorkspaceIntent) => boolean | void) => (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => {
+  const onRow = (act: (row: Row, index: number, intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => boolean | void) => (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => {
     const visible = latest.current.rows, index = visible.findIndex(row => row.key === event.currentTarget.dataset.row);
-    return index >= 0 ? act(visible[index], index, intent) : false;
+    return index >= 0 ? act(visible[index], index, intent, event) : false;
   };
   const move = (to: (index: number, visible: readonly Row[]) => number) => onRow((_row, index) => {
     const visible = latest.current.rows, next = visible[Math.max(0, Math.min(visible.length - 1, to(index, visible)))];
@@ -330,7 +332,8 @@ export function TreeView(props: TreeViewProps) {
       if (answering === row.key && chosen >= 0) { sendOption(chosen); return true; }
       select(row.item.id); return true;
     }),
-    answer: onRow(row => {
+    answer: onRow((row, _index, _intent, event) => {
+      if (row.kind === 'item' && session && ackTarget(session, row.item)) { if (!event.repeat && !busy && !ack.busy) void ack.run(row.item.id); return true; }
       if (answerable(row)) { if (answering === row.key) setAnswering(null); else openAnswer(row.key); return true; }
       const oldest = session ? oldestWaiting(session) : null, target = oldest ? latest.current.rows.find(value => value.key === oldest.id) : undefined;
       if (!answerable(target)) return false;
@@ -575,8 +578,10 @@ export function TreeView(props: TreeViewProps) {
   const touchedMessage = highlightedMessages.size && session ? session.messages.find(message => highlightedMessages.has(message.id))?.number ?? null : null;
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
+    const ackTo = session && ackTarget(session, item);
+    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo), label: 'Ack', persistent: true, disabled: busy || ack.busy, run: () => { void ack.run(item.id); } });
     const act = (intent: RowIntent) => () => onAct(intent, target, result => { clickedReveal.current = result; });
-    if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed) && running && !archivedMode && session?.state === 'active') {
+    if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed || closed(item.status)) && running && !archivedMode && session?.state === 'active') {
       const bring = { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') };
       if (item.status === 'open') list.push(bring, ...row.later ? [{ icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: act('later') }]
         : [{ icon: 'ph ph-chat-text', title: 'Reply (r)', run: act('reply') }, { icon: 'ph ph-x-circle', title: 'Drop (d)', run: act('drop') },
@@ -693,6 +698,7 @@ export function TreeView(props: TreeViewProps) {
       {archived.cancelled ? ` ${archived.cancelled} unsent message${archived.cancelled > 1 ? 's were' : ' was'} cancelled.` : ''}</Banner>}
     {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
+    {ack.error && <Banner icon="ph ph-warning-circle" alert>{ack.error}</Banner>}
     {lifecycle.error && <Banner icon="ph ph-warning-circle" alert>{lifecycle.error}</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}

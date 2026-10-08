@@ -19,14 +19,29 @@ const needsOwner = new Set(['cancelled', 'skipped', 'needs_attention']);
  * answer to it stands (the agent has not opened a new round yet). Mirrors core's
  * `waiting_unanswered`, so every count agrees.
  */
-export function ownerReplied(session: Immutable<Session>, item: Immutable<Item>): boolean {
-  if (item.status !== 'waiting_on_me') return false;
+export function currentQuestionReplied(session: Immutable<Session>, item: Immutable<Item>): boolean {
+  const canRetain = item.status === 'open' || item.status === 'in_progress';
+  const round = !canRetain ? null : item.current_round_id ? session.rounds[item.current_round_id]
+    : Object.values(session.rounds).filter(round => round?.item_id === item.id).sort((a, b) => b!.ordinal - a!.ordinal)[0];
+  // Leaving Waiting advances the item revision while preserving the answered round's question.
+  // A genuinely revised question or ask uses the item's new episode instead.
+  const retained = !!round && item.question_revision === round.question_revision + 1
+    && item.question === round.question_snapshot && item.ask === round.ask_snapshot
+    && item.options.length === round.options_snapshot.length && item.options.every((option, index) => {
+      const previous = round.options_snapshot[index];
+      return option.id === previous.id && option.label === previous.label && option.consequence === previous.consequence
+        && option.recommended === previous.recommended;
+    });
+  const questionRevisions = new Set([item.question_revision, ...retained ? [round.question_revision] : []]);
   const superseded = (answerId: string | null) => !!answerId && session.answers.some(newer => newer.supersedes_answer_id === answerId);
   const pending = Object.values(session.inputs).some(input => !!input && input.target.item_id === item.id && onItsWay.has(input.state)
-    && input.payload.target_snapshot.question_revision === item.question_revision && !superseded(input.answer_id));
-  return pending || session.answers.some(answer => answer.item_id === item.id && answer.question_revision === item.question_revision
+    && questionRevisions.has(input.payload.target_snapshot.question_revision ?? -1) && !superseded(input.answer_id));
+  return pending || session.answers.some(answer => answer.item_id === item.id && questionRevisions.has(answer.question_revision)
     && !superseded(answer.id) && !needsOwner.has(session.inputs[answer.input_id]?.state ?? 'handled'));
 }
+
+export const ownerReplied = (session: Immutable<Session>, item: Immutable<Item>): boolean =>
+  item.status === 'waiting_on_me' && currentQuestionReplied(session, item);
 
 export const displayStatus = (session: Immutable<Session>, item: Immutable<Item>): DisplayStatus =>
   ownerReplied(session, item) ? 'waiting_on_agent' : item.status;

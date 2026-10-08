@@ -294,7 +294,7 @@ Keyboard navigation works when focus is outside editable controls:
 | Left / h | Collapse or move to parent |
 | Home / End | First / last visible row |
 | Enter | Open detail, expand/collapse topic, or activate focused navigation control |
-| `a` | Focus answer control for waiting item; otherwise oldest waiting item |
+| `a` | Ack the focused eligible item; otherwise focus answer control for waiting item or oldest waiting item |
 | `1`–`9` | Select an answer option; never submit |
 | `b` | Queue bring-up intent |
 | `r` | Focus reply/note/follow-up editor based on item status |

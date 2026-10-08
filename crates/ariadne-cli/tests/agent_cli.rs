@@ -157,6 +157,17 @@ fn envelope(output: &Output, exit: i32) -> Value {
     assert_eq!(value["ok"], exit == 0);
     value
 }
+fn repaired_full_envelope(output: &Output) -> Value {
+    let notes = String::from_utf8(output.stderr.clone()).unwrap();
+    assert_eq!(notes.lines().count(), 2, "{notes}");
+    for line in notes.lines() {
+        assert!(line.starts_with("Repair: operations[1]"), "{line}");
+        assert!(line.contains("created open with ack_to `done`"), "{line}");
+    }
+    let mut clean = output.clone();
+    clean.stderr.clear();
+    envelope(&clean, 0)
+}
 fn request(op: u64) -> Value {
     json!({"op_id":id(op),"source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":null})
 }
@@ -1066,7 +1077,13 @@ fn the_lenient_fixture_applies_end_to_end_and_prints_a_compact_receipt() {
     assert_eq!(data["topics"][0]["revision"], topic.revision.value());
     let item = |name: &str| &session.items.0[&ItemRef::new(name).unwrap()];
     assert_eq!(item("3").owner, ItemOwner::Agent { binding_id: id(3) });
-    assert_eq!(item("3").status, ItemStatus::Done);
+    assert_eq!(item("3").status, ItemStatus::Open);
+    assert_eq!(item("3").ack_to, Some(AckTarget::Done));
+    assert_eq!(item("3").outcome.as_deref(), Some("Reviewed"));
+    assert_eq!(item("3").why.as_deref(), Some("Read every changed file"));
+    assert_eq!(item("3.1").status, ItemStatus::Open);
+    assert_eq!(item("3.1").ack_to, Some(AckTarget::Done));
+    assert_eq!(data["repairs"].as_array().unwrap().len(), 2);
     assert_eq!(item("3.1").parent, Some(ItemRef::new("3").unwrap()));
     assert_eq!(item("3.1").topic_id, topic.id);
     assert_eq!(item("3").topic_id, topic.id);
@@ -1082,10 +1099,115 @@ fn the_lenient_fixture_applies_end_to_end_and_prints_a_compact_receipt() {
 }
 
 #[test]
+fn terminal_creation_is_repaired_recursively_and_read_exposes_the_ack_target() {
+    for (status, target) in [
+        ("decided", AckTarget::Decided),
+        ("done", AckTarget::Done),
+        ("dropped", AckTarget::Dropped),
+    ] {
+        let setup = Setup::new(&seed());
+        let body = serde_json::to_vec(&json!({"operations": [{
+            "op": "item.add", "topic": {"id": id(5)}, "type": "finding",
+            "question": "Root", "status": status, "outcome": "Authored outcome",
+            "why": "Authored why", "children": [{
+                "type": "finding", "question": "Child", "status": status,
+                "children": [{"type": "finding", "question": "Grandchild", "status": status}]
+            }]
+        }]}))
+        .unwrap();
+        let before = setup.bytes();
+        let preview = envelope(&setup.apply_with(&["--dry-run"], &body), 0);
+        assert_eq!(preview["data"]["repairs"].as_array().unwrap().len(), 3);
+        assert_eq!(setup.bytes(), before);
+        let filed = envelope(&setup.apply_with(&[], &body), 0);
+        let mut expected = preview;
+        expected["data"].as_object_mut().unwrap().remove("dry_run");
+        assert_eq!(filed, expected);
+        let saved = setup.bytes();
+        assert_eq!(
+            envelope(&setup.apply_with(&[], &body), 0),
+            as_replay(&filed)
+        );
+        assert_eq!(setup.bytes(), saved);
+        let session = setup.store().read(&id(2)).unwrap();
+        for name in ["3", "3.1", "3.1.1"] {
+            let item = &session.items.0[&ItemRef::new(name).unwrap()];
+            assert_eq!(item.status, ItemStatus::Open);
+            assert_eq!(item.ack_to, Some(target));
+        }
+        let root = &session.items.0[&ItemRef::new("3").unwrap()];
+        assert_eq!(root.outcome.as_deref(), Some("Authored outcome"));
+        assert_eq!(root.why.as_deref(), Some("Authored why"));
+        let rows = setup.page(&["--view", "items", "--limit", "100"]);
+        for row in rows
+            .iter()
+            .filter(|row| row["item"]["id"].as_str().unwrap().starts_with('3'))
+        {
+            assert_eq!(row["item"]["status"], "open");
+            assert_eq!(row["item"]["ack_to"], status);
+        }
+    }
+}
+
+#[test]
+fn strict_creation_rejects_every_terminal_status_including_nested_item_operations() {
+    for status in ["decided", "done", "dropped", "replaced"] {
+        let mut strict = request(650);
+        strict["operations"] = json!([
+            {"op": "item.add", "ref": "parent", "topic": {"id": id(5)},
+             "type": "finding", "question": "Parent", "status": "open",
+             "owner": {"kind": "agent", "binding_id": id(3)}},
+            {"op": "item.add", "ref": "child", "topic": {"id": id(5)},
+             "parent": {"ref": "parent"}, "type": "finding", "question": "Child",
+             "status": status, "owner": {"kind": "agent", "binding_id": id(3)},
+             "outcome": "Authored outcome", "why": "Authored why",
+             "replaced_by": {"id": "1"}}
+        ]);
+        let typed: ApplyRequest = serde_json::from_value(strict).unwrap();
+        let error = typed.validate_wire().unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidArgument);
+        assert!(error.message.contains("New items must start"), "{error:?}");
+    }
+}
+
+#[test]
+fn explicit_ack_creation_is_accepted_and_conflicts_or_replaced_are_atomic_failures() {
+    let setup = Setup::new(&seed());
+    for target in ["decided", "done", "dropped"] {
+        let value = envelope(
+            &setup.apply(&json!({"operations": [{
+                "op": "item.add", "topic": {"id": id(5)}, "type": "finding",
+                "question": target, "status": "open", "ack_to": target
+            }]})),
+            0,
+        );
+        assert!(value["data"].get("repairs").is_none());
+    }
+    let before = setup.bytes();
+    for flags in [&[][..], &["--dry-run"][..]] {
+        for (status, target) in [("done", "dropped"), ("replaced", "done")] {
+            let body = serde_json::to_vec(&json!({"operations": [{
+                "op": "item.add", "topic": {"id": id(5)}, "type": "finding",
+                "question": "Rejected", "status": status, "ack_to": target,
+                "outcome": "Preserved", "why": "Preserved", "replaced_by": {"id": "1"}
+            }]}))
+            .unwrap();
+            let refused = envelope(&setup.apply_with(flags, &body), 2);
+            assert_eq!(refused["error"]["code"], "invalid_argument");
+            assert!(refused["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("operations[0]"));
+            assert_eq!(setup.bytes(), before);
+        }
+    }
+}
+
+#[test]
 fn full_prints_the_complete_saved_receipt_and_a_stated_op_id_replays() {
     let setup = Setup::new(&seed());
     let body = lenient_with_op(600);
-    let full = envelope(&setup.apply_with(&["--full"], &body), 0);
+    let full = repaired_full_envelope(&setup.apply_with(&["--full"], &body));
     assert_eq!(full["data"]["data"]["kind"], "apply");
     assert_eq!(full["data"]["operation_id"], id(600).as_str());
     assert_eq!(
@@ -1101,7 +1223,10 @@ fn full_prints_the_complete_saved_receipt_and_a_stated_op_id_replays() {
     assert_eq!(compact["data"]["items"][0]["id"], "3");
     assert_eq!(compact["data"]["replayed"], true);
     assert_eq!(setup.bytes(), saved, "an exact replay writes nothing");
-    assert_eq!(envelope(&setup.apply_with(&["--full"], &body), 0), full);
+    assert_eq!(
+        repaired_full_envelope(&setup.apply_with(&["--full"], &body)),
+        full
+    );
     assert_eq!(setup.bytes(), saved, "a full replay also writes nothing");
 }
 
@@ -1230,10 +1355,8 @@ fn dry_run_reports_what_would_change_and_commits_nothing() {
     assert_eq!(setup.bytes(), saved);
 
     // --full shows the complete would-be receipt.
-    let full = envelope(
-        &setup.apply_with(&["--dry-run", "--full"], &lenient_with_op(602)),
-        0,
-    );
+    let full =
+        repaired_full_envelope(&setup.apply_with(&["--dry-run", "--full"], &lenient_with_op(602)));
     assert_eq!(full["data"]["dry_run"], true);
     assert_eq!(full["data"]["data"]["kind"], "apply");
     assert_eq!(setup.bytes(), saved);
@@ -1402,7 +1525,7 @@ fn read_items_filters_by_topic_id_or_number_and_by_archived() {
 }
 
 #[test]
-fn the_help_example_is_the_lenient_fixture() {
+fn the_help_example_uses_explicit_ack_targets_for_the_lenient_fixture() {
     let help = invoke(Command::new(env!("CARGO_BIN_EXE_ariadne")), None);
     let text = String::from_utf8(help.stdout).unwrap();
     let line = text
@@ -1414,11 +1537,112 @@ fn the_help_example_is_the_lenient_fixture() {
         .and_then(|rest| rest.split_once("' | ariadne apply"))
         .expect("printf form")
         .0;
-    assert_eq!(
-        serde_json::from_str::<Value>(body).unwrap(),
-        serde_json::from_str::<Value>(LENIENT).unwrap()
-    );
+    let mut expected: Value = serde_json::from_str(LENIENT).unwrap();
+    expected["operations"][1]["status"] = json!("open");
+    expected["operations"][1]["ack_to"] = json!("done");
+    expected["operations"][1]["children"][0]["status"] = json!("open");
+    expected["operations"][1]["children"][0]["ack_to"] = json!("done");
+    assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
     for word in ["--dry-run", "--full", "--topic", "--archived", "children"] {
         assert!(text.contains(word), "{word}");
+    }
+}
+
+#[test]
+fn existing_summary_completion_waits_for_ack_and_replays_after_the_owner_acks() {
+    for target in ["decided", "done", "dropped"] {
+        let mut source = seed();
+        let summary = source.items.0.get_mut(&ItemRef::new("1").unwrap()).unwrap();
+        summary.status = ItemStatus::InProgress;
+        summary.waiting_since = None;
+        summary.ask = None;
+        summary.ack_to = Some(AckTarget::Done);
+        let setup = Setup::new(&source);
+        let completion = json!({"expected_item_revisions": {"1": 1}, "operations": [{
+            "op": "item.status", "item": {"id": "1"}, "status": target,
+            "outcome": "Exact finished summary\nwith all text.", "why": "Verified locally."
+        }]});
+        let applied = envelope(&setup.apply(&completion), 0);
+        assert_eq!(applied["data"]["repairs"].as_array().unwrap().len(), 1);
+        let saved = setup.store().read(&id(2)).unwrap();
+        let summary = &saved.items.0[&ItemRef::new("1").unwrap()];
+        assert_eq!(summary.status, ItemStatus::Open);
+        assert_eq!(serde_json::to_value(summary.ack_to).unwrap(), target);
+        assert_eq!(
+            summary.outcome.as_deref(),
+            Some("Exact finished summary\nwith all text.")
+        );
+        assert_eq!(summary.why.as_deref(), Some("Verified locally."));
+        assert_eq!(saved.inputs, source.inputs);
+        let owner_request = json!({"session": {"project_id": id(1), "session_id": id(2)},
+            "command": {"command": "ack", "api_version": 1, "op_id": id(999),
+                "params": {"item_id": "1", "expected_revision": summary.revision}}});
+        let ack = setup.call(
+            &["item", "ack", "--json-stdin", "--json"],
+            Some(&serde_json::to_vec(&owner_request).unwrap()),
+        );
+        envelope(&ack, 0);
+        let before_retry = setup.bytes();
+        assert_eq!(envelope(&setup.apply(&completion), 0), as_replay(&applied));
+        assert_eq!(setup.bytes(), before_retry);
+    }
+}
+
+#[test]
+fn lenient_completed_asks_get_a_real_question_round_and_owner_answer_route() {
+    for status in ["done", "open", "in_progress"] {
+        let setup = Setup::new(&seed());
+        let request = json!({"operations": [{"op": "item.add", "topic": {"id": id(5)},
+            "type": "explanation", "question": "Notes cleanup result", "status": status,
+            "ack_to": "done", "ask": "May I remove the obsolete draft?", "owner": {"kind": "agent"},
+            "outcome": "Exact proposed result.", "why": "Exact evidence.",
+            "options": [{"label": "Go ahead", "consequence": "Removes the draft."}]}]});
+        envelope(&setup.apply(&request), 0);
+        let saved = setup.store().read(&id(2)).unwrap();
+        let ask = &saved.items.0[&ItemRef::new("3").unwrap()];
+        assert_eq!(ask.status, ItemStatus::WaitingOnMe);
+        assert_eq!(ask.owner, ItemOwner::Me {});
+        assert_eq!(ask.ack_to, Some(AckTarget::Done));
+        assert_eq!(ask.outcome.as_deref(), Some("Exact proposed result."));
+        assert_eq!(ask.why.as_deref(), Some("Exact evidence."));
+        let round = &saved.rounds.0[ask.current_round_id.as_ref().unwrap()];
+        assert_eq!(round.ask_snapshot, ask.ask);
+        assert!(ariadne_core::queries::waiting_unanswered(&saved, ask));
+        let owner = OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+            RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+        ));
+        let answer = OwnerCommand::InputSubmit {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: id(990),
+            params: InputSubmitParams {
+                binding_id: id(3),
+                target: InputTarget {
+                    topic_id: id(5),
+                    item_id: Some(ask.id.clone()),
+                },
+                kind: InputKind::Answer,
+                text: "Keep the draft for now.".into(),
+                selected_option_id: None,
+                expected_question_revision: Some(ask.question_revision),
+                supersedes_answer_id: None,
+            },
+        };
+        let mut next = 1000;
+        InputService::new(&setup.registry)
+            .execute(
+                &owner,
+                &answer,
+                || {
+                    next += 1;
+                    id(next)
+                },
+                UtcMillis::new("2026-10-09T12:00:00.000Z").unwrap(),
+            )
+            .unwrap();
+        let answered = setup.store().read(&id(2)).unwrap();
+        assert!(answered
+            .answers
+            .iter()
+            .any(|answer| answer.item_id == ask.id && answer.text == "Keep the draft for now."));
     }
 }
