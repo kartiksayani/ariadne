@@ -13,19 +13,39 @@ async function panel(links: ItemLinkTarget[], exists: readonly string[] = []) {
   const value = setup(); opened.push(value);
   value.transport.session.items['1']!.links = links;
   await value.store.refresh();
-  const open = vi.fn(), files = {
+  const open = vi.fn(), openItem = vi.fn(), files = {
     resolve: vi.fn((_project: string, references: readonly string[]) => Promise.resolve(references.map(text => exists.includes(text)))),
     open: vi.fn(),
   } satisfies FileOpener;
   const project = value.transport.session.project_id;
   render(<LinkOpener.Provider value={open}><FileRefs.Provider value={files}><FileRefProject.Provider value={project}>
-    <ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} />
+    <ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={openItem} />
   </FileRefProject.Provider></FileRefs.Provider></LinkOpener.Provider>);
   await screen.findByRole('heading', { name: value.transport.session.items['1']!.question });
-  return { open, files, project, region: screen.getByRole('region', { name: 'Item links' }) };
+  return { open, openItem, files, project, region: screen.getByRole('region', { name: 'Item links' }) };
 }
 
 describe('item links in the detail panel', () => {
+  it('opens item links in this session with a plain-language tooltip, by click and Enter', async () => {
+    const { open, openItem, files, region } = await panel([{ kind: 'item', label: 'Receipt follow-up', target: '1.1' }]);
+    const link = within(region).getByRole('link', { name: 'Receipt follow-up' });
+    expect(link.getAttribute('title')).toBe('Add the receipt lookup… · Open');
+    expect(link.getAttribute('title')).not.toContain('1.1');
+    fireEvent.click(link);
+    fireEvent.keyDown(link, { key: 'Enter' });
+    expect(openItem.mock.calls).toEqual([['1.1'], ['1.1']]);
+    expect(open).not.toHaveBeenCalled();
+    expect(files.open).not.toHaveBeenCalled();
+  });
+
+  it('shows missing item links as plain text instead of sending them to the external opener', async () => {
+    const { open, openItem, region } = await panel([{ kind: 'item', label: 'Missing follow-up', target: '99.1' }]);
+    expect(within(region).queryByRole('link')).toBeNull();
+    expect(within(region).getByText('Missing follow-up')).toBeTruthy();
+    expect(within(region).getByText('(item not found)').className).toBe('md-item-missing');
+    expect(open).not.toHaveBeenCalled();
+    expect(openItem).not.toHaveBeenCalled();
+  });
   it('opens a web link in the browser and shows its address on hover', async () => {
     const { open, region } = await panel([{ kind: 'pr', label: 'Fix the cache', target: 'https://github.com/o/r/pull/7' }]);
     const link = within(region).getByRole('link', { name: 'Fix the cache' });

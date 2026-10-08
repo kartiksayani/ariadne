@@ -652,6 +652,41 @@ fn option_and_link_bounds_and_duplicate_recommendations_are_rejected() {
 }
 
 #[test]
+fn item_links_validate_raw_identity_without_requiring_a_present_target() {
+    let mut s = session();
+    for target in ["1", "3.2", "9007199254740991.1"] {
+        s.items.0.get_mut(&reference("1")).unwrap().links = vec![ItemLinkTarget {
+            kind: LinkKind::Item,
+            label: "Related item".into(),
+            target: target.into(),
+        }];
+        validate_session_items(&s).unwrap();
+    }
+    for target in [
+        "0",
+        "01",
+        "3.0",
+        "3..2",
+        "3.",
+        "-1",
+        "9007199254740992",
+        "1e2",
+        "item:3.2",
+        "3.2?x",
+        " 3.2",
+        "3.2\n",
+    ] {
+        s.items.0.get_mut(&reference("1")).unwrap().links[0].target = target.into();
+        let error = validate_session_items(&s).unwrap_err();
+        assert_eq!(error.path, "items.1.links.0.target", "{target:?}");
+        assert_eq!(error.kind, ValidationErrorKind::InvalidState, "{target:?}");
+    }
+    s.items.0.get_mut(&reference("1")).unwrap().links[0].target = " ".into();
+    invalid(&s, ValidationErrorKind::Blank);
+    assert_eq!(serde_json::to_value(LinkKind::Item).unwrap(), json!("item"));
+}
+
+#[test]
 fn every_status_pair_obeys_the_finite_matrix_and_preserves_old_fields() {
     let statuses = [
         ItemStatus::Open,

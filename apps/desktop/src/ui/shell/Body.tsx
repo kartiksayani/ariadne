@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { bodyLayout, DETAIL_DEFAULT, DETAIL_MIN } from './model';
 import { WaitingFold } from './fold';
+import { ItemHistoryContext } from './itemHistory';
 
 export interface BodyProps {
   readonly waiting: ReactNode;
@@ -39,6 +40,7 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
 export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail, onRemove, detailWidth = null, onResizeDetail,
   waitingFolded = false, onFoldWaiting }: BodyProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const history = useContext(ItemHistoryContext);
   const width = useWidth(ref);
   const [peek, setPeek] = useState(false);
   // The width being dragged or stepped, until it is saved.
@@ -96,6 +98,12 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
         onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onKeyDown={keyDown}
         onBlur={() => { if (settle.current && drag !== null) commit(drag); }} onDoubleClick={() => commit(DETAIL_DEFAULT)} />}
       <div className="shell-detail-head">
+        {history && <div className="shell-detail-history" role="group" aria-label="Item navigation">
+          <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Back (⌘[)" aria-label="Back"
+            disabled={!history.canBack} onClick={history.back}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
+          <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Forward (⌘])" aria-label="Forward"
+            disabled={!history.canForward} onClick={history.forward}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
+        </div>}
         <div className="shell-detail-path">{detailPath}</div>
         <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Remove (⌫)" aria-label="Remove item" onClick={onRemove}>
           <i className="ph ph-trash" aria-hidden="true" /></button>

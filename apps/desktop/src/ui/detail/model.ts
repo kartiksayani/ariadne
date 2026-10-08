@@ -3,7 +3,7 @@
 // already holds. Strings are the prototype's; nothing here is invented copy.
 import type { Immutable } from '../../data/session-store';
 import type { SupervisorHealth } from '../../data/service';
-import type { Input, InputKind, Item, ItemOption, Message, PresenceObservation, Round, Session } from '../../generated/domain/models';
+import type { Input, InputKind, Item, ItemOption, LinkKind, Message, PresenceObservation, Round, Session } from '../../generated/domain/models';
 import { connectionOf, reconnectingNote } from '../shared/connection';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentName } from '../shell/model';
@@ -44,14 +44,14 @@ export interface OpenAction {
 export interface OpenSection { readonly title: string; readonly hint: string; readonly actions: readonly OpenAction[] }
 export interface BoxText { readonly label: string; readonly placeholder: string; readonly button: string; readonly hint: string }
 export interface Kid { readonly id: string; readonly question: string; readonly status: StatusKey; readonly closed: boolean }
-export interface LinkView { readonly icon: string; readonly label: string; readonly meta: string; /** Where the link points: a web address or a file path. */ readonly target: string }
+export interface LinkView { readonly kind: LinkKind; readonly icon: string; readonly label: string; readonly meta: string; /** Where the link points: an item, web address or file path. */ readonly target: string }
 /** One exchange of the conversation: the agent's ask, the owner's reply, what the agent did with it, and the items it forked. */
 export interface RoundView {
   /** The round's number: a test hook only, never shown. */
   readonly ordinal: number;
   /** Empty when it only repeats the item's question (the head shows it). */
   readonly ask: string; readonly now: boolean;
-  readonly you: { readonly chosen: boolean; readonly text: string } | null; readonly result: string;
+  readonly you: { readonly chosen: boolean; readonly text: string; readonly source: string } | null; readonly result: string;
   readonly forks: readonly Kid[];
 }
 /** A message of the owner's that has not settled: it ends the conversation as a pending bubble. */
@@ -60,6 +60,8 @@ export interface PendingView {
   /** What was sent: the chosen option (`chose`), the owner's words (`said`) or a one-press request (`action`). */
   readonly how: 'chose' | 'said' | 'action';
   readonly text: string;
+  /** Original message source, before the display label or whitespace shortening. */
+  readonly source: string;
   /** Where it stands, in a few words. */
   readonly caption: string;
   /** Why it hasn't reached the agent, with what fixes it (ui/answer/StuckNote); null while saving. */
@@ -212,8 +214,9 @@ function roundView(session: Immutable<Session>, item: Immutable<Item>, round: Im
   });
   const answer = session.answers.filter(value => value.item_id === item.id && owner.some(message => message.id === value.message_id)).sort((a, b) => b.seq - a.seq)[0];
   const chosen = answer?.selected_option_id ? answer.options_snapshot.find(option => option.id === answer.selected_option_id)?.label ?? null : null;
-  const you = chosen ? { chosen: true, text: chosen } : answer?.text.trim() ? { chosen: false, text: answer.text.trim() }
-    : owner.length ? { chosen: false, text: owner.at(-1)!.body } : null;
+  const source = (answer ? owner.find(message => message.id === answer.message_id)?.body ?? answer.text : owner.at(-1)?.body) ?? '';
+  const you = chosen ? { chosen: true, text: chosen, source } : answer?.text.trim() ? { chosen: false, text: answer.text.trim(), source }
+    : owner.length ? { chosen: false, text: owner.at(-1)!.body, source } : null;
   // Still waiting on the owner unless an answer or reply to this ask is on its way. Core files every owner input of the item in
   // its open round, a Bring or a note too, so being in the round proves nothing: only the kind and the question it was written for do.
   const now = last && !you && !answered && item.status === 'waiting_on_me';
@@ -258,7 +261,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const newest = active.at(-1);
   const held = !saving && !!newest && heldInput(session, newest);
   const stuck = !saving && tracked ? stuckInput(session, tracked, presence, health) : null;
-  const outbox = active.map((input): PendingView => ({ input, ...sentView(input), caption: CAPTION[input.state] ?? '',
+  const outbox = active.map((input): PendingView => ({ input, ...sentView(input), source: byId.get(input.message_id)?.body ?? input.payload.text, caption: CAPTION[input.state] ?? '',
     stuck: saving ? null : stuckInput(session, input, presence, health) }));
   const pending = !!sub?.stage && sub.stage !== 'failed' && !held;
   const outLabel = status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
@@ -367,7 +370,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     replaced: replacement ? kid(replacement) : null,
     kidLabel: `Branched into ${kids.length} item${kids.length > 1 ? 's' : ''}`,
     kids: kids.map(kid),
-    links: item.links.map(link => ({ icon: LINKICON[link.kind] ?? 'ph ph-link', target: link.target, label: link.label, meta: (link as typeof link & { meta?: string }).meta ?? '' })),
+    links: item.links.map(link => ({ kind: link.kind, icon: LINKICON[link.kind] ?? 'ph ph-link', target: link.target, label: link.label, meta: (link as typeof link & { meta?: string }).meta ?? '' })),
     prev: reopened ? { status: statusKey[reopened.old_status], outcome: reopened.previous_outcome ?? '' } : null,
     rounds: roundViews,
     timeline,

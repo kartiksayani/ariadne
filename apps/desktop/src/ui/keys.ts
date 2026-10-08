@@ -6,7 +6,7 @@ import { useCallback, useRef, type KeyboardEvent } from 'react';
 export type IntentKind =
   | 'move-down' | 'move-up' | 'first' | 'last' | 'unfold' | 'fold' | 'enter' | 'send'
   | 'answer' | 'choose' | 'bring' | 'respond' | 'drop' | 'later' | 'reopen' | 'archive'
-  | 'search' | 'graph' | 'messages' | 'waiting' | 'escape' | 'remove';
+  | 'search' | 'graph' | 'messages' | 'waiting' | 'escape' | 'remove' | 'history-back' | 'history-forward';
 
 export type WorkspaceIntent =
   | { readonly kind: Exclude<IntentKind, 'choose'> }
@@ -17,6 +17,7 @@ export interface KeyLike {
   readonly metaKey?: boolean;
   readonly ctrlKey?: boolean;
   readonly altKey?: boolean;
+  readonly shiftKey?: boolean;
 }
 
 const plain: Readonly<Record<string, Exclude<IntentKind, 'choose'>>> = {
@@ -29,6 +30,8 @@ const plain: Readonly<Record<string, Exclude<IntentKind, 'choose'>>> = {
 /** The intent a key press means, or null when it is not a workspace key. */
 export function workspaceIntent(event: KeyLike): WorkspaceIntent | null {
   if (event.metaKey && !event.ctrlKey && !event.altKey) {
+    if (!event.shiftKey && event.key === '[') return { kind: 'history-back' };
+    if (!event.shiftKey && event.key === ']') return { kind: 'history-forward' };
     if (event.key.toLowerCase() === 'f') return { kind: 'search' };
     if (event.key === 'Enter') return { kind: 'send' };
     return null;
@@ -53,7 +56,7 @@ export type KeyScope = 'workspace' | 'row' | 'editor';
 export type IntentHandler<T extends Element> = (intent: WorkspaceIntent, event: KeyboardEvent<T>) => boolean | void;
 export type WorkspaceHandlers<T extends Element = HTMLElement> = Partial<Record<IntentKind, IntentHandler<T>>>;
 
-const editableSelector = 'input,textarea,select,[contenteditable="true"],[role="textbox"]';
+const editableSelector = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]';
 const inside = (target: EventTarget, selector: string) => target instanceof Element && !!target.closest(selector);
 
 export function accepts(scope: KeyScope, event: Pick<KeyboardEvent<Element>, 'target' | 'currentTarget' | 'defaultPrevented'>, intent: WorkspaceIntent): boolean {

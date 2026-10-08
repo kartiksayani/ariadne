@@ -7,9 +7,13 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{Emitter, Manager};
+mod clipboard;
 mod discovery;
 mod file_ref;
 mod open_link;
+pub use clipboard::{
+    __cmd__clipboard_write, __tauri_command_name_clipboard_write, clipboard_write,
+};
 pub(crate) use discovery::project as project_discovery;
 pub use discovery::{
     __cmd__codex_default_endpoint, __cmd__discovery_snapshot, __cmd__discovery_ui_open,

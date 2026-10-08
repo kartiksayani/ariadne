@@ -1,8 +1,9 @@
 // A small, safe Markdown reader for agent message bodies. It turns text into a
 // plain tree (paragraphs, line breaks, headings, lists, quotes, code, tables,
 // emphasis, links); Markdown.tsx renders that tree as React elements. Raw HTML
-// is never interpreted: it stays text. Links keep only http, https and mailto
-// targets. Parsing is linear in the input: every scan is a single pass or a
+// is never interpreted: it stays text. External links keep only http, https and
+// mailto targets; item references select items inside the app. Parsing is linear
+// in the input: every scan is a single pass or a
 // bounded lookahead, and the input and nesting depth are capped.
 
 export type Inline =
@@ -14,6 +15,7 @@ export type Inline =
   /** A bare `src/app.ts` path (no line): plain text, and a link when the desktop finds the file. */
   | { readonly t: 'path'; readonly text: string }
   | { readonly t: 'strong' | 'em' | 'del'; readonly children: readonly Inline[] }
+  | { readonly t: 'item'; readonly itemId: string; readonly children: readonly Inline[] }
   | { readonly t: 'link'; readonly href: string; readonly children: readonly Inline[] };
 
 export type Align = 'left' | 'center' | 'right' | null;
@@ -29,6 +31,16 @@ export type Block =
 /** Characters read as Markdown; the rest of a longer body follows as plain text. */
 export const MARKDOWN_LIMIT = 100_000;
 const BLOCK_DEPTH = 8, INLINE_DEPTH = 6, URL_LIMIT = 2048;
+
+/** A local item target, using the core's positive safe-integer dotted identity syntax. */
+export function itemReference(raw: string): string | null {
+  if (!raw.startsWith('item:')) return null;
+  const id = raw.slice(5);
+  return id.split('.').every(segment => {
+    const ordinal = Number(segment);
+    return ordinal > 0 && Number.isSafeInteger(ordinal) && String(ordinal) === segment;
+  }) ? id : null;
+}
 
 /** The link target when it is a safe external URL (http, https or mailto), else null. */
 export function safeHref(raw: string): string | null {
@@ -473,11 +485,13 @@ function spans(text: string, found: Scan, from: number, to: number, depth: numbe
         // and no whitespace.
         const close = found.parenClose.get(end + 1) ?? -1;
         if (close >= 0 && close < to && close - end < URL_LIMIT && found.nextSpace[end + 2] > close) {
-          const href = safeHref(text.slice(end + 2, close));
+          const target = text.slice(end + 2, close), href = safeHref(target), itemId = itemReference(target);
           const label = depth < INLINE_DEPTH ? spans(text, found, index + 1, end, depth + 1, true) : [text.slice(index + 1, end)];
           flush();
           // An unsafe target keeps only the label, as text.
-          if (href) out.push({ t: 'link', href, children: label }); else out.push(...label);
+          if (itemId) out.push({ t: 'item', itemId, children: label });
+          else if (href) out.push({ t: 'link', href, children: label });
+          else out.push(...label);
           index = close + 1; continue;
         }
       }

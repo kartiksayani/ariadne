@@ -32,6 +32,7 @@ import { nextSelection, removeSubject, subtree, targetSession } from './ui/remov
 import { agentName, hostApp, themeToggle, type SessionFacts } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
+import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
 import { connectionOf } from './ui/shared/connection';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
@@ -146,6 +147,7 @@ function SessionArchive({ application, view, onRemove }: { application: Applicat
 interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean; readonly railOpen: boolean;
+  readonly historyReveal: RevealedItem | null;
   readonly highlightedItems: ReadonlySet<string>; readonly highlightedMessages: ReadonlySet<string>;
   readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute) => void;
@@ -169,6 +171,8 @@ function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...pr
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
+  const removals = application.removals;
+  const hidden = useSyncExternalStore(removals.subscribe, removals.getSnapshot, removals.getSnapshot);
   // The configured Codex socket becomes the connect dialog's default; absent when Codex is unconfigured.
   const [codexSocket, setCodexSocket] = useState<string | null>(null);
   useEffect(() => {
@@ -200,6 +204,11 @@ function Workspace({ application }: { application: Application }) {
   const currentReveal = localReveal?.store === store ? localReveal : state.reveal?.store === store ? state.reveal : null;
   const treeReveal = currentReveal === dismissedReveal ? null : currentReveal;
   const selectedId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
+  const historyReveal = useRef<RevealedItem | null>(null);
+  const historySession = sessionState?.snapshot?.session;
+  const existsInHistory = useCallback((id: string) => !!route && !!historySession?.items[id] && !hidden.item(route, historySession, id),
+    [route, historySession, hidden]);
+  const itemHistory = useItemHistory(key, selectedId, existsInHistory);
   // The tree stops forcing a dismissed reveal's row into the filtered view ("Resume filtered view"); the detail keeps it.
   const treeSelectedId = treeReveal?.kind === 'item' ? treeReveal.route.item_id : view?.selected_item_id ?? null;
   const theme = preferences?.global.theme ?? 'system';
@@ -230,7 +239,7 @@ function Workspace({ application }: { application: Application }) {
   }, [navigation, searchEdit, key, view, preferences, state.writing, state.pendingOperationId]);
   const invalidateOwnerRequest = () => { ++shortcutSequence.current; setOwnerFocus(null); };
   const consumeOwnerRequest = (token: number) => setOwnerFocus(current => current?.token === token ? null : current);
-  const reveal = async (result: RevealedItem, ownerToken?: number): Promise<number | null> => {
+  const reveal = async (result: RevealedItem, ownerToken?: number, fromHistory = false): Promise<number | null> => {
     if (ownerToken === undefined) invalidateOwnerRequest();
     const token = ownerToken ?? shortcutSequence.current;
     const intent = navigation.getNavigationIntent(), completion = navigation.getWritingCompletion();
@@ -248,6 +257,7 @@ function Workspace({ application }: { application: Application }) {
     if (intent === null || navigation.getNavigationIntent() !== intent || navigation.getNavigationRequest() !== navigationRequest
       || shortcutSequence.current !== token) return null;
     const target = result.kind === 'item' ? result.route : result.session;
+    historyReveal.current = fromHistory ? result : null;
     const opened = navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result, ownerToken === undefined ? undefined : () => shortcutSequence.current === ownerToken);
     const request = navigation.getNavigationRequest();
     if (!await opened || navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
@@ -258,6 +268,7 @@ function Workspace({ application }: { application: Application }) {
   // Tree and graph already save their own selection through navigation.
   // The graph's ↑/↓ and "−" move the selection without opening detail (Ariadne.dc.html `select`).
   const selected = (result: RevealedItem, openDetail = true) => {
+    historyReveal.current = null;
     invalidateOwnerRequest(); setLocalReveal(result);
     if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); }
   };
@@ -266,6 +277,24 @@ function Workspace({ application }: { application: Application }) {
     void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
       .catch((error: unknown) => setRouteError(plainFailure(error, 'This registered item could not be opened.')));
   };
+  const navigateHistory = (direction: HistoryDirection) => {
+    if (!route || state.writing || state.pendingOperationId !== null) return false;
+    return itemHistory.navigate(direction, async id => {
+      const token = ++shortcutSequence.current, request = navigation.getNavigationRequest();
+      setOwnerFocus(null); setRouteError(null);
+      try {
+        const result = await navigation.routes.revealItem({ ...route, item_id: id });
+        if (result?.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== request) return false;
+        return await reveal(result, token, true) !== null;
+      } catch (error: unknown) {
+        if (shortcutSequence.current === token) setRouteError(plainFailure(error, 'This registered item could not be opened.'));
+        return false;
+      }
+    });
+  };
+  const historyControls = { canBack: itemHistory.canBack && !state.writing && state.pendingOperationId === null,
+    canForward: itemHistory.canForward && !state.writing && state.pendingOperationId === null,
+    back: () => navigateHistory('back'), forward: () => navigateHistory('forward') };
   // Send while the session's agent isn't running asks first (1ad); see ui/answer/notRunning.
   const onAgentNotRunning = (submission: PendingSubmission) => {
     void agentNotRunning({ navigation, drafts: application.drafts, reveal: revealItem })(submission);
@@ -322,8 +351,6 @@ function Workspace({ application }: { application: Application }) {
   // The archive is kept per project (1x), so the label counts the project's archived topics.
   const archivedTopics = route ? state.projects?.projects.items.find(project => project.project_id === route.project_id)?.counts.archived_topics ?? 0 : 0;
   // Remove (handoff README "Remove"): ask, then hide at once and run after the undo window (ui/remove/queue).
-  const removals = application.removals;
-  const hidden = useSyncExternalStore(removals.subscribe, removals.getSnapshot, removals.getSnapshot);
   const [asking, setAsking] = useState<{ target: RemoveTarget; subject: RemoveSubject } | null>(null);
   const askRemove = (target: TreeRemoveTarget): boolean => {
     const at = targetSession(target), session = navigation.opened.open(at).getSnapshot().snapshot?.session;
@@ -399,8 +426,8 @@ function Workspace({ application }: { application: Application }) {
   }), { scope: 'workspace' });
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
-  useWindowKeys(appRoot);
-  return <RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
+  useWindowKeys(appRoot, historyControls);
+  return <ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget}
       session={store ? sessionFacts(sessionState, projectName) : undefined}
@@ -428,6 +455,7 @@ function Workspace({ application }: { application: Application }) {
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} drafts={application.drafts}
         selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} earlierAgent={earlier} /> : undefined}
       renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
+        historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
         selectedId={treeSelectedId} detailOpen={detailOpen && !!selectedId} railOpen={!!view && view.rail !== 'hidden'}
         highlightedItems={highlightedItems} highlightedMessages={highlightedMessages} onHoverItem={hoverItem} onSelected={selected}
         onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}
@@ -444,7 +472,7 @@ function Workspace({ application }: { application: Application }) {
       if (route && routeKey(target) === key && archived) showView('tree');
     }} />
     <AgentNotRunningHost navigation={navigation} />
-  </div></RemovalContext.Provider>;
+  </div></RemovalContext.Provider></ItemHistoryContext.Provider>;
 }
 
 // Construction happens in an effect, so StrictMode's discarded render creates

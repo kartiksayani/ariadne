@@ -1,12 +1,34 @@
 // Agent-written text rendered from Markdown (ui/shared/markdown.ts) as React
 // elements: no HTML strings, nothing injected. Links open in the system
-// browser through LinkOpener; a click never navigates the app's window.
+// browser through LinkOpener; local item references select items through ItemRefs.
 import { createContext, Fragment, useContext, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { fileLinkTitle, fileReference, fileReferences, parseMarkdown, safeHref, type Block, type Inline } from './markdown';
 import './markdown.css';
+import type { DisplayStatus } from '../../selectors/waiting/replied';
+import { STATUS, statusKey } from './status';
 
 /** Opens a checked external URL; the composition supplies the desktop's opener. */
 export const LinkOpener = createContext<(url: string) => void>(() => {});
+
+/** Same-session item lookup and selection, supplied only around agent text. */
+export interface ItemReferenceNavigation {
+  lookup(itemId: string): { readonly label: string; readonly status: DisplayStatus } | null;
+  onOpenItem(itemId: string): void;
+}
+export const ItemRefs = createContext<ItemReferenceNavigation | null>(null);
+
+/** An in-app item link, shared by Markdown and the item's Links section. */
+export function ItemReference({ itemId, children, className }: { readonly itemId: string; readonly children: ReactNode; readonly className?: string }) {
+  const navigation = useContext(ItemRefs);
+  if (!navigation) return className ? <span className={className}>{children}</span> : <>{children}</>;
+  const item = navigation.lookup(itemId);
+  if (!item) {
+    const content = <>{children} <span className="md-item-missing">(item not found)</span></>;
+    return className ? <span className={className}>{content}</span> : content;
+  }
+  const title = `${item.label} · ${STATUS[statusKey[item.status]].label}`;
+  return <a className={className ? `md-link ${className}` : 'md-link'} {...fileLinkProps(title, () => navigation.onOpenItem(itemId))}>{children}</a>;
+}
 
 /**
  * Files named in agent text. The desktop alone decides which references are files inside a project's
@@ -22,7 +44,7 @@ export const FileRefProject = createContext<string | null>(null);
 /** The references the desktop found, for the text being rendered. */
 const FoundFiles = createContext<{ readonly projectId: string; readonly found: ReadonlySet<string> } | null>(null);
 
-/** Props that make an element without a web address (a file link) act as a link: the keyboard reaches it and Enter opens it. */
+/** Props that make a local reference act as a link: the keyboard reaches it and Enter opens it. */
 export function fileLinkProps(title: string, open: () => void) {
   return {
     role: 'link', tabIndex: 0, title,
@@ -69,6 +91,7 @@ function Spans({ nodes, plain = false }: { readonly nodes: readonly Inline[]; /*
       case 'strong': return <strong key={index}><Spans nodes={node.children} plain={plain} /></strong>;
       case 'em': return <em key={index}><Spans nodes={node.children} plain={plain} /></em>;
       case 'del': return <del key={index}><Spans nodes={node.children} plain={plain} /></del>;
+      case 'item': return plain ? <Spans key={index} nodes={node.children} plain /> : <ItemReference key={index} itemId={node.itemId}><Spans nodes={node.children} plain /></ItemReference>;
       case 'link': {
         const click = (event: MouseEvent<HTMLAnchorElement>) => {
           event.preventDefault(); event.stopPropagation();

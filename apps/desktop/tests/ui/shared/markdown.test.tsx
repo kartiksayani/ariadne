@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { fileLinkTitle, fileReference, fileReferences, inline, MARKDOWN_LIMIT, parseMarkdown, safeHref } from '../../../src/ui/shared/markdown';
-import { FileRefProject, FileRefs, LinkOpener, Markdown, type FileOpener } from '../../../src/ui/shared/MarkdownText';
+import { fileLinkTitle, fileReference, fileReferences, inline, itemReference, MARKDOWN_LIMIT, parseMarkdown, safeHref } from '../../../src/ui/shared/markdown';
+import { FileRefProject, FileRefs, ItemReference, ItemRefs, LinkOpener, Markdown, type FileOpener, type ItemReferenceNavigation } from '../../../src/ui/shared/MarkdownText';
 
 const blocks = (text: string) => parseMarkdown(text).blocks;
 
@@ -81,6 +81,17 @@ describe('markdown parser', () => {
     expect(inline('<javascript:alert(1)>', 0)).toEqual(['<javascript:alert(1)>']);
     expect(safeHref('https://example.com/\nx')).toBeNull();
     expect(safeHref(`https://example.com/${'a'.repeat(3000)}`)).toBeNull();
+  });
+
+  it('recognizes local item links without admitting them as external URLs', () => {
+    expect(inline('[Earlier decision](item:3.2)', 0)).toEqual([{ t: 'item', itemId: '3.2', children: ['Earlier decision'] }]);
+    for (const id of ['1', '3.2', '9007199254740991.1']) expect(itemReference(`item:${id}`)).toBe(id);
+    for (const target of ['item:', 'item:0', 'item:01', 'item:3.0', 'item:3..2', 'item:3.', 'item:-1', 'item:9007199254740992', 'item:1e2', 'ITEM:3.2', 'item://3.2', 'item:3.2?x', 'item:3.2\n']) {
+      expect(itemReference(target), target).toBeNull();
+    }
+    expect(safeHref('item:3.2')).toBeNull();
+    expect(inline('[Bad](item:3.0)', 0)).toEqual(['Bad']);
+    expect(fileReferences(blocks('[See `src/label.ts`](item:3.2)'))).toEqual([]);
   });
 
   it('marks file:line references as code', () => {
@@ -197,6 +208,84 @@ describe('Markdown component', () => {
     expect(container.querySelector('strong')?.textContent).toBe('Done:');
     expect(container.querySelector('pre')?.textContent).toBe('code');
     expect(container.querySelector('li code')?.textContent).toBe('x');
+  });
+});
+
+describe('item references in Markdown', () => {
+  afterEach(cleanup);
+  const navigation = (): ItemReferenceNavigation => ({
+    lookup: id => id === '3.2' ? { label: 'Retry decision', status: 'decided' } : null,
+    onOpenItem: vi.fn(),
+  });
+
+  it('selects a same-session item by click and Enter without calling the external opener', () => {
+    const items = navigation(), open = vi.fn(), outer = vi.fn();
+    render(<div onClick={outer}><LinkOpener.Provider value={open}><ItemRefs.Provider value={items}>
+      <Markdown text="See [Earlier decision](item:3.2)." />
+    </ItemRefs.Provider></LinkOpener.Provider></div>);
+    const link = screen.getByRole('link', { name: 'Earlier decision' });
+    expect(link.getAttribute('title')).toBe('Retry decision · Decided');
+    expect(link.getAttribute('tabindex')).toBe('0');
+    expect(link.getAttribute('href')).toBeNull();
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    fireEvent(link, click);
+    expect(click.defaultPrevented).toBe(true);
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    fireEvent(link, enter);
+    expect(enter.defaultPrevented).toBe(true);
+    fireEvent.keyDown(link, { key: ' ' });
+    expect(items.onOpenItem).toHaveBeenCalledTimes(2);
+    expect(items.onOpenItem).toHaveBeenCalledWith('3.2');
+    expect(open).not.toHaveBeenCalled();
+    expect(outer).not.toHaveBeenCalled();
+  });
+
+  it('keeps missing targets as plain labels with a muted not-found hint', () => {
+    const items = navigation(), open = vi.fn();
+    const { container } = render(<LinkOpener.Provider value={open}><ItemRefs.Provider value={items}>
+      <Markdown text="See [Removed item](item:99.2)." inline />
+    </ItemRefs.Provider></LinkOpener.Provider>);
+    expect(container.textContent).toBe('See Removed item (item not found).');
+    expect(container.querySelector('.md-item-missing')?.textContent).toBe('(item not found)');
+    expect(screen.queryByRole('link')).toBeNull();
+    fireEvent.click(screen.getByText('Removed item', { exact: false }));
+    expect(items.onOpenItem).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('leaves item references plain in owner text and when navigation is unavailable', () => {
+    const items = navigation();
+    const { container } = render(<ItemRefs.Provider value={items}><ItemRefs.Provider value={null}>
+      <Markdown text="[Owner reference](item:3.2) and [missing](item:99)" />
+    </ItemRefs.Provider></ItemRefs.Provider>);
+    expect(container.textContent).toBe('Owner reference and missing');
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(container.querySelector('.md-item-missing')).toBeNull();
+  });
+
+  it('keeps external links working and never resolves file-shaped item labels', () => {
+    const items = navigation(), open = vi.fn(), files: FileOpener = { resolve: vi.fn(), open: vi.fn() };
+    render(<LinkOpener.Provider value={open}><FileRefs.Provider value={files}><FileRefProject.Provider value="project">
+      <ItemRefs.Provider value={items}><Markdown text="[See `src/label.ts`](item:3.2) and [docs](https://example.com)." /></ItemRefs.Provider>
+    </FileRefProject.Provider></FileRefs.Provider></LinkOpener.Provider>);
+    const local = screen.getByRole('link', { name: 'See src/label.ts' });
+    expect(local.querySelector('a')).toBeNull();
+    fireEvent.click(local);
+    fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+    expect(items.onOpenItem).toHaveBeenCalledWith('3.2');
+    expect(open).toHaveBeenCalledExactlyOnceWith('https://example.com');
+    expect(files.resolve).not.toHaveBeenCalled();
+    expect(files.open).not.toHaveBeenCalled();
+  });
+
+  it('uses current-session lookup after provider changes and supports the Links section class', () => {
+    const items = navigation();
+    const { rerender } = render(<ItemRefs.Provider value={items}><ItemReference itemId="3.2" className="detail-link">Previous item</ItemReference></ItemRefs.Provider>);
+    expect(screen.getByRole('link', { name: 'Previous item' }).classList.contains('detail-link')).toBe(true);
+    rerender(<ItemRefs.Provider value={{ ...items, lookup: () => null }}><ItemReference itemId="3.2" className="detail-link">Previous item</ItemReference></ItemRefs.Provider>);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByText('(item not found)')).toBeTruthy();
+    expect(screen.getByText('(item not found)').parentElement?.className).toBe('detail-link');
   });
 });
 

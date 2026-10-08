@@ -11,6 +11,7 @@ import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
+import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
 function fixture(): { session: Session; project: ProjectSummary; summary: SessionSummary } {
@@ -406,6 +407,21 @@ describe('source-backed Waiting and Sent panel', () => {
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
     expect(store.getSnapshot()).toBe(captured);
   });
+  it('opens references from the waiting question in that card’s session without opening the card itself', async () => {
+    const { store, transport, drafts } = setup(), seed = mutableSession();
+    seed.items['2']!.question = 'Read [receipt follow-up](item:1.1) or [missing follow-up](item:99).';
+    transport.push('project_list', projectPage()); transport.push('session_list', sessionPage()); transport.push('session_get', loaded(seed));
+    await store.start();
+    const reveal = vi.fn(), external = vi.fn();
+    render(<LinkOpener.Provider value={external}><WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={vi.fn()} /></LinkOpener.Provider>);
+    const link = await screen.findByRole('link', { name: 'receipt follow-up' });
+    fireEvent.click(link); fireEvent.keyDown(link, { key: 'Enter' });
+    expect(reveal.mock.calls).toEqual([[{ ...route, item_id: '1.1' }], [{ ...route, item_id: '1.1' }]]);
+    expect(screen.queryByRole('link', { name: 'missing follow-up' })).toBeNull();
+    expect(screen.getByText('(item not found)')).toBeTruthy();
+    expect(external).not.toHaveBeenCalled();
+  });
+
   it('routes waiting/current and original Sent targets, including a topic-only input', async () => {
     const { store, transport, drafts } = setup(); transport.capture(); await store.start();
     const reveal = vi.fn(), open = vi.fn();

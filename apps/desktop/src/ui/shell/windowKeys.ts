@@ -3,10 +3,11 @@
 // launch, or after a click on a non-focusable area) lands on <body> and is lost.
 // This hook hands such keys to the element that would own them had focus been
 // there, and keeps Esc away from macOS (which would otherwise leave full screen).
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { workspaceIntent } from '../keys';
+import type { ItemHistoryControls } from './itemHistory';
 
-const editable = 'input,textarea,select,[contenteditable="true"],[role="textbox"]';
+const editable = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]';
 const dialogs = 'dialog,[role="dialog"],[role="alertdialog"]';
 const openDialogs = 'dialog[open],[role="dialog"],[role="alertdialog"]';
 // The tree's roving row, then the graph's roving node, then the graph scroller.
@@ -35,11 +36,20 @@ export function keyAnchor(root: HTMLElement): HTMLElement {
  * while the field is disabled the characters and Backspaces are held (`hold`) until it is enabled again; in the short
  * window after that (HOLD_MS) the field takes focus back and the key goes into it.
  */
-export function routeWindowKey(event: KeyboardEvent, root: HTMLElement, stranded: Stranded | null = null): void {
+export function routeWindowKey(event: KeyboardEvent, root: HTMLElement, stranded: Stranded | null = null,
+  history?: Pick<ItemHistoryControls, 'back' | 'forward'>): void {
   const target = event.target, page = root.ownerDocument;
   const outside = !(target instanceof Node && root.contains(target));
   const field = stranded && stranded.field.isConnected ? stranded.field : null;
   const toBody = outside && !event.defaultPrevented && !within(target, `${editable},${dialogs}`) && !page.querySelector(openDialogs);
+  const intent = workspaceIntent(event);
+  if (history && (intent?.kind === 'history-back' || intent?.kind === 'history-forward')) {
+    if (!event.defaultPrevented && !event.isComposing && !field && !within(target, `${editable},${dialogs}`)
+      && !within(page.activeElement, editable) && !page.querySelector(openDialogs)) {
+      if ((intent.kind === 'history-back' ? history.back : history.forward)()) event.preventDefault();
+    }
+    return;
+  }
   if (toBody && field) {
     if (field.matches(':disabled')) { if (typed(event) || backspace(event)) stranded!.hold(event.key); }
     else {
@@ -98,7 +108,9 @@ function insertText(field: Element, text: string, erase = 0): boolean {
 }
 
 /** Installs `routeWindowKey` on the window for the lifetime of the app root. */
-export function useWindowKeys(root: RefObject<HTMLElement | null>): void {
+export function useWindowKeys(root: RefObject<HTMLElement | null>, history?: Pick<ItemHistoryControls, 'back' | 'forward'>): void {
+  const latestHistory = useRef(history);
+  latestHistory.current = history;
   useEffect(() => {
     // The last text field focused, forgotten as soon as focus goes elsewhere or the owner clicks away.
     let field: Element | null = null;
@@ -138,7 +150,7 @@ export function useWindowKeys(root: RefObject<HTMLElement | null>): void {
     const listener = (event: KeyboardEvent) => {
       if (!root.current) return;
       settle();
-      routeWindowKey(event, root.current, field && stranded ? { field, hold, resume } : null);
+      routeWindowKey(event, root.current, field && stranded ? { field, hold, resume } : null, latestHistory.current);
     };
     window.addEventListener('focusin', focused);
     window.addEventListener('pointerdown', clicked, true);

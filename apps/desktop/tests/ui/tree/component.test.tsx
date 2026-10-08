@@ -647,13 +647,12 @@ describe('session tree reading position', () => {
     await mount({ configure: savedAtTop, props: { selectedId: '8', detailOpen: true } });
     expect(top('8')).toBeGreaterThanOrEqual(0); expect(top('8') + 40).toBeLessThanOrEqual(400);
   });
-  it('brings the selected row back into view when the detail panel opens', async () => {
+  it('preserves the reading position when detail and messages open', async () => {
     layout();
     const { rerender } = await mount({ configure: savedAtTop, props: { selectedId: '8' } });
     expect(top('8')).toBe(800);
     rerender({ detailOpen: true });
-    expect(top('8')).toBeGreaterThanOrEqual(0); expect(top('8') + 40).toBeLessThanOrEqual(400);
-    // A row already in view stays put.
+    expect(top('8')).toBe(800);
     const before = top('8');
     rerender({ detailOpen: true, railOpen: true });
     expect(top('8')).toBe(before);
@@ -790,12 +789,25 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(150);
   });
 
-  it('reveals an item opened from elsewhere only when it is not in view', async () => {
+  it('preserves scroll for ordinary external selection, including an offscreen item and opening detail', async () => {
     const view = await opened();
+    row('3').focus(); fireEvent.keyDown(row('3'), { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(row('4'));
     view.rerender({ reveal: link(view, '4'), selectedId: '4' });
     expect(scroller().scrollTop).toBe(150);
-    view.rerender({ reveal: link(view, '8'), selectedId: '8' });
-    expect(scroller().scrollTop).not.toBe(150);
+    view.rerender({ reveal: link(view, '8'), selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(150);
+  });
+
+  it('reveals only history navigation with the least scroll, leaving an onscreen history target in place', async () => {
+    const view = await opened();
+    row('3').focus(); fireEvent.keyDown(row('3'), { key: 'ArrowDown' });
+    const onscreen = link(view, '4');
+    view.rerender({ reveal: onscreen, historyReveal: onscreen, selectedId: '4' });
+    expect(scroller().scrollTop).toBe(150);
+    const offscreen = link(view, '8');
+    view.rerender({ reveal: offscreen, historyReveal: offscreen, selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(440);
     expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
     expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
   });

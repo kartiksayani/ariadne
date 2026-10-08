@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useRef, useState, type KeyboardEvent } from 'react';
-import { HOLD_MAX, HOLD_MS, keyAnchor, useWindowKeys } from '../../../src/ui/shell/windowKeys';
+import { HOLD_MAX, HOLD_MS, keyAnchor, routeWindowKey, useWindowKeys } from '../../../src/ui/shell/windowKeys';
 import { watchFullscreen, SETTLE_MS } from '../../../src/ui/shell/fullscreen';
 import { RootBoundary } from '../../../src/RootBoundary';
 
@@ -31,6 +31,42 @@ const press = (target: EventTarget, key: string, init: KeyboardEventInit = {}) =
 };
 
 describe('window-level workspace keys', () => {
+  it('routes Cmd brackets directly from body, buttons and tree rows while leaving removal keys unchanged', () => {
+    const root = document.createElement('div'); root.innerHTML = '<button>Back</button><div tabindex="0"></div>';
+    document.body.append(root);
+    const history = { back: vi.fn(() => true), forward: vi.fn(() => true) };
+    const route = (target: EventTarget, key: string, init: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent('keydown', { key, metaKey: true, bubbles: true, cancelable: true, ...init });
+      target.addEventListener('keydown', event => routeWindowKey(event as globalThis.KeyboardEvent, root, null, history), { once: true });
+      target.dispatchEvent(event); return event;
+    };
+    expect(route(document.body, '[').defaultPrevented).toBe(true);
+    expect(route(root.querySelector('button')!, ']').defaultPrevented).toBe(true);
+    expect(route(root.querySelector('div')!, '[').defaultPrevented).toBe(true);
+    expect(history.back).toHaveBeenCalledTimes(2); expect(history.forward).toHaveBeenCalledOnce();
+    route(root, 'Backspace', { metaKey: false }); route(root, 'Delete', { metaKey: false });
+    expect(history.back).toHaveBeenCalledTimes(2); expect(history.forward).toHaveBeenCalledOnce();
+  });
+
+  it('never routes history chords in text fields, editable content, dialogs, composition or stranded fields', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<input /><textarea></textarea><select></select><div contenteditable="true"><span>Editing</span></div><div contenteditable=""></div><div contenteditable="plaintext-only"></div><div role="textbox"></div>';
+    document.body.append(root);
+    const history = { back: vi.fn(() => true), forward: vi.fn(() => true) };
+    const route = (target: Element, init: KeyboardEventInit = {}, stranded = false) => {
+      const event = new KeyboardEvent('keydown', { key: '[', metaKey: true, bubbles: true, cancelable: true, ...init });
+      target.addEventListener('keydown', event => routeWindowKey(event as globalThis.KeyboardEvent, root,
+        stranded ? { field: root.querySelector('input')!, hold: vi.fn(), resume: vi.fn() } : null, history), { once: true });
+      target.dispatchEvent(event); expect(event.defaultPrevented).toBe(false);
+    };
+    for (const target of root.querySelectorAll('input,textarea,select,span,[contenteditable],[role="textbox"]')) route(target);
+    root.querySelector('input')!.focus(); route(document.body); root.querySelector('input')!.blur();
+    route(document.body, { isComposing: true }); route(document.body, {}, true);
+    const dialog = document.body.appendChild(document.createElement('div')); dialog.setAttribute('role', 'dialog');
+    route(document.body); route(dialog);
+    expect(history.back).not.toHaveBeenCalled(); expect(history.forward).not.toHaveBeenCalled();
+  });
+
   it('replays a key pressed on <body> at the tree’s roving row, focuses it and consumes the key when handled', () => {
     const seen: string[] = [];
     render(<Workspace onKey={(where, key) => { seen.push(`${where}:${key}`); return where === 'row' && key === 'ArrowDown'; }} />);

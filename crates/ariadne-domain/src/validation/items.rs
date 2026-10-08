@@ -130,6 +130,13 @@ pub(super) fn validate_candidate_indexed(
             true,
             Some(4096),
         )?;
+        if link.kind == LinkKind::Item {
+            require(
+                ItemRef::new(link.target.clone()).is_ok(),
+                format!("{path}.links.{index}.target"),
+                ValidationErrorKind::InvalidState,
+            )?;
+        }
     }
     if terminal(&item.status) {
         require(
