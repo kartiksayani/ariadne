@@ -414,14 +414,15 @@ function Workspace({ application }: { application: Application }) {
         notice={routeError && <p className="waiting-notice waiting-notice-warn" role="alert">{routeError}</p>}
         openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} />}
       detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
-      detail={store && selectedId && detailOpen && route ? <><ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
+      detail={store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
         highlightedMessageIds={highlightedMessages} later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
-        onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)} />
-        <CopiedProvenance key={`source:${key}:${selectedId}`} store={store} itemId={selectedId} revealItem={async target => {
+        onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)}
+        provenance={<CopiedProvenance store={store} itemId={selectedId}
+          projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={async target => {
           const result = await navigation.routes.revealItem(target); if (result) reveal(result);
-        }} /></> : undefined}
+        }} />} /> : undefined}
       onCloseDetail={closeDetail}
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} drafts={application.drafts}
         selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} earlierAgent={earlier} /> : undefined}

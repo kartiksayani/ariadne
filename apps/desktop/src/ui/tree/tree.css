@@ -574,6 +574,58 @@
   text-wrap: pretty;
 }
 
+/* The details fold to six lines (--tree-clamp, set by ItemRow); the title above never folds.
+   Show more / Show less appears only when the text runs longer. */
+.tree-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.tree-preview > .tree-line {
+  align-self: stretch;
+}
+
+.tree-clamp {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-line-clamp: var(--tree-clamp);
+  -webkit-box-orient: vertical;
+}
+
+.tree-preview[data-open] .tree-clamp {
+  display: block;
+  overflow: visible;
+}
+
+.tree-more {
+  margin-left: 21px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 18px;
+  cursor: pointer;
+  color: var(--a-acc-text);
+  background: transparent;
+}
+
+.tree-more:hover {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.tree-ask + .tree-more {
+  margin-left: 0;
+}
+
+/* The owner's message on its way: a small line under the details, never in their place. */
+.tree-delivery {
+  font-size: 12.5px;
+}
+
 .tree-jump {
   padding: 0;
   border: 0;
@@ -646,15 +698,22 @@
   font-size: 12px;
 }
 
+/* The shortcut icons keep their room at all times and only fade in, so the text column
+   never changes width between hover and no hover. */
 .tree-actions {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 1px;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity .12s;
 }
 
 .tree-item:hover .tree-actions,
-.tree-item[aria-selected="true"] .tree-actions {
-  display: flex;
+.tree-item[aria-selected="true"] .tree-actions,
+.tree-column[data-kbd] .tree-item:focus .tree-actions {
+  visibility: visible;
+  opacity: 1;
 }
 
 .tree-action {

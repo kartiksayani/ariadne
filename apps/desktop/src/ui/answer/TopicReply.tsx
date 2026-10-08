@@ -35,12 +35,15 @@ export function TopicReply({ drafts, store, actions, topicId, agent, onClose }: 
   useEffect(() => { box.current?.focus(); }, []);
   if (!session) return null;
   const live = current.status === 'ready' && !current.error;
-  const locked = !entry || !live || state.preferenceUncertain || entry.saving || entry.uncertain || !!entry.receipt;
+  // `locked` is a save in progress or awaiting a retry: it disables the box. A view that is refreshing (`!live`) only holds
+  // Send back: a disabled box drops the owner's keystrokes and focus falls to <body>, where keys become tree shortcuts.
+  const locked = !entry || state.preferenceUncertain || entry.saving || entry.uncertain || !!entry.receipt;
+  const sendOff = locked || !live;
   // Only the binding can change under a topic reply: it follows the active one.
   const rebased = entry && !entry.receipt && entry.draft.binding_id !== session.active_binding_id ? { ...entry.draft, binding_id: session.active_binding_id ?? '' } : entry?.draft;
   const blocked = rebased ? blockedDraft(rebased, session) : null;
   const send = async () => {
-    if (!entry || locked || blocked) return;
+    if (!entry || sendOff || blocked) return;
     if (entry.draft.binding_id !== session.active_binding_id) drafts.review(entry.draft.op_id, session);
     if (await drafts.submit(entry.draft.op_id)) onClose();
   };
@@ -56,7 +59,7 @@ export function TopicReply({ drafts, store, actions, topicId, agent, onClose }: 
     <textarea ref={box} className="input" rows={3} aria-label="Reply to this topic" placeholder={`Tell ${agent} something about this whole topic…`}
       value={entry && !entry.receipt ? entry.draft.text : ''} disabled={locked} onChange={event => { if (entry) drafts.edit(entry.draft.op_id, { text: event.target.value }); }} />
     <div className="tree-topic-reply-row">
-      <button type="button" className="btn btn-primary" disabled={locked || !!blocked} onClick={() => { void send(); }}>
+      <button type="button" className="btn btn-primary" disabled={sendOff || !!blocked} onClick={() => { void send(); }}>
         <i className="ph ph-paper-plane-right" aria-hidden="true" />Send reply</button>
       {retry && <button type="button" className="btn btn-secondary" disabled={state.preferenceUncertain || !live}
         onClick={() => { void drafts.submit(entry.draft.op_id).then(saved => { if (saved) onClose(); }); }}>Try sending again</button>}

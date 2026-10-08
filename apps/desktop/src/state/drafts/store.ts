@@ -46,6 +46,8 @@ export const emptyDraft = 'Choose an option or enter a message before sending.';
 const contentBlocked = (draft: Immutable<OwnerDraft>): string | null => !draft.selected_option_id && !draft.text.trim() ? emptyDraft
   : new TextEncoder().encode(draft.text).length > 16 * 1024 ? 'Keep the message within 16 KiB.' : null;
 const typed = new Set<InputKind>(['answer', 'reply', 'note', 'followup', TOPIC_REPLY]);
+/** The owner's own words outside an answer: core takes all three at any status, so the app sends the one that fits. */
+const words = new Set<InputKind>(['reply', 'note', 'followup']);
 /**
  * A cheap safety net: the same words for the same target and option are still queued or in flight as an owner message.
  * Sending them again would deliver them twice. The kind is not compared: Edit can move a queued note or follow-up into
@@ -274,19 +276,25 @@ export class OwnerDraftStore {
       binding_id: draft.binding_id, target: draft.target, kind: draft.intent, text: draft.text, selected_option_id: draft.selected_option_id,
       expected_question_revision: draft.question_revision, supersedes_answer_id: draft.supersedes_answer_id } } } as OwnerMutationRequest) as OwnerMutationRequest;
   }
-  submit(id: string): Promise<boolean> {
+  /**
+   * Sends the draft. `as` is the kind of message it goes out as, for the owner's words (reply, note, follow-up): the box the
+   * words were written in may no longer be the one that fits the item's status. The draft takes that kind in the same save
+   * that marks it attempted, so a retry after a restart sends the exact same message. Ignored for a draft already attempted.
+   */
+  submit(id: string, as?: OwnerIntent): Promise<boolean> {
     const flight = this.flights.get(id); if (flight) return flight;
     const entry = this.state.entries[id]; if (!entry || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
     this.entry(id, { saving: true, error: null });
-    const next = this.send(id).finally(() => { this.flights.delete(id); this.entry(id, { saving: false }); });
+    const next = this.send(id, as).finally(() => { this.flights.delete(id); this.entry(id, { saving: false }); });
     this.flights.set(id, next); return next;
   }
-  private async send(id: string): Promise<boolean> {
+  private async send(id: string, as?: OwnerIntent): Promise<boolean> {
     try {
       const entry = this.state.entries[id]; if (!entry) return false;
       let request = this.pendingInputs.get(id);
       if (!request) {
         const draft = structuredClone(entry.draft) as OwnerDraft;
+        if (as && words.has(draft.intent) && words.has(as)) draft.intent = as;
         const snapshot = await this.service.query({ session: draft.session, request: { command: 'session_get', params: {} } });
         if (snapshot.freshness !== 'fresh') throw new ServiceFailure('transport');
         const blocked = blockedDraft(draft, snapshot.session);
@@ -302,7 +310,7 @@ export class OwnerDraftStore {
         || !receipt.data.input_id || !receipt.data.message_id || receipt.data.input_seq <= 0 || receipt.data.message_number <= 0) throw new ServiceFailure('invalid_response');
       this.pendingInputs.delete(id); this.entry(id, { receipt: immutable(receipt), uncertain: false, error: null, sent: request.command.command === 'input_submit'
         ? { text: request.command.params.text, selected_option_id: request.command.params.selected_option_id } : null,
-        draft: immutable({ ...structuredClone(entry.draft), text: '', selected_option_id: null } as OwnerDraft) });
+        draft: immutable({ ...structuredClone((this.state.entries[id] ?? entry).draft), text: '', selected_option_id: null } as OwnerDraft) });
       // A failed cleanup leaves the durable draft recoverable. A validated input
       // receipt, never local button acceptance, authorizes its removal.
       await this.save([{ kind: 'delete_draft', operation_id: id }]); return true;
