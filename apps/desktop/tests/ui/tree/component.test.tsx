@@ -230,6 +230,38 @@ describe('session tree rows', () => {
 });
 
 describe('session tree filters', () => {
+  it('counts the matches themselves, excluding context and forced selections', async () => {
+    const { rerender } = await mount({ props: { query: 'receipt', selectedId: '4' } });
+    expect(screen.getByText('Showing 2 of 9 items matching “receipt”')).toBeTruthy();
+    expect(ids()).toContain('1'); // parent kept as context
+    expect(ids()).toContain('4'); // selection kept despite not matching
+    rerender({ query: '' });
+    expect(screen.queryByText(/items matching/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull();
+  });
+  it('explains picked statuses and clears only search', async () => {
+    let currentQuery = 'receipt';
+    const clear = vi.fn();
+    const view = await mount({ configure: value => { viewOf(value).filters.statuses = ['open']; },
+      props: { query: currentQuery, onClearSearch: () => { clear(); currentQuery = ''; } } });
+    expect(screen.getByText('Showing 1 of 9 items matching “receipt” in the statuses you picked')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    view.rerender({ query: currentQuery });
+    expect(clear).toHaveBeenCalledOnce();
+    expect(viewOf(view.transport).filters.statuses).toEqual(['open']);
+    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByText(/items matching/)).toBeNull();
+  });
+  it('counts only items in the current archive mode', async () => {
+    const view = await mount({ configure: value => {
+      const session = value.sessions.get(route.session_id)!;
+      session.topics[session.items['8']!.topic_id]!.archived_at = '2026-10-07T12:00:00Z';
+    }, props: { query: 'receipt' } });
+    expect(screen.getByText('Showing 2 of 8 items matching “receipt”')).toBeTruthy();
+    viewOf(view.transport).filters.archived = true;
+    await act(async () => { await view.navigation.refresh(); });
+    expect(screen.getByText('Showing 0 of 1 items matching “receipt”')).toBeTruthy();
+  });
   it('reads a saved full status set, including duplicates, as All', async () => {
     const { transport } = await mount({ configure: value => {
       viewOf(value).filters.statuses = ['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open', 'done'];
@@ -964,6 +996,35 @@ describe('scrolling the tree', () => {
   };
   const link = (view: Awaited<ReturnType<typeof mount>>, id: string): RevealedItem =>
     ({ kind: 'item', route: { ...route, item_id: id }, store: view.store, temporaryExpandedItemIds: [] });
+
+  it('keeps the selected row below its topic header when the search line appears or wraps', async () => {
+    let bannerHeight = 48;
+    const observers: (() => void)[] = [];
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} disconnect() {} });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = scroller(), banner = screen.queryByRole('button', { name: 'Clear search' });
+      const top = banner ? bannerHeight : 0;
+      if (this === box) return new DOMRect(0, top, 300, 400 - top);
+      if (this.matches('.tree-topic')) return new DOMRect(0, top, 300, 60);
+      const id = this.dataset.itemId, at = id ? ids().indexOf(id) : -1;
+      if (this.getAttribute('role') === 'treeitem' && at >= 0) return new DOMRect(0, top + at * 100 - (box?.scrollTop ?? 0), 300, 40);
+      return rectangle.call(this);
+    });
+    try {
+      const view = await mount({ props: { selectedId: '8', detailOpen: true }, configure: value => {
+        for (const item of Object.values(value.sessions.get(route.session_id)!.items)) if (item) item.question = 'Matching text';
+      } });
+      scroller().scrollTop = 440; fireEvent.scroll(scroller());
+      view.rerender({ query: 'Matching' });
+      expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+      expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(108);
+      bannerHeight = 96;
+      act(() => { observers.forEach(callback => callback()); });
+      expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+      expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(156);
+    } finally { vi.unstubAllGlobals(); }
+  });
 
   it('never scrolls when an item is clicked, even once the workspace echoes the opening back', async () => {
     const view = await opened();

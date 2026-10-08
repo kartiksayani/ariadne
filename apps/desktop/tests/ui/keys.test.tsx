@@ -5,6 +5,15 @@ import { useWorkspaceKeys, workspaceIntent, type KeyScope, type WorkspaceHandler
 afterEach(cleanup);
 
 describe('workspace keymap', () => {
+  it('reads Option digits from physical codes and ignores repeat and other modifiers', () => {
+    for (let digit = 1; digit <= 9; digit++) expect(workspaceIntent({ key: '¡', code: `Digit${digit}`, altKey: true })).toEqual({ kind: 'choose-send', index: digit - 1 });
+    expect(workspaceIntent({ key: 'º', code: 'Digit0', altKey: true })).toEqual({ kind: 'answer-words' });
+    for (const extra of [{ repeat: true }, { shiftKey: true }, { metaKey: true }, { ctrlKey: true }]) {
+      expect(workspaceIntent({ key: '¡', code: 'Digit1', altKey: true, ...extra })).toBeNull();
+    }
+    expect(workspaceIntent({ key: '1', altKey: true })).toBeNull();
+    expect(workspaceIntent({ key: '0', code: 'Digit0', metaKey: true })).toEqual({ kind: 'text-default' });
+  });
   it('maps the README keyboard table to intents', () => {
     const kinds = (keys: string[]) => keys.map(key => workspaceIntent({ key })?.kind ?? null);
     expect(kinds(['ArrowDown', 'j', 'ArrowUp', 'k', 'Home', 'End'])).toEqual(['move-down', 'move-down', 'move-up', 'move-up', 'first', 'last']);
@@ -34,13 +43,21 @@ describe('workspace keymap', () => {
 function Probe({ scope, handlers }: { readonly scope: KeyScope; readonly handlers: WorkspaceHandlers<HTMLDivElement> }) {
   const keys = useWorkspaceKeys(handlers, { scope });
   return <div data-testid="root" tabIndex={0} onKeyDown={keys}>
-    <input data-testid="input" /><textarea data-testid="area" /><button type="button" data-testid="button">B</button>
+    <select data-testid="select"><option>Choice</option></select><div contentEditable data-testid="editable" /><div role="textbox" data-testid="textbox" /><input data-testid="input" /><textarea data-testid="area" /><button type="button" data-testid="button">B</button>
     <div role="dialog"><button type="button" data-testid="dialog">D</button></div>
   </div>;
 }
 const node = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
 
 describe('useWorkspaceKeys', () => {
+  it.each(['workspace', 'row', 'editor'] as const)('keeps Option digits in all text fields in %s scope', scope => {
+    const quick = vi.fn(() => true);
+    render(<Probe scope={scope} handlers={{ 'choose-send': quick, 'answer-words': quick }} />);
+    for (const field of ['input', 'area', 'select', 'editable', 'textbox']) {
+      for (const digit of [0, 1]) expect(fireEvent.keyDown(node(field), { key: '¡', code: `Digit${digit}`, altKey: true })).toBe(true);
+    }
+    expect(quick).not.toHaveBeenCalled();
+  });
   it('workspace scope skips fields, dialogs and keys already handled below', () => {
     const graph = vi.fn(() => true), remove = vi.fn(() => false);
     render(<Probe scope="workspace" handlers={{ graph, remove }} />);

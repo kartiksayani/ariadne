@@ -621,12 +621,12 @@ describe('owner input component and durable draft controller', () => {
     // Cancel: the dialog never queues, so the draft is unchanged.
     expect([saved().text, saved().selected_option_id]).toEqual(['Keep my words', 'no']);
     fireEvent.click(screen.getByRole('button', { name: 'Send “Change the design”' }));
-    expect(held).toHaveLength(2); expect(held[1]!.change).toEqual({ selected_option_id: 'no', text: '' });
+    expect(held).toHaveLength(2); expect(held[1]!.change).toEqual({ selected_option_id: 'no', text: 'Keep my words' });
     expect([saved().text, saved().selected_option_id]).toEqual(['Keep my words', 'no']);
     expect(editor().value).toBe('Keep my words'); expect(value.calls).toHaveLength(0);
     await act(async () => { await held[1]!.queue(); });
     const sent = value.calls[0]!.command;
-    expect(sent.command === 'input_submit' && [sent.params.text, sent.params.selected_option_id]).toEqual(['', 'no']);
+    expect(sent.command === 'input_submit' && [sent.params.text, sent.params.selected_option_id]).toEqual(['Keep my words', 'no']);
   });
   it('asks to review a saved detail reply after the item changed, then sends it re-based on the current revision', async () => {
     const value = await setup(), user = userEvent.setup();

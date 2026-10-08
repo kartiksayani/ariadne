@@ -120,7 +120,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
     <div className="answer-options">
       {options.map((option, index) => {
         const on = index === selected;
-        return <button type="button" key={option.id} data-answer-option={index} title={`Press ${index + 1} to select`} aria-pressed={on} {...gate(locked, frozen)}
+        return <button type="button" key={option.id} data-answer-option={index} title={`Press ${index + 1} to select${index < 9 ? `, ⌥${index + 1} to send` : ''}`} aria-pressed={on} {...gate(locked, frozen)}
           className={`btn ${option.recommended ? 'btn-primary' : 'btn-secondary'} answer-option${on ? ' answer-option-on' : ''}${option.recommended ? ' answer-option-rec' : ''}`}
           onClick={event => { event.stopPropagation(); if (!off) onSelect(index); }}>
           <span className="answer-option-head">

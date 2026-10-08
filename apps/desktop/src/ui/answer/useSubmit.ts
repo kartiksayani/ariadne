@@ -11,7 +11,11 @@ import { blockedDraft, emptyDraft, ownerActions, useOwnerDrafts, type DraftEntry
 import { agentName } from '../shell/model';
 
 /** A keyboard request to open the input for an intent, optionally choosing option `optionIndex`. */
-export interface OwnerFocusRequest { intent: OwnerIntent; token: number; optionIndex?: number }
+export interface OwnerFocusRequest {
+  intent: OwnerIntent; token: number; optionIndex?: number; sendOption?: boolean; ownWords?: boolean;
+  /** An immediate answer must still be the option and question visible at the key press. */
+  answerTarget?: { optionId: string; revision: number; questionRevision: number; bindingId: string | null };
+}
 
 /** The text and option a send puts into the draft. */
 export interface DraftChange { readonly text: string; readonly selected_option_id: string | null }
@@ -61,7 +65,7 @@ export interface Submit {
   readonly error: string | null;
   select: (optionId: string | null) => void;
   write: (text: string) => void;
-  /** Sends the option only. */
+  /** Sends the option with the note already typed in its draft. */
   sendOption: (optionId: string) => void;
   /** Sends the text only, never with an option. */
   sendText: (text: string) => void;
@@ -131,7 +135,7 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
     sendOption: optionId => {
       const option = item?.options.find(value => value.id === optionId);
       if (!entry || !option || !ready()) return;
-      dispatch(option.label, { selected_option_id: option.id, text: '' });
+      dispatch(option.label, { selected_option_id: option.id, text: drafts.getSnapshot().entries[entry.draft.op_id]?.draft.text ?? entry.draft.text });
     },
     sendText: text => {
       if (!entry || !text.trim() || !ready()) return;

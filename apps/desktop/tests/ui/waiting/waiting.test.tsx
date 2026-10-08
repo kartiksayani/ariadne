@@ -334,7 +334,7 @@ describe('source-backed Waiting and Sent panel', () => {
     await store.start(); const answers = drafts();
     render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
     await act(async () => { await answers.load(); });
-    const option = screen.getByTitle('Press 2 to select'); option.focus();
+    const option = screen.getByTitle('Press 2 to select, ⌥2 to send'); option.focus();
     const before = store.getSnapshot(), reads = transport.calls.length;
     const row = sentRow(queued.payload.target_snapshot.item_question!);
     expect(row.textContent).toContain('demo.local hasn’t picked it up yet');
@@ -343,7 +343,7 @@ describe('source-backed Waiting and Sent panel', () => {
     for (const [index, execution] of ['running', 'idle', 'running'].entries()) {
       await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
         observation: { ...observation, execution_state: execution as 'running' | 'idle', last_seen_at: `2026-10-05T02:05:0${index}.000Z` } }); });
-      expect(screen.getByTitle('Press 2 to select')).toBe(option); expect(document.activeElement).toBe(option);
+      expect(screen.getByTitle('Press 2 to select, ⌥2 to send')).toBe(option); expect(document.activeElement).toBe(option);
       expect(store.getSnapshot().status).toBe('ready'); expect(store.getSnapshot().waiting).toBe(before.waiting);
       expect(store.getSnapshot().sent).toBe(before.sent); expect(store.getSnapshot().counts).toBe(before.counts);
       expect(row.textContent).toContain(execution === 'running' ? 'Waiting for demo.local to finish what it’s doing' : 'demo.local hasn’t picked it up yet');
@@ -586,7 +586,7 @@ describe('source-backed Waiting and Sent panel', () => {
     expect(document.querySelector('[data-waiting-item="2"]')?.getAttribute('aria-current')).toBe('true');
     // A preference write that cannot be confirmed locks the drafts until it is retried.
     drafts(); transport.push('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'commit_uncertain' } });
-    fireEvent.click(screen.getByTitle('Press 2 to select'));
+    fireEvent.click(screen.getByTitle('Press 2 to select, ⌥2 to send'));
     expect(await screen.findByRole('button', { name: 'Try saving your draft again' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(true);
   });

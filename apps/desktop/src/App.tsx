@@ -6,7 +6,7 @@ import type { RevealedItem } from './data/routes';
 import { plainFailure } from './data/plain';
 import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
-import { OwnerDraftStore } from './state/drafts/store';
+import { blockedDraft, emptyDraft, OwnerDraftStore } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationGraph } from './ui/graph/NavigationGraph';
@@ -35,6 +35,7 @@ import { useWindowKeys } from './ui/shell/windowKeys';
 import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
 import { connectionOf } from './ui/shared/connection';
+import { displayStatus } from './selectors/waiting/replied';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
 import { fileOpener, linkOpener } from './ui/shared/openers';
@@ -82,6 +83,7 @@ function workspaceKeys(app: {
   readonly focused: (event: KeyboardEvent<HTMLDivElement>) => FocusedItem | null;
   readonly oldestWaiting: () => ItemRoute | undefined;
   readonly focusOwner: (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => void;
+  readonly quickAnswer: (target: ItemRoute, index?: number) => boolean;
   readonly queueBring: (target: ItemRoute) => Promise<void>;
   readonly toggleLater: (target: ItemRoute, itemId: string) => boolean;
   readonly archiveTopic: (topicId: string) => boolean;
@@ -118,6 +120,8 @@ function workspaceKeys(app: {
       if (item.status !== 'waiting_on_me' || intent.kind !== 'choose') return false;
       app.focusOwner(target, 'answer', intent.index); return true;
     }),
+    'choose-send': onItem(({ item, target }, intent) => item.status === 'waiting_on_me' && intent.kind === 'choose-send' && app.quickAnswer(target, intent.index)),
+    'answer-words': onItem(({ item, target }) => item.status === 'waiting_on_me' && app.quickAnswer(target)),
     later: onItem(({ item, target }) => app.toggleLater(target, item.id)),
     archive: onItem(({ item }) => app.archiveTopic(item.topic_id)),
     graph: () => { if (!app.store) return false; app.toggleGraph(); return true; },
@@ -152,7 +156,7 @@ interface CenterProps {
   readonly highlightedItems: ReadonlySet<string>; readonly highlightedMessages: ReadonlySet<string>;
   readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
-  readonly onClearFilters: () => void; readonly onShowArchive: () => void;
+  readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void; readonly onRemoveTarget: RemoveHandler;
   readonly onAgentNotRunning: (submission: PendingSubmission) => void;
 }
@@ -188,6 +192,7 @@ function Workspace({ application }: { application: Application }) {
   const earlier = route ? earlierAgent(route, state.sessions?.sessions.items ?? []) : null;
   const preferences = state.preferences, view = preferences?.sessions.find(value => route && routeKey(value.session) === key);
   const shortcutSequence = useRef(0), bringing = useRef(new Set<string>());
+  const quickRequests = useRef(new Map<string, number>());
   const [ownerFocus, setOwnerFocus] = useState<(OwnerFocusRequest & { route: string; itemId: string }) | null>(null);
   const [graphModes, setGraphModes] = useState<Readonly<Record<string, boolean>>>({});
   const [detailOpen, setDetailOpen] = useState(true);
@@ -238,8 +243,11 @@ function Workspace({ application }: { application: Application }) {
     }, 250);
     return () => { clearTimeout(timer); };
   }, [navigation, searchEdit, key, view, preferences, state.writing, state.pendingOperationId]);
-  const invalidateOwnerRequest = () => { ++shortcutSequence.current; setOwnerFocus(null); };
-  const consumeOwnerRequest = (token: number) => setOwnerFocus(current => current?.token === token ? null : current);
+  const invalidateOwnerRequest = () => { ++shortcutSequence.current; quickRequests.current.clear(); setOwnerFocus(null); };
+  const consumeOwnerRequest = (token: number) => {
+    for (const [target, request] of quickRequests.current) if (request === token) quickRequests.current.delete(target);
+    setOwnerFocus(current => current?.token === token ? null : current);
+  };
   const reveal = async (result: RevealedItem, ownerToken?: number, fromHistory = false): Promise<number | null> => {
     if (ownerToken === undefined) invalidateOwnerRequest();
     const token = ownerToken ?? shortcutSequence.current;
@@ -300,16 +308,41 @@ function Workspace({ application }: { application: Application }) {
   const onAgentNotRunning = (submission: PendingSubmission) => {
     void agentNotRunning({ navigation, drafts: application.drafts, reveal: revealItem })(submission);
   };
-  const focusOwner = (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number, onReveal?: (result: RevealedItem) => void) => {
+  const focusOwner = (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number, onReveal?: (result: RevealedItem) => void, quick?: 'send' | 'words', answerTarget?: OwnerFocusRequest['answerTarget']) => {
     const token = ++shortcutSequence.current, navigationRequest = navigation.getNavigationRequest();
+    const identity = JSON.stringify(target);
+    let published = false;
+    quickRequests.current.clear();
+    if (quick) quickRequests.current.set(identity, token);
     setOwnerFocus(null);
     void navigation.routes.revealItem(target).then(async result => {
       if (!result || result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== navigationRequest) return;
       onReveal?.(result);
       const openedRequest = await reveal(result, token);
       if (openedRequest === null || shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
-      setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex });
-    }).catch((error: unknown) => setRouteError(plainFailure(error, 'This registered item could not be opened.')));
+      published = true;
+      setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex, sendOption: quick === 'send', ownWords: quick === 'words', answerTarget });
+    }).catch((error: unknown) => setRouteError(plainFailure(error, 'This registered item could not be opened.'))).finally(() => {
+      if (quickRequests.current.get(identity) === token && (!published || shortcutSequence.current !== token)) quickRequests.current.delete(identity);
+    });
+  };
+  const quickAnswer = (target: ItemRoute, index?: number) => {
+    const current = store && route && sameSession(route, target) ? store.getSnapshot() : application.waiting.sessionState(target);
+    const session = current?.snapshot?.session, item = session?.items[target.item_id];
+    const draftState = application.drafts.getSnapshot(), entry = application.drafts.find(target, target.item_id, 'answer');
+    const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
+    const guard = entry && session ? blockedDraft(entry.draft, session) : null;
+    if (!session || !item || current?.status !== 'ready' || current.error || session.state !== 'active'
+      || session.topics[item.topic_id]?.archived_at !== null || displayStatus(session, item) !== 'waiting_on_me'
+      || state.writing || state.pendingOperationId !== null || !draftState.ready || draftState.preferenceUncertain
+      || quickRequests.current.has(JSON.stringify(target))
+      || Object.values(draftState.entries).some(value => sameSession(value.draft.session, target) && value.draft.target.item_id === item.id && (value.saving || value.uncertain))
+      || entry?.receipt || guard && guard !== emptyDraft
+      || index !== undefined && (!item.options[index] || connectionOf(binding, binding ? current.presence[binding.id] : null) !== 'connected')) return false;
+    focusOwner(target, 'answer', index, undefined, index === undefined ? 'words' : 'send', index === undefined ? undefined : {
+      optionId: item.options[index]!.id, revision: item.revision, questionRevision: item.question_revision, bindingId: session.active_binding_id,
+    });
+    return true;
   };
   const queueBring = async (target: ItemRoute, onReveal?: (result: RevealedItem) => void) => {
     const identity = JSON.stringify(target);
@@ -430,12 +463,18 @@ function Workspace({ application }: { application: Application }) {
     void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === itemId), preferences.revision); return true;
   };
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({
-    store: !!store, closeDetail, focusOwner, queueBring, archiveTopic: topicId => {
+    store: !!store, closeDetail, focusOwner, quickAnswer, queueBring, archiveTopic: topicId => {
       const control = document.querySelector<HTMLButtonElement>(`[data-shortcut-archive-topic="${topicId}"]`);
       if (!control || control.disabled) return false;
       control.focus(); control.click(); return true;
     },
     focused: event => {
+      const card = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-waiting-item]') : null;
+      if (card) {
+        const target = { project_id: card.dataset.projectId!, session_id: card.dataset.sessionId!, item_id: card.dataset.waitingItem! };
+        const session = application.waiting.sessionState(target)?.snapshot?.session, item = session?.items[target.item_id];
+        return session && item && !hidden.item(target, session, item.id) ? { item, target } : null;
+      }
       const focusedId = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-item-id]')?.dataset.itemId : undefined;
       const session = sessionState?.snapshot?.session, item = session?.items[focusedId ?? selectedId ?? ''];
       return route && session && item && !hidden.item(route, session, item.id) ? { item, target: { ...route, item_id: item.id } } : null;
@@ -486,6 +525,10 @@ function Workspace({ application }: { application: Application }) {
           if (intent === 'bring') void queueBring(target, onReveal);
           else if (intent === 'later') toggleLater(target, target.item_id);
           else focusOwner(target, intent, undefined, onReveal);
+        }}
+        onClearSearch={() => {
+          setSearchEdit({ route: key, text: '', attempted: false }); setDismissedReveal(currentReveal);
+          if (view) saveView({ filters: { ...structuredClone(view.filters), search: '' } as SessionPreferences['filters'] });
         }}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
         onRemove={target => { askRemove(target); }} onRemoveTarget={removeTarget} onAgentNotRunning={onAgentNotRunning} />} />
