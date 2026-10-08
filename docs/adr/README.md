@@ -95,3 +95,8 @@ and agent writes to an archived topic return `topic_archived`.
 [ADR-0091](ADR-0091-owner-session-names.md) lets the owner name a session and give it a
 short description (`session_label_set`). The name leads on cards, the session bar, tabs,
 pickers and confirmations; the agent line becomes the quieter label.
+
+[ADR-0092](ADR-0092-lenient-apply-in-the-cli.md) makes `ariadne apply` input lenient
+(generated `op_id`, defaults, nested `children`) while core stays strict, adds
+`--dry-run`, makes the default receipt compact (`--full` for the old one) and gives
+`ariadne read --view items` `--topic` and `--archived`.

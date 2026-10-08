@@ -171,7 +171,8 @@ fn call(binary: &str, home: &Path, lane: &Lane, report: bool, payload: &Value) -
     if report {
         command.args(["bridge", "report"]);
     } else {
-        command.arg("apply").arg("--json");
+        // The default receipt is compact; this test reads the saved receipt's ids.
+        command.arg("apply").arg("--json").arg("--full");
     }
     let mut child = command
         .args([
