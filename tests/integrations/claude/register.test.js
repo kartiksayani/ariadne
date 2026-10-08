@@ -510,6 +510,9 @@ describe('conversation changes, relaunch and removal', () => {
     expect(note.message.content[0].text).toMatch(/^Ariadne reconnected this conversation /);
     expect(note.message.content[0].text).toContain(`binding ${ids.binding} and generation ${ids.attempt}`);
     expect(note.message.content[0].text).not.toContain(ids.generation);
+    // A fresh context is sent to reconnect.md, which holds the one-time read.
+    expect(note.message.content[0].text).toContain('read reconnect.md in the ariadne skill first');
+    expect(note.message.content[0].text).not.toMatch(/run ariadne read/);
   });
   it('after /clear while the app cannot save, never finishes the old message with the new conversation\'s answer', async () => {
     const value = await prepared();let claims = 0, down = false;

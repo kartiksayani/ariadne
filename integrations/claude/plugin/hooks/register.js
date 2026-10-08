@@ -231,7 +231,7 @@ async function followChange(state, $) {
 // routing, so its Ariadne commands keep working without an owner command.
 function routingNote(binding) {
   const {binding_id,generation,session} = binding;
-  return `Ariadne reconnected this conversation to session ${session.session_id} in project ${session.project_id} by itself. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current. If your context is fresh, run ariadne read once to rebuild it. This note is not a message from the owner; do not reply to it.`;
+  return `Ariadne reconnected this conversation to session ${session.session_id} in project ${session.project_id} by itself. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current. If your context is fresh, read reconnect.md in the ariadne skill first. This note is not a message from the owner; do not reply to it.`;
 }
 // A note the engine refuses (no conversation mounted yet) is retried on the
 // poll tick; past that, the skill's stale_generation rule still applies.
