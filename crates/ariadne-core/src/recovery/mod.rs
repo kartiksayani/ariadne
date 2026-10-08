@@ -74,6 +74,9 @@ fn resolve(
     presence: Option<&RecoveryObservation>,
     at: &UtcMillis,
 ) -> Result<SavedReceiptData, CoreError> {
+    if params.decision == ResolutionKind::AcceptResult {
+        return accept_result(session, params, operation_id, at);
+    }
     if session.revision != params.expected_revision {
         let mut e = core(
             CoreErrorCode::RevisionConflict,
@@ -166,13 +169,13 @@ fn resolve(
                 original_work(input, &params.attempt_id)?;
             }
             ResolutionKind::Resend | ResolutionKind::Skip => {}
-            ResolutionKind::ConfirmEvidence => unreachable!("attribution handled above"),
+            ResolutionKind::ConfirmEvidence | ResolutionKind::AcceptResult => {
+                unreachable!("handled above")
+            }
         }
     }
     let binding_id = input.binding_id.clone();
-    let clear = params.decision != ResolutionKind::ConfirmEvidence
-        && resolved_reason(session, input, attempt, binding)
-        && conflicts_acknowledged(session, &binding_id, params);
+    let acknowledged = conflicts_acknowledged(session, &binding_id, params);
     let input = session
         .inputs
         .0
@@ -200,11 +203,13 @@ fn resolve(
             .get_mut(&binding_id)
             .expect("validated binding");
         binding.active_input_id = None;
-        binding.owner_paused = true;
-        if clear {
-            binding.pause_reason = None;
+        // A saved decision is the owner's go-ahead: once nothing else on the
+        // binding needs recovery, dispatch resumes unless the owner paused it.
+        if acknowledged {
+            crate::delivery_join::release_barrier(session, &binding_id);
+        } else {
+            binding.dispatch_state = crate::bindings::dispatch(binding, false);
         }
-        binding.dispatch_state = DispatchState::Paused;
     }
     if params.decision == ResolutionKind::ConfirmEvidence {
         let binding = &session.bindings.0[&binding_id];
@@ -218,8 +223,7 @@ fn resolve(
         if safe {
             let binding = session.bindings.0.get_mut(&binding_id).expect("validated");
             binding.pause_reason = None;
-            binding.owner_paused = true;
-            binding.dispatch_state = DispatchState::Paused;
+            binding.dispatch_state = crate::bindings::dispatch(binding, false);
         }
     }
     session.updated_at = at.clone();
@@ -298,45 +302,81 @@ fn conflicts_acknowledged(
         })
 }
 
-fn resolved_reason(session: &Session, input: &Input, attempt: &Attempt, binding: &Binding) -> bool {
-    if session.inputs.0.values().any(|other| {
-        other.id != input.id
-            && other.binding_id == binding.id
-            && matches!(
-                other.state,
-                InputState::InFlight | InputState::NeedsAttention
+/// "Mark as handled": the agent already committed this attempt's result, so the
+/// input completes without liveness evidence, a reason or a fresh revision.
+/// Only inputs left stuck by earlier versions need it; a committed result now
+/// completes its input on its own.
+fn accept_result(
+    session: &mut Session,
+    params: &InputResolveParams,
+    operation_id: &UuidV4,
+    at: &UtcMillis,
+) -> Result<SavedReceiptData, CoreError> {
+    let input = session
+        .inputs
+        .0
+        .get(&params.input_id)
+        .ok_or_else(|| core(CoreErrorCode::NotFound, "Recovery input is missing"))?;
+    let index = input
+        .attempts
+        .iter()
+        .position(|a| a.id == params.attempt_id)
+        .ok_or_else(|| {
+            core(
+                CoreErrorCode::InvalidRef,
+                "Recovery attempt does not belong to this input",
             )
-    }) {
-        return false;
+        })?;
+    let attempt = &input.attempts[index];
+    if attempt.result_state != ResultState::Committed || attempt.domain_result.is_none() {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "Only an attempt whose result the agent saved can be marked as handled",
+        ));
     }
-    // Binding-only contradictions cannot be discharged by another input's resolution.
-    if session.operation_receipts.0.values().flatten().any(|r| {
-        matches!(&r.actor_scope,ReceiptActorScope::Adapter{binding_id} if binding_id==&binding.id)
-            && matches!(
-                &r.result.data,
-                SavedReceiptData::EventConflict { input_id: None, .. }
-            )
-    }) {
-        return false;
+    if !matches!(
+        input.state,
+        InputState::InFlight | InputState::NeedsAttention
+    ) {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "This input is already settled",
+        ));
     }
-    match binding.pause_reason {
-        Some(PauseReason::ResultMissing) => attempt.result_state == ResultState::Missing,
-        Some(PauseReason::HostFailure) => matches!(
-            attempt.turn_state,
-            TurnState::Failed | TurnState::Interrupted
-        ),
-        Some(PauseReason::Uncertain) => {
-            matches!(
-                attempt.acceptance,
-                AcceptanceState::Rejected | AcceptanceState::Uncertain
-            ) || attempt
-                .error
-                .as_ref()
-                .is_some_and(|e| e.code != "result_missing")
-                || contradictory(session, &binding.id, &input.id, &attempt.id)
+    let binding_id = input.binding_id.clone();
+    let input = session
+        .inputs
+        .0
+        .get_mut(&params.input_id)
+        .expect("validated input");
+    input.resolution_history.push(ResolutionHistoryEntry {
+        op_id: operation_id.clone(),
+        kind: ResolutionKind::AcceptResult,
+        reason: params.reason.clone(),
+        at: at.clone(),
+        attempt_id: params.attempt_id.clone(),
+        evidence: None,
+    });
+    for attempt in &mut input.attempts {
+        if attempt.sealed_at.is_none() {
+            attempt.sealed_at = Some(at.clone());
         }
-        _ => false,
     }
+    input.state = InputState::Handled;
+    input.active_attempt_id = None;
+    if let Some(binding) = session.bindings.0.get_mut(&binding_id) {
+        if binding.active_input_id.as_ref() == Some(&params.input_id) {
+            binding.active_input_id = None;
+        }
+    }
+    crate::delivery_join::release_barrier(session, &binding_id);
+    session.updated_at = at.clone();
+    Ok(SavedReceiptData::InputResolve {
+        input_id: params.input_id.clone(),
+        attempt_id: params.attempt_id.clone(),
+        resolution_kind: ResolutionKind::AcceptResult,
+        state: InputState::Handled,
+    })
 }
 
 /// Repair lineage is bounded by retained attempts and flattened to original Work.

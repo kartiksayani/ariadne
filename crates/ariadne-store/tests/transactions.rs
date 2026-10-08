@@ -99,6 +99,7 @@ fn actor_scopes_share_operation_uuid_without_sharing_replay() {
             Ok(SavedReceiptData::SessionLifecycle {
                 state: session.state.clone(),
                 closed_at: session.closed_at.clone(),
+                cancelled_input_ids: vec![],
             })
         },
     );
@@ -123,6 +124,7 @@ fn command_key_order_is_irrelevant_but_exact_text_and_revisions_are_part_of_dige
             Ok(SavedReceiptData::SessionLifecycle {
                 state: session.state.clone(),
                 closed_at: session.closed_at.clone(),
+                cancelled_input_ids: vec![],
             })
         });
     let reordered = serde_json::from_str(
@@ -162,6 +164,7 @@ fn routing_is_included_by_the_store_even_when_command_input_is_identical() {
                 Ok(SavedReceiptData::SessionLifecycle {
                     state: session.state.clone(),
                     closed_at: None,
+                    cancelled_input_ids: vec![],
                 })
             },
         );
@@ -194,6 +197,7 @@ fn merged_history_validation_runs_on_both_live_and_candidate_snapshots() {
             Ok(SavedReceiptData::SessionLifecycle {
                 state: candidate.state.clone(),
                 closed_at: None,
+                cancelled_input_ids: vec![],
             })
         },
     );
@@ -401,6 +405,7 @@ fn invalid_candidates_and_callback_errors_have_no_persistent_effects() {
             Ok(SavedReceiptData::SessionLifecycle {
                 state: candidate.state.clone(),
                 closed_at: None,
+                cancelled_input_ids: vec![],
             })
         },
     );
@@ -435,6 +440,7 @@ fn transaction_bookkeeping_identity_and_old_receipts_cannot_be_changed_by_callba
                 Ok(SavedReceiptData::SessionLifecycle {
                     state: candidate.state.clone(),
                     closed_at: None,
+                    cancelled_input_ids: vec![],
                 })
             },
         );
@@ -671,6 +677,7 @@ fn keyed_in_process_lock_wait_is_bounded_and_other_sessions_remain_available() {
                     Ok(SavedReceiptData::SessionLifecycle {
                         state: session.state.clone(),
                         closed_at: None,
+                        cancelled_input_ids: vec![],
                     })
                 },
             );
@@ -754,6 +761,92 @@ fn hand_edited_session_with_overlong_short_label_fails_validation() {
             ValidationErrorKind::TooManyChars { maximum_chars: 40 }
         ),
         other => panic!("expected a validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn snapshot_written_before_session_names_loads_and_keeps_its_bytes() {
+    // The seed fixture predates owner session names: it has neither key, and an
+    // unnamed session gains none when it is saved again (ADR-0091).
+    let fixture = include_str!("../../../fixtures/domain/history/seed.json");
+    let top: serde_json::Value = serde_json::from_str(fixture).unwrap();
+    assert!(top.get("name").is_none() && top.get("description").is_none());
+    let project = ProjectDir::new();
+    let store = project.store();
+    let loaded = store.read(&id(2)).unwrap();
+    assert!(loaded.name.is_none() && loaded.description.is_none());
+    transact(&store, "1", 100, Some(1)).unwrap();
+    let live: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.live()).unwrap()).unwrap();
+    assert!(live.get("name").is_none() && live.get("description").is_none());
+
+    // A name and description survive a save and a fresh read.
+    let named = |operation: u64, name: &str, description: &str| {
+        store.transact(
+            &id(2),
+            &actor(),
+            &id(operation),
+            &command("1", operation, Some(2)),
+            |session| {
+                let data = reply(session, "1", operation, None)?;
+                session.name = Some(name.into());
+                session.description = Some(description.into());
+                Ok::<_, &'static str>(data)
+            },
+        )
+    };
+    named(101, "Billing fixes", "Sorting out the refund rules").unwrap();
+    let saved = project.store().read(&id(2)).unwrap();
+    assert_eq!(saved.name.as_deref(), Some("Billing fixes"));
+    assert_eq!(
+        saved.description.as_deref(),
+        Some("Sorting out the refund rules")
+    );
+    // An overlong name is refused and leaves the file as it was.
+    let before = fs::read(project.live()).unwrap();
+    assert!(matches!(
+        named(102, &"n".repeat(61), "ok"),
+        Err(TransactionError::Store(StoreError::Validation(_)))
+    ));
+    assert_eq!(fs::read(project.live()).unwrap(), before);
+}
+
+#[test]
+fn hand_edited_session_name_and_description_must_stay_one_bounded_line() {
+    use ariadne_domain::validation::ValidationErrorKind;
+    let project = ProjectDir::new();
+    let store = project.store();
+    let write = |name: Option<&str>, description: Option<&str>| {
+        let mut edited = seed();
+        edited.name = name.map(Into::into);
+        edited.description = description.map(Into::into);
+        fs::write(project.live(), serde_json::to_vec(&edited).unwrap()).unwrap();
+        store.read(&id(2))
+    };
+    assert!(write(Some("Billing"), Some("Refunds")).is_ok());
+    for (name, description, kind) in [
+        (
+            Some("x".repeat(61)),
+            None,
+            ValidationErrorKind::TooManyChars { maximum_chars: 60 },
+        ),
+        (
+            None,
+            Some("x".repeat(201)),
+            ValidationErrorKind::TooManyChars { maximum_chars: 200 },
+        ),
+        (Some("a\nb".into()), None, ValidationErrorKind::Multiline),
+        (
+            None,
+            Some(" padded".into()),
+            ValidationErrorKind::InvalidState,
+        ),
+        (Some(" ".into()), None, ValidationErrorKind::Blank),
+    ] {
+        match write(name.as_deref(), description.as_deref()) {
+            Err(StoreError::Validation(error)) => assert_eq!(error.kind, kind),
+            other => panic!("expected a validation error, got {other:?}"),
+        }
     }
 }
 

@@ -1,4 +1,7 @@
-use super::{expiry::ResultExpiry, instructions, presence::PresenceCache, CoreBridge};
+use super::{
+    expiry::ResultExpiry, health::HealthHub, installed_codex_rules, instructions,
+    presence::PresenceCache, CoreBridge,
+};
 use crate::watchers::RegisteredWatcher;
 use ariadne_adapter_claude::ClaudeOptions;
 use ariadne_adapter_codex::CodexOptions;
@@ -8,7 +11,9 @@ use ariadne_runtime::{
     activation::{registered_announcement_resolver, ActivationOutcome, NativeActivation},
     control::{BindingScope, ControlRoutes, ControlServer},
     discovery::{CodexEndpoint, Discovery, DiscoveryPoller, DiscoverySnapshot},
+    health::{SupervisorHealth, HEARTBEAT},
     leases::DesktopOwner,
+    logging,
     providers::{ProjectRootResolver, ProviderFactory},
     supervisor::NativeFacts,
 };
@@ -66,10 +71,19 @@ pub struct NativeRuntime {
     reconciliation_errors: Mutex<Vec<CoreError>>,
     /// Configured Codex app-server socket, offered as the connect dialog default.
     codex_socket: Option<String>,
+    health: Arc<HealthHub>,
 }
 impl NativeRuntime {
     pub fn codex_default_socket(&self) -> Option<String> {
         self.codex_socket.clone()
+    }
+    /// Latest health per push-delivery (Codex) binding.
+    pub fn supervisor_health(&self) -> Vec<SupervisorHealth> {
+        self.health.snapshot()
+    }
+    /// Installs the renderer event sink for later health changes.
+    pub fn set_supervisor_health_emitter(&self, emit: Arc<dyn Fn(SupervisorHealth) + Send + Sync>) {
+        self.health.set_emitter(emit);
     }
     /// Blocking startup, after single-instance interception and off the UI thread.
     /// The one actual owner is acquired before any Core/provider worker starts.
@@ -108,6 +122,17 @@ impl NativeRuntime {
         presence_emit: Arc<dyn Fn(PresenceChangedHint) -> bool + Send + Sync>,
         reconciled: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Arc<Self>, CoreError> {
+        if let Err(error) = logging::init(&config.home) {
+            eprintln!("Ariadne could not open its log file: {:?}.", error.kind());
+        }
+        let health = HealthHub::new(Some(&config.home));
+        let outcomes: Arc<dyn Fn(ActivationOutcome) + Send + Sync> = {
+            let health = health.clone();
+            Arc::new(move |outcome| {
+                health.observe_outcome(&outcome);
+                outcomes(outcome)
+            })
+        };
         let codex_socket = config.discovery_endpoints.first().and_then(|configured| {
             let path = configured
                 .options
@@ -137,7 +162,8 @@ impl NativeRuntime {
                 roots.clone(),
             )),
         );
-        let instructions = instructions(&config.cli_invocation);
+        let codex_rules = installed_codex_rules(std::env::var_os("HOME").map(PathBuf::from));
+        let instructions = instructions(&config.cli_invocation, codex_rules.as_deref());
         let providers = ProviderFactory::new(
             roots,
             discovery.clone(),
@@ -156,7 +182,7 @@ impl NativeRuntime {
         let routes = ControlRoutes::new();
         let presence = PresenceCache::new(core.clone(), presence_emit);
         let expiry = ResultExpiry::new(core.clone());
-        let activation = NativeActivation::new_with_presence(
+        let activation = NativeActivation::new_with_observers(
             core.clone(),
             providers.clone(),
             owner.clone(),
@@ -164,6 +190,7 @@ impl NativeRuntime {
             executor.handle().clone(),
             outcomes.clone(),
             Some(presence.observer()),
+            Some(health.observer()),
         );
         let runtime = Arc::new(Self {
             core: core.clone(),
@@ -176,6 +203,7 @@ impl NativeRuntime {
             expiry: expiry.clone(),
             reconciliation_errors: Mutex::new(Vec::new()),
             codex_socket,
+            health: health.clone(),
         });
         let connect_runtime = Arc::downgrade(&runtime);
         let announcement_runtime = Arc::downgrade(&runtime);
@@ -211,7 +239,7 @@ impl NativeRuntime {
         .map_err(|_| unavailable())?;
         let (control_stop, stopped) = tokio::sync::oneshot::channel();
         let control = executor.spawn(server.serve(stopped));
-        let (presence_stop, presence_task) = start_timer(&executor, presence, expiry);
+        let (presence_stop, presence_task) = start_timer(&executor, presence, expiry, health);
         *runtime.workers.lock().map_err(|_| unavailable())? = Some(Workers {
             executor,
             activation,
@@ -381,6 +409,10 @@ impl NativeRuntime {
             let task = workers.executor.spawn_blocking(move || {
                 let _owned = OwnedBridgeGuard(OWNED_BRIDGE.with(|owned| owned.replace(true)));
                 if let Err(error) = runtime.reconcile() {
+                    logging::error(
+                        "runtime",
+                        &format!("Persisted binding reconciliation failed: {:?}.", error.code),
+                    );
                     eprintln!(
                         "Ariadne persisted binding reconciliation remains unavailable: {:?}.",
                         error.code
@@ -619,7 +651,7 @@ impl NativeRuntime {
                         result
                     };
                     if result.is_ok() {
-                        workers.activation = NativeActivation::new_with_presence(
+                        workers.activation = NativeActivation::new_with_observers(
                             self.core.clone(),
                             workers.providers.clone(),
                             workers.owner.clone(),
@@ -627,6 +659,7 @@ impl NativeRuntime {
                             workers.executor.handle().clone(),
                             workers.outcomes.clone(),
                             Some(self.presence.observer()),
+                            Some(self.health.observer()),
                         );
                         self.presence.reopen();
                         self.expiry.reopen();
@@ -634,6 +667,7 @@ impl NativeRuntime {
                             &workers.executor,
                             self.presence.clone(),
                             self.expiry.clone(),
+                            self.health.clone(),
                         );
                     }
                     // Even a failed refresh retains the owner and stopped
@@ -758,6 +792,7 @@ fn start_timer(
     executor: &tokio::runtime::Runtime,
     presence: Arc<PresenceCache>,
     expiry: Arc<ResultExpiry>,
+    health: Arc<HealthHub>,
 ) -> (
     Option<tokio::sync::oneshot::Sender<()>>,
     Option<tokio::task::JoinHandle<()>>,
@@ -765,6 +800,7 @@ fn start_timer(
     let (stop, mut stopped) = tokio::sync::oneshot::channel();
     let task = executor.spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
+        let mut ticks: u64 = 0;
         loop {
             tokio::select! {
                 biased;
@@ -772,11 +808,17 @@ fn start_timer(
                 _ = tick.tick() => {
                     let cache = presence.clone();
                     let expiry = expiry.clone();
+                    // The doctor reads this heartbeat to tell whether the app runs.
+                    let heartbeat = ticks.is_multiple_of(HEARTBEAT.as_secs()).then(|| health.clone());
+                    ticks = ticks.wrapping_add(1);
                     // Both sweeps stay off UI; actual blocking work is awaited
                     // before wake replacement or shutdown can finish the timer.
                     let _ = tokio::task::spawn_blocking(move || {
                         cache.sweep();
                         expiry.sweep();
+                        if let Some(health) = heartbeat {
+                            health.heartbeat();
+                        }
                     }).await;
                 }
             }

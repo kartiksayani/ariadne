@@ -55,8 +55,16 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
             resource!("claude/plugin/skills/ariadne/SKILL.md").as_slice(),
         ),
         (
+            "claude-mod/plugin/skills/ariadne/playbook.md",
+            resource!("claude/plugin/skills/ariadne/playbook.md").as_slice(),
+        ),
+        (
             "codex-skills/ariadne/SKILL.md",
             resource!("codex/skills/ariadne/SKILL.md").as_slice(),
+        ),
+        (
+            "codex-skills/ariadne/playbook.md",
+            resource!("codex/skills/ariadne/playbook.md").as_slice(),
         ),
         ("rules/claude.md", resource!("rules/claude.md").as_slice()),
         ("rules/codex.md", resource!("rules/codex.md").as_slice()),
@@ -109,7 +117,7 @@ pub fn host_commands(stable_integrations: &Path, agent: &str) -> Vec<String> {
     if agent != "claude" {
         let rules = stable_integrations.join("rules/codex.md");
         commands.push(format!(
-            "In the existing Codex terminal, run /status and select that thread in Ariadne; keep host approvals explicit. Codex is never sent the Ariadne rules automatically: after connecting, paste the setup instruction Ariadne shows into that Codex thread once per binding (same rules: {}).",
+            "In the existing Codex terminal, run /status and select that thread in Ariadne; keep host approvals explicit. After connecting, paste the short setup instruction Ariadne shows into that Codex thread once per binding; the installed Ariadne skill holds the rules (also at {}).",
             rules.display()
         ));
     }

@@ -55,6 +55,17 @@
   padding: 0 6px 14px;
 }
 
+/* A rail card with its Not sent line (and Put back in reply box) under it. */
+.pw-excerpt-group {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+
+.pw-excerpt-unsent {
+  padding: 0 10px 8px 14px;
+}
+
 .pw-rail-note {
   padding: 6px 10px;
   font-size: 13px;

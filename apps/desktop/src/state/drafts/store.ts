@@ -3,9 +3,12 @@ import type { MutationReceipt, OwnerDraft, OwnerMutationRequest, PreferencesPatc
 import type { Item, InputKind, SavedReceipt, Session } from '../../generated/domain/models';
 import { immutable, type Immutable } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService } from '../../data/service';
+import { OwnFailure } from '../../data/plain';
 
+/** A reply to a whole topic (target item_id null). */
+export const TOPIC_REPLY: InputKind = 'topic_reply';
 // Continue and removed inputs are created by their own commands, never typed.
-export type OwnerIntent = Exclude<InputKind, 'continue' | 'removed'>;
+export type OwnerIntent = Exclude<InputKind, 'continue' | 'removed' | 'topic_reply'>;
 type Failure = CoreFailure | ServiceFailure;
 export interface DraftEntry {
   readonly draft: Immutable<OwnerDraft>;
@@ -17,6 +20,8 @@ export interface DraftEntry {
   /** What a saved input carried; the draft itself is cleared once the receipt arrives. */
   readonly sent?: { readonly text: string; readonly selected_option_id: string | null } | null;
 }
+/** What a draft says when the same words are already queued or on their way. */
+export const ALREADY_WAITING = 'This same message is already waiting to be sent. Delete it first if you want to change it.';
 export interface DraftState {
   readonly entries: Readonly<Record<string, DraftEntry>>;
   readonly ready: boolean;
@@ -38,11 +43,37 @@ export function ownerActions(item: Immutable<Item>): OwnerIntent[] {
 }
 /** The guard text for a draft with neither a choice nor a message; controls show their own Send state instead. */
 export const emptyDraft = 'Choose an option or enter a message before sending.';
+const contentBlocked = (draft: Immutable<OwnerDraft>): string | null => !draft.selected_option_id && !draft.text.trim() ? emptyDraft
+  : new TextEncoder().encode(draft.text).length > 16 * 1024 ? 'Keep the message within 16 KiB.' : null;
+const typed = new Set<InputKind>(['answer', 'reply', 'note', 'followup', TOPIC_REPLY]);
+/**
+ * A cheap safety net: the same words for the same target and option are still queued or in flight as an owner message.
+ * Sending them again would deliver them twice. The kind is not compared: Edit can move a queued note or follow-up into
+ * the reply box. An attempted draft is excluded: it is that message's own exact retry.
+ */
+function alreadyWaiting(draft: Immutable<OwnerDraft>, session: Immutable<Session>): boolean {
+  if (draft.submission_attempted || !typed.has(draft.intent) || (!draft.text.trim() && !draft.selected_option_id)) return false;
+  return Object.values(session.inputs).some(input => !!input && (input.state === 'queued' || input.state === 'in_flight')
+    && input.target.topic_id === draft.target.topic_id && input.target.item_id === draft.target.item_id
+    && input.payload.text === draft.text && input.payload.selected_option_id === draft.selected_option_id);
+}
+const sendBlocked = (draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null =>
+  contentBlocked(draft) ?? (alreadyWaiting(draft, session) ? ALREADY_WAITING : null);
+/** A reply to a whole topic: the topic is there and open, the binding is current, and there is text. */
+function topicBlocked(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
+  const topic = session.topics[draft.target.topic_id];
+  if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !topic || draft.intent !== TOPIC_REPLY) return 'The saved target is unavailable. Open its registered session.';
+  if (session.state !== 'active') return 'This session is closed. Reopen it to send this reply.';
+  if (topic.archived_at !== null) return 'This topic is archived. Restore it to send this reply.';
+  if (session.active_binding_id !== draft.binding_id || !session.bindings[draft.binding_id]) return 'The selected binding changed. Review the current target before sending.';
+  return sendBlocked(draft, session);
+}
 export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
-  const item = draft.target.item_id ? session.items[draft.target.item_id] : null;
+  if (draft.target.item_id === null) return topicBlocked(draft, session);
+  const item = session.items[draft.target.item_id];
   if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !item || item.topic_id !== draft.target.topic_id) return 'The saved target is unavailable. Open its registered session.';
-  if (session.state !== 'active') return 'Reopen this session before sending an input.';
-  if (session.topics[item.topic_id]?.archived_at !== null) return 'Restore this topic before sending an input.';
+  if (session.state !== 'active') return 'This session is closed. Reopen it to send this reply.';
+  if (session.topics[item.topic_id]?.archived_at !== null) return 'This topic is archived. Restore it to send this reply.';
   if (session.active_binding_id !== draft.binding_id || !session.bindings[draft.binding_id]) return 'The selected binding changed. Review the current target before sending.';
   if (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision) return 'This item changed. Review the current question and options before sending.';
   if (!ownerActions(item).includes(draft.intent as OwnerIntent)) return 'This action is no longer available for the current item.';
@@ -52,9 +83,7 @@ export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Se
     if (!round || round.closed_at !== null || round.question_revision !== item.question_revision) return 'The current question is no longer open for an answer.';
     if (draft.selected_option_id && !item.options.some(option => option.id === draft.selected_option_id)) return 'Choose one of the current options.';
   }
-  if (!draft.selected_option_id && !draft.text.trim()) return emptyDraft;
-  if (new TextEncoder().encode(draft.text).length > 16 * 1024) return 'Keep the message within 16 KiB.';
-  return null;
+  return sendBlocked(draft, session);
 }
 
 // Composition owns one store for all owner controls. Preferences patches use a
@@ -69,7 +98,8 @@ export class OwnerDraftStore {
   private readonly pendingInputs = new Map<string, OwnerMutationRequest>();
   private readonly flights = new Map<string, Promise<boolean>>();
   private loadFlight: Promise<void> | null = null;
-  constructor(private readonly service: RendererService, private readonly operationId: () => string = () => crypto.randomUUID()) {}
+  /** `service` is public so owner controls reach the session's write barrier (sessionActionsFor). */
+  constructor(readonly service: RendererService, private readonly operationId: () => string = () => crypto.randomUUID()) {}
   readonly getSnapshot = () => this.state;
   readonly subscribe = (receive: () => void) => { this.listeners.add(receive); return () => { this.listeners.delete(receive); }; };
   private publish(update: Partial<DraftState>): void {
@@ -108,14 +138,40 @@ export class OwnerDraftStore {
     this.publish({ entries: Object.freeze({ ...this.state.entries, [draft.op_id]: Object.freeze({ draft: immutable(draft), saving: false, uncertain: false, error: null, receipt: null, rejected: false }) }) });
     return draft.op_id;
   }
+  /** The owner's reply to a whole topic (target item_id null). */
+  findTopic(session: SessionRef, topicId: string): DraftEntry | undefined {
+    return Object.values(this.state.entries).reverse().find(entry => sameSession(entry.draft.session, session) && entry.draft.target.item_id === null
+      && entry.draft.target.topic_id === topicId && entry.draft.intent === TOPIC_REPLY);
+  }
+  beginTopic(session: Immutable<Session>, topicId: string, revised = false): string | null {
+    const route = { project_id: session.project_id, session_id: session.id }, existing = this.findTopic(route, topicId);
+    if (existing && !revised) return existing.draft.op_id;
+    const topic = session.topics[topicId], binding = session.active_binding_id;
+    if (!this.state.ready || !topic || topic.archived_at !== null || !binding) return null;
+    const draft: OwnerDraft = { submission_attempted: false, op_id: this.operationId(), session: route, binding_id: binding, target: { topic_id: topic.id, item_id: null },
+      intent: TOPIC_REPLY, text: '', selected_option_id: null, target_revision: topic.revision, question_revision: null, supersedes_answer_id: null };
+    this.publish({ entries: Object.freeze({ ...this.state.entries, [draft.op_id]: Object.freeze({ draft: immutable(draft), saving: false, uncertain: false, error: null, receipt: null, rejected: false }) }) });
+    return draft.op_id;
+  }
   edit(id: string, change: Pick<Partial<OwnerDraft>, 'text' | 'selected_option_id'>): void {
+    void this.editSaved(id, change);
+  }
+  /** Like edit; resolves true once the change is saved, false when the draft is locked or the save failed. */
+  editSaved(id: string, change: Pick<Partial<OwnerDraft>, 'text' | 'selected_option_id'>): Promise<boolean> {
     const entry = this.state.entries[id];
-    if (!entry || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain) return;
+    if (!entry || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
     const draft = { ...structuredClone(entry.draft), ...change } as OwnerDraft;
-    this.entry(id, { draft: immutable(draft), error: null }); void this.save([{ kind: 'upsert_draft', draft }]);
+    this.entry(id, { draft: immutable(draft), error: null }); return this.save([{ kind: 'upsert_draft', draft }]);
   }
   review(id: string, session: Immutable<Session>): void {
     const entry = this.state.entries[id], itemId = entry?.draft.target.item_id, item = itemId ? session.items[itemId] : null;
+    // A topic reply follows the current binding; it has no question to re-base on.
+    const topic = entry && itemId === null ? session.topics[entry.draft.target.topic_id] : null;
+    if (entry && topic && sameSession(entry.draft.session, { project_id: session.project_id, session_id: session.id }) && !entry.saving && !entry.uncertain
+      && !this.state.preferenceUncertain && session.active_binding_id) {
+      const draft: OwnerDraft = { ...structuredClone(entry.draft), binding_id: session.active_binding_id, target_revision: topic.revision };
+      this.entry(id, { draft: immutable(draft), error: null }); void this.save([{ kind: 'upsert_draft', draft }]); return;
+    }
     if (!entry || !item || !sameSession(entry.draft.session, { project_id: session.project_id, session_id: session.id }) || entry.saving || entry.uncertain || this.state.preferenceUncertain || !session.active_binding_id) return;
     const previous = session.answers.filter(answer => answer.item_id === item.id && answer.question_revision === item.question_revision).sort((a, b) => b.seq - a.seq)[0];
     const draft: OwnerDraft = { ...structuredClone(entry.draft), target: { topic_id: item.topic_id, item_id: item.id }, binding_id: session.active_binding_id,
@@ -123,10 +179,21 @@ export class OwnerDraftStore {
       supersedes_answer_id: entry.draft.intent === 'answer' ? previous?.id ?? null : null };
     this.entry(id, { draft: immutable(draft), error: null }); void this.save([{ kind: 'upsert_draft', draft }]);
   }
+  /** Moves a draft to the session's active binding when nothing else changed; text and option stay. */
+  rebind(id: string, session: Immutable<Session>): void {
+    const entry = this.state.entries[id], itemId = entry?.draft.target.item_id, item = itemId ? session.items[itemId] : null;
+    if (!entry || !item || !session.active_binding_id || session.active_binding_id === entry.draft.binding_id
+      || !sameSession(entry.draft.session, { project_id: session.project_id, session_id: session.id })
+      || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain
+      || item.revision !== entry.draft.target_revision || item.question_revision !== entry.draft.question_revision) return;
+    const draft: OwnerDraft = { ...structuredClone(entry.draft), binding_id: session.active_binding_id };
+    this.entry(id, { draft: immutable(draft), error: null }); void this.save([{ kind: 'upsert_draft', draft }]);
+  }
   another(id: string, session: Immutable<Session>): void {
-    const entry = this.state.entries[id]; if (!entry?.receipt || !entry.draft.target.item_id) return;
+    const entry = this.state.entries[id]; if (!entry?.receipt) return;
     const entries = { ...this.state.entries }; delete entries[id]; this.publish({ entries: Object.freeze(entries) });
-    this.begin(session, entry.draft.target.item_id, entry.draft.intent as OwnerIntent, true);
+    if (entry.draft.target.item_id) this.begin(session, entry.draft.target.item_id, entry.draft.intent as OwnerIntent, true);
+    else if (entry.draft.intent === TOPIC_REPLY) this.beginTopic(session, entry.draft.target.topic_id, true);
   }
   prepareRevised(id: string, session: Immutable<Session>): void {
     const previous = this.state.entries[id];
@@ -223,7 +290,7 @@ export class OwnerDraftStore {
         const snapshot = await this.service.query({ session: draft.session, request: { command: 'session_get', params: {} } });
         if (snapshot.freshness !== 'fresh') throw new ServiceFailure('transport');
         const blocked = blockedDraft(draft, snapshot.session);
-        if (blocked) throw new CoreFailure({ code: 'question_changed', message: blocked, hint: 'Review this input before sending again.', retryable: false, field_errors: [] });
+        if (blocked) throw new OwnFailure({ code: 'question_changed', message: blocked, hint: 'Review this reply before sending again.', retryable: false, field_errors: [] });
         draft.submission_attempted = true;
         if (!await this.save([{ kind: 'upsert_draft', draft }])) return false;
         this.entry(id, { draft: immutable(draft) });

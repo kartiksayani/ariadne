@@ -4,12 +4,15 @@ import type { MutationEnvelope } from '../../../src/generated/core';
 import { createDesktopService, CoreFailure } from '../../../src/data/service';
 import { OpenSessions } from '../../../src/data/session-store';
 import { useSession } from '../../../src/data';
-import type { ItemRoute, SessionRef } from '../../../src/generated/core';
+import type { SessionRef } from '../../../src/generated/core';
 import { SessionActionControllers, type SessionActions } from '../../../src/components/bindings/actions';
 import { useLifecycle } from '../../../src/ui/tree/Lifecycle';
-import { ContinueDialog } from '../../../src/components/history-actions/ContinueDialog';
+import { ContinuePicker, ContinueTopicHost, continueTargets, openContinueTopic } from '../../../src/ui/dialogs/ContinueTopicDialog';
+import { NavigationStore } from '../../../src/state/navigation/store';
+import type { SessionSummary } from '../../../src/generated/domain/models';
 import { CopiedProvenance } from '../../../src/components/history-actions/CopiedProvenance';
-import { dispatchQuiesced, lifecycleBlockers } from '../../../src/components/history-actions/selectors';
+import { archiveImpact, archiveWarning, closeWarning } from '../../../src/components/history-actions/selectors';
+import { notices } from '../../../src/ui/pages/notices';
 import { route, secondId } from '../app/transport';
 import { HistoryTransport } from './fixture';
 
@@ -30,23 +33,19 @@ async function setup(terminal = false) {
   const store = sessions.open(route), targetStore = sessions.open(targetRoute); await store.refresh(); await targetStore.refresh();
   const controllers = new SessionActionControllers(service, () => op), actions = controllers.forSession(store), targetActions = controllers.forSession(targetStore);
   const topic = Object.values(transport.source.topics)[0]!;
-  const reveal: unknown[] = [];
-  const props = { actions, targets: [{ route: targetRoute, label: 'Target session' }], actionsForTarget: () => targetActions,
-    revealItem: (value: unknown) => { reveal.push(value); }, openSession: (value: unknown) => { reveal.push(value); } };
-  return { transport, service, sessions, store, actions, targetActions, topic, reveal, props };
+  const props = { actions };
+  return { transport, service, sessions, store, actions, targetActions, topic, props };
 }
 const dialog = () => within(screen.getByRole('dialog'));
 // The tree's session bar, topic actions and banners reduced to plain buttons over the same useLifecycle.
-function HistoryActions({ actions, revealItem, openSession }: {
-  actions: SessionActions; revealItem: (route: ItemRoute) => void; openSession: (route: SessionRef) => void;
-}) {
-  const lifecycle = useLifecycle(actions, { revealItem, openSession }), session = useSession(actions.session).snapshot?.session;
+function HistoryActions({ actions }: { actions: SessionActions }) {
+  const lifecycle = useLifecycle(actions), session = useSession(actions.session).snapshot?.session;
   if (!session) return null;
   return <section aria-label="History actions">
     <button type="button" disabled={lifecycle.busy} onClick={lifecycle.session}>{session.state === 'closed' ? 'Reopen session' : 'Close session'}</button>
     {Object.values(session.topics).map(topic => topic && <button key={topic.id} type="button" disabled={lifecycle.busy}
       onClick={() => { if (topic.archived_at) lifecycle.restore(topic.id); else lifecycle.archive(topic.id); }}>{topic.archived_at ? 'Restore' : 'Archive'} {topic.name}</button>)}
-    {lifecycle.archived && <p role="status">Archived {lifecycle.archived.name}<button type="button" onClick={lifecycle.undo}>Undo</button>
+    {lifecycle.archived && <p role="status">Archived {lifecycle.archived.name} · {lifecycle.archived.cancelled} cancelled<button type="button" onClick={lifecycle.undo}>Undo</button>
       <button type="button" onClick={lifecycle.dismiss}>Dismiss</button></p>}
     {lifecycle.pending && <button type="button" onClick={lifecycle.reconcile}>Reconcile saved action</button>}
     {lifecycle.error && <p role="alert">{lifecycle.error}</p>}
@@ -55,58 +54,81 @@ function HistoryActions({ actions, revealItem, openSession }: {
 }
 
 describe('guarded history controls', () => {
-  it('shows navigable active-item and pending-input blockers without archiving', async () => {
-    const { props, topic, reveal, transport } = await setup(); render(<HistoryActions {...props} />);
+  it('archives a topic with open items and unsent messages after one plain confirmation, cancelling only the messages', async () => {
+    const { props, topic, transport } = await setup(); render(<HistoryActions {...props} />);
+    const open = Object.values(transport.source.items).filter(item => item?.topic_id === topic.id
+      && !['decided', 'done', 'dropped', 'replaced'].includes(item.status)).length;
+    const unsettled = Object.values(transport.source.inputs).filter(input => input?.target.topic_id === topic.id
+      && ['queued', 'in_flight', 'needs_attention'].includes(input.state)).map(input => input!.id);
+    expect(open).toBeGreaterThan(0); expect(unsettled.length).toBeGreaterThan(0);
+    const statuses = Object.fromEntries(Object.values(transport.source.items).map(item => [item!.id, item!.status]));
     fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` }));
-    expect((dialog().getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(true);
-    const blocker = dialog().getAllByRole('button').find(button => button.textContent?.startsWith('Item '))!;
-    fireEvent.click(blocker); expect(reveal).toHaveLength(1); expect(transport.mutations).toHaveLength(0);
-  });
-  it('routes a generic-input blocker to its session and combines authoritative IDs', async () => {
-    const { transport, topic } = await setup(true), input = structuredClone(new HistoryTransport().source.inputs);
-    transport.source.inputs = input;
-    const row = Object.values(input)[0]!; row.target.item_id = null; row.target.topic_id = topic.id; row.state = 'queued';
-    const error = { ...new CoreFailure({ code: 'topic_not_archivable', message: '', hint: '', retryable: false, field_errors: [], details: {
-      reason: null, binding_id: null, input_id: null, attempt_id: null, blocking_item_ids: ['999'], blocking_input_ids: [], dispatch_must_pause: false,
-    } }).error };
-    const blockers = lifecycleBlockers(transport.source, topic.id, error);
-    expect(blockers.find(value => value.key === `input:${row.id}`)?.item).toBeNull();
-    expect(blockers.find(value => value.key === 'item:999')?.item?.item_id).toBe('999');
-  });
-  it('confirms Pause first, persists it, then requires a separate Close confirmation', async () => {
-    const { props, transport } = await setup(true); render(<HistoryActions {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
-    fireEvent.click(dialog().getByRole('button', { name: 'Pause dispatch' }));
+    const confirm = screen.getByRole('dialog', { name: `Archive “${topic.name}”?` });
+    // The words say what stays and what is cancelled, never an internal id, and the confirm button is live.
+    const words = archiveWarning(archiveImpact(transport.source, topic.id), 'demo.local')!;
+    expect(words).toMatch(new RegExp(`^${open} open items? stays? as (it is|they are)\\. .+; archiving cancels (it|them)\\. You can restore it any time\\.$`));
+    expect(within(confirm).getByText(words)).toBeDefined();
+    expect(/[0-9a-f]{8}-[0-9a-f]{4}-/.test(confirm.textContent ?? '')).toBe(false);
     expect(transport.mutations).toHaveLength(0);
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm Pause dispatch' })); });
-    expect(transport.mutations.map(value => value.command.command)).toEqual(['binding_pause']);
-    expect(transport.source.state).toBe('active');
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm session close' })); });
-    expect(transport.mutations.map(value => value.command.command)).toEqual(['binding_pause', 'session_close']);
-    expect(transport.source.state).toBe('closed');
+    await act(async () => { fireEvent.click(within(confirm).getByRole('button', { name: 'Archive topic' })); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
+    expect(screen.getByRole('status').textContent).toContain(`Archived ${topic.name} · ${unsettled.length} cancelled`);
+    expect(unsettled.every(id => transport.source.inputs[id]!.state === 'cancelled')).toBe(true);
+    // Items keep their status; Undo brings the topic back and the cancelled messages stay cancelled.
+    expect(Object.fromEntries(Object.values(transport.source.items).map(item => [item!.id, item!.status]))).toEqual(statuses);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
+    expect(transport.source.topics[topic.id]!.archived_at).toBeNull();
+    expect(unsettled.every(id => transport.source.inputs[id]!.state === 'cancelled')).toBe(true);
   });
-  it('offers Confirm Close directly when the active binding is disconnected', async () => {
-    const { props, transport } = await setup(true);
+  it('leaves the topic as it is when the archive confirmation is cancelled', async () => {
+    const { props, topic, transport } = await setup(); render(<HistoryActions {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` }));
+    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull(); expect(transport.mutations).toHaveLength(0);
+    expect(transport.source.topics[topic.id]!.archived_at).toBeNull();
+  });
+  it('words what archiving leaves as it is and what it cancels', () => {
+    expect(archiveWarning({ open: 3, unsent: 2, delivering: 0 }, 'codex'))
+      .toBe('3 open items stay as they are. 2 of your messages haven’t reached codex yet; archiving cancels them. You can restore it any time.');
+    expect(archiveWarning({ open: 1, unsent: 0, delivering: 0 }, 'codex')).toBe('1 open item stays as it is. You can restore it any time.');
+    expect(archiveWarning({ open: 0, unsent: 1, delivering: 0 }, 'codex')).toBe('1 of your messages hasn’t reached codex yet; archiving cancels it. You can restore it any time.');
+    expect(archiveWarning({ open: 0, unsent: 0, delivering: 1 }, 'codex')).toBe('1 of your messages is being delivered to codex; archiving cancels it. You can restore it any time.');
+    expect(archiveWarning({ open: 2, unsent: 1, delivering: 2 }, 'codex'))
+      .toBe('2 open items stay as they are. 1 of your messages hasn’t reached codex yet and 2 are being delivered; archiving cancels them. You can restore it any time.');
+    // Nothing stays open and nothing is cancelled: no confirmation at all.
+    expect(archiveWarning({ open: 0, unsent: 0, delivering: 0 }, 'codex')).toBeNull();
+  });
+  it('closes a sending session with open questions and unsent messages in one confirmation', async () => {
+    const { props, transport } = await setup();
     const binding = transport.source.bindings[transport.source.active_binding_id!]!;
-    binding.dispatch_state = 'disconnected'; binding.connection_state = 'disconnected'; binding.owner_paused = true;
-    ++transport.source.revision;
+    binding.dispatch_state = 'enabled'; binding.connection_state = 'connected'; binding.owner_paused = false;
     await props.actions.session.refresh(); render(<HistoryActions {...props} />);
+    const questions = Object.values(transport.source.items).filter(item => item?.status === 'waiting_on_me').length;
+    const inputs = Object.values(transport.source.inputs);
+    const queued = inputs.filter(input => input && ['queued', 'needs_attention'].includes(input.state)).length;
+    const delivering = inputs.filter(input => input?.state === 'in_flight').length, unsent = queued + delivering;
+    expect(questions).toBeGreaterThan(0); expect(queued).toBeGreaterThan(0); expect(delivering).toBe(1);
     fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
-    expect(dialog().queryByRole('button', { name: 'Pause dispatch' })).toBeNull();
-    expect(dialog().getByText('Dispatch is already stopped (binding not connected). Confirm Close.')).toBeTruthy();
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm session close' })); });
+    expect(dialog().queryByRole('button', { name: /Pause/ })).toBeNull();
+    expect(dialog().getByText(new RegExp(`^${questions} questions? (is|are) still open, ${queued} of your messages ha(s|ve)n’t reached demo\\.local `
+      + 'and 1 is being delivered — closing cancels those messages\\.$'))).toBeTruthy();
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Close session' })); });
     expect(transport.mutations.map(value => value.command.command)).toEqual(['session_close']);
-    expect(transport.source.state).toBe('closed');
+    expect(transport.source.state).toBe('closed'); expect(screen.queryByRole('dialog')).toBeNull();
+    expect(notices.getSnapshot().some(notice => notice.text.includes(`${unsent} unsent message`))).toBe(true);
   });
-  it('pins the dispatch-quiesced truth table shared with Binding::dispatch_quiesced', () => {
-    const make = (dispatch_state: string, connection_state: string) => ({ dispatch_state, connection_state }) as never;
-    expect(dispatchQuiesced(null)).toBe(true);
-    expect(dispatchQuiesced(make('paused', 'connected'))).toBe(true);
-    expect(dispatchQuiesced(make('disconnected', 'disconnected'))).toBe(true);
-    expect(dispatchQuiesced(make('recovery_required', 'unknown'))).toBe(true);
-    expect(dispatchQuiesced(make('enabled', 'reconnecting'))).toBe(true);
-    expect(dispatchQuiesced(make('enabled', 'connected'))).toBe(false);
-    expect(dispatchQuiesced(make('recovery_required', 'connected'))).toBe(false);
+  it('words what closing leaves open and what it cancels', () => {
+    expect(closeWarning({ questions: 1, unsent: 2, delivering: 0 }, 'codex')).toBe('1 question is still open and 2 of your messages haven’t reached codex — closing cancels those messages.');
+    expect(closeWarning({ questions: 0, unsent: 1, delivering: 0 }, 'codex')).toBe('1 of your messages hasn’t reached codex — closing cancels it.');
+    expect(closeWarning({ questions: 2, unsent: 0, delivering: 0 }, 'codex')).toBe('2 questions are still open — they stay in the closed session.');
+    expect(closeWarning({ questions: 0, unsent: 0, delivering: 0 }, 'codex')).toBeNull();
+    // A message in flight is being delivered, not "hasn't reached".
+    expect(closeWarning({ questions: 0, unsent: 0, delivering: 1 }, 'codex')).toBe('1 of your messages is being delivered to codex — closing cancels it.');
+    expect(closeWarning({ questions: 0, unsent: 2, delivering: 1 }, 'codex')).toBe('2 of your messages haven’t reached codex and 1 is being delivered — closing cancels them.');
+    expect(closeWarning({ questions: 1, unsent: 1, delivering: 2 }, 'codex'))
+      .toBe('1 question is still open, 1 of your messages hasn’t reached codex and 2 are being delivered — closing cancels those messages.');
+    expect(closeWarning({ questions: 1, unsent: 0, delivering: 1 }, 'codex')).toBe('1 question is still open and 1 of your messages is being delivered to codex — closing cancels that message.');
   });
   it('archives/restores and closes/reopens with retained IDs, history and paused binding', async () => {
     const { props, topic, transport } = await setup(true), items = structuredClone(transport.source.items), messages = structuredClone(transport.source.messages);
@@ -120,23 +142,25 @@ describe('guarded history controls', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Restore ${topic.name}` })); });
-    for (const [button, confirm] of [['Close session', 'session close'], ['Reopen session', 'session reopen']]) {
+    for (const [button, confirm] of [['Close session', 'Close session'], ['Reopen session', 'Reopen session']]) {
       fireEvent.click(screen.getByRole('button', { name: button }));
-      await act(async () => { fireEvent.click(dialog().getByRole('button', { name: `Confirm ${confirm}` })); });
+      await act(async () => { fireEvent.click(dialog().getByRole('button', { name: confirm })); });
     }
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore', 'topic_archive', 'topic_restore', 'session_close', 'session_reopen']);
     expect(transport.source.items).toEqual(items); expect(transport.source.messages).toEqual(messages);
     expect(binding.dispatch_state).toBe('paused'); expect(transport.source.state).toBe('active');
   });
-  it('requires revised review after a session change and keeps uncertain requests after unmount', async () => {
+  it('closes against the current revision after an agent write and keeps uncertain requests after unmount', async () => {
     const { props, topic, transport, store, actions } = await setup(true);
-    const binding = transport.source.bindings[transport.source.active_binding_id!]!; binding.dispatch_state = 'paused'; binding.owner_paused = true;
-    await store.refresh(); const view = render(<HistoryActions {...props} />);
+    const view = render(<HistoryActions {...props} />);
     fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
+    // An agent write while the confirmation is open never holds Close: it closes the session as it is now.
     ++transport.source.revision; await act(async () => { await store.refresh(); });
-    expect((dialog().getByRole('button', { name: 'Confirm session close' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(dialog().getByRole('button', { name: 'Review current state' })); transport.replies.push(new Error('Lost acknowledgement'));
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm session close' })); });
+    expect((dialog().getByRole('button', { name: 'Close session' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(dialog().queryByRole('button', { name: 'Review current state' })).toBeNull();
+    transport.replies.push(new Error('Lost acknowledgement'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Close session' })); });
+    expect((transport.mutations[0]!.command.params as { expected_revision: number }).expected_revision).toBe(transport.source.revision);
     const request = structuredClone(transport.mutations[0]); view.unmount(); render(<HistoryActions {...props} />);
     expect(actions.getSnapshot().pending).toEqual(request); expect(transport.mutations).toHaveLength(1);
     // The column offers the reconcile while an uncertain action holds every other change.
@@ -157,105 +181,116 @@ describe('guarded history controls', () => {
     expect(transport.mutations).toEqual([request, request, request]); expect(screen.queryByRole('alert')).toBeNull();
     expect(transport.source.topics[topic.id]!.archived_at).not.toBeNull();
   });
-  it('recomputes blockers after deliberately reviewing resolved canonical state', async () => {
-    const { props, topic, transport, store, actions } = await setup(true); render(<HistoryActions {...props} />);
-    const item = Object.values(transport.source.items).find(item => item?.topic_id === topic.id)!;
-    const rejected = failure('topic_not_archivable');
-    if (rejected.ok) throw new Error('test rejection');
-    rejected.error.details = { reason: null, binding_id: null, input_id: null, attempt_id: null,
-      blocking_item_ids: [item.id], blocking_input_ids: [], dispatch_must_pause: false };
-    // The core knows a blocker the snapshot does not show yet: the direct archive opens the review with it.
-    transport.replies.push(rejected);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
-    expect(dialog().getByRole('button', { name: `Item ${item.id} · ${item.question}` })).toBeDefined();
-    expect((dialog().getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(actions.getSnapshot().pending).toBeNull();
-    const previousError = actions.getSnapshot().error;
-    ++transport.source.revision; await act(async () => { await store.refresh(); });
-    fireEvent.click(dialog().getByRole('button', { name: 'Review current state' }));
-    expect(dialog().queryByRole('button', { name: `Item ${item.id} · ${item.question}` })).toBeNull();
-    expect(dialog().queryByText('Rejected topic_not_archivable')).toBeNull();
-    expect(actions.getSnapshot().error).toBe(previousError);
-    expect((dialog().getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(false);
-    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Confirm topic archive' })); });
-    expect(topic.archived_at).not.toBeNull(); expect(transport.mutations).toHaveLength(2);
-  });
-  it.each(['same topic', 'different topic'])('does not reuse a rejected review when opening %s', async selection => {
-    const { props, topic, transport, actions } = await setup(true);
-    const other = { ...structuredClone(topic), id: op, name: 'Another terminal topic', order: topic.order + 1 };
-    transport.source.topics[other.id] = other; ++transport.source.revision; await props.actions.session.refresh();
-    render(<HistoryActions {...props} />);
-    const rejected = failure('topic_not_archivable');
-    if (rejected.ok) throw new Error('test rejection');
-    rejected.error.details = { reason: null, binding_id: null, input_id: null, attempt_id: null,
-      blocking_item_ids: ['999'], blocking_input_ids: [], dispatch_must_pause: false };
-    transport.replies.push(rejected);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
-    expect(dialog().getByRole('button', { name: 'Item 999 · Active item' })).toBeDefined();
-    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
-    const chosen = selection === 'same topic' ? topic : other;
-    expect(actions.getSnapshot().error).toBeInstanceOf(CoreFailure); expect(actions.getSnapshot().pending).toBeNull();
-    // The earlier rejection is not reused: nothing blocks locally, so the archive runs again at once.
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${chosen.name}` })); });
+  it('keeps the archive confirmation open with the reason when the save is refused, then archives the topic as it is now', async () => {
+    const { props, topic, transport, store } = await setup(); render(<HistoryActions {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` }));
+    // An agent write moved the topic on: core refuses the stale revision and the dialog says so.
+    transport.replies.push(failure('revision_conflict'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' })); });
+    expect(dialog().getByRole('alert').textContent).toContain('This changed while you were working.');
+    expect(dialog().getByRole('alert').textContent).not.toContain('revision_conflict');
+    expect(transport.source.topics[topic.id]!.archived_at).toBeNull();
+    ++transport.source.revision; ++transport.source.topics[topic.id]!.revision; await act(async () => { await store.refresh(); });
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' })); });
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(transport.mutations[1].command).toMatchObject({ command: 'topic_archive', params: { topic_id: chosen.id } });
-    expect(screen.getByRole('status').textContent).toContain(`Archived ${chosen.name}`);
+    expect(transport.mutations[1]!.command).toMatchObject({ command: 'topic_archive', params: { topic_id: topic.id, expected_revision: transport.source.topics[topic.id]!.revision - 1 } });
+    expect(transport.source.topics[topic.id]!.archived_at).not.toBeNull();
   });
 });
 
 describe('explicit Continue preview and request identity', () => {
-  async function previewSetup() {
-    const data = await setup(); render(<ContinueDialog {...data.props} topicId={data.topic.id} onCancel={() => {}} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Target session' }));
-    await waitFor(() => expect(screen.getByText('Approved handoff summary')).toBeDefined());
-    return data;
+  const navigations: NavigationStore[] = [];
+  afterEach(() => { navigations.splice(0).forEach(navigation => navigation.stop()); });
+  // The app's Continue dialog (ui/dialogs/ContinueTopicDialog) over the history fixture, opened for its first topic.
+  async function previewSetup(blocked = false) {
+    const transport = new HistoryTransport(); transport.blocked = blocked;
+    const service = createDesktopService(transport), navigation = new NavigationStore(service); navigations.push(navigation);
+    await navigation.start();
+    const store = navigation.opened.open(route), targetStore = navigation.opened.open(targetRoute);
+    await store.refresh(); await targetStore.refresh();
+    const controllers = new SessionActionControllers(service, () => op), targetActions = controllers.forSession(targetStore);
+    const topic = Object.values(transport.source.topics)[0]!, sent: SessionRef[] = [];
+    render(<ContinueTopicHost navigation={navigation} actions={controllers} onSent={target => { sent.push(target); }} />);
+    act(() => { openContinueTopic({ source: route, topicId: topic.id, target: targetRoute }); });
+    await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
+    return { transport, store, targetActions, topic, sent };
   }
-  it('shows qualified source/target, grouped items, provenance and queued host-unavailable readiness before Send', async () => {
-    const { transport, topic } = await previewSetup();
-    expect(screen.getByText(/Host unavailable. Handoff will be saved as queued/)).toBeDefined();
-    expect(screen.getByRole('region', { name: 'Waiting items' })).toBeDefined();
-    expect(screen.getByRole('region', { name: 'Open items' })).toBeDefined();
-    expect(screen.getByRole('region', { name: 'Terminal items' })).toBeDefined();
+  const send = () => screen.getByRole('button', { name: /^Send to / }) as HTMLButtonElement;
+  it('shows the grouped summary and queued readiness before Send, then sends the reviewed revisions', async () => {
+    const { transport, topic, sent } = await previewSetup();
+    expect(screen.getByText(/isn’t running, so the summary waits until it runs again/)).toBeDefined();
+    const summary = screen.getByLabelText('Summary');
+    expect(summary.getAttribute('data-summary')).toBe('Approved full snapshot. Keep copied source provenance.');
+    expect(within(summary).getByText(/^Waiting on you · \d+$/)).toBeDefined();
     expect(transport.mutations).toHaveLength(0);
     expect(transport.queries.filter(query => query.request.command === 'topic_continue_preview')).toMatchObject([{ session: null }]);
     const source = structuredClone(transport.source);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Send to Target session' })); });
+    await act(async () => { fireEvent.click(send()); });
     expect(transport.mutations).toHaveLength(1);
     expect(transport.mutations[0]).toMatchObject({ session: targetRoute, command: { command: 'topic_continue', params: {
       source: route, source_topic_id: topic.id, source_revision: source.revision, source_sha256: 'a'.repeat(64), target: targetRoute,
       summary: 'Approved full snapshot. Keep copied source provenance.',
     } } });
     expect(transport.source).toEqual(source);
+    expect(screen.queryByRole('dialog')).toBeNull(); expect(sent).toEqual([targetRoute]);
   });
-  it('blocks changed preview, refreshes deliberately and freezes uncertain Send across source change', async () => {
+  it('blocks a changed preview, prepares again deliberately and freezes an uncertain Send across source change', async () => {
     const { transport, store, targetActions } = await previewSetup(); ++transport.source.revision;
     await act(async () => { await store.refresh(); });
-    expect((screen.getByRole('button', { name: 'Send to Target session' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Prepare new preview' }));
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Send to Target session' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(send().disabled).toBe(true);
+    expect(screen.getByText('The topic or this session changed. Prepare the summary again before sending.')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare again' }));
+    await waitFor(() => expect(send().disabled).toBe(false));
     transport.replies.push(new Error('Lost acknowledgement'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Send to Target session' })); });
+    await act(async () => { fireEvent.click(send()); });
     const request = structuredClone(transport.mutations[0]); ++transport.source.revision;
     await act(async () => { await store.refresh(); });
-    expect(screen.queryByRole('button', { name: 'Prepare new preview' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Prepare again' })).toBeNull();
     expect(targetActions.getSnapshot().pending).toEqual(request);
+    const alert = screen.getByText(/isn’t sure the summary was sent/);
+    expect(alert.getAttribute('data-operation-id')).toBe(request.command.op_id);
     transport.replies.push(failure('preview_stale'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check again' })); });
     expect(transport.mutations).toEqual([request, request]); expect(targetActions.getSnapshot().pending).toBeNull();
-    expect(screen.getByRole('button', { name: 'Prepare new preview' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Prepare again' })).toBeDefined();
   });
   it('disables Send for an unknown target binding', async () => {
-    const data = await setup(); data.transport.blocked = true;
-    render(<ContinueDialog {...data.props} topicId={data.topic.id} onCancel={() => {}} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Target session' }));
-    await waitFor(() => expect(screen.getByText(/Target unavailable: binding unknown/)).toBeDefined());
-    expect((screen.getByRole('button', { name: 'Send to Target session' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(data.transport.mutations).toHaveLength(0);
+    const { transport } = await previewSetup(true);
+    expect(screen.getByRole('alert').textContent).toMatch(/can’t take this topic now: Ariadne can’t tell which agent is connected\./);
+    expect(send().disabled).toBe(true);
+    expect(transport.mutations).toHaveLength(0);
   });
   it.each(['preview_stale', 'queue_full', 'invalid_transition', 'incompatible_adapter', 'binding_mismatch', 'not_found', 'invalid_argument', 'capacity_exceeded', 'io_error', 'commit_uncertain'] as const)('clears only replay-first Continue guard %s', async code => {
     const { transport, targetActions } = await previewSetup(); transport.replies.push(failure(code));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Send to Target session' })); });
-    expect(targetActions.getSnapshot().pending === null).toBe(['preview_stale', 'queue_full', 'invalid_transition', 'incompatible_adapter'].includes(code));
+    await act(async () => { fireEvent.click(send()); });
+    // Wire validation (invalid_argument) rejects before any store opens: never saved, so never held.
+    expect(targetActions.getSnapshot().pending === null).toBe(['preview_stale', 'queue_full', 'invalid_transition', 'incompatible_adapter', 'invalid_argument'].includes(code));
+  });
+});
+
+describe('Continue target picker', () => {
+  const summary = (session_id: string, extra: Partial<SessionSummary> = {}) => ({
+    project_id: route.project_id, session_id, title: `Session ${session_id.slice(-1)}`, state: 'active',
+    active_binding: { adapter_id: 'codex', connection_state: 'connected' }, ...extra,
+  }) as unknown as SessionSummary;
+  it('lists the other active sessions, those of the topic’s own project first', () => {
+    const elsewhere = summary('00000000-0000-4000-8000-000000000005', { project_id: '00000000-0000-4000-8000-0000000000aa' });
+    const targets = continueTargets(route, [elsewhere, summary(route.session_id), summary('00000000-0000-4000-8000-000000000006', { state: 'closed' }),
+      summary(secondId, { active_binding: null })]);
+    expect(targets.map(target => target.route.session_id)).toEqual([secondId, elsewhere.session_id]);
+    expect(targets.map(target => target.detail)).toEqual(['No agent connected', 'codex · running · another project']);
+  });
+  it('picks a session or cancels, and says when no session can take the topic', () => {
+    const picked: SessionRef[] = []; let cancelled = 0;
+    const { rerender } = render(<ContinuePicker topicName="Delivery decisions" targets={continueTargets(route, [summary(secondId)])}
+      onPick={target => { picked.push(target); }} onCancel={() => { cancelled++; }} />);
+    const dialog = screen.getByRole('dialog', { name: 'Continue “Delivery decisions” in another session' });
+    const option = within(dialog).getByRole('button', { name: 'Session 3' });
+    expect(option.getAttribute('aria-describedby') && document.getElementById(option.getAttribute('aria-describedby')!)?.textContent).toBe('codex · running');
+    fireEvent.click(option); expect(picked).toEqual([targetRoute]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); expect(cancelled).toBe(1);
+    rerender(<ContinuePicker topicName="Delivery decisions" targets={[]} onPick={() => {}} onCancel={() => {}} />);
+    expect(screen.getByText('No other open session can take this topic.')).toBeDefined();
   });
 });
 
@@ -263,7 +298,7 @@ describe('saved receipts and copied provenance', () => {
   it.each(['revision_conflict', 'invalid_transition', 'topic_not_archivable', 'session_not_closable', 'not_found', 'invalid_argument', 'io_error', 'commit_uncertain'] as const)('retains uncertainty except replay-first lifecycle guard %s', async code => {
     const { transport, actions, topic } = await setup(true); transport.replies.push(failure(code));
     await actions.execute({ command: 'topic_archive', api_version: 1, op_id: '', params: { topic_id: topic.id, expected_revision: topic.revision } }, transport.source.revision);
-    expect(actions.getSnapshot().pending === null).toBe(['revision_conflict', 'invalid_transition', 'topic_not_archivable', 'session_not_closable'].includes(code));
+    expect(actions.getSnapshot().pending === null).toBe(['revision_conflict', 'invalid_transition', 'topic_not_archivable', 'session_not_closable', 'invalid_argument'].includes(code));
   });
   it.each(['topic', 'revision', 'archive_time'] as const)('rejects mismatched archive receipt %s without discarding frozen action', async field => {
     const { transport, actions, topic } = await setup(true);

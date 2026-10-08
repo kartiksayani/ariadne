@@ -35,8 +35,16 @@ interface ActionState {
   readonly error: CoreFailure | ServiceFailure | null;
   readonly receipt: Immutable<MutationReceipt> | null;
 }
-function definitiveRejection(failure: CoreFailure | ServiceFailure, command: OwnerCommand): boolean {
+/** binding_connect replays its exact operation first; every guard after that rejects before saving (bindings/mod.rs connect_guarded). */
+const connectRejections = ['binding_conflict', 'binding_mismatch', 'not_found', 'incompatible_adapter', 'host_unreachable',
+  'unsupported_host_version', 'unsupported', 'invalid_transition', 'protocol_conflict', 'control_path_too_long', 'permission_denied'];
+export function definitiveRejection(failure: CoreFailure | ServiceFailure, command: OwnerCommand): boolean {
   if (!(failure instanceof CoreFailure)) return false;
+  // Wire validation (validation.rs validate_wire) runs before any store is
+  // opened, so a validation rejection can never have saved the operation.
+  if (failure.error.code === 'invalid_argument') return true;
+  if (command.command === 'binding_connect' && connectRejections.includes(failure.error.code)) return true;
+  if (command.command === 'input_cancel' && ['revision_conflict', 'invalid_transition', 'not_found'].includes(failure.error.code)) return true;
   // Verified replay-first transaction guards in recovery/mod.rs and
   // bindings/mod.rs reject before publication. Recovery's delivery_uncertain
   // denotes missing idle attestation or ineligible retry before mutation.
@@ -50,6 +58,8 @@ function definitiveRejection(failure: CoreFailure | ServiceFailure, command: Own
   // routing/source IO errors (including binding_mismatch) remain uncertain.
   if (history && ['revision_conflict', 'invalid_transition', 'topic_not_archivable', 'session_not_closable'].includes(failure.error.code)) return true;
   if (command.command === 'topic_continue' && ['preview_stale', 'queue_full', 'invalid_transition', 'incompatible_adapter'].includes(failure.error.code)) return true;
+  // A rename of a removed session finds no file, so nothing was saved and nothing can replay.
+  if (command.command === 'session_label_set' && failure.error.code === 'not_found') return true;
   return (lifecycle || command.command === 'input_resolve')
       && ['revision_conflict', 'binding_mismatch', 'invalid_transition'].includes(failure.error.code)
     || command.command === 'input_resolve' && failure.error.code === 'delivery_uncertain'
@@ -85,7 +95,10 @@ export class SessionActions {
     const current = this.session.getSnapshot();
     if (this.state.writing || this.state.pending || current.status !== 'ready' || current.error
         || current.snapshot?.session.revision !== reviewedRevision) return false;
-    this.publish({ pending: immutable({ session: this.route, command: { ...command, op_id: this.operationId() } }), receipt: null, error: null });
+    // binding_connect is project-scoped on the wire (validation.rs requires no session route);
+    // the controller still owns its barrier and checks the receipt against its own session.
+    const session = command.command === 'binding_connect' ? null : this.route;
+    this.publish({ pending: immutable({ session, command: { ...command, op_id: this.operationId() } }), receipt: null, error: null });
     return this.retry();
   }
   async retry(): Promise<boolean> {
@@ -94,7 +107,7 @@ export class SessionActions {
     this.publish({ writing: true, error: null });
     try {
       const receipt = await this.service.executeOwner(request);
-      if (!('data' in receipt) || receipt.session_id !== request.session?.session_id
+      if (!('data' in receipt) || receipt.session_id !== this.route.session_id
           || receipt.operation_id !== request.command.op_id || !Number.isSafeInteger(receipt.revision) || receipt.revision <= 0) {
         throw new ServiceFailure('invalid_response');
       }
@@ -107,6 +120,10 @@ export class SessionActions {
           ? data.kind === 'session_lifecycle' && receipt.revision === command.params.expected_revision + 1
             && data.state === (command.command === 'session_close' ? 'closed' : 'active')
             && (command.command === 'session_close' ? timestamp(data.closed_at) : data.closed_at === null)
+        : command.command === 'session_label_set'
+          // Core stores the trimmed text and clears a blank field to null.
+          ? data.kind === 'session_label' && (data.name ?? null) === (command.params.name?.trim() || null)
+            && (data.description ?? null) === (command.params.description?.trim() || null)
         : command.command === 'topic_continue'
           ? data.kind === 'continuation' && validContinuation(data.continuation) && data.continuation.operation_id === command.op_id
             && data.continuation.source_project_id === command.params.source.project_id
@@ -116,6 +133,7 @@ export class SessionActions {
             && data.continuation.source_sha256 === command.params.source_sha256
             && data.continuation.summary === command.params.summary
         : command.command === 'binding_connect' ? data.kind === 'binding_connect'
+        : command.command === 'input_cancel' ? data.kind === 'input_cancel' && data.input_id === command.params.input_id
         : command.command === 'input_resolve' ? data.kind === 'input_resolve' && data.input_id === command.params.input_id
           && data.attempt_id === command.params.attempt_id && data.resolution_kind === command.params.decision
         : (command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect')
@@ -136,10 +154,15 @@ export class SessionActions {
     } finally { this.publish({ writing: false }); }
   }
 }
+// The application's controllers per renderer service: owner controls deep in a
+// view (the paused warning's Resume) reach the same write barrier as the session bar.
+const registered = new WeakMap<RendererService, SessionActionControllers>();
 /** Owned by the application, independently of mounted views or open tabs. */
 export class SessionActionControllers {
   private readonly controllers = new Map<string, SessionActions>();
-  constructor(private readonly service: RendererService, private readonly operationId: () => string = () => crypto.randomUUID()) {}
+  constructor(readonly service: RendererService, private readonly operationId: () => string = () => crypto.randomUUID()) {
+    if (!registered.has(service)) registered.set(service, this);
+  }
   forSession(session: SessionStore): SessionActions {
     const route = session.getSnapshot().route;
     const key = JSON.stringify([route.project_id, route.session_id]);
@@ -150,6 +173,10 @@ export class SessionActionControllers {
     } else actions.attachSession(session);
     return actions;
   }
+}
+/** The session's controller in the application's registry for `service` (created on first use). */
+export function sessionActionsFor(service: RendererService, session: SessionStore): SessionActions {
+  return (registered.get(service) ?? new SessionActionControllers(service)).forSession(session);
 }
 export function useSessionActions(actions: SessionActions) {
   return useSyncExternalStore(actions.subscribe, actions.getSnapshot, actions.getSnapshot);

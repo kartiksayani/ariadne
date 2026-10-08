@@ -67,9 +67,7 @@ impl NativeRoutes {
                 return;
             };
             // UI failures preserve the pending navigation intent for reconcile.
-            if window.show().is_ok()
-                && window.unminimize().is_ok()
-                && window.set_focus().is_ok()
+            if crate::native::window::present(&window).is_ok()
                 && window.emit("ariadne://route", route).is_ok()
             {
                 pending.delivered(ticket);
@@ -81,7 +79,42 @@ impl NativeRoutes {
 
 /// The first plugin intercepts second launches before any owning startup code.
 pub(crate) fn receive_launch<R: tauri::Runtime>(app: tauri::AppHandle<R>, args: Vec<String>) {
-    match launch::parse(&args) {
+    if open_launch_route(&app, &args) == Some(false) {
+        show_main_window(&app);
+    }
+}
+
+/// The app's own launch arguments. Only a route is opened here: the first
+/// show waits for the saved window size (`NativeWindow::launch`), and the
+/// route waits for that show (`window_shown`).
+pub(crate) fn receive_startup<R: tauri::Runtime>(app: tauri::AppHandle<R>, args: Vec<String>) {
+    if let Ok(mut pending) = app.state::<NativeRoutes>().pending.lock() {
+        pending.hold_until_shown();
+    }
+    open_launch_route(&app, &args);
+}
+
+/// Called once by every path that first shows the main window (including
+/// the launch fallback). Releases a held startup route.
+pub(crate) fn window_shown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let routes = app.state::<NativeRoutes>();
+    match routes.pending.lock() {
+        Ok(mut pending) => pending.shown(),
+        Err(_) => return,
+    }
+    if routes.flush(app).is_err() {
+        eprintln!("Ariadne could not open the requested registered route.");
+    }
+}
+
+/// Opens a route named in `args`. Returns whether there was one, or None for
+/// arguments that are not a valid route.
+fn open_launch_route<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    args: &[String],
+) -> Option<bool> {
+    let app = app.clone();
+    match launch::parse(args) {
         Ok(Some(route)) => {
             tauri::async_runtime::spawn(async move {
                 let routes = app.state::<NativeRoutes>().inner().clone();
@@ -90,9 +123,13 @@ pub(crate) fn receive_launch<R: tauri::Runtime>(app: tauri::AppHandle<R>, args: 
                     eprintln!("Ariadne could not open the requested registered route.");
                 }
             });
+            Some(true)
         }
-        Ok(None) => show_main_window(&app),
-        Err(_) => eprintln!("Ariadne rejected invalid native route arguments."),
+        Ok(None) => Some(false),
+        Err(_) => {
+            eprintln!("Ariadne rejected invalid native route arguments.");
+            None
+        }
     }
 }
 
@@ -102,9 +139,7 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(window) = handle.get_webview_window("main") {
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_focus();
+            let _ = crate::native::window::present(&window);
         }
     });
 }

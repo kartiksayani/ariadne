@@ -427,6 +427,7 @@ fn mutation_receipts_keep_the_saved_shape_and_validate_operation_route_and_kind(
     wrong.data = SavedReceiptData::SessionLifecycle {
         state: SessionState::Closed,
         closed_at: None,
+        cancelled_input_ids: vec![],
     };
     assert!(validate_receipt(&wrapper, &MutationReceipt::Session(wrong)).is_err());
 }
@@ -751,6 +752,43 @@ fn codex_default_endpoint_ipc_returns_the_configured_socket_or_null() {
     assert_eq!(
         invoke(&window, "codex_default_endpoint", json!({})).unwrap(),
         Value::Null
+    );
+}
+
+#[test]
+fn supervisor_health_ipc_returns_the_published_entries_in_wire_shape() {
+    use ariadne_runtime::health::SupervisorHealth;
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let binding = UuidV4::new("00000000-0000-4000-8000-000000000001").unwrap();
+    let generation = UuidV4::new("00000000-0000-4000-8000-000000000002").unwrap();
+    let at = ariadne_domain::models::UtcMillis::new("2026-10-07T12:00:00.000Z").unwrap();
+    let entry = SupervisorHealth::backing_off(
+        binding,
+        generation,
+        "Ariadne can't reach Codex right now.".into(),
+        std::time::Duration::from_secs(4),
+        at,
+    );
+    let window = window(
+        DesktopService::from_trusted_startup(core.clone(), resolve)
+            .with_supervisor_health(move || vec![entry.clone()]),
+    );
+    assert_eq!(
+        invoke(&window, "supervisor_health", json!({})).unwrap(),
+        json!([{
+            "binding_id": "00000000-0000-4000-8000-000000000001",
+            "generation": "00000000-0000-4000-8000-000000000002",
+            "state": "backing_off",
+            "reason": "Ariadne can't reach Codex right now.",
+            "retry_in_seconds": 4,
+            "updated_at": "2026-10-07T12:00:00.000Z"
+        }])
+    );
+    // Without a runtime (or with only Claude bindings) the list is empty.
+    let window = self::window(DesktopService::from_trusted_startup(core, resolve));
+    assert_eq!(
+        invoke(&window, "supervisor_health", json!({})).unwrap(),
+        json!([])
     );
 }
 

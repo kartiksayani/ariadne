@@ -6,15 +6,18 @@
 import type { BindingSummary, Input, Item, ItemOption, ItemStatus, PresenceObservation, Session, SessionSummary, Topic } from '../../generated/domain/models';
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
+import type { SupervisorHealth } from '../../data/service';
 import { normalizeSearch, sameOwner } from '../../selectors/tree/rows';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
+import { stuckInput, type Stuck } from '../../selectors/waiting/stuck';
 import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
-import { agentName, dayWord, hostApp, sessionRange } from '../shell/model';
+import { agentLine, agentName, dayWord, hostApp, ownerName, sessionLabel, sessionRange } from '../shell/model';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
+import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { continuedLabel } from '../shared/continued';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
 
-export const visual = (status: ItemStatus): StatusKey => statusKey[status];
+export const visual = (status: DisplayStatus): StatusKey => statusKey[status];
 const CLOSED: ReadonlySet<ItemStatus> = new Set(['decided', 'done', 'dropped', 'replaced']);
 export const closed = (status: ItemStatus) => CLOSED.has(status);
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -37,7 +40,10 @@ export function chipOf(statuses: readonly ItemStatus[]): Chip | null {
   const key = [...statuses].sort().join();
   return CHIPS.find(chip => [...chip.statuses].sort().join() === key)?.chip ?? null;
 }
-const inChip = (chip: Chip, status: ItemStatus) => chip === 'all' || CHIPS.find(value => value.chip === chip)!.statuses.includes(status);
+/** Whether a status filter matches what a row shows: Waiting on agent counts as In progress, never as Waiting on me. */
+export const statusIn = (statuses: readonly ItemStatus[], status: DisplayStatus) =>
+  status === 'waiting_on_agent' ? statuses.includes('in_progress') : statuses.includes(status);
+const inChip = (chip: Chip, status: DisplayStatus) => chip === 'all' || statusIn(CHIPS.find(value => value.chip === chip)!.statuses, status);
 
 // ---------------------------------------------------------------- search
 
@@ -61,17 +67,27 @@ export function segments(text: string, query: string): readonly Segment[] {
 
 // ---------------------------------------------------------------- delivery
 
-export interface Delivery { readonly icon: string; readonly text: string; readonly color: string; readonly failed: boolean }
+export interface Delivery {
+  readonly icon: string; readonly text: string; readonly color: string; readonly failed: boolean;
+  /** A stopped delivery: the row answers it inline (ui/answer/StuckNote) instead of the line. */
+  readonly stuck: { readonly input: Immutable<Input>; readonly note: Stuck } | null;
+}
 const inputLabel = (input: Immutable<Input>, options: readonly Immutable<ItemOption>[]) => {
   const option = input.payload.selected_option_id ? options.find(value => value.id === input.payload.selected_option_id) : null;
   return option?.label ?? input.payload.text;
 };
-/** The delivery line of the latest unsettled input on an item or topic (Ariadne.dc.html:1415). */
+/**
+ * The delivery line of the latest unsettled input on an item or topic (Ariadne.dc.html:1415). A stopped delivery
+ * needing a decision comes first, even with later messages queued behind it: those cannot go out until it is
+ * settled, so its Retry / Mark as done must stay on the row.
+ */
 export function deliveryLine(session: Immutable<Session>, target: { readonly topicId: string; readonly itemId: string | null },
-  presence: Immutable<PresenceObservation> | null): Delivery | null {
+  presence: Immutable<PresenceObservation> | null, health: SupervisorHealth | null = null): Delivery | null {
+  const stopped = (value: Immutable<Input>) => value.state === 'needs_attention' ? 1 : 0;
   const input = Object.values(session.inputs).filter((value): value is Immutable<Input> => !!value
     && value.target.topic_id === target.topicId && value.target.item_id === target.itemId
-    && value.state !== 'handled' && value.state !== 'cancelled' && value.state !== 'skipped').sort((a, b) => b.seq - a.seq)[0];
+    && value.state !== 'handled' && value.state !== 'cancelled' && value.state !== 'skipped')
+    .sort((a, b) => stopped(b) - stopped(a) || b.seq - a.seq)[0];
   if (!input) return null;
   const binding = session.bindings[input.binding_id];
   const summary = binding ? { ...binding, presence: null } as Immutable<BindingSummary> : null;
@@ -79,14 +95,24 @@ export function deliveryLine(session: Immutable<Session>, target: { readonly top
   const item = target.itemId ? session.items[target.itemId] : null;
   const label = inputLabel(input, item?.options ?? []), agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const stage = deliveryStage(evidence.kind);
-  return stage ? { ...deliveryText(stage, input.kind, label, agent), failed: stage === 'failed' } : null;
+  const note = input.state === 'needs_attention' ? stuckInput(session, input, presence, health) : null;
+  if (note) return { ...deliveryText('failed', input.kind, label, agent), failed: true, stuck: { input, note } };
+  // A topic reply not sent yet is answered on the band: Edit puts it back in the reply box, Delete drops it.
+  const queued = target.itemId === null && input.state === 'queued' ? stuckInput(session, input, presence, health) : null;
+  return stage ? { ...deliveryText(stage, input.kind, label, agent), failed: stage === 'failed', stuck: queued ? { input, note: queued } : null } : null;
 }
 
 // ---------------------------------------------------------------- session bar
 
 export interface SessionBar {
-  /** "codex · iTerm window 2"; the location segment only when the host reports one. */
+  /** The owner's name for the session; unnamed, "codex · iTerm window 2" (the location segment only when the host reports one). */
   readonly title: string;
+  /** The "codex · iTerm window 2" line kept quietly beside a name; null while unnamed. */
+  readonly secondary: string | null;
+  /** The owner's one-line description, or null. */
+  readonly description: string | null;
+  /** Whether the owner has named the session. */
+  readonly named: boolean;
   /** The agent alone ("codex"), or "No agent". */
   readonly agent: string;
   /** The terminal app ("iTerm") for "Connected to codex in iTerm", or null. */
@@ -111,7 +137,8 @@ export function sessionBar(session: Immutable<Session> | null, summary: Immutabl
     : summary ? summary.topic_count - summary.counts.archived_topics : null;
   const range = sessionRange(Date.parse(created), ended ? Date.parse(ended) : null, running, now);
   const agent = binding ? agentName(binding.adapter_id) : 'No agent', location = binding?.host_location ?? null;
-  return { title: location ? `${agent} · ${location}` : agent, agent, where: hostApp(location),
+  const label = sessionLabel(session ?? summary, agentLine(agent, location));
+  return { title: label.title, secondary: label.secondary, description: label.description, named: label.named, agent, where: hostApp(location),
     meta: topics === null ? range : `${range} · ${plural(topics, 'topic')}`,
     running, connection, closed: (session?.state ?? summary?.state) === 'closed' };
 }
@@ -145,6 +172,8 @@ export interface ItemRow {
   readonly kind: 'item';
   readonly key: string;
   readonly item: Immutable<Item>;
+  /** What the row shows: the item's status, or Waiting on agent once the owner replied. */
+  readonly status: DisplayStatus;
   readonly depth: number;
   readonly hasKids: boolean;
   readonly expanded: boolean;
@@ -172,6 +201,8 @@ export interface TreeInput {
   readonly revealId: string | null;
   readonly temporaryExpanded: readonly string[];
   readonly presence: Immutable<PresenceObservation> | null;
+  /** The desktop supervisor's health for the session's binding, when known. */
+  readonly health?: SupervisorHealth | null;
   /** Catalogue summaries, to name the session a continued topic came from. */
   readonly summaries: readonly Immutable<SessionSummary>[];
   readonly now: number;
@@ -194,15 +225,17 @@ function topicChip(session: Immutable<Session>, topic: Immutable<Topic>, summari
   const day = dayWord(Date.parse(session.created_at), now).toLowerCase();
   if (!day) return null;
   const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
-  return { label: `${binding ? agentName(binding.adapter_id) : 'Session'} · ${day}`, title: 'From an earlier session' };
+  return { label: `${ownerName(session) ?? (binding ? agentName(binding.adapter_id) : 'Session')} · ${day}`, title: 'From an earlier session' };
 }
 
-export function topicCounts(statuses: readonly ItemStatus[]): Count[] {
-  const count = (test: (status: ItemStatus) => boolean) => statuses.filter(test).length;
+export function topicCounts(statuses: readonly DisplayStatus[]): Count[] {
+  const count = (test: (status: DisplayStatus) => boolean) => statuses.filter(test).length;
   const waiting = count(status => status === 'waiting_on_me'), open = count(status => status === 'open');
-  const progress = count(status => status === 'in_progress'), done = count(closed);
+  const agent = count(status => status === 'waiting_on_agent');
+  const progress = count(status => status === 'in_progress'), done = count(status => status !== 'waiting_on_agent' && closed(status));
   return [
     waiting ? { icon: STATUS.waiting.icon, color: 'var(--st-waiting)', text: `${waiting} waiting on you` } : null,
+    agent ? { icon: STATUS.agent.icon, color: 'var(--st-agent)', text: `${agent} waiting on agent` } : null,
     open ? { icon: STATUS.open.icon, color: 'var(--st-open)', text: `${open} open` } : null,
     progress ? { icon: STATUS.progress.icon, color: 'var(--st-progress)', text: `${progress} in progress` } : null,
     done ? { icon: STATUS.decided.icon, color: 'var(--st-decided)', text: `${done} closed` } : null,
@@ -217,10 +250,10 @@ export function collapsedNote(collapsed: NonNullable<ItemRow['collapsed']>, touc
   return `${parts.join(' · ')} inside${inside && touched?.message ? ` · ${inside} touched in #${touched.message}` : ''}`;
 }
 
-export function badgeLabel(item: Immutable<Item>, later: boolean): string {
+export function badgeLabel(item: Immutable<Item>, later: boolean, status: DisplayStatus = item.status): string {
   if (item.status === 'open' && later) return 'Later';
   if (item.status === 'done' && item.type === 'explanation') return 'Explained';
-  return STATUS[visual(item.status)].label;
+  return STATUS[visual(status)].label;
 }
 
 export function treeModel(input: TreeInput): TreeModel {
@@ -238,10 +271,12 @@ export function treeModel(input: TreeInput): TreeModel {
     const text = normalizeSearch(`${item.question} ${item.outcome ?? ''}`);
     return terms.every(term => text.includes(term));
   };
-  const statusMatch = (item: Immutable<Item>) => !filters.statuses.length || filters.statuses.includes(item.status);
+  const shows = new Map(all.map(item => [item.id, displayStatus(session, item)]));
+  const display = (item: Immutable<Item>) => shows.get(item.id) ?? item.status;
+  const statusMatch = (item: Immutable<Item>) => !filters.statuses.length || statusIn(filters.statuses, display(item));
   const filtering = terms.length > 0 || filters.statuses.length > 0 || filters.owners.length > 0 || filters.hide_later;
   const scoped = live.filter(item => base(item) && (filters.topic_id === null || item.topic_id === filters.topic_id));
-  const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => inChip(key, item.status)).length])) as Record<Chip, number>;
+  const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => inChip(key, display(item))).length])) as Record<Chip, number>;
 
   // includeSets: matches, the forced reveal and selection, and their ancestors.
   const matched = new Set<string>(), forced = new Set<string>(), include = new Set<string>();
@@ -264,13 +299,15 @@ export function treeModel(input: TreeInput): TreeModel {
   for (const topic of topics) {
     if (filters.topic_id !== null && filters.topic_id !== topic.id) continue;
     const roots = rootsOf(topic.id);
-    if (!roots.length || (filtering && !roots.some(item => include.has(item.id)))) continue;
+    // A topic with no items yet (or none left) still shows its band; filters hide topics without a match.
+    // A session with no items at all shows its empty state instead (frame 1g).
+    if (filtering && !roots.some(item => include.has(item.id))) continue;
     const open = filtering || topic.id === revealTopic || !input.collapsedTopics.has(topic.id);
-    const statuses = all.filter(item => item.topic_id === topic.id).map(item => item.status);
+    const statuses = all.filter(item => item.topic_id === topic.id).map(display);
     const chipValue = topicChip(session, topic, input.summaries, input.now);
-    const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence);
+    const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence, input.health);
     built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses),
-      earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(closed), delivery });
+      earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(status => status !== 'waiting_on_agent' && closed(status)), delivery });
     if (!open) continue;
     const walk = (list: readonly Immutable<Item>[], depth: number) => {
       for (const item of list) {
@@ -282,14 +319,14 @@ export function treeModel(input: TreeInput): TreeModel {
           const below: Immutable<Item>[] = [];
           const gather = (id: string) => kids(id).forEach(child => { below.push(child); gather(child.id); });
           gather(item.id);
-          collapsed = { waiting: below.filter(value => value.status === 'waiting_on_me').length, open: below.filter(value => value.status === 'open').length,
-            progress: below.filter(value => value.status === 'in_progress').length, closed: below.filter(value => closed(value.status)).length, ids: below.map(value => value.id) };
+          collapsed = { waiting: below.filter(value => display(value) === 'waiting_on_me').length, open: below.filter(value => value.status === 'open').length,
+            progress: below.filter(value => value.status === 'in_progress' || display(value) === 'waiting_on_agent').length, closed: below.filter(value => closed(value.status)).length, ids: below.map(value => value.id) };
         }
         const parked = item.status === 'open' && later.has(item.id);
-        built.push({ kind: 'item', key: item.id, item, depth, hasKids: children.length > 0, expanded: open,
+        built.push({ kind: 'item', key: item.id, item, status: display(item), depth, hasKids: children.length > 0, expanded: open,
           context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked, segments: segments(item.question, input.search),
           replacedBy: item.replaced_by ? session.items[item.replaced_by] ?? null : null, rounds: indexes.roundsByItem.get(item.id)?.length ?? 0,
-          collapsed, delivery: deliveryLine(session, { topicId: item.topic_id, itemId: item.id }, input.presence), badge: badgeLabel(item, parked) });
+          collapsed, delivery: deliveryLine(session, { topicId: item.topic_id, itemId: item.id }, input.presence, input.health), badge: badgeLabel(item, parked, display(item)) });
         if (open) walk(children, depth + 1);
       }
     };
@@ -336,8 +373,8 @@ export function parentKey(row: Row): string | null {
   return row.item.parent ?? row.item.topic_id;
 }
 
-/** The oldest item waiting on the owner in this session. */
+/** The oldest item waiting on the owner in this session; one the owner already replied to waits on the agent. */
 export function oldestWaiting(session: Immutable<Session>): Immutable<Item> | null {
-  return items(session).filter(item => item.status === 'waiting_on_me' && session.topics[item.topic_id]?.archived_at === null)
+  return items(session).filter(item => displayStatus(session, item) === 'waiting_on_me' && session.topics[item.topic_id]?.archived_at === null)
     .sort((a, b) => (a.waiting_since ?? a.created_at).localeCompare(b.waiting_since ?? b.created_at))[0] ?? null;
 }

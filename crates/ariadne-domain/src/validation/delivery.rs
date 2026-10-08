@@ -148,7 +148,8 @@ pub fn validate_session_delivery(session: &Session) -> Result<(), ValidationErro
                     kind: ValidationErrorKind::MissingReference,
                 })?;
             require(
-                matches!(&receipt.actor_scope,ReceiptActorScope::Adapter {binding_id} if binding_id==&input.binding_id),
+                matches!(&receipt.actor_scope, ReceiptActorScope::Adapter { binding_id }
+                    if super::input_route(session, input, binding_id)),
                 "receipts.actor_scope",
                 ValidationErrorKind::IdentityMismatch,
             )?;

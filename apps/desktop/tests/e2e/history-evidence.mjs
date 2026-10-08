@@ -10,7 +10,7 @@ export function historyFailureFacts() {
   const editor = owner?.querySelector('textarea') ?? null;
   const send = owner?.querySelector('.answer-send, .detail-box-row .btn-primary') ?? null;
   const search = document.querySelector('[data-shell-search]');
-  const stateButtons = /^(Refresh|Refreshing…|Reconcile operation|Register project|Connect existing session|Retry saving draft preferences|Retry saved input|Write another input)$/;
+  const stateButtons = /^(Refresh|Refreshing…|Check again|Register project|Connect existing session|Try saving your draft again|Try sending again|Write another input)$/;
   const active = document.activeElement;
   return {
     // Messages (m) is an icon-only button: the spec selects it by title and it is named by aria-label.

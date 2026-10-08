@@ -21,7 +21,7 @@ export class HistoryTransport extends AppTransport {
       };
       return { api_version: 1, ok: true, data: { kind: name, data: preview } } as T;
     }
-    if (!['topic_archive', 'topic_restore', 'session_close', 'session_reopen', 'topic_continue'].includes(name)) return super.invoke(name, args);
+    if (!['topic_archive', 'topic_restore', 'session_close', 'session_reopen', 'topic_continue', 'session_label_set'].includes(name)) return super.invoke(name, args);
     this.mutations.push(structuredClone(request));
     const reply = this.replies.shift();
     if (reply instanceof Error) throw reply;
@@ -31,11 +31,26 @@ export class HistoryTransport extends AppTransport {
     if (command.command === 'topic_archive' || command.command === 'topic_restore') {
       const topic = session.topics[command.params.topic_id]!;
       topic.archived_at = command.command === 'topic_archive' ? session.updated_at : null; ++topic.revision;
-      data = { kind: 'topic_lifecycle', topic_id: topic.id, topic_revision: topic.revision, archived_at: topic.archived_at };
+      // Core's archive cancels the topic's unsettled inputs and lists them; items keep their status. Restore leaves them cancelled.
+      const cancelled = command.command === 'topic_archive' ? Object.values(session.inputs)
+        .filter(input => input && input.target.topic_id === topic.id && ['queued', 'in_flight', 'needs_attention'].includes(input.state))
+        .map(input => { input!.state = 'cancelled'; return input!.id; }) : [];
+      data = { kind: 'topic_lifecycle', topic_id: topic.id, topic_revision: topic.revision, archived_at: topic.archived_at,
+        ...cancelled.length ? { cancelled_input_ids: cancelled } : {} };
     } else if (command.command === 'session_close' || command.command === 'session_reopen') {
       session.state = command.command === 'session_close' ? 'closed' : 'active';
       session.closed_at = session.state === 'closed' ? session.updated_at : null;
-      data = { kind: 'session_lifecycle', state: session.state, closed_at: session.closed_at };
+      // Core's close cancels every unsettled input and lists them (`cancelled_input_ids`, not yet in the generated type).
+      const cancelled = command.command === 'session_close' ? Object.values(session.inputs)
+        .filter(input => input && ['queued', 'in_flight', 'needs_attention'].includes(input.state))
+        .map(input => { input!.state = 'cancelled'; return input!.id; }) : [];
+      data = { kind: 'session_lifecycle', state: session.state, closed_at: session.closed_at,
+        ...cancelled.length ? { cancelled_input_ids: cancelled } : {} } as SavedReceiptData;
+    } else if (command.command === 'session_label_set') {
+      // Core stores the trimmed text and clears a blank field (history_actions/label.rs).
+      const name = command.params.name?.trim() || undefined, description = command.params.description?.trim() || undefined;
+      session.name = name; session.description = description;
+      data = { kind: 'session_label', name: name ?? null, description: description ?? null };
     } else if (command.command === 'topic_continue') {
       data = { kind: 'continuation', continuation: {
         operation_id: command.op_id, source_project_id: command.params.source.project_id, source_session_id: command.params.source.session_id,

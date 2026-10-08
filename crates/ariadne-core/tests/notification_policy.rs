@@ -68,6 +68,7 @@ fn queue(rows: Vec<WaitingRow>, complete: bool) -> WaitingCapture {
         counts,
         rows,
         diagnostics: vec![],
+        labels: Default::default(),
     }
 }
 
@@ -577,7 +578,12 @@ fn capture_uses_global_counts_labels_and_registered_snapshots() {
         counts.waiting_unanswered.value()
     );
     assert_eq!(captured.rows[0].project_label, "Ariadne canonical demo");
-    assert_eq!(captured.rows[0].session_label, session.title);
+    // The session bar's label (agent · host location), not the raw title,
+    // which is the agent's external session ID.
+    assert_eq!(
+        captured.rows[0].session_label,
+        "demo.local · iTerm window 1"
+    );
     assert!(!captured.rows[0].question.is_empty());
     assert!(captured.diagnostics.is_empty());
     // An independently changed snapshot is rejected without substituting its
@@ -663,10 +669,15 @@ fn capture_skips_empty_sessions_but_keeps_diagnostics_and_rechecks_their_revisio
                 let captured = result.unwrap();
                 assert!(captured.rows.is_empty());
                 assert_eq!(captured.counts, counts);
+                // Named by the session label, not the binding's IDs.
                 assert!(captured
                     .diagnostics
                     .iter()
-                    .any(|row| row.ends_with("binding paused")));
+                    .any(|row| row == "demo.local · iTerm window 1: paused"));
+                assert_eq!(
+                    captured.labels.get("00000000-0000-4000-8000-000000000020"),
+                    Some(&"demo.local · iTerm window 1".to_owned())
+                );
                 assert_eq!(captured.diagnostics.len(), if partial { 2 } else { 1 });
             }
         }

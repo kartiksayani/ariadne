@@ -16,11 +16,18 @@ it('opens guarded history in ordinary App and sends an approved Continue into th
   render(<DesktopApp service={createDesktopService(transport)} />); await openSource();
   const topic = Object.values(source.topics)[0]!, controls = within(screen.getByRole('treeitem', { name: topic.name }));
   fireEvent.click(controls.getByRole('button', { name: 'Archive' }));
-  expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm topic archive' }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+  // A topic with open items asks first; Archive is offered, never refused.
+  const confirm = within(screen.getByRole('dialog', { name: `Archive “${topic.name}”?` }));
+  expect((confirm.getByRole('button', { name: 'Archive topic' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
+  expect(transport.mutations.filter(value => value.command.command === 'topic_archive')).toHaveLength(0);
   fireEvent.click(controls.getByRole('button', { name: 'Continue here' }));
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Separate session' }));
-  const send = await screen.findByRole('button', { name: 'Send to Separate session' });
+  const picker = within(screen.getByRole('dialog', { name: `Continue “${topic.name}” in another session` }));
+  // The topic's own session is not a target.
+  expect(picker.queryByRole('button', { name: source.title })).toBeNull();
+  fireEvent.click(picker.getByRole('button', { name: 'Separate session' }));
+  await screen.findByRole('dialog', { name: `Continue “${topic.name}” in this session` });
+  const send = await screen.findByRole('button', { name: /^Send to / });
   await waitFor(() => expect((send as HTMLButtonElement).disabled).toBe(false));
   expect(transport.mutations.filter(value => value.command.command === 'topic_continue')).toHaveLength(0);
   fireEvent.click(send);

@@ -1,108 +1,113 @@
-// The session card's dispatch and Close dialogs. They keep the binding rules of
-// the former BindingControls and HistoryActions: resume needs an active,
-// connected binding with no pause reason or input needing attention; Close
-// needs quiesced dispatch (paused, disconnected or unbound) and no open items
-// or pending inputs.
-import { CoreFailure, useSession, type SessionStore } from '../../data';
+// The session's "Sending and connection" and Close dialogs, in the owner's
+// words. Sending reads like the session bar's chip (components/bindings/dispatch);
+// Reconnect checks the same agent session again on the project-scoped path.
+// Close is one confirmation: it says what stays open and which unsent messages
+// it cancels, then closes.
+import { plainFailure, useSession, type SessionStore } from '../../data';
 import type { OwnerCommand } from '../../generated/core';
 import type { AdapterConfig } from '../../generated/domain/models';
 import { useSessionActions, type SessionActions } from '../../components/bindings/actions';
-import { dispatchQuiesced, lifecycleBlockers } from '../../components/history-actions/selectors';
+import { useDispatch } from '../../components/bindings/DispatchChip';
+import { closeImpact, closeWarning } from '../../components/history-actions/selectors';
+import { connectionOf } from '../shared/connection';
+import { sessionPhrase } from '../shell/model';
 import { Dialog } from '../dialogs/Dialog';
-
-type BindingAction = 'connect' | 'pause' | 'resume' | 'disconnect';
-const words = (value: string) => value.replace(/_/g, ' ');
+import { notices } from './notices';
 
 function Failure({ actions }: { readonly actions: SessionActions }) {
   const operation = useSessionActions(actions);
   if (!operation.error) return null;
-  return <div className="pw-dialog-error" role="alert">{operation.error.message}
-    {operation.error instanceof CoreFailure && ` ${operation.error.error.hint}`}
-    {operation.pending && ' Completion is unknown. Reconcile the saved action before trying again.'}</div>;
+  return <div className="pw-dialog-error" role="alert">{plainFailure(operation.error)}
+    {operation.pending && ' Ariadne isn’t sure the change was saved. Check again before another change.'}</div>;
 }
 
-/** Pause or resume dispatch, reconnect or disconnect the session's agent. */
+const connectionWords = { connected: 'Connected', reconnecting: 'Reconnecting…', not_running: 'Not running', none: 'Not connected' } as const;
+
+/** Pause or resume sending, reconnect or disconnect the session's agent. */
 export function DispatchDialog({ store, actions, agent, onClose }: {
   readonly store: SessionStore; readonly actions: SessionActions; readonly agent: string; readonly onClose: () => void;
 }) {
-  const state = useSession(store), operation = useSessionActions(actions);
+  const state = useSession(store), operation = useSessionActions(actions), control = useDispatch(actions);
   const session = state.snapshot?.session;
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
   const disabled = !session || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
-  const resumable = !!session && !!binding && session.state === 'active' && binding.connection_state === 'connected' && !binding.pause_reason
-    && !Object.values(session.inputs).some(input => input?.state === 'needs_attention' && input.binding_id === binding.id);
-  const run = (action: BindingAction) => {
+  const reconnect = () => {
     if (!session || !binding || disabled) return;
-    const command: OwnerCommand = action === 'connect' ? { command: 'binding_connect', api_version: 1, op_id: '', params: {
+    const command: OwnerCommand = { command: 'binding_connect', api_version: 1, op_id: '', params: {
       project_id: session.project_id, adapter_id: binding.adapter_id, external_session_id: binding.external_session_id,
       endpoint: structuredClone(binding.endpoint), configuration: structuredClone(binding.adapter_config) as AdapterConfig, existing_session_id: session.id,
-    } } : { command: `binding_${action}`, api_version: 1, op_id: '', params: { binding_id: binding.id, expected_generation: binding.generation } };
+    } };
     void actions.execute(command, session.revision);
   };
-  const button = (action: BindingAction, label: string, icon: string, off = false) => <button type="button" className="btn btn-secondary"
-    disabled={disabled || off} onClick={() => run(action)}><i className={icon} aria-hidden="true" />{label}</button>;
-  return <Dialog label={`${agent} dispatch and connection`} width={520} onCancel={() => { if (!operation.writing) onClose(); }}>
-    <div className="dialog-title">{agent} · dispatch and connection</div>
+  const disconnect = () => {
+    if (!session || !binding || disabled) return;
+    void actions.execute({ command: 'binding_disconnect', api_version: 1, op_id: '', params: { binding_id: binding.id, expected_generation: binding.generation } }, session.revision);
+  };
+  const button = (label: string, icon: string, run: () => void, off = false) => <button type="button" className="btn btn-secondary"
+    disabled={disabled || off} onClick={run}><i className={icon} aria-hidden="true" />{label}</button>;
+  const title = `Sending to ${agent}`;
+  return <Dialog label={title} width={520} onCancel={() => { if (!operation.writing) onClose(); }}>
+    <div className="dialog-title">{title}</div>
     {!session && <div className="pw-dialog-body" role="status">Reading the session…</div>}
     {session && !binding && <div className="pw-dialog-body">No agent is connected to this session. Connect one from the project page.</div>}
     {session && binding && <>
       <dl className="pw-dialog-facts">
-        <dt>Connection</dt><dd>{words(binding.connection_state)}</dd>
-        <dt>Dispatch</dt><dd>{words(binding.dispatch_state)}{binding.owner_paused ? ' · paused by you' : ''}{binding.pause_reason ? ` · ${words(binding.pause_reason)}` : ''}</dd>
-        <dt>Session</dt><dd>{binding.external_session_id}</dd>
+        <dt>Sending</dt><dd data-dispatch={control.status.kind}>{control.status.label}{binding.owner_paused && control.status.kind !== 'paused' ? ' · paused by you' : ''}</dd>
+        <dt>Agent</dt><dd>{connectionWords[connectionOf(binding, state.presence[binding.id] ?? null)]}</dd>
       </dl>
-      <div className="pw-dialog-body">Pause stops Ariadne sending anything more to {agent}. Work already sent keeps running; interrupt it in the terminal. Reconnect checks the same host session again.</div>
+      <div className="pw-dialog-body">Pause stops Ariadne sending anything more to {agent}. Work already sent keeps running; interrupt it in the terminal. Reconnect checks the same {agent} session again.</div>
       <div className="pw-dialog-buttons">
-        {button('pause', 'Pause dispatch', 'ph ph-pause', binding.dispatch_state === 'paused')}
-        {button('resume', 'Resume dispatch', 'ph ph-play', !resumable)}
-        {button('connect', 'Reconnect', 'ph ph-arrows-clockwise')}
-        {button('disconnect', 'Disconnect', 'ph ph-plugs')}
+        {/* Pausing while something blocks sending keeps it paused once the blocker clears. */}
+        {button('Pause sending', 'ph ph-pause', () => { void control.pause(); }, binding.owner_paused || session.state === 'closed'
+          || binding.dispatch_state === 'paused' || binding.dispatch_state === 'disconnected')}
+        {button('Resume sending', 'ph ph-play', () => { void control.resume(); }, control.status.action !== 'resume')}
+        {button('Reconnect', 'ph ph-arrows-clockwise', reconnect)}
+        {button('Disconnect', 'ph ph-plugs', disconnect)}
       </div>
     </>}
     <Failure actions={actions} />
     <div className="dialog-actions">
-      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing} onClick={() => { void actions.retry(); }}>Reconcile saved action</button>}
+      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing} onClick={() => { void actions.retry(); }}>Check again</button>}
       <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onClose}>Done</button>
     </div>
   </Dialog>;
 }
 
-/** Shown when Close session cannot run straight away: dispatch must be paused and nothing left open. */
-export function CloseSessionDialog({ store, actions, agent, when, onOpenSession, onClose }: {
+/** After a saved close: say how many unsent messages it cancelled (receipt `cancelled_input_ids`), if any. */
+export function announceClosed(actions: SessionActions, agent: string, name: string | null = null): void {
+  const receipt = actions.getSnapshot().receipt;
+  const data = receipt && 'data' in receipt ? receipt.data : undefined;
+  const cancelled = data?.kind === 'session_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0;
+  if (cancelled) notices.push({ icon: 'ph ph-x-circle', dismissible: true,
+    text: `Closed ${name ? `the “${name}”` : `the ${agent}`} session. ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.` }, 8000);
+}
+
+/** Close session: one confirmation in plain words, then close. Nothing has to be paused or settled first. */
+export function CloseSessionDialog({ store, actions, agent, when, name = null, onClose }: {
   readonly store: SessionStore; readonly actions: SessionActions; readonly agent: string; readonly when: string;
-  readonly onOpenSession: () => void; readonly onClose: () => void;
+  /** The owner's name for the session, when set; it stands in for the agent and day. */
+  readonly name?: string | null; readonly onClose: () => void;
 }) {
   const state = useSession(store), operation = useSessionActions(actions);
   const session = state.snapshot?.session;
-  const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
-  const disabled = !session || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
-  const error = operation.error instanceof CoreFailure ? operation.error.error : undefined;
-  const blockers = session ? lifecycleBlockers(session, null, error) : [];
-  // A disconnected or unbound session is already quiesced: Close needs no pause first.
-  const mustPause = !dispatchQuiesced(binding);
-  const alreadyStopped = !!binding && binding.dispatch_state !== 'paused' && !mustPause;
-  const pause = () => {
-    if (!session || !binding || disabled) return;
-    void actions.execute({ command: 'binding_pause', api_version: 1, op_id: '', params: { binding_id: binding.id, expected_generation: binding.generation } }, session.revision);
-  };
+  const disabled = !session || session.state === 'closed' || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
+  const warning = session ? closeWarning(closeImpact(session), agent) : null;
   const close = async () => {
-    if (!session || disabled || mustPause || blockers.length) return;
-    if (await actions.execute({ command: 'session_close', api_version: 1, op_id: '', params: { expected_revision: session.revision } }, session.revision)) onClose();
+    if (!session || disabled) return;
+    if (!await actions.execute({ command: 'session_close', api_version: 1, op_id: '', params: { expected_revision: session.revision } }, session.revision)) return;
+    announceClosed(actions, agent, name);
+    onClose();
   };
-  const title = `Close the ${agent} session from ${when.toLowerCase()}?`;
+  const title = `Close ${sessionPhrase({ name }, agent, when)}?`;
   return <Dialog label={title} width={520} onCancel={() => { if (!operation.writing) onClose(); }} onConfirm={() => { void close(); }}>
     <div className="dialog-title">{title}</div>
     <div className="pw-dialog-body">Ariadne marks the session Closed and keeps it read-only. The agent process isn’t touched.</div>
-    {alreadyStopped && <div className="pw-dialog-body">Dispatch is already stopped (binding not connected).</div>}
-    {session && binding && mustPause && <div className="pw-dialog-step"><span>Dispatch is on. Pause it first so nothing more is sent.</span>
-      <button type="button" className="btn btn-secondary" disabled={disabled} onClick={pause}><i className="ph ph-pause" aria-hidden="true" />Pause dispatch</button></div>}
-    {blockers.length > 0 && <div className="pw-dialog-body">These are still open. Settle them in the session first:
-      <ul className="pw-dialog-list">{blockers.map(blocker => <li key={blocker.key}>{blocker.label}</li>)}</ul></div>}
+    {warning && <div className="pw-dialog-body" data-close-warning>{warning}</div>}
     <Failure actions={actions} />
     <div className="dialog-actions">
-      {blockers.length > 0 && <button type="button" className="btn btn-ghost" onClick={() => { onClose(); onOpenSession(); }}>Open the session</button>}
+      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing} onClick={() => { void actions.retry(); }}>Check again</button>}
       <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onClose}>Cancel</button>
-      <button type="button" className="btn btn-primary" disabled={disabled || mustPause || blockers.length > 0} onClick={() => { void close(); }}>
+      <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => { void close(); }}>
         <i className="ph ph-x-circle" aria-hidden="true" />Close session</button>
     </div>
   </Dialog>;

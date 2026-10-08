@@ -54,7 +54,7 @@ export async function runAccessibilityAcceptance(configuration) {
   await focus(row); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-retained-editor.png'));
-  // Close session in the session bar opens the guarded review dialog.
+  // Close session in the session bar opens its one confirmation.
   const closeButton = await browser.$('.tree-session-bar').$('button*=Close session'); await closeButton.waitForEnabled(); await closeButton.click();
   await (await browser.$('[role="dialog"]')).waitForDisplayed();
   await focus('[role="dialog"] button');

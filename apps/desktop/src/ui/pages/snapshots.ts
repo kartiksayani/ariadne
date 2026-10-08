@@ -3,6 +3,7 @@
 // session is read once per revision with `session_get`.
 import { useEffect, useMemo, useState } from 'react';
 import type { RendererService } from '../../data/service';
+import { plainFailure } from '../../data/plain';
 import { immutable, type Immutable } from '../../data/session-store';
 import type { Session, SessionSummary } from '../../generated/domain/models';
 import { sessionKey } from './model';
@@ -26,7 +27,7 @@ export function useSessionSnapshots(service: RendererService | null, summaries: 
           if (!current) return;
           // One note per session; a later successful read does not clear it, the owner dismisses it.
           notices.push({ id: `session-read-failed:${sessionKey(summary)}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
-            text: `A session could not be read, so its card is incomplete${error instanceof Error && error.message ? `: ${error.message}` : '.'}` });
+            text: `A session could not be read, so its card is incomplete. ${plainFailure(error)}` });
         });
     }
     return () => { current = false; };

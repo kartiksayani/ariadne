@@ -8,6 +8,16 @@
     },
     "input_id": {
       "$ref": "#/$defs/UuidV4"
+    },
+    "purpose": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CancelPurpose"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "additionalProperties": false,
@@ -16,6 +26,21 @@
     "expected_revision"
   ],
   "$defs": {
+    "CancelPurpose": {
+      "description": "What an owner `input_cancel` is for.",
+      "oneOf": [
+        {
+          "description": "Delete the message: it is not sent.",
+          "type": "string",
+          "const": "delete"
+        },
+        {
+          "description": "Take the message back to edit: only a message still queued can be.",
+          "type": "string",
+          "const": "edit"
+        }
+      ]
+    },
     "PositiveSafeInteger": {
       "type": "integer",
       "maximum": 9007199254740991,

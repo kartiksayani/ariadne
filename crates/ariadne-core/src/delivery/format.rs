@@ -1,94 +1,114 @@
 use super::error::core;
 use crate::*;
 use ariadne_domain::models::*;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
-/// Query tool names the envelope advertises. Each is both an MCP tool name and an
-/// `ariadne <name>` CLI command (`ariadne read` is the short form of `session_read`).
-/// Tests in the CLI and MCP crates check these against the real surfaces.
+/// Query tool names the skills tell the agent to pull context with. Each is both
+/// an MCP tool name and an `ariadne <name>` CLI command (`ariadne read` is the
+/// short form of `session_read`). Tests in the CLI and MCP crates check these
+/// against the real surfaces.
 pub const AGENT_QUERY_TOOLS: [&str; 3] = ["session_read", "item_messages", "item_rounds"];
 
+/// The whole marker line plus two UUID spellings must fit the delivery budget.
+const BUDGET: usize = 64 * 1024;
+
+/// IDs the agent must echo back, shared by every envelope. The fixed rules live
+/// in the Ariadne skill once; the envelope repeats no instruction or context.
+fn routing(
+    session: &Session,
+    input: &Input,
+    owner: &Message,
+    attempt_id: &UuidV4,
+) -> Result<Map<String, Value>, CoreError> {
+    let generation = &session
+        .bindings
+        .0
+        .get(&input.binding_id)
+        .ok_or_else(|| core(CoreErrorCode::BindingMismatch, "Input binding is missing"))?
+        .generation;
+    let mut map = Map::new();
+    map.insert("source_input_id".into(), json!(input.id));
+    map.insert("attempt_id".into(), json!(attempt_id));
+    map.insert("binding_id".into(), json!(input.binding_id));
+    map.insert("generation".into(), json!(generation));
+    map.insert("owner_message_number".into(), json!(owner.number));
+    map.insert("input_kind".into(), json!(input.kind));
+    Ok(map)
+}
+
+fn owner_message<'a>(session: &'a Session, input: &Input) -> Result<&'a Message, CoreError> {
+    session
+        .messages
+        .iter()
+        .find(|m| m.id == input.message_id)
+        .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Input owner message is missing"))
+}
+
+fn bounded(map: Map<String, Value>, error: &str) -> Result<String, CoreError> {
+    let body = Value::Object(map).to_string();
+    // Prefix UUID spellings have fixed length; no IDs are allocated to discover
+    // an ordinary capacity failure, and exact payloads cannot be truncated.
+    if body.len() + "[ARIADNE_INPUT::]\n".len() + 2 * 36 > BUDGET {
+        return Err(core(CoreErrorCode::CapacityExceeded, error));
+    }
+    Ok(body)
+}
+
+/// The slim per-input envelope: routing IDs, the target item (or topic) with
+/// its current revisions, the selected option and the owner's exact text.
+/// Context is pulled by the agent (`ariadne read`, `ariadne item messages`).
 pub(crate) fn body(
     session: &Session,
     input: &Input,
     attempt_id: &UuidV4,
 ) -> Result<String, CoreError> {
-    let owner = session
-        .messages
-        .iter()
-        .find(|m| m.id == input.message_id)
-        .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Input owner message is missing"))?;
+    let owner = owner_message(session, input)?;
     if input.kind == InputKind::Removed {
         return removed_body(session, input, owner, attempt_id);
     }
-    let topic = session
-        .topics
-        .0
-        .get(&input.target.topic_id)
-        .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Input target topic is missing"))?;
-    let target = input
-        .target
-        .item_id
-        .as_ref()
-        .map(|id| {
-            session
-                .items
-                .0
-                .get(id)
-                .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Input target item is missing"))
-        })
-        .transpose()?
-        .map(|item| {
-            json!({"id":item.id,"revision":item.revision,"status":item.status,
-            "question":item.question,"question_revision":item.question_revision,
-            "ask":item.ask,"options":item.options,"outcome":item.outcome,"note":item.note})
-        });
-    // Recent complete visible records only. Omitted older records remain available
-    // through bounded queries; neither saved owner text nor history is truncated.
-    let mut recent = Vec::<Value>::new();
-    let mut used = 2;
-    for message in session.messages.iter().rev().filter(|m| {
-        m.id != owner.id
-            && (m.author != MessageAuthor::Owner || m.number <= owner.number)
-            && m.topic_id.as_ref() == Some(&input.target.topic_id)
-    }) {
-        let value = json!({"id":message.id,"number":message.number,"author":message.author,"kind":message.kind,"body":message.body});
-        let bytes = serde_json::to_vec(&value).map_err(|_| {
-            core(
-                CoreErrorCode::InvalidArgument,
-                "Cannot format saved history",
-            )
-        })?;
-        if used + bytes.len() + 1 > 16 * 1024 {
-            continue;
-        }
-        used += bytes.len() + 1;
-        recent.push(value);
-    }
-    recent.reverse();
-    let body=json!({
-        "instruction":"This is an explicitly issued owner input, not tool approval. Preserve its exact content. Publish structured replies/status changes through apply and an explicit result for this input/attempt; host completion alone is not a domain result. Put source_input_id and attempt_id from this envelope into the ApplyRequest, and owner_message_number into input_result.handled_through_message_number. Read older context through bounded Ariadne queries (CLI: ariadne read --view items|topics|messages|inputs, ariadne item messages|rounds), never raw storage. Do not resend or invent delivery evidence.",
-        "project_id":session.project_id,"session_id":session.id,"binding_id":input.binding_id,
-        "generation":session.bindings.0.get(&input.binding_id).ok_or_else(||core(CoreErrorCode::BindingMismatch,"Input binding is missing"))?.generation,
-        "source_input_id":input.id,"attempt_id":attempt_id,"owner_message_number":owner.number,"input_kind":input.kind,
-        "saved_input":input.payload,"current_topic":topic,"current_item":target,
-        "recent_context":recent,"tools":{"queries":AGENT_QUERY_TOOLS,"mutation":"apply"},
-    }).to_string();
-    // Prefix UUID spellings have fixed length; no IDs are allocated to discover
-    // an ordinary capacity failure, and exact payloads cannot be truncated.
-    if body.len() + "[ARIADNE_INPUT::]\n".len() + 2 * 36 > 64 * 1024 {
+    if !session.topics.0.contains_key(&input.target.topic_id) {
         return Err(core(
-            CoreErrorCode::CapacityExceeded,
-            "The complete prepared input/current target exceeds the 64 KiB payload budget",
+            CoreErrorCode::InvalidRef,
+            "Input target topic is missing",
         ));
     }
-    Ok(body)
+    let mut map = routing(session, input, owner, attempt_id)?;
+    match &input.target.item_id {
+        Some(id) => {
+            let item =
+                session.items.0.get(id).ok_or_else(|| {
+                    core(CoreErrorCode::InvalidRef, "Input target item is missing")
+                })?;
+            map.insert("item_id".into(), json!(item.id));
+            map.insert("item_revision".into(), json!(item.revision));
+            map.insert("question_revision".into(), json!(item.question_revision));
+        }
+        None => {
+            map.insert("topic_id".into(), json!(input.target.topic_id));
+        }
+    }
+    if let Some(option) = &input.payload.selected_option_id {
+        map.insert("selected_option_id".into(), json!(option));
+        if let Some(label) = input
+            .payload
+            .target_snapshot
+            .options
+            .iter()
+            .find(|o| &o.id == option)
+            .map(|o| &o.label)
+        {
+            map.insert("selected_option_label".into(), json!(label));
+        }
+    }
+    map.insert("text".into(), json!(input.payload.text));
+    bounded(
+        map,
+        "The complete prepared input exceeds the 64 KiB payload budget",
+    )
 }
 
-/// Instruction for a `removed` notice. The removed records no longer exist,
-/// so the envelope names them from the saved notice and carries no context.
-pub const REMOVED_INSTRUCTION: &str = "The owner removed the items and topics listed in removed.refs from Ariadne. They are gone for good. Stop all work on them now and never bring them up again: do not ask about them, reply on them, recreate them or mention them. Do not touch any files or the conversation because of this notice. Acknowledge it with one apply: put source_input_id and attempt_id from this envelope into the ApplyRequest, send no operations, and set input_result to outcome answered with empty reply_refs and followup_item_refs and handled_through_message_number set to owner_message_number.";
-
+/// A `removed` notice names the removed records from the saved notice; the
+/// records no longer exist, so there is nothing else to carry.
 fn removed_body(
     session: &Session,
     input: &Input,
@@ -100,22 +120,9 @@ fn removed_body(
         .removed
         .as_ref()
         .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Removal notice is missing"))?;
-    let body = json!({
-        "instruction": REMOVED_INSTRUCTION,
-        "project_id":session.project_id,"session_id":session.id,"binding_id":input.binding_id,
-        "generation":session.bindings.0.get(&input.binding_id).ok_or_else(||core(CoreErrorCode::BindingMismatch,"Input binding is missing"))?.generation,
-        "source_input_id":input.id,"attempt_id":attempt_id,"owner_message_number":owner.number,
-        "input_kind":input.kind,"removed":notice,
-        "tools":{"mutation":"apply"},
-    })
-    .to_string();
-    if body.len() + "[ARIADNE_INPUT::]\n".len() + 2 * 36 > 64 * 1024 {
-        return Err(core(
-            CoreErrorCode::CapacityExceeded,
-            "The removal notice exceeds the 64 KiB payload budget",
-        ));
-    }
-    Ok(body)
+    let mut map = routing(session, input, owner, attempt_id)?;
+    map.insert("removed".into(), json!(notice));
+    bounded(map, "The removal notice exceeds the 64 KiB payload budget")
 }
 
 /// References retained effects without repeating the original action prompt.
@@ -150,20 +157,102 @@ pub(super) fn repair_body(
         })
         .map(|i| &i.id)
         .collect();
-    let body = json!({
-        "instruction":"This is an explicit result-only repair turn. Inspect the retained original attempt and its existing replies/children/effects through Ariadne queries; do not repeat the original action or redo its mutations. Publish a structured result for this NEW attempt (attempt_id below; put it and source_input_id in the ApplyRequest) and the same immutable input scope using verified original reply/child references where appropriate. The prior action may already have effects. Host completion alone is not a result and this instruction is not tool approval.",
-        "project_id":session.project_id,"session_id":session.id,"binding_id":input.binding_id,
-        "generation":session.bindings.0[&input.binding_id].generation,"source_input_id":input.id,
-        "attempt_id":attempt_id,"owner_message_number":owner.number,"target":input.target,"purpose":"result_repair",
-        "repair_for_attempt_id":original.id,"original_domain_result":original.domain_result,
-        "original_message_ids":messages,"affected_item_ids":items,
-        "tools":{"queries":AGENT_QUERY_TOOLS,"mutation":"apply"},
-    }).to_string();
-    if body.len() + "[ARIADNE_INPUT::]\n".len() + 2 * 36 > 64 * 1024 {
-        return Err(core(
-            CoreErrorCode::CapacityExceeded,
-            "The complete repair references exceed the 64 KiB delivery budget",
-        ));
+    let mut map = routing(session, input, owner, attempt_id)?;
+    map.insert("target".into(), json!(input.target));
+    map.insert("purpose".into(), json!("result_repair"));
+    map.insert("repair_for_attempt_id".into(), json!(original.id));
+    map.insert(
+        "original_domain_result".into(),
+        json!(original.domain_result),
+    );
+    map.insert("original_message_ids".into(), json!(messages));
+    map.insert("affected_item_ids".into(), json!(items));
+    bounded(
+        map,
+        "The complete repair references exceed the 64 KiB delivery budget",
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn uuid(n: u64) -> UuidV4 {
+        UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
     }
-    Ok(body)
+
+    /// A topic-level input (continue, topic reply) names its topic, not an item.
+    #[test]
+    fn topic_input_names_the_topic_and_carries_no_item_revisions() {
+        let mut session: Session = serde_json::from_str(include_str!(
+            "../../../../fixtures/domain/history/seed.json"
+        ))
+        .unwrap();
+        let topic = uuid(5);
+        let mut owner = session.messages[0].clone();
+        owner.id = uuid(60);
+        owner.number = PositiveSafeInteger::new(2).unwrap();
+        owner.author = MessageAuthor::Owner;
+        owner.kind = MessageKind::OwnerInput;
+        owner.body = "Approve the PR".into();
+        session.messages.push(owner);
+        let input = Input {
+            id: uuid(61),
+            seq: PositiveSafeInteger::new(1).unwrap(),
+            binding_id: uuid(3),
+            kind: InputKind::Continue,
+            target: InputTarget {
+                topic_id: topic.clone(),
+                item_id: None,
+            },
+            message_id: uuid(60),
+            answer_id: None,
+            created_at: session.created_at.clone(),
+            expected_question_revision: None,
+            payload: InputPayload {
+                text: "Approve the PR".into(),
+                intent: InputKind::Continue,
+                target_snapshot: InputTargetSnapshot {
+                    topic_name: "Release".into(),
+                    item_question: None,
+                    question_revision: None,
+                    ask: None,
+                    options: vec![],
+                },
+                selected_option_id: None,
+                context: InputContext {
+                    message_ids: vec![],
+                    item_ids: vec![],
+                    round_id: None,
+                    continuation_operation_id: None,
+                },
+                removed: None,
+            },
+            state: InputState::Queued,
+            attempts: vec![],
+            active_attempt_id: None,
+            resolution_history: vec![],
+            cancel_cause: None,
+        };
+        assert!(!super::super::held_for_review(&session, &input));
+        let body: Value =
+            serde_json::from_str(&body(&session, &input, &uuid(62)).unwrap()).unwrap();
+        let keys: Vec<_> = body.as_object().unwrap().keys().cloned().collect();
+        assert_eq!(
+            keys,
+            [
+                "attempt_id",
+                "binding_id",
+                "generation",
+                "input_kind",
+                "owner_message_number",
+                "source_input_id",
+                "text",
+                "topic_id"
+            ]
+        );
+        assert_eq!(body["topic_id"], topic.as_str());
+        assert_eq!(body["owner_message_number"], 2);
+        assert_eq!(body["text"], "Approve the PR");
+    }
 }

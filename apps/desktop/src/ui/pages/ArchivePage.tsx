@@ -2,6 +2,7 @@
 // is kept per project: it lists the archived topics of every session in it.
 import { useState } from 'react';
 import type { Immutable } from '../../data/session-store';
+import { plainFailure } from '../../data/plain';
 import type { SessionRef } from '../../generated/core';
 import type { Session, SessionSummary } from '../../generated/domain/models';
 import type { NavigationStore } from '../../state/navigation/store';
@@ -47,7 +48,7 @@ export function ArchivePage({ navigation, actions, projectName, sessions, snapsh
       }
       await navigation.refresh();
     } catch (error: unknown) {
-      notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: error instanceof Error ? error.message : 'The topic could not be restored.' });
+      notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: plainFailure(error, 'The topic could not be restored. Try again.') });
     } finally { setBusy(null); }
   };
   const remove = (topic: ArchivedTopic) => setRemoving({ target: { kind: 'topic', session: topic.source, topic_id: topic.topic.id },

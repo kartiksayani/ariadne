@@ -6,7 +6,7 @@ import { useSession, type Immutable } from '../../data/session-store';
 import type { ItemRoute, SessionRef } from '../../generated/core';
 import type { SessionSummary } from '../../generated/domain/models';
 import { useNavigation, type NavigationStore } from '../../state/navigation/store';
-import { agentName, sessionWhen } from '../shell/model';
+import { agentName, sessionPhrase, sessionWhen } from '../shell/model';
 import { Dialog } from './Dialog';
 
 export interface NotRunningSubmission {
@@ -65,7 +65,7 @@ function NotRunningDialog({ request, navigation, now }: { readonly request: Requ
   const title = `${agent} isn’t running for this session`;
   return <Dialog label={title} width={520} onCancel={cancel}>
     <div className="dialog-title">{title}</div>
-    <div className="pw-dialog-body">{`Your answer to “${request.submission.question}” belongs to the ${agent} session from ${when}. Choose what happens to it this time.`}</div>
+    <div className="pw-dialog-body">{`Your answer to “${request.submission.question}” belongs to ${sessionPhrase(summary ?? session, agent, when)}. Choose what happens to it this time.`}</div>
     <div className="pw-dialog-options">
       {options.map(option => <button key={option.key} type="button" className={`${option.className} pw-dialog-option`} onClick={option.choose}>
         <span className="pw-dialog-option-label" style={{ color: option.color }}><i className={option.icon} aria-hidden="true" />{option.label}</span>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ItemRoute } from '../../generated/core';
-import { useSession, type SessionStore } from '../../data';
+import { plainFailure, useSession, type SessionStore } from '../../data';
 
 /** The caller routes through RegisteredRoutes; copied local history is always retained. */
 export function CopiedProvenance({ store, itemId, revealItem }: {
@@ -17,10 +17,10 @@ export function CopiedProvenance({ store, itemId, revealItem }: {
     <button type="button" className="btn btn-secondary" disabled={opening} onClick={() => {
       setOpening(true); setUnavailableSource(null);
       void revealItem(source).catch((error: unknown) => setUnavailableSource({ identity,
-        message: error instanceof Error ? error.message : 'The registered source could not be opened.' })).finally(() => setOpening(false));
+        message: plainFailure(error, 'The original item could not be opened.') })).finally(() => setOpening(false));
     }}>Source item {source.item_id}</button>
     {unavailableSource?.identity === identity && <><span role="status">Original project is unavailable. {unavailableSource.message} Full copied history remains here.</span>
       <button type="button" className="btn btn-secondary" onClick={() => { void revealItem(copied).catch((error: unknown) => setUnavailableSource({ identity,
-        message: error instanceof Error ? error.message : 'The copied item could not be opened.' })); }}>Open copied item {copied.item_id}</button></>}
+        message: plainFailure(error, 'The copied item could not be opened.') })); }}>Open copied item {copied.item_id}</button></>}
   </span>;
 }

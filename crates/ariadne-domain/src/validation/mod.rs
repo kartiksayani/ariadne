@@ -14,6 +14,15 @@ use std::fmt;
 pub use items::validate_item;
 pub use session::validate_session_items;
 
+/// Whether a record saved under `binding_id` may name `input`. A rebind
+/// carries pending inputs to the new binding; messages and receipts saved
+/// while an input belonged to a retired binding of the session keep that one.
+pub(crate) fn input_route(session: &Session, input: &Input, binding_id: &UuidV4) -> bool {
+    binding_id == &input.binding_id
+        || (session.bindings.0.contains_key(binding_id)
+            && session.active_binding_id.as_ref() != Some(binding_id))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationError {
     pub path: String,
@@ -166,6 +175,57 @@ pub(crate) fn optional_host_location(
             maximum_chars: HOST_LOCATION_MAX_CHARS,
         },
     )
+}
+
+/// Most Unicode characters an owner-set session name may hold (ADR-0091).
+pub const SESSION_NAME_MAX_CHARS: usize = 60;
+/// Most Unicode characters an owner-set session description may hold (ADR-0091).
+pub const SESSION_DESCRIPTION_MAX_CHARS: usize = 200;
+
+/// Trim an owner-typed one-line label. Blank after trimming clears it (`None`).
+/// A label with a control character (so more than one line) or more than
+/// `maximum_chars` characters after trimming is rejected.
+pub fn normalize_owner_label(
+    value: Option<&str>,
+    path: &str,
+    maximum_chars: usize,
+) -> Result<Option<String>, ValidationError> {
+    let trimmed = value.map_or("", str::trim);
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    owner_label(trimmed, path, maximum_chars)?;
+    Ok(Some(trimmed.to_owned()))
+}
+
+/// A stored owner label is already trimmed, nonblank, one line and bounded.
+fn owner_label(value: &str, path: &str, maximum_chars: usize) -> Result<(), ValidationError> {
+    text(value, path, true, None)?;
+    require(
+        !value.contains(['\n', '\r']),
+        path,
+        ValidationErrorKind::Multiline,
+    )?;
+    require(
+        value.trim() == value && !value.contains(char::is_control),
+        path,
+        ValidationErrorKind::InvalidState,
+    )?;
+    require(
+        value.chars().count() <= maximum_chars,
+        path,
+        ValidationErrorKind::TooManyChars { maximum_chars },
+    )
+}
+
+pub(crate) fn optional_owner_label(
+    value: &Option<String>,
+    path: &str,
+    maximum_chars: usize,
+) -> Result<(), ValidationError> {
+    value
+        .as_deref()
+        .map_or(Ok(()), |value| owner_label(value, path, maximum_chars))
 }
 
 pub(crate) fn distinct<T: Ord>(

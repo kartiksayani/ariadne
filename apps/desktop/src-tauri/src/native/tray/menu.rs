@@ -70,16 +70,8 @@ fn build<R: tauri::Runtime>(
                 .map_err(error)?;
         }
     } else {
-        menu.append(
-            &MenuItem::new(
-                app,
-                "Loading registered Waiting queue…",
-                false,
-                None::<&str>,
-            )
-            .map_err(error)?,
-        )
-        .map_err(error)?;
+        menu.append(&MenuItem::new(app, "Loading questions…", false, None::<&str>).map_err(error)?)
+            .map_err(error)?;
     }
     menu.append(&PredefinedMenuItem::separator(app).map_err(error)?)
         .map_err(error)?;
@@ -119,14 +111,16 @@ fn build<R: tauri::Runtime>(
     Ok(menu)
 }
 
+/// The Ariadne mark in black on transparent, so macOS tints it for the menu
+/// bar (light, dark, highlighted). tray-icon takes a single bitmap and draws it
+/// 18pt tall, so this one image is 36px: sharp on Retina, scaled on 1x.
+fn template_icon() -> tauri::image::Image<'static> {
+    tauri::include_image!("icons/tray-template.png")
+}
+
 pub(crate) fn install<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), CoreError> {
-    let icon = app
-        .default_window_icon()
-        .ok_or_else(super::feed::unavailable)?
-        .clone();
     TrayIconBuilder::with_id(ID)
-        .title("*")
-        .icon(icon)
+        .icon(template_icon())
         .icon_as_template(true)
         .menu(&build(app, None)?)
         .show_menu_on_left_click(true)
@@ -234,8 +228,26 @@ pub(crate) fn open<R: tauri::Runtime>(app: tauri::AppHandle<R>, route: OpenRoute
 
 fn show<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        let _ = crate::native::window::present(&window);
+    }
+}
+
+#[cfg(test)]
+mod icon_tests {
+    #[test]
+    fn the_tray_icon_is_a_black_and_alpha_template_at_menu_bar_retina_size() {
+        let icon = super::template_icon();
+        assert_eq!((icon.width(), icon.height()), (36, 36));
+        let (pixels, rest) = icon.rgba().as_chunks::<4>();
+        assert!(rest.is_empty());
+        // macOS tints a template by its alpha alone; any colour or an opaque
+        // background renders as the blank square the owner saw.
+        assert!(pixels.iter().all(|pixel| pixel[..3] == [0, 0, 0]));
+        let opaque = pixels.iter().filter(|pixel| pixel[3] == 255).count();
+        let clear = pixels.iter().filter(|pixel| pixel[3] == 0).count();
+        assert!(
+            opaque > 100 && clear > 600,
+            "{opaque} opaque, {clear} clear"
+        );
     }
 }

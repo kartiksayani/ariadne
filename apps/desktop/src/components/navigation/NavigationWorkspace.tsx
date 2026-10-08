@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AdapterConfig, ProjectSummary, SummaryCounts } from '../../generated/domain/models';
 import type { NavigationSelection, SessionPreferences, SessionRef } from '../../generated/core';
-import { CoreFailure } from '../../data/service';
+import { plainFailure } from '../../data/plain';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
-import { NavigationStore, useNavigation, type NavigationState } from '../../state/navigation/store';
+import { NavigationStore, useNavigation, type LayoutChange, type NavigationState } from '../../state/navigation/store';
 import { WaitingFrame } from '../../ui/waiting/WaitingColumn';
 import { SessionActionControllers } from '../bindings/actions';
 import { RegisterProject, BindSession } from './Registration';
@@ -61,7 +61,7 @@ const running = isRunning;
 const defaultChrome: Omit<HeaderProps, 'text' | 'disabled'> ={ query: '', views: null, railOn: false, theme: 'dark' };
 
 /** Saved binding-connect receipt: what to give the host, plus capabilities the owner cannot rely on. */
-function SetupCard({ setup, adapterId }: { setup: NonNullable<NavigationState['setup']>; adapterId: string | null }) {
+function SetupCard({ setup, adapterId, onDismiss }: { setup: NonNullable<NavigationState['setup']>; adapterId: string | null; onDismiss: () => void }) {
   const [copied, setCopied] = useState<'idle' | 'copied' | 'failed'>('idle');
   useEffect(() => {
     if (copied === 'idle') return undefined;
@@ -79,17 +79,19 @@ function SetupCard({ setup, adapterId }: { setup: NonNullable<NavigationState['s
       setCopied('failed');
     }
   };
-  return <section className="nav-banner" aria-label="Session setup"><h2>Session connected</h2>
+  return <section className="nav-banner nav-setup" aria-label="Session setup">
+    <div className="nav-setup-head"><h2>Session connected</h2>
+      <button type="button" className="btn btn-ghost btn-icon" aria-label="Dismiss" title="Dismiss" onClick={onDismiss}><i className="ph ph-x" aria-hidden="true" /></button></div>
     <p>Connecting sent nothing to the model. {adapterId === 'codex'
-      ? 'Paste this setup instruction into the selected Codex thread once per binding so the agent has the Ariadne rules. Installation also adds an Ariadne skill for Codex unless its link was skipped.'
+      ? 'Paste this setup instruction into the selected Codex thread once per binding so the agent connects and uses the Ariadne skill. Installation also adds an Ariadne skill for Codex unless its link was skipped.'
       : adapterId === 'claude_code_mod'
         ? 'Run /ariadne-connect in the selected Claude conversation. Nothing to paste: the Mod reports the binding and the installed Ariadne skill holds the rules.'
-        : 'Paste this setup instruction into the selected host conversation once per binding so the agent has the Ariadne rules.'}</p>
-    {adapterId !== 'claude_code_mod' && <>
-      <button type="button" className="btn btn-secondary" onClick={copy}>Copy instruction</button>
-      <span role="status" className="nav-copied">{copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : ''}</span>
-      <pre>{instruction}</pre></>}
-    <p>Session {setup.session_id}</p>
+        : 'Paste this setup instruction into the selected host conversation once per binding so the agent connects and uses the Ariadne skill.'}</p>
+    {adapterId !== 'claude_code_mod' && <div className="nav-setup-code">
+      <details><summary>Show instruction</summary><pre>{instruction}</pre></details>
+      <div className="nav-setup-copy"><button type="button" className="btn btn-secondary" onClick={copy}>Copy instruction</button>
+        <span role="status" className="nav-copied">{copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : ''}</span></div>
+    </div>}
     {unavailable.length > 0 && <p>Unavailable capabilities: {unavailable.join(', ')}.</p>}
   </section>;
 }
@@ -109,7 +111,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   // 1h: the skeleton stands in for the session until its first snapshot.
   if (session.status === 'loading' && !session.snapshot) return <LoadingSession />;
   return <>
-    {session.error && <p role="alert">{session.error.message}</p>}
+    {session.error && <p role="alert">{plainFailure(session.error)}</p>}
     {session.snapshot?.session.state === 'closed' && <p className="nav-banner">Closed session · opening this tab does not resume dispatch.</p>}
     {matchingReveal?.kind === 'missing_item' && <p className="nav-banner" role="status">{matchingReveal.banner}</p>}
     {renderSession({ store, preferences, temporaryExpandedItemIds: matchingReveal?.kind === 'item' ? matchingReveal.temporaryExpandedItemIds : [],
@@ -147,6 +149,13 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
     finally { setRefreshPending(false); }
   };
   const select = (next: NavigationSelection) => { void store.navigate(next); };
+  // Layout choices apply at once; the saved preferences catch up when the write lands.
+  const [layout, setLayout] = useState<LayoutChange>({});
+  const shown: LayoutChange = { detail_width: state.preferences?.global.detail_width, waiting_collapsed: state.preferences?.global.waiting_collapsed, ...layout };
+  const saveLayout = (change: LayoutChange) => {
+    setLayout(current => ({ ...current, ...change }));
+    if (state.preferences) void store.saveLayout(change, state.preferences.revision);
+  };
   const openViews: readonly Immutable<SessionPreferences>[] = state.preferences?.sessions.filter(view => view.tab_open && !hidden.session(view.session))
     .sort((a, b) => a.tab_order - b.tab_order || key(a.session).localeCompare(key(b.session))) ?? [];
   const projectNameOf = (projectId: string) => { const project = projects.find(value => value.project_id === projectId); return project ? projectName(project) : 'Unavailable project'; };
@@ -155,7 +164,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
     sessions: openViews.map(view => {
       const summary = sessions.find(value => key(value) === key(view.session));
       return { id: key(view.session), project: projectNameOf(view.session.project_id), agent: summary?.active_binding ? agentName(summary.active_binding.adapter_id) : null,
-        where: summary?.active_binding?.host_location ?? null,
+        where: summary?.active_binding?.host_location ?? null, naming: summary,
         createdAt: summary ? Date.parse(summary.created_at) : null, endedAt: summary ? Date.parse(summary.closed_at ?? summary.updated_at) : null, running: summary ? running(summary) : false,
         on: selection.kind === 'session' && key(selection.session) === key(view.session) };
     }) }, at);
@@ -174,9 +183,12 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   // Message counts, topic chips and remove counts come from each listed session's snapshot.
   const snapshots = useSessionSnapshots(listing ? store.service : null, listing ? sessions : []);
   const counts = selection.kind === 'projects' ? state.projects?.counts : matchingSessions?.counts;
-  // The connect card sits directly under the project header; other views keep it at the end.
-  const setupCard = state.setup?.data.kind === 'binding_connect' ? <SetupCard setup={state.setup} adapterId={state.setupAdapterId} /> : null;
-  const setupInGroup = selection.kind === 'project' && !!selectedProject;
+  // The connect card belongs to the project page it was made on, directly under the project header,
+  // and goes with its session: dismissed, removed (or pending removal), or another page shown.
+  const setup = state.setup;
+  const setupCard = setup?.data.kind === 'binding_connect' && selectedProject && selectedProject.project_id === state.setupProjectId
+    && !hidden.session({ project_id: selectedProject.project_id, session_id: setup.session_id })
+    ? <SetupCard setup={setup} adapterId={state.setupAdapterId} onDismiss={() => store.dismissSetup()} /> : null;
   const openTabs = new Set(openViews.map(view => key(view.session)));
   const register = (root: string) => { setRegistrationRoot(root); setRegistering(true); };
   const openSession = (route: SessionRef) => select({ kind: 'session', session: route });
@@ -189,10 +201,9 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
         onClick={() => setBinding(selectedProject)}><i className="ph ph-plugs-connected" aria-hidden="true" />Connect existing session</button> }] : []
     : openProjectIds.flatMap(id => { const project = projects.find(value => value.project_id === id); return project ? [{ project, openLink: true }] : []; });
   const notes = <>
-    {state.error && <div className="nav-banner" role="alert"><p>{state.error.message}</p>
-      {state.error instanceof CoreFailure && <p>{state.error.error.hint}</p>}
-      {state.pendingOperationId ? <><p>Completion is unknown. Reconcile operation {state.pendingOperationId} with its original request.</p>
-        <button type="button" className="btn btn-secondary" disabled={state.writing} onClick={() => { void store.retryMutation(); }}>Reconcile operation</button></>
+    {state.error && <div className="nav-banner" role="alert"><p>{plainFailure(state.error)}</p>
+      {state.pendingOperationId ? <><p>Ariadne isn’t sure your last change was saved. Check before changing anything else.</p>
+        <button type="button" className="btn btn-secondary" disabled={state.writing} onClick={() => { void store.retryMutation(); }}>Check again</button></>
         : <button type="button" className="btn btn-secondary" disabled={mutationDisabled} onClick={() => { void refresh(); }}>{refreshPending ? 'Refreshing…' : 'Refresh'}</button>}
     </div>}
     {state.status === 'loading' && <p className="pw-page-note" role="status">Loading registered projects and sessions…</p>}
@@ -205,7 +216,6 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
     ? <ProjectsPage projects={projects} sessions={sessions} snapshots={snapshots} now={at} discovered={state.status === 'ready' && state.preferences?.sessions.length === 0 && projects.length > 0}
       disabled={mutationDisabled} discovery={discovery} onOpen={openProject} onRegister={register} onRemove={onRemoveTarget}>
       {state.status === 'ready' && projects.length === 0 && <p className="pw-page-note">No registered projects. Register a project to connect an existing session.</p>}
-      {setupCard}
     </ProjectsPage>
     : <SessionLists navigation={store} actions={actions} groups={groups} sessions={sessions} snapshots={snapshots} openTabs={openTabs} now={at} disabled={disabled}
       onBack={selection.kind === 'project' ? () => select({ kind: 'projects' }) : undefined}
@@ -214,17 +224,18 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
       onOpenProject={openProject} onOpenSession={openSession} onRemove={onRemoveTarget}>
       {sessionNote}
       {selection.kind === 'project' && !selectedProject && state.status === 'ready' && <p className="pw-page-note">This project is no longer registered.</p>}
-      {!setupInGroup && setupCard}
     </SessionLists>;
   const center = <>
     <Notices />
     {page && <div className="pw-page-notes">{notes}</div>}
-    {page ?? <div className="nav-content nav-session-content">{notes}<SelectedSession navigation={store} renderSession={renderSession} />{setupCard}</div>}
+    {page ?? <div className="nav-content nav-session-content">{notes}<SelectedSession navigation={store} renderSession={renderSession} /></div>}
   </>;
   return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
     tabs={{ tabs, disabled, onSelect: selectTab, onClose: closeTab }}
     body={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />,
-      center, detail, detailPath, rail: railContent, onCloseDetail, onRemove }}
+      center, detail, detailPath, rail: railContent, onCloseDetail, onRemove,
+      detailWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false,
+      onResizeDetail: width => saveLayout({ detail_width: width }), onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
     summary={footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,
       inProgress: global.items_by_status.in_progress, open: global.items_by_status.open, archivedTopics: global.archived_topics } : null)} overlay={registering
       ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={mutationDisabled} close={() => setRegistering(false)} />

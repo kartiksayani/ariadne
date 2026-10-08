@@ -48,3 +48,18 @@ fn failed_publication_keeps_route_and_readiness_reset_prevents_delivery() {
     pending.set_ready(true);
     assert_eq!(pending.current(), Some((ticket, route(None))));
 }
+
+#[test]
+fn startup_route_waits_for_the_first_show_even_once_the_webview_is_ready() {
+    let mut pending = PendingRoute::default();
+    pending.hold_until_shown();
+    let ticket = pending.begin().unwrap();
+    pending.validated(ticket, route(Some("2.1")));
+    pending.set_ready(true);
+    assert!(pending.current().is_none());
+    pending.shown();
+    assert_eq!(pending.current(), Some((ticket, route(Some("2.1")))));
+    // Once shown, a later hold has nothing to wait for.
+    pending.hold_until_shown();
+    assert!(pending.current().is_some());
+}

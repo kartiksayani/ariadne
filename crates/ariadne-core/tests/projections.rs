@@ -732,6 +732,7 @@ fn waiting_uses_current_unsuperseded_eligible_answer_without_changing_status_fil
         params: InputCancelParams {
             input_id: replacement_input,
             expected_revision: setup.saved().revision,
+            purpose: None,
         },
     };
     InputService::new(&setup.registry)
@@ -1465,4 +1466,38 @@ fn read_waits_for_a_separate_process_transaction_then_returns_its_complete_save(
         assert_eq!(message.body, input.payload.text);
     });
     assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn session_summary_carries_the_owner_name_and_description_only_when_set() {
+    let list = |session: &Session| {
+        sessions(
+            Setup::new(session)
+                .query(
+                    &registry_owner(),
+                    &QueryRequest::SessionList(SessionListRequest {
+                        project_id: Some(id(1)),
+                        state: None,
+                        cursor: None,
+                        limit: limit(100),
+                    }),
+                )
+                .unwrap(),
+        )
+    };
+    let mut named = seed();
+    named.name = Some("Billing fixes".into());
+    named.description = Some("Sorting out the refund rules".into());
+    let named_list = list(&named);
+    let summary = &named_list.sessions.items[0];
+    assert_eq!(summary.name.as_deref(), Some("Billing fixes"));
+    assert_eq!(
+        summary.description.as_deref(),
+        Some("Sorting out the refund rules")
+    );
+    let plain = list(&seed());
+    let summary = &plain.sessions.items[0];
+    assert!(summary.name.is_none() && summary.description.is_none());
+    let json = serde_json::to_string(summary).unwrap();
+    assert!(!json.contains("\"name\"") && !json.contains("\"description\""));
 }

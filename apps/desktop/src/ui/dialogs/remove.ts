@@ -1,5 +1,6 @@
 // The Remove dialog copy of Ariadne.dc.html:1285-1316 (rmText), for each kind.
 import type { ItemRoute, SessionRef } from '../../generated/core';
+import { sessionPhrase } from '../shell/model';
 
 /** What a confirmed Remove asks the owner of the callback to remove. */
 export type RemoveTarget =
@@ -32,20 +33,28 @@ function tellText(tell: RemoveTell, them: boolean): string {
   return ` The session is closed, so ${tell.agent} isn’t told. The conversation doesn’t change.`;
 }
 
-function warning(waiting: number): string {
-  return waiting ? `${plural(waiting, 'question')} waiting on you ${waiting === 1 ? 'goes' : 'go'} with it.` : '';
+/** The owner's queued messages in what is removed: they haven't reached `agent` yet, and removing cancels them. */
+export interface RemoveUnsent { readonly count: number; readonly agent: string }
+
+function warning(waiting: number, unsent: RemoveUnsent | undefined): string {
+  const questions = waiting ? `${plural(waiting, 'question')} waiting on you ${waiting === 1 ? 'goes' : 'go'} with it.` : '';
+  const messages = !unsent?.count ? '' : unsent.count === 1 ? `1 of your messages hasn’t reached ${unsent.agent} yet; removing cancels it.`
+    : `${unsent.count} of your messages haven’t reached ${unsent.agent} yet; removing cancels them.`;
+  return [questions, messages].filter(Boolean).join(' ');
 }
 
-export type RemoveSubject =
+interface Unsent { readonly unsent?: RemoveUnsent }
+export type RemoveSubject = Unsent & (
   | { readonly kind: 'item'; readonly short: string; readonly items: number; readonly waiting: number; readonly tell: RemoveTell }
   | { readonly kind: 'topic'; readonly name: string; readonly items: number; readonly waiting: number; readonly tell: RemoveTell }
-  | { readonly kind: 'session'; readonly agent: string; readonly when: string; readonly topics: number; readonly items: number;
+  | { readonly kind: 'session'; readonly agent: string; readonly when: string; /** The owner's name for the session, when set. */ readonly name?: string | null;
+    readonly topics: number; readonly items: number;
     readonly shared: number; readonly waiting: number }
   | { readonly kind: 'project'; readonly name: string; readonly path: string; readonly sessions: number; readonly topics: number;
-    readonly items: number; readonly waiting: number };
+    readonly items: number; readonly waiting: number });
 
 export function removeCopy(subject: RemoveSubject): RemoveCopy {
-  const warn = warning(subject.waiting);
+  const warn = warning(subject.waiting, subject.unsent);
   if (subject.kind === 'item') {
     const below = subject.items - 1;
     return { title: `Remove “${capital(subject.short)}”?`, warn,
@@ -58,8 +67,7 @@ export function removeCopy(subject: RemoveSubject): RemoveCopy {
       body: `The topic and its ${plural(subject.items, 'item')} are removed from Ariadne, in every session.${tellText(subject.tell, true)}` };
   }
   if (subject.kind === 'session') {
-    const when = subject.when.toLowerCase();
-    return { title: `Remove the ${subject.agent} session from ${when}?`, warn, confirm: 'Remove session',
+    return { title: `Remove ${sessionPhrase({ name: subject.name }, subject.agent, subject.when)}?`, warn, confirm: 'Remove session',
       body: `Ariadne forgets this session${subject.topics ? ` and the ${plural(subject.topics, 'topic')} only it has (${plural(subject.items, 'item')})` : ''}.`
         + `${subject.shared ? ` ${plural(subject.shared, 'topic')} shared with other sessions ${subject.shared === 1 ? 'stays' : 'stay'}.` : ''}`
         + ' The session’s transcript on disk isn’t touched.' };

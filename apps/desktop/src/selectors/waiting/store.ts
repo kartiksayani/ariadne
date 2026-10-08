@@ -85,7 +85,11 @@ export class WaitingStore {
   // Only stores from the complete registered capture are exposed. Presence is
   // read from the shared canonical cache, never copied into durable summaries.
   sessionState(route: SessionRef): SessionState | null {
-    return this.capturedStores.get(JSON.stringify([route.project_id, route.session_id]))?.getSnapshot() ?? null;
+    return this.storeOf(route)?.getSnapshot() ?? null;
+  }
+  /** The captured session's store, for owner controls (Resume, Cancel, Retry) on its write barrier. */
+  storeOf(route: SessionRef): SessionStore | null {
+    return this.capturedStores.get(JSON.stringify([route.project_id, route.session_id])) ?? null;
   }
   readonly subscribe = (receive: () => void): Unsubscribe => {
     this.listeners.add(receive); return () => { this.listeners.delete(receive); };

@@ -48,7 +48,7 @@ it('announces a new waiting episode and committed input resolution once without 
   expect(updates.firstElementChild).toBe(span); expect(document.activeElement).toBe(search);
   const input = Object.values(session.inputs).find(input => input?.state === 'queued')!;
   input.state = 'skipped'; await update();
-  await waitFor(() => expect(updates.textContent).toBe('1 owner input resolved.'));
+  await waitFor(() => expect(updates.textContent).toBe('1 owner reply resolved.'));
   const resolved = updates.firstElementChild; await update();
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(updates.firstElementChild).toBe(resolved); expect(document.activeElement).toBe(search);
@@ -94,7 +94,7 @@ it('routes owner shortcuts from roving rows, repeats focus requests and never su
   // A replaced item stays replaced, so o on #7 sends nothing.
   press('7', 'o'); await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   press('8', 'd'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Drop reason')));
-  press('8', 'e'); expect(await screen.findByRole('dialog', { name: 'Confirm topic archive' })).toBeTruthy();
+  press('8', 'e'); expect(await screen.findByRole('dialog', { name: /^Archive “.+”\?$/ })).toBeTruthy();
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
 });
 it('sends Back to Open as one press from the o shortcut (Ariadne.dc.html:1207)', async () => {
@@ -221,7 +221,7 @@ it.each(['r', 'b'])('failed preference navigation cannot authorize %s focus or B
   });
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key });
-  await screen.findByText('Navigation save unknown.');
+  await screen.findByText('Ariadne isn’t sure that change was saved.');
   expect(screen.queryByLabelText('Reply message')).toBeNull(); expect(screen.queryByLabelText('Bring up message')).toBeNull();
   expect(document.activeElement).toBe(row); expect(transport.preferences.drafts).toEqual([]);
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);

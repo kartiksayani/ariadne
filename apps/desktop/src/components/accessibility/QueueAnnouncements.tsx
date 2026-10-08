@@ -30,7 +30,7 @@ export function QueueAnnouncements({ state }: { state: WaitingState }) {
     previous.seeded = true;
     if (waiting || completed) setAnnouncement(value => ({ sequence: value.sequence + 1, text: [
       waiting ? `${waiting} new waiting ${waiting === 1 ? 'question' : 'questions'}.` : '',
-      completed ? `${completed} owner ${completed === 1 ? 'input resolved' : 'inputs resolved'}.` : '',
+      completed ? `${completed} owner ${completed === 1 ? 'reply resolved' : 'replies resolved'}.` : '',
     ].filter(Boolean).join(' ') }));
   }, [state]);
   return <div className="accessibility-announcement" role="status" aria-live="polite" aria-atomic="true" aria-label="Queue updates">

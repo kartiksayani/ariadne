@@ -21,8 +21,9 @@ export function Guides({ guides }: { guides: readonly Guide[] }) {
 }
 
 /** The one supporting line, by priority (Item Row.dc.html:68-75). */
-function supporting(row: Row, jump: () => void): ReactNode {
+function supporting(row: Row, jump: () => void, fix: ReactNode): ReactNode {
   const item = row.item, delivery = row.delivery;
+  if (delivery?.stuck && fix) return fix;
   if (delivery) return <div className="tree-line" style={{ color: delivery.color }}><i className={delivery.icon} /><span>{delivery.text}</span></div>;
   if (row.later) return <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}><i className="ph ph-clock" /><span>Parked for later · still open</span></div>;
   if (item.status === 'waiting_on_me' && item.ask) return <div className="tree-line tree-ask">{item.ask}</div>;
@@ -49,6 +50,8 @@ export interface ItemRowProps {
   readonly note: string | null;
   readonly actions: readonly RowAction[];
   readonly answer: ReactNode;
+  /** A stopped delivery's inline fix (ui/answer/StuckNote); it takes the delivery line's place. */
+  readonly fix?: ReactNode;
   readonly remember: (key: string, element: HTMLDivElement | null) => void;
   readonly onFocus: (key: string) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
@@ -58,8 +61,8 @@ export interface ItemRowProps {
   readonly onHover: (id: string | null) => void;
 }
 
-export function ItemRow({ row, selected, focused, disabled = false, highlight, note, actions, answer, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
-  const item = row.item, status = visual(item.status);
+export function ItemRow({ row, selected, focused, disabled = false, highlight, note, actions, answer, fix, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
+  const item = row.item, status = visual(row.status);
   const muted = closed(item.status) || row.context || row.later;
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className="tree-row tree-item"
@@ -77,7 +80,7 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
       <div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
       </div>
-      {supporting(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); })}
+      {supporting(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); }, fix)}
       {note && <button type="button" className="tree-collapsed" tabIndex={-1} data-weak={highlight === 'weak' || undefined}
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className="ph ph-dots-three" />{note}</button>}
       {answer && <div className="tree-answer" onClick={event => event.stopPropagation()}>{answer}</div>}

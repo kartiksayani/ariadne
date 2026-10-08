@@ -130,6 +130,15 @@
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
+/* A message that archive or close cancelled: why it wasn't sent, and Put back in reply box. */
+.excerpt-unsent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 4px;
+}
+
 /* — Message Excerpt, rail variant (message rail) — */
 .pw-excerpt {
   position: relative;

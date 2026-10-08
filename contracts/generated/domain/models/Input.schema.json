@@ -32,6 +32,16 @@
     "binding_id": {
       "$ref": "#/$defs/UuidV4"
     },
+    "cancel_cause": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CancelCause"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "created_at": {
       "$ref": "#/$defs/UtcMillis"
     },
@@ -278,6 +288,31 @@
         "result_repair"
       ]
     },
+    "CancelCause": {
+      "description": "Who or what cancelled an input before it was delivered.",
+      "oneOf": [
+        {
+          "description": "The owner deleted it.",
+          "type": "string",
+          "const": "owner"
+        },
+        {
+          "description": "The owner took it back to edit: its words go back to the owner's editor.",
+          "type": "string",
+          "const": "owner_edit"
+        },
+        {
+          "description": "Its topic was archived.",
+          "type": "string",
+          "const": "topic_archived"
+        },
+        {
+          "description": "Its session was closed.",
+          "type": "string",
+          "const": "session_closed"
+        }
+      ]
+    },
     "Checkpoint": {
       "description": "At most 4096 UTF-8 bytes; maxLength only bounds Unicode characters.",
       "type": "string",
@@ -408,6 +443,11 @@
           "description": "The owner removed items or topics; the agent stops work on them.",
           "type": "string",
           "const": "removed"
+        },
+        {
+          "description": "The owner's instruction for a whole topic (target has no item).",
+          "type": "string",
+          "const": "topic_reply"
         }
       ]
     },
@@ -711,13 +751,22 @@
       ]
     },
     "ResolutionKind": {
-      "type": "string",
-      "enum": [
-        "retry_unexecuted",
-        "resend",
-        "skip",
-        "request_result_repair",
-        "confirm_evidence"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "retry_unexecuted",
+            "resend",
+            "skip",
+            "request_result_repair",
+            "confirm_evidence"
+          ]
+        },
+        {
+          "description": "The attempt already committed its result; the input is handled.",
+          "type": "string",
+          "const": "accept_result"
+        }
       ]
     },
     "ResultOutcome": {

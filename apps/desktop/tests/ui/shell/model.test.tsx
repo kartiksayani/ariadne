@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  agentName, bodyColumns, clock, dayWord, footerSummary, glow, headerText, hostApp, sessionRange, sessionWhen, tabModels, themeToggle, type SessionFacts,
+  agentName, bodyLayout, clock, DETAIL_MAX, DETAIL_MIN, dayWord, footerSummary, glow, headerText, hostApp, sessionRange, sessionWhen, tabModels, themeToggle, type SessionFacts,
 } from '../../../src/ui/shell/model';
 
 const now = new Date(2026, 9, 7, 15, 30).getTime();
@@ -80,10 +80,39 @@ describe('shell model', () => {
     expect(footerSummary(null)).toBe('');
     expect(footerSummary({ items: 10, waiting: 3, inProgress: 2, open: 4, archivedTopics: 0 })).toBe('10 items · 3 waiting on you · 2 in progress · 4 open');
     expect(footerSummary({ items: 10, waiting: 3, inProgress: 2, open: 4, archivedTopics: 1 })).toContain(' · 1 archived topics');
-    expect(bodyColumns(false, false)).toBe('300px minmax(560px,1fr)');
-    expect(bodyColumns(true, true)).toBe('300px minmax(560px,1fr) 400px 240px');
+    expect(bodyLayout({ width: null, detail: false, rail: false }).columns).toBe('300px minmax(560px,1fr)');
+    expect(bodyLayout({ width: 1600, detail: true, rail: true }).columns).toBe('300px minmax(560px,1fr) 400px 240px');
     expect(themeToggle('dark')).toEqual({ icon: 'ph ph-sun', title: 'Switch to light', next: 'light' });
     expect(themeToggle('light')).toEqual({ icon: 'ph ph-moon', title: 'Switch to dark', next: 'dark' });
     expect(glow('var(--st-done)')).toBe('0 0 0 3px color-mix(in srgb, var(--st-done) 22%, transparent)');
+  });
+
+  it('sizes the detail panel to the owner width inside its bounds', () => {
+    expect(bodyLayout({ width: 1600, detail: true, rail: false, detailWidth: 520 }).columns).toBe('300px minmax(560px,1fr) 520px');
+    expect(bodyLayout({ width: 2400, detail: true, rail: false, detailWidth: 5000 }).detailWidth).toBe(DETAIL_MAX);
+    expect(bodyLayout({ width: 2400, detail: true, rail: false, detailWidth: 10 }).detailWidth).toBe(DETAIL_MIN);
+    // The widest the panel can go leaves the centre its minimum.
+    expect(bodyLayout({ width: 1500, detail: true, rail: false }).detailMax).toBe(1500 - 300 - 560);
+  });
+
+  it('folds the Waiting column and narrows the detail panel so the body never scrolls sideways', () => {
+    const total = (columns: string) => columns.split(' ').filter(part => part.endsWith('px') && !part.startsWith('minmax')).map(parseFloat)
+      .reduce((sum, value) => sum + value, 0) + 560;
+    // 1300 px with detail and rail open: 300 + 560 + 400 + 240 would overflow.
+    const tight = bodyLayout({ width: 1300, detail: true, rail: true });
+    expect(tight).toMatchObject({ folded: true, auto: true, narrow: true });
+    expect(tight.columns).toBe(`44px minmax(560px,1fr) 400px 240px`);
+    expect(total(tight.columns)).toBeLessThanOrEqual(1300);
+    // An owner-wide detail panel narrows to fit.
+    const wide = bodyLayout({ width: 1300, detail: true, rail: true, detailWidth: 700 });
+    expect(wide.detailWidth).toBe(1300 - 44 - 560 - 240);
+    expect(total(wide.columns)).toBeLessThanOrEqual(1300);
+    // The owner can still open it; the centre squeezes instead of the body scrolling.
+    const peek = bodyLayout({ width: 1300, detail: true, rail: true, peek: true });
+    expect(peek).toMatchObject({ folded: false, narrow: true });
+    expect(peek.columns.startsWith('300px minmax(0,1fr)')).toBe(true);
+    // The owner's own fold holds at any width and is not "auto".
+    expect(bodyLayout({ width: 2000, detail: false, rail: false, folded: true })).toMatchObject({ folded: true, auto: false, columns: '44px minmax(560px,1fr)' });
+    expect(bodyLayout({ width: 1300, detail: true, rail: false }).folded).toBe(false);
   });
 });

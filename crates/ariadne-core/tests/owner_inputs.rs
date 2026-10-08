@@ -60,12 +60,21 @@ fn params(command: &mut OwnerCommand) -> &mut InputSubmitParams {
     params
 }
 fn cancel(input_id: UuidV4, revision: u64, op: u64) -> OwnerCommand {
+    cancel_for(input_id, revision, op, None)
+}
+fn cancel_for(
+    input_id: UuidV4,
+    revision: u64,
+    op: u64,
+    purpose: Option<CancelPurpose>,
+) -> OwnerCommand {
     OwnerCommand::InputCancel {
         api_version: SchemaVersion::new(1).unwrap(),
         op_id: id(op),
         params: InputCancelParams {
             input_id,
             expected_revision: p(revision),
+            purpose,
         },
     }
 }
@@ -468,6 +477,7 @@ fn cancellation_is_durable_preserves_every_historical_byte_and_replays_first() {
     assert_eq!(after.counters, before.counters);
     let mut expected_input = before.inputs.0[&input_id(&submitted)].clone();
     expected_input.state = InputState::Cancelled;
+    expected_input.cancel_cause = Some(CancelCause::Owner);
     assert_eq!(after.inputs.0[&expected_input.id], expected_input);
     assert!(expected_input.resolution_history.is_empty());
     assert!(matches!(
@@ -494,15 +504,151 @@ fn cancellation_is_durable_preserves_every_historical_byte_and_replays_first() {
 }
 
 #[test]
-fn cancellation_requires_current_session_revision_and_existing_input() {
+fn cancellation_of_work_past_the_queue_requires_current_session_revision_and_an_existing_input() {
     let setup = Setup::new(&seed());
     let saved = setup.execute(&submit("1", InputKind::Note, 10)).unwrap();
-    let error = setup.rejected(
-        &cancel(input_id(&saved), 1, 11),
-        CoreErrorCode::RevisionConflict,
+    let id_ = input_id(&saved);
+    // Handed to the agent (the claim bumped the revision): the reviewed revision must match.
+    setup.edit(80, |s| {
+        s.inputs.0.get_mut(&id_).unwrap().state = InputState::InFlight
+    });
+    let error = setup.rejected(&cancel(id_.clone(), 2, 11), CoreErrorCode::RevisionConflict);
+    assert_eq!(error.current_revision, Some(p(3)));
+    assert_eq!(setup.saved().inputs.0[&id_].state, InputState::InFlight);
+    setup.rejected(&cancel(id(999), 3, 12), CoreErrorCode::NotFound);
+    // The same holds for one that needs attention.
+    setup.edit(81, |s| {
+        s.inputs.0.get_mut(&id_).unwrap().state = InputState::NeedsAttention
+    });
+    setup.rejected(&cancel(id_, 3, 13), CoreErrorCode::RevisionConflict);
+}
+
+#[test]
+fn a_queued_input_cancels_after_unrelated_session_changes() {
+    let setup = Setup::new(&seed());
+    let saved = setup.execute(&submit("1", InputKind::Note, 10)).unwrap();
+    let queued = input_id(&saved);
+    // Revision 2 was reviewed; an agent report and another submit moved the session on.
+    setup.edit(80, |_| {});
+    setup.execute(&submit("1", InputKind::Note, 12)).unwrap();
+    assert_eq!(setup.saved().revision, p(4));
+    let receipt = setup.execute(&cancel(queued.clone(), 2, 11)).unwrap();
+    assert!(matches!(
+        receipt.data,
+        SavedReceiptData::InputCancel {
+            state: InputState::Cancelled,
+            ..
+        }
+    ));
+    let input = &setup.saved().inputs.0[&queued];
+    assert_eq!(input.state, InputState::Cancelled);
+    assert_eq!(input.cancel_cause, Some(CancelCause::Owner));
+}
+
+#[test]
+fn a_requeued_input_with_attempt_history_cancels_after_unrelated_changes() {
+    let setup = Setup::new(&seed());
+    let saved = setup.execute(&submit("1", InputKind::Note, 10)).unwrap();
+    let requeued = input_id(&saved);
+    // A first attempt was sealed (a resend put the input back in the queue): still queued.
+    setup.edit(80, |s| {
+        let input = s.inputs.0.get_mut(&requeued).unwrap();
+        let mut attempt = prepared_attempt(&requeued);
+        attempt.sealed_at = Some(at());
+        input.attempts.push(attempt);
+        input.state = InputState::Queued;
+    });
+    setup.edit(81, |_| {});
+    // Revision 2 was reviewed; the session is at 4.
+    setup.execute(&cancel(requeued.clone(), 2, 11)).unwrap();
+    let saved = setup.saved();
+    let input = &saved.inputs.0[&requeued];
+    assert_eq!(input.state, InputState::Cancelled);
+    assert_eq!(input.cancel_cause, Some(CancelCause::Owner));
+    assert_eq!(input.attempts.len(), 1);
+}
+
+#[test]
+fn the_cancel_purpose_maps_to_its_cause_and_defaults_to_delete() {
+    assert_eq!(CancelPurpose::Delete.cause(), CancelCause::Owner);
+    assert_eq!(CancelPurpose::Edit.cause(), CancelCause::OwnerEdit);
+    for (op, purpose, cause) in [
+        (10, None, CancelCause::Owner),
+        (20, Some(CancelPurpose::Delete), CancelCause::Owner),
+        (30, Some(CancelPurpose::Edit), CancelCause::OwnerEdit),
+    ] {
+        let setup = Setup::new(&seed());
+        let queued = input_id(&setup.execute(&submit("1", InputKind::Note, op)).unwrap());
+        // A queued input skips the revision guard whatever the purpose.
+        setup.edit(80, |_| {});
+        setup
+            .execute(&cancel_for(queued.clone(), 2, op + 1, purpose))
+            .unwrap();
+        let input = &setup.saved().inputs.0[&queued];
+        assert_eq!(input.state, InputState::Cancelled, "{purpose:?}");
+        assert_eq!(input.cancel_cause, Some(cause), "{purpose:?}");
+    }
+    // The wire: absent and "delete" mean delete; "edit" is the take-back.
+    let wire = |purpose: serde_json::Value| {
+        let mut params = serde_json::json!({ "input_id": id(5), "expected_revision": 2 });
+        if !purpose.is_null() {
+            params["purpose"] = purpose;
+        }
+        serde_json::from_value::<InputCancelParams>(params)
+            .unwrap()
+            .purpose
+    };
+    assert_eq!(wire(serde_json::Value::Null), None);
+    assert_eq!(wire("delete".into()), Some(CancelPurpose::Delete));
+    assert_eq!(wire("edit".into()), Some(CancelPurpose::Edit));
+    let plain = serde_json::to_value(match cancel(id(5), 2, 1) {
+        OwnerCommand::InputCancel { params, .. } => params,
+        _ => unreachable!(),
+    })
+    .unwrap();
+    assert!(plain.get("purpose").is_none());
+}
+
+#[test]
+fn edit_takes_back_only_a_queued_input() {
+    let setup = Setup::new(&seed());
+    let saved = setup.execute(&submit("1", InputKind::Note, 10)).unwrap();
+    let id_ = input_id(&saved);
+    // A claim won the race: the message is on its way, and the owner's revision is current.
+    setup.edit(80, |s| {
+        s.inputs.0.get_mut(&id_).unwrap().state = InputState::InFlight
+    });
+    let current = setup.saved().revision.value();
+    setup.rejected(
+        &cancel_for(id_.clone(), current, 11, Some(CancelPurpose::Edit)),
+        CoreErrorCode::InvalidTransition,
     );
-    assert_eq!(error.current_revision, Some(p(2)));
-    setup.rejected(&cancel(id(999), 2, 12), CoreErrorCode::NotFound);
+    assert_eq!(setup.saved().inputs.0[&id_].state, InputState::InFlight);
+    assert_eq!(setup.saved().inputs.0[&id_].cancel_cause, None);
+    // Delete still cancels it.
+    setup.execute(&cancel(id_.clone(), current, 12)).unwrap();
+    assert_eq!(
+        setup.saved().inputs.0[&id_].cancel_cause,
+        Some(CancelCause::Owner)
+    );
+    // An already cancelled one is refused for edit too.
+    setup.rejected(
+        &cancel_for(id_, current + 1, 13, Some(CancelPurpose::Edit)),
+        CoreErrorCode::InvalidTransition,
+    );
+}
+
+#[test]
+fn an_edit_cancel_replays_and_a_changed_purpose_is_another_operation() {
+    let setup = Setup::new(&seed());
+    let queued = input_id(&setup.execute(&submit("1", InputKind::Note, 10)).unwrap());
+    let command = cancel_for(queued.clone(), 2, 11, Some(CancelPurpose::Edit));
+    let first = setup.execute(&command).unwrap();
+    assert_eq!(setup.execute(&command).unwrap(), first);
+    assert!(matches!(
+        setup.execute(&cancel_for(queued, 2, 11, None)),
+        Err(InputError::Store(StoreError::OperationReused))
+    ));
 }
 
 #[test]
@@ -553,7 +699,9 @@ fn prepared_attempt(input_id: &UuidV4) -> Attempt {
     }
 }
 #[test]
-fn cancellation_refuses_prepared_history_active_attempt_and_every_nonqueued_state() {
+fn cancellation_abandons_pending_work_and_refuses_only_settled_inputs() {
+    // Owner rule: cancel works for queued, in-flight and needs-attention
+    // inputs, abandoning any attempt; settled inputs stay as they are.
     for case in 0..7 {
         let setup = Setup::new(&seed());
         let saved = setup.execute(&submit("1", InputKind::Note, 10)).unwrap();
@@ -574,7 +722,24 @@ fn cancellation_refuses_prepared_history_active_attempt_and_every_nonqueued_stat
                 _ => unreachable!(),
             }
         });
-        setup.rejected(&cancel(input_id, 3, 11), CoreErrorCode::InvalidTransition);
+        if matches!(case, 3 | 5 | 6) {
+            setup.rejected(&cancel(input_id, 3, 11), CoreErrorCode::InvalidTransition);
+            continue;
+        }
+        let receipt = setup.execute(&cancel(input_id.clone(), 3, 11)).unwrap();
+        assert!(matches!(
+            receipt.data,
+            SavedReceiptData::InputCancel {
+                state: InputState::Cancelled,
+                ..
+            }
+        ));
+        let saved = setup.saved();
+        let input = &saved.inputs.0[&input_id];
+        assert_eq!(input.state, InputState::Cancelled, "case {case}");
+        assert!(input.active_attempt_id.is_none());
+        assert!(input.attempts.iter().all(|a| a.sealed_at.is_some()));
+        assert_eq!(saved.bindings.0[&id(3)].active_input_id, None);
     }
 }
 

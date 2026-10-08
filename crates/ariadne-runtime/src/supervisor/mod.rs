@@ -5,12 +5,17 @@ mod gate;
 pub use diagnostics::Diagnostic;
 pub use gate::ClaimGate;
 
-use crate::{control::validated_error, leases::BindingLease};
+use crate::{
+    control::validated_error,
+    health::{plain_reason, HealthObserver, SupervisorHealth},
+    leases::BindingLease,
+    logging,
+};
 use ariadne_agent_protocol::*;
 use ariadne_core::*;
 use ariadne_domain::models::{
-    Binding, ConnectionState, ExecutionState, Freshness, InputState, PresenceObservation,
-    PresenceSource,
+    Binding, ConnectionState, DeliveryMode, ExecutionState, Freshness, InputState,
+    PresenceObservation, PresenceSource,
 };
 use std::{
     collections::VecDeque,
@@ -24,6 +29,10 @@ use tokio::{
 };
 
 const POLL: Duration = Duration::from_millis(250);
+/// Retry delay after a failed cycle: doubles from the first value up to the cap.
+const BACKOFF_FIRST: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(30);
+const WAITING_ON_EARLIER: &str = "Checking whether an earlier answer reached Codex.";
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 const FRAME_BYTES: usize = 8 * 1024 * 1024;
 const SCAN_BYTES: usize = 16 * 1024 * 1024;
@@ -110,6 +119,7 @@ pub struct ConnectedSupervisor {
     connected: ConnectResult,
     facts: NativeFacts,
     presence: Option<Arc<PresenceObserver>>,
+    health: Option<Arc<HealthObserver>>,
 }
 impl ConnectedSupervisor {
     pub async fn connect(
@@ -241,11 +251,21 @@ impl ConnectedSupervisor {
             connected,
             facts,
             presence: None,
+            health: None,
         })
     }
     pub fn with_presence_observer(mut self, observer: Arc<PresenceObserver>) -> Self {
         self.presence = Some(observer);
         self
+    }
+    /// Health is published only for push delivery (the desktop sends). Pull
+    /// bindings are delivered by their host-side Mod and never publish health.
+    pub fn with_health_observer(mut self, observer: Arc<HealthObserver>) -> Self {
+        self.health = Some(observer);
+        self
+    }
+    pub fn delivery_mode(&self) -> DeliveryMode {
+        self.connected.capabilities.delivery_mode.clone()
     }
     pub fn start(self, lease: BindingLease) -> Result<SupervisorHandle, CoreError> {
         if lease.session() != &self.session
@@ -321,6 +341,65 @@ struct Worker {
     validated_claims: u64,
     last_presence: Option<PresenceObservation>,
     presence_tasks: Vec<JoinHandle<Result<(), CoreError>>>,
+    /// Throttles re-checks of earlier attempts that history could not settle yet.
+    reconcile_after: Option<tokio::time::Instant>,
+    reconcile_backoff: Backoff,
+    last_health: Option<SupervisorHealth>,
+}
+#[derive(Debug)]
+struct Backoff {
+    next: Duration,
+}
+impl Default for Backoff {
+    fn default() -> Self {
+        Self {
+            next: BACKOFF_FIRST,
+        }
+    }
+}
+impl Backoff {
+    fn reset(&mut self) {
+        self.next = BACKOFF_FIRST;
+    }
+    fn take(&mut self) -> Duration {
+        let delay = self.next;
+        self.next = (self.next * 2).min(BACKOFF_MAX);
+        delay
+    }
+}
+/// Core's final answer to a reported attempt fact: the attempt is sealed, or
+/// Core saved this contradiction (with whatever barrier it needs; a saved
+/// conflict carries its revision). The same event ID gets the same answer
+/// forever, so the fact is acknowledged rather than retried.
+fn final_verdict(error: &CoreError) -> bool {
+    match error.code {
+        CoreErrorCode::AttemptSealed => true,
+        CoreErrorCode::ProtocolConflict => error.current_revision.is_some(),
+        _ => false,
+    }
+}
+/// Error code and Ariadne's own barrier reason for the log. Never the message:
+/// it can carry text a provider sent (ADR-0087).
+fn log_cause(error: &CoreError) -> String {
+    match error.details.as_ref().and_then(|details| details.reason) {
+        Some(reason) => format!("{:?} ({reason:?})", error.code),
+        None => format!("{:?}", error.code),
+    }
+}
+/// The supervisor's scope no longer exists or no longer selects this host:
+/// retrying cannot succeed, so the task ends and composition is told why.
+fn scope_ended(error: &CoreError) -> bool {
+    matches!(
+        error.code,
+        CoreErrorCode::StaleGeneration
+            | CoreErrorCode::BindingMismatch
+            | CoreErrorCode::BindingConflict
+            | CoreErrorCode::BindingAmbiguous
+            | CoreErrorCode::NotFound
+    ) || error
+        .details
+        .as_ref()
+        .is_some_and(|details| details.reason == Some(BarrierReason::Disconnected))
 }
 impl Worker {
     fn new(
@@ -345,7 +424,62 @@ impl Worker {
             validated_claims: 0,
             last_presence: None,
             presence_tasks: Vec::new(),
+            reconcile_after: None,
+            reconcile_backoff: Backoff::default(),
+            last_health: None,
         }
+    }
+    fn label(&self) -> String {
+        format!(
+            "binding={} generation={}",
+            self.connected.binding.id.as_str(),
+            self.connected.binding.generation.as_str()
+        )
+    }
+    /// Publishes a changed health entry for push delivery only; pull bindings
+    /// (Claude Code via its Mod) never publish, so no UI says "Not sending".
+    fn publish_health(&mut self, health: SupervisorHealth) {
+        if self.connected.connected.capabilities.delivery_mode != DeliveryMode::Push {
+            return;
+        }
+        if self
+            .last_health
+            .as_ref()
+            .is_some_and(|prior| prior.same_as(&health))
+        {
+            return;
+        }
+        self.last_health = Some(health.clone());
+        if let Some(observer) = &self.connected.health {
+            observer(health);
+        }
+    }
+    fn health_running(&mut self) {
+        let health = SupervisorHealth::running(
+            self.connected.binding.id.clone(),
+            self.connected.binding.generation.clone(),
+            (self.connected.facts.now)(),
+        );
+        self.publish_health(health);
+    }
+    fn health_backing_off(&mut self, reason: String, retry: Duration) {
+        let health = SupervisorHealth::backing_off(
+            self.connected.binding.id.clone(),
+            self.connected.binding.generation.clone(),
+            reason,
+            retry,
+            (self.connected.facts.now)(),
+        );
+        self.publish_health(health);
+    }
+    fn health_stopped(&mut self, reason: String) {
+        let health = SupervisorHealth::stopped(
+            self.connected.binding.id.clone(),
+            self.connected.binding.generation.clone(),
+            reason,
+            (self.connected.facts.now)(),
+        );
+        self.publish_health(health);
     }
     fn context(
         &self,
@@ -397,11 +531,15 @@ impl Worker {
         events: impl IntoIterator<Item = NormalizedEvent>,
         historical: bool,
     ) -> Result<(), CoreError> {
+        // All or nothing: a retried cycle must never acknowledge a checkpoint
+        // past an event that was rejected here and never became pending.
+        let mut accepted = Vec::new();
         for event in events {
             event.validate().map_err(adapter_error)?;
             let context = self.context(&event, historical)?;
-            self.pending.push_back(PendingReport { event, context });
+            accepted.push(PendingReport { event, context });
         }
+        self.pending.extend(accepted);
         Ok(())
     }
     async fn report(&mut self) -> Result<(), CoreError> {
@@ -409,12 +547,35 @@ impl Worker {
             let context = pending.context.clone();
             let core = self.connected.core.clone();
             let reported = pending.event.clone();
-            core_io::call(self.lease.clone(), move || {
+            let receipt = core_io::call(self.lease.clone(), move || {
                 let receipt = core.report(context.clone(), reported.clone())?;
                 receipt.validate_for(&context, &reported)?;
                 Ok(receipt)
             })
-            .await?;
+            .await;
+            if let Err(e) = &receipt {
+                let event = &self.pending.front().expect("retained until verdict").event;
+                // Retrying this event ID can only repeat the same answer and
+                // would hold every later fact and claim behind it. Binding facts
+                // (the opening Connected one above all) keep failing loudly.
+                if event.attempt_id.is_some() && final_verdict(e) {
+                    let id = |value: Option<&UuidV4>| value.map_or("-", UuidV4::as_str).to_owned();
+                    logging::warn(
+                        "delivery",
+                        &format!(
+                            "{} acknowledged a late fact Core already settled: {:?} input={} attempt={}",
+                            self.label(),
+                            e.code,
+                            id(event.input_id.as_ref()),
+                            id(event.attempt_id.as_ref()),
+                        ),
+                    );
+                    self.pending.pop_front();
+                    self.validated_reports = self.validated_reports.saturating_add(1);
+                    continue;
+                }
+            }
+            receipt?;
             let observation = match &self
                 .pending
                 .front()
@@ -435,6 +596,7 @@ impl Worker {
             if let Some((observation, initial)) = observation {
                 self.observe_presence(observation, initial).await?;
             }
+            log_delivery_fact(&self.pending.front().expect("retained until receipt").event);
             self.diagnostics
                 .record(&self.pending.front().expect("retained until receipt").event);
             self.pending.pop_front();
@@ -605,14 +767,16 @@ impl Worker {
             "Reload and reconcile from the first page; no dispatch was enabled.",
         ))
     }
-    async fn reconcile(&mut self) -> Result<bool, CoreError> {
+    /// Returns the `input=… attempt=…` labels history could not settle yet;
+    /// empty means every persisted attempt was reconciled.
+    async fn reconcile(&mut self) -> Result<Vec<String>, CoreError> {
         let attempts = self.inputs().await?;
         let batches = if attempts.is_empty() {
             1
         } else {
             attempts.len().div_ceil(100)
         };
-        let mut complete = true;
+        let mut waiting = Vec::new();
         for batch in 0..batches {
             let attempts = &attempts[batch * 100..attempts.len().min((batch + 1) * 100)];
             let mut checkpoint = None;
@@ -641,7 +805,8 @@ impl Worker {
                     }
                 }
                 unresolved.extend(result.unresolved_attempt_ids.iter().cloned());
-                self.offered = result.next_checkpoint.clone();
+                // Reconcile continuations are provider-private and never become
+                // the observation checkpoint, so a retried cycle keeps its place.
                 self.queue(
                     result.attempt_evidence.into_iter().flat_map(|a| a.events),
                     true,
@@ -657,11 +822,20 @@ impl Worker {
                 }
                 checkpoint = result.next_checkpoint;
             }
-            complete &= unresolved.is_empty();
+            waiting.extend(
+                attempts
+                    .iter()
+                    .filter(|a| unresolved.contains(&a.attempt_id))
+                    .map(|a| {
+                        format!(
+                            "input={} attempt={}",
+                            a.input_id.as_str(),
+                            a.attempt_id.as_str()
+                        )
+                    }),
+            );
         }
-        // Reconcile and observe tokens are different provider-private cursors.
-        self.checkpoint = None;
-        Ok(complete)
+        Ok(waiting)
     }
     async fn submit(&mut self) -> Result<(), CoreError> {
         if self.connected.connected.capabilities.delivery_mode
@@ -669,10 +843,15 @@ impl Worker {
         {
             return Ok(());
         }
-        let request = ClaimRequest {
-            binding_id: self.connected.binding.id.clone(),
-            generation: self.connected.binding.generation.clone(),
-            request_id: (self.connected.facts.next_id)(),
+        // A claim whose receipt was lost may already be saved: retry that exact
+        // request ID so Core replays it instead of preparing another attempt.
+        let request = match self.pending_claim.clone() {
+            Some(retained) => retained,
+            None => ClaimRequest {
+                binding_id: self.connected.binding.id.clone(),
+                generation: self.connected.binding.generation.clone(),
+                request_id: (self.connected.facts.next_id)(),
+            },
         };
         let context = self
             .lease
@@ -714,6 +893,15 @@ impl Worker {
         let Some(attempt) = attempt else {
             return Ok(());
         };
+        logging::info(
+            "delivery",
+            &format!(
+                "{} claimed input={} attempt={}",
+                self.label(),
+                attempt.input_id.as_str(),
+                attempt.attempt_id.as_str()
+            ),
+        );
         self.submitting = Some((attempt.clone(), false));
         let request = SubmitRequest {
             binding_id: self.connected.binding.id.clone(),
@@ -740,6 +928,20 @@ impl Worker {
                         .into(),
             },
         };
+        logging::info(
+            "delivery",
+            &format!(
+                "{} submitted input={} attempt={} outcome={}",
+                self.label(),
+                attempt.input_id.as_str(),
+                attempt.attempt_id.as_str(),
+                match &outcome {
+                    SubmitOutcome::Accepted { .. } => "accepted",
+                    SubmitOutcome::RejectedBeforeDelivery { .. } => "rejected_before_delivery",
+                    SubmitOutcome::Uncertain { .. } => "uncertain",
+                }
+            ),
+        );
         let (id, payload) = match outcome {
             SubmitOutcome::Accepted { receipt } => (
                 format!(
@@ -795,9 +997,89 @@ impl Worker {
         .map_err(adapter_error)?;
         result.validate_for(&request).map_err(adapter_error)?;
         frame_bound(result.events.iter())?;
-        self.offered = result.next_checkpoint;
         self.queue(result.events, false)?;
+        self.offered = result.next_checkpoint;
         self.report().await
+    }
+    /// A preparation stranded by an earlier failed cycle becomes its terminal
+    /// fact: possibly sent is uncertain, never admitted is rejected. Never resent.
+    fn settle_submitting(&mut self, reason: &str) -> Result<(), CoreError> {
+        let Some((attempt, started)) = self.submitting.take() else {
+            return Ok(());
+        };
+        let (kind, payload) = if started {
+            (
+                TerminalEventKind::Uncertain,
+                EventPayload::Uncertain {
+                    reason: format!(
+                        "{reason} during possible submission; delivery cannot be ruled out."
+                    ),
+                },
+            )
+        } else {
+            (
+                TerminalEventKind::Rejected,
+                EventPayload::Rejected {
+                    reason: format!("{reason} before adapter submission admission."),
+                },
+            )
+        };
+        let id = terminal_event_id(
+            &self.connected.binding.id,
+            &self.connected.binding.generation,
+            &attempt.attempt_id,
+            None,
+            kind,
+            None,
+        )
+        .map_err(adapter_error)?;
+        self.queue([self.event(id, payload, Some(&attempt))], false)
+    }
+    /// One scheduling pass. Pending facts always flush first, with their
+    /// original IDs, so a retried pass never skips or duplicates a fact.
+    async fn cycle(&mut self) -> Result<(), CoreError> {
+        self.settle_submitting("A delivery step failed")?;
+        if !self.pending.is_empty() {
+            self.report().await?;
+        }
+        if !self.reconciled
+            && self
+                .reconcile_after
+                .is_none_or(|after| tokio::time::Instant::now() >= after)
+        {
+            let waiting = self.reconcile().await?;
+            if waiting.is_empty() {
+                self.reconciled = true;
+                self.reconcile_after = None;
+                self.gate.reconciled_from_trusted_native()?;
+                logging::info(
+                    "supervisor",
+                    &format!("{} reconciled; sending is open.", self.label()),
+                );
+                self.publish();
+            } else {
+                // Core's FIFO refuses every claim on this binding while these
+                // attempts' inputs are in flight or need attention, so the
+                // gate stays closed; re-check with backoff and say what blocks.
+                let delay = self.reconcile_backoff.take();
+                self.reconcile_after = Some(tokio::time::Instant::now() + delay);
+                logging::warn(
+                    "supervisor",
+                    &format!(
+                        "{} waiting on earlier attempts history cannot settle yet: {}; re-checking in {}s.",
+                        self.label(),
+                        waiting.join(", "),
+                        delay.as_secs()
+                    ),
+                );
+                self.health_backing_off(WAITING_ON_EARLIER.into(), delay);
+            }
+        }
+        self.observe().await?;
+        if self.reconciled {
+            self.submit().await?;
+        }
+        Ok(())
     }
     async fn run(mut self, mut stop: oneshot::Receiver<()>) -> SupervisorExit {
         let initial = self.event(
@@ -813,70 +1095,96 @@ impl Worker {
             },
             None,
         );
+        logging::info(
+            "supervisor",
+            &format!(
+                "{} started ({:?} delivery).",
+                self.label(),
+                self.connected.delivery_mode()
+            ),
+        );
+        // The connected fact opens the binding's lifecycle; without its receipt
+        // nothing later is attributable, so this one failure ends the task.
         let mut error = self.queue([initial], false).err();
         if error.is_none() {
             error = self.report().await.err();
         }
+        let mut backoff = Backoff::default();
+        // The failure being retried, handed to the caller if a stop interrupts it.
+        let mut unresolved: Option<CoreError> = None;
         while error.is_none() {
-            let operation = async {
-                if !self.reconciled && self.reconcile().await? {
-                    self.reconciled = true;
-                    self.gate.reconciled_from_trusted_native()?;
-                    self.publish();
-                }
-                self.observe().await?;
-                if self.reconciled {
-                    self.submit().await?;
-                }
-                Ok::<_, CoreError>(())
-            };
-            tokio::select! {
+            let outcome = tokio::select! {
                 biased;
-                _ = &mut stop => break,
-                result = operation => {
-                    if let Err(e) = result {
-                        if matches!(e.code, CoreErrorCode::InvalidTransition | CoreErrorCode::ResultMissing | CoreErrorCode::DeliveryUncertain) && self.pending.is_empty() {
-                            // Core owns durable pause/result barriers. Continue observation.
-                        } else { error = Some(e); }
-                    }
-                }
-            }
-            if error.is_none() {
-                tokio::select! { biased; _ = &mut stop => break, _ = tokio::time::sleep(POLL) => {} }
-            }
-        }
-        self.gate.stop();
-        if let Some((attempt, started)) = self.submitting.take() {
-            let (kind, payload) = if started {
-                (TerminalEventKind::Uncertain, EventPayload::Uncertain { reason: "Desktop stopped during possible submission; delivery cannot be ruled out.".into() })
-            } else {
-                (
-                    TerminalEventKind::Rejected,
-                    EventPayload::Rejected {
-                        reason: "Desktop stopped before adapter submission admission.".into(),
-                    },
-                )
+                _ = &mut stop => None,
+                result = self.cycle() => Some(result),
             };
-            match terminal_event_id(
-                &self.connected.binding.id,
-                &self.connected.binding.generation,
-                &attempt.attempt_id,
-                None,
-                kind,
-                None,
-            ) {
-                Ok(id) => {
-                    if let Err(e) = self.queue([self.event(id, payload, Some(&attempt))], false) {
-                        if error.is_none() {
-                            error = Some(e);
-                        }
-                    }
+            let Some(result) = outcome else {
+                // A retry was under way; whether it cleared the cause is unknown.
+                unresolved = None;
+                break;
+            };
+            let delay = match result {
+                Ok(()) => None,
+                // Core owns durable pause/result barriers. Continue observation.
+                Err(e)
+                    if matches!(
+                        e.code,
+                        CoreErrorCode::InvalidTransition
+                            | CoreErrorCode::ResultMissing
+                            | CoreErrorCode::DeliveryUncertain
+                    ) && self.pending.is_empty()
+                        && !scope_ended(&e) =>
+                {
+                    None
+                }
+                Err(e) if scope_ended(&e) => {
+                    error = Some(e);
+                    break;
                 }
                 Err(e) => {
-                    if error.is_none() {
-                        error = Some(adapter_error(e));
-                    }
+                    let delay = backoff.take();
+                    logging::warn(
+                        "supervisor",
+                        &format!(
+                            "{} cycle failed: {}; retrying in {}s.",
+                            self.label(),
+                            log_cause(&e),
+                            delay.as_secs()
+                        ),
+                    );
+                    self.health_backing_off(plain_reason(&e), delay);
+                    unresolved = Some(e);
+                    Some(delay)
                 }
+            };
+            let delay = delay.unwrap_or_else(|| {
+                unresolved = None;
+                backoff.reset();
+                if self.reconciled {
+                    self.health_running();
+                }
+                POLL
+            });
+            tokio::select! { biased; _ = &mut stop => break, _ = tokio::time::sleep(delay) => {} }
+        }
+        // Only a lost connected receipt or an ended scope reaches here with an
+        // error; every other failure was retried above.
+        if let Some(e) = &error {
+            logging::error(
+                "supervisor",
+                &format!("{} stopped: {}.", self.label(), log_cause(e)),
+            );
+            self.health_stopped(plain_reason(e));
+        } else {
+            logging::info(
+                "supervisor",
+                &format!("{} stopped on request.", self.label()),
+            );
+        }
+        self.gate.stop();
+        if let Err(e) = self.settle_submitting("Desktop stopped") {
+            if error.is_none() {
+                error = Some(e);
             }
         }
         if !self.pending.is_empty() && error.is_none() {
@@ -886,6 +1194,9 @@ impl Worker {
                     "Shutdown flush exceeded its bound; pending facts were not acknowledged.",
                 )),
             };
+        }
+        if error.is_none() {
+            error = unresolved;
         }
         if self.pending_claim.is_some() && error.is_none() {
             error = Some(host_error(
@@ -928,6 +1239,36 @@ impl Worker {
             error,
         }
     }
+}
+/// Logs a saved delivery fact by kind and IDs only. Output text, reasons and
+/// diagnostics may quote the conversation, so they never reach the log.
+fn log_delivery_fact(event: &NormalizedEvent) {
+    let kind = match &event.event {
+        EventPayload::Accepted { .. } => "accepted",
+        EventPayload::Rejected { .. } => "rejected",
+        EventPayload::Uncertain { .. } => "uncertain",
+        EventPayload::TurnFinished { status, .. } => match status {
+            TurnFinishedStatus::Completed => "turn_finished completed",
+            TurnFinishedStatus::Failed => "turn_finished failed",
+            TurnFinishedStatus::Interrupted => "turn_finished interrupted",
+        },
+        EventPayload::Disconnected { .. } => "disconnected",
+        EventPayload::Connected { .. } => "connected",
+        EventPayload::TurnStarted {}
+        | EventPayload::VisibleOutput { .. }
+        | EventPayload::Presence { .. } => return,
+    };
+    let id = |value: Option<&UuidV4>| value.map_or("-", UuidV4::as_str).to_owned();
+    logging::info(
+        "delivery",
+        &format!(
+            "saved {kind} binding={} generation={} input={} attempt={}",
+            event.binding_id.as_str(),
+            event.generation.as_str(),
+            id(event.input_id.as_ref()),
+            id(event.attempt_id.as_ref()),
+        ),
+    );
 }
 fn adapter_error(error: AdapterError) -> CoreError {
     if error.validate().is_err() {

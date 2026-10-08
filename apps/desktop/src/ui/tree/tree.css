@@ -57,6 +57,20 @@
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
+/* Beside the owner's name the agent line and description stay quieter; a long description is cut to one line. */
+.tree-session-secondary,
+.tree-session-description {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.tree-session-description {
+  overflow: hidden;
+  min-width: 0;
+  max-width: 48ch;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .tree-run {
   display: inline-flex;
   align-items: center;
@@ -87,8 +101,36 @@
   font-size: 12.5px;
 }
 
-.tree-session-bar .btn {
+/* Rename and Close/Reopen sit together at the bar's right edge. */
+.tree-session-actions {
+  display: inline-flex;
+  gap: 4px;
   margin-left: auto;
+}
+
+/* The dispatch chip's buttons sit in the bar's text line; Pause/Resume are
+   icon-only, so the bar keeps the design's height. */
+.tree-session-bar .dispatch-chip .dispatch-action {
+  height: auto;
+  margin-left: 0;
+}
+
+.tree-session-bar .dispatch-chip .dispatch-icon {
+  width: 20px;
+  height: 18px;
+  padding: 0;
+}
+
+/* A long "Not sending: …" reason stays on one line; the details dialog has it in full. */
+.tree-session-bar .dispatch-chip {
+  min-width: 0;
+}
+
+.tree-session-bar .dispatch-label {
+  overflow: hidden;
+  max-width: 40ch;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .tree-filters {
@@ -258,14 +300,18 @@
   background: color-mix(in srgb, var(--color-text) 7%, var(--a-side));
 }
 
+/* The name wraps beside the counts as in the design; only when that would
+   squeeze it under 12em do the counts move under it. */
 .tree-topic-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
 .tree-topic-name {
+  flex: 1 1 12em;
   min-width: 0;
   padding-left: 4px;
   font-size: 15.5px;
@@ -356,6 +402,33 @@
 
 .tree-topic-line > i {
   font-size: 13px;
+}
+
+.tree-topic-fix {
+  padding-left: 26px;
+}
+
+.tree-fix .stuck-note {
+  margin: 2px 0;
+}
+
+.tree-topic-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 6px 26px;
+}
+
+.tree-topic-reply textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.tree-topic-reply-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .tree-prompt {

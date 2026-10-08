@@ -160,11 +160,11 @@ fn bridge_qualified_idle_recovers_without_renderer_attestation_or_dispatch() {
     assert_eq!(input.attempts.len(), 1);
     assert!(input.attempts[0].sealed_at.is_some());
     assert_eq!(input.resolution_history[0].evidence, None);
-    assert!(after.bindings.0[&id(3)].owner_paused);
-    assert_eq!(
-        after.bindings.0[&id(3)].dispatch_state,
-        DispatchState::Paused
-    );
+    // Settling the input lifts the barrier; resolve adds no owner pause (ADR-0088).
+    let binding = &after.bindings.0[&id(3)];
+    assert_eq!(binding.owner_paused, before.bindings.0[&id(3)].owner_paused);
+    assert_eq!(binding.pause_reason, None);
+    assert_ne!(binding.dispatch_state, DispatchState::RecoveryRequired);
     let MutationReceipt::Session(saved) = receipt else {
         panic!("real saved recovery receipt")
     };

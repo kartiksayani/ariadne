@@ -12,7 +12,7 @@ const labels: Record<DeliveryKind, readonly [string, string]> = {
   cancelled: ['Cancelled', 'The saved input was cancelled.'],
   skipped: ['Skipped', 'An explicit owner resolution skipped this input.'],
   handled: ['Handled', 'The matching host turn and explicit domain result are complete.'],
-  uncertain: ['Delivery uncertain', 'Delivery may have happened. Reconcile before sending more work.'],
+  uncertain: ['Delivery uncertain', 'The agent may have got this message. Check before sending more.'],
   rejected: ['Rejected before delivery', 'The host rejected this attempt before delivery. This does not authorize automatic retry.'],
   failed: ['Failed', 'The matching host turn failed or was interrupted.'],
   missing: ['Missing result', 'The matching host turn ended without a committed explicit result.'],
@@ -23,7 +23,7 @@ const labels: Record<DeliveryKind, readonly [string, string]> = {
   sending: ['Delivering', 'The exact prepared attempt is awaiting delivery evidence.'],
   queued: ['Queued · waiting for connection', 'The input is saved while the bound host is unavailable, paused or busy.'],
   saved: ['Saved', 'The input is saved. No delivery is established.'],
-  unavailable: ['Delivery evidence unavailable', 'Current delivery facts are inconsistent or incomplete. Refresh to reconcile.'],
+  unavailable: ['Delivery evidence unavailable', 'Ariadne can’t tell what happened to this message yet. Refresh to check again.'],
 };
 function evidence(kind: DeliveryKind): DeliveryEvidence {
   return Object.freeze({ kind, label: labels[kind][0], detail: labels[kind][1] });

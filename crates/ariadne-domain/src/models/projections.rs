@@ -256,6 +256,13 @@ pub struct SessionSummary {
     pub project_id: UuidV4,
     pub session_id: UuidV4,
     pub title: String,
+    // The session's owner-set name and description (ADR-0091).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub description: Option<String>,
     pub state: SessionState,
     pub revision: PositiveSafeInteger,
     pub created_at: UtcMillis,

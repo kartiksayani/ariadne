@@ -2,6 +2,10 @@
 
 Status: Accepted
 
+Amended by: [ADR-0088](ADR-0088-core-never-dead-ends.md) (only the rule that
+nonredundant additions to a sealed attempt reject `AttemptSealed`; every other
+rule is retained)
+
 ## Context
 
 Owner inputs are durable before dispatch. A provider receipt, matching completed
@@ -40,9 +44,11 @@ then atomically retains `EventConflict {event_id,input_id,attempt_id}`, pauses t
 affected binding and returns `ProtocolConflict`. Original facts/results/receipts
 remain immutable. Exact original facts replay success; exact conflicting facts
 replay their saved rejection without another effect. Contradictory fresh-ID facts
-use the same atomic barrier. Sealed/skipped Input and Attempt bytes are preserved:
-redundant fresh observations are unchanged, contradictions pause only the binding,
-and nonredundant noncontradictory additions reject `AttemptSealed`. There is no
+use the same atomic barrier. Sealed/skipped Input and Attempt bytes are preserved.
+(Amended by ADR-0088: a new fact about a sealed or settled attempt, or about a
+handled, skipped or cancelled input, is `Unchanged`, never `AttemptSealed`; a
+changed fact under a known event ID is still saved as a conflict, but adds no
+barrier once the attempt is settled or its result is committed.) There is no
 second transaction gap or reopened delivery authority.
 
 Apply and reporter use the existing pure delivery join. Only completed host turn

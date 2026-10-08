@@ -81,19 +81,6 @@ pub struct Binding {
     pub host_location: Option<String>,
 }
 
-impl Binding {
-    /// True when nothing can be dispatched through this binding: dispatch is paused
-    /// or disconnected, or the connection is not `connected`. This is the session
-    /// close precondition. Mirrored by `dispatchQuiesced` in
-    /// `apps/desktop/src/components/history-actions/selectors.ts`.
-    pub fn dispatch_quiesced(&self) -> bool {
-        matches!(
-            self.dispatch_state,
-            DispatchState::Paused | DispatchState::Disconnected
-        ) || self.connection_state != ConnectionState::Connected
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatchState {
@@ -186,6 +173,25 @@ pub struct Input {
     pub attempts: Vec<Attempt>,
     pub active_attempt_id: Option<UuidV4>,
     pub resolution_history: Vec<ResolutionHistoryEntry>,
+    // Why a cancelled input was cancelled; set only with `state: cancelled`. Absent in
+    // older stores, which read as the owner's own cancel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cancel_cause: Option<CancelCause>,
+}
+
+/// Who or what cancelled an input before it was delivered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum CancelCause {
+    /// The owner deleted it.
+    Owner,
+    /// The owner took it back to edit: its words go back to the owner's editor.
+    OwnerEdit,
+    /// Its topic was archived.
+    TopicArchived,
+    /// Its session was closed.
+    SessionClosed,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -201,6 +207,8 @@ pub enum InputKind {
     Continue,
     /// The owner removed items or topics; the agent stops work on them.
     Removed,
+    /// The owner's instruction for a whole topic (target has no item).
+    TopicReply,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -385,6 +393,8 @@ pub enum ResolutionKind {
     Skip,
     RequestResultRepair,
     ConfirmEvidence,
+    /// The attempt already committed its result; the input is handled.
+    AcceptResult,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]

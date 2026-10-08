@@ -368,7 +368,7 @@ describe('selectors and registered reveal', () => {
     const bad = new CoreFailure({ ...coreError, code: 'not_found' });
     transport.script.push({ api_version: 1, ok: false, error: bad.error }, loaded());
     const missing = await routes.revealItem({ ...itemRoute, item_id: '99' });
-    expect(missing).toMatchObject({ kind: 'missing_item', session: route, requestedItemId: '99', banner: bad.message });
+    expect(missing).toMatchObject({ kind: 'missing_item', session: route, requestedItemId: '99', banner: 'Ariadne can’t find that any more. It may have been removed.' });
     expect(missing).not.toHaveProperty('route'); expect(missing).not.toHaveProperty('temporaryExpandedItemIds');
   });
   it('suppresses superseded reveals and unsubscribed native routes', async () => {

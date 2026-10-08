@@ -2,7 +2,7 @@
 use ariadne_adapter_codex::{CodexDaemonReader, CodexDiscovery, CodexHistoryClient, CodexOptions};
 use ariadne_agent_protocol::{
     AdapterErrorCode as Code, AttemptEvidenceRequest, ConnectRequest, EventPayload,
-    ReconcileRequest, Sha256, UtcMillis, UuidV4,
+    ReconcileRequest, ReconcileResult, Sha256, TurnFinishedStatus, UtcMillis, UuidV4,
 };
 use ariadne_domain::models::{ExecutionState, Freshness, PresenceSource};
 use serde_json::{json, Value};
@@ -1318,6 +1318,79 @@ fn failed_and_interrupted_turns_remain_separate_lifecycle_facts() {
             EventPayload::TurnFinished { .. }
         ));
     }
+}
+
+fn finished_status(result: &ReconcileResult) -> Option<TurnFinishedStatus> {
+    result.attempt_evidence[0]
+        .events
+        .iter()
+        .find_map(|event| match &event.event {
+            EventPayload::TurnFinished { status, .. } => Some(*status),
+            _ => None,
+        })
+}
+
+/// The owner's live case: the agent answered while its turn still ran in the
+/// local TUI, and the app-server read that newest turn back as `interrupted`
+/// with no end time. That is not a finished turn and never marks the input.
+#[test]
+fn newest_interrupted_turn_without_an_end_or_error_stays_in_progress() {
+    let harness = observed_turns(|page| {
+        page["data"][0]["status"] = json!("interrupted");
+        page["data"][0]["completedAt"] = Value::Null;
+        page["data"][0]["durationMs"] = Value::Null;
+        page["data"][0]["error"] = Value::Null;
+    });
+    let (mut client, _) = harness.connect();
+    let mut scan = client.begin_scan(None).unwrap();
+    let request = reconcile(vec![attempt(2)]);
+    let result = client
+        .read_history(request.clone(), &mut scan, at())
+        .unwrap();
+    result.validate_for(&request).unwrap();
+    assert_eq!(result.unresolved_attempt_ids, vec![attempt(2).attempt_id]);
+    assert_eq!(finished_status(&result), None);
+    // The turn itself was still found: started, with its visible answer.
+    assert!(matches!(
+        result.attempt_evidence[0].events[0].event,
+        EventPayload::TurnStarted {}
+    ));
+}
+
+#[test]
+fn interrupted_turn_is_conclusive_with_an_end_time_or_a_later_turn() {
+    // An end time recorded by Codex proves the newest turn really stopped.
+    let harness = observed_turns(|page| {
+        page["data"][0]["status"] = json!("interrupted");
+        page["data"][0]["error"] = Value::Null;
+    });
+    let (mut client, _) = harness.connect();
+    let mut scan = client.begin_scan(None).unwrap();
+    let result = client
+        .read_history(reconcile(vec![attempt(2)]), &mut scan, at())
+        .unwrap();
+    assert!(result.unresolved_attempt_ids.is_empty());
+    assert_eq!(
+        finished_status(&result),
+        Some(TurnFinishedStatus::Interrupted)
+    );
+    // A later turn in the thread proves an older one ended, even without an end time.
+    let harness = observed_turns(|page| {
+        page["data"][1]["status"] = json!("interrupted");
+        page["data"][1]["completedAt"] = Value::Null;
+        page["data"][1]["durationMs"] = Value::Null;
+        page["data"][1]["error"] = Value::Null;
+    });
+    let (mut client, _) = harness.connect();
+    let mut scan = client.begin_scan(None).unwrap();
+    let result = client
+        .read_history(reconcile(vec![attempt(1)]), &mut scan, at())
+        .unwrap();
+    assert!(result.unresolved_attempt_ids.is_empty());
+    assert_eq!(
+        finished_status(&result),
+        Some(TurnFinishedStatus::Interrupted)
+    );
 }
 
 #[test]

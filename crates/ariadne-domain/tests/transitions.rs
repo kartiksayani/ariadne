@@ -128,6 +128,8 @@ fn session() -> Session {
         id: uuid(5),
         project_id: uuid(6),
         title: "Validation test session".into(),
+        name: None,
+        description: None,
         state: SessionState::Active,
         created_at: time(),
         updated_at: time(),
@@ -222,6 +224,7 @@ fn add_owner_input(session: &mut Session, id: u64, number: u64, state: InputStat
             attempts: vec![],
             active_attempt_id: None,
             resolution_history: vec![],
+            cancel_cause: None,
         },
     );
     session.messages.push(message);
@@ -1488,6 +1491,70 @@ fn short_labels_are_trimmed_one_line_and_at_most_forty_characters() {
     let mut s = session();
     s.items.0.get_mut(&reference("1")).unwrap().short = Some("a\nb".into());
     invalid(&s, ValidationErrorKind::Multiline);
+}
+
+#[test]
+fn owner_labels_are_trimmed_one_line_bounded_and_blank_clears() {
+    for blank in [None, Some(""), Some("  \t ")] {
+        assert_eq!(
+            normalize_owner_label(blank, "name", SESSION_NAME_MAX_CHARS).unwrap(),
+            None
+        );
+    }
+    assert_eq!(
+        normalize_owner_label(Some("  Billing fixes "), "name", SESSION_NAME_MAX_CHARS).unwrap(),
+        Some("Billing fixes".into())
+    );
+    let sixty = "é".repeat(SESSION_NAME_MAX_CHARS);
+    assert_eq!(
+        normalize_owner_label(Some(&sixty), "name", SESSION_NAME_MAX_CHARS).unwrap(),
+        Some(sixty)
+    );
+    for (value, kind) in [
+        (
+            "x".repeat(61),
+            ValidationErrorKind::TooManyChars { maximum_chars: 60 },
+        ),
+        ("two\nlines".into(), ValidationErrorKind::Multiline),
+        ("tab\there".into(), ValidationErrorKind::InvalidState),
+        ("nul\0".into(), ValidationErrorKind::Nul),
+    ] {
+        let error =
+            normalize_owner_label(Some(&value), "name", SESSION_NAME_MAX_CHARS).unwrap_err();
+        assert_eq!(error.kind, kind, "{value:?}");
+    }
+    let long = "d".repeat(SESSION_DESCRIPTION_MAX_CHARS + 1);
+    assert_eq!(
+        normalize_owner_label(Some(&long), "description", SESSION_DESCRIPTION_MAX_CHARS)
+            .unwrap_err()
+            .kind,
+        ValidationErrorKind::TooManyChars { maximum_chars: 200 }
+    );
+    // Stored names are checked too, including one that skipped trimming.
+    let mut s = session();
+    s.name = Some("x".repeat(61));
+    invalid(&s, ValidationErrorKind::TooManyChars { maximum_chars: 60 });
+    let mut s = session();
+    s.description = Some(" padded".into());
+    invalid(&s, ValidationErrorKind::InvalidState);
+    let mut s = session();
+    s.name = Some("Billing".into());
+    s.description = Some("Refunds".into());
+    validate_session_items(&s).unwrap();
+}
+
+#[test]
+fn stored_sessions_without_a_name_load_and_serialize_unchanged() {
+    let plain = serde_json::to_value(session()).unwrap();
+    assert!(plain.get("name").is_none() && plain.get("description").is_none());
+    let parsed: Session = serde_json::from_value(plain.clone()).unwrap();
+    assert!(parsed.name.is_none() && parsed.description.is_none());
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), plain);
+    let mut named = parsed;
+    named.name = Some("Billing".into());
+    let value = serde_json::to_value(&named).unwrap();
+    assert_eq!(value["name"], "Billing");
+    assert!(value.get("description").is_none());
 }
 
 #[test]

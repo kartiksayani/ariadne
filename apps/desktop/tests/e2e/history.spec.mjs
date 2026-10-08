@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { historyFailureFacts, withFailureEvidence } from './history-evidence.mjs';
 import { folded } from './owner-reply.mjs';
-import { admissions, awaitConnected, cliRequest, completeTurn, journeyResultRequest, snapshot } from './scripted-provider.mjs';
+import { admissions, assertSlimEnvelope, awaitConnected, cliRequest, completeTurn, journeyResultRequest, snapshot } from './scripted-provider.mjs';
 import { openSessionButton } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
@@ -170,7 +170,7 @@ async function result(history, ordinal, body, extra = []) {
   assert.equal(admission.inputId, input.id); assert.equal(admission.bindingId, history.bindingId); assert.equal(admission.generation, history.generation);
   assert.equal(input.attempts.length, 1); assert.equal(admission.attemptId, input.attempts[0].id);
   assert.equal(admission.payload, input.attempts[0].formatted_payload);
-  assert.deepEqual(JSON.parse(admission.payload.slice(admission.payload.indexOf('\n') + 1)).saved_input, input.payload);
+  assertSlimEnvelope(admission, input);
   const value = journeyResultRequest(history, admission, saved, body);
   value.operations[0].round_id = input.payload.context.round_id;
   value.input_result.explanation = `Explicit native result ${ordinal}\nComplete stored explanation for ${input.kind} #${input.seq}.`;

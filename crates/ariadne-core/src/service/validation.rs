@@ -291,7 +291,8 @@ impl OwnerCommand {
             | Self::ItemRemove { op_id, .. }
             | Self::TopicRemove { op_id, .. }
             | Self::SessionRemove { op_id, .. }
-            | Self::ProjectRemove { op_id, .. } => op_id,
+            | Self::ProjectRemove { op_id, .. }
+            | Self::SessionLabelSet { op_id, .. } => op_id,
         }
     }
     pub fn validate_wire(&self) -> Result<(), CoreError> {
@@ -309,7 +310,8 @@ impl OwnerCommand {
                         .is_some_and(|id| !id.trim().is_empty());
                 text(&params.text, 16 * 1024, !option_only)?;
             }
-            Self::InputResolve { params, .. } => text(&params.reason, 4096, true)?,
+            // The owner's reason is optional plain text.
+            Self::InputResolve { params, .. } => text(&params.reason, 4096, false)?,
             Self::TopicContinue { params, .. } => {
                 if params.summary.len() > 16 * 1024 {
                     return Err(CoreError::new(CoreErrorCode::CapacityExceeded, "The complete continuation summary exceeds the saved 16 KiB owner-input bound", "Use a concise complete summary; full history is copied separately."));
@@ -388,9 +390,52 @@ impl OwnerCommand {
                     }
                 }
             }
+            Self::SessionLabelSet { params, .. } => {
+                params.normalized()?;
+            }
             _ => {}
         }
         size(self, 512 * 1024)
+    }
+}
+
+impl SessionLabelParams {
+    /// The name and description as they are stored: trimmed, blank cleared to
+    /// `None`. A name over 60 characters, a description over 200, or either
+    /// spanning lines is refused in plain words.
+    pub fn normalized(&self) -> Result<(Option<String>, Option<String>), CoreError> {
+        use ariadne_domain::validation::{
+            normalize_owner_label, ValidationErrorKind, SESSION_DESCRIPTION_MAX_CHARS,
+            SESSION_NAME_MAX_CHARS,
+        };
+        let one = |value: &Option<String>, field: &str, noun: &str, maximum: usize| {
+            normalize_owner_label(value.as_deref(), field, maximum).map_err(|error| {
+                let message = match error.kind {
+                    ValidationErrorKind::TooManyChars { maximum_chars } => {
+                        format!("The session {noun} can be up to {maximum_chars} characters.")
+                    }
+                    ValidationErrorKind::Multiline => {
+                        format!("The session {noun} must be on one line.")
+                    }
+                    _ => format!("The session {noun} has a character Ariadne cannot save."),
+                };
+                let mut refused = invalid(&message);
+                refused.field_errors = vec![FieldError {
+                    field: field.to_owned(),
+                    message: message.clone(),
+                }];
+                refused
+            })
+        };
+        Ok((
+            one(&self.name, "name", "name", SESSION_NAME_MAX_CHARS)?,
+            one(
+                &self.description,
+                "description",
+                "description",
+                SESSION_DESCRIPTION_MAX_CHARS,
+            )?,
+        ))
     }
 }
 
@@ -1001,6 +1046,9 @@ pub fn validate_owner_receipt(
                     ) | (
                         OwnerCommand::SessionClose { .. } | OwnerCommand::SessionReopen { .. },
                         SavedReceiptData::SessionLifecycle { .. }
+                    ) | (
+                        OwnerCommand::SessionLabelSet { .. },
+                        SavedReceiptData::SessionLabel { .. }
                     ) | (
                         OwnerCommand::BindingPause { .. }
                             | OwnerCommand::BindingResume { .. }

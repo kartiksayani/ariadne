@@ -47,6 +47,26 @@ pub fn validated_error(error: CoreError) -> CoreError {
     }
 }
 
+/// The binding still exists (or cannot be shown gone) but no desktop holds its
+/// lease: not terminal, the desktop may take it again.
+fn no_lease(binding_id: &ariadne_domain::models::UuidV4) -> CoreError {
+    let mut no_lease = error(
+        CoreErrorCode::NotFound,
+        "No current desktop supervisor holds this binding lease.",
+    );
+    no_lease.details = Some(Box::new(ariadne_core::ErrorDetails {
+        reason: Some(ariadne_core::BarrierReason::LeaseInvalid),
+        binding_id: Some(binding_id.clone()),
+        input_id: None,
+        attempt_id: None,
+        blocking_item_ids: vec![],
+        blocking_input_ids: vec![],
+        dispatch_must_pause: false,
+        partial_removal: None,
+    }));
+    no_lease
+}
+
 fn path_limit(path: &Path) -> Result<(), CoreError> {
     use std::os::unix::ffi::OsStrExt;
     // SAFETY: zero is a valid sockaddr_un representation used only for its array capacity.
@@ -345,10 +365,19 @@ async fn handle(mut stream: UnixStream, connection: Connection) -> Result<(), Co
                         )
                     })?;
                     match bindings.get(&scope.binding_id)? {
-                        None => Err(error(
-                            CoreErrorCode::NotFound,
-                            "No current desktop supervisor holds this binding lease.",
-                        )),
+                        None => {
+                            let binding_id = scope.binding_id.clone();
+                            tokio::task::spawn_blocking(move || {
+                                let _retained_slot = slot;
+                                let _owner = owner;
+                                core.unknown_binding_error(&binding_id)
+                            })
+                            .await
+                            .ok()
+                            .and_then(Result::ok)
+                            .flatten()
+                            .map_or_else(|| Err(no_lease(&scope.binding_id)), Err)
+                        }
                         Some((lease, gate)) => match lease.context(
                             &scope.binding_id,
                             if matches!(request.method, ControlMethod::Claim(_)) {

@@ -430,7 +430,10 @@ fn owner(session: &Session, message: &Message) -> Result<(), HistoryError> {
             } else {
                 message.topic_id.as_ref() == Some(&input.target.topic_id)
             }
-            && message.binding_id.as_ref() == Some(&input.binding_id)
+            && message
+                .binding_id
+                .as_ref()
+                .is_some_and(|id| crate::validation::input_route(session, input, id))
             && message.body == input.payload.text
             && message.created_at == input.created_at
             && message.attempt_id.is_none()
@@ -441,8 +444,10 @@ fn owner(session: &Session, message: &Message) -> Result<(), HistoryError> {
     )?;
     if message.item_id.is_none() {
         require(
-            matches!(input.kind, InputKind::Continue | InputKind::Removed)
-                && input.answer_id.is_none()
+            matches!(
+                input.kind,
+                InputKind::Continue | InputKind::Removed | InputKind::TopicReply
+            ) && input.answer_id.is_none()
                 && input.payload.selected_option_id.is_none()
                 && message.round_id.is_none()
                 && message.items_touched.is_empty(),
@@ -508,7 +513,7 @@ fn agent(session: &Session, message: &Message) -> Result<(), HistoryError> {
                 .find(|a| &a.id == attempt_id)
                 .ok_or(HistoryError::MissingReference)?;
             require(
-                &input.binding_id == binding_id
+                crate::validation::input_route(session, input, binding_id)
                     && message
                         .host_turn_id
                         .as_ref()
@@ -567,9 +572,10 @@ pub(super) fn result_rounds(
     }
     distinct(result.reply_message_ids.iter())?;
     distinct(result.followup_item_ids.iter())?;
-    // A removal notice is acknowledged without replies: its subject is gone.
+    // A removal notice is acknowledged without replies: its subject is gone. A
+    // topic reply may be acted on outside Ariadne; its explanation says how.
     require(
-        input.kind == InputKind::Removed
+        matches!(input.kind, InputKind::Removed | InputKind::TopicReply)
             || match result.outcome {
                 ResultOutcome::Answered => {
                     !result.reply_message_ids.is_empty() || !result.followup_item_ids.is_empty()

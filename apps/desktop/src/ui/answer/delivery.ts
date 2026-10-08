@@ -43,14 +43,14 @@ type Kind = InputKind;
 const sending = (label: string, agent: string): Record<Kind, string> => ({
   answer: `Sending ${label}…`, bring: 'Asking the agent to bring this up…', reply: 'Sending your reply…', drop: 'Sending your drop request…',
   note: 'Sending your note…', followup: 'Sending your follow-up…', reopen: 'Asking the agent to reopen this…', continue: `Sending the topic summary to ${agent}…`,
-  removed: `Telling ${agent}…`,
+  removed: `Telling ${agent}…`, topic_reply: 'Sending your reply on this topic…',
 });
 const received = (label: string, agent: string): Record<Kind, string> => ({
   answer: `You answered ${label} · received, waiting for the agent`, bring: 'Asked the agent to bring this up · received, waiting for the agent',
   reply: 'Your reply was received · waiting for the agent', drop: 'Drop request received · waiting for the agent',
   note: 'Note received · the agent is folding it in', followup: 'Follow-up received · waiting for the agent',
   reopen: 'Reopen request received · waiting for the agent', continue: 'Summary received · the agent is picking the topic up',
-  removed: `${agent} was told and won't bring them up again.`,
+  removed: `${agent} was told and won't bring them up again.`, topic_reply: 'Your reply on this topic was received · waiting for the agent',
 });
 
 /** The line under a card or Sent row. `label` is the chosen option or the reply text; `agent` the receiving agent's name. */

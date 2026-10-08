@@ -1,4 +1,5 @@
 use super::{NativeConfiguration, NativeRuntime};
+use crate::native::tray::LifecycleNote;
 use ariadne_core::CoreError;
 use ariadne_runtime::activation::ActivationOutcome;
 use std::sync::{Arc, Mutex};
@@ -12,44 +13,27 @@ impl ActivationHandoffs {
     pub fn take(&self) -> Vec<ActivationOutcome> {
         std::mem::take(&mut *self.0.lock().unwrap_or_else(|error| error.into_inner()))
     }
-    pub(crate) fn diagnostics(&self) -> Vec<String> {
+    /// Plain tray notes per binding; the tray names each session by its label.
+    pub(crate) fn diagnostics(&self) -> Vec<LifecycleNote> {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .iter()
             .rev()
-            .filter_map(|outcome| match outcome {
-                ActivationOutcome::ConnectFailed { scope, failure } => Some(format!(
-                    "Binding {}: {}{}",
-                    scope.binding_id.as_str(),
-                    failure.cause.message,
-                    if failure.pending.is_some() {
-                        " Unsaved connection facts remain retained."
-                    } else {
-                        ""
-                    }
-                )),
-                ActivationOutcome::Failed { scope, error } => Some(format!(
-                    "Binding {}: {}",
-                    scope.binding_id.as_str(),
-                    error.message
-                )),
-                ActivationOutcome::Stopped { scope, exit } => match exit {
-                    Err(error) => Some(format!(
-                        "Binding {}: {}",
-                        scope.binding_id.as_str(),
-                        error.message
-                    )),
-                    Ok(exit) if exit.pending.is_some() || exit.pending_claim.is_some() => {
-                        Some(format!(
-                            "Binding {} retains unconfirmed observation or claim facts.",
-                            scope.binding_id.as_str()
-                        ))
-                    }
-                    Ok(exit) => exit.error.as_ref().map(|error| {
-                        format!("Binding {}: {}", scope.binding_id.as_str(), error.message)
-                    }),
-                },
+            .filter_map(|outcome| {
+                let (scope, text) = match outcome {
+                    ActivationOutcome::ConnectFailed { scope, .. } => (scope, "could not connect"),
+                    ActivationOutcome::Failed { scope, .. } => (scope, "could not start"),
+                    ActivationOutcome::Stopped { scope, exit } => match exit {
+                        Err(_) => (scope, "disconnected unexpectedly"),
+                        Ok(exit) if exit.pending.is_some() || exit.pending_claim.is_some() => {
+                            (scope, "disconnected before its last update was saved")
+                        }
+                        Ok(exit) if exit.error.is_some() => (scope, "disconnected unexpectedly"),
+                        Ok(_) => return None,
+                    },
+                };
+                Some(LifecycleNote::binding(scope.binding_id.as_str(), text))
             })
             .take(16)
             .collect()
@@ -91,12 +75,22 @@ pub(crate) fn establish<R: tauri::Runtime>(
             if let Some(tray) = refresh.try_state::<crate::native::tray::NativeTray>() {
                 let mut diagnostics = diagnostic_handoffs.diagnostics();
                 if let Some(runtime) = refresh.try_state::<Arc<NativeRuntime>>() {
-                    diagnostics.extend(runtime.reconciliation_diagnostics());
+                    diagnostics.extend(
+                        runtime
+                            .reconciliation_diagnostics()
+                            .into_iter()
+                            .map(LifecycleNote::general),
+                    );
                 }
                 tray.diagnostics(diagnostics);
             }
         }),
     )?;
+    let health = app.clone();
+    runtime.set_supervisor_health_emitter(Arc::new(move |entry| {
+        // Best effort: the renderer reads `supervisor_health` on mount.
+        let _ = health.emit("ariadne://supervisor_health", entry);
+    }));
     let preferences = app.clone();
     app.manage(
         runtime

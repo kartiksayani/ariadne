@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { BindingConnectParams, ItemRoute, MutationReceipt, NavigationSelection, OwnerMutationRequest,
+import type { BindingConnectParams, GlobalPreferences, ItemRoute, MutationReceipt, NavigationSelection, OwnerMutationRequest,
   PreferencesPatchEntry, PreferencesSnapshot, ProjectListResult, SessionListResult, SessionPreferences, SessionRef, Theme } from '../../generated/core';
 import type { RevealedItem } from '../../data/routes';
 import { RegisteredRoutes } from '../../data/routes';
@@ -26,7 +26,11 @@ export interface NavigationState {
   readonly reveal: RevealedItem | null;
   readonly setup: Immutable<Extract<MutationReceipt, { session_id: string }>> | null;
   readonly setupAdapterId: string | null;
+  /** The project whose page shows the setup card: the one the session was connected in. */
+  readonly setupProjectId: string | null;
 }
+/** Renderer layout choices saved with the global preferences. */
+export type LayoutChange = Partial<Pick<GlobalPreferences, 'detail_width' | 'waiting_collapsed'>>;
 const sameRoute = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
 const fail = (error: unknown): Failure => error instanceof CoreFailure || error instanceof ServiceFailure
   ? error : new ServiceFailure('transport');
@@ -57,7 +61,7 @@ export class NavigationStore {
   readonly opened: OpenSessions;
   readonly routes: RegisteredRoutes;
   private state: NavigationState = Object.freeze({ preferences: null, projects: null, sessions: null,
-    sessionProjectId: null, status: 'loading', error: null, writing: false, pendingOperationId: null, reveal: null, setup: null, setupAdapterId: null });
+    sessionProjectId: null, status: 'loading', error: null, writing: false, pendingOperationId: null, reveal: null, setup: null, setupAdapterId: null, setupProjectId: null });
   private readonly listeners = new Set<() => void>();
   private subscriptions: Unsubscribe[] = [];
   private setup: Promise<void> | null = null;
@@ -188,12 +192,23 @@ export class NavigationStore {
           throw new ServiceFailure('invalid_response');
         }
         this.publish({ preferences: immutable(preferences), projects: immutable(projects), sessions: immutable(sessions),
-          sessionProjectId: projectId, status: 'ready', error: this.mutationFailure });
+          sessionProjectId: projectId, status: 'ready', error: this.mutationFailure, ...this.setupAfter(sessions, projectId) });
         this.flushStartupRoute();
       } catch (error: unknown) {
         if (epoch === this.epoch) this.publish({ status: this.state.projects ? 'stale' : 'unavailable', error: fail(error) });
       }
     }
+  }
+  // The setup card outlives a removed session only until a complete capture of its project lacks it.
+  private setupAfter(sessions: SessionListResult, projectId: string | null): Partial<NavigationState> {
+    const { setup, setupProjectId } = this.state;
+    if (!setup || (projectId !== null && projectId !== setupProjectId)) return {};
+    const listed = sessions.sessions.items.some(session => session.project_id === setupProjectId && session.session_id === setup.session_id);
+    return listed || sessions.counts.unavailable_session_ids.includes(setup.session_id) ? {} : { setup: null, setupAdapterId: null, setupProjectId: null };
+  }
+  /** The owner closed the "Session connected" card. */
+  dismissSetup(): void {
+    this.publish({ setup: null, setupAdapterId: null, setupProjectId: null });
   }
   private flushStartupRoute(): void {
     if (this.stopped || this.startupRouteFlight || this.pending || !this.state.preferences) return;
@@ -273,6 +288,14 @@ export class NavigationStore {
       const preferences = await this.editingPreferences(expectedPreferencesRevision);
       if (!preferences || this.stopped || this.pending) return false;
       return await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, theme } }]);
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
+  /** Saves the detail panel width or the Waiting column fold. */
+  async saveLayout(change: LayoutChange, expectedPreferencesRevision: number): Promise<boolean> {
+    try {
+      const preferences = await this.editingPreferences(expectedPreferencesRevision);
+      if (!preferences || this.stopped || this.pending) return false;
+      return await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, ...change } }]);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   async saveSessionView(view: SessionPreferences, expectedPreferencesRevision: number): Promise<boolean> {
@@ -355,11 +378,11 @@ export class NavigationStore {
   }
   async bind(params: BindingConnectParams): Promise<boolean> {
     if (this.stopped || this.pending) return false;
-    this.publish({ setup: null, setupAdapterId: null });
+    this.publish({ setup: null, setupAdapterId: null, setupProjectId: null });
     return this.execute({ session: null, command: { api_version: 1, command: 'binding_connect',
       op_id: this.operationId(), params } }, receipt => {
       if (!('session_id' in receipt) || receipt.data.kind !== 'binding_connect') throw new ServiceFailure('invalid_response');
-      this.publish({ setup: immutable(receipt), setupAdapterId: params.adapter_id });
+      this.publish({ setup: immutable(receipt), setupAdapterId: params.adapter_id, setupProjectId: params.project_id });
     });
   }
   private async execute(request: OwnerMutationRequest, confirmed: (receipt: MutationReceipt) => void,

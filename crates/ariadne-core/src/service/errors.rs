@@ -103,6 +103,14 @@ pub enum BarrierReason {
     DeliveryUncertain,
     HostFailure,
     StoreError,
+    /// The binding's session is closed; reopening it resumes dispatch.
+    SessionClosed,
+    /// The binding exists in no registered session (removed or unknown).
+    SessionRemoved,
+    /// The owner cancelled or removed the input the agent names.
+    InputCancelled,
+    /// The owner archived the topic an agent write targets; restore reopens it.
+    TopicArchived,
 }
 
 impl CoreError {

@@ -94,6 +94,21 @@
         "expected_generation"
       ]
     },
+    "CancelPurpose": {
+      "description": "What an owner `input_cancel` is for.",
+      "oneOf": [
+        {
+          "description": "Delete the message: it is not sent.",
+          "type": "string",
+          "const": "delete"
+        },
+        {
+          "description": "Take the message back to edit: only a message still queued can be.",
+          "type": "string",
+          "const": "edit"
+        }
+      ]
+    },
     "EndpointRef": {
       "oneOf": [
         {
@@ -135,6 +150,15 @@
     "GlobalPreferences": {
       "type": "object",
       "properties": {
+        "detail_width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "maximum": 720,
+          "minimum": 320
+        },
         "notification_ledger": {
           "type": "array",
           "items": {
@@ -164,6 +188,9 @@
         "theme": {
           "$ref": "#/$defs/Theme"
         },
+        "waiting_collapsed": {
+          "type": "boolean"
+        },
         "window": {
           "anyOf": [
             {
@@ -192,6 +219,16 @@
         },
         "input_id": {
           "$ref": "#/$defs/UuidV4"
+        },
+        "purpose": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CancelPurpose"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -219,6 +256,11 @@
           "description": "The owner removed items or topics; the agent stops work on them.",
           "type": "string",
           "const": "removed"
+        },
+        {
+          "description": "The owner's instruction for a whole topic (target has no item).",
+          "type": "string",
+          "const": "topic_reply"
         }
       ]
     },
@@ -982,6 +1024,31 @@
             "op_id",
             "params"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "api_version": {
+              "$ref": "#/$defs/SchemaVersion"
+            },
+            "command": {
+              "type": "string",
+              "const": "session_label_set"
+            },
+            "op_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "params": {
+              "$ref": "#/$defs/SessionLabelParams"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "api_version",
+            "op_id",
+            "params"
+          ]
         }
       ]
     },
@@ -1241,13 +1308,22 @@
       ]
     },
     "ResolutionKind": {
-      "type": "string",
-      "enum": [
-        "retry_unexecuted",
-        "resend",
-        "skip",
-        "request_result_repair",
-        "confirm_evidence"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "retry_unexecuted",
+            "resend",
+            "skip",
+            "request_result_repair",
+            "confirm_evidence"
+          ]
+        },
+        {
+          "description": "The attempt already committed its result; the input is handled.",
+          "type": "string",
+          "const": "accept_result"
+        }
       ]
     },
     "SchemaVersion": {
@@ -1279,6 +1355,29 @@
         "offset"
       ]
     },
+    "SessionLabelParams": {
+      "description": "Replaces the routed session's owner-set name and description. `null` or a\nblank string clears a field (the session falls back to its agent label).",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description"
+      ]
+    },
     "SessionLifecycleParams": {
       "type": "object",
       "properties": {
@@ -1294,6 +1393,13 @@
     "SessionPreferences": {
       "type": "object",
       "properties": {
+        "collapsed_topic_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "maxItems": 256
+        },
         "expanded_item_ids": {
           "type": "array",
           "items": {

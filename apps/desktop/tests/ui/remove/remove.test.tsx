@@ -11,7 +11,8 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { NoticeStore, Notices } from '../../../src/ui/pages/notices';
-import type { RemoveSubject, RemoveTarget } from '../../../src/ui/dialogs/remove';
+import { removeCopy, type RemoveSubject, type RemoveTarget } from '../../../src/ui/dialogs/remove';
+import { projectRemoval, sessionRemoval } from '../../../src/ui/pages/model';
 import { RemovalContext, RemovalQueue, UNDO_MS } from '../../../src/ui/remove/queue';
 import { Hidden, hiddenKey, nextSelection, removeLabel, removeSubject, tellOf, visibleSession } from '../../../src/ui/remove/model';
 import { TreeView } from '../../../src/ui/tree/TreeView';
@@ -127,7 +128,7 @@ describe('the removal queue', () => {
     service.removeItem.mockRejectedValueOnce(new CoreFailure({ code: 'revision_conflict', message: 'The revision changed', hint: '', retryable: false, field_errors: [] }));
     const op = queue.schedule(itemTarget('1'), itemSubject());
     await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS); });
-    expect(text()).toEqual(['Couldn’t remove “Stale plans” and 1 item below it. The revision changed']);
+    expect(text()).toEqual(['Couldn’t remove “Stale plans” and 1 item below it. This changed while you were working. Look at it as it is now, then try again.']);
     expect(queue.getSnapshot().empty).toBe(true);
     revision = 4;
     await act(async () => { notice().actions![0]!.run(); await vi.advanceTimersByTimeAsync(0); });
@@ -186,6 +187,25 @@ describe('remove model', () => {
     expect(removeLabel(removeSubject(session, { kind: 'topic', session: route, topic_id: topicId })!)).toBe('the topic “Delivery decisions”');
     expect(tellOf({ ...session, state: 'closed' } as Immutable<Session>).mode).toBe('closed');
   });
+  it('says how many queued messages a removal cancels, naming their agent', () => {
+    const warn = (subject: RemoveSubject | null) => removeCopy(subject!).warn;
+    const item = (itemId: string) => ({ kind: 'item' as const, item: { ...route, item_id: itemId } });
+    // Item 4 holds the queued drop (input 76); item 1 holds none.
+    expect(removeSubject(session, item('4'))!.unsent).toEqual({ count: 1, agent: 'demo.local' });
+    // A drop is not an answer: the warning says "messages" for every kind.
+    expect(warn(removeSubject(session, item('4')))).toBe('1 of your messages hasn’t reached demo.local yet; removing cancels it.');
+    expect(warn(removeSubject(session, item('1')))).toBe('');
+    expect(removeSubject(session, { kind: 'topic', session: route, topic_id: topicId })!.unsent?.count).toBe(1);
+    // The session and its project hold both queued messages (76 and the topic continuation 77).
+    const counts = sessionRemoval(session, new Set());
+    expect(warn({ kind: 'session', agent: 'demo.local', when: 'Yesterday', ...counts }))
+      .toBe('1 question waiting on you goes with it. 2 of your messages haven’t reached demo.local yet; removing cancels them.');
+    const other = structuredClone(demo) as Session, binding = other.bindings[other.active_binding_id!]!; binding.adapter_id = 'codex';
+    expect(projectRemoval([session, other as Immutable<Session>]).unsent).toEqual({ count: 4, agent: 'the agent' });
+    // Waiting questions and unsent messages are both named.
+    expect(removeCopy({ ...removeSubject(session, item('4'))!, waiting: 1 } as RemoveSubject).warn)
+      .toBe('1 question waiting on you goes with it. 1 of your messages hasn’t reached demo.local yet; removing cancels it.');
+  });
   it('selects the next row, else the parent, else none', () => {
     const view = new AppTransport().view();
     const rows = Object.values(session.items).filter(item => item?.topic_id === topicId && !item.parent).map(item => item!.id).sort();
@@ -207,9 +227,9 @@ describe('tree remove triggers', () => {
     const store = navigation.opened.open(route); await store.refresh();
     const actions = new SessionActionControllers(service).forSession(store), targets: RemoveTarget[] = [];
     const tree = <TreeView navigation={navigation} store={store} actions={actions} drafts={new OwnerDraftStore(service)} query="" reveal={null} selectedId={null}
-      detailOpen={false} railOpen={false} highlightedItems={new Set()} highlightedMessages={new Set()} summaries={[]} continueTargets={[]}
-      actionsForTarget={() => actions} onHoverItem={() => {}} onSelected={() => {}} onDismissReveal={() => {}} onResume={() => {}} onAct={() => {}}
-      onClearFilters={() => {}} onShowArchive={() => {}} revealItem={() => {}} openSession={() => {}} onRemove={target => { targets.push(target); }} />;
+      detailOpen={false} railOpen={false} highlightedItems={new Set()} highlightedMessages={new Set()} summaries={[]}
+      onHoverItem={() => {}} onSelected={() => {}} onDismissReveal={() => {}} onResume={() => {}} onAct={() => {}}
+      onClearFilters={() => {}} onShowArchive={() => {}} onRemove={target => { targets.push(target); }} />;
     render(queue ? <RemovalContext.Provider value={queue}>{tree}</RemovalContext.Provider> : tree);
     return { targets };
   }

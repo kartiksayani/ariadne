@@ -625,8 +625,9 @@ fn installed_cli_repairs_a_missing_result_without_repeating_original_work() {
     );
     assert_eq!(input.resolution_history[0].evidence, evidence);
     assert!(input.attempts[0].sealed_at.is_some());
-    assert!(prepared.bindings.0[&lane.binding].owner_paused);
-    blocked_claim(2004);
+    // The saved decision is the owner's go-ahead: no extra resume step.
+    assert!(!prepared.bindings.0[&lane.binding].owner_paused);
+    assert_eq!(prepared.bindings.0[&lane.binding].pause_reason, None);
     let before = lane.bytes();
     assert_eq!(
         ok(owner_call(binary, home.path(), &lane, &resolve)),
@@ -634,19 +635,6 @@ fn installed_cli_repairs_a_missing_result_without_repeating_original_work() {
     );
     assert_eq!(lane.bytes(), before);
 
-    ok(owner_call(
-        binary,
-        home.path(),
-        &lane,
-        &OwnerCommand::BindingResume {
-            api_version: SchemaVersion::new(1).unwrap(),
-            op_id: id(2005),
-            params: BindingStateParams {
-                binding_id: lane.binding.clone(),
-                expected_generation: lane.generation.clone(),
-            },
-        },
-    ));
     let repair = lane.claim(&registry, 2006).unwrap();
     assert_eq!(repair.input_id, work.input_id);
     assert_ne!(repair.attempt_id, work.attempt_id);
@@ -657,7 +645,9 @@ fn installed_cli_repairs_a_missing_result_without_repeating_original_work() {
         repair_attempt.repair_for_attempt_id,
         Some(work.attempt_id.clone())
     );
-    assert!(repair.formatted_payload.contains("result-only"));
+    assert!(repair
+        .formatted_payload
+        .contains(r#""purpose":"result_repair""#));
     assert!(repair
         .formatted_payload
         .contains(original_reply.id.as_str()));

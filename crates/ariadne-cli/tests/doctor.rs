@@ -781,8 +781,17 @@ fn doctor_flags_output_and_error_exit_are_stable_without_root_creation() {
         .contains("session.future_schema"));
 }
 
-#[test]
-fn executable_doctor_qualifies_only_the_existing_codex_daemon_and_exact_thread() {
+struct CodexDoctorRun {
+    report: Value,
+    calls: Vec<String>,
+    stdout: String,
+    socket: PathBuf,
+}
+
+/// Runs the installed doctor against a scripted Codex app-server whose
+/// `thread/read` reports `thread_status` for the bound thread. Asserts the run
+/// changed nothing on disk.
+fn codex_doctor(thread_status: &str) -> CodexDoctorRun {
     use std::os::unix::net::UnixListener;
     let profile = Profile::new();
     let executable_path = profile.home.path().join("codex");
@@ -811,6 +820,7 @@ fn executable_doctor_qualifies_only_the_existing_codex_daemon_and_exact_thread()
     let project = profile.project.path().canonicalize().unwrap();
     let before = snapshot(profile.project.path());
     let home_before = snapshot(profile.home.path());
+    let status = thread_status.to_owned();
     let server = std::thread::spawn(move || {
         let fixture = |name: &str| -> Value {
             serde_json::from_slice(
@@ -845,6 +855,7 @@ fn executable_doctor_qualifies_only_the_existing_codex_daemon_and_exact_thread()
                         let mut result = fixture("read-response.json");
                         result["thread"]["id"] = thread.clone().into();
                         result["thread"]["cwd"] = serde_json::json!(project);
+                        result["thread"]["status"] = serde_json::json!({"type": status});
                         result
                     }
                     "thread/queue/list" => fixture("queue-response.json"),
@@ -881,19 +892,35 @@ fn executable_doctor_qualifies_only_the_existing_codex_daemon_and_exact_thread()
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let report = &envelope["data"];
+    let mut envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let calls = server.join().unwrap();
+    assert_eq!(snapshot(profile.project.path()), before);
+    assert_eq!(snapshot(profile.home.path()), home_before);
+    CodexDoctorRun {
+        report: envelope["data"].take(),
+        calls,
+        stdout: String::from_utf8(output.stdout).unwrap(),
+        socket: endpoint,
+    }
+}
+
+#[test]
+fn executable_doctor_qualifies_only_the_existing_codex_daemon_and_exact_thread() {
+    let run = codex_doctor("idle");
+    let report = &run.report;
     assert_eq!(checks(report, "codex.selected_thread")[0]["status"], "ok");
     assert_eq!(checks(report, "codex.daemon")[0]["status"], "ok");
+    assert!(checks(report, "codex.thread_not_loaded").is_empty());
     assert_eq!(
         checks(report, "codex.selected_thread")[0]["facts"]["dispatch_ready"],
         false
     );
     assert_eq!(
-        server.join().unwrap(),
+        run.calls,
         [
             "initialize",
             "initialized",
+            "thread/read",
             "thread/read",
             "thread/queue/list",
             "thread/turns/list",
@@ -901,9 +928,153 @@ fn executable_doctor_qualifies_only_the_existing_codex_daemon_and_exact_thread()
             "initialized"
         ]
     );
-    assert_eq!(snapshot(profile.project.path()), before);
-    assert_eq!(snapshot(profile.home.path()), home_before);
-    assert!(!String::from_utf8(output.stdout)
+    assert!(!run.stdout.contains("Codex queue communication test"));
+}
+
+#[test]
+fn doctor_warns_in_plain_words_when_codex_has_not_loaded_the_selected_thread() {
+    let run = codex_doctor("notLoaded");
+    let report = &run.report;
+    let check = &checks(report, "codex.thread_not_loaded")[0];
+    assert_eq!(check["status"], "warning");
+    assert_eq!(
+        check["message"],
+        "Codex isn't sharing this conversation with Ariadne, so messages can't reach it."
+    );
+    // The fix names the exact option and this binding's own socket.
+    let hint = check["hint"].as_str().unwrap();
+    assert!(
+        hint.contains(&format!("--remote unix://{}", run.socket.display())),
+        "{hint}"
+    );
+    assert_eq!(check["facts"]["dispatch_ready"], false);
+    // Not loaded is a specific answer, so neither the generic warning nor a pass appears.
+    assert!(checks(report, "codex.thread_unknown").is_empty());
+    assert!(checks(report, "codex.selected_thread").is_empty());
+    assert_eq!(report["status"], "warning");
+    // Doctor stops at the status read: no queue or history read of an unloaded thread.
+    assert_eq!(
+        run.calls,
+        [
+            "initialize",
+            "initialized",
+            "thread/read",
+            "initialize",
+            "initialized"
+        ]
+    );
+}
+
+fn health_entry(n: u64, state: &str, reason: Option<&str>) -> Value {
+    serde_json::json!({
+        "binding_id": id(n), "generation": id(n + 100), "state": state,
+        "reason": reason, "retry_in_seconds": if state == "backing_off" { Some(8) } else { None },
+        "updated_at": "2026-10-07T18:41:00.000Z"
+    })
+}
+fn write_health(data: &Path, written_at: &str, bindings: Vec<Value>) {
+    let logs = data.join("logs");
+    fs::create_dir_all(&logs).unwrap();
+    fs::write(
+        logs.join("supervisor-health.json"),
+        serde_json::to_vec(
+            &serde_json::json!({"pid": 1, "written_at": written_at, "bindings": bindings}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+}
+fn now_utc(offset_seconds: i64) -> String {
+    (chrono::Utc::now() + chrono::Duration::seconds(offset_seconds))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+#[test]
+fn supervisor_health_reads_the_app_heartbeat_and_says_what_is_wrong_in_plain_words() {
+    let profile = Profile::new();
+    // Before the app ever ran with this data folder.
+    let report = profile.report();
+    let missing = checks(&report, "desktop.supervisor_health");
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0]["status"], "warning");
+    assert_eq!(missing[0]["facts"]["state"], "missing");
+    assert!(
+        !profile.data.join("logs").exists(),
+        "doctor created nothing"
+    );
+
+    // The real writer, as the app runs it: everything working.
+    let board = ariadne_runtime::health::HealthBoard::new(Some(&profile.data));
+    board.publish(ariadne_runtime::health::SupervisorHealth::running(
+        id(30),
+        id(31),
+        UtcMillis::new(now_utc(0)).unwrap(),
+    ));
+    board.heartbeat();
+    let before = snapshot(profile.home.path());
+    let report = profile.report();
+    let running = checks(&report, "desktop.supervisor_health");
+    assert_eq!(running.len(), 1);
+    assert_eq!(running[0]["status"], "ok");
+    assert_eq!(running[0]["facts"]["codex_connections"], 1);
+    assert_eq!(snapshot(profile.home.path()), before);
+
+    // A retrying and a stopped connection each get their own warning with the reason.
+    let retry = "Ariadne can't reach Codex right now.";
+    let stop = "This connection was replaced. Reconnect to send again.";
+    write_health(
+        &profile.data,
+        &now_utc(-5),
+        vec![
+            health_entry(1, "running", None),
+            health_entry(2, "backing_off", Some(retry)),
+            health_entry(3, "stopped", Some(stop)),
+        ],
+    );
+    let report = profile.report();
+    let troubled = checks(&report, "desktop.supervisor_health");
+    assert_eq!(troubled.len(), 2);
+    assert!(troubled.iter().all(|c| c["status"] == "warning"));
+    assert_eq!(
+        troubled[0]["message"],
+        format!("A Codex connection is retrying. {retry}")
+    );
+    assert_eq!(troubled[0]["facts"]["binding_id"], id(2).as_str());
+    assert_eq!(troubled[0]["facts"]["retry_in_seconds"], 8);
+    assert!(troubled[0]["hint"]
+        .as_str()
         .unwrap()
-        .contains("Codex queue communication test"));
+        .contains("logs/ariadne.log"));
+    assert_eq!(
+        troubled[1]["message"],
+        format!("A Codex connection stopped. {stop}")
+    );
+    assert!(troubled[1]["hint"]
+        .as_str()
+        .unwrap()
+        .starts_with("Reconnect the conversation in Ariadne"));
+
+    // An old heartbeat means the app is not running, whatever the entries say.
+    write_health(
+        &profile.data,
+        &now_utc(-3600),
+        vec![health_entry(2, "backing_off", Some(retry))],
+    );
+    let stale = checks(&profile.report(), "desktop.supervisor_health");
+    assert_eq!(stale.len(), 1);
+    assert_eq!(stale[0]["facts"]["state"], "stale");
+    assert_eq!(
+        stale[0]["message"],
+        "The Ariadne app isn't running, or it stopped updating its record."
+    );
+
+    // A damaged record is reported, never trusted.
+    fs::write(
+        profile.data.join("logs/supervisor-health.json"),
+        b"{not json",
+    )
+    .unwrap();
+    let unreadable = checks(&profile.report(), "desktop.supervisor_health");
+    assert_eq!(unreadable[0]["facts"]["state"], "unreadable");
+    assert_eq!(unreadable[0]["status"], "warning");
 }

@@ -245,6 +245,7 @@ impl Fixture {
                     params: InputCancelParams {
                         input_id: historical,
                         expected_revision: fixture.saved().revision,
+                        purpose: None,
                     },
                 },
             )
