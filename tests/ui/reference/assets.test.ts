@@ -73,7 +73,11 @@ describe('Paperwhite design source and offline assets', () => {
   it('maps every Phosphor glyph the handoff uses, including the regular spiral', () => {
     const css = read('apps/desktop/public/icons/phosphor.css').toString();
     const mappings = [...css.matchAll(/\.(ph|ph-fill)\.(ph-[\w-]+)::before\s*\{\s*content:\s*"\\([\da-f]+)";/g)];
-    expect(mappings).toHaveLength(assets.glyphs.length);
+    // The handoff's glyphs, then the few the app uses beyond it (listed as app_glyphs).
+    expect(mappings).toHaveLength(assets.glyphs.length + assets.app_glyphs.length);
+    for (const glyph of assets.app_glyphs) {
+      expect(mappings.some(match => match[1] === 'ph' && match[2] === glyph.class && match[3].toUpperCase() === glyph.unicode.slice(2))).toBe(true);
+    }
     const sourceText = Object.values(members).join('\n');
     const used = new Set([...sourceText.matchAll(/\b(ph-fill|ph) (ph-[a-z-]+)/g)].map(match => `${match[1]} ${match[2]}`));
     expect(new Set(assets.glyphs.map(glyph => `${glyph.weight === 'fill' ? 'ph-fill' : 'ph'} ${glyph.class}`))).toEqual(used);
