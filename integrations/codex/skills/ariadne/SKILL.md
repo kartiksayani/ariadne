@@ -27,7 +27,7 @@ Read these files, beside this one, only when they apply:
 
 | Read | When |
 |---|---|
-| `inputs.md` | The first message starting `[ARIADNE_INPUT:` |
+| `inputs.md` | A message starting `[ARIADNE_INPUT:`; closing a parent |
 | `errors.md` | An `ariadne` command exits non-zero |
 | `reconnect.md` | After `/clear` or `/compact`, or on attaching a fresh conversation |
 | `report.md` | Filing a report, audit, test run or investigation |
@@ -51,8 +51,8 @@ and validation and can make the app refuse the session.
   one item's full history.
 - `ariadne apply --binding B --generation G --json-stdin --json`: one request on
   stdin (use a quoted heredoc). `--dry-run` validates without committing. The
-  receipt is compact: the `op_id` and, for each topic and item created or changed,
-  its id, number, short label and new revision. `--full` prints everything.
+  receipt is compact: `op_id` and, for each topic and item created or changed, its
+  `id`, `short` label and new `revision` (a topic also its `number`).
 
 Ariadne never pushes context: read the topics and items and reuse the ones that
 fit.
@@ -63,27 +63,32 @@ One JSON object on stdin. Only `operations` is required.
 
 | Field | Meaning |
 |---|---|
-| `op_id` | Optional; the CLI generates it and prints it in the receipt. Set your own lowercase UUIDv4 only if you may replay the same bytes (`errors.md`) |
+| `op_id` | Optional; the CLI generates one and prints it in the receipt. Set your own lowercase UUIDv4 only to replay a cut-off call (`errors.md`) |
 | `expected_item_revisions`, `expected_topic_revisions` | `{"1":4}`: the current revision of each existing item or topic the request replies to, edits, asks, closes or adds a child under. Not needed for what the same request creates |
 | `summary` | Optional; one short line shown in the timeline of every item touched |
 | `source_input_id`, `attempt_id`, `input_result` | Optional; only to answer a dispatched input (`inputs.md`) |
 
-Keep the revisions from the apply receipt for your next request instead of
-reading again. Any optional field of an operation may be omitted.
+The receipt lists each topic and item the request created or changed, with its new
+`revision`: keep those for your next request instead of reading again. An item's
+receipt `id` is its number (`3`, `3.1`), the value `{"id":...}` takes. Any optional
+field of an operation may be omitted.
 
 | `op` | Required | Optional |
 |---|---|---|
-| `topic.add` | `ref`, `name` | `short` |
-| `item.add` | `ref`, `topic`, `question`, `type`, `status` | `short`, `parent`, `owner`, `ask`, `options`, `note`, `links`, `outcome`, `why`, `children` |
+| `topic.add` | `name` | `short`, `ref` |
+| `item.add` | `question`, `type`, `topic` | `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
 | `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `short` |
-| `item.ask` | `item`, `ask`, `options`, `recipient_binding_id` | |
+| `item.ask` | `item`, `ask` | `options` |
 | `item.status` | `item`, `status` | `outcome`, `why`, `reason` |
 | `item.replace` | `item`, `replacement`, `outcome`, `why` | |
-| `reply` | `ref`, `item`, `text` | `round_id` |
+| `reply` | `item`, `text` | `ref`, `round_id` |
 | `round.close` | `round_id` | |
 
-- `owner` on `item.add` defaults to you (`{"kind":"agent","binding_id":B}`); others
-  are `{"kind":"me"}` and `{"kind":"other","name":"N"}`.
+- Defaults. `topic`: the request's only `topic.add` (a child takes its parent's).
+  `status`: `waiting_on_me` with an `ask`, else `open`. `owner`: you; `{"kind":"me"}`
+  with an `ask`; others are `{"kind":"other","name":"N"}`. Option `id`: 1, 2, ...
+  `ref`: r1, r2, ... by position, so name a `ref` only to cite it later (a
+  `parent`, an `item.ask`, `reply_refs`). An ask's answer comes back to you.
 - `children: [...]` on `item.add` holds nested `item.add` objects; their parent
   and topic are wired automatically.
 - References: `{"ref":"a"}` names an earlier `ref` of this request (a letter, then
@@ -93,8 +98,7 @@ reading again. Any optional field of an operation may be omitted.
 - Types: question, decision, finding, task, explanation. Statuses: `open` and
   `in_progress` take a `reason` (only in `item.status`); `decided`, `done` and
   `dropped` need `outcome` and `why`; `replaced` only through `item.replace`;
-  `waiting_on_me` only through `item.ask`. `item.ask` needs `recipient_binding_id`
-  = your own binding ID.
+  `waiting_on_me` only through an `ask`.
 - Every topic and item you create gets a `short` label: a 2-4 word noun phrase of
   at most 40 characters, such as "SDK cache PR". It is the tree node title; keep
   it stable.
@@ -127,7 +131,7 @@ yourself; the owner never names topics or items.
 
 | The point is | Type | Status |
 |---|---|---|
-| A decision only the owner can make | decision or question | `open`, then `item.ask` with options |
+| A decision only the owner can make | decision or question | `waiting_on_me`: set `ask` |
 | A question that does not block you | question | `open` |
 | A decision you already took | decision | `decided` |
 | Something you established | finding | `done` |
@@ -141,24 +145,23 @@ yourself; the owner never names topics or items.
   items; `note` is the progress line while in progress; `links` are `pr`, `file`
   or `doc` targets; `reply` is for answering the owner or long detail. Never
   repeat a text across them.
-- **Ask.** One decision per item: add it `open`, then `item.ask` on its `ref` in
-  the same request (it becomes `waiting_on_me` with one round). Give options with
-  a `consequence` each and at most one `recommended`; `"options":[]` leaves a
-  free-text answer. A question you would write in prose is an ask, never a
-  sentence in chat. Another question on the same decision is a new ask round on
-  that item.
+- **Ask.** One decision per item: set `ask` (and `options`) on the `item.add`; it
+  starts `waiting_on_me`, owned by the owner, with one round. Give options with a
+  `label` and a `consequence` each and at most one `recommended`; no `options`
+  leaves a free-text answer. A question you would write in prose is an ask, never
+  a sentence in chat. `item.ask` asks on an item that already exists, and
+  another question on the same decision is a new ask round on that item.
 - **Spend few tokens.** File a result in one request, children nested with
-  `children`. Data nobody discusses row by row is one item with a table. Keep
-  `summary` to one line.
+  `children`. Data nobody discusses row by row is one item with a table.
 
 ## Examples
 
-IDs are placeholders: topic `...0005`, binding `...0003`, item `1`.
+Item `1` below is a placeholder.
 
 Open a topic with an in-progress summary item and a finding under it:
 
 ```json
-{"summary":"Started the retry review","operations":[{"op":"topic.add","ref":"t","name":"Review: PR #812 retry backoff","short":"PR #812 review"},{"op":"item.add","ref":"s","topic":{"ref":"t"},"question":"Reviewing PR #812; nothing concluded yet","short":"Review summary","type":"task","status":"in_progress","note":"Reading the diff","children":[{"op":"item.add","ref":"c","question":"Backoff has no jitter","short":"No jitter","type":"finding","status":"done","outcome":"Clients retry in lockstep","why":"The delay is fixed at 2s."}]}]}
+{"summary":"Started the retry review","operations":[{"op":"topic.add","name":"Review: PR #812 retry backoff","short":"PR #812 review"},{"op":"item.add","question":"Reviewing PR #812; nothing concluded yet","short":"Review summary","type":"task","status":"in_progress","note":"Reading the diff","children":[{"question":"Backoff has no jitter","short":"No jitter","type":"finding","status":"done","outcome":"Clients retry in lockstep","why":"The delay is fixed at 2s."}]}]}
 ```
 
 Later, finish it using the revision from the receipt (item `1` is at revision 3):

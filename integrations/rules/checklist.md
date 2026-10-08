@@ -8,7 +8,8 @@ still apply.
 
 - One `task` per step, added `open` in the order you will do them. The step you
   start is `in_progress` with a `note` ("Backfilling: 1.2M of 4M rows").
-- A step that needs consent is an ask on that step. Work for someone else is a
+- A step that needs consent is an ask on that step (`ask` when you add it,
+  `item.ask` once it exists). Work for someone else is a
   `task` owned by `{"kind":"other","name":"N"}` that says who and what.
 - As you go, update the note with `item.edit` (patch `{"note":"..."}`), close each
   step `done` with its result and start the next. The tree is the checklist; the
@@ -26,8 +27,8 @@ still apply.
 ## Example
 
 A plan whose first step has started, a consent ask on the second and a step for
-someone else.
+someone else (`owner` `other`, status `open`).
 
 ```json
-{"summary":"Planned the sessions v2 migration","operations":[{"op":"topic.add","ref":"t","name":"Migrate the sessions table to v2","short":"Sessions v2 migration"},{"op":"item.add","ref":"s1","topic":{"ref":"t"},"question":"Backfill v2 from v1","short":"Backfill v2","type":"task","status":"in_progress","note":"Backfilling: 1.2M of 4M rows"},{"op":"item.add","ref":"s2","topic":{"ref":"t"},"question":"Switch reads to v2","short":"Switch reads","type":"task","status":"open"},{"op":"item.ask","item":{"ref":"s2"},"ask":"Switch reads to v2 after the backfill?","options":[{"id":"go","label":"Switch","consequence":"Readers use v2; rollback needs a redeploy","recommended":true},{"id":"wait","label":"Wait","consequence":"Both tables stay in sync longer","recommended":false}],"recipient_binding_id":"00000000-0000-4000-8000-000000000003"},{"op":"item.add","ref":"s3","topic":{"ref":"t"},"question":"Drop the v1 table","short":"Drop v1","type":"task","status":"open","owner":{"kind":"other","name":"DBA team"}}]}
+{"summary":"Planned the sessions v2 migration","operations":[{"op":"topic.add","name":"Migrate the sessions table to v2","short":"Sessions v2 migration"},{"op":"item.add","question":"Backfill v2 from v1","short":"Backfill v2","type":"task","status":"in_progress","note":"Backfilling: 1.2M of 4M rows"},{"op":"item.add","question":"Switch reads to v2","short":"Switch reads","type":"task","ask":"Switch reads to v2 after the backfill?","options":[{"label":"Switch","consequence":"Readers use v2; rollback needs a redeploy","recommended":true},{"label":"Wait","consequence":"Both tables stay in sync longer"}]},{"op":"item.add","question":"Drop the v1 table","short":"Drop v1","type":"task","owner":{"kind":"other","name":"DBA team"}}]}
 ```

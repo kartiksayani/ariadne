@@ -7,7 +7,7 @@ still apply.
 
 ## Review
 
-- The first item is the verdict: a `decision` asked with options such as "Request
+- The first item is the verdict: a `decision` with an `ask` and options such as "Request
   changes", "Approve as is" and "Comment only", with the PR in `links`.
 - Under it, each comment you would post is a `finding`, `done`: `outcome` is the
   comment text, `why` your reasoning, `links` the file. What you checked and found
@@ -32,5 +32,5 @@ still apply.
 ## Example
 
 ```json
-{"summary":"Reviewed PR #812","operations":[{"op":"topic.add","ref":"t","name":"Review: PR #812 retry backoff","short":"PR #812 review"},{"op":"item.add","ref":"v","topic":{"ref":"t"},"question":"PR #812 is sound apart from two fixes; request changes?","short":"PR #812 verdict","type":"decision","status":"open","links":[{"kind":"pr","label":"PR #812","target":"https://example.com/org/repo/pull/812"}],"children":[{"op":"item.add","ref":"f1","question":"Backoff has no jitter","short":"No jitter","type":"finding","status":"done","outcome":"Add jitter: clients retry in lockstep after an outage.","why":"The delay is a fixed 2s in `src/retry.rs`.","links":[{"kind":"file","label":"src/retry.rs","target":"src/retry.rs"}]},{"op":"item.add","ref":"ok","question":"Checked and fine","short":"Checked, fine","type":"explanation","status":"done","outcome":"- Retry cap is respected\n- Errors keep their cause","why":"Read the whole diff and ran the tests."}]},{"op":"item.ask","item":{"ref":"v"},"ask":"What should the review say?","options":[{"id":"changes","label":"Request changes","consequence":"Posts the comments","recommended":true},{"id":"approve","label":"Approve as is","consequence":"Merges without the fixes","recommended":false}],"recipient_binding_id":"00000000-0000-4000-8000-000000000003"}]}
+{"summary":"Reviewed PR #812","operations":[{"op":"topic.add","name":"Review: PR #812 retry backoff","short":"PR #812 review"},{"op":"item.add","question":"PR #812 is sound apart from two fixes; request changes?","short":"PR #812 verdict","type":"decision","ask":"What should the review say?","options":[{"label":"Request changes","consequence":"Posts the comments","recommended":true},{"label":"Approve as is","consequence":"Merges without the fixes"}],"links":[{"kind":"pr","label":"PR #812","target":"https://example.com/org/repo/pull/812"}],"children":[{"question":"Backoff has no jitter","short":"No jitter","type":"finding","status":"done","outcome":"Add jitter: clients retry in lockstep after an outage.","why":"The delay is a fixed 2s in `src/retry.rs`.","links":[{"kind":"file","label":"src/retry.rs","target":"src/retry.rs"}]},{"question":"Checked and fine","short":"Checked, fine","type":"explanation","status":"done","outcome":"- Retry cap is respected\n- Errors keep their cause","why":"Read the whole diff and ran the tests."}]}]}
 ```

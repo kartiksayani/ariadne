@@ -25,6 +25,7 @@ tungstenite = { version = "=0.29.0", default-features = false, features = ["hand
 serde.workspace = true
 ariadne-core = { path = "../ariadne-core", features = ["test-support"] }
 tempfile.workspace = true
+sha2.workspace = true
 
 [[bin]]
 name = "ariadne"

@@ -47,8 +47,13 @@ valid requests.
 
 - Receipt consumers of the CLI must read the compact keys or pass `--full`. None in
   the repository parsed the old default.
-- The agent rules text still describes `allocated_refs` and the full request shape;
-  it is rewritten separately to match.
+- The agent skill teaches this shape. Every apply example in the generated Claude and
+  Codex skill files is sent to the real `ariadne apply` by
+  `crates/ariadne-cli/tests/agent_skill_examples.rs` (`--dry-run`, then a commit on a
+  seeded session), so the skill cannot drift from the CLI's defaults.
+- The skill folder is the only home of the rules: `integrations/rules/claude.md` and
+  `codex.md` are no longer generated or bundled, and the Codex fallback in the setup
+  instruction names the installed skill's `SKILL.md`, beside the on-demand files.
 - `type` and `question` stay required on `item.add`, as do `outcome` and `why` for
   terminal statuses: no default for them is unambiguous.
 
