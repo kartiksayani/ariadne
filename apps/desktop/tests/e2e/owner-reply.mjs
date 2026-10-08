@@ -68,7 +68,8 @@ export function replyControlState(itemId) {
   const editor = form?.querySelector('textarea');
   const send = [...(form?.querySelectorAll('button') ?? [])].find(button => button.textContent.trim() === 'Send reply');
   return { formPresent: Boolean(form), editorPresent: Boolean(editor), value: editor?.value ?? null,
-    editorEnabled: Boolean(editor && !editor.disabled), sendPresent: Boolean(send), sendEnabled: Boolean(send && !send.disabled),
+    editorEnabled: Boolean(editor && !editor.disabled), sendPresent: Boolean(send),
+    sendEnabled: Boolean(send && !send.disabled && send.getAttribute('aria-disabled') !== 'true'),
     alerts: [...(form?.querySelectorAll('[role="alert"], .answer-blocked, [role="status"]') ?? [])].map(node => node.textContent.trim()) };
 }
 
@@ -81,7 +82,8 @@ export async function sendDetailReply(configuration, text) {
     const send = await (await browser.$(selector)).$('button=Send reply');
     await send.waitForDisplayed();
     stage = 'readiness';
-    await browser.waitUntil(async () => await editor.getValue() === text && await editor.isEnabled() && await send.isEnabled(), {
+    await browser.waitUntil(async () => await editor.getValue() === text && await editor.isEnabled() && await send.isEnabled()
+      && await send.getAttribute('aria-disabled') !== 'true', {
       timeout: 20000, interval: 100, timeoutMsg: 'Detail Reply text and enabled Send were not ready for one click',
     });
     stage = 'click'; clickRequested = true; await send.click();

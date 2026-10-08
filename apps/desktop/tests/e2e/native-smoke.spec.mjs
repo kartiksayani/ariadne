@@ -8,7 +8,7 @@ import { runAccessibilityAcceptance } from './accessibility.spec.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
 import { runHistoryActionsAcceptance } from './history-actions.spec.mjs';
 import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
-import { runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
+import { navigationRejection, runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
 import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
 import { runRemoveAcceptance } from './remove.spec.mjs';
@@ -28,11 +28,7 @@ const invoke = (command, request) => browser.execute(async (command, request) =>
 }, command, request);
 
 let navigationRecovered = false;
-const revisionConflict = 'Preferences revision changed; reload before applying this new patch';
-async function navigationRejection() {
-  const message = await browser.$('.nav-banner[role="alert"] p');
-  return await message.isExisting() && await message.getText() === revisionConflict;
-}
+const revisionConflict = 'This changed while you were working. Look at it as it is now, then try again.';
 async function openSession(sessionId, itemId) {
   const before = await readJson(join(process.env.ARIADNE_HOME, 'ui.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   try {
@@ -51,8 +47,8 @@ async function openSession(sessionId, itemId) {
         body: await browser.$('body').getText() };
       const refresh = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
       await refresh.waitForDisplayed(); await refresh.waitForEnabled(); await refresh.click();
-      // This is a deliberate new owner choice after the visible typed rejection.
-      // Unknown completion and other errors cannot enter this recovery path.
+      // A deliberate new owner choice after a definite changed-view rejection.
+      // Pending/uncertain completion offers Check again instead of Refresh.
       await catalogue.waitForEnabled(); await catalogue.click();
       await wait(selectedCatalogue, 'Explicit refreshed All sessions choice did not persist');
       await json(join(evidence, 'navigation-recovery.json'), { rejected, recovered: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')) });
@@ -66,7 +62,7 @@ async function openSession(sessionId, itemId) {
     }, 'Selected session navigation did not finish its saved preference update');
     const item = await browser.$(`.tree-item[data-item-id="${itemId}"]`);
     await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
-    await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === itemId, 'Selected item detail did not load');
+    await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === itemId, 'Selected item detail did not load');
   } catch (error) {
     await json(join(evidence, `navigation-failure-${sessionId}.json`), { before,
       after: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
@@ -76,16 +72,18 @@ async function openSession(sessionId, itemId) {
   }
 }
 async function showHistory(texts) {
-  // The Timeline is a section of the detail panel; it lays multi-line bodies out as one paragraph.
-  const timeline = await browser.$('.item-detail [aria-label="Timeline"]');
-  await timeline.waitForDisplayed(); await timeline.scrollIntoView();
+  // The single chat lays multi-line stored bodies out as paragraphs.
+  const conversation = await browser.$('.item-detail [aria-label="Conversation"]');
+  await conversation.waitForDisplayed(); await conversation.scrollIntoView();
   await wait(async () => {
     const detail = folded(await browser.$('[aria-label="Item detail"]').getText());
     return texts.every(text => detail.includes(folded(text)));
   }, 'Complete saved history was not visible in native item detail');
 }
 async function nativeCard(kind, question) {
-  for (const card of await browser.$$(`aside[aria-label="Waiting on me"] .waiting-${kind === 'waiting' ? 'card' : 'sent'}`)) {
+  const region = kind === 'waiting' ? '[aria-label="Waiting questions"] .waiting-card'
+    : '[aria-label="Sent · waiting for the agent to pick up"] .waiting-sent';
+  for (const card of await browser.$$(`aside[aria-label="Waiting on me"] ${region}`)) {
     if ((await card.getText()).includes(question)) return card;
   }
   return undefined;
@@ -115,9 +113,9 @@ async function delivery(configuration) {
   // its canonical pending/recovery examples rather than rebinding its storage.
   await openSession(configuration.demo.session_id, '1');
   await showHistory(configuration.demo.before.messages.filter(message => message.item_id === '1').map(message => message.body));
-  const child = await browser.$('[aria-label="Child items"] button');
+  const child = await browser.$('.item-detail button.detail-fork');
   await child.waitForDisplayed(); assert.ok((await child.getText()).includes('Add the receipt lookup test')); await child.click();
-  await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === '1.1'
+  await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === '1.1'
     && (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
   await browser.saveScreenshot(join(evidence, 'canonical-demo.png'));
 
@@ -127,7 +125,7 @@ async function delivery(configuration) {
     card = await nativeCard('waiting', configuration.question);
     if (!card) return false;
     const choice = await card.$('button*=Use the native window');
-    return await choice.isExisting() && await choice.isEnabled();
+    return await choice.isExisting() && await choice.isEnabled() && await choice.getAttribute('aria-disabled') !== 'true';
   }, 'The real unanswered item.ask did not become editable in Waiting');
   const cardText = await card.getText();
   assert.ok(cardText.includes(configuration.ask)); assert.ok(cardText.includes(configuration.options[0].label));
@@ -137,7 +135,9 @@ async function delivery(configuration) {
   const choice = await card.$('button*=Use the native window'); await choice.click();
   // The compact send button carries its Enter hint ("Send answer ↵"); selecting saves the draft first.
   const send = await card.$('button.answer-send');
-  await send.waitForEnabled(); assert.ok((await send.getText()).includes('Send answer')); await send.click();
+  await send.waitForEnabled();
+  await wait(async () => await send.isEnabled() && await send.getAttribute('aria-disabled') !== 'true', 'Waiting Send answer did not become editable');
+  assert.ok((await send.getText()).includes('Send answer')); await send.click();
   await wait(async () => {
     const saved = orderedInputs(await snapshot(configuration)), queued = await admissions(configuration);
     return saved.length === 1 && queued.length === 1 && saved[0].attempts.length === 1

@@ -52,7 +52,7 @@ export function repairResultRequest(configuration, admission, session, original,
 }
 
 async function apply(configuration, request) {
-  const result = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin'], request);
+  const result = await cliRequest(configuration.cli, ['apply', '--binding', configuration.bindingId, '--generation', configuration.generation, '--json-stdin', '--full'], request);
   assert.equal(result.code, 0); assert.equal(result.value.session_id, configuration.sessionId);
   return { request, receipt: result.value };
 }
@@ -72,7 +72,7 @@ async function openPrimary(configuration) {
   // Graph mode can be retained from the preceding acceptance; choose Tree explicitly.
   await click(await browser.$('button[title="Tree (g)"]'));
   await click(await browser.$(`.tree-item[data-item-id="${configuration.itemId}"]`));
-  await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === configuration.itemId, 'Recovery selected a different item');
+  await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === configuration.itemId, 'Recovery selected a different item');
 }
 
 /** Opens the "Sending to <agent>" dialog from the session card in All sessions (its sending button, title "Sending and connection"). */
@@ -213,7 +213,7 @@ export async function runRecoveryAcceptance(configuration) {
   assert.deepEqual(finalSession.messages.find(message => message.id === reply.id), reply);
   for (const [id, prior] of Object.entries(baseline.inputs)) assert.deepEqual(finalSession.inputs[id], prior, 'Recovery cannot rewrite the restored golden inputs');
   assert.deepEqual(await readFile(configuration.demo.sessionPath), demoBefore);
-  await (await browser.$('.item-detail [aria-label="Timeline"]')).waitForDisplayed();
+  await (await browser.$('.item-detail [aria-label="Conversation"]')).waitForDisplayed();
   await wait(async () => {
     // The timeline lays a multi-line body out as one paragraph: compare with white space folded.
     const text = folded(await browser.$('[aria-label="Item detail"]').getText());

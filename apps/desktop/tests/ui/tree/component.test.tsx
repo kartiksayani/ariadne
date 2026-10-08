@@ -1078,6 +1078,44 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(150);
   });
 
+  it.each(['fold topic', 'collapse item', 'status chip', 'topic filter', 'Resume filtered view'])(
+  'never scrolls when %s dismisses the active tree reveal', async path => {
+    const view = await opened();
+    fireEvent.click(row('8'));
+    await waitFor(() => expect(viewOf(view.transport).selected_item_id).toBe('8'));
+    const reveal = view.calls.selected[0];
+    view.rerender({ reveal, selectedId: '8', detailOpen: true });
+    if (path === 'Resume filtered view') view.rerender({ reveal, selectedId: '8', detailOpen: true, query: 'missing' });
+    const readingPosition = path === 'collapse item' ? 0 : 150;
+    scroller().scrollTop = readingPosition;
+    fireEvent.scroll(scroller());
+    switch (path) {
+      case 'fold topic':
+        fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
+        break;
+      case 'collapse item':
+        fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
+        break;
+      case 'status chip':
+        fireEvent.click(chip('All'));
+        break;
+      case 'topic filter':
+        fireEvent.change(screen.getByRole('combobox', { name: 'Topic' }), {
+          target: { value: view.transport.sessions.get(route.session_id)!.items['8']!.topic_id },
+        });
+        break;
+      case 'Resume filtered view':
+        fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
+        break;
+    }
+    await waitFor(() => expect(path === 'Resume filtered view' ? view.calls.resumed : view.calls.dismissed).toBe(1));
+    // Dismissal can reach the workspace before a queued preference write changes selection.
+    view.rerender({ reveal: null, selectedId: '8', detailOpen: true, query: path === 'Resume filtered view' ? 'missing' : '' });
+    expect(scroller().scrollTop).toBe(readingPosition);
+    await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(false));
+    expect(scroller().scrollTop).toBe(readingPosition);
+  });
+
   it('reveals an external offscreen selection with the least scroll, leaving a visible selection in place', async () => {
     const view = await opened();
     row('3').focus(); fireEvent.keyDown(row('3'), { key: 'ArrowDown' });
@@ -1101,15 +1139,25 @@ describe('scrolling the tree', () => {
     expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
   });
 
-  it('keeps the tree still when an item link inside a preview opens an offscreen item', async () => {
+  it.each([['4', 150], ['8', 440]] as const)('reveals preview link target %s with nearest scroll only when offscreen', async (target, expectedScroll) => {
     const view = await opened({ configure: transport => {
       const item = transport.sessions.get(route.session_id)!.items['4']!;
-      item.status = 'done'; item.outcome = '[Next item](item:8)';
+      item.status = 'done'; item.outcome = `[Next item](item:${target})`;
     } });
     fireEvent.click(within(row('4')).getByRole('link', { name: 'Next item' }));
     await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    view.rerender({ reveal: view.calls.selected[0], selectedId: target, detailOpen: true });
+    expect(scroller().scrollTop).toBe(expectedScroll);
+  });
+  it('reveals an offscreen replacement link target with nearest scroll', async () => {
+    const view = await opened({ configure: transport => {
+      const item = transport.sessions.get(route.session_id)!.items['4']!;
+      item.status = 'replaced'; item.replaced_by = '8';
+    } });
+    fireEvent.click(within(row('4')).getByRole('button', { name: view.transport.sessions.get(route.session_id)!.items['8']!.question }));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(1));
     view.rerender({ reveal: view.calls.selected[0], selectedId: '8', detailOpen: true });
-    expect(scroller().scrollTop).toBe(150);
+    expect(scroller().scrollTop).toBe(440);
   });
   it('keeps the tree still when a row action echoes a new detail selection from the workspace', async () => {
     let onReveal: ((result: RevealedItem) => void) | undefined;

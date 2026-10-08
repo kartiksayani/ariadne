@@ -6,17 +6,79 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySeedRequest, unpinHistoryMessage, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySeedRequest, navigationRejection, unpinHistoryMessage, waitForHistoryControl, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { archiveClosedTopic, topicAction } from '../../../apps/desktop/tests/e2e/history-actions.spec.mjs';
+
+test('history recovery requires the plain changed-view alert and enabled Refresh without uncertain Check again', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  const changed = 'This changed while you were working. Look at it as it is now, then try again.';
+  let message, refresh, enabled, uncertain;
+  globalThis.browser = { $(selector) {
+    if (selector === '.nav-banner[role="alert"] p') return { async isExisting() { return message !== null; }, async getText() { return message; } };
+    assert.equal(selector, '.nav-banner[role="alert"]');
+    return { $(selector) {
+      assert.notEqual(message, null, 'An absent alert must not initiate a nested element lookup');
+      if (selector === 'button=Refresh') return { async isExisting() { return refresh; }, async isEnabled() { return enabled; } };
+      assert.equal(selector, 'button=Check again'); return { async isExisting() { return uncertain; } };
+    } };
+  } };
+  const admitted = [];
+  for ([message, refresh, enabled, uncertain] of [[null, false, false, false], ['Preferences revision changed; reload before applying this new patch', true, true, false],
+    [changed, false, false, false], [changed, true, false, false], [changed, true, true, true], [changed, true, true, false]]) {
+    admitted.push(await navigationRejection());
+  }
+  assert.deepEqual(admitted, [false, false, false, false, false, true]);
+});
+
+test('history topic actions use their accessible names and the all-closed prompt stays outside the sticky band', async t => {
+  const dom = new JSDOM(`<div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
+    <button aria-label="Continue here"><i></i></button><button aria-label="Archive"><i></i></button></div>
+    <div class="tree-topic-content"><div class="tree-prompt"><button>Archive topic</button></div></div>
+    <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div>`);
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; dom.window.close(); });
+  const clicked = [];
+  const wrap = node => {
+    assert.ok(node, 'The current native selector must find an actual rendered control');
+    return { node, async waitForDisplayed() {}, async waitForEnabled() {},
+      async click() { clicked.push(node.getAttribute('aria-label') ?? node.textContent); },
+      $(selector) { return wrap(node.querySelector(selector)); } };
+  };
+  globalThis.browser = { $(selector) { return wrap(dom.window.document.querySelector(selector)); },
+    async execute(callback, element) { return callback(element.node); } };
+  await topicAction('Native topic', 'Continue here');
+  await topicAction('Native topic', 'Archive');
+  await archiveClosedTopic('topic');
+  assert.deepEqual(clicked, ['Continue here', 'Archive', 'Archive topic']);
+});
+
+test('history choice and Send wait for both native enabled and refresh aria-disabled to clear', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  let enabled = false, frozen = true;
+  const admitted = [];
+  globalThis.browser = { async waitUntil(condition, options) {
+    assert.equal(options.timeout, 20000);
+    admitted.push(await condition());
+    enabled = true; admitted.push(await condition());
+    frozen = false; admitted.push(await condition());
+    assert.equal(admitted.at(-1), true);
+  } };
+  await waitForHistoryControl({ async waitForEnabled() {}, async isEnabled() { return enabled; },
+    async getAttribute(name) { assert.equal(name, 'aria-disabled'); return frozen ? 'true' : null; } }, 'round choice');
+  assert.deepEqual(admitted, [false, false, true]);
+});
 
 test('unpin proves pin removal independently, while deliberate rail Close requires cleared references', async t => {
   const dom = new JSDOM(`<aside class="pw-rail"><div class="pw-rail-list"><button data-message-id="message" class="pw-excerpt pw-excerpt-active" aria-pressed="true"></button></div></aside>
     <div class="tree-rows"><div role="treeitem" data-item-id="1" data-highlight="strong"></div></div>
-    <section class="detail-timeline"><div data-message-id="message" class="excerpt-timeline excerpt-highlighted"></div></section>`);
+    <section aria-label="Conversation"><ol class="detail-chat-list"><li data-message-id="message" class="detail-turn excerpt-highlighted"></li></ol></section>`);
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
   t.after(() => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); });
   globalThis.document = dom.window.document;
   const excerpt = document.querySelector('.pw-rail-list [data-message-id]'), item = document.querySelector('[role="treeitem"]');
-  const detail = document.querySelector('.detail-timeline [data-message-id]');
+  const detail = document.querySelector('.detail-chat-list [data-message-id]');
   let pinWait = true;
   const actions = [], admitted = [];
   const card = {
@@ -77,13 +139,13 @@ test('fork links and parent references cannot admit a different selected history
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
   t.after(() => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); });
   globalThis.document = dom.window.document;
-  // The Paperwhite detail names the item by its agent reference and question only;
-  // a fork's source round is its fork link inside the parent's round (proveRounds).
-  const view = (header, question, nested) => `<article class="item-detail"><div class="detail-head"><h2 class="detail-question">${question}</h2></div>
-    ${nested}<div class="detail-reference"><span>Agent reference</span><code>${header}</code></div></article>`;
+  // Selection uses the canonical article ID and complete question, even when
+  // other items appear as child, location or creation-message fork links.
+  const view = (header, question, nested) => `<article class="item-detail" data-detail-item-id="${header}"><div class="detail-head"><h2 class="detail-question">${question}</h2></div>
+    ${nested}</article>`;
   const views = [
     view(parent.id, parent.question, `<section aria-label="Child items"><button class="detail-kid">${child.question}</button></section>
-      <section class="detail-chat" aria-label="Conversation"><ol class="detail-chat-list"><li class="detail-turn" data-round="1"><button class="detail-fork">${child.question}</button></li></ol></section>`),
+      <section class="detail-chat" aria-label="Conversation"><ol class="detail-chat-list"><li class="detail-turn" data-message-id="ask" data-round="1"></li><li class="detail-turn" data-message-id="fork-created"><button class="detail-fork">${child.question}</button></li></ol></section>`),
     view(child.id, parent.question, ''),
     view(parent.id, child.question, ''),
     view(child.id, child.question.split('\n')[0], ''),
@@ -108,60 +170,54 @@ test('fork links and parent references cannot admit a different selected history
   assert.deepEqual(admitted, [false, true]);
 });
 
-// An exchange of the Conversation renders its ask, the owner's answer and the result's explanation
-// as one-paragraph lines; its explanation alone proves the closed result. It carries no visible number.
-const roundText = (ask, you, result = null) => [ask, you, result].filter(Boolean).join('\n');
+// The production detail uses one li per message; only the ask has data-round.
 const roundAsk = 'History round 5: choose and explain. Full ask line 5.';
-const roundChoice = 'You chose “Use round 5 choice”';
-
-test('five existing round sections do not admit assertions before the final closed result reaches native detail', async t => {
-  const round = { ordinal: 5, closed_at: '2026-10-05T11:51:57.000Z' };
-  const explanation = 'Explicit native result 5\nComplete stored explanation for answer #5.';
-  const absent = { async isExisting() { return false; }, getText: async () => assert.fail('An absent round has no text') };
-  const complete = roundText(roundAsk, roundChoice, 'Explicit native result 5 Complete stored explanation for answer #5.');
-  // The last two states carry the full result; in the first of them the owner's message is still a pending bubble.
-  const states = [[absent, 0], [roundText(roundAsk, roundChoice), 0], [roundText(roundAsk, roundChoice, 'Explicit native result 5'), 0],
-    [complete, 1], [complete, 0]];
-  let state, pending;
-  const admitted = [];
-  const previousBrowser = globalThis.browser;
-  t.after(() => { globalThis.browser = previousBrowser; });
-  globalThis.browser = {
-    $(selector) {
-      assert.equal(selector, '.detail-chat-list [data-round="5"]');
-      return typeof state === 'string' ? { isExisting: async () => true, getText: async () => state } : state;
-    },
-    async $$(selector) {
-      assert.equal(selector, '.detail-chat-list [data-pending]');
-      return Array.from({ length: pending }, () => ({}));
-    },
-    async waitUntil(condition, options) {
-      assert.equal(options.timeout, 20000);
-      for ([state, pending] of states) admitted.push(await condition());
-      assert.equal(admitted.at(-1), true);
-    },
-  };
-  await waitForRoundResult(round, explanation);
-  assert.deepEqual(admitted, [false, false, false, false, true]);
+const roundOwner = { id: 'owner-5', text: 'You chose “Use round 5 choice”' };
+const roundReply = { id: 'reply-5', body: 'Explicit native round 5 result\nFull correlated agent reply for the saved answer.' };
+const roundView = ({ ask = true, owner = true, said = true, ownerText = roundOwner.text,
+  reply = true, replyId = roundReply.id, body = roundReply.body, pending = false } = {}) =>
+  `<ol class="detail-chat-list">${ask ? `<li data-message-id="ask-5" data-round="5">${roundAsk}</li>` : ''}
+    ${owner ? `<li data-message-id="${roundOwner.id}" ${said ? 'data-owner-said="true"' : ''} ${pending ? 'data-pending="input-5"' : ''}><div class="detail-bubble-you">${ownerText}</div></li>` : ''}
+    ${reply ? `<li data-message-id="${replyId}"><div class="detail-bubble-agent"><div class="md">${body}</div></div></li>` : ''}</ol>`;
+const roundBrowser = (document, waitUntil) => ({
+  $(selector) {
+    const element = document.querySelector(selector);
+    return { async isExisting() { return !!element; }, async getText() { assert.ok(element); return element.textContent; },
+      async getAttribute(name) { assert.ok(element); return element.getAttribute(name); } };
+  },
+  async $$(selector) { return [...document.querySelectorAll(selector)]; }, waitUntil,
 });
 
-test('a permanently omitted or truncated final result remains a native acceptance failure', async t => {
+test('five ask anchors require the complete separate correlated reply and settled owner message', async t => {
   const round = { ordinal: 5, closed_at: '2026-10-05T11:51:57.000Z' };
-  const explanation = 'Explicit native result 5\nComplete stored explanation for answer #5.';
-  let text;
+  const dom = new JSDOM();
+  const states = [{ ask: false }, { owner: false }, { said: false }, { ownerText: 'You chose “Use round' }, { reply: false },
+    { replyId: 'unrelated-reply' }, { body: 'Explicit native round 5 result' }, { pending: true }, {}];
+  const admitted = [];
   const previousBrowser = globalThis.browser;
-  t.after(() => { globalThis.browser = previousBrowser; });
-  globalThis.browser = {
-    $() { return { isExisting: async () => true, getText: async () => text }; },
-    async $$() { return []; },
-    async waitUntil(condition, options) {
-      for (text of [roundText(roundAsk, roundChoice), roundText(roundAsk, roundChoice, 'Explicit native result 5\nComplete stored')]) {
-        assert.equal(await condition(), false);
-      }
-      throw new Error(options.timeoutMsg);
-    },
-  };
-  await assert.rejects(waitForRoundResult(round, explanation), /did not publish the final closed round, its complete correlated result and the settled owner message/);
+  t.after(() => { globalThis.browser = previousBrowser; dom.window.close(); });
+  globalThis.browser = roundBrowser(dom.window.document, async (condition, options) => {
+    assert.equal(options.timeout, 20000);
+    for (const state of states) { dom.window.document.body.innerHTML = roundView(state); admitted.push(await condition()); }
+    assert.equal(admitted.at(-1), true);
+  });
+  await waitForRoundResult(round, roundOwner, roundReply);
+  assert.deepEqual(admitted, [false, false, false, false, false, false, false, false, true]);
+});
+
+test('an omitted, unrelated or truncated correlated reply remains a native acceptance failure', async t => {
+  const round = { ordinal: 5, closed_at: '2026-10-05T11:51:57.000Z' };
+  const dom = new JSDOM();
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; dom.window.close(); });
+  globalThis.browser = roundBrowser(dom.window.document, async (condition, options) => {
+    for (const state of [{ reply: false }, { replyId: 'another-round' }, { body: 'Explicit native round 5 result\nFull correlated' }]) {
+      dom.window.document.body.innerHTML = roundView(state);
+      assert.equal(await condition(), false);
+    }
+    throw new Error(options.timeoutMsg);
+  });
+  await assert.rejects(waitForRoundResult(round, roundOwner, roundReply), /did not publish the final closed round, its complete correlated result and the settled owner message/);
 });
 
 test('complete native history batches deserialize through the real CLI/Core dispatch barrier', { timeout: 15000 }, async () => {

@@ -108,6 +108,7 @@ export class NavigationStore {
   // Observe only the already executing write; uncertain operations still need
   // explicit reconciliation. This neither schedules nor retries a mutation.
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
+  readonly hasQueuedTextScale = () => this.textScaleTarget !== null;
   // True only when this exact write operation settled with a definite revision_conflict, which
   // the store has already cleared and refreshed. Uncertain and other rejections are never reported.
   readonly settledAsConflict = (completion: Promise<boolean>) => {

@@ -82,7 +82,7 @@ export async function runRemoveAcceptance(configuration) {
   // Topic: ⌫ on the focused band, same deferred command.
   const band = await topicBand(topicName); await band.waitForDisplayed();
   await browser.execute(element => element.focus(), band);
-  // The band hides its Remove action while a delivery line shows (TreeView.tsx:369); the key path is used until that is decided.
+  // The band also offers Remove during delivery; this step proves its keyboard path.
   await browser.keys('Backspace');
   await confirm('Remove topic');
   await wait(async () => !(await topicBand(topicName).isExisting()), 'The removed topic stayed in the tree');

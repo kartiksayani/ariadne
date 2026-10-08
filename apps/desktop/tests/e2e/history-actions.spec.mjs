@@ -10,10 +10,10 @@ import { folded } from './owner-reply.mjs';
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
-// The detail names its item by the agent reference at its foot.
+// The detail carries its canonical local item identity.
 const detailReference = async () => {
-  const code = await browser.$('.item-detail .detail-reference code');
-  return await code.isExisting() ? code.getText() : null;
+  const detail = await browser.$('.item-detail');
+  return await detail.isExisting() ? detail.getAttribute('data-detail-item-id') : null;
 };
 // Close/Reopen sit in the tree's session bar; Archive and Continue on each topic band.
 const sessionBar = () => browser.$('.tree-session-bar');
@@ -25,10 +25,14 @@ async function openSession(sessionId) {
   await sessionBar().waitForDisplayed();
 }
 // A topic band shows its actions while it holds focus (the prototype's hover).
-async function topicAction(name, label) {
+export async function topicAction(name, label) {
   const band = await topicBand(name); await band.waitForDisplayed();
   await browser.execute(element => element.focus(), band);
-  await click(await band.$(`button*=${label}`));
+  await click(await band.$(`button[aria-label="${label}"]`));
+}
+export async function archiveClosedTopic(topicId) {
+  // The all-closed prompt sits below the sticky band, in that topic's sibling content.
+  await click(await browser.$(`.tree-rows [data-topic-id="${topicId}"] + .tree-topic-content .tree-prompt button`));
 }
 async function lifecycle(button, confirmation, path, predicate) {
   await click(await sessionBar().$(`button*=${button}`));
@@ -111,7 +115,7 @@ export async function runHistoryActionsAcceptance(configuration) {
   const targetHistory = { items: target.items, messages: target.messages, rounds: target.rounds, answers: target.answers, bindings: target.bindings };
   // Nothing blocks an all-closed topic, so its prompt archives at once and the
   // column offers Undo, which restores it (no confirmation dialog either way).
-  await click(await topicBand(topicName).$('button*=Archive topic'));
+  await archiveClosedTopic(terminalTopic.id);
   await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at !== null, 'Direct topic archive was not visible on disk');
   assert.equal(await dialog().isExisting(), false, 'An unblocked archive must not open the review');
   await wait(async () => (await browser.$('.tree-column').getText()).includes(`Archived “${topicName}”.`), 'Archive did not report its Undo banner');
@@ -191,7 +195,7 @@ export async function runHistoryActionsAcceptance(configuration) {
   const copiedItemId = copied.item_id_map[originalItem.id];
   await openSession(finalTarget.id);
   await click(await browser.$(`.tree-item[data-item-id="${copiedItemId}"]`));
-  await (await browser.$('.item-detail [aria-label="Timeline"]')).waitForDisplayed();
+  await (await browser.$('.item-detail [aria-label="Conversation"]')).waitForDisplayed();
   const copiedBodies = source.messages.filter(message => message.item_id === originalItem.id).map(message => message.body);
   await wait(async () => {
     const text = folded(await browser.$('[aria-label="Item detail"]').getText());
@@ -210,7 +214,7 @@ export async function runHistoryActionsAcceptance(configuration) {
     assert.ok(!unavailableReason.includes('NotFound'), 'The owner-facing failure must not expose the OS error');
     await click(await browser.$('.copied-provenance').$(`button=Open copied item ${copiedItemId}`));
     await wait(async () => await detailReference() === copiedItemId, 'Copied provenance fallback did not use the local registered item');
-    await (await browser.$('.item-detail [aria-label="Timeline"]')).waitForDisplayed();
+    await (await browser.$('.item-detail [aria-label="Conversation"]')).waitForDisplayed();
     await wait(async () => {
       const text = folded(await browser.$('[aria-label="Item detail"]').getText());
       return copiedBodies.every(body => text.includes(folded(body)));
