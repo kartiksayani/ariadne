@@ -93,7 +93,10 @@ impl Fixture {
                 ("hooks/setup.js","// setup"),("hooks/claims.js","// claims"),("hooks/discovery.js","// discovery"),
                 ("hooks/installed.js","export default Object.freeze({helperPath:'/installed/helper',appVersion:'0.1.0',apiVersion:1});"),
                 ("skills/ariadne/SKILL.md","# Structured Ariadne context"),
-                ("skills/ariadne/playbook.md","# Ariadne playbook"),
+                ("skills/ariadne/inputs.md","# Fixture"),("skills/ariadne/errors.md","# Fixture"),
+                ("skills/ariadne/reconnect.md","# Fixture"),("skills/ariadne/report.md","# Fixture"),
+                ("skills/ariadne/review.md","# Fixture"),("skills/ariadne/checklist.md","# Fixture"),
+                ("skills/ariadne/follow-up.md","# Fixture"),
             ] { let path = dir.join(name); fs::create_dir_all(path.parent().unwrap()).unwrap(); fs::write(path,bytes).unwrap(); }
         }
         let helper = root.path().join("ariadne");

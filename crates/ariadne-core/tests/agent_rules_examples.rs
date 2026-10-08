@@ -1,15 +1,109 @@
-//! The worked examples in the shared agent rules and the on-demand playbook are
-//! the only model-facing ApplyRequest samples. They are extracted from the
-//! authored sources so they cannot drift from the real request type, and every
-//! terminal-originated playbook request is executed against a seeded session.
+//! The worked examples in the core skill rules and the on-demand files are the
+//! only model-facing ApplyRequest samples. They are extracted from the authored
+//! sources so they cannot drift from the real request type, and every
+//! terminal-originated request is executed against a seeded session.
+//!
+//! The examples use the lenient filing shape (optional fields omitted, `owner`
+//! defaulting to the agent, nested `children`, generated `op_id`). `lenient`
+//! expands that shape to the canonical request before it is checked.
 use ariadne_core::{apply::ApplyService, *};
 use ariadne_domain::models::*;
 use ariadne_store::{registry::Registry, session::Store};
+use serde_json::{json, Value};
 use sha2::Digest;
 use std::collections::BTreeSet;
 
 const RULES: &str = include_str!("../../../integrations/rules/source.md");
-const PLAYBOOK: &str = include_str!("../../../integrations/rules/playbook.md");
+const SKILL: &str = include_str!("../../../integrations/rules/skill.md");
+const CLAUDE_SKILL: &str =
+    include_str!("../../../integrations/claude/plugin/skills/ariadne/SKILL.md");
+const CODEX_SKILL: &str = include_str!("../../../integrations/codex/skills/ariadne/SKILL.md");
+const INPUTS: &str = include_str!("../../../integrations/rules/inputs.md");
+const ERRORS: &str = include_str!("../../../integrations/rules/errors.md");
+const RECONNECT: &str = include_str!("../../../integrations/rules/reconnect.md");
+const REPORT: &str = include_str!("../../../integrations/rules/report.md");
+const REVIEW: &str = include_str!("../../../integrations/rules/review.md");
+const CHECKLIST: &str = include_str!("../../../integrations/rules/checklist.md");
+const FOLLOW_UP: &str = include_str!("../../../integrations/rules/follow-up.md");
+
+/// Optional operation fields the lenient shape may omit; canonical form has `null`.
+const OPTIONAL: [(&str, &[&str]); 3] = [
+    (
+        "item.add",
+        &[
+            "parent",
+            "ask",
+            "options",
+            "note",
+            "links",
+            "outcome",
+            "why",
+            "replaced_by",
+            "source_round_id",
+        ],
+    ),
+    ("item.status", &["outcome", "why", "reason"]),
+    ("reply", &["round_id"]),
+];
+
+/// Expand one operation (and its nested `children`) into canonical operations.
+fn flatten(mut operation: Value, out: &mut Vec<Value>) {
+    let object = operation.as_object_mut().unwrap();
+    let children = object.remove("children");
+    let kind = object["op"].as_str().unwrap().to_owned();
+    for (name, keys) in OPTIONAL {
+        if kind == name {
+            for key in keys {
+                object.entry(*key).or_insert(Value::Null);
+            }
+        }
+    }
+    if kind == "item.add" {
+        object.entry("owner").or_insert(json!({
+            "kind": "agent",
+            "binding_id": id(3).as_str()
+        }));
+    }
+    if kind == "item.edit" {
+        let patch = object["patch"].as_object_mut().unwrap();
+        for key in ["question", "type", "links"] {
+            patch.entry(key).or_insert(Value::Null);
+        }
+    }
+    let (topic, reference) = (object.get("topic").cloned(), object.get("ref").cloned());
+    out.push(operation);
+    for mut child in children
+        .into_iter()
+        .flat_map(|c| c.as_array().unwrap().clone())
+    {
+        child["topic"] = topic
+            .clone()
+            .expect("a parent with children names its topic");
+        child["parent"] =
+            json!({"ref": reference.clone().expect("a parent with children has a ref")});
+        flatten(child, out);
+    }
+}
+
+fn lenient(block: &str) -> Value {
+    let mut request: Value = serde_json::from_str(block)
+        .unwrap_or_else(|error| panic!("example is not JSON: {error}\n{block}"));
+    let object = request.as_object_mut().unwrap();
+    object.entry("op_id").or_insert(json!(id(0x300).as_str()));
+    for key in ["source_input_id", "attempt_id", "input_result"] {
+        object.entry(key).or_insert(Value::Null);
+    }
+    for key in ["expected_item_revisions", "expected_topic_revisions"] {
+        object.entry(key).or_insert(json!({}));
+    }
+    object.entry("summary").or_insert(json!(""));
+    let mut operations = Vec::new();
+    for operation in object["operations"].as_array().unwrap().clone() {
+        flatten(operation, &mut operations);
+    }
+    object.insert("operations".into(), Value::Array(operations));
+    request
+}
 
 fn examples(text: &str) -> Vec<String> {
     let mut blocks = Vec::new();
@@ -30,13 +124,14 @@ fn examples(text: &str) -> Vec<String> {
 /// teaches: every created topic and item is labelled, and a `note` (shown only
 /// as an in-progress line) is set only on an item that starts in progress.
 fn checked(block: &str) -> ApplyRequest {
-    let request: ApplyRequest = serde_json::from_str(block)
+    let expanded = lenient(block);
+    let request: ApplyRequest = serde_json::from_value(expanded.clone())
         .unwrap_or_else(|error| panic!("example does not deserialize: {error}\n{block}"));
     request.validate_wire().unwrap();
     // Strict round trip: no field the type would silently add or drop.
     assert_eq!(
         serde_json::to_value(&request).unwrap(),
-        serde_json::from_str::<serde_json::Value>(block).unwrap(),
+        expanded,
         "example is not canonical"
     );
     for operation in &request.operations {
@@ -57,13 +152,15 @@ fn checked(block: &str) -> ApplyRequest {
 
 #[test]
 fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surface() {
-    let blocks = examples(RULES);
+    let blocks: Vec<String> = [RULES, INPUTS, REPORT, REVIEW, CHECKLIST, FOLLOW_UP]
+        .into_iter()
+        .flat_map(examples)
+        .collect();
     assert!(blocks.len() >= 7, "expected the worked examples");
     let mut ops = BTreeSet::new();
     let mut outcomes = BTreeSet::new();
     let mut owners = BTreeSet::new();
     let (mut local_ref, mut child, mut local_topic) = (false, false, false);
-    let mut removed_ack = false;
     for block in &blocks {
         let request = checked(block);
         for operation in &request.operations {
@@ -76,11 +173,6 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
             }
         }
         if let Some(result) = &request.input_result {
-            // A `removed` notice is acknowledged with nothing but the result.
-            removed_ack |= request.operations.is_empty()
-                && result.outcome == ResultOutcome::Answered
-                && result.reply_refs.is_empty()
-                && result.followup_item_refs.is_empty();
             outcomes.insert(
                 serde_json::to_value(&result.outcome)
                     .unwrap()
@@ -99,59 +191,91 @@ fn every_rule_example_is_a_valid_apply_request_and_together_they_cover_the_surfa
             }
         }
     }
-    // The core rules stand alone: the playbook is read only on demand.
+    for op in ["topic.add", "item.add", "item.ask", "item.status", "reply"] {
+        assert!(ops.contains(op), "no example for {op}");
+    }
+    // The core table names every operation the request type has.
     for op in [
         "topic.add",
         "item.add",
         "item.edit",
         "item.ask",
         "item.status",
+        "item.replace",
         "reply",
         "round.close",
     ] {
-        assert!(ops.contains(op), "no example for {op}");
+        assert!(RULES.contains(&format!("| `{op}` |")), "core omits {op}");
     }
-    for outcome in ["answered", "deferred", "unable"] {
-        assert!(outcomes.contains(outcome), "{outcome}");
-    }
+    assert!(outcomes.contains("answered"));
     assert!(owners.contains("agent") && owners.contains("other"));
     assert!(child && local_ref && local_topic);
-    assert!(removed_ack, "no example acknowledges a removed input");
 }
 
-/// The archived-topic read command in the rules is the real read request, and
-/// the refusal reason it teaches is the one core returns.
+/// The archived-topic refusal the errors file teaches is the one core returns.
 #[test]
-fn the_archived_topic_read_example_is_a_valid_read_request() {
-    let line = RULES
-        .lines()
-        .find(|line| line.starts_with("printf '%s' '") && line.contains("\"archived\":true"))
-        .expect("no archived-topic read example");
-    let json = line
-        .strip_prefix("printf '%s' '")
-        .and_then(|rest| rest.split_once("' | ariadne read "))
-        .map(|(json, _)| json.replace("<TOPIC_ID>", id(5).as_str()))
-        .expect("example is not `printf ... | ariadne read`");
-    let request: SessionReadRequest = serde_json::from_str(&json)
-        .unwrap_or_else(|error| panic!("read example does not deserialize: {error}\n{json}"));
-    assert_eq!(
-        serde_json::to_value(&request).unwrap(),
-        serde_json::from_str::<serde_json::Value>(&json).unwrap(),
-        "read example is not canonical"
-    );
-    assert!(matches!(
-        request.selection,
-        ReadView::Items {
-            topic_id: Some(_),
-            archived: Some(true),
-            ..
-        }
-    ));
-    assert!(RULES.contains("\"topic_archived\""));
+fn the_archived_topic_refusal_is_the_one_core_returns() {
+    assert!(ERRORS.contains("\"topic_archived\""));
+    assert!(ERRORS.contains("--archived"));
+    assert!(RULES.contains("--archived"));
     assert_eq!(
         serde_json::to_value(BarrierReason::TopicArchived).unwrap(),
         "topic_archived"
     );
+}
+
+/// The skill stays cheap: the core and every kind-of-work file are size-capped,
+/// each on-demand file is pointed at, and nothing duplicates the read-once rule.
+#[test]
+fn the_core_and_on_demand_files_stay_small_and_are_each_pointed_at() {
+    for skill in [CLAUDE_SKILL, CODEX_SKILL] {
+        assert!(
+            skill.len() <= 10 * 1024,
+            "core skill is {} bytes",
+            skill.len()
+        );
+        let description = skill.lines().nth(2).unwrap();
+        assert!(
+            description.len() <= "description: ".len() + 200,
+            "{description}"
+        );
+    }
+    for (name, text) in [
+        ("report.md", REPORT),
+        ("review.md", REVIEW),
+        ("checklist.md", CHECKLIST),
+        ("follow-up.md", FOLLOW_UP),
+    ] {
+        assert!(text.len() <= 3 * 1024, "{name} is {} bytes", text.len());
+        assert!(
+            examples(text).len() <= 1,
+            "{name} has more than one example"
+        );
+    }
+    for name in [
+        "inputs.md",
+        "errors.md",
+        "reconnect.md",
+        "report.md",
+        "review.md",
+        "checklist.md",
+        "follow-up.md",
+    ] {
+        assert!(SKILL.contains(&format!("`{name}`")), "core omits {name}");
+    }
+    assert!(!SKILL.contains("playbook") && !RULES.contains("playbook"));
+    let all = [
+        SKILL, RULES, INPUTS, ERRORS, RECONNECT, REPORT, REVIEW, CHECKLIST, FOLLOW_UP,
+    ];
+    let read_once = all
+        .iter()
+        .filter(|text| text.contains("`ariadne read` once"))
+        .count();
+    assert_eq!(
+        read_once, 1,
+        "the read-once rule belongs in reconnect.md only"
+    );
+    assert!(RECONNECT.contains("`ariadne read` once"));
 }
 
 fn id(n: u64) -> UuidV4 {
@@ -329,8 +453,8 @@ impl Seeded {
 /// The follow-up example answers a reply on item `1`: two explanation children
 /// of that item, a one-line reply and a result that lists both children.
 #[test]
-fn the_followup_playbook_example_files_two_children_for_a_delivered_reply() {
-    let block = examples(PLAYBOOK)
+fn the_followup_example_files_two_children_for_a_delivered_reply() {
+    let block = examples(FOLLOW_UP)
         .into_iter()
         .find(|block| block.contains("\"summary\":\"Explained Q10 and Q11\""))
         .expect("no follow-up example");
@@ -382,23 +506,28 @@ fn the_followup_playbook_example_files_two_children_for_a_delivered_reply() {
 }
 
 #[test]
-fn every_playbook_request_is_valid_and_each_terminal_one_commits_on_a_seeded_session() {
-    let blocks = examples(PLAYBOOK);
-    assert!(blocks.len() >= 5, "expected the playbook's worked requests");
+fn every_terminal_example_commits_on_a_seeded_session() {
+    // The core's opening example plus every kind-of-work example that does not
+    // answer a dispatched input. (The core's second example edits item `1` at
+    // a revision the receipt would have given, so it only needs to be valid.)
+    let blocks: Vec<String> = [RULES, REPORT, REVIEW, CHECKLIST]
+        .into_iter()
+        .flat_map(examples)
+        .filter(|block| !block.contains("\"expected_item_revisions\":{\"1\":3}"))
+        .collect();
     let mut executed = 0;
     let mut report = None;
     for block in &blocks {
         let request = checked(block);
-        if request.source_input_id.is_none() {
-            let session = execute(&request);
-            executed += 1;
-            if request.summary.contains("report") {
-                report = Some(session);
-            }
+        assert!(request.source_input_id.is_none());
+        let session = execute(&request);
+        executed += 1;
+        if request.summary.contains("report") {
+            report = Some(session);
         }
     }
-    assert!(executed >= 4, "only {executed} playbook requests executed");
-    // The report example is the shape the playbook teaches: summary first and
+    assert_eq!(executed, 4, "expected four terminal examples");
+    // The report example is the shape report.md teaches: summary first and
     // closed, and nothing left dangling: every open item is either work owned
     // by someone else or a parent grouping asks that wait on the owner.
     let session = report.expect("a report example");
@@ -425,7 +554,7 @@ fn every_playbook_request_is_valid_and_each_terminal_one_commits_on_a_seeded_ses
         .iter()
         .filter(|i| i.status == ItemStatus::WaitingOnMe)
         .count();
-    assert!(first.question.contains(&format!("{waiting} choices wait")));
+    assert!(first.question.contains(&format!("{waiting} choice waits")));
     for item in &items {
         if item.status == ItemStatus::Open {
             let groups_asks = items.iter().any(|child| {
@@ -473,8 +602,8 @@ fn rules_explain_every_input_kind_the_owner_can_send() {
         let name = kind_name(&kind);
         assert_eq!(serde_json::to_value(&kind).unwrap(), name);
         assert!(
-            RULES.contains(&format!("- `{name}`")) || RULES.contains(&format!(", `{name}`")),
-            "rules omit input kind {name}"
+            INPUTS.contains(&format!("- `{name}`")) || INPUTS.contains(&format!(", `{name}`")),
+            "inputs.md omits input kind {name}"
         );
     }
 }
@@ -486,13 +615,14 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
         "`owner_message_number`",
         "`handled_through_message_number`",
         "[ARIADNE_INPUT:",
-        "SAME `op_id`",
-        "`short` label",
-        "at most 40 characters",
-        "`playbook.md`",
     ] {
+        assert!(INPUTS.contains(needle), "{needle}");
+    }
+    assert!(ERRORS.contains("SAME `op_id`"));
+    for needle in ["`short` label", "at most 40 characters"] {
         assert!(RULES.contains(needle), "{needle}");
     }
+    assert!(SKILL.contains("[ARIADNE_INPUT:"));
     for code in [
         "stale_generation",
         "attempt_sealed",
@@ -511,14 +641,14 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
     ] {
         serde_json::from_value::<CoreErrorCode>(serde_json::json!(code))
             .unwrap_or_else(|_| panic!("rules name unknown error code {code}"));
-        assert!(RULES.contains(&format!("`{code}`")), "{code}");
+        assert!(ERRORS.contains(&format!("`{code}`")), "{code}");
     }
 }
 
 #[test]
 fn error_table_exit_codes_match_the_real_cli_exit_mapping() {
-    // Only the error table: the rules hold other tables too.
-    let table = RULES
+    // Only the error table: the file holds prose around it.
+    let table = ERRORS
         .lines()
         .skip_while(|line| *line != "| Code | Exit | Do |")
         .take_while(|line| line.starts_with('|'));

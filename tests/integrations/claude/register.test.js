@@ -62,7 +62,7 @@ describe('supported Mod entry convention', () => {
       expect(bound.at(-1)).toEqual(bound[0]);
       published = true;
       const retried = await hooks.get('ariadne-connect')(h.$,{args:ids.session});
-      expect(retried.text).toContain('connection connected');
+      expect(retried.text).toContain(`binding ${ids.binding}, generation ${ids.generation}`);
       expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
       expect(h.calls.filter(call => call.argv[2] === 'report')).toEqual([]);
       expect(h.prompts).toEqual([]);
@@ -175,16 +175,15 @@ describe('supported Mod entry convention', () => {
     const h = host();const hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);
     const result = await hooks.get('ariadne-connect')(h.$,{args:` ${ids.session} `});
-    const [summary,...guidance] = result.text.split('\n');
-    expect(summary).toContain(`session ${ids.session} in project ${ids.project}`);
-    expect(summary).toContain(`binding ${ids.binding}, generation ${ids.generation}`);
-    expect(summary).toContain('[ARIADNE_INPUT:');
-    expect(result.text).toContain('without waiting for an input');
-    expect(result.text).toContain('Never edit .ariadne/');
-    expect(result.text).not.toContain('Use published Ariadne domain commands.');
+    const [summary,command,advice,...guidance] = result.text.split('\n');
+    expect(summary).toBe(`Ariadne connected: binding ${ids.binding}, generation ${ids.generation}.`);
+    expect(command).toBe(`Command: ${descriptor.helperPath}`);
+    expect(advice).toBe('File your work as you go; the ariadne skill has the rest.');
+    // The inline rules live in the skill, not in the connect output.
+    expect(result.text).not.toContain('[ARIADNE_INPUT:');
+    expect(result.text).not.toContain('Never edit .ariadne/');
     expect(result.text).not.toContain('"instruction"');
-    expect(guidance.join('\n')).toContain(`project ${ids.project}, session ${ids.session}`);
-    expect(guidance.join('\n')).toContain('respect cancelled work');
+    expect(guidance.join('\n')).toBe('This resumes an earlier session: read reconnect.md in the ariadne skill first.');
     expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => JSON.parse(call.options.stdin).command.params.existing_session_id)).toEqual([ids.session]);
     expect(h.prompts).toEqual([]);
     // The command output carries the routing; no extra conversation note.
@@ -209,7 +208,8 @@ describe('supported Mod entry convention', () => {
     expect(h.commands[0].argumentHint).toBe('[session-id]');
     expect(h.timer().ms).toBe(1000);
     const result = await hooks.get('ariadne-connect')(h.$);
-    expect(result.text).toMatch(/^Ariadne connected: session /);
+    expect(result.text).toMatch(/^Ariadne connected: binding \S+, generation \S+\.\nCommand: \/\S+\nFile your work as you go; the ariadne skill has the rest\.$/);
+    expect(result.text).toContain(descriptor.helperPath);
     expect(result.text).not.toContain('{');
     expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.connection_state).toBe('connected');
     h.timer().callback();
