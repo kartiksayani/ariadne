@@ -74,8 +74,6 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
             "codex-skills/ariadne/SKILL.md",
             resource!("codex/skills/ariadne/SKILL.md").as_slice(),
         ),
-        ("rules/claude.md", resource!("rules/claude.md").as_slice()),
-        ("rules/codex.md", resource!("rules/codex.md").as_slice()),
     ]
     .into_iter()
     .chain(on_demand_files!(
@@ -108,7 +106,7 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
 }
 
 pub fn selected(name: &str, agent: &str) -> bool {
-    let codex = name == "rules/codex.md" || name.starts_with("codex-skills/");
+    let codex = name.starts_with("codex-skills/");
     agent == "both" || if agent == "claude" { !codex } else { codex }
 }
 
@@ -133,10 +131,11 @@ pub fn host_commands(stable_integrations: &Path, agent: &str) -> Vec<String> {
         ]);
     }
     if agent != "claude" {
-        let rules = stable_integrations.join("rules/codex.md");
+        // The skill's folder also holds the on-demand files its SKILL.md points at.
+        let skill = stable_integrations.join("codex-skills/ariadne/SKILL.md");
         commands.push(format!(
-            "In the existing Codex terminal, run /status and select that thread in Ariadne; keep host approvals explicit. After connecting, paste the short setup instruction Ariadne shows into that Codex thread once per binding; the installed Ariadne skill holds the rules (also at {}).",
-            rules.display()
+            "In the existing Codex terminal, run /status and select that thread in Ariadne; keep host approvals explicit. After connecting, paste the short setup instruction Ariadne shows into that Codex thread once per binding; the installed Ariadne skill holds the rules (if the thread cannot load it, read {} first).",
+            skill.display()
         ));
     }
     commands

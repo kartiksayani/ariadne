@@ -30,12 +30,17 @@ fn one_source_generates_adapter_guidance_and_detects_stale_outputs() {
         "Full exact reply.\nRetain original operation IDs.\n",
     );
     ariadne_xtask::rules::generate(root.path(), false).unwrap();
-    // The rule sheets are the skill text for each agent, without front matter.
-    let claude = fs::read_to_string(rules.join("claude.md")).unwrap();
-    let codex = fs::read_to_string(rules.join("codex.md")).unwrap();
+    // The skill is the only home of the rules: no separate rule sheets are written.
+    for sheet in ["claude.md", "codex.md"] {
+        assert!(!rules.join(sheet).exists(), "{sheet}");
+    }
+    let claude = fs::read_to_string(
+        root.path()
+            .join("integrations/claude/plugin/skills/ariadne/SKILL.md"),
+    )
+    .unwrap();
     assert!(claude.contains("Claude only.") && !claude.contains("Codex only."));
-    assert!(codex.contains("Codex only.") && !codex.contains("Claude only."));
-    assert!(claude.contains("Retain original operation IDs.") && !claude.starts_with("---"));
+    assert!(claude.contains("Retain original operation IDs."));
     ariadne_xtask::rules::generate(root.path(), true).unwrap();
     fs::write(rules.join("source.md"), "Changed canonical guidance.\n").unwrap();
     assert!(ariadne_xtask::rules::generate(root.path(), true)
@@ -125,7 +130,11 @@ fn symlinked_rule_target_is_rejected_without_overwriting_unrelated_content() {
     sources(&rules, "Valid full reply guidance.\n");
     let other = root.path().join("unrelated.md");
     fs::write(&other, "Keep this owner's file.").unwrap();
-    symlink(&other, rules.join("claude.md")).unwrap();
+    let skills = root
+        .path()
+        .join("integrations/claude/plugin/skills/ariadne");
+    fs::create_dir_all(&skills).unwrap();
+    symlink(&other, skills.join("SKILL.md")).unwrap();
     assert!(ariadne_xtask::rules::generate(root.path(), false).is_err());
     assert_eq!(
         fs::read_to_string(other).unwrap(),

@@ -271,13 +271,15 @@ findings as structured items through `ariadne apply`, write full replies on the
 item rather than only in the terminal, choose item statuses deliberately, and
 finish every input Ariadne sends them with exactly one explicit result. Agents
 must never guess which session they belong to, and never repeat work because a
-result was missing. The core text is in [integrations/rules](../integrations/rules/):
-[claude.md](../integrations/rules/claude.md) and [codex.md](../integrations/rules/codex.md).
-They are generated from [skill.md](../integrations/rules/skill.md) and
-[source.md](../integrations/rules/source.md); do not edit the generated files. The
-skill loads the rest on demand: inputs, errors, reconnecting and one file per kind
+result was missing. The authored text is in [integrations/rules](../integrations/rules/):
+[skill.md](../integrations/rules/skill.md) and [source.md](../integrations/rules/source.md)
+make each agent's `SKILL.md`, which `cargo xtask gen-rules` writes into the Claude
+plugin and the Codex skill folder; do not edit the generated files. The skill loads
+the rest on demand from beside it: inputs, errors, reconnecting and one file per kind
 of work (`inputs.md`, `errors.md`, `reconnect.md`, `report.md`, `review.md`,
-`checklist.md`, `follow-up.md`).
+`checklist.md`, `follow-up.md`). If the Codex skill link was skipped at setup, the
+setup instruction points Codex at the installed skill's `SKILL.md`, whose folder
+holds those files.
 
 ## Recovery
 

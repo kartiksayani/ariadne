@@ -885,13 +885,14 @@ fn admitted_real_core_claim_retains_its_physical_lease_until_quit_drains_it() {
 }
 
 #[test]
-fn setup_instructions_are_short_and_name_the_skill_and_fallback_rules() {
-    let rules = std::path::Path::new("/opt/ariadne/current/integrations/rules/codex.md");
-    let with = instructions("ariadne", Some(rules));
+fn setup_instructions_are_short_and_name_the_skill_and_its_fallback_file() {
+    let skill =
+        std::path::Path::new("/opt/ariadne/current/integrations/codex-skills/ariadne/SKILL.md");
+    let with = instructions("ariadne", Some(skill));
     assert!(with.codex.contains("the ariadne skill has the rest"));
     assert!(with
         .codex
-        .contains(&format!("read {} first", rules.display())));
+        .contains(&format!("read {} first", skill.display())));
     // The read-once rule lives in the skill's reconnect file, not here.
     assert!(!with.codex.contains("/clear"));
     let without = instructions("ARIADNE_HOME=/data ariadne", None);
@@ -902,12 +903,15 @@ fn setup_instructions_are_short_and_name_the_skill_and_fallback_rules() {
         assert!(!body.contains("# Ariadne shared agent rules"));
     }
     let home = tempfile::tempdir().unwrap();
-    assert_eq!(installed_codex_rules(Some(home.path().into())), None);
-    let sheet = home
+    assert_eq!(installed_codex_skill(Some(home.path().into())), None);
+    let skill_file = home
         .path()
-        .join(".local/share/ariadne/current/integrations/rules/codex.md");
-    fs::create_dir_all(sheet.parent().unwrap()).unwrap();
-    fs::write(&sheet, "rules").unwrap();
-    assert_eq!(installed_codex_rules(Some(home.path().into())), Some(sheet));
-    assert_eq!(installed_codex_rules(None), None);
+        .join(".local/share/ariadne/current/integrations/codex-skills/ariadne/SKILL.md");
+    fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
+    fs::write(&skill_file, "skill").unwrap();
+    assert_eq!(
+        installed_codex_skill(Some(home.path().into())),
+        Some(skill_file)
+    );
+    assert_eq!(installed_codex_skill(None), None);
 }

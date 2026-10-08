@@ -210,6 +210,8 @@ def inventory(root):
 
 
 SKILL_LINK = ".agents/skills/ariadne"
+# "rules" no longer ships (the skills hold the rules) but stays recognised so the
+# inventory of an earlier install still validates for upgrade and uninstall.
 INTEGRATION_ROOTS = ("rules", "claude-mod", "codex-skills")
 
 
