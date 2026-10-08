@@ -47,6 +47,21 @@ const ids = () => [...document.querySelectorAll<HTMLElement>('.graph-node')].map
 const selected = () => document.querySelector<HTMLElement>('.graph-node[aria-selected="true"]')?.dataset.itemId;
 
 describe('session graph view', () => {
+  it('fades hidden branches while keeping click and outside selection paths into detail', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1'] }));
+    const { rerender } = render(<value.Composition />);
+    for (const id of ['1', '1.1', '1.1.1', '1.2']) expect(node(id).className).toContain('is-hidden');
+    expect(node('2').className).not.toContain('is-hidden');
+    expect(node('1.1.1').getAttribute('aria-label')).toContain('(hidden)');
+    fireEvent.click(node('1.1.1'));
+    await waitFor(() => expect(value.reveals).toEqual([['1.1.1', true]]));
+    expect(value.saved.at(-1)?.hidden_item_ids).toEqual(['1']);
+    const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.2' });
+    rerender(<value.Composition reveal={reveal} />);
+    expect(selected()).toBe('1.2');
+    expect(node('1.2').className).toContain('is-hidden');
+  });
+
   it('renders the legend and one card per topic with its nodes and edges', async () => {
     const value = await setup(); render(<value.Composition />);
     for (const text of ['Thread to the selected item', 'Replaced by', 'Waiting on me', 'Closed', 'One graph per topic']) expect(screen.getByText(text)).toBeTruthy();

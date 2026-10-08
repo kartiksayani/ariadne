@@ -56,10 +56,10 @@ interface NodeProps {
 const Node = memo(function Node({ node, focusable, onOpen, onCollapse, onHover }: NodeProps) {
   const visual = statusVisual[node.status];
   const className = ['graph-node', node.status === 'waiting' && 'is-waiting', node.onThread && 'is-thread', node.selected && 'is-selected',
-    node.closed && 'is-closed', node.dimmed && 'is-dimmed'].filter(Boolean).join(' ');
+    node.closed && 'is-closed', node.dimmed && 'is-dimmed', node.hidden && 'is-hidden'].filter(Boolean).join(' ');
   const belowTitle = `${node.below} items below, collapsed · click to open the next tier`;
   return <div className={className} role="treeitem" aria-selected={node.selected} aria-expanded={node.below ? !node.collapsed : undefined}
-    aria-label={`${node.short}: ${node.item.question}`} title={node.item.question} tabIndex={focusable ? 0 : -1}
+    aria-label={`${node.short}: ${node.item.question}${node.hidden ? ' (hidden)' : ''}`} title={node.item.question} tabIndex={focusable ? 0 : -1}
     data-item-id={node.item.id} data-row={node.item.id} style={{ left: node.x, top: node.y }}
     onClick={() => onOpen(node)} onMouseEnter={() => onHover?.(node.item.id)} onMouseLeave={() => onHover?.(null)}>
     <div className="graph-node-head">

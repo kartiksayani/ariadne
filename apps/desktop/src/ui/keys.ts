@@ -5,7 +5,7 @@ import { useCallback, useRef, type KeyboardEvent } from 'react';
 
 export type IntentKind =
   | 'move-down' | 'move-up' | 'first' | 'last' | 'unfold' | 'fold' | 'enter' | 'send'
-  | 'answer' | 'choose' | 'choose-send' | 'answer-words' | 'bring' | 'respond' | 'drop' | 'later' | 'reopen' | 'archive'
+  | 'answer' | 'choose' | 'choose-send' | 'answer-words' | 'bring' | 'respond' | 'drop' | 'later' | 'hide' | 'reopen' | 'archive'
   | 'search' | 'graph' | 'messages' | 'waiting' | 'escape' | 'remove' | 'history-back' | 'history-forward'
   | 'text-smaller' | 'text-larger' | 'text-default';
 
@@ -26,7 +26,7 @@ export interface KeyLike {
 const plain: Readonly<Record<string, Exclude<IntentKind, 'choose' | 'choose-send'>>> = {
   ArrowDown: 'move-down', j: 'move-down', ArrowUp: 'move-up', k: 'move-up', Home: 'first', End: 'last',
   ArrowRight: 'unfold', l: 'unfold', ArrowLeft: 'fold', h: 'fold', Enter: 'enter',
-  a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', o: 'reopen', e: 'archive',
+  a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', x: 'hide', o: 'reopen', e: 'archive',
   '/': 'search', g: 'graph', m: 'messages', w: 'waiting', Escape: 'escape', Backspace: 'remove', Delete: 'remove',
 };
 

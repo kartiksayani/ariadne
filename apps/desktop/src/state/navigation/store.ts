@@ -368,6 +368,35 @@ export class NavigationStore {
       } }]);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
+  /** Hiding is an owner view preference; no domain mutation reaches the agent. */
+  async setHidden(item: ItemRoute, hidden: boolean, expectedPreferencesRevision: number): Promise<boolean> {
+    try {
+      const preferences = await this.editingPreferences(expectedPreferencesRevision);
+      if (!preferences || this.stopped || this.pending) return false;
+      const current = preferences.sessions.find(saved => sameRoute(saved.session, item));
+      const snapshot = await this.service.query({ session: { project_id: item.project_id, session_id: item.session_id }, request: { command: 'session_get', params: {} } });
+      if (this.stopped || this.pending) return false;
+      if (!snapshot.session.items[item.item_id]) throw new ServiceFailure('invalid_response');
+      const view: SessionPreferences = current ? structuredClone(current) : {
+        session: { project_id: item.project_id, session_id: item.session_id }, tab_open: false, selected_item_id: null,
+        tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
+        expanded_item_ids: [...initialExpansion(snapshot.session)],
+        filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null,
+      };
+      const ids = new Set(view.hidden_item_ids ?? []);
+      if (hidden) ids.add(item.item_id);
+      else {
+        // An inherited hidden row also offers Unhide. Open its ancestors while
+        // retaining separately hidden siblings and descendants.
+        const seen = new Set<string>();
+        for (let id: string | null = item.item_id; id && !seen.has(id); id = snapshot.session.items[id]?.parent ?? null) {
+          ids.delete(id); seen.add(id);
+        }
+      }
+      if (ids.size) view.hidden_item_ids = [...ids]; else delete view.hidden_item_ids;
+      return await this.patch(preferences, [{ kind: 'set_session_view', preferences: view }]);
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
   async setLater(item: ItemRoute, later: boolean, expectedPreferencesRevision: number): Promise<boolean> {
     try {
       const preferences = await this.editingPreferences(expectedPreferencesRevision);

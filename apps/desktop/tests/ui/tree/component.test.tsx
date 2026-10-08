@@ -223,8 +223,8 @@ describe('session tree rows', () => {
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Remove (⌫)' }));
     expect(calls.acts.map(([intent, target]) => `${intent}:${target.item_id}`)).toEqual(['bring:1.1', 'later:1.1', 'reopen:5', 'followup:5']);
     expect(calls.removed).toBe(1);
-    // A delivery on its way (item 3's in-flight input) leaves only Remove.
-    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Remove (⌫)']);
+    // A delivery on its way still permits owner-only Hide and Remove.
+    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Hide (x)', 'Remove (⌫)']);
     fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
   });
 });

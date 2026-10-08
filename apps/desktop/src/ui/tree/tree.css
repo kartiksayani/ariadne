@@ -765,6 +765,7 @@
   transition: opacity .12s;
 }
 
+.tree-item-hidden .tree-actions,
 .tree-item:hover .tree-actions,
 .tree-item[aria-selected="true"] .tree-actions,
 .tree-column[data-kbd] .tree-item:focus .tree-actions {
@@ -913,4 +914,34 @@
 .tree-session-bar .btn i,
 .tree-topic-line .btn i {
   font-size: calc(13px * var(--text-scale));
+}
+
+
+.tree-hidden-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  cursor: pointer;
+}
+
+.tree-hidden-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: calc(11px * var(--text-scale));
+  color: var(--st-waiting);
+}
+
+.tree-item-hidden {
+  opacity: .58;
+}
+
+.tree-action-label {
+  display: flex;
+  gap: 4px;
+  width: auto;
+  padding: 0 5px;
+  font-size: calc(11px * var(--text-scale));
 }

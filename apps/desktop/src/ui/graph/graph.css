@@ -235,6 +235,11 @@
   opacity: 0.4;
 }
 
+.graph-node.is-hidden {
+  opacity: 0.45;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
 .graph-node-head {
   display: flex;
   align-items: center;
@@ -310,5 +315,10 @@
 }
 
 .graph-node.is-closed .graph-node-question {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.graph-node.is-hidden .graph-node-title,
+.graph-node.is-hidden .graph-node-question {
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }

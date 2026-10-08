@@ -18,11 +18,11 @@ describe('workspace keymap', () => {
     const kinds = (keys: string[]) => keys.map(key => workspaceIntent({ key })?.kind ?? null);
     expect(kinds(['ArrowDown', 'j', 'ArrowUp', 'k', 'Home', 'End'])).toEqual(['move-down', 'move-down', 'move-up', 'move-up', 'first', 'last']);
     expect(kinds(['ArrowRight', 'l', 'ArrowLeft', 'h', 'Enter'])).toEqual(['unfold', 'unfold', 'fold', 'fold', 'enter']);
-    expect(kinds(['a', 'b', 'r', 'd', 'z', 'o', 'e'])).toEqual(['answer', 'bring', 'respond', 'drop', 'later', 'reopen', 'archive']);
+    expect(kinds(['a', 'b', 'r', 'd', 'z', 'x', 'o', 'e'])).toEqual(['answer', 'bring', 'respond', 'drop', 'later', 'hide', 'reopen', 'archive']);
     expect(kinds(['/', 'g', 'm', 'w', 'Escape', 'Backspace', 'Delete'])).toEqual(['search', 'graph', 'messages', 'waiting', 'escape', 'remove', 'remove']);
     expect(workspaceIntent({ key: '1' })).toEqual({ kind: 'choose', index: 0 });
     expect(workspaceIntent({ key: '9' })).toEqual({ kind: 'choose', index: 8 });
-    expect(kinds(['0', 'A', 'x', 'Tab', ' '])).toEqual([null, null, null, null, null]);
+    expect(kinds(['0', 'A', 'X', 'Tab', ' '])).toEqual([null, null, null, null, null]);
   });
 
   it('accepts Cmd+F, Cmd+Enter and item history chords among modified keys', () => {
@@ -50,6 +50,15 @@ function Probe({ scope, handlers }: { readonly scope: KeyScope; readonly handler
 const node = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
 
 describe('useWorkspaceKeys', () => {
+  it('uses x for hide and unhide while keeping it in owner text fields', () => {
+    const hide = vi.fn(() => true);
+    render(<Probe scope="workspace" handlers={{ hide }} />);
+    expect(fireEvent.keyDown(node('button'), { key: 'x' })).toBe(false);
+    expect(hide).toHaveBeenCalledWith({ kind: 'hide' }, expect.anything());
+    fireEvent.keyDown(node('input'), { key: 'x' }); fireEvent.keyDown(node('area'), { key: 'x' });
+    expect(hide).toHaveBeenCalledOnce();
+  });
+
   it.each(['workspace', 'row', 'editor'] as const)('keeps Option digits in all text fields in %s scope', scope => {
     const quick = vi.fn(() => true);
     render(<Probe scope={scope} handlers={{ 'choose-send': quick, 'answer-words': quick }} />);

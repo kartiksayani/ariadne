@@ -19,6 +19,7 @@ import { SessionActionControllers } from './components/bindings/actions';
 import { RecoveryPanel, recoveryTargets } from './components/recovery/RecoveryPanel';
 import { CopiedProvenance } from './components/history-actions/CopiedProvenance';
 import { SessionNotice } from './components/edge-states/EdgeState';
+import { hiddenItems } from './ui/tree/hidden';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
 import { ArchivePage } from './ui/pages/ArchivePage';
 import { useSessionSnapshots } from './ui/pages/snapshots';
@@ -85,6 +86,7 @@ function workspaceKeys(app: {
   readonly focusOwner: (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => void;
   readonly quickAnswer: (target: ItemRoute, index?: number) => boolean;
   readonly queueBring: (target: ItemRoute) => Promise<void>;
+  readonly toggleHidden: (target: ItemRoute) => boolean;
   readonly toggleLater: (target: ItemRoute, itemId: string) => boolean;
   readonly archiveTopic: (topicId: string) => boolean;
   readonly toggleGraph: () => void;
@@ -122,6 +124,7 @@ function workspaceKeys(app: {
     }),
     'choose-send': onItem(({ item, target }, intent) => item.status === 'waiting_on_me' && intent.kind === 'choose-send' && app.quickAnswer(target, intent.index)),
     'answer-words': onItem(({ item, target }) => item.status === 'waiting_on_me' && app.quickAnswer(target)),
+    hide: onItem(({ target }, _intent, event) => event.repeat ? true : app.toggleHidden(target)),
     later: onItem(({ item, target }) => app.toggleLater(target, item.id)),
     archive: onItem(({ item }) => app.archiveTopic(item.topic_id)),
     graph: () => { if (!app.store) return false; app.toggleGraph(); return true; },
@@ -462,6 +465,21 @@ function Workspace({ application }: { application: Application }) {
     if (!preferences) return false;
     void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === itemId), preferences.revision); return true;
   };
+  const toggleHidden = (target: ItemRoute) => {
+    const current = navigation.getSnapshot();
+    if (!current.preferences || current.writing || current.pendingOperationId !== null) return false;
+    const session = navigation.opened.open(target).getSnapshot().snapshot?.session ?? application.waiting.sessionState(target)?.snapshot?.session;
+    const saved = current.preferences.sessions.find(value => routeKey(value.session) === routeKey(target));
+    const isHidden = !!session && hiddenItems(session, new Set(saved?.hidden_item_ids ?? [])).has(target.item_id);
+    setDismissedReveal(currentReveal);
+    void navigation.setHidden(target, !isHidden, current.preferences.revision).then(saved => {
+      if (!saved) notices.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+        text: 'The hidden items preference could not be saved. Try again.' });
+    });
+    return true;
+  };
+  const selectedHidden = !!sessionState?.snapshot?.session && !!selectedId
+    && hiddenItems(sessionState.snapshot.session, new Set(view?.hidden_item_ids ?? [])).has(selectedId);
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({
     store: !!store, closeDetail, focusOwner, quickAnswer, queueBring, archiveTopic: topicId => {
       const control = document.querySelector<HTMLButtonElement>(`[data-shortcut-archive-topic="${topicId}"]`);
@@ -481,7 +499,7 @@ function Workspace({ application }: { application: Application }) {
     },
     askRemove,
     oldestWaiting: () => application.waiting.getSnapshot().waiting[0]?.route,
-    toggleLater,
+    toggleLater, toggleHidden,
     toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })), toggleRail,
     clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
   }), { scope: 'workspace' });
@@ -498,6 +516,7 @@ function Workspace({ application }: { application: Application }) {
         onQueryChange: view ? text => { setSearchEdit({ route: key, text, attempted: false }); setDismissedReveal(currentReveal); } : undefined,
         onToggleRail: view ? toggleRail : undefined,
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
+      hidden={selectedHidden} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
       waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={revealItem} onAgentNotRunning={onAgentNotRunning}
         selected={route && selectedId ?{ ...route, item_id: selectedId } : null}
@@ -523,6 +542,7 @@ function Workspace({ application }: { application: Application }) {
         onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}
         onAct={(intent, target, onReveal) => {
           if (intent === 'bring') void queueBring(target, onReveal);
+          else if (intent === 'hide') toggleHidden(target);
           else if (intent === 'later') toggleLater(target, target.item_id);
           else focusOwner(target, intent, undefined, onReveal);
         }}
