@@ -4,7 +4,7 @@
 // item is (head, delivery, outcome, why, children, links, timeline) scrolls
 // and ends in the conversation, oldest first; the owner's composer stays
 // docked under it (quick replies above a reply box that grows as you type).
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { sessionActionsFor } from '../../components/bindings/actions';
@@ -73,7 +73,8 @@ interface WordsFieldProps {
   /** What the words go out as now. */
   readonly sentAs: WordsKind;
   readonly first: boolean;
-  readonly inputRef: RefObject<HTMLTextAreaElement | null> | null;
+  /** Hands the box's textarea to the panel, so a key can focus the draft it names. */
+  readonly register: (element: HTMLTextAreaElement | null) => void;
   readonly sendOff: boolean;
   /** The box was opened by a button and holds no words: it can be closed. */
   readonly closable: boolean;
@@ -89,18 +90,20 @@ interface WordsFieldProps {
  * owner sees the kind before sending. Its mount does not depend on the section around it, so typing and focus survive
  * the item changing status.
  */
-function WordsField({ slot, sentAs, first, inputRef, sendOff, closable, onEdit, onKeyDown, onSend, onCancel, onReview }: WordsFieldProps) {
-  const own = useRef<HTMLTextAreaElement>(null), ref = inputRef ?? own;
+function WordsField({ slot, sentAs, first, register, sendOff, closable, onEdit, onKeyDown, onSend, onCancel, onReview }: WordsFieldProps) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  const attach = (element: HTMLTextAreaElement | null) => { ref.current = element; register(element); };
   useGrow(ref, slot.text);
-  const text = boxText[sentAs], noteId = useId();
-  // A locked draft (an attempt in flight or awaiting a retry) goes out as the kind it was saved with, so the note would be wrong.
+  // A locked draft (an attempt in flight or awaiting a retry) goes out as the kind it was saved with: its label, button and
+  // hint name that kind, and it carries no note about a change.
+  const kind = slot.locked ? slot.kind : sentAs, text = boxText[kind], noteId = useId();
   const note = slot.kind !== sentAs && !slot.locked;
   return <>
     {slot.changed && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
       <button type="button" className="btn btn-secondary answer-warn-action" disabled={slot.locked} onClick={onReview}>Review current target</button></div>}
     <div className="detail-box">
-      {note && <p className="detail-box-note" id={noteId}>{`This was written as a ${kindName[slot.kind]}. It will be sent as a ${kindName[sentAs]}, which fits the item now.`}</p>}
-      <textarea ref={ref} className="input" rows={1} aria-label={first ? text.label : `${text.label}, another draft`} aria-describedby={note ? noteId : undefined}
+      {note && <p className="detail-box-note" id={noteId}>{`This will be sent as a ${kindName[sentAs]}, which fits the item now. You wrote it as a ${kindName[slot.kind]}.`}</p>}
+      <textarea ref={attach} className="input" rows={1} aria-label={first ? text.label : `${text.label}, another draft`} aria-describedby={note ? noteId : undefined}
         placeholder={text.placeholder} value={slot.text} disabled={slot.locked} onChange={event => onEdit(event.target.value)} onKeyDown={onKeyDown} />
       <div className="detail-box-row">
         <button type="button" className="btn btn-primary" disabled={sendOff} aria-label={first ? text.button : `${text.button}, another draft`} onClick={onSend}>
@@ -145,7 +148,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const [laterError, setLaterError] = useState(false);
   // The drop reason is local; the sent text wraps it (Ariadne.dc.html:1207).
   const [reason, setReason] = useState('');
-  const box = useRef<HTMLTextAreaElement>(null), dropBox = useRef<HTMLInputElement>(null);
+  // The boxes' textareas by key, and the key of the one typed in last: `r` goes to that draft (else the newest).
+  const boxes = useRef(new Map<string, HTMLTextAreaElement>()), edited = useRef<string | null>(null), dropBox = useRef<HTMLInputElement>(null);
   const handled = useRef<number | null>(null);
   // The scrolling body, and whether the owner is reading its end (the latest message) or has scrolled up.
   const body = useRef<HTMLDivElement>(null), atEnd = useRef(true), justSent = useRef(false);
@@ -172,12 +176,11 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   useEffect(() => { if (mode && model && !modeFits(mode)) setMode(null); });
   // A box is keyed by its draft, so removing one draft never hands its mount (and the owner's focus) to another. The empty box
   // keeps one key when its first keystroke makes it a draft, so that keystroke does not remount the textarea.
+  // A saved draft the owner empties keeps the key it had, so its textarea (focus, caret) stays mounted.
   const lead = useRef<string | null>(null), blankShown = useRef(false);
-  const showingBlank = slots.length === 1 && submit.written.length === 0;
-  if (showingBlank) lead.current = slots[0]!.id;
-  else if (blankShown.current && slots.length > 0) lead.current = slots[0]!.id;
-  blankShown.current = showingBlank;
-  const slotKey = (slot: Words) => showingBlank || slot.id === null || slot.id === lead.current ? 'blank' : slot.id;
+  if (blankShown.current && slots[0]?.id) lead.current = slots[0].id;
+  blankShown.current = slots.length === 1 && slots[0]?.id === null;
+  const slotKey = (slot: Words) => slot.id === null || slot.id === lead.current ? 'blank' : slot.id;
 
   // Opening the item, and sending, show the latest message, as chat apps do. A message that arrives
   // while the owner reads further up leaves the view where it is. An item with nothing said yet (no conversation, or
@@ -226,7 +229,12 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     else openBox(action);
   };
 
-  useEffect(() => { if (focusBox) (dropOpen ? dropBox : box).current?.focus(); }, [focusBox]);
+  useEffect(() => {
+    if (!focusBox) return;
+    if (dropOpen) { dropBox.current?.focus(); return; }
+    const keys = slots.map(slotKey), key = edited.current !== null && keys.includes(edited.current) ? edited.current : keys.at(-1);
+    if (key !== undefined) boxes.current.get(key)?.focus();
+  }, [focusBox]);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1600);
@@ -275,8 +283,9 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     <PausedNote actions={actions} />
     {reopenStale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
       <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked('reopen')} onClick={() => submit.review('reopen')}>Review current target</button></div>}
-    {fit && slots.map((slot, index) => <WordsField key={slotKey(slot)} slot={slot} sentAs={fit} first={index === 0} inputRef={index === 0 ? box : null} sendOff={sendOff(slot)}
-      closable={closable} onEdit={value => submit.edit(slot, value)} onKeyDown={wordsKey(slot)} onSend={() => sendWords(slot)} onCancel={closeBox}
+    {fit && slots.map((slot, index) => <WordsField key={slotKey(slot)} slot={slot} sentAs={fit} first={index === 0} sendOff={sendOff(slot)}
+      register={element => { const key = slotKey(slot); if (element) boxes.current.set(key, element); else boxes.current.delete(key); }}
+      closable={closable} onEdit={value => { edited.current = slotKey(slot); submit.edit(slot, value); }} onKeyDown={wordsKey(slot)} onSend={() => sendWords(slot)} onCancel={closeBox}
       onReview={() => submit.review(slot)} />)}
     {dropOpen && <div className="detail-box">
       <input ref={dropBox} className="input" aria-label="Drop reason" placeholder="Reason (optional), e.g. the metric already covers it" value={reason}
@@ -409,7 +418,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
     </section>}
 
-    {model.followUp && <section className="detail-section detail-open" aria-label="Follow-up">
+    {model.followUp && <section className="detail-section detail-open" aria-label="Reply">
       <div className="detail-actions" role="group" aria-label="Item actions">
         <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !submit.ready}
           title="Reply in your own words" onClick={() => openBox('reply')}>

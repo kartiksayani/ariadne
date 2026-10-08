@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useRef, useState, type KeyboardEvent } from 'react';
-import { keyAnchor, useWindowKeys } from '../../../src/ui/shell/windowKeys';
+import { HOLD_MS, keyAnchor, useWindowKeys } from '../../../src/ui/shell/windowKeys';
 import { watchFullscreen, SETTLE_MS } from '../../../src/ui/shell/fullscreen';
 import { RootBoundary } from '../../../src/RootBoundary';
 
@@ -88,6 +88,80 @@ describe('window-level workspace keys', () => {
     act(() => { field.disabled = false; field.focus(); field.disabled = true; field.blur(); });
     field.remove();
     expect(press(document.body, 'e').defaultPrevented).toBe(true);
+  });
+
+  /** A text field outside the app root that the owner is typing in, then a save disables it (focus falls to <body>). */
+  const strand = () => {
+    const field = document.body.appendChild(document.createElement('textarea'));
+    act(() => { field.focus(); });
+    field.disabled = true; field.blur();
+    return field;
+  };
+  const settle = () => act(async () => { await Promise.resolve(); });
+
+  it('gives the field its focus back and the held keys once it is enabled again, instead of replaying them on the tree', async () => {
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const field = strand();
+    await settle();
+    // Typed while it was disabled: held, neither lost nor treated as the tree’s d, e and 1.
+    press(document.body, 'd'); press(document.body, 'e'); press(document.body, '1');
+    expect(field.value).toBe('');
+    field.disabled = false;
+    await settle();
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe('de1');
+    expect(onKey).not.toHaveBeenCalled();
+  });
+
+  it('refocuses the field and types into it when the first key comes after it was enabled again', async () => {
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const field = strand();
+    await settle();
+    field.disabled = false;
+    await settle();
+    const event = press(document.body, 'd');
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe('d');
+    expect(onKey).not.toHaveBeenCalled();
+    // The caret is kept: the owner is back in the field, and keys inside it are theirs alone.
+    expect(press(field, 'e').defaultPrevented).toBe(false);
+  });
+
+  it('inserts at the caret and reports the change to the field’s own handler', async () => {
+    render(<Workspace onKey={() => true} />);
+    const field = strand();
+    await settle();
+    field.disabled = false;
+    field.value = 'ac'; field.setSelectionRange(1, 1);
+    const seen: string[] = [];
+    field.addEventListener('input', () => seen.push(field.value));
+    await settle();
+    press(document.body, 'b');
+    expect(field.value).toBe('abc');
+    expect(seen).toEqual(['abc']);
+  });
+
+  it('gives up the held keys after a short while, and never hands them to the tree', async () => {
+    vi.useFakeTimers();
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const field = strand();
+    await settle();
+    press(document.body, 'd'); press(document.body, 'e');
+    act(() => { vi.advanceTimersByTime(HOLD_MS + 1); });
+    // Still disabled (a send awaiting reconciliation): later keys are dropped too, not queued forever.
+    press(document.body, '1');
+    field.disabled = false;
+    await settle();
+    expect(field.value).toBe('');
+    expect(onKey).not.toHaveBeenCalled();
+    // Enabled again, the owner’s next key is theirs once more.
+    press(document.body, 'z');
+    expect(field.value).toBe('z');
+    expect(onKey).not.toHaveBeenCalled();
   });
 
   it('always consumes plain Esc so macOS does not leave full screen, except for dialogs and input methods', () => {
