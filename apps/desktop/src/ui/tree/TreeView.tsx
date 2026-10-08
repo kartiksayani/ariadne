@@ -674,7 +674,7 @@ export function TreeView(props: TreeViewProps) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
   } else body = tree;
 
-  return <section className="tree-column" aria-label="Session tree" data-kbd={kbd || undefined}
+  return <section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-kbd={kbd || undefined}
     onKeyDownCapture={() => { if (!kbd) setKbd(true); }} onMouseDownCapture={() => { if (kbd) setKbd(false); }}>
     {bar && !archivedMode && <SessionBar bar={bar} busy={lifecycle.busy || !session} onClose={lifecycle.session}
       onRename={session ? (name, description) => saveSessionLabel(actions, session.revision, name, description) : undefined}

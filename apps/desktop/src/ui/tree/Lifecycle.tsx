@@ -2,7 +2,7 @@
 // a topic with open items or unsent messages asks one plain confirmation that
 // says what stays and what is cancelled; one with neither archives at once.
 // Either way an "Archived" banner offers Undo.
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { CoreFailure, plainFailure, useSession, type ServiceFailure } from '../../data';
 import type { OwnerCommand } from '../../generated/core';
 import { SessionActions, useSessionActions } from '../../components/bindings/actions';
@@ -23,6 +23,7 @@ const confirmWords: Record<Kind, { readonly title: string; readonly button: stri
   session_close: { title: 'Close this session?', button: 'Close session' },
   session_reopen: { title: 'Reopen this session?', button: 'Reopen session' },
 };
+const loadingError = "Ariadne is still loading this session's latest changes. Try again.";
 interface Review { kind: Kind; topicId: string | null; revision: number; sessionRevision: number; error: CoreFailure | ServiceFailure | null }
 /** A saved archive: its waiting questions left the panel, and `cancelled` unsent messages were cancelled. */
 export interface Archived { readonly topicId: string; readonly name: string; readonly waiting: number; readonly cancelled: number }
@@ -50,30 +51,51 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
   const [confirming, setConfirming] = useState<{ readonly topicId: string; readonly error: string | null } | null>(null);
   const [archived, setArchived] = useState<Archived | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const running = useRef(false);
+  const [waiting, setWaiting] = useState(false);
   const session = state.snapshot?.session ?? null;
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
-  const disabled = state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
+  const disabled = waiting || operation.writing || !!operation.pending;
   const resetReview = () => setReview(null);
   const prepare = (kind: Kind, topicId: string | null = null) => {
     if (!session) return;
     setError(null);
     setReview({ kind, topicId, revision: topicId ? session.topics[topicId]!.revision : session.revision, sessionRevision: session.revision, error: null });
   };
-  const run = async (command: OwnerCommand) => {
-    if (!session || disabled) return false;
+  // Reserve before yielding so repeated clicks cannot queue duplicate writes.
+  // Rebuild the action from the refreshed capture, retaining SessionActions' write barrier.
+  const withReady = async (change: (current: NonNullable<typeof session>) => Promise<boolean> | boolean) => {
+    if (running.current || actions.getSnapshot().writing || actions.getSnapshot().pending) return false;
+    running.current = true;
+    setWaiting(true);
     setError(null);
-    const saved = await actions.execute(command, session.revision);
+    try {
+      const store = actions.session;
+      if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) await store.refresh(true);
+      const current = store.getSnapshot();
+      if (actions.session !== store || current.status !== 'ready' || current.error || !current.snapshot) {
+        setError(loadingError);
+        setConfirming(value => value && { ...value, error: loadingError });
+        return false;
+      }
+      if (actions.getSnapshot().writing || actions.getSnapshot().pending) return false;
+      const result = change(current.snapshot.session);
+      return typeof result === 'boolean' ? result : await result;
+    } finally { running.current = false; setWaiting(false); }
+  };
+  const run = async (command: OwnerCommand, current: NonNullable<typeof session>) => {
+    const saved = await actions.execute(command, current.revision);
     if (!saved) setError(plainFailure(actions.getSnapshot().error, 'The change was not saved. Reload the session and try again.'));
     return saved;
   };
   /** Archives the topic as it is now; returns whether it saved. */
-  const archiveNow = async (topicId: string) => {
-    const topic = session?.topics[topicId];
-    if (!session || !topic || topic.archived_at !== null) return false;
+  const archiveCurrent = async (topicId: string, current: NonNullable<typeof session>) => {
+    const topic = current.topics[topicId];
+    if (!topic || topic.archived_at !== null) return false;
     // Only questions still in the Waiting on me panel leave it; replied ones already wait on the agent.
-    const waiting = Object.values(session.items).filter(item => item?.topic_id === topicId && displayStatus(session, item) === 'waiting_on_me').length;
-    const saved = await run({ command: 'topic_archive', api_version: 1, op_id: '', params: { topic_id: topicId, expected_revision: topic.revision } });
+    const waiting = Object.values(current.items).filter(item => item?.topic_id === topicId && displayStatus(current, item) === 'waiting_on_me').length;
+    const saved = await run({ command: 'topic_archive', api_version: 1, op_id: '', params: { topic_id: topicId, expected_revision: topic.revision } }, current);
     if (saved) {
       const receipt = actions.getSnapshot().receipt, data = receipt && 'data' in receipt ? receipt.data : undefined;
       setArchived({ topicId, name: topic.name, waiting, cancelled: data?.kind === 'topic_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0 });
@@ -84,19 +106,27 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
     const topic = session?.topics[topicId];
     if (!session || !topic || topic.archived_at !== null) return;
     if (operation.pending) { prepare('topic_archive', topicId); return; }
-    if (archiveWarning(archiveImpact(session, topicId), agent)) { setError(null); setConfirming({ topicId, error: null }); return; }
-    void archiveNow(topicId);
+    void withReady(current => {
+      const topic = current.topics[topicId];
+      if (!topic || topic.archived_at !== null) return false;
+      if (archiveWarning(archiveImpact(current, topicId), agent)) { setConfirming({ topicId, error: null }); return false; }
+      return archiveCurrent(topicId, current);
+    });
   };
   const restore = (topicId: string) => {
-    const topic = session?.topics[topicId];
-    if (!topic || topic.archived_at === null) return;
-    void run({ command: 'topic_restore', api_version: 1, op_id: '', params: { topic_id: topicId, expected_revision: topic.revision } });
+    void withReady(current => {
+      const topic = current.topics[topicId];
+      if (!topic || topic.archived_at === null) return false;
+      return run({ command: 'topic_restore', api_version: 1, op_id: '', params: { topic_id: topicId, expected_revision: topic.revision } }, current);
+    });
   };
   const undo = () => {
     if (!archived) return;
-    const topic = session?.topics[archived.topicId];
-    if (!topic || topic.archived_at === null) { setArchived(null); return; }
-    void run({ command: 'topic_restore', api_version: 1, op_id: '', params: { topic_id: topic.id, expected_revision: topic.revision } })
+    void withReady(current => {
+      const topic = current.topics[archived.topicId];
+      if (!topic || topic.archived_at === null) { setArchived(null); return false; }
+      return run({ command: 'topic_restore', api_version: 1, op_id: '', params: { topic_id: topic.id, expected_revision: topic.revision } }, current);
+    })
       .then(saved => { if (saved) setArchived(null); });
   };
 
@@ -106,13 +136,14 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
     // The confirmation reads the topic as it is now; an agent write meanwhile only updates its words.
     const warning = archiveWarning(archiveImpact(session, confirmed.id), agent) ?? 'You can restore it any time.';
     dialog = <ConfirmDialog title={`Archive “${confirmed.name}”?`} body={warning} confirmLabel="Archive topic" busy={disabled}
-      error={confirming.error} onCancel={() => { if (!operation.writing) setConfirming(null); }}
+      error={confirming.error} onCancel={() => { if (!running.current && !actions.getSnapshot().writing) setConfirming(null); }}
       onConfirm={() => {
-        void archiveNow(confirmed.id).then(saved => {
+        void withReady(current => archiveCurrent(confirmed.id, current)).then(saved => {
           // An unconfirmed save is reconciled from the column's banner, not here.
           if (saved || actions.getSnapshot().pending) { setConfirming(null); return; }
           setError(null);
-          setConfirming(current => current && { ...current, error: plainFailure(actions.getSnapshot().error, 'The topic was not archived. Try again.') });
+          setConfirming(current => current && { ...current, error: actions.session.getSnapshot().status !== 'ready' || actions.session.getSnapshot().error
+            ? loadingError : plainFailure(actions.getSnapshot().error, 'The topic was not archived. Try again.') });
         });
       }} />;
   } else if (review && session) {
@@ -124,21 +155,24 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
       const next = actions.getSnapshot().error;
       if (next !== previousError) setReview(current => current === attempted ? { ...current, error: next } : current);
     };
-    const confirm = async () => {
-      if (disabled || changing) return;
+    const confirm = () => withReady(async current => {
+      if (changing || (!closing && review.kind !== 'session_reopen' && review.sessionRevision !== current.revision)) return false;
       const command: OwnerCommand = review.kind === 'topic_archive' || review.kind === 'topic_restore'
         ? { command: review.kind, api_version: 1, op_id: '', params: { topic_id: review.topicId!, expected_revision: review.revision } }
-        : { command: review.kind, api_version: 1, op_id: '', params: { expected_revision: session.revision } };
+        : { command: review.kind, api_version: 1, op_id: '', params: { expected_revision: current.revision } };
       const previousError = actions.getSnapshot().error;
-      if (await actions.execute(command, review.kind === 'topic_archive' || review.kind === 'topic_restore' ? review.sessionRevision : session.revision)) {
-        if (closing) announceClosed(actions, agent, ownerName(session));
+      if (await actions.execute(command, review.kind === 'topic_archive' || review.kind === 'topic_restore' ? review.sessionRevision : current.revision)) {
+        if (closing) announceClosed(actions, agent, ownerName(current));
         resetReview();
-      } else recordFailure(review, previousError);
-    };
+        return true;
+      }
+      recordFailure(review, previousError);
+      return false;
+    });
     const title = closing ? `Close ${sessionPhrase(session, agent, sessionWhen(Date.parse(session.created_at), Date.now()))}?` : words.title;
     const warning = closing ? closeWarning(closeImpact(session), agent) : null;
     const buttons = <>
-      <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={resetReview}>Cancel</button>
+      <button type="button" className="btn btn-ghost" disabled={waiting || operation.writing} onClick={resetReview}>Cancel</button>
       {operation.pending ? <button type="button" className="btn btn-primary" disabled={operation.writing} onClick={() => {
         const previousError = actions.getSnapshot().error;
         void actions.retry().then(saved => { if (saved) resetReview(); else recordFailure(review, previousError); });
@@ -146,7 +180,7 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
         : <button type="button" className="btn btn-primary" disabled={disabled || changing} onClick={() => { void confirm(); }}>
           {words.button}</button>}
     </>;
-    dialog = <Dialog label={title} width={580} onCancel={() => { if (!operation.writing) resetReview(); }}>
+    dialog = <Dialog label={title} width={580} onCancel={() => { if (!running.current && !actions.getSnapshot().writing) resetReview(); }}>
       <div className="dialog-title">{title}</div><div className="history-action-dialog">
       <p>{ownerName(session) ?? session.title}{review.topicId && ` · ${session.topics[review.topicId]?.name}`}</p>
       <p>{closing ? 'Ariadne marks the session Closed and keeps it read-only. The agent process isn’t touched.'
@@ -155,7 +189,7 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
       {warning && <p data-close-warning>{warning}</p>}
       {changing && <p role="alert">The session changed. Review the current state before confirming.</p>}
       {changing && !operation.pending && <button type="button" className="btn btn-secondary" onClick={() => prepare(review.kind, review.topicId)}>Review current state</button>}
-      {(review.error || operation.pending && operation.error) && <p role="alert">{plainFailure(review.error ?? operation.error)} {operation.pending && 'Ariadne isn’t sure your last change was saved. Check again before confirming another.'}</p>}
+      {(error || review.error || operation.pending && operation.error) && <p role="alert">{error ?? plainFailure(review.error ?? operation.error)} {operation.pending && 'Ariadne isn’t sure your last change was saved. Check again before confirming another.'}</p>}
     </div><div className="dialog-actions">{buttons}</div></Dialog>;
   }
   return {

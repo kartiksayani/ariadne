@@ -10,6 +10,11 @@ import { folded } from './owner-reply.mjs';
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
+async function archiveDiagnostics(failure) {
+  const tree = await browser.$('.tree-column').getText().catch(() => '(unavailable)');
+  const hasDialog = await dialog().isExisting().catch(() => '(unavailable)');
+  return new Error(`${failure.message}\nTree column text: ${tree}\nDialog exists: ${hasDialog}`, { cause: failure });
+}
 // The detail carries its canonical local item identity.
 const detailReference = async () => {
   const detail = await browser.$('.item-detail');
@@ -32,7 +37,10 @@ export async function topicAction(name, label) {
 }
 export async function archiveClosedTopic(topicId) {
   // The all-closed prompt sits below the sticky band, in that topic's sibling content.
-  await click(await browser.$(`.tree-rows [data-topic-id="${topicId}"] + .tree-topic-content .tree-prompt button`));
+  try {
+    await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready', 'Session was not ready for direct topic archive');
+    await click(await browser.$(`.tree-rows [data-topic-id="${topicId}"] + .tree-topic-content .tree-prompt button`));
+  } catch (failure) { throw await archiveDiagnostics(failure); }
 }
 async function lifecycle(button, confirmation, path, predicate) {
   await click(await sessionBar().$(`button*=${button}`));
@@ -116,7 +124,9 @@ export async function runHistoryActionsAcceptance(configuration) {
   // Nothing blocks an all-closed topic, so its prompt archives at once and the
   // column offers Undo, which restores it (no confirmation dialog either way).
   await archiveClosedTopic(terminalTopic.id);
-  await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at !== null, 'Direct topic archive was not visible on disk');
+  try {
+    await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at !== null, 'Direct topic archive was not visible on disk');
+  } catch (failure) { throw await archiveDiagnostics(failure); }
   assert.equal(await dialog().isExisting(), false, 'An unblocked archive must not open the review');
   await wait(async () => (await browser.$('.tree-column').getText()).includes(`Archived “${topicName}”.`), 'Archive did not report its Undo banner');
   await click(await browser.$('.tree-column').$('button=Undo'));
