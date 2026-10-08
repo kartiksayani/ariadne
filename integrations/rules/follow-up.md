@@ -8,6 +8,8 @@ not. The rules in `SKILL.md` still apply; shape every answer like a first report
   example "what are Q10 and Q11?"): file each as a child `explanation`, `done`, of
   that item (an ask if it waits on the owner). Keep the `reply` to a 1-2 line
   pointer and list the children in `followup_item_refs`.
+- **Related items**: apply the ripple updates in `SKILL.md` across the session;
+  if another item carries an owner decision, ask there before reversing it.
 - **The answer changes the result**: close the item again with the new `outcome`
   and `why`; the earlier outcome stays in its history.
 - **`bring`** on an open item: ask it now with `item.ask` and options.
@@ -22,7 +24,8 @@ not. The rules in `SKILL.md` still apply; shape every answer like a first report
 ## Example
 
 The owner replied on [retry questions](item:1) (revision 1): "what are Q10 and
-Q11?". The new items use [retry questions](item:1)'s topic id from `ariadne read`.
+Q11?". The session check finds no other affected items. The new items use
+[retry questions](item:1)'s topic id from `ariadne read`.
 
 ```json
 {"source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":1},"summary":"Explained Q10 and Q11","operations":[{"op":"item.add","ref":"q10","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":{"id":"1"},"question":"Q10: do retries stop after a cap?","short":"Q10 retry cap","type":"explanation","status":"done","outcome":"Yes, after five attempts.","why":"`MAX_RETRIES` in `src/retry.rs`."},{"op":"item.add","ref":"q11","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":{"id":"1"},"question":"Q11: is the delay jittered?","short":"Q11 jitter","type":"explanation","status":"done","outcome":"No, it is a fixed 2s.","why":"See `backoff()` in `src/retry.rs`."},{"op":"reply","ref":"r1","item":{"id":"1"},"text":"Retries stop after five attempts; the delay is fixed at 2s."}],"input_result":{"outcome":"answered","explanation":"Explained Q10 and Q11 as two items.","reply_refs":[{"ref":"r1"}],"followup_item_refs":[{"ref":"q10"},{"ref":"q11"}],"handled_through_message_number":7}}
