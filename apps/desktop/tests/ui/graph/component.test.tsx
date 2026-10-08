@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -47,6 +49,16 @@ const ids = () => [...document.querySelectorAll<HTMLElement>('.graph-node')].map
 const selected = () => document.querySelector<HTMLElement>('.graph-node[aria-selected="true"]')?.dataset.itemId;
 
 describe('session graph view', () => {
+  it('highlights collapsed children consistently in graph badges and tree notes', () => {
+    for (const [file, selector] of [['graph/graph.css', '.graph-node-below'], ['tree/tree.css', '.tree-collapsed']]) {
+      const css = readFileSync(resolve(__dirname, '../../../src/ui', file!), 'utf8');
+      const declarations = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+        .find(([, rule]) => rule!.trim() === selector)?.[2];
+      expect(declarations).toMatch(/color:\s*var\(--a-acc-text\);/);
+      expect(declarations).toMatch(/background:\s*color-mix\(in srgb, var\(--color-accent\) 15%, var\(--a-card\)\);/);
+    }
+  });
+
   it('renders the legend and one card per topic with its nodes and edges', async () => {
     const value = await setup(); render(<value.Composition />);
     for (const text of ['Thread to the selected item', 'Replaced by', 'Waiting on me', 'Closed', 'One graph per topic']) expect(screen.getByText(text)).toBeTruthy();
@@ -71,7 +83,9 @@ describe('session graph view', () => {
 
   it('opens a collapsed node: selects it, expands it, opens detail and saves the view', async () => {
     const value = await setup(undefined, preferences({ expanded_item_ids: [] })); render(<value.Composition />);
-    expect(within(node('1')).getByText('+3').title).toBe('3 items below, collapsed · click to open the next tier');
+    const badge = within(node('1')).getByText('+3');
+    expect(badge.classList.contains('graph-node-below')).toBe(true);
+    expect(badge.title).toBe('3 items below, collapsed · click to open the next tier');
     expect(node('1').getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(node('1'));
     expect(selected()).toBe('1'); expect(ids()).toContain('1.1');

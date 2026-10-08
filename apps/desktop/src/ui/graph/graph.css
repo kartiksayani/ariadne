@@ -269,11 +269,11 @@
   flex: none;
   padding: 0 5px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 15%, var(--a-card));
   font-size: calc(10.5px * var(--text-scale));
   font-weight: 500;
   line-height: calc(15px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  color: var(--a-acc-text);
 }
 
 .graph-node-collapse {
