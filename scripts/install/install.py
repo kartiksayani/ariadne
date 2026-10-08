@@ -32,6 +32,10 @@ class InstallError(ValueError):
     pass
 
 
+class MissingPath(InstallError):
+    """A directory Ariadne expected is not there; uninstall counts what it owned there as removed."""
+
+
 def require(condition, message):
     if not condition:
         raise InstallError(message)
@@ -67,7 +71,8 @@ def directory(path, create=False):
     if path.parent != path:
         directory(path.parent, create)
     if not exists(path):
-        require(create, f"Missing directory: {path}")
+        if not create:
+            raise MissingPath(f"Missing directory: {path}")
         path.mkdir(mode=0o700)
     require(not path.is_symlink() and path.is_dir(), f"Unsafe directory: {path}")
     return path
@@ -89,7 +94,8 @@ def anchored_directory(path, parent_fd=None, create=False):
             try:
                 child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             except FileNotFoundError:
-                require(create, f"Missing directory: {path}")
+                if not create:
+                    raise MissingPath(f"Missing directory: {path}") from None
                 os.mkdir(part, mode=0o700, dir_fd=fd)
                 child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             except OSError as error:
@@ -237,7 +243,7 @@ def receipts(root, home, versions_fd):
         if name.startswith("."):
             continue
         try:
-            found.append(descriptor(root / "versions" / name, home))
+            found.append(descriptor(root / "versions" / name, home, partial=True))
         except (InstallError, OSError, ValueError):
             continue
     return found
@@ -334,7 +340,10 @@ def manifest(root, home, version, files, directories, owned_links, preflight):
             "owned_links": owned_links, "preflight": preflight}
 
 
-def descriptor(root, home):
+def descriptor(root, home, partial=False):
+    """Read and validate a receipt. With partial=True a package whose helper is gone is accepted:
+    the integration inventory cannot be cross-checked then, but every removal still verifies
+    its own recorded hash, so nothing unverifiable is ever deleted."""
     value = json_read(root / "install.json")
     keys = {"schema_version", "version", "app_path", "inventory_version",
             "owned_files", "owned_directories", "owned_links", "preflight"}
@@ -380,6 +389,8 @@ def descriptor(root, home):
     # helper before executing its read-only exporter; edited/missing helpers
     # cannot establish ownership of the remaining package.
     helper = root / "bin/ariadne"
+    if partial and not exists(helper):
+        return value
     directory(helper.parent)
     require(not helper.is_symlink() and helper.is_file() and
             value["owned_files"].get("bin/ariadne", {}).get("mode") == 0o700 and
@@ -396,7 +407,7 @@ def descriptor(root, home):
     return value
 
 
-def current(root, home):
+def current(root, home, partial=False):
     path = root / "current"
     if not exists(path):
         return None
@@ -405,9 +416,12 @@ def current(root, home):
     require(target.startswith("versions/") and len(PurePosixPath(target).parts) == 2,
             "Existing current pointer escapes the versions directory.")
     version = component(target.split("/")[1])
-    selected = directory(root / "versions" / version)
+    selected = root / "versions" / version
+    if partial and not exists(selected):
+        return selected, None  # the version folder is already gone; only the pointer is left
+    directory(selected)
     require(path.resolve() == selected, "Current pointer redirects outside its exact version.")
-    return selected, descriptor(selected, home)
+    return selected, descriptor(selected, home, partial=partial)
 
 
 @contextlib.contextmanager
@@ -762,17 +776,19 @@ def install_package(home, package_dir):
     require(built["architecture"] == facts["architecture"],
             f"This package is for {built['architecture']} Macs; this Mac is {facts['architecture']}.")
     require(built["app_version"] == app_version(package_dir), "Package description does not match its app.")
+    replace_existing(home, built["app_version"])
     return install(home, package_dir, {**facts, "built": built})
 
 
-def uninstall(home):
+def uninstall(home, announce=True):
     root_path = home / ".local/share/ariadne"
     if not exists(root_path):
-        print("No personal Ariadne package installed.")
+        if announce:
+            print("No personal Ariadne package installed.")
         return []
     retained = []
     with locked(home) as (root, home_fd, root_fd, versions_fd):
-        selected = current(root, home)
+        selected = current(root, home, partial=True)
         packages = []
         # Validate every receipt before removing anything; unknown versions are retained.
         with contextlib.ExitStack() as anchors:
@@ -780,14 +796,31 @@ def uninstall(home):
                 child = root / "versions" / name
                 try:
                     package_fd = anchors.enter_context(anchored_directory(name, parent_fd=versions_fd))
-                    packages.append((child, descriptor(child, home), package_fd))
+                    packages.append((child, descriptor(child, home, partial=True), package_fd))
                 except (InstallError, OSError, ValueError):
                     retained.append(str(child))
             _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained)
     for path in sorted(set(retained)):
         print(f"Retained edited, foreign or unverifiable path: {path}")
-    print("Personal package uninstall finished. Project history and host configuration were preserved.")
+    if announce:
+        print("Personal package uninstall finished. Project history and host configuration were preserved.")
     return retained
+
+
+def replace_existing(home, version):
+    """Remove a same-version install (complete or partial) that Ariadne owns, so a fresh one can follow."""
+    final = home / ".local/share/ariadne/versions" / component(version)
+    if not exists(final):
+        return
+    print(f"Replacing the Ariadne {version} already installed (your projects and history are kept).", flush=True)
+    stop = (f"The Ariadne {version} already installed could not be replaced safely, because it holds files "
+            f"Ariadne did not create or that were changed. Move the folder {final} somewhere else, "
+            "then run ./install.sh again.")
+    try:
+        uninstall(home, announce=False)
+    except (InstallError, OSError, ValueError) as error:
+        raise InstallError(f"{stop} ({error})") from error
+    require(not exists(final), stop)
 
 
 def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained):
@@ -800,8 +833,8 @@ def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, sel
             try:
                 if not remove_owned(package_fd, name, expected):
                     retained.append(str(package / name))
-            except FileNotFoundError:
-                pass
+            except (FileNotFoundError, MissingPath):
+                pass  # already gone, so it counts as removed
             except (InstallError, OSError):
                 retained.append(str(package / name))
         for name, target in receipt["owned_links"].items():
@@ -816,7 +849,7 @@ def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, sel
                     retained.append(str(path))
         # Foreign files and nonempty directories survive. Keep descriptor for retained files.
         for name in sorted(receipt["owned_directories"], key=lambda p: len(PurePosixPath(p).parts), reverse=True):
-            with contextlib.suppress(OSError):
+            with contextlib.suppress(OSError, MissingPath):
                 remove_owned_directory(package_fd, name, receipt["owned_directories"][name])
         if os.listdir(package_fd) == ["install.json"]:
             expected = {"kind": "file", "mode": 0o600,
@@ -852,6 +885,7 @@ def main(argv=None):
         run([installed / "bin/ariadne", "doctor"])
     else:
         artifacts, facts = build()
+        replace_existing(home, app_version(artifacts))
         installed = install(home, artifacts, facts)
         run([installed / "bin/ariadne", "doctor"])
 

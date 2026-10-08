@@ -532,6 +532,48 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue((final / "bin/ariadne-mcp").exists())
         self.assertTrue((final / "integrations/rules/claude.md").exists())
 
+    def test_uninstall_tolerates_a_missing_bin_directory(self):
+        final = self.install()
+        shutil.rmtree(final / "bin")
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(final.exists())
+        self.assertFalse((self.root / "current").is_symlink())
+        self.assertFalse(self.app.exists())
+        self.assertFalse((self.home / ".local/bin/ariadne").is_symlink())
+        self.assertIn("uninstall finished", self.output.getvalue())
+
+    def test_uninstall_tolerates_a_missing_app_copy_and_bundle(self):
+        final = self.install()
+        shutil.rmtree(self.app)
+        shutil.rmtree(final / "Ariadne.app")
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(final.exists())
+
+    def test_uninstall_of_the_real_partial_shape_keeps_foreign_and_edited_files(self):
+        final = self.install()
+        shutil.rmtree(final / "bin")
+        shutil.rmtree(final / "Ariadne.app")
+        shutil.rmtree(self.app)
+        edited = final / "integrations/rules/claude.md"
+        edited.write_bytes(b"owner edited")
+        foreign = final / "owner-notes.txt"
+        foreign.write_bytes(b"foreign notes")
+        retained = installer.uninstall(self.home)
+        self.assertIn(str(edited), retained)
+        self.assertIn(str(final), retained)
+        self.assertEqual(edited.read_bytes(), b"owner edited")
+        self.assertEqual(foreign.read_bytes(), b"foreign notes")
+        self.assertFalse((final / "integrations/rules/codex.md").exists())
+        self.assertTrue((final / "install.json").exists())
+
+    def test_partial_package_with_an_edited_helper_still_preserves_everything(self):
+        final = self.install()
+        (final / "bin/ariadne").write_text("edited")
+        (final / "bin/ariadne").chmod(0o700)
+        with self.assertRaisesRegex(installer.InstallError, "helper identity"):
+            installer.uninstall(self.home)
+        self.assertTrue((final / "integrations/rules/claude.md").exists())
+
     def test_original_empty_app_directory_is_removed_but_foreign_directory_survives(self):
         (self.artifacts / "bundle/macos/Ariadne.app/Contents/empty-original").mkdir()
         final = self.install()
@@ -810,6 +852,62 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(before, {path: path.stat().st_mtime_ns for path in package.rglob("*") if not path.is_symlink()})
         self.assertEqual(installer.uninstall(self.home), [])
         self.assertFalse(final.exists())
+
+    def install_over(self, package):
+        with patch.object(installer, "build", side_effect=AssertionError("must not build")):
+            return installer.install_package(self.home, package)
+
+    def replacing_line(self):
+        return "Replacing the Ariadne 0.1.0 already installed (your projects and history are kept)."
+
+    def test_install_over_a_complete_same_version_install_replaces_it(self):
+        _, package = self.extract()
+        first = self.install_over(package)
+        self.assertNotIn("Replacing", self.output.getvalue())
+        history = self.home / ".ariadne/projects/p/history.json"
+        history.parent.mkdir(parents=True)
+        history.write_text("keep")
+        second = self.install_over(package)
+        self.assertEqual(first, second)
+        self.assertEqual(self.output.getvalue().count(self.replacing_line()), 1)
+        self.assertEqual((self.root / "current").resolve(), second)
+        self.assertTrue((second / "bin/ariadne").is_file())
+        self.assertTrue((self.home / "Applications/Ariadne.app").is_dir())
+        self.assertEqual(history.read_text(), "keep")
+        self.assertEqual(installer.uninstall(self.home), [])
+
+    def test_install_over_a_partial_same_version_install_replaces_it(self):
+        _, package = self.extract()
+        final = self.install_over(package)
+        shutil.rmtree(final / "bin")
+        shutil.rmtree(final / "Ariadne.app")
+        shutil.rmtree(self.home / "Applications/Ariadne.app")
+        again = self.install_over(package)
+        self.assertEqual(self.output.getvalue().count(self.replacing_line()), 1)
+        self.assertTrue((again / "bin/ariadne").is_file())
+        self.assertTrue((again / "Ariadne.app").is_dir())
+        self.assertTrue((self.home / "Applications/Ariadne.app").is_dir())
+        self.assertEqual((self.root / "current").resolve(), again)
+        self.assertEqual(installer.uninstall(self.home), [])
+
+    def test_install_over_an_install_with_foreign_files_stops_with_one_instruction(self):
+        _, package = self.extract()
+        final = self.install_over(package)
+        foreign = final / "owner-notes.txt"
+        foreign.write_bytes(b"foreign notes")
+        edited = final / "integrations/rules/claude.md"
+        edited.write_bytes(b"owner edited")
+        with self.assertRaises(installer.InstallError) as stopped:
+            self.install_over(package)
+        self.assertIn(f"Move the folder {final} somewhere else", str(stopped.exception))
+        self.assertIn(f"Retained edited, foreign or unverifiable path: {edited}", self.output.getvalue())
+        self.assertEqual(foreign.read_bytes(), b"foreign notes")
+        self.assertEqual(edited.read_bytes(), b"owner edited")
+
+    def test_install_script_no_longer_blocks_on_an_existing_version(self):
+        script = (SOURCE.parent / "install.sh").read_text()
+        self.assertNotIn("already exists", script)
+        self.assertIn('install.py install --package "$PWD"', script)
 
     def test_main_package_mode_skips_build_and_runs_doctor(self):
         _, package = self.extract()
