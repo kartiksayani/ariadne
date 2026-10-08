@@ -59,27 +59,23 @@ test('escaped multiline owner work injected into the decoded repair instruction 
   assert.throws(() => assertRepairAdmission(state.configuration, state.admission, state.session, state.original, state.reply), /Repair cannot repeat the original owner work/);
 });
 
-// The non-waiting detail: its Reply box closes once the previous reply saved.
-function replyBoxBrowser(closesAfter) {
+// The non-waiting detail: its Reply box is always docked and empties once the previous reply saved.
+// Polling its words is how the helper learns the reply was acknowledged; the box is never pressed open.
+function replyBoxBrowser(emptiesAfter) {
   const calls = []; let polls = 0, rendered = 'sent box';
-  const reply = {
-    async waitForDisplayed() { assert.equal(rendered, 'closed box'); calls.push('Reply displayed'); },
-    async waitForEnabled() { assert.equal(rendered, 'closed box'); },
-    async scrollIntoView() {},
-    async click() { assert.equal(rendered, 'closed box'); calls.push('choose Reply'); rendered = 'new box'; },
+  const box = {
+    async isExisting() { return true; },
+    async getValue() {
+      if (++polls > emptiesAfter) rendered = 'emptied box';
+      calls.push(`box ${rendered}`); return rendered === 'emptied box' ? '' : 'The sent reply';
+    },
   };
   const exists = value => ({ async isExisting() { return value(); } });
   const browser = {
     $(selector) {
       if (selector === '.item-detail .detail-answer-slot') return exists(() => false);
-      if (selector === '.item-detail .detail-box') return exists(() => {
-        if (++polls > closesAfter) rendered = 'closed box';
-        calls.push(`box ${rendered}`); return rendered !== 'closed box';
-      });
-      if (selector === '.item-detail .detail-box textarea') return exists(() => rendered !== 'closed box');
-      assert.equal(selector, '[aria-label="Item actions"]');
-      assert.equal(rendered, 'closed box', 'The sent Reply box cannot be reused before Saved closes it');
-      return { $(selector) { assert.equal(selector, 'button*=Reply'); return reply; } };
+      if (selector === '.item-detail .detail-box textarea') return box;
+      return assert.fail(`The docked Reply box needs no press: ${selector}`);
     },
     async waitUntil(condition, options) {
       for (let attempt = 0; attempt < 3; attempt++) if (await condition()) return true;
@@ -89,22 +85,22 @@ function replyBoxBrowser(closesAfter) {
   return { browser, calls };
 }
 
-test('a known successive Reply waits for the sent Reply box to close before choosing another form', async t => {
+test('a known successive Reply waits for the sent Reply box to empty, then writes in the docked box without pressing Reply', async t => {
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; });
   const fake = replyBoxBrowser(1);
   globalThis.browser = fake.browser;
   await openOwnerReply(true);
-  assert.deepEqual(fake.calls, ['box sent box', 'box closed box', 'Reply displayed', 'choose Reply']);
+  assert.deepEqual(fake.calls, ['box sent box', 'box emptied box']);
 });
 
-test('a missing Saved acknowledgement fails before a known successive Reply can choose any form', async t => {
+test('a missing Saved acknowledgement fails while the sent Reply box still holds its words', async t => {
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; });
   const fake = replyBoxBrowser(Infinity);
   globalThis.browser = fake.browser;
-  await assert.rejects(openOwnerReply(true), /The sent Reply box did not close/);
-  assert.equal(fake.calls.includes('choose Reply'), false);
+  await assert.rejects(openOwnerReply(true), /The sent Reply box did not empty/);
+  assert.equal(fake.calls.every(call => call === 'box sent box'), true);
   // A waiting item's answer slot must show its Saved receipt's "Write another input" first.
   globalThis.browser = {
     $(selector) {
