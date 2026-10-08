@@ -51,14 +51,23 @@ export function createRegister(descriptor, publish) {
   return on => registerModule(descriptor, on, publish);
 }
 
-function failure($, error) {
-  // Only our bounded actionable messages are displayed; raw rejected host
-  // promises, helper stderr and owner payloads are never reflected.
-  $.ui.log(error instanceof ModError ? error.message : 'Ariadne helper unavailable; retain original IDs and check the app.');
+// Only our bounded plain sentences are displayed; raw rejected host
+// promises, helper stderr and owner payloads are never reflected.
+function failureText(error) {
+  return error instanceof ModError ? (error.plain ?? error.message)
+    : 'Something went wrong while talking to Ariadne. Open the Ariadne app and try again; if it keeps happening, update Ariadne.';
 }
-async function checked($, action) {
-  try { return await action(); }
-  catch (error) { failure($,error); return {text:'Ariadne operation did not complete. See the local status message; retain original operation IDs.'}; }
+// Printed once per outage: the 'helper' slot clears when a helper call works again.
+function failure(state, $, error) {
+  notice(state,host($),'helper',failureText(error));
+}
+// A command always answers the owner, even when its log line was already shown.
+async function checked(state, $, action) {
+  try {
+    const result = await action();
+    state.notices.delete('helper');
+    return result;
+  } catch (error) { failure(state,$,error); return {text:`That did not complete. ${failureText(error)}`}; }
 }
 // One owner notice per state: a slot prints again only after its text changes
 // or the state clears.
@@ -70,15 +79,17 @@ function notice(state, h, slot, text) {
 async function announce(state, h) {
   try {
     await state.discovery.announce(h,state.announcementScope);
-    state.notices.delete('heartbeat');
+    for (const slot of ['heartbeat','helper']) state.notices.delete(slot);
   } catch (error) {
     let last = error;
     // A scope the app no longer has still leaves this conversation discoverable.
     if (state.announcementScope && STALE_SCOPE.includes(error?.code)) {
-      try { await state.discovery.announce(h,null); state.notices.delete('heartbeat'); return; }
+      try { await state.discovery.announce(h,null); for (const slot of ['heartbeat','helper']) state.notices.delete(slot); return; }
       catch (fallback) { last = fallback; }
     }
-    notice(state,h,'heartbeat',last instanceof ModError && last.code === undefined ? last.message : TEXT.unreachable);
+    // The closed-app outage shares one slot with hook failures, so it is told once.
+    if (last instanceof ModError && last.code === 'host_unreachable') notice(state,h,'helper',failureText(last));
+    else notice(state,h,'heartbeat',last instanceof ModError && last.code === undefined ? last.message : TEXT.unreachable);
   }
 }
 async function heartbeat(state, $) {
@@ -289,7 +300,7 @@ async function sessionStart(state, $, event, next) {
     await qualify(host($),state.descriptor);
     state.qualified = true;
     startPolling(state,$);
-  } catch (error) { failure($,error); }
+  } catch (error) { failure(state,$,error); }
   // `claude --resume` of a connected conversation reconnects it; a new
   // conversation has no remembered session and only announces itself.
   if (state.qualified && !state.sessionEnded) {
@@ -336,7 +347,7 @@ async function connectTransition(state, $, requestedSessionId) {
   return {text:summary + guidance};
 }
 function connectRun(state, $, event) {
-  return checked($,() => {
+  return checked(state,$,() => {
     const requestedSessionId = selectedSession(event);
     return transition(state,$,() => connectTransition(state,$,requestedSessionId));
   });
@@ -367,13 +378,13 @@ async function disconnectAction(state, $) {
 }
 async function turnStart(state, $, event, next) {
   try { if (state.loop) await state.loop.start(host($),event); }
-  catch (error) { failure($,error); }
+  catch (error) { failure(state,$,error); }
   return next(event);
 }
 async function turnComplete(state, $, event, next) {
   // A retired loop still records the end of a turn it delivered.
   try { for (const loop of [state.loop,...state.retired]) if (loop) await loop.complete(host($),event); }
-  catch (error) { failure($,error); }
+  catch (error) { failure(state,$,error); }
   return next(event);
 }
 // /clear and /resume end this conversation but not the process: report the
@@ -433,8 +444,8 @@ function registerModule(descriptor, on, publish) {
   state.owner = descriptor ? setup(descriptor.helperPath,(h,binding) => savedBinding(state,h,binding),publish) : null;
   on('session.start',($,event,next) => sessionStart(state,$,event,next));
   on('command.run',{command:'ariadne-connect'},($,event) => connectRun(state,$,event));
-  on('command.run',{command:'ariadne-status'},($) => checked($,() => statusAction(state,$)));
-  on('command.run',{command:'ariadne-disconnect'},($) => checked($,() => transition(state,$,() => disconnectAction(state,$))));
+  on('command.run',{command:'ariadne-status'},($) => checked(state,$,() => statusAction(state,$)));
+  on('command.run',{command:'ariadne-disconnect'},($) => checked(state,$,() => transition(state,$,() => disconnectAction(state,$))));
   on('turn.start',($,event,next) => turnStart(state,$,event,next));
   on('turn.complete',($,event,next) => turnComplete(state,$,event,next));
   on('session.end',($,event,next) => sessionEnd(state,$,event,next));

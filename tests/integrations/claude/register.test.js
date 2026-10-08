@@ -665,6 +665,52 @@ describe('conversation changes, relaunch and removal', () => {
     expect(last.map(body => body.binding_scope === null)).toEqual([false,true]);
     expect(h.logs.slice(before)).toEqual([]);
   });
+  it('tells the owner once per outage, in plain words, and again only after the app recovered and failed again', async () => {
+    const closed = "Ariadne isn't open, so this session's work isn't being recorded. Open Ariadne and it will reconnect.";
+    let down = false;
+    const h = host({handler:argv => down && argv[1] !== '--version' ? failure('host_unreachable') : undefined});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
+    const quiet = h.logs.length;
+    down = true;
+    // The first heartbeat and every command in the outage share one notice, yet each command still answers.
+    const beat = h.timers().find(timer => timer.ms === 30000);
+    await beat.callback();
+    for (let i = 0; i < 3; i += 1) expect((await hooks.get('ariadne-status')(h.$)).text).toBe(`That did not complete. ${closed}`);
+    await beat.callback();
+    expect(h.logs.slice(quiet)).toEqual([closed]);
+    down = false;
+    await beat.callback();
+    expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.generation).toBe(ids.generation);
+    expect(h.logs.slice(quiet)).toEqual([closed]);
+    down = true;
+    await hooks.get('ariadne-status')(h.$);
+    await hooks.get('ariadne-status')(h.$);
+    expect(h.logs.slice(quiet)).toEqual([closed,closed]);
+    expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper/);
+  });
+  it('gives each helper failure code its own plain sentence with a next step, shown once per change of state', async () => {
+    let code = 'stale_generation', details, armed = false;
+    const h = host({handler:argv => armed && argv[2] === 'connection-status' ? failure(code,details) : undefined});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
+    armed = true;
+    const before = h.logs.length;
+    const say = async () => (await hooks.get('ariadne-status')(h.$)).text;
+    const gone = await say();
+    expect(gone).toContain('/ariadne-connect');
+    expect(await say()).toBe(gone);
+    expect(h.logs.slice(before)).toHaveLength(1);
+    expect(gone).toContain(h.logs[before]);
+    code = 'invalid_transition';details = {reason:'owner_paused'};
+    expect(await say()).toContain('paused in the app. Resume it in Ariadne');
+    code = 'delivery_uncertain';details = undefined;
+    expect(await say()).toContain('check before sending anything again');
+    code = 'invented_by_a_future_helper';
+    expect(await say()).toContain('Open the Ariadne app to see what happened');
+    expect(h.logs.slice(before)).toHaveLength(4);
+    expect(h.logs.slice(before).join(' ')).not.toMatch(/stale_generation|owner_paused|delivery_uncertain|invented|retain|original IDs/);
+  });
   it('admits claims again after an owner command is refused', async () => {
     const value = await prepared();const submission = deferred();
     const h = host({claim:value,submit:() => submission.promise});const hooks = callbacks(descriptor);
