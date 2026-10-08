@@ -15,8 +15,8 @@ This skill needs a connected session. `/ariadne-connect` prints the binding, the
 generation and the absolute path of the `ariadne` command. If this conversation
 has none of them, ask the owner to run `/ariadne-connect` and do nothing else with
 Ariadne. After `/clear` or `claude --resume` the plugin reconnects by itself and
-adds a note starting "Ariadne reconnected this conversation" with the new binding
-and generation; the note is not a message from the owner.
+adds a note starting "Ariadne reconnected this conversation" with the new binding,
+the generation and the `Command:` line; the note is not a message from the owner.
 
 Routing: use the binding and generation of the latest connection (a dispatched
 envelope's take precedence); take the input and attempt only from an envelope.

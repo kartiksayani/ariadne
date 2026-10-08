@@ -513,6 +513,40 @@ describe('conversation changes, relaunch and removal', () => {
     // A fresh context is sent to reconnect.md, which holds the one-time read.
     expect(note.message.content[0].text).toContain('read reconnect.md in the ariadne skill first');
     expect(note.message.content[0].text).not.toMatch(/run ariadne read/);
+    // The note carries the same Command line as the connect summary, so a fresh context can run it.
+    expect(note.message.content[0].text.split('\n')).toContain(`Command: ${descriptor.helperPath}`);
+  });
+  it('shell-quotes a helper path that needs it, in the connect summary and in the reconnect note', async () => {
+    for (const [helperPath,printed] of [
+      ['/Users/o wner/Ariadne App/bin/ariadne',`'/Users/o wner/Ariadne App/bin/ariadne'`],
+      ["/Users/o'wner/bin/ariadne",`'/Users/o'\\''wner/bin/ariadne'`],
+      ['/installed/ariadne-1.0_x/bin/ariadne','/installed/ariadne-1.0_x/bin/ariadne'],
+    ]) {
+      const config = {...descriptor,helperPath};
+      const h = rotatingApp();const hooks = callbacks(config);
+      await hooks.get('session.start')(h.$,{},next);
+      const summary = (await hooks.get('ariadne-connect')(h.$,{args:ids.session})).text;
+      expect(summary.split('\n')[1]).toBe(`Command: ${printed}`);
+      await hooks.get('session.end')(h.$,{reason:'clear'},next);
+      await h.timer().callback();
+      await vi.waitFor(() => expect(h.appended).toHaveLength(1));
+      expect(h.appended[0].message.content[0].text.split('\n')).toContain(`Command: ${printed}`);
+    }
+  });
+  it('prints the closed-app notice again in the new conversation after a conversation change', async () => {
+    const h = rotatingApp({before:argv => argv[2] === 'announce' ? failure('unsupported') : undefined});
+    const hooks = callbacks(descriptor);
+    const outage = 'Ariadne: could not reach the Ariadne app. This conversation will show there once the app is running.';
+    await hooks.get('session.start')(h.$,{},next);
+    const heartbeat = h.timers().find(timer => timer.ms === 30000);
+    await heartbeat.callback();
+    expect(h.logs.filter(log => log === outage)).toHaveLength(1);
+    h.switchSession('new-conversation');
+    await hooks.get('session.end')(h.$,{reason:'clear'},next);
+    await h.timer().callback();
+    await vi.waitFor(() => expect(h.logs.filter(log => log === outage)).toHaveLength(2));
+    await heartbeat.callback();
+    expect(h.logs.filter(log => log === outage)).toHaveLength(2);
   });
   it('after /clear while the app cannot save, never finishes the old message with the new conversation\'s answer', async () => {
     const value = await prepared();let claims = 0, down = false;

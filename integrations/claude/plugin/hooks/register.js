@@ -222,16 +222,25 @@ async function followChange(state, $) {
   // later follows whatever this conversation is connected to then.
   if (followed) await forget(h,previous);
   state.target = await recall(h,id) ?? followed ?? null;
-  for (const slot of ['auto','heartbeat']) state.notices.delete(slot);
+  // The new conversation has seen none of these, so each may print again (a closed app included).
+  for (const slot of ['auto','heartbeat','helper']) state.notices.delete(slot);
   await announce(state,h);
   if (state.target) await autoConnect(state,$);
 }
 // Every reconnect rotates the generation. A note in the conversation (a meta
 // row the model reads on its next turn, not a prompt) gives Claude the new
 // routing, so its Ariadne commands keep working without an owner command.
-function routingNote(binding) {
+function routingNote(binding, helperPath) {
   const {binding_id,generation,session} = binding;
-  return `Ariadne reconnected this conversation to session ${session.session_id} in project ${session.project_id} by itself. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current. If your context is fresh, read reconnect.md in the ariadne skill first. This note is not a message from the owner; do not reply to it.`;
+  return `Ariadne reconnected this conversation to session ${session.session_id} in project ${session.project_id} by itself. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current.\n${commandLine(helperPath)}\nIf your context is fresh, read reconnect.md in the ariadne skill first. This note is not a message from the owner; do not reply to it.`;
+}
+// The skill tells the agent to run this path verbatim, so a path with a space or
+// another shell-special character is single-quoted here.
+function shellQuote(path) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'","'\\''")}'`;
+}
+function commandLine(helperPath) {
+  return `Command: ${shellQuote(helperPath)}`;
 }
 // A note the engine refuses (no conversation mounted yet) is retried on the
 // poll tick; past that, the skill's stale_generation rule still applies.
@@ -242,7 +251,7 @@ async function deliverNote(state, $) {
   note.sending = true;
   note.tries += 1;
   try {
-    await $.session.append({message:{type:'user',content:[{type:'text',text:routingNote(note.binding)}]}});
+    await $.session.append({message:{type:'user',content:[{type:'text',text:routingNote(note.binding,state.descriptor.helperPath)}]}});
     if (state.note === note) state.note = null;
   } catch {
     if (state.note === note && note.tries >= NOTE_TRIES) state.note = null;
@@ -343,7 +352,7 @@ async function connectTransition(state, $, requestedSessionId) {
   state.note = null;
   const {binding} = bound.result;
   const guidance = chosen === null ? '' : '\nThis resumes an earlier session: read reconnect.md in the ariadne skill first.';
-  const summary = `Ariadne connected: binding ${binding.binding_id}, generation ${binding.generation}.\nCommand: ${state.descriptor.helperPath}\nFile your work as you go; the ariadne skill has the rest.`;
+  const summary = `Ariadne connected: binding ${binding.binding_id}, generation ${binding.generation}.\n${commandLine(state.descriptor.helperPath)}\nFile your work as you go; the ariadne skill has the rest.`;
   return {text:summary + guidance};
 }
 function connectRun(state, $, event) {

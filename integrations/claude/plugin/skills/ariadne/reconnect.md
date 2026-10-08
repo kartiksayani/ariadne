@@ -3,8 +3,10 @@
 
 After `/clear`, `/compact` or `claude --resume` the plugin reconnects this
 conversation and adds a note starting "Ariadne reconnected this conversation"
-with the new binding and generation. From then on use the latest note or
-`/ariadne-connect` output; earlier values are stale. Do not reply to the note.
+with the new binding, the generation and a `Command: <path>` line, the same line
+`/ariadne-connect` prints. From then on use the latest note or `/ariadne-connect`
+output; earlier values are stale. Run the command exactly as written on that
+line (it is already quoted if the path needs it). Do not reply to the note.
 
 Run `ariadne read` once to rebuild the session's topics, items, questions, answers
 and results; Ariadne does not push them. Read an item's full history with
