@@ -8,8 +8,12 @@ import { sessionButton } from '../app/open';
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function setup(configure?: (transport: AppTransport) => void) {
   const transport = new AppTransport(); configure?.(transport); render(<DesktopApp service={createDesktopService(transport)} />);
-  fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  const open = await sessionButton(route);
+  await act(async () => { fireEvent.click(open); });
+  await screen.findByRole('tree', { name: 'Session items' });
+  // Restrict button lookup to the session bar; scanning every tree/queue action is costly in jsdom.
+  const sessionBar = within(screen.getByLabelText('Session'));
+  await waitFor(() => expect(sessionBar.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
   return transport;
 }
 it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts inside modal controls', async () => {
@@ -75,26 +79,28 @@ it('routes owner shortcuts from roving rows, repeats focus requests and never su
     // Item 3's in-flight reply would hide its actions while the agent has it.
     for (const input of Object.values(session.inputs)) if (input?.target.item_id === '3' && input.state === 'in_flight') input.state = 'cancelled';
   });
-  const press = (id: string, key: string) => {
+  // Async act drains shortcut navigation and focus work before querying the full app again.
+  const press = async (id: string, key: string) => {
     const row = document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
-    row.focus(); fireEvent.keyDown(row, { key });
+    await act(async () => { row.focus(); fireEvent.keyDown(row, { key }); });
   };
   // a answers inline in the tree (frame 1c); the number keys then change the picked option.
-  press('2', 'a');
+  await press('2', 'a');
   await waitFor(() => expect(document.querySelector('[role="treeitem"][data-item-id="2"] .answer')).not.toBeNull());
-  press('2', '2');
+  await press('2', '2');
   await waitFor(() => expect(transport.preferences.drafts.some(value => value.target.item_id === '2' && value.selected_option_id === transport.sessions.get(route.session_id)!.items['2']!.options[1].id)).toBe(true));
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
-  press('8', 'r'); await screen.findByLabelText('Reply message'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Reply message')));
-  screen.getByRole('button', { name: 'Switch to light' }).focus(); fireEvent.keyDown(document.activeElement!, { key: 'r' });
+  await press('8', 'r'); await screen.findByLabelText('Reply message'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Reply message')));
+  const theme = screen.getByLabelText('Switch to light');
+  await act(async () => { theme.focus(); fireEvent.keyDown(theme, { key: 'r' }); });
   await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Reply message')));
   fireEvent.keyDown(screen.getByLabelText('Reply message'), { key: 'g' }); expect(screen.getByRole('tree')).toBeTruthy();
-  press('3', 'r'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Note message')));
-  press('6', 'r'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Follow-up message')));
+  await press('3', 'r'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Note message')));
+  await press('6', 'r'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Follow-up message')));
   // A replaced item stays replaced, so o on #7 sends nothing.
-  press('7', 'o'); await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
-  press('8', 'd'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Drop reason')));
-  press('8', 'e'); expect(await screen.findByRole('dialog', { name: /^Archive “.+”\?$/ })).toBeTruthy();
+  await press('7', 'o');
+  await press('8', 'd'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Drop reason')));
+  await press('8', 'e'); expect(await screen.findByRole('dialog', { name: /^Archive “.+”\?$/ })).toBeTruthy();
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
 });
 it('sends Back to Open as one press from the o shortcut (Ariadne.dc.html:1207)', async () => {

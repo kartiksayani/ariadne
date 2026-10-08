@@ -32,10 +32,10 @@ Read these files, beside this one, only when they apply:
 
 | Read | When |
 |---|---|
-| `inputs.md` | A message starting `[ARIADNE_INPUT:`; closing a parent |
+| `inputs.md` | A message starting `[ARIADNE_INPUT:` |
 | `errors.md` | Preparing an unfamiliar request; an `ariadne` command exits non-zero |
 | `reconnect.md` | After `/clear` or `/compact`, or on attaching a fresh conversation |
 | `report.md` | Filing a report, audit, test run or investigation |
 | `review.md` | Reviewing a PR or document, or comparing options |
-| `checklist.md` | Filing a plan, migration or long-running work |
+| `checklist.md` | Filing a plan, migration or long-running work; closing a parent |
 | `follow-up.md` | Answering the owner on an item or topic |

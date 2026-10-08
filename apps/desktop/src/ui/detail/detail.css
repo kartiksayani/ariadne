@@ -296,12 +296,6 @@
   gap: 8px;
 }
 
-.detail-ask {
-  font-size: calc(14.5px * var(--text-scale));
-  line-height: 1.5;
-  color: var(--a-acc-text);
-}
-
 /* — outcome, note, why — */
 .detail-outcome-text {
   margin: 0;
@@ -547,6 +541,11 @@
 
 .detail-bubble-you > * {
   min-width: 0;
+}
+
+.detail-turn-cancelled .detail-bubble-you {
+  color: var(--a-label);
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
 }
 
 .detail-reply {

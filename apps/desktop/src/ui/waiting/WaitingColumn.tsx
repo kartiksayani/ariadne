@@ -1,6 +1,6 @@
 // The "Waiting on me" column (handoff Ariadne.dc.html, aside "Waiting on me"):
 // every open question across sessions, oldest first, each with a compact answer
-// control, then the Sent inputs the agent has not picked up yet.
+// control, with Sent inputs in their own scrolling section below.
 import { useContext, useEffect, useMemo, type MouseEvent, type ReactNode } from 'react';
 import type { ItemRoute, SessionRef } from '../../generated/core';
 import { plainFailure, type Immutable } from '../../data';
@@ -41,10 +41,10 @@ export interface WaitingColumnProps {
 }
 
 /**
- * The column frame: header with the count pill, then the scrolling list. Folded, it is a strip
- * with the count and an unfold button; the list stays mounted so drafts and announcements keep running.
+ * Header with the question count, then separately scrolling questions and Sent messages. Folded, it is a strip
+ * with the count and an unfold button; both lists stay mounted so drafts and announcements keep running.
  */
-export function WaitingFrame({ count, loading = false, children }: { readonly count: string; readonly loading?: boolean; readonly children?: ReactNode }) {
+export function WaitingFrame({ count, loading = false, children, sent }: { readonly count: string; readonly loading?: boolean; readonly children?: ReactNode; readonly sent?: ReactNode }) {
   const fold = useContext(WaitingFold);
   return <aside className={`waiting${fold.folded ? ' waiting-folded' : ''}`} aria-label="Waiting on me">
     {fold.folded
@@ -58,9 +58,12 @@ export function WaitingFrame({ count, loading = false, children }: { readonly co
         {fold.toggle && <button type="button" className="btn btn-secondary btn-icon waiting-fold" aria-label="Hide Waiting on me" title="Hide Waiting on me (w)" data-shortcut-waiting-fold="" onClick={fold.toggle}>
           <i className="ph ph-arrow-left" aria-hidden="true" /></button>}
       </div>}
-    <div className="waiting-scroll" hidden={fold.folded}>
-      {loading && [0, 1].map(index => <div className="waiting-skeleton" key={index} aria-label="Loading waiting questions"><span /><span /><span /><span /></div>)}
-      {children}
+    <div className="waiting-content" hidden={fold.folded}>
+      <div className="waiting-scroll" role="region" aria-label="Waiting questions" hidden={fold.folded}>
+        {loading && [0, 1].map(index => <div className="waiting-skeleton" key={index} aria-label="Loading waiting questions"><span /><span /><span /><span /></div>)}
+        {children}
+      </div>
+      {sent}
     </div>
   </aside>;
 }
@@ -86,7 +89,14 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
   const incomplete = state.counts?.completeness === 'partial' || state.unavailableProjects.length > 0;
   const current = state.status === 'ready' && !state.error;
   const loading = state.status === 'loading';
-  return <WaitingFrame count={model.count} loading={loading}>
+  return <WaitingFrame count={model.count} loading={loading} sent={<section className={`waiting-sent-section${model.sent.length === 0 ? ' waiting-sent-section-empty' : ''}`} aria-label="Sent · waiting for the agent to pick up">
+    <div className="waiting-sent-label">Sent<span>· waiting for the agent to pick up</span></div>
+    <div className="waiting-sent-scroll">
+      {!loading && model.sent.length === 0 && <p className="waiting-sent-empty">No messages waiting for pickup.</p>}
+      {model.sent.map(row => <SentRow key={row.id} row={row} drafts={drafts} store={store}
+        open={() => { if (row.item) revealItem({ ...row.item }); else openSession({ ...row.session }); }} />)}
+    </div>
+  </section>}>
     <QueueAnnouncements state={state} />
     {notice}
     {state.status === 'stale' && <p className="waiting-notice" role="status">Showing the last complete queue read. Refresh is pending.</p>}
@@ -105,11 +115,6 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
     {model.cards.map(card => <WaitingCard key={card.id} card={card} drafts={drafts} current={current} selected={same(selected, card.route)}
       revealItem={revealItem} onAgentNotRunning={onAgentNotRunning} onSaved={() => { void store.refresh(); }} sessionStore={store.storeOf(card.route)}
       presence={card.session.active_binding_id ? store.sessionState(card.route)?.presence[card.session.active_binding_id] ?? null : null} />)}
-    {model.sent.length > 0 && <>
-      <div className="waiting-sent-label">Sent<span>· waiting for the agent to pick up</span></div>
-      {model.sent.map(row => <SentRow key={row.id} row={row} drafts={drafts} store={store}
-        open={() => { if (row.item) revealItem({ ...row.item }); else openSession({ ...row.session }); }} />)}
-    </>}
   </WaitingFrame>;
 }
 
@@ -187,7 +192,7 @@ function SentStuck({ row, input, drafts, session, open }: { readonly row: SentRo
     {row.stuck!.kind === 'sent'
       ? <div className="waiting-sent-line" style={{ color: row.line.color }}><i className={row.line.icon} aria-hidden="true" /><span>{row.line.text}</span></div>
       : <div className="waiting-sent-what">You sent {row.what}</div>}
-    <StuckNote actions={actions} input={input} stuck={row.stuck!}
+    <StuckNote actions={actions} input={input} stuck={row.stuck!} compactActions
       onEdit={async () => {
         const outcome = await editQueued(drafts, session.getSnapshot().snapshot?.session, input, actions);
         if (inEditor(outcome)) open();

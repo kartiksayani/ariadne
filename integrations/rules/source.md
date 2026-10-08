@@ -41,7 +41,7 @@ for example `[cache choice](item:3.2)`; never use a bare item number such as
 | `op` | Required | Optional |
 |---|---|---|
 | `topic.add` | `name` | `short`, `ref` |
-| `item.add` | `question`, `type`, `topic` | `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
+| `item.add` | `question`, `type` | `topic` (the request's only `topic.add`; nested `children` inherit their parent's topic), `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
 | `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `short` |
 | `item.ask` | `item`, `ask` | `options` |
 | `item.status` | `item`, `status` | `outcome`, `why`, `reason` |
@@ -49,7 +49,8 @@ for example `[cache choice](item:3.2)`; never use a bare item number such as
 | `reply` | `item`, `text` | `ref`, `round_id` |
 | `round.close` | `round_id` | |
 
-For defaults, nested children, reference syntax, transitions and field limits,
+Set `topic` explicitly if neither default applies.
+For other defaults, nested children, reference syntax, transitions and field limits,
 read `errors.md` when preparing an unfamiliar request.
 
 Every topic and item you create gets a `short` label: a 2-4 word noun phrase of

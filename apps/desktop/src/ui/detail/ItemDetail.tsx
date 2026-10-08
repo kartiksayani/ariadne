@@ -407,7 +407,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         {model.chat.map(entry => <li key={entry.id} data-message-id={entry.id} data-pending={entry.pending?.input.id}
           data-round={entry.asks[0]?.ordinal}
           data-owner-said={entry.you && !Object.values(session.inputs).some(input => input?.message_id === entry.id && input.state === 'cancelled') ? 'true' : undefined}
-          className={`detail-turn${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${highlightedMessageIds?.has(entry.id) ? ' excerpt-highlighted' : ''}`}>
+          className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${highlightedMessageIds?.has(entry.id) ? ' excerpt-highlighted' : ''}`}>
           {entry.marker && <div className="detail-chat-marker">{entry.marker}</div>}
           <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
             <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>
@@ -480,8 +480,6 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {(model.answer || retainedAnswer) && <section className="detail-section detail-answer" aria-label="Your answer">
       {model.answer?.heading && <div className="detail-label detail-label-accent">Your answer</div>}
-      {/* The ask the conversation's last message does not already carry. */}
-      {model.answer?.ask && <Markdown className="detail-ask" text={model.answer.ask} />}
       {model.answer && <PausedNote actions={actions} />}
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
       <AnswerSlot drafts={drafts} store={store} itemId={itemId} blocked={model.answer?.blocked} focusRequest={answerFocus}
