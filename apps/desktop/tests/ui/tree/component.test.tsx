@@ -728,6 +728,31 @@ describe('item details in the tree', () => {
     for (const [, , declarations] of rules) expect(declarations).not.toMatch(/display:\s*none|width:|position:\s*absolute/);
     expect(rules.some(([, , declarations]) => /visibility:\s*hidden/.test(declarations!) && /opacity:\s*0/.test(declarations!))).toBe(true);
   });
+  it('keeps the space of a topic band’s actions so the topic name never rewraps on hover or focus', async () => {
+    await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!;
+      for (const item of Object.values(session.items)) if (item) item.status = 'done';
+    } });
+    const band = topicRow('Delivery decisions'), before = band.innerHTML;
+    expect(band.querySelector('.tree-topic-actions')).not.toBeNull();
+    fireEvent.mouseEnter(band); band.focus();
+    expect(band.innerHTML).toBe(before);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /\.tree-topic-actions\b/.test(selector!));
+    const hidden = rules.filter(([, , declarations]) => /visibility:\s*hidden/.test(declarations!));
+    const shown = rules.filter(([, , declarations]) => /visibility:\s*visible/.test(declarations!));
+    // Hidden by visibility and opacity only: no rule takes the actions out of the flow, at rest or on hover or focus.
+    expect(hidden).toHaveLength(1); expect(hidden[0]![2]).toMatch(/opacity:\s*0/);
+    expect(shown).toHaveLength(1); expect(shown[0]![1]).toMatch(/:hover[^,]*\.tree-topic-actions/); expect(shown[0]![1]).toMatch(/:focus-within/);
+    for (const [, , declarations] of rules) expect(declarations).not.toMatch(/display:\s*none|width:|position:\s*absolute/);
+    // The buttons stay out of the tab order while hidden, like the item shortcuts.
+    for (const button of band.querySelectorAll('.tree-topic-actions button')) expect((button as HTMLElement).tabIndex).toBe(-1);
+    // Icon-only like the item shortcuts, so the reserved room is small: each has its plain name and a distinct icon.
+    const buttons = [...band.querySelectorAll<HTMLElement>('.tree-topic-actions button')];
+    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Reply to topic', 'Continue here', 'Archive', 'Remove']);
+    for (const button of buttons) { expect(button.textContent).toBe(''); expect(button.title).not.toBe(''); }
+    expect(new Set(buttons.map(button => button.querySelector('i')!.className)).size).toBe(buttons.length);
+  });
 });
 
 describe('scrolling the tree', () => {
@@ -844,6 +869,60 @@ describe('scrolling the tree', () => {
         act(() => { observers.forEach(callback => callback()); });
         expect(row(reading).getBoundingClientRect().top).toBe(offset);
       } finally { vi.unstubAllGlobals(); }
+    });
+  });
+
+  // The tree opens with an anchor (the saved reading position: row 4, 20 px below the top). A row above the
+  // viewport is then folded away, which moves every row under it up by 100 px, as an unfold moves them down.
+  describe('with an opening anchor', () => {
+    const observers: (() => void)[] = [];
+    const readingAt4 = (transport: AppTransport) => {
+      transport.preferences.sessions = transport.preferences.sessions.map(view =>
+        view.session.session_id === route.session_id ? { ...view, scroll: { item_id: '4', offset: 20 } } : view);
+    };
+    const top = (id: string) => row(id).getBoundingClientRect().top;
+    const fold = (id: string) => within(row(id)).getByRole('button', { name: 'Expand or collapse' });
+    const opening = async () => {
+      observers.length = 0;
+      vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} });
+      layout();
+      const view = await mount({ configure: readingAt4 });
+      expect(top('4')).toBe(20);
+      return view;
+    };
+    const visible = () => ids().filter(id => { const rectangle = row(id!).getBoundingClientRect(); return rectangle.bottom > 0 && rectangle.top < 400; });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('keeps the visible rows still when a row above the viewport opens or closes while the view is still settling', async () => {
+      await opening();
+      const before = visible(), at = Object.fromEntries(before.map(id => [id, top(id!)]));
+      expect(before).toContain('4');
+      fireEvent.click(fold('1'));
+      await waitFor(() => expect(ids()).not.toContain('1.1'));
+      act(() => { observers.forEach(callback => callback()); });
+      expect(top('4')).toBe(20);
+      // Every row that was in view and is still there sits exactly where it was.
+      for (const id of before.filter(id => ids().includes(id))) if (Number(id) >= 4) expect(top(id!)).toBe(at[id!]);
+      // Opening it again moves everything down; the anchored row still does not move.
+      fireEvent.click(fold('1'));
+      await waitFor(() => expect(ids()).toContain('1.1'));
+      act(() => { observers.forEach(callback => callback()); });
+      expect(top('4')).toBe(20);
+    });
+
+    it('keeps the clicked row in place when a pointerdown hands the view over to the owner', async () => {
+      await opening();
+      const clicked = top('4');
+      // The press settles the view: from here the first visible row holds its place on every render, no observer needed.
+      fireEvent.pointerDown(fold('1'));
+      fireEvent.click(fold('1'));
+      await waitFor(() => expect(ids()).not.toContain('1.1'));
+      expect(top('4')).toBe(clicked);
+      // The row pressed is the one that was under the pointer, and it stays there through the next change too.
+      fireEvent.pointerDown(row('4'));
+      fireEvent.click(fold('1'));
+      await waitFor(() => expect(ids()).toContain('1.1'));
+      expect(top('4')).toBe(clicked);
     });
   });
 });

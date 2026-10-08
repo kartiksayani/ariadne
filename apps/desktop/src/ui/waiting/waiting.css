@@ -43,11 +43,18 @@
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
+/* A bordered icon button like the Messages toggle, so it reads as a button before it is hovered. */
 .waiting-head > .waiting-fold {
+  flex: none;
+  box-sizing: border-box;
   width: 24px;
   height: 24px;
   margin: -4px -6px -4px -2px;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  color: var(--color-text);
+}
+
+.waiting-fold > i {
+  font-size: 14px;
 }
 
 /* Folded: a strip with the unfold button and the count. */
@@ -61,7 +68,7 @@
 }
 
 .waiting-unfold > i {
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .waiting-scroll[hidden] {

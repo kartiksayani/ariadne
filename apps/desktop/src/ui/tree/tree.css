@@ -354,23 +354,29 @@
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
+/* The band's actions keep their room at all times and only fade in (as .tree-actions does on items),
+   so the name never rewraps between hover and no hover. visibility keeps them unclickable while hidden. */
 .tree-topic-actions {
-  display: none;
+  display: flex;
   gap: 2px;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity .12s;
 }
 
 .tree-topic:hover .tree-topic-actions,
 .tree-topic:focus .tree-topic-actions,
 .tree-topic:focus-within .tree-topic-actions {
-  display: flex;
+  visibility: visible;
+  opacity: 1;
 }
 
 .tree-topic-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 7px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px; /* No taller than the name's line, so the always-present actions never make the band taller. */
+  padding: 0;
   border: 0;
   border-radius: 5px;
   font: inherit;

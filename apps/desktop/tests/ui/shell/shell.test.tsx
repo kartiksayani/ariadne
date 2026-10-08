@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { Shell, type ShellProps } from '../../../src/ui/shell/Shell';
@@ -77,6 +79,18 @@ describe('Paperwhite shell', () => {
     expect((screen.getByText('Card').closest('.waiting-scroll') as HTMLElement).hidden).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (3)' }));
     expect(fold).toHaveBeenLastCalledWith(false);
+  });
+
+  it('draws an icon on both the Hide and the Show button of the Waiting column', () => {
+    // Phosphor ships as a bundled subset; a class outside it renders an empty square.
+    const icons = readFileSync(resolve(__dirname, '../../../public/icons/phosphor.css'), 'utf8');
+    const glyph = (button: HTMLElement) => button.querySelector('i')!.className.split(' ').find(name => name !== 'ph')!;
+    const { rerender } = render(<Shell {...props({ body: { waiting: <WaitingFrame count="3" />, center: null, onFoldWaiting: vi.fn() } })} />);
+    const hide = screen.getByRole('button', { name: 'Hide Waiting on me' });
+    expect(hide.className).toContain('btn-icon');
+    expect(icons).toContain(`.ph.${glyph(hide)}::before`);
+    rerender(<Shell {...props({ body: { waiting: <WaitingFrame count="3" />, center: null, onFoldWaiting: vi.fn(), waitingFolded: true } })} />);
+    expect(icons).toContain(`.ph.${glyph(screen.getByRole('button', { name: 'Show Waiting on me (3)' }))}::before`);
   });
 
   it('folds the Waiting column by itself in a window too narrow for every column, and the owner can still open it', () => {

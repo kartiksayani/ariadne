@@ -46,14 +46,15 @@ export function WaitingFrame({ count, loading = false, children }: { readonly co
   const fold = useContext(WaitingFold);
   return <aside className={`waiting${fold.folded ? ' waiting-folded' : ''}`} aria-label="Waiting on me">
     {fold.folded
-      ? <button type="button" className="btn btn-ghost waiting-unfold" aria-label={`Show Waiting on me (${count})`} title="Show Waiting on me (w)" data-shortcut-waiting-fold="" onClick={fold.toggle}>
-        <i className="ph ph-caret-double-right" aria-hidden="true" /><span className="waiting-count">{count}</span></button>
+      // The icons come from the bundled Phosphor subset (public/icons/phosphor.css); an icon outside it draws nothing.
+      ? <button type="button" className="btn btn-secondary waiting-unfold" aria-label={`Show Waiting on me (${count})`} title="Show Waiting on me (w)" data-shortcut-waiting-fold="" onClick={fold.toggle}>
+        <i className="ph ph-arrow-right" aria-hidden="true" /><span className="waiting-count">{count}</span></button>
       : <div className="waiting-head">
         <span className="waiting-title">Waiting on me</span>
         <span className="waiting-count">{count}</span>
         <span className="waiting-order">Oldest first</span>
-        {fold.toggle && <button type="button" className="btn btn-ghost btn-icon waiting-fold" aria-label="Hide Waiting on me" title="Hide Waiting on me (w)" data-shortcut-waiting-fold="" onClick={fold.toggle}>
-          <i className="ph ph-caret-double-left" aria-hidden="true" /></button>}
+        {fold.toggle && <button type="button" className="btn btn-secondary btn-icon waiting-fold" aria-label="Hide Waiting on me" title="Hide Waiting on me (w)" data-shortcut-waiting-fold="" onClick={fold.toggle}>
+          <i className="ph ph-arrow-left" aria-hidden="true" /></button>}
       </div>}
     <div className="waiting-scroll" hidden={fold.folded}>
       {loading && [0, 1].map(index => <div className="waiting-skeleton" key={index} aria-label="Loading waiting questions"><span /><span /><span /><span /></div>)}
