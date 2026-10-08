@@ -114,6 +114,9 @@ yourself; the owner never names topics or items.
   leaves a free-text answer. A question you would write in prose is an ask, never
   a sentence in chat. `item.ask` asks on an item that already exists, and
   another question on the same decision is a new ask round on that item.
+- **Proposals** (comments to post, fixes to apply): one child each with its own
+  `ask` and options. The parent is a summary with no ask. Never file them `done`
+  under one blanket ask on the parent.
 - **Spend few tokens.** File a result in one request, children nested with
   `children`. Data nobody discusses row by row is one item with a table.
 

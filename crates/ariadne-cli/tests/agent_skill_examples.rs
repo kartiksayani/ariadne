@@ -599,15 +599,29 @@ fn the_review_and_checklist_examples_default_owner_and_status_as_the_rules_say()
     assert_eq!(data["topics"][0]["number"], 2);
     let session = seeded.session();
     let (_, items) = topic_items(&session, "Review: PR #812");
+    // The parent is a summary with no blanket ask; each decision is its own child.
+    let summary = by_short(&items, "PR #812 review");
+    assert_eq!(summary.status, ItemStatus::Open);
+    assert_eq!(summary.item_type, ItemType::Explanation);
+    assert_eq!(summary.owner, ItemOwner::Agent { binding_id: id(3) });
+    assert!(summary.ask.is_none() && summary.options.is_empty());
+    assert_eq!(summary.links.len(), 1);
     let verdict = by_short(&items, "PR #812 verdict");
+    assert_eq!(verdict.parent.as_ref(), Some(&summary.id));
     assert_eq!(verdict.owner, ItemOwner::Me {});
     assert_eq!(verdict.status, ItemStatus::WaitingOnMe);
     assert_eq!(verdict.item_type, ItemType::Decision);
     assert_eq!(verdict.options.len(), 2);
-    assert_eq!(verdict.links.len(), 1);
-    let finding = by_short(&items, "No jitter");
-    assert_eq!(finding.parent.as_ref(), Some(&verdict.id));
-    assert_eq!(finding.owner, ItemOwner::Agent { binding_id: id(3) });
+    let comment = by_short(&items, "No jitter");
+    assert_eq!(comment.parent.as_ref(), Some(&summary.id));
+    assert_eq!(comment.owner, ItemOwner::Me {});
+    assert_eq!(comment.status, ItemStatus::WaitingOnMe);
+    assert_eq!(comment.item_type, ItemType::Decision);
+    let labels: Vec<_> = comment.options.iter().map(|o| o.label.as_str()).collect();
+    assert_eq!(labels, ["Post it", "Skip", "Edit first"]);
+    let fine = by_short(&items, "Checked, fine");
+    assert_eq!(fine.status, ItemStatus::Done);
+    assert_eq!(fine.owner, ItemOwner::Agent { binding_id: id(3) });
 
     let (seeded, _, _) = Seeded::committed(&examples(CHECKLIST)[0]);
     let session = seeded.session();
