@@ -213,6 +213,14 @@ describe('session tree rows', () => {
     expect(row('1.1').getAttribute('data-highlight')).toBe('strong'); expect(row('1').getAttribute('data-highlight')).toBeNull();
     fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
     await waitFor(() => expect(row('1').getAttribute('data-highlight')).toBe('weak'));
+    const badge = row('1').querySelector('.tree-collapsed')!;
+    expect(badge.hasAttribute('data-weak')).toBe(true);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const rule = (selector: string) => [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(([, value]) => value!.trim() === selector)?.[2];
+    expect(rule('.tree-collapsed')).toContain('color: var(--a-acc-text)');
+    expect(rule('.tree-collapsed[data-weak]')).toContain('var(--color-accent) 7%, var(--a-card)');
+    expect(rule('.tree-collapsed[data-weak]')).not.toBe(rule('.tree-collapsed'));
+    expect(rule('.tree-collapsed[data-weak]:hover')).toContain('var(--color-accent) 10%, var(--a-card)');
   });
   it('offers the row actions for the item status and routes them to the workspace', async () => {
     const { calls } = await mount();

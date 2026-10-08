@@ -82,9 +82,15 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
       draft: route => draftState.ready ? drafts.find(route, route.item_id, 'answer') : undefined,
       presence: (route, bindingId) => store.sessionState(route)?.presence[bindingId] ?? null,
     });
-    // A pending removal takes its questions out of the column at once.
+    // A pending removal takes its questions and sent messages out at once.
     const cards = all.cards.filter(card => !hidden.item(card.route, card.session, card.route.item_id));
-    return cards.length === all.cards.length ? all : { ...all, cards, count: String(cards.length) };
+    const sent = all.sent.filter(row => {
+      const session = state.sessions.find(captured => captured.session.project_id === row.session.project_id
+        && captured.session.id === row.session.session_id)?.session;
+      if (row.item && session) return !hidden.item(row.session, session, row.item.item_id);
+      return row.input ? !hidden.topic(row.session, row.input.target.topic_id) : !hidden.session(row.session);
+    });
+    return cards.length === all.cards.length && sent.length === all.sent.length ? all : { ...all, cards, sent, count: String(cards.length) };
   }, [state, draftState, drafts, store, clock, hidden, health]);
   const incomplete = state.counts?.completeness === 'partial' || state.unavailableProjects.length > 0;
   const current = state.status === 'ready' && !state.error;

@@ -716,6 +716,15 @@
   background: color-mix(in srgb, var(--color-accent) 20%, var(--a-card));
 }
 
+.tree-collapsed[data-weak] {
+  /* Keep the AA text token; a lighter tint distinguishes indirect matches. */
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--a-card));
+}
+
+.tree-collapsed[data-weak]:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--a-card));
+}
+
 .tree-item-hidden .tree-collapsed {
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
   background: color-mix(in srgb, var(--color-text) 8%, transparent);

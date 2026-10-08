@@ -12,6 +12,9 @@ import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
 import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
+import { RemovalContext, RemovalQueue } from '../../../src/ui/remove/queue';
+import { removeSubject } from '../../../src/ui/remove/model';
+import { NoticeStore } from '../../../src/ui/pages/notices';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
 function fixture(): { session: Session; project: ProjectSummary; summary: SessionSummary } {
@@ -324,6 +327,31 @@ describe('registered global capture', () => {
 });
 
 describe('source-backed Waiting and Sent panel', () => {
+  it.each(['item', 'topic', 'session', 'project'] as const)('hides Sent during %s removal and restores the same row on Undo without sending', async kind => {
+    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
+    const session = store.getSnapshot().sessions[0]!.session;
+    const item = session.items['3']!, topic = session.topics[item.topic_id]!;
+    const target = kind === 'item' ? { kind, item: { ...route, item_id: item.id } }
+      : kind === 'topic' ? { kind, session: route, topic_id: topic.id }
+      : kind === 'session' ? { kind, session: route } : { kind, project_id: route.project_id };
+    const subject = target.kind === 'item' || target.kind === 'topic' ? removeSubject(session, target)!
+      : target.kind === 'session' ? { kind: 'session' as const, name: 'Sample session', agent: 'the agent', when: 'Today', topics: 2, items: 9, shared: 0, waiting: 1 }
+      : { kind: 'project' as const, name: 'Sample project', path: '/tmp/sample-project', sessions: 1, topics: 2, items: 9, waiting: 1 };
+    const notices = new NoticeStore(), queue = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
+    render(<RemovalContext.Provider value={queue}><WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} /></RemovalContext.Provider>);
+    const input = store.getSnapshot().sent.find(row => row.route?.item_id === item.id)!.input;
+    const sent = () => document.querySelector(`[data-sent-input="${input.id}"]`);
+    const before = sent()!;
+    expect(before).toBeTruthy();
+    const calls = transport.calls.length;
+    let operation!: string;
+    act(() => { operation = queue.schedule(target, subject); });
+    expect(sent()).toBeNull();
+    act(() => { queue.undo(operation); });
+    expect(sent()?.textContent).toBe(before.textContent);
+    expect(transport.calls.slice(calls).some(call => /remove/.test(call.name))).toBe(false);
+  });
+
   it('keeps the card control and its focus through qualified presence heartbeats without recapturing the queue', async () => {
     const { store, transport, drafts } = setup(), seed = withOptions(), summary = fixture().summary;
     summary.active_binding!.presence = null;

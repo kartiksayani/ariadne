@@ -403,6 +403,13 @@ export class NavigationStore {
   async setHidden(item: ItemRoute, hidden: boolean, expectedPreferencesRevision: number): Promise<boolean> {
     try {
       if (this.stopped || this.pending) return false;
+      const store = this.opened.get(item), state = store?.getSnapshot();
+      // A session_changed hint makes a valid capture stale while its read is
+      // in flight. Wait for a fresh capture before rebuilding the hide set.
+      if (store && (state?.status !== 'ready' || state.snapshot?.freshness !== 'fresh')) {
+        await store.refresh(true);
+        if (this.stopped || this.pending) return false;
+      }
       const preferences = this.preferences();
       if (preferences.revision !== expectedPreferencesRevision) {
         await this.editingPreferences(expectedPreferencesRevision);
