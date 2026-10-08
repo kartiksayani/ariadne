@@ -87,16 +87,22 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
       // The bar keeps Close session and the sending chip (details, Pause); connect lives on the project page.
       const bar = page.locator('.tree-session-bar');
       await expect(bar.getByRole('button', { name: 'Close session' })).toBeInViewport();
-      for (const action of await bar.getByRole('button').all()) {
-        await action.scrollIntoViewIfNeeded();
+      const labels = await bar.getByRole('button').evaluateAll(buttons => buttons.map(button => (button.getAttribute('aria-label') ?? (button as HTMLElement).innerText).replace(/\s+/g, ' ').trim()));
+      for (const label of labels) {
+        // Opening a dialog can change the sending chip; positional locators can then target a different button or disappear.
+        const named = bar.getByRole('button', { name: label, exact: true });
+        if (await named.count() === 0) continue;
+        // The sending button can change its name while its dialog is open; its title still identifies the focus return target.
+        const action = await named.getAttribute('title', { timeout: 3000 }) === 'Sending and connection'
+          ? bar.getByTitle('Sending and connection', { exact: true }) : named;
+        await action.scrollIntoViewIfNeeded({ timeout: 3000 });
         await expect(action).toBeInViewport();
         expect(await action.evaluate(element => {
           const bounds = element.getBoundingClientRect();
           return document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === element;
-        })).toBe(true);
+        }, undefined, { timeout: 3000 })).toBe(true);
         // Pause and Resume write at once; Close session and the sending details open a dialog to dismiss.
         // Pause and Resume are icon buttons: their name is the aria-label.
-        const label = ((await action.getAttribute('aria-label')) ?? (await action.innerText())).trim();
         if (/Pause|Resume|Try again/.test(label)) continue;
         // Copy ID acts immediately without a dialog. This layout harness grants no clipboard permissions.
         if (label === 'Copy ID') {
@@ -105,14 +111,14 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
         }
         // Rename opens its fields in the bar, not a dialog; Esc closes them and focus returns to the button.
         if (label === 'Rename') {
-          await action.click();
+          await action.click({ timeout: 3000 });
           const field = bar.getByLabel('Session name');
           await expect(field).toBeInViewport();
           await page.keyboard.press('Escape');
           await expect(field).toHaveCount(0);
           continue;
         }
-        await action.click();
+        await action.click({ timeout: 3000 });
         const review = page.getByRole('dialog');
         await expect(review).toBeInViewport();
         await review.getByRole('button', { name: label === 'Close session' ? 'Cancel' : 'Done', exact: true }).click();

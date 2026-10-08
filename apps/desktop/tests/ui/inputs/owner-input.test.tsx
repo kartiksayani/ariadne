@@ -25,6 +25,8 @@ import { sentAs } from '../../../src/ui/detail/model';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { HistoryTransport } from '../history/fixtures';
 import { useWindowKeys } from '../../../src/ui/shell/windowKeys';
+// @ts-expect-error Native e2e helpers are plain ESM without type declarations.
+import { replyControlState } from '../../e2e/owner-reply.mjs';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
 const opened: OpenSessions[] = [];
@@ -173,6 +175,17 @@ describe('owner input component and durable draft controller', () => {
   describe('the reply box is always docked on an open or in-progress item', () => {
     const show = (value: Awaited<ReturnType<typeof setup>>, itemId: string) =>
       render(<ItemDetail drafts={value.drafts} store={value.store} itemId={itemId} later={false} onOpenItem={() => {}} />);
+    it('diagnoses the waiting answer composer independently of its chosen-option Send', async () => {
+      const value = await setup(); show(value, '2');
+      const user = userEvent.setup();
+      const text = await screen.findByRole('textbox', { name: 'Reply in your own words' });
+      expect(screen.getByRole('button', { name: 'Send “Keep the design”' })).toBeTruthy();
+      expect(replyControlState('2')).toMatchObject({ editorPresent: true, sendPresent: true, sendEnabled: false });
+      await user.type(text, 'My own answer');
+      await waitFor(() => expect(replyControlState('2')).toMatchObject({ value: 'My own answer', editorEnabled: true, sendPresent: true, sendEnabled: true }));
+      await user.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+      await waitFor(() => expect(value.calls.map(call => call.command)).toMatchObject([{ command: 'input_submit', params: { kind: 'answer', text: 'My own answer', selected_option_id: null } }]));
+    });
     it.each([['8', 'open', 'Reply message'], ['3', 'in_progress', 'Note message']])('keeps the composer visible outside the scrolling detail for %s (%s), without waiting on the owner', async (itemId, status, label) => {
       const value = await setup();
       expect(value.session.items[itemId]!.status).toBe(status);
@@ -458,9 +471,10 @@ describe('owner input component and durable draft controller', () => {
       show(value, itemId);
       const label = { reply: 'Reply message', note: 'Note message', followup: 'Follow-up message' }[sentKind], button = { reply: 'Send reply', note: 'Send note', followup: 'Send follow-up' }[sentKind];
       expect((await screen.findByRole('textbox', { name: label }) as HTMLTextAreaElement).value).toBe('Words to map');
-      // A waiting item also has its answer box with a Send reply button: the owner's words box is the one in "Your message".
+      // A waiting item also has its answer composer; the marked words box is the one in "Your message".
       const mine = () => within(screen.getByRole('region', { name: 'Your message' })).getByRole('button', { name: button }) as HTMLButtonElement;
       await waitFor(() => expect(mine().disabled).toBe(false));
+      expect(replyControlState(itemId)).toMatchObject({ editorPresent: true, value: 'Words to map', editorEnabled: true, sendPresent: true, sendEnabled: true });
       await userEvent.setup().click(mine());
       await waitFor(() => expect(value.calls.map(call => call.command)).toMatchObject([{ command: 'input_submit', params: { kind: sentKind, text: 'Words to map' } }]));
       await waitFor(() => expect(value.prefs.drafts).toEqual([]));

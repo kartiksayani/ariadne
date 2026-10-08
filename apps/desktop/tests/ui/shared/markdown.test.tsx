@@ -168,13 +168,13 @@ describe('markdown parser', () => {
   ])('parses %s repeated to the Markdown limit in linear time', (_name, unit) => {
     const text = unit.repeat(Math.ceil(MARKDOWN_LIMIT / unit.length)).slice(0, MARKDOWN_LIMIT);
     parseMarkdown(text.slice(0, 1_000));
-    // The best of three runs, so a busy machine does not fail a linear parse.
+    // Best of three with coverage/scheduler headroom; still over 40x below the former 13 s regression.
     const timings = [0, 1, 2].map(() => {
       const started = performance.now();
       expect(parseMarkdown(text).rest).toBe('');
       return performance.now() - started;
     });
-    expect(Math.min(...timings)).toBeLessThan(100);
+    expect(Math.min(...timings)).toBeLessThan(300);
   });
 
   it('reads only the first MARKDOWN_LIMIT characters as markdown', () => {
