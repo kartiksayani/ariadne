@@ -34,10 +34,11 @@ const uuid = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0
 function preferences(): PreferencesSnapshot {
   return { schema_version: 1, revision: 1, global: { theme: 'system', selected_navigation: { kind: 'projects' }, window: null, pinned: false, notification_watermark: null }, sessions: [], later: [], drafts: [] };
 }
-async function setup(saved: OwnerDraft[] = []) {
+async function setup(saved: OwnerDraft[] = [], change: (session: Session) => void = () => {}) {
   const session = structuredClone(demo) as Session, prefs = preferences(); prefs.drafts = structuredClone(saved);
   session.items['2']!.options = [{ id: 'yes', label: 'Keep the design', consequence: 'Retain the current contract.', recommended: true },
     { id: 'no', label: 'Change the design', consequence: 'Review a new contract.', recommended: false }];
+  change(session);
   const calls: OwnerMutationRequest[] = [], writes: OwnerMutationRequest[] = [];
   let outcome: 'ok' | 'uncertain' | 'malformed' | 'error' | 'question_changed' | 'operation_reused' = 'ok', preferenceOutcome: 'ok' | 'uncertain' = 'ok', readError = false, deleteConflicts = 0;
   let submitGate: Promise<void> | null = null, cancelGate: Promise<void> | null = null, prefGate: Promise<void> | null = null;
@@ -773,6 +774,29 @@ describe('owner input component and durable draft controller', () => {
     fireEvent.click(await screen.findByText('Sending “Keep the design”…')); expect(revealed).toBe('2');
     expect(screen.getByText('Nothing waiting on you')).toBeTruthy();
   });
+  it('uses a labelled pencil icon to take a queued Sent message back into its durable reply draft', async () => {
+    const text = 'Complete queued message\nKeep the final spaces  ';
+    const value = await setup([], session => {
+      const queued = session.inputs['00000000-0000-4000-8000-000000000076']!;
+      queued.kind = 'reply'; queued.payload.text = text;
+      session.messages.find(message => message.id === queued.message_id)!.body = text;
+    }), input = value.session.inputs['00000000-0000-4000-8000-000000000076']!;
+    const queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue); await queue.start();
+    const reveal = vi.fn();
+    render(<WaitingColumn drafts={value.drafts} store={queue} revealItem={reveal} openSession={() => {}} />);
+    const edit = await screen.findByRole('button', { name: 'Edit message' });
+    expect(edit.getAttribute('title')).toBe('Edit message');
+    expect(edit.querySelector('i.ph-pencil-simple')).not.toBeNull();
+    expect(edit.textContent).toBe('');
+    await waitFor(() => expect(edit.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(edit);
+    await waitFor(() => expect(value.calls.map(call => call.command)).toMatchObject([{ command: 'input_cancel', params: { input_id: input.id, purpose: 'edit' } }]));
+    await waitFor(() => expect(value.prefs.drafts).toMatchObject([{ text, intent: 'reply', target: { item_id: '4' } }]));
+    expect(value.drafts.find(route, '4', 'reply')?.draft.text).toBe(text);
+    expect(reveal).toHaveBeenCalledWith({ ...route, item_id: '4' });
+    expect(value.events.indexOf(`draft:${text}`)).toBeGreaterThan(value.events.indexOf('cancelled'));
+    expect(value.calls.some(call => call.command.command === 'input_submit')).toBe(false);
+  });
   it('moves an unknown Waiting answer to Sent as Checking and retries the exact operation from detail', async () => {
     const value = await setup(), queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue); await queue.start(); value.outcome('uncertain');
     let revealed: string | undefined;
@@ -1074,6 +1098,10 @@ describe('the detail explains messages that have not reached the agent', () => {
   // Input 76 is item 4's queued "drop" request; item 4 is open.
   const queuedText = 'Drop request for item 4.\nPreserve this complete owner text.';
   const detail = () => document.querySelector('.item-detail')!;
+  const cancelledTurn = () => detail().querySelector<HTMLElement>('[data-message-id="00000000-0000-4000-8000-000000000109"]');
+  const getPutBack = () => within(cancelledTurn()!).getByRole('button', { name: 'Put back in reply box' });
+  const queryPutBack = () => cancelledTurn() ? within(cancelledTurn()!).queryByRole('button', { name: 'Put back in reply box' }) : null;
+  const findPutBack = () => waitFor(getPutBack);
   // Input 76 is made a queued reply (it has words to edit) unless the test asks for another kind.
   const queuedOnItem4 = async (kind: InputKind = 'reply') => {
     const value = await setup();
@@ -1087,15 +1115,16 @@ describe('the detail explains messages that have not reached the agent', () => {
     await waitFor(() => expect(remove.hasAttribute('disabled')).toBe(false));
     return { value, edit, remove, revision: value.session.revision };
   };
-  it('explains a queued message in the tracker; Delete cancels it and it leaves the timeline', async () => {
+  it('explains a queued message in the tracker; Delete keeps its cancelled text in the timeline', async () => {
     const { value, remove, revision } = await queuedOnItem4();
     expect(detail().textContent).toContain('Drop request for item 4.');
     fireEvent.click(remove);
     await waitFor(() => expect(cancels(value.calls)).toEqual([{ input_id: demoInput('76'), expected_revision: revision }]));
     expect(value.prefs.drafts).toEqual([]);
-    // Core cancelled it before any delivery: the tracker and the timeline no longer show it.
+    // Core cancelled it before any delivery: it leaves the tracker but keeps readable text in the chat.
     await waitFor(() => expect(screen.queryByText('Queued behind your message on “Implement receipt lookup”')).toBeNull());
-    expect(detail().textContent).not.toContain('Drop request for item 4.');
+    expect(detail().textContent).toContain('Drop request for item 4.');
+    expect(within(document.querySelector<HTMLElement>('[data-message-id="00000000-0000-4000-8000-000000000109"]')!).getByText('Cancelled before it reached the agent')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
   });
   it.each(['drop', 'bring', 'reopen'] as const)('offers only Delete for a queued %s request: it has no text to edit', async kind => {
@@ -1119,7 +1148,7 @@ describe('the detail explains messages that have not reached the agent', () => {
     loadedAfterCancel(value.events);
     expect(value.session.inputs[demoInput('76')]).toMatchObject({ state: 'cancelled', cancel_cause: 'owner_edit' });
     expect(await screen.findByText('Taken back to edit')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+    expect(getPutBack()).toBeTruthy();
     expect(value.calls.some(call => call.command.command === 'input_submit')).toBe(false);
   });
   it('Edit on a queued note while the item is open shows its words in the docked reply box, labelled as a reply, with no extra step', async () => {
@@ -1222,7 +1251,7 @@ describe('the detail explains messages that have not reached the agent', () => {
       expect(second?.command.op_id).toBe(first?.command.op_id);
       expect(cancels(value.calls).every(params => 'purpose' in params && params.purpose === 'edit')).toBe(true);
       untouched(value);
-      fireEvent.click(screen.getByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(getPutBack());
       expect((await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe(queuedText);
       loadedAfterCancel(value.events);
     });
@@ -1335,7 +1364,7 @@ describe('the detail explains messages that have not reached the agent', () => {
       const value = await cancelledBy('topic_archived');
       expect(await screen.findByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
       expect(detail().textContent).toContain('Drop request for item 4.');
-      fireEvent.click(screen.getByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(getPutBack());
       expect((await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe(queuedText);
       expect(value.prefs.drafts).toMatchObject([{ intent: 'reply', text: queuedText, target: { item_id: '4' } }]);
       // Nothing is cancelled or sent by putting it back.
@@ -1344,12 +1373,12 @@ describe('the detail explains messages that have not reached the agent', () => {
     it('says the session was closed when close cancelled it; Put back waits for Reopen', async () => {
       await cancelledBy('session_closed', session => { session.state = 'closed'; session.closed_at = '2026-10-04T12:00:00.000Z'; });
       expect(await screen.findByText(/Not sent: cancelled when you closed this session\. Reopen the session/)).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
     });
     it('says the session was closed when close cancelled it and it is open again', async () => {
       await cancelledBy('session_closed');
       expect(await screen.findByText('Not sent: cancelled when you closed this session')).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+      expect(getPutBack()).toBeTruthy();
     });
     it('after a restart, a message taken back to edit still reads Taken back to edit, and Put back loads it', async () => {
       // A fresh draft store and session read stand for the app started again with the cancel saved in core.
@@ -1358,7 +1387,7 @@ describe('the detail explains messages that have not reached the agent', () => {
       render(<ItemDetail drafts={restored} store={value.store} itemId="4" later={false} onOpenItem={() => {}} />);
       expect(await screen.findByText('Taken back to edit')).toBeTruthy();
       expect(detail().textContent).toContain('Drop request for item 4.');
-      fireEvent.click(screen.getByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(getPutBack());
       expect((await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe(queuedText);
       expect(restored.find(route, '4', 'reply')!.draft.text).toBe(queuedText);
       expect(value.writes.map(write => write.command.command).filter(name => name !== 'preferences_patch')).toEqual([]);
@@ -1371,24 +1400,25 @@ describe('the detail explains messages that have not reached the agent', () => {
       });
       await waitFor(() => expect(detail().textContent).not.toContain('Drop request for item 4.'));
       expect(screen.queryByText(/Taken back to edit/)).toBeNull();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
     });
     it('never overwrites a reply the owner already started: the old text shows to copy', async () => {
       const value = await cancelledBy('topic_archived');
       const id = value.drafts.begin(value.store.getSnapshot().snapshot!.session, '4', 'reply')!;
       value.drafts.edit(id, { text: 'My own reply' });
       await waitFor(() => expect(value.prefs.drafts.some(draft => draft.op_id === id && draft.text === 'My own reply')).toBe(true));
-      fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(await findPutBack());
       expect((await screen.findByRole('textbox', { name: 'Your earlier message' }) as HTMLTextAreaElement).value).toBe(queuedText);
       expect(value.drafts.find(route, '4', 'reply')!.draft.text).toBe('My own reply');
     });
-    it('hides a message the owner deleted, and one from a store with no recorded cause', async () => {
-      await cancelledBy('owner');
-      await waitFor(() => expect(detail().textContent).not.toContain('Drop request for item 4.'));
-      cleanup();
-      await cancelledBy(undefined);
-      await waitFor(() => expect(detail().textContent).not.toContain('Drop request for item 4.'));
-      expect(screen.queryByText(/Not sent:/)).toBeNull();
+    it.each([['owner'], [undefined]] as const)('keeps an owner-deleted message and its reason when cause is %s', async cause => {
+      await cancelledBy(cause);
+      const turn = document.querySelector<HTMLElement>('[data-message-id="00000000-0000-4000-8000-000000000109"]')!;
+      expect(await within(turn).findByText('Cancelled before it reached the agent')).toBeTruthy();
+      expect(turn.textContent).toContain('Drop request for item 4.');
+      expect(turn.classList.contains('detail-turn-cancelled')).toBe(true);
+      expect(within(turn).getByRole('button', { name: 'Copy message' })).toBeTruthy();
+      expect(turn.closest('[hidden], [aria-hidden="true"]')).toBeNull();
     });
     it('puts a topic reply that archive cancelled into that topic’s reply draft, never over one the owner started', async () => {
       const value = await setup(), input = value.session.inputs[demoInput('76')]!, topicId = input.target.topic_id;
@@ -1412,50 +1442,50 @@ describe('the detail explains messages that have not reached the agent', () => {
         session.inputs[later.id] = later;
       });
       expect(await screen.findByText('Not sent: cancelled when you archived this topic. You sent it again.')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
     });
     it('offers no Put back after it was put back and sent', async () => {
       const value = await cancelledBy('topic_archived');
-      fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(await findPutBack());
       await screen.findByRole('textbox', { name: 'Reply message' });
       // The owner sends it: a new queued reply with the same words, to the same item.
       const later = structuredClone(value.session.inputs[demoInput('76')]!);
       later.id = demoInput('97'); later.seq += 100; later.state = 'queued'; later.cancel_cause = undefined; value.session.inputs[later.id] = later; value.session.revision++;
       await act(async () => { await value.store.refresh(); });
-      await waitFor(() => expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull());
+      await waitFor(() => expect(queryPutBack()).toBeNull());
       expect(screen.getByText(/You sent it again\./)).toBeTruthy();
     });
     it('offers no Put back while the put-back words are sending, nor after they are sent, before the session view catches up', async () => {
       const value = await cancelledBy('owner_edit');
-      fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(await findPutBack());
       await screen.findByRole('textbox', { name: 'Reply message' });
       const finish = value.gate();
       fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
       await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries).some(entry => entry.saving)).toBe(true));
       // Sending: the session still shows only the cancelled message.
       expect(await screen.findByText(/Taken back to edit\. You sent it again\./)).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
       await act(async () => { finish(); });
       await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries).some(entry => entry.receipt)).toBe(true));
       // Sent, session view not refreshed: still no button, and loading the words again is refused.
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
       const session = value.store.getSnapshot().snapshot!.session;
       expect(await putBackCancelled(value.drafts, session, session.inputs[demoInput('76')]!)).toEqual({ kind: 'already_sent' });
     });
     it('offers Put back again when the sent words were refused', async () => {
       const value = await cancelledBy('owner_edit');
-      fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(await findPutBack());
       await screen.findByRole('textbox', { name: 'Reply message' });
       value.outcome('error');
       fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
       await waitFor(() => expect(value.calls.some(call => call.command.command === 'input_submit')).toBe(true));
       await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries).every(entry => !entry.saving)).toBe(true));
-      expect(await screen.findByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+      expect(await findPutBack()).toBeTruthy();
     });
     it('offers no Put back while the topic is archived: it says to restore it first', async () => {
       await cancelledBy('topic_archived', session => { session.topics[session.items['4']!.topic_id]!.archived_at = '2026-10-04T12:00:00.000Z'; });
       expect(await screen.findByText(/Not sent: cancelled when you archived this topic\. Restore the topic/)).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
     });
   });
   it('lets the newer question win over a held answer; Review and send again prefills the box and cancels the held one', async () => {

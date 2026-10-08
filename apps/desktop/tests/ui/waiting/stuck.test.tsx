@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import demo from '../../../../../fixtures/domain/demo/session.json';
-import type { Input, PresenceObservation, Session } from '../../../src/generated/domain/models';
+import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
+import summariesFixture from '../../../../../fixtures/domain/projections/sessions.json';
+import type { Input, PresenceObservation, ProjectSummary, Session, SessionSummary } from '../../../src/generated/domain/models';
 import type { SupervisorHealth } from '../../../src/data/service';
 import { immutable } from '../../../src/data';
 import { displayStatus, ownerReplied } from '../../../src/selectors/waiting/replied';
 import { counted, heldInput, notSent, stuckInput, withdrawn } from '../../../src/selectors/waiting/stuck';
+import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { detailModel } from '../../../src/ui/detail/model';
 
 const id = (suffix: string) => `00000000-0000-4000-8000-0000000000${suffix}`;
@@ -17,18 +20,33 @@ function reply(session: Session, state: Input['state'], revision = 1): Input {
   return input;
 }
 
-describe('a message deleted before it was sent', () => {
-  it('leaves the history only when it was cancelled with no delivery attempt', () => {
+describe('an owner-cancelled message', () => {
+  it.each([['owner'], [undefined]] as const)('keeps its full history and delivery warning for cause %s', cause => {
     const session = seed(), input = session.inputs[id('76')]!, message = session.messages.find(value => value.input_id === input.id)!;
     expect(withdrawn(immutable(session), immutable(message))).toBe(false);
-    input.state = 'cancelled';
-    expect(withdrawn(immutable(session), immutable(message))).toBe(true);
-    // One that reached the agent stays in the history even once cancelled.
+    input.state = 'cancelled'; input.cancel_cause = cause;
+    expect(withdrawn(immutable(session), immutable(message))).toBe(false);
+    expect(notSent(immutable(session), immutable(message))?.line).toBe('Cancelled before it reached the agent');
     input.attempts = structuredClone(session.inputs[id('72')]!.attempts);
     expect(withdrawn(immutable(session), immutable(message))).toBe(false);
-    // Agent messages are never hidden.
+    expect(notSent(immutable(session), immutable(message))?.line).toBe('Cancelled — the agent may already have seen it');
     const agent = session.messages.find(value => value.author === 'agent')!;
-    expect(withdrawn(immutable(session), immutable({ ...agent, input_id: input.id }))).toBe(false);
+    expect(notSent(immutable(session), immutable({ ...agent, input_id: input.id }))).toBeNull();
+  });
+  it.each([false, true])('is excluded from sent rows, reply counts and stuck warnings after an attempt: %s', attempted => {
+    const session = seed(), input = reply(session, 'queued');
+    const capture = () => [immutable({ session, project: structuredClone(projectsFixture.items[0]) as ProjectSummary,
+      summary: structuredClone(summariesFixture.items[0]) as SessionSummary })];
+    expect(waitingRows(capture())).toHaveLength(0);
+    expect(sentRows(capture()).some(row => row.input.id === input.id)).toBe(true);
+    input.state = 'cancelled'; input.cancel_cause = 'owner';
+    if (attempted) input.attempts = structuredClone(session.inputs[id('72')]!.attempts);
+    const message = session.messages.find(value => value.input_id === input.id)!;
+    expect(counted(immutable(session), immutable(message))).toBe(false);
+    expect(ownerReplied(immutable(session), immutable(session.items['2']!))).toBe(false);
+    expect(waitingRows(capture()).map(row => row.item.id)).toEqual(['2']);
+    expect(sentRows(capture()).some(row => row.input.id === input.id)).toBe(false);
+    expect(stuckInput(immutable(session), immutable(input))).toBeNull();
   });
 });
 
@@ -44,10 +62,10 @@ describe('a message that archive or close cancelled before it was sent', () => {
       expect(withdrawn(session, message)).toBe(false);
       expect(notSent(session, message)?.line).toBe(line);
     });
-  it.each([['owner'], [undefined]] as const)('is left out as the owner’s own cancel when the cause is %s', cause => {
+  it.each([['owner'], [undefined]] as const)('stays visible as the owner’s own cancel when the cause is %s', cause => {
     const { session, message } = setup(cause);
-    expect(withdrawn(session, message)).toBe(true);
-    expect(notSent(session, message)).toBeNull();
+    expect(withdrawn(session, message)).toBe(false);
+    expect(notSent(session, message)?.line).toBe('Cancelled before it reached the agent');
   });
   it('is not marked not sent once it reached the agent or while it is still queued', () => {
     const { session, message } = setup('topic_archived');

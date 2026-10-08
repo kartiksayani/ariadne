@@ -12,6 +12,7 @@ import { messageItems } from '../../components/history/MessageCard';
 import { excerptView } from '../shared/excerpt';
 import { notSent, withdrawn } from '../../selectors/waiting/stuck';
 import { RailExcerpt } from '../shared/MessageExcerpt';
+import { CopyMessage } from '../detail/CopyMessage';
 import { NotSentLine } from '../answer/NotSentLine';
 import { editable, putBackBlocked, putBackCancelled, sendingAgain } from '../answer/held';
 import type { DraftState, OwnerDraftStore } from '../../state/drafts/store';
@@ -111,7 +112,7 @@ export function MessageRail({ service, store, drafts, selectedItemId = null, hov
       {messages?.map(message => {
         const unsent = live ? notSent(live, message) : null;
         // The Not sent line sits under the card, not in it: its button can't live inside the card's own button.
-        return <div className="pw-excerpt-group" key={message.id}>
+        return <div className={`pw-excerpt-group${unsent && (unsent.input.cancel_cause ?? 'owner') === 'owner' ? ' pw-excerpt-cancelled' : ''}`} key={message.id}>
           <RailExcerpt id={message.id} view={excerptView(message, at, earlierAgent)} active={message.id === hovered || message.id === pinned}
             highlight={focus !== null && messageItems(message).includes(focus)}
             onHover={on => setHovered(previous => on ? message.id : previous === message.id ? null : previous)}
@@ -119,7 +120,8 @@ export function MessageRail({ service, store, drafts, selectedItemId = null, hov
           {live && unsent && <div className="pw-excerpt-unsent"><NotSentLine line={unsent.line} again={unsent.again || sendingAgain(draftState, live, unsent.input)}
             restoreHint={editable(unsent.input.kind) ? putBackBlocked(live, unsent.input) : null}
             onPutBack={!drafts || putBackBlocked(live, unsent.input) || !editable(unsent.input.kind) ? null
-              : () => putBackCancelled(drafts, live, unsent.input)} /></div>}
+              : () => putBackCancelled(drafts, live, unsent.input)} />
+            {(unsent.input.cancel_cause ?? 'owner') === 'owner' && <CopyMessage text={message.body} />}</div>}
         </div>;
       })}
     </div>

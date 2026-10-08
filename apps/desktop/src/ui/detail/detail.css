@@ -549,6 +549,11 @@
   min-width: 0;
 }
 
+.detail-turn-cancelled .detail-bubble-you {
+  color: var(--a-label);
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
 .detail-reply {
   display: flex;
   flex-direction: column;

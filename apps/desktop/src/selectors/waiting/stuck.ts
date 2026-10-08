@@ -45,30 +45,20 @@ function cancelledInput(session: Immutable<Session>, message: Immutable<Message>
   const input = message.author === 'owner' && message.input_id ? session.inputs[message.input_id] : undefined;
   return input && input.state === 'cancelled' ? input : undefined;
 }
-/** The owner's cancelled message that never went out, before any delivery attempt; undefined for anything else. */
-function unsentInput(session: Immutable<Session>, message: Immutable<Message>): Immutable<Input> | undefined {
-  const input = cancelledInput(session, message);
-  return input && input.attempts.length === 0 ? input : undefined;
-}
-
 /**
- * An owner message the owner deleted before it went out, or took back to edit and then sent again (a later message
- * carries the same words). The history leaves it out. Stores from before core recorded a cause read as a delete.
- * One taken back to edit and not sent again, or cancelled by archiving a topic or closing the session, stays (`notSent`):
- * its text is not lost.
+ * Only an edit sent again leaves the history: a later message carries its words.
+ * Every owner cancellation stays visible, including stores from before core recorded a cause.
  */
 export function withdrawn(session: Immutable<Session>, message: Immutable<Message>): boolean {
   // A message taken back to edit may have earlier attempts (it was re-queued): the take-back is the cause that counts.
   const edited = cancelledInput(session, message);
-  if (edited?.cancel_cause === 'owner_edit') return sentAgain(session, edited);
-  const input = unsentInput(session, message);
-  return !!input && (input.cancel_cause ?? 'owner') === 'owner';
+  return edited?.cancel_cause === 'owner_edit' && sentAgain(session, edited);
 }
 
-/** Why a message that Edit took back, or archive or close cancelled, was not sent, as the quiet line under it. */
+/** The quiet line explaining an owner cancellation, edit take-back, archive or close. */
 export interface NotSent {
   readonly input: Immutable<Input>;
-  /** "Taken back to edit", or "Not sent: cancelled when you archived this topic". */
+  /** The plain reason and, for an owner cancellation, whether the agent may have seen it. */
   readonly line: string;
   /** The owner already sent these same words again to the same item or topic, so "Put back in reply box" has nothing left to do. */
   readonly again: boolean;
@@ -84,13 +74,15 @@ function sentAgain(session: Immutable<Session>, input: Immutable<Input>): boolea
     && other.payload.text.trim() === text && other.payload.selected_option_id === option);
 }
 /**
- * The message was taken back to edit, or cancelled by archive or close, before it went out. Archive and close keep
+ * Owner cancellations keep their words and explain whether a delivery was attempted. Archive and close keep
  * their line; one taken back to edit is hidden instead once its words were sent again (`withdrawn`).
  */
 export function notSent(session: Immutable<Session>, message: Immutable<Message>): NotSent | null {
   // Taken back to edit shows by its cause alone, even for a message that was re-queued after an earlier attempt: Edit only
   // takes back a queued message. Archive and close cancel an in-flight one too, so those need no attempt to have been made.
-  const input = cancelledInput(session, message), cause = input?.cancel_cause;
+  const input = cancelledInput(session, message), cause = input?.cancel_cause ?? 'owner';
+  if (input && cause === 'owner') return { input, line: input.attempts.length === 0
+    ? 'Cancelled before it reached the agent' : 'Cancelled — the agent may already have seen it', again: false };
   if (!input || !(cause === 'owner_edit' || (cause === 'topic_archived' || cause === 'session_closed') && input.attempts.length === 0)) return null;
   const again = sentAgain(session, input);
   return cause === 'owner_edit' && again ? null : { input, line: notSentLine[cause], again };
