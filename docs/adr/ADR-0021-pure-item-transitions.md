@@ -61,9 +61,6 @@ prove the transition matrix, canonical relationships, content bounds, prior-fiel
 history and unchanged caller state on rejection. P1.2 supplies immutable rounds
 and conversation semantics; P2 supplies owner/apply/result behavior.
 
-MCP/Seezo remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no approval is claimed.
-
 ## Spec references
 
 - [DOMAIN: pure item seam](../planning/low-level/DOMAIN_AND_STORAGE.md#pure-item-validation-and-transition-seam)

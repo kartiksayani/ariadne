@@ -67,8 +67,6 @@ first-slice sequencing; the legacy section anchor is retained for historical lin
   Known-provider discovery/liveness and final native/install behaviors remain.
 - Handle invalid/stale input, connection loss, save failures and normal quit/reopen.
   Do not deepen exotic recovery or plugin frameworks before the first release.
-- MCP/Seezo remain disabled under the current-session waiver. Organization guidance
-  was not checked; no organization approval is claimed.
 
 ## Per-commit quality policy
 

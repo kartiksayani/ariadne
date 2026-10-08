@@ -409,6 +409,3 @@ and dispatches all affected producer, consumer and conformance changes. There
 are no worker-local contract forks. Important architecture decisions receive a
 short ADR with the affected implementation; routine compatible amendments are
 documented in their PR.
-
-MCP/Seezo remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no approval is claimed.

@@ -199,5 +199,3 @@ check nor a disposable probe proves notification routing, tray behavior, install
 release packaging or other [release acceptance](../planning/low-level/VERIFICATION.md).
 
 See [ADR-0002](../adr/ADR-0002-test-webview-and-macos-surfaces.md) for this decision.
-Organization security guidance was not fetched under the owner's explicit MCP
-waiver; no Seezo approval or organization-compliance claim is made.

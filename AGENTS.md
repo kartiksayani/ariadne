@@ -43,8 +43,7 @@ is the task and completion catalogue.
   preserve quality. Do not grow another delivery framework.
 - Use applicable independent review; no global service pre-mortem checklist.
   RTK belongs only to outer agent commands, never repository subprocesses or CI.
-- MCP/Seezo are disabled under the owner's explicit current-session waiver.
-  Organization security guidance was not checked; no approval is claimed.
+- MCP remains disabled. External security-review tooling is not used for this project.
 
 Historical `.delivery/` records remain evidence of earlier work. New machine
 receipts, JSON context attestations and maintainer-spec-review statuses are unnecessary.

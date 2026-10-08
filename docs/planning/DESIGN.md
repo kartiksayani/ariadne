@@ -94,4 +94,4 @@ Use deterministic clocks and the canonical fixture from `DESIGN_PROMPT.md`. Comp
 
 ## Security guidance provenance
 
-The owner explicitly waived Seezo organizational guidance for this task. It was not checked. Security boundaries in these documents are grounded in the approved local-only architecture and user-provided decisions; this note does not claim organizational guidance review.
+Security boundaries in these documents are grounded in the approved local-only architecture and user-provided decisions.

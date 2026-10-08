@@ -369,4 +369,4 @@ Rust validates every renderer command and enforces project/session/item membersh
 
 ## 10. Security guidance provenance
 
-The owner explicitly waived Seezo organizational guidance for this task. It was not checked. The renderer and storage constraints above are design requirements, not a claim that the guidance was reviewed.
+The renderer and storage constraints above are design requirements.

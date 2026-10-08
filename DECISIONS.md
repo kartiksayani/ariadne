@@ -38,9 +38,5 @@ They prove ordered delivery and retained existing-session context; they do not
 prove the production store, structured result loop, native UI or installation.
 Acceptance status belongs in the [verification ledger](docs/planning/low-level/VERIFICATION.md).
 
-The owner explicitly waived Seezo for this work. Organization security guidance
-was not fetched or checked; these decisions make no organization-compliance claim.
-
 Earlier decisions, research and prototypes remain available in the
-[planning archive](https://github.com/kartiksayani/ariadne/tree/reference/planning-and-pocs)
-and the `reference/planning-and-pocs` branch.
+[planning archive](https://github.com/kartiksayani/ariadne/tree/reference/planning-and-pocs).
