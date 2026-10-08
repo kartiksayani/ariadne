@@ -118,9 +118,11 @@ test('five existing round sections do not admit assertions before the final clos
   const round = { ordinal: 5, closed_at: '2026-10-05T11:51:57.000Z' };
   const explanation = 'Explicit native result 5\nComplete stored explanation for answer #5.';
   const absent = { async isExisting() { return false; }, getText: async () => assert.fail('An absent round has no text') };
-  const states = [absent, roundText(roundAsk, roundChoice), roundText(roundAsk, roundChoice, 'Explicit native result 5'),
-    roundText(roundAsk, roundChoice, 'Explicit native result 5 Complete stored explanation for answer #5.')];
-  let state;
+  const complete = roundText(roundAsk, roundChoice, 'Explicit native result 5 Complete stored explanation for answer #5.');
+  // The last two states carry the full result; in the first of them the owner's message is still a pending bubble.
+  const states = [[absent, 0], [roundText(roundAsk, roundChoice), 0], [roundText(roundAsk, roundChoice, 'Explicit native result 5'), 0],
+    [complete, 1], [complete, 0]];
+  let state, pending;
   const admitted = [];
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; });
@@ -129,14 +131,18 @@ test('five existing round sections do not admit assertions before the final clos
       assert.equal(selector, '.detail-chat-list [data-round="5"]');
       return typeof state === 'string' ? { isExisting: async () => true, getText: async () => state } : state;
     },
+    async $$(selector) {
+      assert.equal(selector, '.detail-chat-list [data-pending]');
+      return Array.from({ length: pending }, () => ({}));
+    },
     async waitUntil(condition, options) {
       assert.equal(options.timeout, 20000);
-      for (state of states) admitted.push(await condition());
+      for ([state, pending] of states) admitted.push(await condition());
       assert.equal(admitted.at(-1), true);
     },
   };
   await waitForRoundResult(round, explanation);
-  assert.deepEqual(admitted, [false, false, false, true]);
+  assert.deepEqual(admitted, [false, false, false, false, true]);
 });
 
 test('a permanently omitted or truncated final result remains a native acceptance failure', async t => {
@@ -147,6 +153,7 @@ test('a permanently omitted or truncated final result remains a native acceptanc
   t.after(() => { globalThis.browser = previousBrowser; });
   globalThis.browser = {
     $() { return { isExisting: async () => true, getText: async () => text }; },
+    async $$() { return []; },
     async waitUntil(condition, options) {
       for (text of [roundText(roundAsk, roundChoice), roundText(roundAsk, roundChoice, 'Explicit native result 5\nComplete stored')]) {
         assert.equal(await condition(), false);
@@ -154,7 +161,7 @@ test('a permanently omitted or truncated final result remains a native acceptanc
       throw new Error(options.timeoutMsg);
     },
   };
-  await assert.rejects(waitForRoundResult(round, explanation), /did not publish the final closed round and its complete correlated result/);
+  await assert.rejects(waitForRoundResult(round, explanation), /did not publish the final closed round, its complete correlated result and the settled owner message/);
 });
 
 test('complete native history batches deserialize through the real CLI/Core dispatch barrier', { timeout: 15000 }, async () => {
