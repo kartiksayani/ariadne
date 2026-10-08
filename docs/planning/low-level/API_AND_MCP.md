@@ -463,6 +463,12 @@ stdin request. `--json` emits exactly one application envelope on stdout, while
 text failures use stderr and the canonical exit code. Help includes valid stdin
 and invalid-routing examples.
 
+The CLI (not the wire) is lenient for Apply, per [ADR-0092](../../adr/ADR-0092-lenient-apply-in-the-cli.md):
+defaults, a generated `op_id` and nested `children` expand into the strict
+`ApplyRequest` below before core validates it. `--dry-run` validates without
+committing, and the printed receipt is compact unless `--full` is passed. Read takes
+`--topic ID|NUMBER` and `--archived` for the common filters.
+
 The native CLI resolves retained binding IDs across authoritative registered
 sessions so exact Apply replay survives rebind. It derives terminal issuance or
 the exact source-message ceiling from persisted data, releases catalogue locks,

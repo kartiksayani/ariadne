@@ -1,5 +1,8 @@
 //! Thin installed agent tools; native facts come from Registry, semantics from Core.
+mod lenient;
+
 use ariadne_core::{
+    apply::summarize,
     native::{AgentResolver, NativeCoreService},
     *,
 };
@@ -11,23 +14,53 @@ use std::{
 };
 
 pub const HELP: &str = r#"Agent tools (explicit routing; no cwd/session default):
-  ariadne read --binding UUID --generation UUID --view items [--limit 1..100] [--json]
+  ariadne read --binding UUID --generation UUID --view items [--topic ID|NUMBER] [--archived] [--limit 1..100] [--json]
+  ariadne read --binding UUID --generation UUID --view topics [--archived] [--limit 1..100] [--json]
   ariadne read --binding UUID --generation UUID --json-stdin [--json]
   ariadne item messages|rounds --binding UUID --generation UUID --item ITEM [--json]
   ariadne item messages|rounds --binding UUID --generation UUID --json-stdin [--json]
-  ariadne apply --binding UUID --generation UUID --json-stdin [--json]
+  ariadne apply --binding UUID --generation UUID --json-stdin [--dry-run] [--full] [--json]
 Read source scope: add both --source-input UUID and --attempt UUID, or neither.
+--topic takes a topic id or its number (the `order` shown by --view topics);
+--archived keeps only archived topics (and the items in them).
 Stdin is the complete canonical SessionReadRequest, ItemMessagesRequest,
 ItemRoundsRequest or ApplyRequest (not an actor/context envelope), at most 512KiB.
-A malformed stdin request fails with exit 2 and the parser's message (offending
-field, variant or type, plus line/column); fix that and send the corrected
-request with a new op_id (the same op_id is only for replaying the same bytes
-after an uncertain commit).
-Worked ApplyRequest examples are in the Ariadne rules text given to you at setup.
+Apply stdin may leave out defaulted fields (below); a fully explicit ApplyRequest
+works unchanged. A malformed stdin request fails with exit 2 and the parser's message
+(offending field, variant or type, with its position in operations); fix that
+and send the corrected request. A generated op_id is new every run; after
+an uncertain commit (exit 4) resend the same request with the op_id the error
+names, so it replays instead of repeating.
 Use stdin for filters and all outer/nested continuation cursors. --json emits one
 canonical envelope on stdout, including failures. Text failures use stderr.
 ARIADNE_HOME selects the same existing application data directory as bridge;
 the default is HOME/.ariadne. Models cannot select project/session paths.
+
+Lenient apply input (the CLI expands it into the full ApplyRequest, then core
+validates it exactly as before):
+  Omit: op_id (a UUIDv4 is generated and echoed in the receipt), source_input_id,
+  attempt_id, input_result (null), expected_item_revisions, expected_topic_revisions
+  ({}), summary (""), and any optional operation field (absent = null or empty).
+  Defaults: ref on topic.add/item.add/reply = r1, r2, ...; item.add topic = the
+  request's only topic.add (a child inherits its parent's topic); status =
+  waiting_on_me when ask is set, else open; owner = the agent (this binding), or
+  me when the status is waiting_on_me (core requires it); {"kind":"agent"} gets
+  this binding; options[].id = 1, 2, ... and recommended = false; item.ask
+  recipient_binding_id = this binding and options = []; input_result
+  reply_refs and followup_item_refs = [].
+  Nesting: item.add may carry "children": [item.add objects, recursively]. Each
+  child's parent is its enclosing item, its topic is inherited, order is kept.
+  Still required: type and question on item.add; outcome and why for done,
+  decided and dropped; expected_item_revisions for every existing item you touch.
+Example (a topic, a summary item with one child, one ask with two options):
+  printf '%s' '{"operations":[{"op":"topic.add","name":"Cache PR review","short":"Cache PR"},{"op":"item.add","short":"Review result","type":"finding","question":"Review finished: one race, one choice","status":"done","outcome":"Reviewed","why":"Read every changed file","children":[{"short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"done","outcome":"Confirmed","why":"Reproduced locally"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Merge the fallback path now?","ask":"Merge now or wait?","options":[{"label":"Merge now","consequence":"Ships today"},{"label":"Wait","consequence":"Ships next week"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
+Receipt (default, compact; data of the --json envelope):
+  {"op_id":"...","session_revision":3,"topics":[{"id":"UUID","number":2,"short":"Cache PR","revision":1,"created":true}],"items":[{"id":"4","short":"Review result","revision":1,"created":true},{"id":"4.1","short":"Fill race","revision":1,"created":true}]}
+  An item id is its number (1.2). revision is the value to send as the next
+  expected_item_revisions entry. --full prints the complete saved receipt
+  (allocated_refs, messages, every revision). --dry-run runs every check against
+  the current session, commits nothing and prints the same compact form with
+  "dry_run":true (--full adds the full receipt shape).
 
 Executable examples with registered binding/generation values B and G:
   ariadne read --binding "$B" --generation "$G" --view topics --limit 10 --json
@@ -67,18 +100,30 @@ pub fn run(
 }
 
 enum Tool {
-    Read(AgentReadToolRequest),
+    Read(ReadCall),
     Messages(AgentMessagesToolRequest),
     Rounds(AgentRoundsToolRequest),
-    Apply(AgentApplyToolRequest),
+    Apply(ApplyCall),
+}
+struct ReadCall {
+    request: AgentReadToolRequest,
+    /// `--topic N`: resolved to the topic id once the session is reachable.
+    topic_number: Option<u64>,
+}
+struct ApplyCall {
+    request: AgentApplyToolRequest,
+    dry_run: bool,
+    full: bool,
+    /// Set when the CLI chose the `op_id` itself.
+    generated_op_id: Option<UuidV4>,
 }
 fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, CoreError> {
     let tool = parse(args, input)?;
     match &tool {
-        Tool::Read(request) => request.validate_wire()?,
+        Tool::Read(call) => call.request.validate_wire()?,
         Tool::Messages(request) => request.validate_wire()?,
         Tool::Rounds(request) => request.validate_wire()?,
-        Tool::Apply(request) => request.validate_wire()?,
+        Tool::Apply(call) => call.request.validate_wire()?,
     }
     let data = crate::bridge::command::home_from_environment()?;
     let registry = AgentResolver::open_data_directory(&data)?;
@@ -101,11 +146,11 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
         },
     );
     let (binding, generation, source, attempt) = match &tool {
-        Tool::Read(request) => (
-            &request.binding_id,
-            &request.generation,
-            &request.source_input_id,
-            &request.attempt_id,
+        Tool::Read(call) => (
+            &call.request.binding_id,
+            &call.request.generation,
+            &call.request.source_input_id,
+            &call.request.attempt_id,
         ),
         Tool::Messages(request) => (
             &request.binding_id,
@@ -119,11 +164,11 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
             &request.source_input_id,
             &request.attempt_id,
         ),
-        Tool::Apply(request) => (
-            &request.binding_id,
-            &request.generation,
-            &request.request.source_input_id,
-            &request.request.attempt_id,
+        Tool::Apply(call) => (
+            &call.request.binding_id,
+            &call.request.generation,
+            &call.request.request.source_input_id,
+            &call.request.request.attempt_id,
         ),
     };
     let context = AgentResolver::resolve(
@@ -134,13 +179,22 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
         attempt.clone(),
     )?;
     match tool {
-        Tool::Apply(request) => {
-            let result = core.apply(context, request.request)?;
-            value(serde_json::to_value(result))
+        Tool::Apply(call) => {
+            let generated = call.generated_op_id.clone();
+            run_apply(&core, context, call).map_err(|error| name_generated_op(error, generated))
         }
         query => {
             let request = match query {
-                Tool::Read(request) => QueryRequest::SessionRead(request.params),
+                Tool::Read(call) => {
+                    let mut params = call.request.params;
+                    if let Some(number) = call.topic_number {
+                        let topic = topic_by_number(&core, &context, number)?;
+                        if let ReadView::Items { topic_id, .. } = &mut params.selection {
+                            *topic_id = Some(topic);
+                        }
+                    }
+                    QueryRequest::SessionRead(params)
+                }
                 Tool::Messages(request) => QueryRequest::ItemMessages(request.params),
                 Tool::Rounds(request) => QueryRequest::ItemRounds(request.params),
                 Tool::Apply(_) => unreachable!("handled above"),
@@ -150,6 +204,95 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
             ))
         }
     }
+}
+
+/// Real apply prints the compact receipt (or the full one); `--dry-run` runs every
+/// check against the current session and writes nothing.
+fn run_apply(
+    core: &NativeCoreService,
+    context: AgentContext,
+    call: ApplyCall,
+) -> Result<serde_json::Value, CoreError> {
+    let request = call.request.request;
+    if call.dry_run {
+        let preview = core.apply_preview(&context, &request)?;
+        let mut shown = if call.full {
+            value(serde_json::to_value(&preview.receipt))?
+        } else {
+            value(serde_json::to_value(summarize(
+                &preview.session,
+                &preview.receipt,
+            )?))?
+        };
+        if let Some(object) = shown.as_object_mut() {
+            object.insert("dry_run".into(), true.into());
+            if preview.replayed {
+                object.insert("replayed".into(), true.into());
+            }
+        }
+        return Ok(shown);
+    }
+    let receipt = core.apply(context.clone(), request)?;
+    if !call.full {
+        // The commit already happened: a failed summary must not read as a failed apply.
+        if let Ok(summary) = core.apply_summary(&context, &receipt) {
+            return value(serde_json::to_value(summary));
+        }
+    }
+    value(serde_json::to_value(receipt))
+}
+
+/// Number of a topic as `--view topics` shows it (`order`) to its id.
+fn topic_by_number(
+    core: &NativeCoreService,
+    context: &AgentContext,
+    number: u64,
+) -> Result<UuidV4, CoreError> {
+    let mut cursor = None;
+    loop {
+        let result = core.query(
+            QueryContext::agent(context.clone()),
+            QueryRequest::SessionRead(SessionReadRequest {
+                selection: ReadView::Topics { archived: None },
+                cursor: cursor.take(),
+                limit: PageLimit::new(100).expect("literal page limit"),
+                item_pages: vec![],
+            }),
+        )?;
+        let QueryResult::SessionRead(SessionReadResult::Topics(page)) = result else {
+            return Err(invalid("The topic list came back in another shape."));
+        };
+        if let Some(topic) = page.items.iter().find(|t| t.order.value() == number) {
+            return Ok(topic.id.clone());
+        }
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => {
+                return Err(CoreError::new(
+                    CoreErrorCode::NotFound,
+                    format!("This session has no topic number {number}."),
+                    "Run ariadne read --view topics to list topic ids and numbers.",
+                ))
+            }
+        }
+    }
+}
+
+/// A generated `op_id` is unknown to the caller, so an uncertain commit has to
+/// name it: the retry must carry the same one to replay instead of repeating.
+fn name_generated_op(mut error: CoreError, generated: Option<UuidV4>) -> CoreError {
+    if let (Some(id), CoreErrorCode::CommitUncertain | CoreErrorCode::IoError) =
+        (generated, &error.code)
+    {
+        let note = format!(
+            " The CLI generated op_id {0}; resend the same request with \"op_id\":\"{0}\" added.",
+            id.as_str()
+        );
+        if error.hint.len() + note.len() <= 4096 {
+            error.hint.push_str(&note);
+        }
+    }
+    error
 }
 fn value(
     value: Result<serde_json::Value, serde_json::Error>,
@@ -170,9 +313,9 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
     while i < rest.len() {
         let name = rest[i];
         let value = match name {
-            "--json" | "--json-stdin" => "",
+            "--json" | "--json-stdin" | "--dry-run" | "--full" | "--archived" => "",
             "--binding" | "--generation" | "--source-input" | "--attempt" | "--view" | "--item"
-            | "--limit" => {
+            | "--limit" | "--topic" => {
                 i += 1;
                 rest.get(i)
                     .copied()
@@ -202,7 +345,7 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
     }
     let stdin = flags.contains_key("--json-stdin");
     if stdin
-        && ["--view", "--item", "--limit"]
+        && ["--view", "--item", "--limit", "--topic", "--archived"]
             .iter()
             .any(|key| flags.contains_key(key))
     {
@@ -215,7 +358,12 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
             || flags.keys().any(|key| {
                 !matches!(
                     *key,
-                    "--binding" | "--generation" | "--json" | "--json-stdin"
+                    "--binding"
+                        | "--generation"
+                        | "--json"
+                        | "--json-stdin"
+                        | "--dry-run"
+                        | "--full"
                 )
             }))
     {
@@ -223,6 +371,41 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
             "Apply source and revision guards belong in the full stdin request.",
         ));
     }
+    if method != "apply" && (flags.contains_key("--dry-run") || flags.contains_key("--full")) {
+        return Err(invalid("--dry-run and --full apply only to ariadne apply."));
+    }
+    let topic = flags.get("--topic").copied();
+    let archived = flags.contains_key("--archived");
+    if (topic.is_some() || archived) && method != "read" {
+        return Err(invalid(
+            "--topic and --archived apply only to ariadne read.",
+        ));
+    }
+    let view = flags.get("--view").copied().unwrap_or("items");
+    if topic.is_some() && view != "items" {
+        return Err(invalid("--topic applies to --view items."));
+    }
+    if archived && !matches!(view, "items" | "topics") {
+        return Err(invalid("--archived applies to --view items or topics."));
+    }
+    // A topic is a UUID, or its number (digits only; a UUID always has hyphens).
+    let (topic_id, topic_number) = match topic {
+        None => (None, None),
+        Some(value) if value.bytes().all(|b| b.is_ascii_digit()) && !value.is_empty() => {
+            let number = value
+                .parse::<u64>()
+                .ok()
+                .filter(|number| PositiveSafeInteger::new(*number).is_ok())
+                .ok_or_else(|| invalid("A topic number must be a positive integer."))?;
+            (None, Some(number))
+        }
+        Some(value) => (
+            Some(UuidV4::new(value).map_err(|_| {
+                invalid("--topic takes a topic UUID or its number from --view topics.")
+            })?),
+            None,
+        ),
+    };
     let limit = flags.get("--limit").map_or(Ok(20), |value| {
         value
             .parse::<u64>()
@@ -245,13 +428,19 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
     match method {
         "apply" => {
             let bytes = bytes.ok_or_else(|| invalid("Apply requires --json-stdin."))?;
-            let request: ApplyRequest = serde_json::from_slice(&bytes)
-                .map_err(|error| bad_stdin("ApplyRequest", &error))?;
-            request.validate_wire()?;
-            Ok(Tool::Apply(AgentApplyToolRequest {
-                binding_id,
-                generation,
-                request,
+            let expanded = lenient::expand(&bytes, &binding_id, &mut || {
+                uuid::Uuid::new_v4().to_string()
+            })?;
+            expanded.request.validate_wire()?;
+            Ok(Tool::Apply(ApplyCall {
+                request: AgentApplyToolRequest {
+                    binding_id,
+                    generation,
+                    request: expanded.request,
+                },
+                dry_run: flags.contains_key("--dry-run"),
+                full: flags.contains_key("--full"),
+                generated_op_id: expanded.generated_op_id,
             }))
         }
         "read" => {
@@ -262,15 +451,16 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
                 serde_json::from_slice(&bytes)
                     .map_err(|error| bad_stdin("SessionReadRequest", &error))?
             } else {
-                let selection = match flags.get("--view").copied().unwrap_or("items") {
+                let archived = archived.then_some(true);
+                let selection = match view {
                     "items" => ReadView::Items {
-                        topic_id: None,
+                        topic_id,
                         item_id: None,
                         parent_item_id: None,
                         statuses: vec![],
-                        archived: None,
+                        archived,
                     },
-                    "topics" => ReadView::Topics { archived: None },
+                    "topics" => ReadView::Topics { archived },
                     "messages" => ReadView::Messages {
                         topic_id: None,
                         item_id: None,
@@ -293,12 +483,15 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
                     item_pages: vec![],
                 }
             };
-            Ok(Tool::Read(AgentReadToolRequest {
-                binding_id,
-                generation,
-                source_input_id,
-                attempt_id,
-                params,
+            Ok(Tool::Read(ReadCall {
+                request: AgentReadToolRequest {
+                    binding_id,
+                    generation,
+                    source_input_id,
+                    attempt_id,
+                    params,
+                },
+                topic_number,
             }))
         }
         "messages" | "rounds" => {
@@ -379,8 +572,16 @@ fn read_stdin(input: &mut dyn Read) -> Result<Vec<u8>, CoreError> {
 /// Names the first serde failure (field, variant or type, with line/column) so a
 /// model can correct its own request. Only the caller's own bytes are echoed.
 fn bad_stdin(kind: &str, error: &serde_json::Error) -> CoreError {
-    let detail: String = error
-        .to_string()
+    bad_detail(kind, &error.to_string())
+}
+
+/// A lenient-apply failure that has no line/column, such as `operations[2] (item.add): ...`.
+fn bad_request(detail: String) -> CoreError {
+    bad_detail("ApplyRequest", &detail)
+}
+
+fn bad_detail(kind: &str, detail: &str) -> CoreError {
+    let detail: String = detail
         .chars()
         .map(|c| if c.is_control() { '?' } else { c })
         .take(400)

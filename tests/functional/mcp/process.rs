@@ -221,6 +221,8 @@ pub fn persisted_race_and_parity(binary: &str, args: &[&str], cli: Option<&str>)
                 id(4).as_str(),
                 "--json-stdin",
                 "--json",
+                // The default receipt is compact; parity with MCP is the full one.
+                "--full",
             ])
             .env("ARIADNE_HOME", &setup.data)
             .stdin(Stdio::piped())
