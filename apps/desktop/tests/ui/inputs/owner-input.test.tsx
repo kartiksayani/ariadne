@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { useRef, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { InputKind, Session, SessionSummary, ProjectSummary } from '../../../src/generated/domain/models';
@@ -18,7 +18,7 @@ import { editQueued, NOT_TAKEN_BACK, putBackCancelled } from '../../../src/ui/an
 import { StuckNote } from '../../../src/ui/answer/StuckNote';
 import { sessionActionsFor, type SessionActions } from '../../../src/components/bindings/actions';
 import { AnswerSlot, changedText, type AnswerSlotProps } from '../../../src/ui/detail/AnswerSlot';
-import type { PendingSubmission } from '../../../src/ui/answer/useSubmit';
+import { useSubmit, type PendingSubmission } from '../../../src/ui/answer/useSubmit';
 import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { sentAs } from '../../../src/ui/detail/model';
@@ -131,6 +131,22 @@ function KeyedRoot({ children, shortcuts }: { readonly children: ReactNode; read
 const staleView = (store: object) => act(() => { (store as unknown as { publish: (update: object) => void }).publish({ status: 'stale' }); });
 
 describe('owner input component and durable draft controller', () => {
+  it.each([
+    { note: undefined, expected: 'Latest draft before React renders' },
+    { note: 'Explicit answer-box note', expected: 'Explicit answer-box note' },
+    { note: '', expected: '' },
+  ])('uses an explicit option note or the fresh draft when omitted: $note', async ({ note, expected }) => {
+    const value = await setup(), session = value.store.getSnapshot().snapshot!.session;
+    const id = value.drafts.begin(session, '2', 'answer')!;
+    const { result } = renderHook(() => useSubmit({ drafts: value.drafts, session, current: true, itemId: '2', intent: 'answer' }));
+    // The shortcut may run before the store notification gives React its next render.
+    await act(async () => {
+      value.drafts.edit(id, { text: 'Latest draft before React renders' });
+      result.current.sendOption('no', note);
+    });
+    await waitFor(() => expect(value.calls).toHaveLength(1));
+    expect(value.calls[0]!.command).toMatchObject({ command: 'input_submit', params: { selected_option_id: 'no', text: expected } });
+  });
   // The tree's z-persists-Later versus editor-typing check lives in App.test.tsx now that rows hand z to the workspace keys.
   // A finished item (1) opens its follow-up box on press; an open item (1.1) always shows its reply box.
   it.each([['1', 'Follow up', 'Follow-up message', false], ['1.1', 'Reply', 'Reply message', true]])('focuses the box only after explicit %s %s; Esc leaves it and keeps the draft', async (itemId, action, label, always) => {

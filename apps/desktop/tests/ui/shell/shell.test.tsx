@@ -61,6 +61,10 @@ describe('Paperwhite shell', () => {
     expect(screen.queryByRole('complementary', { name: 'Item detail' })).toBeNull();
     expect(document.querySelector('.shell-summary')?.textContent).toBe('10 items · 3 waiting on you · 2 in progress · 4 open');
     expect([...document.querySelectorAll('.shell-footer .pw-keycap')].map(key => key.textContent)).toContain('esc');
+    const footer = document.querySelector('.shell-footer')!;
+    expect(footer.textContent).toContain('⌥1–9send choice + note');
+    expect(footer.textContent).toContain('⌥0focus own words');
+    expect(footer.textContent).toContain('⌘↵reply only');
   });
 
   it('wires views, search, rail, theme and the detail column', () => {

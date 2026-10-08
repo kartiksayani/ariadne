@@ -12,6 +12,8 @@ describe('answer choice with an optional note', () => {
     const values = props({ variant }); render(<AnswerControl {...values} />);
     const send = screen.getByRole('button', { name: 'Send “Keep the design” with your note' });
     expect(send.classList.contains('btn-primary')).toBe(true);
+    expect(screen.getByTitle('Press 1 to select, ⌥1 to send with your note')).toBeTruthy();
+    expect(screen.getByText('Enter sends with your note')).toBeTruthy();
     expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Add a note to your choice, or reply on its own…');
     fireEvent.click(send);
     expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, values.draft);
@@ -28,7 +30,8 @@ describe('answer choice with an optional note', () => {
     const values = props(changes); render(<AnswerControl {...values} />);
     expect(screen.queryByRole('textbox')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: changes.variant === 'compact' ? 'Send answer' : 'Send “Keep the design”' }));
-    expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, undefined);
+    expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, '');
+    expect(screen.getByTitle('Press 1 to select, ⌥1 to send with your note')).toBeTruthy();
   });
   it('offers a reply without a selected option and labels an empty note as a plain option send', () => {
     const values = props({ selected: -1 }), view = render(<AnswerControl {...values} />);
@@ -37,6 +40,7 @@ describe('answer choice with an optional note', () => {
     expect(values.onSendText).toHaveBeenCalledExactlyOnceWith(values.draft);
     view.rerender(<AnswerControl {...values} selected={0} draft="   " />);
     expect(screen.getByRole('button', { name: 'Send “Keep the design”' })).toBeTruthy();
+    expect(screen.getByTitle('Press 1 to select, ⌥1 to send')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Send as a reply only' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

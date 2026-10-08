@@ -70,6 +70,7 @@ export interface TreeViewProps {
   readonly onResume: () => void;
   readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onClearFilters: () => void;
+  readonly onClearSearch?: () => void;
   readonly onShowArchive: () => void;
   /** Called instead of sending when the agent is not running; without it the send queues. */
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
@@ -89,7 +90,7 @@ const SKELETON = [
 
 export function TreeView(props: TreeViewProps) {
   const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, railOpen, graph, notices, highlightedItems, highlightedMessages,
-    summaries, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onShowArchive,
+    summaries, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onClearSearch, onShowArchive,
     onAgentNotRunning, onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
   const nav = useNavigation(navigation), preferences = nav.preferences;
@@ -239,7 +240,10 @@ export function TreeView(props: TreeViewProps) {
       onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', change, queue: submit });
     } else void submit();
   };
-  const sendOption = (index: number, note = entry?.draft.text ?? '') => { const option = options[index]; if (option) send({ selected_option_id: option.id, text: note }); };
+  const sendOption = (index: number, note?: string) => {
+    const option = options[index];
+    if (entry && option) send({ selected_option_id: option.id, text: note ?? drafts.getSnapshot().entries[entry.draft.op_id]?.draft.text ?? entry.draft.text });
+  };
   const answerControl = answerRow ? <AnswerControl variant="full" selected={chosen} draft={entry?.draft.text ?? ''}
     options={options.map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: option.recommended }))}
     warn={entry?.error ? plainFailure(entry.error) : undefined} blocked={blocked ?? undefined} locked={!entry || entry.saving}
@@ -484,6 +488,35 @@ export function TreeView(props: TreeViewProps) {
     if (current?.item_id !== scroll.item_id || current.offset !== scroll.offset) void saveView(next => { next.scroll = scroll; });
   };
 
+  const selectedForResize = useRef(selectedId);
+  selectedForResize.current = selectedId;
+  const previousQuery = useRef(query);
+  const topicKeys = JSON.stringify(sections.map(section => section.topic.key));
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    if (!box || graph) return;
+    const keepSelected = () => {
+      const id = selectedForResize.current;
+      if (id && !inView(id)) nearest(id);
+    };
+    if (previousQuery.current !== query) keepSelected();
+    previousQuery.current = query;
+    if (!query || typeof ResizeObserver === 'undefined') return;
+    const selectedHeaderHeight = () => {
+      const element = selectedForResize.current ? elements.current.get(selectedForResize.current) : undefined;
+      return element ? headerHeight(element) : 0;
+    };
+    let height = box.getBoundingClientRect().height, topicHeight = selectedHeaderHeight();
+    // The search line changes the viewport; a wrapped sticky topic changes its reading top.
+    const observer = new ResizeObserver(() => {
+      const next = box.getBoundingClientRect().height, nextTopic = selectedHeaderHeight();
+      if (next !== height || nextTopic !== topicHeight) { height = next; topicHeight = nextTopic; keepSelected(); }
+    });
+    observer.observe(box);
+    box.querySelectorAll('.tree-topic').forEach(header => observer.observe(header));
+    return () => observer.disconnect();
+  }, [query, graph, topicKeys]);
+
   // ------------------------------------------------------------ rows
   const running = bar?.running ?? false;
   const touchedMessage = highlightedMessages.size && session ? session.messages.find(message => highlightedMessages.has(message.id))?.number ?? null : null;
@@ -593,6 +626,8 @@ export function TreeView(props: TreeViewProps) {
     {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
     {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts} topics={model?.topics ?? []} topicId={view?.filters.topic_id ?? null}
       showTopics={!(detailOpen && railOpen)} disabled={nav.writing || nav.pendingOperationId !== null} onChip={setChip} onTopic={setTopic} />}
+    {!!query && model && !graph && <Banner icon="ph ph-magnifying-glass" actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={onClearSearch}>Clear search</button></>}>
+      Showing {model.searchCount} of {model.itemCount} items matching “{query}”{!model.chips.has('all') ? ' in the statuses you picked' : ''}</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}
     {archived && <Banner icon="ph ph-archive" actions={<>

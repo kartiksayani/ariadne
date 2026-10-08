@@ -82,7 +82,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
   const gate = (hard: boolean, soft: boolean) => ({ disabled: hard || undefined, 'aria-disabled': soft && !hard ? true : undefined });
   const hasText = full && !noText;
   const withNote = hasText && !!draft.trim();
-  const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index, hasText ? draft : undefined); };
+  const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index, hasText ? draft : ''); };
   const sendText = () => { if (draft.trim() && !blocked && !off) onSendText(draft); };
   const optionIndex = (target: EventTarget) => target instanceof HTMLElement && root.current?.contains(target)
     ? Number(target.closest<HTMLElement>('[data-answer-option]')?.dataset.answerOption ?? -1) : -1;
@@ -116,14 +116,14 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
       return true;
     },
   }, { scope: 'editor' });
-  const hint = blocked ? '' : full && options.length > 1 ? `1–${options.length} to change · Enter sends · Esc closes, keeps your draft` : 'Enter sends';
+  const hint = blocked ? '' : full && options.length > 1 ? `1–${Math.min(options.length, 9)} to select · Enter sends${withNote ? ' with your note' : ''} · Esc closes, keeps your draft` : `Enter sends${withNote ? ' with your note' : ''}`;
   return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
     {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
       {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
     <div className="answer-options">
       {options.map((option, index) => {
         const on = index === selected;
-        return <button type="button" key={option.id} data-answer-option={index} title={`Press ${index + 1} to select`} aria-pressed={on} {...gate(locked, frozen)}
+        return <button type="button" key={option.id} data-answer-option={index} title={index < 9 ? `Press ${index + 1} to select, ⌥${index + 1} to send${draft.trim() ? ' with your note' : ''}` : 'Click to select, Enter to send'} aria-pressed={on} {...gate(locked, frozen)}
           className={`btn ${option.recommended ? 'btn-primary' : 'btn-secondary'} answer-option${on ? ' answer-option-on' : ''}${option.recommended ? ' answer-option-rec' : ''}`}
           onClick={event => { event.stopPropagation(); if (!off) onSelect(index); }}>
           <span className="answer-option-head">

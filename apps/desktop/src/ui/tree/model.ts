@@ -222,6 +222,8 @@ export interface TreeInput {
 export interface TreeModel {
   readonly rows: readonly Row[];
   readonly filtering: boolean;
+  readonly searchCount: number;
+  readonly itemCount: number;
   /** "Showing an item outside your current filters." */
   readonly outside: boolean;
   readonly noMatch: boolean;
@@ -376,7 +378,7 @@ export function treeModel(input: TreeInput): TreeModel {
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.
   const outside = filtering && rows.length > 0 && !!revealId && forced.has(revealId) && !matched.has(revealId);
-  return { rows, filtering, outside, noMatch: live.length > 0 && rows.length === 0, empty: all.length === 0, chips, counts,
+  return { rows, filtering, searchCount: scoped.filter(statusMatch).length, itemCount: live.length, outside, noMatch: live.length > 0 && rows.length === 0, empty: all.length === 0, chips, counts,
     topics: topics.map(topic => ({ id: topic.id, name: topic.name })) };
 }
 

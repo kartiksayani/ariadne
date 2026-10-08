@@ -144,7 +144,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = card.session.items[id];
     return target ? { label: shortLabel(target), status: displayStatus(card.session, target) } : null;
-  }, onOpenItem: id => revealItem({ ...card.route, item_id: id }) }}><FileRefProject.Provider value={card.route.project_id}><div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} aria-current={selected || undefined} onClick={open}>
+  }, onOpenItem: id => revealItem({ ...card.route, item_id: id }) }}><FileRefProject.Provider value={card.route.project_id}><div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} data-project-id={card.route.project_id} data-session-id={card.route.session_id} aria-current={selected || undefined} onClick={open}>
     <div className="waiting-path">{card.path}</div>
     <Markdown className="waiting-question" text={item.question} />
     {card.ask && <Markdown className="waiting-ask" text={card.ask} />}

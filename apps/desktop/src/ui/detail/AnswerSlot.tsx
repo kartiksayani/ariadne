@@ -44,6 +44,18 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
     if (!focusRequest || focusRequest.intent !== 'answer' || handled.current === focusRequest.token || !entry) return;
     handled.current = focusRequest.token;
     onFocusRequestConsumed?.(focusRequest.token);
+    if (focusRequest.sendOption) {
+      const target = focusRequest.answerTarget, choice = item?.options[focusRequest.optionIndex ?? -1];
+      if (target && item?.revision === target.revision && item.question_revision === target.questionRevision
+        && session?.active_binding_id === target.bindingId && choice?.id === target.optionId
+        && choice && live && !blocked && !submit.locked && !submit.changed && !submit.blocked
+        && submit.connection === 'connected' && !entry.receipt) submit.sendOption(choice.id);
+      return;
+    }
+    if (focusRequest.ownWords) {
+      root.current?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)')?.focus();
+      return;
+    }
     const buttons = root.current?.querySelectorAll<HTMLButtonElement>('[data-answer-option]');
     if (focusRequest.optionIndex !== undefined) {
       const choice = item?.options[focusRequest.optionIndex], button = buttons?.[focusRequest.optionIndex];
@@ -52,7 +64,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
     }
     if (entry.saving || entry.uncertain || entry.receipt || state.preferenceUncertain) return;
     root.current?.querySelector<HTMLElement>('[data-answer-option]:not(:disabled):not([aria-disabled="true"]),textarea:not(:disabled)')?.focus();
-  }, [focusRequest, entry, item, drafts, state.preferenceUncertain, onFocusRequestConsumed]);
+  }, [focusRequest, entry, item, drafts, state.preferenceUncertain, onFocusRequestConsumed, live, blocked, submit, session]);
   if (!item) return null;
   // data-owner-input marks every owner input of the detail (this slot and the action box) for native tests.
   if (!state.ready || !entry) return <div className="detail-answer-slot" data-owner-input={mark} role="status">Loading saved drafts…{state.error && <p role="alert">{plainFailure(state.error)}</p>}</div>;
