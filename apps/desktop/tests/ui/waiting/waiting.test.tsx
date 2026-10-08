@@ -19,6 +19,8 @@ function fixture(): { session: Session; project: ProjectSummary; summary: Sessio
 }
 const mutableSession = () => structuredClone(demo) as Session;
 const inputId = (suffix: string) => `00000000-0000-4000-8000-0000000000${suffix}`;
+/** A button that does nothing: disabled, or only aria-disabled when the view is stale (so it keeps the focus it holds). */
+const held = (button: HTMLElement) => button.hasAttribute('disabled') || button.getAttribute('aria-disabled') === 'true';
 function input(): Input { return structuredClone((demo as unknown as Session).inputs[inputId('72')]!); }
 function attempt(): Attempt { return input().attempts[0]; }
 const binding = fixture().summary.active_binding!;
@@ -362,12 +364,12 @@ describe('source-backed Waiting and Sent panel', () => {
     transport.push('project_list', pending.promise); transport.push('session_list', sessionPage([summary]), sessionPage([summary]), sessionPage([summary]));
     transport.push('session_get', loaded(changed), loaded(changed));
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: demo.id, revision: changed.revision }); });
-    expect(store.getSnapshot().status).toBe('stale'); expect(send().hasAttribute('disabled')).toBe(true);
+    expect(store.getSnapshot().status).toBe('stale'); expect(held(send())).toBe(true);
     expect(screen.getByText(/Refresh is pending/)).toBeTruthy();
     const active = summary.active_binding!;
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
       observation: { ...structuredClone(binding.presence!), generation: active.generation, last_seen_at: '2026-10-05T02:05:00.000Z' } }); });
-    expect(store.getSnapshot().status).toBe('stale'); expect(send().hasAttribute('disabled')).toBe(true);
+    expect(store.getSnapshot().status).toBe('stale'); expect(held(send())).toBe(true);
     await act(async () => { pending.resolve(projectPage()); await store.refresh(); });
     expect(store.getSnapshot().status).toBe('ready'); expect(screen.getByText(changed.items['2']!.question)).toBeTruthy();
     // The untouched draft follows the new question; no review is asked for.
@@ -544,7 +546,7 @@ describe('source-backed Waiting and Sent panel', () => {
     expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(false);
     transport.push('project_list', { api_version: 1, ok: false, error });
     await act(async () => { await store.refresh(); });
-    expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(true);
+    expect(held(screen.getByRole('button', { name: 'Send answer' }))).toBe(true);
     expect(screen.getByText('Ariadne couldn’t read or save its data. Try again.')).toBeTruthy(); expect(screen.queryByText(error.hint)).toBeNull();
     expect(screen.getByRole('button', { name: 'Details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Refresh queue' })).toBeTruthy();

@@ -24,26 +24,42 @@ export async function openOwnerReply(afterSaved = false) {
     if (afterSaved || await another.isExisting()) await click(another);
     return;
   }
-  if (afterSaved) await wait(async () => { const box = await browser.$('.item-detail .detail-box textarea'); return !(await box.isExisting()) || (await box.getValue()) === ''; }, 'The sent Reply box did not empty');
+  if (afterSaved) {
+    // The Reply box stays docked on an open or in-progress item and empties once its words are saved. A box that is gone is no
+    // proof of that: the item may be closed or archived, and pressing Reply there would only time out.
+    let missing = false;
+    try {
+      await wait(async () => {
+        const box = await browser.$('.item-detail .detail-box textarea');
+        missing = !(await box.isExisting());
+        return !missing && (await box.getValue()) === '';
+      }, 'The sent Reply box did not empty');
+    } catch (error) {
+      if (missing) throw new Error('The sent Reply box is missing: the item shows no Reply box (closed, archived or changed?), so the helper cannot tell the reply was saved', { cause: error });
+      throw error;
+    }
+  }
   if (!(await browser.$('.item-detail .detail-box textarea').isExisting())) {
     // Item actions carry their key hint ("Reply r"), so the button matches by contained text.
-    await click(await browser.$('[aria-label="Item actions"]').$('button*=Reply'));
+    const reply = await browser.$('[aria-label="Item actions"]').$('button*=Reply');
+    if (!(await reply.isExisting())) throw new Error('The item shows no Reply box and offers no Reply button (closed, archived or waiting on another input?)');
+    await click(reply);
   }
 }
 
 /**
- * Opens the follow-up Reply box of a waiting item whose answer is in flight: the answer slot is gone,
- * and the reply queues behind the held input (owner FIFO). `afterSaved`: a previous follow-up saved on
+ * Opens the extra Reply box of a waiting item whose answer is in flight: the answer slot is gone,
+ * and the reply queues behind the held input (owner FIFO). `afterSaved`: a previous reply saved on
  * disk; its box closes before the next one opens.
  */
 export async function openFollowUp(afterSaved = false) {
-  if (afterSaved) await wait(async () => !(await browser.$('.item-detail .detail-box').isExisting()), 'The sent follow-up box did not close');
+  if (afterSaved) await wait(async () => !(await browser.$('.item-detail .detail-box').isExisting()), 'The sent reply box did not close');
   if (!(await browser.$('.item-detail .detail-box textarea').isExisting())) {
-    // The follow-up section holds this one action; its key hint ("r") follows the label.
-    const followUp = await browser.$('.item-detail [aria-label="Follow-up"] [aria-label="Item actions"] button');
-    await followUp.waitForDisplayed();
-    if (!(await followUp.getText()).includes('Add a follow-up')) throw new Error('The follow-up section did not offer "Add a follow-up"');
-    await click(followUp);
+    // This section holds the one action; its key hint ("r") follows the label.
+    const addReply = await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button');
+    await addReply.waitForDisplayed();
+    if (!(await addReply.getText()).includes('Add a reply')) throw new Error('The reply section did not offer "Add a reply"');
+    await click(addReply);
   }
 }
 

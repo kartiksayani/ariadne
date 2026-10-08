@@ -114,6 +114,33 @@ test('a missing Saved acknowledgement fails while the sent Reply box still holds
   await assert.rejects(openOwnerReply(true), /Saved acknowledgement absent/);
 });
 
+test('a missing Reply box after a send is a clear failure, not a saved reply, and never presses Reply', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  const exists = value => ({ async isExisting() { return value; } });
+  globalThis.browser = {
+    $(selector) {
+      if (selector === '.item-detail .detail-answer-slot') return exists(false);
+      if (selector === '.item-detail .detail-box textarea') return exists(false);
+      return assert.fail(`A closed item has no Reply to press: ${selector}`);
+    },
+    async waitUntil(condition, options) {
+      for (let attempt = 0; attempt < 3; attempt++) if (await condition()) return true;
+      throw new Error(options.timeoutMsg);
+    },
+  };
+  await assert.rejects(openOwnerReply(true), /The sent Reply box is missing/);
+  // Without a send to wait for, no box and no Reply button says so instead of timing out on a click.
+  globalThis.browser = {
+    $(selector) {
+      if (selector === '.item-detail .detail-answer-slot' || selector === '.item-detail .detail-box textarea') return exists(false);
+      if (selector === '[aria-label="Item actions"]') return { $() { return exists(false); } };
+      return assert.fail(`Unexpected lookup: ${selector}`);
+    },
+  };
+  await assert.rejects(openOwnerReply(false), /shows no Reply box and offers no Reply button/);
+});
+
 test('original publication deliberately omits its result; repair references the retained reply without another mutation', () => {
   const state = fixture();
   const originalRequest = originalReplyRequest(state.configuration, state.admission, state.session, state.reply.body);

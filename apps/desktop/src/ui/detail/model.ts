@@ -93,7 +93,7 @@ export interface DetailModel {
    * on a finished one. Null when the session or topic is read-only. Words written in another box stay in their draft and go out as this.
    */
   readonly box: WordsKind | null;
-  /** A waiting item whose input is in flight or queued: a reply queues behind it (owner FIFO). */
+  /** A waiting item whose input is in flight or queued: a reply queues behind it (owner FIFO). Named for what is sent: a reply. */
   readonly followUp: { readonly label: string; readonly hint: string; readonly disabled: boolean } | null;
   readonly answer: (AnswerModel & { readonly heading: boolean; readonly ask: string | null }) | null;
   readonly outcome: { readonly label: string; readonly text: string; readonly color: string } | null;
@@ -188,19 +188,28 @@ const CAPTION: Readonly<Partial<Record<Input['state'], string>>> = { queued: 'No
 
 /**
  * `pending`: owner messages still on their way; they end the conversation as pending bubbles instead of sitting in their round.
+ * `delivered`: the pending ones already with the agent (in flight). Once their round has its result, they stay in the round,
+ * so the exchange reads ask, answer, result; each one so kept is added to `kept` and leaves the pending bubbles.
  * `answered`: an answer or reply written for the current question is on its way.
  */
-function roundView(session: Immutable<Session>, item: Immutable<Item>, round: Immutable<Round>, last: boolean, pending: ReadonlySet<string>, answered: boolean): RoundView {
+function roundView(session: Immutable<Session>, item: Immutable<Item>, round: Immutable<Round>, last: boolean, pending: ReadonlySet<string>, delivered: ReadonlySet<string>,
+  kept: Set<string>, answered: boolean): RoundView {
   // A message deleted before it was sent, or cancelled by archive or close, is not part of the round: the agent never got it.
   const messages = (ids: readonly string[]) => ids.map(id => session.messages.find(message => message.id === id))
     .filter((message): message is Immutable<Message> => !!message && counted(session, message));
-  const owner = messages(round.owner_message_ids).filter(message => !pending.has(message.id)), agent = messages(round.agent_message_ids);
+  const agent = messages(round.agent_message_ids);
+  const results = round.result_input_ids.flatMap(id => session.inputs[id]?.attempts.flatMap(attempt => attempt.domain_result ? [attempt.domain_result] : []) ?? []);
+  const result = results.at(-1)?.explanation ?? agent.at(-1)?.body ?? '';
+  const owner = messages(round.owner_message_ids).filter(message => {
+    if (!pending.has(message.id)) return true;
+    if (!result || !delivered.has(message.id)) return false;
+    kept.add(message.id);
+    return true;
+  });
   const answer = session.answers.filter(value => value.item_id === item.id && owner.some(message => message.id === value.message_id)).sort((a, b) => b.seq - a.seq)[0];
   const chosen = answer?.selected_option_id ? answer.options_snapshot.find(option => option.id === answer.selected_option_id)?.label ?? null : null;
   const you = chosen ? { chosen: true, text: chosen } : answer?.text.trim() ? { chosen: false, text: answer.text.trim() }
     : owner.length ? { chosen: false, text: owner.at(-1)!.body } : null;
-  const results = round.result_input_ids.flatMap(id => session.inputs[id]?.attempts.flatMap(attempt => attempt.domain_result ? [attempt.domain_result] : []) ?? []);
-  const result = results.at(-1)?.explanation ?? agent.at(-1)?.body ?? '';
   // Still waiting on the owner unless an answer or reply to this ask is on its way. Core files every owner input of the item in
   // its open round, a Bring or a note too, so being in the round proves nothing: only the kind and the question it was written for do.
   const now = last && !you && !answered && item.status === 'waiting_on_me';
@@ -290,9 +299,10 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
 
   const answerable = status === 'waiting' && !pending;
   // The answer slot hides while its input is pending; a follow-up reply still queues behind it.
-  // A follow-up being written stays when the hold clears, next to the answer box.
-  const followUp = !readOnly && status === 'waiting' && (pending || replyDraft) ? { label: 'Add a follow-up',
-    hint: pending ? 'Queued behind the answer in flight' : 'Your follow-up is kept. Send it, or answer below.', disabled: offline } : null;
+  // A reply being written stays when the hold clears, next to the answer box. A waiting item's words go out as a reply
+  // (`sentAs`), so the button says reply: "follow-up" is only ever the kind sent on a finished item.
+  const followUp = !readOnly && status === 'waiting' && (pending || replyDraft) ? { label: `Add a ${sentAs(status)}`,
+    hint: pending ? 'Queued behind the answer in flight' : 'Your reply is kept. Send it, or answer below.', disabled: offline } : null;
   const recommended = item.options.findIndex(option => option.recommended);
   const blocked = session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
     : offline ? reconnectingNote(agent) : null;
@@ -325,7 +335,8 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const onItsWay = new Set(active.map(input => input.message_id));
   // An answer or a reply that is on its way and was written for the current question (not held for an older one) answers the newest ask.
   const answered = active.some(input => (input.kind === 'answer' || input.kind === 'reply') && !heldInput(session, input));
-  const roundViews = rounds.map((round, index) => roundView(session, item, round, index === rounds.length - 1, onItsWay, answered));
+  const delivered = new Set(active.filter(input => input.state === 'in_flight').map(input => input.message_id)), kept = new Set<string>();
+  const roundViews = rounds.map((round, index) => roundView(session, item, round, index === rounds.length - 1, onItsWay, delivered, kept, answered));
   // The head already shows the question: a lone ask that only repeats it is not said twice.
   if (roundViews.length === 1 && roundViews[0].ask.trim() === item.question.trim()) roundViews[0] = { ...roundViews[0], ask: '' };
   const reopened = isClosed ? undefined : [...item.status_history].reverse().find(entry => closedStatus.has(statusKey[entry.old_status]) && !closedStatus.has(statusKey[entry.new_status]));
@@ -340,7 +351,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     steps: showSteps ? stepsOf(sub.stage, status) : null,
     // An in-flight message keeps its delivery line; the `sent` note only adds Cancel.
     delivery: sub?.stage && (!stuck || stuck.kind === 'sent') ?deliveryOf(sub.stage, sub.kind, sub.label, agent) : null,
-    outbox,
+    outbox: outbox.filter(pending => !kept.has(pending.input.message_id)),
     open,
     box: readOnly ? null : sentAs(status),
     followUp,
