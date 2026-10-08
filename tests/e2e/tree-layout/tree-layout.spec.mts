@@ -32,15 +32,16 @@ test('folds a long preview to two lines, never rewraps on hover and never scroll
     const first = page.locator('.tree-item[data-item-id="1"]');
     const text = first.locator('.tree-outcome .tree-clamp'), line = await text.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
     const folded = (await text.boundingBox())!.height;
-    expect(folded).toBeLessThanOrEqual(line * 2 + 1); expect(folded).toBeGreaterThanOrEqual(line * 2);
+    // Fractional line heights can round either way in browser layout.
+    expect(folded).toBeLessThanOrEqual(line * 2 + 0.5); expect(folded).toBeGreaterThanOrEqual(line * 2 - 0.5);
     await expect(first.getByRole('button', { name: 'Show more' })).toBeVisible();
     const title = first.locator('.tree-question'), titleLine = await title.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
-    expect((await title.boundingBox())!.height).toBeLessThanOrEqual(titleLine * 2 + 1);
+    expect((await title.boundingBox())!.height).toBeLessThanOrEqual(titleLine * 2 + 0.5);
     await first.getByRole('button', { name: 'Show more' }).click();
     expect((await text.boundingBox())!.height).toBeGreaterThan(line * 15);
     expect((await title.boundingBox())!.height).toBeGreaterThan(titleLine * 2);
     await first.getByRole('button', { name: 'Show less' }).click();
-    expect((await text.boundingBox())!.height).toBeLessThanOrEqual(line * 2 + 1);
+    expect((await text.boundingBox())!.height).toBeLessThanOrEqual(line * 2 + 0.5);
 
     // Hovering a row keeps its text column and its line count exactly as they were.
     const wrapped = page.locator('.tree-item[data-item-id="5"]'), body = wrapped.locator('.tree-body'), outcome = wrapped.locator('.tree-outcome .tree-clamp');
