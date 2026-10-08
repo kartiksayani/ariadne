@@ -39,10 +39,42 @@
 }
 
 /* — panel body — */
+
+/* The shell's scroll host gives the panel its whole height: the body scrolls inside it and the composer docks below. */
+.shell-detail-scroll:has(> .item-detail) {
+  overflow: hidden;
+  padding: 0;
+}
+
 .item-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* What the item is, ending in the conversation. It alone scrolls. */
+.detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
   display: flex;
   flex-direction: column;
   gap: 20px;
+  padding: 10px 18px 16px;
+}
+
+/* The owner's composer: quick replies above the reply box, or a closed item's follow-up actions. Always in view. */
+.detail-dock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 65%;
+  overflow-y: auto;
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--color-divider);
+  background: var(--a-side);
 }
 
 .detail-head {
@@ -94,11 +126,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.detail-count {
-  font-size: 12px;
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
 /* — steps and delivery — */
@@ -214,7 +241,8 @@
 }
 
 .detail-box > textarea {
-  min-height: 72px;
+  min-height: 34px;
+  resize: none;
   font-size: 13.5px;
   line-height: 1.5;
 }
@@ -241,6 +269,15 @@
 
 .detail-box-row > .detail-cancel {
   padding: 0 8px;
+}
+
+/* Says what a draft written in another box will be sent as. */
+.detail-box-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
 }
 
 .detail-box-hint {
@@ -411,92 +448,128 @@
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
-/* — rounds — */
-.detail-rounds {
-  gap: 8px;
-}
-
-.detail-rounds > .detail-label-row {
-  align-items: baseline;
-}
-
-.detail-round {
+/* — conversation: a plain chat transcript, oldest first — */
+.detail-chat-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  background: var(--a-card);
-  box-shadow: 0 0 0 1px var(--color-divider), var(--a-lift);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.detail-round-now {
-  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent), var(--a-lift);
-}
-
-.detail-round-head {
+.detail-turn {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--color-text) 64%, transparent);
 }
 
-.detail-round-now .detail-round-head {
-  color: var(--a-acc-text);
+/* A subtle divider between exchanges. */
+.detail-turn + .detail-turn {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--color-divider) 60%, transparent);
 }
 
-.detail-round-range {
-  font-weight: 400;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
-  color: color-mix(in srgb, var(--color-text) 52%, transparent);
-}
-
-.detail-round-tag {
-  margin-left: auto;
-  padding: 1px 7px;
-  font-size: 10.5px;
-}
-
-.detail-round-line {
+.detail-msg {
   display: flex;
   gap: 8px;
+  min-width: 0;
   font-size: 13.5px;
   line-height: 1.5;
 }
 
-.detail-round-line > i {
+.detail-msg-icon {
   flex: none;
   margin-top: 3px;
   font-size: 13px;
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
-.detail-round-line > span,
-.detail-round-line > div {
+.detail-you-icon {
+  color: inherit;
+}
+
+.detail-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
+  padding: 8px 12px;
+  border-radius: 14px;
   text-wrap: pretty;
 }
 
-.detail-round-reply {
+/* The agent: left, on a card. The open ask is picked out. */
+.detail-bubble-agent {
+  border-top-left-radius: 4px;
+  background: var(--a-card);
+  box-shadow: 0 0 0 1px var(--color-divider), var(--a-lift);
+}
+
+.detail-turn-now .detail-bubble-agent {
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent), var(--a-lift);
+}
+
+.detail-waiting-tag {
+  align-self: flex-start;
+  padding: 1px 7px;
+  font-size: 10.5px;
+}
+
+/* You: right, tinted. */
+.detail-msg-you {
+  justify-content: flex-end;
+}
+
+.detail-bubble-you {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  column-gap: 8px;
+  max-width: 88%;
+  border-top-right-radius: 4px;
+  color: var(--a-acc-text);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.detail-bubble-you > * {
+  min-width: 0;
+}
+
+.detail-reply {
   display: flex;
   flex-direction: column;
 }
 
-.detail-round-you,
-.detail-round-you > i {
-  color: var(--a-acc-text);
+/* A message still on its way: dashed, with where it stands under it. */
+.detail-turn-pending .detail-bubble-you {
+  outline: 1px dashed color-mix(in srgb, var(--color-accent) 50%, transparent);
+  outline-offset: -1px;
 }
 
-.detail-round-result {
+.detail-pending-caption {
+  grid-column: 2;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.detail-turn-pending > .stuck-note {
+  align-self: flex-end;
+  max-width: 88%;
+}
+
+/* What the agent did with it. */
+.detail-msg-result {
   color: color-mix(in srgb, var(--color-text) 80%, transparent);
 }
 
-.detail-round-result > i {
+.detail-msg-result .detail-msg-icon {
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.detail-msg-text {
+  min-width: 0;
 }
 
 .detail-fork {

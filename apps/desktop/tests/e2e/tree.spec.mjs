@@ -366,7 +366,9 @@ async function completeRowLayout(id, item) {
     const lines = new Set(part.fragments.map(rect => Math.round(rect.top)));
     assert.ok(lines.size >= text.split('\n').length, `${id} ${name} must retain its complete multiline layout`);
     for (const container of part.containers) {
-      assert.ok(!Number.parseInt(container.lineClamp, 10), `${id} ${name} must not use a line clamp`);
+      // The only fold is the outcome's six-line preview (Show more); these outcomes are shorter, so it hides nothing.
+      const clamp = Number.parseInt(container.lineClamp, 10);
+      assert.ok(!clamp || (name === 'outcome' && clamp === 6 && lines.size <= clamp), `${id} ${name} must not fold any of its lines`);
       assert.notEqual(container.textOverflow, 'ellipsis', `${id} ${name} must not truncate with an ellipsis`);
       assert.ok(container.scrollHeight <= container.clientHeight + 1 && container.scrollWidth <= container.clientWidth + 1,
         `${id} ${name} must fit every containing row box without overflow`);

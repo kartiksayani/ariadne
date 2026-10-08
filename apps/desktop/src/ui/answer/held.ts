@@ -14,7 +14,7 @@
 import type { Immutable } from '../../data/session-store';
 import type { Input, InputKind, Session } from '../../generated/domain/models';
 import type { SessionActions } from '../../components/bindings/actions';
-import { ownerActions, TOPIC_REPLY, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
+import { ownerActions, TOPIC_REPLY, type DraftEntry, type DraftState, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
 
 /** The editor a message goes back to: an item's answer, reply, note or follow-up box, or the topic's reply box. */
 export type EditTarget = 'answer' | 'reply' | 'note' | 'followup' | 'topic_reply';
@@ -71,8 +71,10 @@ async function plan(drafts: OwnerDraftStore, session: Immutable<Session> | null 
   if (!session || !state.ready || state.preferenceUncertain || !editable(input.kind) || session.inputs[input.id]?.state !== from) return unavailable;
   const itemId = input.target.item_id, item = itemId ? session.items[itemId] : undefined;
   if (itemId ? !item : input.kind !== TOPIC_REPLY || !session.topics[input.target.topic_id]) return unavailable;
-  // The same box where the owner can see it: an answer while the question waits, a note or follow-up while the
-  // item isn't waiting (a waiting item shows only its answer and reply boxes); anything else goes to the reply box.
+  // The draft of its own kind: an answer while the question waits, a note or follow-up while the item isn't waiting (a
+  // waiting item shows only its answer and reply boxes); anything else goes to the reply draft. The detail's box edits any
+  // draft of words in place and names what it will be sent as, so a note put back on an open item shows at once in the
+  // docked box, with no extra step.
   const waiting = item?.status === 'waiting_on_me';
   const fits = (kind: InputKind) => kept.has(kind) && ownerActions(item!).includes(kind as OwnerIntent) && (kind === 'answer' || kind === 'reply' || !waiting);
   const intent: EditTarget = !item ? 'topic_reply' : fits(input.kind) ? input.kind as Exclude<EditTarget, 'topic_reply'> : 'reply';
@@ -118,6 +120,27 @@ async function load(drafts: OwnerDraftStore, session: Immutable<Session>, input:
 }
 
 /**
+ * True while the owner's editor is sending, or has just sent, the same words to the same item or topic as the cancelled
+ * `input`: the session view has not caught up yet, so `NotSent.again` is still false. Put back must offer nothing then:
+ * loading the words again would put a second copy in the box. A send that core refused, or whose message was cancelled
+ * again, is not counted: those words are not on their way.
+ */
+export function sendingAgain(state: DraftState, session: Immutable<Session>, input: Immutable<Input>): boolean {
+  const text = input.payload.text.trim(), option = input.payload.selected_option_id;
+  if (!text && !option) return false;
+  return Object.values(state.entries).some(entry => {
+    const { draft } = entry;
+    if (draft.session.project_id !== session.project_id || draft.session.session_id !== session.id
+      || draft.target.item_id !== input.target.item_id || draft.target.topic_id !== input.target.topic_id) return false;
+    const sent = entry.receipt ? entry.sent : entry.saving || entry.uncertain && !entry.rejected ? draft : null;
+    if (!sent || sent.text.trim() !== text || sent.selected_option_id !== option) return false;
+    // Once the session shows the message it speaks for itself (`NotSent.again`), unless that message was cancelled too.
+    const saved = entry.receipt?.data.kind === 'input_submit' ? session.inputs[entry.receipt.data.input_id] : undefined;
+    return !saved || saved.state !== 'cancelled' && saved.state !== 'skipped';
+  });
+}
+
+/**
  * Why a cancelled message can't go back in its editor yet (the session is closed, or its topic is archived: nothing
  * could be sent from there), or null when it can. The Not sent line shows this instead of the button.
  */
@@ -130,7 +153,10 @@ export function putBackBlocked(session: Immutable<Session>, input: Immutable<Inp
 export async function putBackCancelled(drafts: OwnerDraftStore, session: Immutable<Session> | null | undefined,
   input: Immutable<Input>): Promise<ReviewOutcome> {
   const planned = await plan(drafts, session, input, 'cancelled');
-  return 'kind' in planned ? planned : load(drafts, session!, input, planned);
+  if ('kind' in planned) return planned;
+  // The same words are already on their way from the editor: loading them again would send them twice.
+  if (sendingAgain(drafts.getSnapshot(), session!, input)) return { kind: 'already_sent' };
+  return load(drafts, session!, input, planned);
 }
 
 /** Takes the queued `input` back, waits for core to confirm it, and only then puts its words in the owner's editor. */

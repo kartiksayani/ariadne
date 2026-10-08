@@ -42,12 +42,19 @@ describe('item detail panel', () => {
     expect(within(screen.getByRole('region', { name: 'Timeline' })).getAllByText(`#${created.number}`).length).toBeGreaterThan(0);
     expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toBe(`Done${item.outcome}`);
     expect(screen.getByText(item.why!)).toBeTruthy();
-    const order = [...document.querySelectorAll('.item-detail > section, .item-detail > div')].map(element => element.getAttribute('aria-label') ?? element.className);
-    expect(order.filter(name => ['Your answer', 'Revisit', 'Current outcome', 'Child items', 'Item links', 'Back and forth', 'Timeline'].includes(name)))
-      .toEqual(['Your answer', 'Revisit', 'Current outcome', 'Child items', 'Item links', 'Back and forth', 'Timeline']);
+    // Reference first (scrolls), the conversation last; the revisit actions sit in the dock, outside the scrolling body.
+    const detail = document.querySelector('.item-detail')!;
+    expect([...detail.children].map(element => element.className)).toEqual(['detail-body', 'detail-dock']);
+    const order = [...document.querySelectorAll('.detail-body > section, .detail-body > div')].map(element => element.getAttribute('aria-label') ?? element.className);
+    const body = ['detail-head', 'Your answer', 'Current outcome', 'Child items', 'Item links', 'Timeline', 'detail-reference', 'Conversation'];
+    expect(order.filter(name => body.includes(name))).toEqual(body);
+    expect([...detail.querySelectorAll('.detail-dock > section')].map(element => element.getAttribute('aria-label'))).toEqual(['Revisit']);
     // The handled answer is the request the stepper follows.
     expect(within(screen.getByRole('region', { name: 'Your answer' })).getByText('Resolved')).toBeTruthy();
-    const round = screen.getByLabelText('Round 1');
+    expect(screen.queryByText('Back and forth')).toBeNull();
+    expect(screen.queryByLabelText(/^Round \d/)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Round \d/);
+    const round = document.querySelector<HTMLElement>('[data-round="1"]')!;
     expect(round.textContent).toContain('You chose “Keep complete history”');
     expect(round.textContent).toContain('Recorded the original reply and receipt-test follow-up.');
     fireEvent.click(within(round).getByRole('button', { name: /Add the receipt lookup test/ }));
@@ -73,7 +80,9 @@ describe('item detail panel', () => {
       const input = structuredClone(session.inputs['00000000-0000-4000-8000-000000000071']!);
       input.id = '00000000-0000-4000-8000-000000000945'; input.kind = 'answer'; input.state = 'queued'; input.attempts = [];
       input.message_id = second.owner_message_ids[0]!; input.answer_id = '00000000-0000-4000-8000-000000000946';
+      // The choice is one of the options the owner saw, so its bubble reads "You chose …".
       input.payload.selected_option_id = session.answers[0]!.selected_option_id;
+      input.payload.target_snapshot.options = structuredClone(session.answers[0]!.options_snapshot);
       session.inputs[input.id] = input;
       const message = structuredClone(session.messages.find(entry => entry.id === first.owner_message_ids[0])!);
       message.id = second.owner_message_ids[0]!; message.number = 40; message.input_id = input.id; message.round_id = second.id;
@@ -84,23 +93,28 @@ describe('item detail panel', () => {
       session.answers.push(answer);
     }), session = value.transport.session;
     render(panel(value, '2'));
-    const round = await screen.findByLabelText('Round 2');
-    // On its way, the answer counts: the round shows it and no longer waits on the owner.
-    expect(round.textContent).toContain('You chose');
-    expect(within(round).queryByText('Waiting on you')).toBeNull();
+    const chat = await screen.findByRole('region', { name: 'Conversation' });
+    const round = () => chat.querySelector<HTMLElement>('[data-round="2"]')!;
+    const bubble = () => chat.querySelector<HTMLElement>('[data-pending="00000000-0000-4000-8000-000000000945"]');
+    // On its way, the answer counts: it ends the conversation as a pending bubble and the round no longer waits on the owner.
+    expect(bubble()!.textContent).toContain('Not sent yet');
+    expect(bubble()!.textContent).toContain('You chose');
+    expect(round().textContent).not.toContain('You chose');
+    expect(within(round()).queryByText('Waiting on you')).toBeNull();
     const input = session.inputs['00000000-0000-4000-8000-000000000945']!;
     input.state = 'cancelled'; input.cancel_cause = 'topic_archived'; session.revision++;
     await act(() => value.store.refresh());
     // Cancelled by archive, it never reached the agent: not "You chose", and Waiting on you again.
-    await waitFor(() => expect(within(screen.getByLabelText('Round 2')).getByText('Waiting on you')).toBeTruthy());
-    expect(screen.getByLabelText('Round 2').textContent).not.toContain('You chose');
+    await waitFor(() => expect(within(round()).getByText('Waiting on you')).toBeTruthy());
+    expect(chat.textContent).not.toContain('You chose');
+    expect(bubble()).toBeNull();
     expect(within(screen.getByRole('region', { name: 'Timeline' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
     // Restore the topic: the cancelled answer stays cancelled, so it is still the owner's turn and the line stays.
     const topic = session.topics[session.items['2']!.topic_id]!;
     topic.archived_at = '2026-10-04T12:00:00.000Z'; session.revision++; await act(() => value.store.refresh());
     topic.archived_at = null; session.revision++; await act(() => value.store.refresh());
-    await waitFor(() => expect(within(screen.getByLabelText('Round 2')).getByText('Waiting on you')).toBeTruthy());
-    expect(screen.getByLabelText('Round 2').textContent).not.toContain('You chose');
+    await waitFor(() => expect(within(round()).getByText('Waiting on you')).toBeTruthy());
+    expect(chat.textContent).not.toContain('You chose');
     expect(within(screen.getByRole('region', { name: 'Timeline' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
   });
   it('deduplicates a message that both created and updated the item into one timeline entry', async () => {

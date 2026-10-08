@@ -17,6 +17,18 @@ class LayoutTransport extends AppTransport {
     const round = session.rounds[item.current_round_id!]!;
     round.question_snapshot = item.question;
     round.ask_snapshot = item.ask;
+    // ?chat: item 2 offers two quick replies, and closed item 1 has three exchanges (its own, then two later ones).
+    if (new URL(window.location.href).searchParams.has('chat')) {
+      item.options = [{ id: 'yes', label: 'Keep the design', consequence: 'Retain the current contract.', recommended: true },
+        { id: 'no', label: 'Change the design', consequence: 'Review a new contract.', recommended: false }];
+      const first = Object.values(session.rounds).find(value => value?.item_id === '1')!;
+      const owner = session.messages.find(message => message.id === first.owner_message_ids[0])!;
+      for (const [ordinal, ask, said] of [[3, 'Third ask of the chat', 'Third reply of the chat'], [2, 'Second ask of the chat', 'Second reply of the chat']] as const) {
+        const id = `00000000-0000-4000-8000-00000000090${ordinal}`, messageId = `00000000-0000-4000-8000-00000000091${ordinal}`;
+        session.rounds[id] = { ...structuredClone(first), id, ordinal, ask_snapshot: ask, owner_message_ids: [messageId], agent_message_ids: [], result_input_ids: [], fork_item_ids: [], closed_at: null };
+        session.messages.push({ ...structuredClone(owner), id: messageId, number: 80 + ordinal, body: said, input_id: null, round_id: id });
+      }
+    }
     if (new URL(window.location.href).searchParams.has('largeTree')) {
       const template = structuredClone(session.items['1']!);
       session.items = {};

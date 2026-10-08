@@ -40,10 +40,15 @@ export function heldInput(session: Immutable<Session>, input: Immutable<Input>):
   return input.state === 'queued' && !!item && written !== null && written < item.question_revision;
 }
 
+/** The input of an owner message that ended cancelled, whatever its cause; undefined for anything else. */
+function cancelledInput(session: Immutable<Session>, message: Immutable<Message>): Immutable<Input> | undefined {
+  const input = message.author === 'owner' && message.input_id ? session.inputs[message.input_id] : undefined;
+  return input && input.state === 'cancelled' ? input : undefined;
+}
 /** The owner's cancelled message that never went out, before any delivery attempt; undefined for anything else. */
 function unsentInput(session: Immutable<Session>, message: Immutable<Message>): Immutable<Input> | undefined {
-  const input = message.author === 'owner' && message.input_id ? session.inputs[message.input_id] : undefined;
-  return input && input.state === 'cancelled' && input.attempts.length === 0 ? input : undefined;
+  const input = cancelledInput(session, message);
+  return input && input.attempts.length === 0 ? input : undefined;
 }
 
 /**
@@ -53,8 +58,11 @@ function unsentInput(session: Immutable<Session>, message: Immutable<Message>): 
  * its text is not lost.
  */
 export function withdrawn(session: Immutable<Session>, message: Immutable<Message>): boolean {
-  const input = unsentInput(session, message), cause = input?.cancel_cause ?? 'owner';
-  return !!input && (cause === 'owner' || cause === 'owner_edit' && sentAgain(session, input));
+  // A message taken back to edit may have earlier attempts (it was re-queued): the take-back is the cause that counts.
+  const edited = cancelledInput(session, message);
+  if (edited?.cancel_cause === 'owner_edit') return sentAgain(session, edited);
+  const input = unsentInput(session, message);
+  return !!input && (input.cancel_cause ?? 'owner') === 'owner';
 }
 
 /** Why a message that Edit took back, or archive or close cancelled, was not sent, as the quiet line under it. */
@@ -80,19 +88,21 @@ function sentAgain(session: Immutable<Session>, input: Immutable<Input>): boolea
  * their line; one taken back to edit is hidden instead once its words were sent again (`withdrawn`).
  */
 export function notSent(session: Immutable<Session>, message: Immutable<Message>): NotSent | null {
-  const input = unsentInput(session, message), cause = input?.cancel_cause;
-  if (!input || !(cause === 'owner_edit' || cause === 'topic_archived' || cause === 'session_closed')) return null;
+  // Taken back to edit shows by its cause alone, even for a message that was re-queued after an earlier attempt: Edit only
+  // takes back a queued message. Archive and close cancel an in-flight one too, so those need no attempt to have been made.
+  const input = cancelledInput(session, message), cause = input?.cancel_cause;
+  if (!input || !(cause === 'owner_edit' || (cause === 'topic_archived' || cause === 'session_closed') && input.attempts.length === 0)) return null;
   const again = sentAgain(session, input);
   return cause === 'owner_edit' && again ? null : { input, line: notSentLine[cause], again };
 }
 
 /**
- * True when an owner message counts as something the owner said to the agent: not one the owner deleted
- * (`withdrawn`), and not one taken back to edit or cancelled by archive or close before it went out (`notSent`).
- * The agent never got those words, so they are never "You chose …", a reply or an answer anywhere. Core's
- * `waiting_unanswered` reads a cancelled input the same way.
+ * True when an owner message counts as something the owner said to the agent: false for any message whose input ended
+ * cancelled, whatever the cause (deleted, taken back to edit, archive, close) and whether or not it had earlier attempts.
+ * Those words are never "You chose …", a reply or an answer anywhere. Core's `waiting_unanswered` reads a cancelled
+ * input the same way (queries/counts.rs).
  */
-export const counted = (session: Immutable<Session>, message: Immutable<Message>): boolean => !withdrawn(session, message) && !notSent(session, message);
+export const counted = (session: Immutable<Session>, message: Immutable<Message>): boolean => !cancelledInput(session, message);
 
 /** What went wrong with a stopped delivery, in one plain sentence. */
 export function recoveryProblem(attempt: Immutable<Attempt>, agent: string): string {

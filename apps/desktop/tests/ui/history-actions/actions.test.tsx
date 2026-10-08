@@ -329,6 +329,32 @@ describe('saved receipts and copied provenance', () => {
     expect(await targetActions.execute(command, transport.target.revision)).toBe(false);
     expect(targetActions.getSnapshot().pending?.command).toEqual(command);
   });
+  it('names the missing original project folder and says to restore it; other failures keep the general words', async () => {
+    const { transport, store, topic } = await setup();
+    const item = Object.values(transport.source.items)[0]!;
+    item.origin = { project_id: op, session_id: op, topic_id: topic.id, entity_id: '77', source_revision: 1 };
+    ++transport.source.revision; await store.refresh();
+    let code: CoreFailure['error']['code'] = 'io_error';
+    render(<CopiedProvenance store={store} itemId={item.id} projectPath={id => id === op ? '/work/charge-api' : null} revealItem={async () => {
+      throw new CoreFailure({ code, message: 'No such file or directory (os error 2)', hint: 'Check the path.', retryable: false, field_errors: [] });
+    }} />);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item 77' })); });
+    const status = screen.getByRole('status').textContent ?? '';
+    expect(status).toContain('The original project folder (/work/charge-api) is missing or can’t be read. Restore it or move it back, then try again.');
+    expect(status).toContain('Full copied history remains here.');
+    expect(status).not.toMatch(/Try again\.|couldn’t read or save|os error/);
+    // Another kind of failure is not blamed on the folder.
+    code = 'corrupt_session';
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item 77' })); });
+    expect(screen.getByRole('status').textContent).toContain('Original project is unavailable. Ariadne can’t read this session’s saved data.');
+    expect(screen.getByRole('status').textContent).not.toContain('folder');
+    // The original session was removed or its project is no longer registered (core's not_found): the folder is fine.
+    code = 'not_found';
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item 77' })); });
+    const gone = screen.getByRole('status').textContent ?? '';
+    expect(gone).toContain('The original item is no longer in Ariadne. Full copied history remains here.');
+    expect(gone).not.toMatch(/folder|Restore it|Original project is unavailable/);
+  });
   it('keeps copied local history navigable when original project cannot be opened', async () => {
     const { transport, store, topic } = await setup();
     const item = Object.values(transport.source.items)[0]!;

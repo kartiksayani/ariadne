@@ -24,18 +24,20 @@ export interface AnswerSlotProps {
   readonly onEscape: () => void;
   /** Send while the agent isn't running: the "Agent isn't running" dialog (1ad). */
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
+  /** The core accepted a message sent from here. */
+  readonly onSent?: () => void;
   /** False when another box (the follow-up) is the detail's owner input: the slot then carries no data-owner-input. */
   readonly marked?: boolean;
 }
 
-export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, marked = true }: AnswerSlotProps) {
+export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, onSent, marked = true }: AnswerSlotProps) {
   const mark = marked ? itemId : undefined;
   const root = useRef<HTMLDivElement>(null), handled = useRef<number | null>(null);
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
   const live = current.status === 'ready' && !current.error;
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
-  const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning, presence });
+  const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning, onSaved: onSent, presence });
   const { entry } = submit;
   // Keyboard requests (a, 1–9) arrive as focus requests; a number is a deliberate choice.
   useEffect(() => {
@@ -67,8 +69,8 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   const selected = entry.uncertain ? options.findIndex(option => option.id === draft.selected_option_id) : defaultSelection(options, draft.selected_option_id);
   const review = { label: 'Review current target', onAction: submit.review };
   return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
-    <AnswerControl variant="full" options={options} selected={selected} draft={draft.text} label="Answer"
-      locked={submit.locked || submit.changed || !live}
+    <AnswerControl variant="chat" options={options} selected={selected} draft={draft.text} label="Answer"
+      locked={submit.locked || submit.changed} frozen={!live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
       blocked={entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}
       onSelect={index => { const option = options[index]; if (option) submit.select(option.id); }}

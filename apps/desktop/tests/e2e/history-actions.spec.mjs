@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { cliRequest, admissions, snapshot } from './scripted-provider.mjs';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
 import { openSessionButton } from './session-button.mjs';
@@ -203,10 +203,11 @@ export async function runHistoryActionsAcceptance(configuration) {
     await click(await browser.$('.copied-provenance').$(`button=Source item ${originalItem.id}`));
     await wait(async () => (await browser.$('.copied-provenance').getText()).includes('Full copied history remains here'), 'Unavailable original project did not expose copied local fallback');
     const unavailableReason = await browser.$('.copied-provenance').getText();
-    // The screen words a failure in plain language (data/plain.ts); the raw project path and
-    // OS reason (NotFound) go to the console for diagnostics, never into the owner-facing text.
-    assert.ok(unavailableReason.includes('Original project is unavailable. Ariadne couldn’t read or save its data. Try again.'), 'The registered source failure must show the plain-language reason');
-    assert.ok(!unavailableReason.includes(sourceProject) && !unavailableReason.includes('NotFound'), 'The owner-facing failure must not expose the raw project path or OS error');
+    // The screen names the missing folder and says what to do (data/plain.ts originalFailure; core sends io_error for a missing folder); the OS
+    // reason (NotFound) goes to the console for diagnostics, never into the owner-facing text.
+    assert.ok(unavailableReason.includes('The original project folder (') && unavailableReason.includes(basename(sourceProject))
+      && unavailableReason.includes('is missing or can’t be read. Restore it or move it back, then try again.'), 'The registered source failure must name the folder and say to restore it');
+    assert.ok(!unavailableReason.includes('NotFound'), 'The owner-facing failure must not expose the OS error');
     await click(await browser.$('.copied-provenance').$(`button=Open copied item ${copiedItemId}`));
     await wait(async () => await detailReference() === copiedItemId, 'Copied provenance fallback did not use the local registered item');
     await (await browser.$('.item-detail [aria-label="Timeline"]')).waitForDisplayed();

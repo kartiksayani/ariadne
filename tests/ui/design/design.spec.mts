@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { designNow, frameNow, frameSpec, graphFrame, variantIds, type FrameSpec } from './frames';
+import { designNow, detailMask, detailMasked, frameNow, frameSpec, graphFrame, variantIds, type FrameSpec } from './frames';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 
@@ -180,8 +180,8 @@ async function matchRail(page: Page, designPage: Page, id: string) {
 }
 
 /** Pixel diff in the browser canvas: mismatch ratio and a diff image (mismatches red over the dimmed app). */
-async function compare(page: Page, design: Buffer, app: Buffer, regions: readonly Region[] = []) {
-  return page.evaluate(async ({ design, app, tolerance, regions }) => {
+async function compare(page: Page, design: Buffer, app: Buffer, regions: readonly Region[] = [], mask: Region | null = null) {
+  return page.evaluate(async ({ design, app, tolerance, regions, mask }) => {
     const load = (base64: string) => new Promise<HTMLImageElement>((done, fail) => {
       const image = new Image(); image.onload = () => done(image); image.onerror = fail; image.src = `data:image/png;base64,${base64}`;
     });
@@ -196,10 +196,15 @@ async function compare(page: Page, design: Buffer, app: Buffer, regions: readonl
     let mismatched = 0;
     const inRegion = regions.map(() => 0);
     for (let index = 0; index < a.length; index += 4) {
+      const x = (index / 4) % width, y = Math.floor(index / 4 / width);
+      // A masked region is left out of the ratio (the frame's full area still divides it) and shown tinted blue in the diff.
+      if (mask && x >= mask.x && x < mask.x + mask.width && y >= mask.y && y < mask.y + mask.height) {
+        out.data.set([b[index] * 0.3, b[index + 1] * 0.3 + 24, b[index + 2] * 0.3 + 64, 255], index);
+        continue;
+      }
       const differs = [0, 1, 2, 3].some(channel => Math.abs(a[index + channel] - b[index + channel]) > tolerance);
       if (differs) {
         mismatched++;
-        const x = (index / 4) % width, y = Math.floor(index / 4 / width);
         regions.forEach((region, at) => { if (x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height) inRegion[at]++; });
         out.data.set([255, 0, 64, 255], index);
       } else out.data.set([b[index] * 0.3, b[index + 1] * 0.3, b[index + 2] * 0.3, 255], index);
@@ -207,7 +212,7 @@ async function compare(page: Page, design: Buffer, app: Buffer, regions: readonl
     context.putImageData(out, 0, 0);
     return { ratio: mismatched / (width * height), regions: regions.map((region, at) => inRegion[at] / Math.max(1, region.width * region.height)), width, height,
       png: canvas.toDataURL('image/png').split(',')[1] };
-  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance, regions });
+  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance, regions, mask });
 }
 interface Region { readonly name: string; readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 
@@ -264,13 +269,18 @@ async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string
         x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
     }));
     const canvas = await page.context().newPage();
-    const result = await compare(canvas, design, app, columns);
+    // The chat-style detail pane's scrolling body is masked out (frames.ts detailMask); its header strip is still compared.
+    const mask = detailMasked(spec) ? await page.locator(detailMask.selector).evaluate(element => {
+      const rect = element.getBoundingClientRect(); return { name: 'detail body', x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
+    }) : null;
+    const result = await compare(canvas, design, app, columns, mask);
     await canvas.close();
     writeFileSync(resolve(output, `${id}-design.png`), design);
     writeFileSync(resolve(output, `${id}-app.png`), app);
     writeFileSync(resolve(output, `${id}-diff.png`), Buffer.from(result.png, 'base64'));
     const threshold = (thresholds as Record<string, number>)[id] ?? 0;
     writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ ratio: Number(result.ratio.toFixed(4)), threshold, tolerance,
+      masked: mask ? { region: mask, reason: detailMask.reason } : null,
       columns: Object.fromEntries(columns.map((column, at) => [column.name, Number(result.regions[at].toFixed(4))])),
       size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }, null, 2)}\n`);
     expect(denied).toEqual([]);

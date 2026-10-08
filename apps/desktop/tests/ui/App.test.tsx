@@ -717,16 +717,16 @@ describe('ordinary desktop composition', () => {
     await waitFor(() => expect(screen.queryByRole('log', { name: 'Session messages' })).toBeNull());
     expect(transport.preferences.sessions[0].rail).toBe('hidden');
   });
-  it('cancels the reply box with Escape, then closes detail with Escape, and keeps the draft for reopening', async () => {
+  it('leaves the reply box with Escape, then closes detail with Escape, and keeps the draft for reopening', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="8"]')!);
     fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));
     const editor = await screen.findByLabelText('Reply message');
     fireEvent.change(editor, { target: { value: 'Retain this draft when Escape closes detail.' } });
     await waitFor(() => expect(transport.preferences.drafts.some(draft => draft.text === 'Retain this draft when Escape closes detail.')).toBe(true));
-    // The box handles its own Escape (Esc cancels, keeps your draft) and returns focus to the row.
+    // The box handles its own Escape (Esc leaves the box, keeps your draft) and returns focus to the row. The box itself stays.
     fireEvent.keyDown(editor, { key: 'Escape' });
-    expect(screen.queryByLabelText('Reply message')).toBeNull();
+    expect((screen.getByLabelText('Reply message') as HTMLTextAreaElement).value).toBe('Retain this draft when Escape closes detail.');
     expect(screen.getByRole('group', { name: 'Item actions' })).toBeTruthy();
     expect(document.activeElement?.getAttribute('data-item-id')).toBe('8');
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
