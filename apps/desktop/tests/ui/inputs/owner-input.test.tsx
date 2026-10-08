@@ -1147,7 +1147,7 @@ describe('the detail explains messages that have not reached the agent', () => {
     expect(value.prefs.drafts).toMatchObject([{ intent: 'reply', text: queuedText, target: { item_id: '4' } }]);
     loadedAfterCancel(value.events);
     expect(value.session.inputs[demoInput('76')]).toMatchObject({ state: 'cancelled', cancel_cause: 'owner_edit' });
-    expect(await screen.findByText('Taken back to edit')).toBeTruthy();
+    expect(await screen.findByText('Taken back to edit. Cancelled before it reached the agent')).toBeTruthy();
     expect(getPutBack()).toBeTruthy();
     expect(value.calls.some(call => call.command.command === 'input_submit')).toBe(false);
   });
@@ -1246,7 +1246,7 @@ describe('the detail explains messages that have not reached the agent', () => {
       // The cancel may still land: it is kept, and Check again sends the same operation.
       value.cancelOutcome('ok');
       fireEvent.click(within(detail() as HTMLElement).getByRole('button', { name: 'Check again' }));
-      expect(await screen.findByText('Taken back to edit')).toBeTruthy();
+      expect(await screen.findByText('Taken back to edit. Cancelled before it reached the agent')).toBeTruthy();
       const [first, second] = value.calls.filter(call => call.command.command === 'input_cancel');
       expect(second?.command.op_id).toBe(first?.command.op_id);
       expect(cancels(value.calls).every(params => 'purpose' in params && params.purpose === 'edit')).toBe(true);
@@ -1385,7 +1385,7 @@ describe('the detail explains messages that have not reached the agent', () => {
       const value = await cancelledBy('owner_edit'), restored = await value.restart();
       cleanup();
       render(<ItemDetail drafts={restored} store={value.store} itemId="4" later={false} onOpenItem={() => {}} />);
-      expect(await screen.findByText('Taken back to edit')).toBeTruthy();
+      expect(await screen.findByText('Taken back to edit. Cancelled before it reached the agent')).toBeTruthy();
       expect(detail().textContent).toContain('Drop request for item 4.');
       fireEvent.click(getPutBack());
       expect((await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe(queuedText);
@@ -1463,7 +1463,7 @@ describe('the detail explains messages that have not reached the agent', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
       await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries).some(entry => entry.saving)).toBe(true));
       // Sending: the session still shows only the cancelled message.
-      expect(await screen.findByText(/Taken back to edit\. You sent it again\./)).toBeTruthy();
+      expect(await screen.findByText(/Taken back to edit\. Cancelled before it reached the agent\. You sent it again\./)).toBeTruthy();
       expect(queryPutBack()).toBeNull();
       await act(async () => { finish(); });
       await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries).some(entry => entry.receipt)).toBe(true));

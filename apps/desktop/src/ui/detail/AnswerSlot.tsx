@@ -2,7 +2,7 @@
 // variant (ui/answer/AnswerControl.tsx), sent through `useSubmit` so the tree,
 // the Waiting cards and the detail all answer the same way. The slot adds the
 // keyboard focus requests and the saved-input states of the draft store.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
@@ -33,23 +33,26 @@ export interface AnswerSlotProps {
 export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, onSent, marked = true }: AnswerSlotProps) {
   const mark = marked ? itemId : undefined;
   const root = useRef<HTMLDivElement>(null), handled = useRef<number | null>(null);
+  const [shortcutStatus, setShortcutStatus] = useState<string | null>(null);
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
   const live = current.status === 'ready' && !current.error;
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning, onSaved: onSent, presence });
   const { entry } = submit;
+  useEffect(() => { setShortcutStatus(null); }, [itemId, store]);
   // Keyboard requests (a, 1–9) arrive as focus requests; a number is a deliberate choice.
   useEffect(() => {
     if (!focusRequest || focusRequest.intent !== 'answer' || handled.current === focusRequest.token || !entry) return;
     handled.current = focusRequest.token;
     onFocusRequestConsumed?.(focusRequest.token);
+    setShortcutStatus(null);
     if (focusRequest.sendOption) {
       const target = focusRequest.answerTarget, choice = item?.options[focusRequest.optionIndex ?? -1];
-      if (target && item?.revision === target.revision && item.question_revision === target.questionRevision
-        && session?.active_binding_id === target.bindingId && choice?.id === target.optionId
-        && choice && live && !blocked && !submit.locked && !submit.changed && !submit.blocked
-        && submit.connection === 'connected' && !entry.receipt) submit.sendOption(choice.id);
+      const sameTarget = target && item?.revision === target.revision && item.question_revision === target.questionRevision
+        && session?.active_binding_id === target.bindingId && choice?.id === target.optionId;
+      if (!sameTarget || submit.changed) setShortcutStatus('This item changed. Review it before sending. Your note is kept.');
+      else if (choice && live && !blocked && !submit.locked && !submit.blocked && !entry.receipt) submit.sendOption(choice.id);
       return;
     }
     if (focusRequest.ownWords) {
@@ -79,8 +82,9 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   const draft = entry.draft, options = item.options;
   // The frozen choice of an attempted answer, else the draft's or the recommended one.
   const selected = entry.uncertain ? options.findIndex(option => option.id === draft.selected_option_id) : defaultSelection(options, draft.selected_option_id);
-  const review = { label: 'Review current target', onAction: submit.review };
+  const review = { label: 'Review current target', onAction: () => { setShortcutStatus(null); submit.review(); } };
   return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
+    {shortcutStatus && <p role="status">{shortcutStatus}</p>}
     <AnswerControl variant="chat" options={options} selected={selected} draft={draft.text} label="Answer"
       locked={submit.locked || submit.changed} frozen={!live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}

@@ -78,20 +78,21 @@ function sentAgain(session: Immutable<Session>, input: Immutable<Input>): boolea
  * their line; one taken back to edit is hidden instead once its words were sent again (`withdrawn`).
  */
 export function notSent(session: Immutable<Session>, message: Immutable<Message>): NotSent | null {
-  // Taken back to edit shows by its cause alone, even for a message that was re-queued after an earlier attempt: Edit only
-  // takes back a queued message. Archive and close cancel an in-flight one too, so those need no attempt to have been made.
-  const input = cancelledInput(session, message), cause = input?.cancel_cause ?? 'owner';
-  if (input && cause === 'owner') return { input, line: input.attempts.length === 0
-    ? 'Cancelled before it reached the agent' : 'Cancelled — the agent may already have seen it', again: false };
-  if (!input || !(cause === 'owner_edit' || (cause === 'topic_archived' || cause === 'session_closed') && input.attempts.length === 0)) return null;
-  const again = sentAgain(session, input);
-  return cause === 'owner_edit' && again ? null : { input, line: notSentLine[cause], again };
+  const input = cancelledInput(session, message);
+  if (!input) return null;
+  const cause = input.cancel_cause ?? 'owner', again = sentAgain(session, input);
+  if (cause === 'owner_edit' && again) return null;
+  const warning = input.attempts.length === 0
+    ? 'Cancelled before it reached the agent' : 'Cancelled — the agent may already have seen it';
+  const line = cause === 'owner_edit' ? `${notSentLine.owner_edit}. ${warning}`
+    : cause === 'owner' || input.attempts.length > 0 ? warning : notSentLine[cause];
+  return { input, line, again: cause === 'owner' ? false : again };
 }
 
 /**
  * True when an owner message counts as something the owner said to the agent: false for any message whose input ended
  * cancelled, whatever the cause (deleted, taken back to edit, archive, close) and whether or not it had earlier attempts.
- * Those words are never "You chose …", a reply or an answer anywhere. Core's `waiting_unanswered` reads a cancelled
+ * Their saved choice and words remain visible with a cancellation label. Core's `waiting_unanswered` reads a cancelled
  * input the same way (queries/counts.rs).
  */
 export const counted = (session: Immutable<Session>, message: Immutable<Message>): boolean => !cancelledInput(session, message);

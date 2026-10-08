@@ -127,10 +127,10 @@ function OwnerReply({ text }: { readonly text: string }) {
 }
 
 /** What the owner sent, inside their bubble: the option they chose, a one-press request, or their own words. */
-function YouSaid({ how, text, note = '', cancelled = false }: { readonly how: PendingView['how']; readonly text: string; readonly note?: string; readonly cancelled?: boolean }) {
+function YouSaid({ how, text, note = '' }: { readonly how: PendingView['how']; readonly text: string; readonly note?: string }) {
   return <>
     <i className={`${how === 'chose' ? 'ph ph-check-circle' : 'ph ph-user'} detail-msg-icon detail-you-icon`} aria-hidden="true" />
-    {cancelled ? <ItemRefs.Provider value={null}><Markdown text={text} /></ItemRefs.Provider> : how === 'chose' ? <div className="detail-reply"><span>{`You chose “${text}”`}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : how === 'action' ? <div className="detail-reply"><span>{text}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : <OwnerReply text={text} />}
+    {how === 'chose' ? <div className="detail-reply"><span>{`You chose “${text}”`}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : how === 'action' ? <div className="detail-reply"><span>{text}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : <OwnerReply text={text} />}
   </>;
 }
 
@@ -407,11 +407,11 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         {model.chat.map(entry => <li key={entry.id} data-message-id={entry.id} data-pending={entry.pending?.input.id}
           data-round={entry.asks[0]?.ordinal}
           data-owner-said={entry.you && !Object.values(session.inputs).some(input => input?.message_id === entry.id && input.state === 'cancelled') ? 'true' : undefined}
-          className={`detail-turn${entry.unsent && (entry.unsent.input.cancel_cause ?? 'owner') === 'owner' ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${highlightedMessageIds?.has(entry.id) ? ' excerpt-highlighted' : ''}`}>
+          className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${highlightedMessageIds?.has(entry.id) ? ' excerpt-highlighted' : ''}`}>
           {entry.marker && <div className="detail-chat-marker">{entry.marker}</div>}
           <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
             <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>
-              {entry.you ? <><YouSaid {...entry.you} cancelled={!!entry.unsent && (entry.unsent.input.cancel_cause ?? 'owner') === 'owner'} /><span className="detail-pending-caption">you · {entry.message.when}</span>
+              {entry.you ? <><YouSaid {...entry.you} /><span className="detail-pending-caption">you · {entry.message.when}</span>
                 {entry.pending?.caption && <span className="detail-pending-caption">{entry.pending.caption}</span>}</>
                 : <><div className="detail-agent-meta"><span>{entry.message.number}</span><span>{entry.message.who}</span><span>{entry.message.when}</span></div>
                   <Markdown text={entry.message.body} />
@@ -480,8 +480,6 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {(model.answer || retainedAnswer) && <section className="detail-section detail-answer" aria-label="Your answer">
       {model.answer?.heading && <div className="detail-label detail-label-accent">Your answer</div>}
-      {/* The ask the conversation's last message does not already carry. */}
-      {model.answer?.ask && <Markdown className="detail-ask" text={model.answer.ask} />}
       {model.answer && <PausedNote actions={actions} />}
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
       <AnswerSlot drafts={drafts} store={store} itemId={itemId} blocked={model.answer?.blocked} focusRequest={answerFocus}

@@ -52,8 +52,6 @@ export interface PendingView {
   readonly how: 'chose' | 'said' | 'action';
   readonly text: string;
   readonly note: string;
-  /** Original message source, before the display label or whitespace shortening. */
-  readonly source: string;
   /** Where it stands, in a few words. */
   readonly caption: string;
   /** Why it hasn't reached the agent, with what fixes it (ui/answer/StuckNote); null while saving. */
@@ -86,8 +84,6 @@ export interface DetailModel {
   readonly stepsTitle: string;
   readonly steps: readonly Step[] | null;
   readonly delivery: DeliveryLine | null;
-  /** The owner's messages still on their way, oldest first. */
-  readonly outbox: readonly PendingView[];
   readonly open: OpenSection | null;
   /**
    * What the owner's words go out as now (`sentAs`): a reply on an open or waiting item, a note on one in progress, a follow-up
@@ -96,7 +92,7 @@ export interface DetailModel {
   readonly box: WordsKind | null;
   /** A waiting item whose input is in flight or queued: a reply queues behind it (owner FIFO). Named for what is sent: a reply. */
   readonly followUp: { readonly label: string; readonly hint: string; readonly disabled: boolean } | null;
-  readonly answer: (AnswerModel & { readonly heading: boolean; readonly ask: string | null }) | null;
+  readonly answer: (AnswerModel & { readonly heading: boolean }) | null;
   readonly outcome: { readonly label: string; readonly text: string; readonly color: string } | null;
   readonly note: string | null;
   readonly why: string | null;
@@ -223,7 +219,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const newest = active.at(-1);
   const held = !saving && !!newest && heldInput(session, newest);
   const stuck = !saving && tracked ? stuckInput(session, tracked, presence, health) : null;
-  const outbox = active.map((input): PendingView => ({ input, ...sentView(input), source: byId.get(input.message_id)?.body ?? input.payload.text, caption: CAPTION[input.state] ?? '',
+  const outbox = active.map((input): PendingView => ({ input, ...sentView(input), caption: CAPTION[input.state] ?? '',
     stuck: saving ? null : stuckInput(session, input, presence, health) }));
   const pending = !!sub?.stage && sub.stage !== 'failed' && !held;
   const outLabel = status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
@@ -318,7 +314,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     const choice = answer?.selected_option_id ? answer.options_snapshot.find(option => option.id === answer.selected_option_id) : null;
     const you = choice && counted(session, message) ? { how: 'chose' as const, text: choice.label, note: answer!.text }
       : answer && counted(session, message) ? { how: 'said' as const, text: answer.text || message.body, note: '' }
-      : input && counted(session, message) && sentView(input).how !== 'said' ? sentView(input) : { how: 'said' as const, text: message.body, note: '' };
+      : input ? sentView(input) : { how: 'said' as const, text: message.body, note: '' };
     const next = owner.find(value => byId.get(value.id)!.number > message.number);
     const fullReply = ordered().some(value => value.message.author === 'agent' && byId.get(value.id)!.number > message.number
       && (!next || byId.get(value.id)!.number < byId.get(next.id)!.number));
@@ -376,12 +372,11 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     steps: showSteps ? stepsOf(sub.stage, status) : null,
     // An in-flight message keeps its delivery line; the `sent` note only adds Cancel.
     delivery: sub?.stage && (!stuck || stuck.kind === 'sent') ?deliveryOf(sub.stage, sub.kind, sub.label, agent) : null,
-    outbox: outbox.filter(pending => !kept.has(pending.input.message_id)),
     open,
     box: readOnly ? null : sentAs(status),
     followUp,
     // The chat carries the ask once; the composer only carries the answer control.
-    answer: answerable ? { heading: !showSteps, ask: null, options: item.options, recommended, blocked } : null,
+    answer: answerable ? { heading: !showSteps, options: item.options, recommended, blocked } : null,
     outcome: item.outcome ? { label: outLabel ?? 'Outcome', text: item.outcome, color: `var(--st-${status})` } : null,
     note: item.note && status === 'progress' ? item.note : null,
     why: item.why,

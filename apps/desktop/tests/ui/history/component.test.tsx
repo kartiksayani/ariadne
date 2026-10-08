@@ -23,6 +23,9 @@ describe('cancelled owner text in the chat and Messages', () => {
   it.each([
     { cause: 'owner' as const, attempted: false }, { cause: 'owner' as const, attempted: true },
     { cause: undefined, attempted: false }, { cause: undefined, attempted: true },
+    { cause: 'owner_edit' as const, attempted: false }, { cause: 'owner_edit' as const, attempted: true },
+    { cause: 'topic_archived' as const, attempted: false }, { cause: 'topic_archived' as const, attempted: true },
+    { cause: 'session_closed' as const, attempted: false }, { cause: 'session_closed' as const, attempted: true },
   ])('keeps and labels the complete text for cause $cause, after an attempt: $attempted', async ({ cause, attempted }) => {
     const body = '  Cancelled owner words\nKeep every line and trailing spaces  ', highlight = vi.fn();
     const value = await ready(session => {
@@ -32,14 +35,17 @@ describe('cancelled owner text in the chat and Messages', () => {
       input.payload.text = body;
       session.messages.find(message => message.id === input.message_id)!.body = body;
     }), session = value.transport.session, input = session.inputs['00000000-0000-4000-8000-000000000076']!;
-    const line = attempted ? 'Cancelled — the agent may already have seen it' : 'Cancelled before it reached the agent';
+    const warning = attempted ? 'Cancelled — the agent may already have seen it' : 'Cancelled before it reached the agent';
+    const line = cause === 'owner_edit' ? `Taken back to edit. ${warning}`
+      : !attempted && cause === 'topic_archived' ? 'Not sent: cancelled when you archived this topic'
+      : !attempted && cause === 'session_closed' ? 'Not sent: cancelled when you closed this session' : warning;
     render(<><ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="4" later={false} onOpenItem={vi.fn()} />
       <MessageRail {...value} onHighlight={highlight} /></>);
     const chat = await screen.findByRole('region', { name: 'Conversation' });
     const turn = chat.querySelector<HTMLElement>(`[data-message-id="${input.message_id}"]`)!;
     expect(turn).not.toBeNull(); expect(turn.classList.contains('detail-turn-cancelled')).toBe(true);
     expect(turn.textContent).toContain('Cancelled owner words'); expect(turn.textContent).toContain('Keep every line and trailing spaces');
-    expect(turn.textContent).toContain(line); expect(turn.textContent).not.toContain('You replied');
+    expect(turn.textContent).toContain(line); expect(turn.hasAttribute('data-owner-said')).toBe(false);
     expect(turn.closest('[hidden], [aria-hidden="true"]')).toBeNull();
     fireEvent.click(within(turn).getByRole('button', { name: 'Copy message' }));
     expect(copy).toHaveBeenLastCalledWith(body);
@@ -49,8 +55,10 @@ describe('cancelled owner text in the chat and Messages', () => {
     expect(card.parentElement!.classList.contains('pw-excerpt-cancelled')).toBe(true);
     expect(card.parentElement!.textContent).toContain(line);
     expect(card.closest('[hidden], [aria-hidden="true"]')).toBeNull();
-    fireEvent.click(within(card.parentElement!).getByRole('button', { name: 'Copy message' }));
-    expect(copy).toHaveBeenLastCalledWith(body);
+    if (cause === 'owner' || cause === undefined) {
+      fireEvent.click(within(card.parentElement!).getByRole('button', { name: 'Copy message' }));
+      expect(copy).toHaveBeenLastCalledWith(body);
+    }
     fireEvent.click(card);
     expect(highlight).toHaveBeenLastCalledWith(new Set([input.target.item_id]), new Set([input.message_id]));
   });
@@ -146,9 +154,9 @@ describe('item detail panel', () => {
     const input = session.inputs['00000000-0000-4000-8000-000000000945']!;
     input.state = 'cancelled'; input.cancel_cause = 'topic_archived'; session.revision++;
     await act(() => value.store.refresh());
-    // Cancelled by archive, it never reached the agent: not "You chose", and Waiting on you again.
+    // Cancelled by archive: keep the choice visible, labelled, and Waiting on you again.
     await waitFor(() => expect(waiting()).toBeTruthy());
-    expect(chat.textContent).not.toContain('You chose');
+    expect(chat.querySelector('.detail-turn-cancelled')!.textContent).toContain('You chose');
     expect(bubble()).toBeNull();
     expect(within(screen.getByRole('region', { name: 'Conversation' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
     // Restore the topic: the cancelled answer stays cancelled, so it is still the owner's turn and the line stays.
@@ -156,7 +164,7 @@ describe('item detail panel', () => {
     topic.archived_at = '2026-10-04T12:00:00.000Z'; session.revision++; await act(() => value.store.refresh());
     topic.archived_at = null; session.revision++; await act(() => value.store.refresh());
     await waitFor(() => expect(waiting()).toBeTruthy());
-    expect(chat.textContent).not.toContain('You chose');
+    expect(chat.querySelector('.detail-turn-cancelled')!.textContent).toContain('You chose');
     expect(within(screen.getByRole('region', { name: 'Conversation' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
   });
   it('deduplicates messages shared by creation, updates, and rounds into one chat entry', async () => {

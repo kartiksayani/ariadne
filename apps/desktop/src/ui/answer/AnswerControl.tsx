@@ -34,7 +34,7 @@ export interface AnswerOption {
  *   the reply box stays typeable. A truly disabled button or box drops the
  *   focus it holds to <body>, where keys become tree shortcuts.
  * - `onSendOption(index, note)` sends the option with the text box's note;
- *   compact controls and controls without a text box send the option only.
+ *   compact controls and controls without a text box use the saved draft's note.
  *   `onSendText(text)` sends the reply only, without an option.
  * - `onEscape`: Esc closes the control; the draft is kept by the caller.
  *
@@ -82,7 +82,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
   const gate = (hard: boolean, soft: boolean) => ({ disabled: hard || undefined, 'aria-disabled': soft && !hard ? true : undefined });
   const hasText = full && !noText;
   const withNote = hasText && !!draft.trim();
-  const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index, hasText ? draft : ''); };
+  const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index, hasText ? draft : undefined); };
   const sendText = () => { if (draft.trim() && !blocked && !off) onSendText(draft); };
   const optionIndex = (target: EventTarget) => target instanceof HTMLElement && root.current?.contains(target)
     ? Number(target.closest<HTMLElement>('[data-answer-option]')?.dataset.answerOption ?? -1) : -1;

@@ -12,6 +12,8 @@ import { detailModel } from '../../../src/ui/detail/model';
 
 const id = (suffix: string) => `00000000-0000-4000-8000-0000000000${suffix}`;
 const seed = () => structuredClone(demo) as Session;
+const pendingInChat = (model: ReturnType<typeof detailModel>) => model!.chat.flatMap(entry => entry.pending ? [entry.pending] : []);
+
 /** An owner reply to item 2 (waiting on me, question revision 1) in `state`. */
 function reply(session: Session, state: Input['state'], revision = 1): Input {
   const input = session.inputs[id('76')]!;
@@ -67,10 +69,10 @@ describe('a message that archive or close cancelled before it was sent', () => {
     expect(withdrawn(session, message)).toBe(false);
     expect(notSent(session, message)?.line).toBe('Cancelled before it reached the agent');
   });
-  it('is not marked not sent once it reached the agent or while it is still queued', () => {
+  it('warns after an attempted cancellation and leaves a queued message unlabelled', () => {
     const { session, message } = setup('topic_archived');
     const sent = structuredClone(session) as unknown as Session; sent.inputs[id('76')]!.attempts = structuredClone(sent.inputs[id('72')]!.attempts);
-    expect(notSent(immutable(sent), message)).toBeNull();
+    expect(notSent(immutable(sent), message)?.line).toBe('Cancelled — the agent may already have seen it');
     const queued = structuredClone(session) as unknown as Session; queued.inputs[id('76')]!.state = 'queued';
     expect(notSent(immutable(queued), message)).toBeNull();
   });
@@ -122,13 +124,13 @@ describe('a message taken back to edit', () => {
   it('stays in the history as Taken back to edit, with Put back', () => {
     const { session, message } = setup();
     expect(withdrawn(immutable(session), message)).toBe(false);
-    expect(notSent(immutable(session), message)).toMatchObject({ line: 'Taken back to edit', again: false });
+    expect(notSent(immutable(session), message)).toMatchObject({ line: 'Taken back to edit. Cancelled before it reached the agent', again: false });
   });
   it('still reads Taken back to edit when it was re-queued after earlier attempts; it does not count', () => {
     const { session, input, message } = setup();
     input.attempts = structuredClone(session.inputs[id('72')]!.attempts);
     expect(withdrawn(immutable(session), message)).toBe(false);
-    expect(notSent(immutable(session), message)).toMatchObject({ line: 'Taken back to edit', again: false });
+    expect(notSent(immutable(session), message)).toMatchObject({ line: 'Taken back to edit. Cancelled — the agent may already have seen it', again: false });
     expect(counted(immutable(session), message)).toBe(false);
     // Sent again: it leaves the history like one with no attempts.
     const later = structuredClone(input); later.id = id('99'); later.seq = input.seq + 100; later.state = 'queued'; later.cancel_cause = undefined; later.attempts = [];
@@ -145,7 +147,7 @@ describe('a message taken back to edit', () => {
     // A later one that was cancelled too does not count as sent again.
     later.state = 'cancelled'; later.cancel_cause = 'owner_edit';
     expect(withdrawn(immutable(session), message)).toBe(false);
-    expect(notSent(immutable(session), message)?.line).toBe('Taken back to edit');
+    expect(notSent(immutable(session), message)?.line).toBe('Taken back to edit. Cancelled before it reached the agent');
   });
   it('never counts as an answer, shown or hidden: the item still waits on the owner', () => {
     const { session, message } = setup();
@@ -249,7 +251,7 @@ describe('stuck inputs explain themselves', () => {
     expect(stuckInput(immutable(session), input, null, { ...health, generation: id('96') })?.kind).toBe('waiting');
     // The detail tracker passes the health on (the Waiting Sent rows are pinned in waiting.test.tsx).
     const detail = detailModel({ session: immutable(session), itemId: '4', now: at, mode: null, later: false, saving: null, health });
-    expect(detail?.outbox.at(-1)?.stuck?.kind).toBe('blocked');
+    expect(pendingInChat(detail).at(-1)?.stuck?.kind).toBe('blocked');
   });
   it('holds a message written for an older question, and lets later ones past it', () => {
     const session = seed(); session.items['4']!.question_revision = 2;
@@ -269,7 +271,7 @@ describe('stuck inputs explain themselves', () => {
     // The detail tracker finds the moved message by its item, not its binding, and the item still reads Waiting on agent.
     const detail = detailModel({ session: immutable(session), itemId: '2', now: Date.parse('2026-10-03T12:00:00.000Z'), mode: null, later: false, saving: null });
     expect(detail?.display).toBe('agent');
-    expect(detail?.outbox.at(-1)?.input.id).toBe(moved.id);
+    expect(pendingInChat(detail).at(-1)?.input.id).toBe(moved.id);
     // Paused on the new binding: the moved message says so.
     session.bindings[id('95')]!.owner_paused = true;
     expect(stuckInput(immutable(session), immutable(moved))?.kind).toBe('paused');
@@ -290,7 +292,7 @@ describe('stuck inputs explain themselves', () => {
     const behind = () => {
       const session = seed(), stopped = reply(session, 'needs_attention'), queued = structuredClone(stopped);
       stopped.attempts = structuredClone(session.inputs[id('74')]!.attempts); stopped.active_attempt_id = stopped.attempts[0]!.id;
-      queued.id = id('f5'); queued.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1;
+      queued.message_id = id('e5'); queued.id = id('f5'); queued.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1;
       queued.kind = 'answer'; queued.state = 'queued'; queued.attempts = []; queued.active_attempt_id = null; queued.payload.text = 'Behind the stopped one';
       session.inputs[queued.id] = queued;
       const model = () => detailModel({ session: immutable(session), itemId: '2', now: Date.parse('2026-10-03T12:00:00.000Z'), mode: null, later: false, saving: null });
@@ -299,34 +301,34 @@ describe('stuck inputs explain themselves', () => {
     it('keeps the answer box closed while B waits behind the stopped delivery', () => {
       const { model, stopped, queued } = behind();
       expect(model()?.answer).toBeNull();
-      expect(model()?.outbox.map(pending => pending.stuck?.kind)).toEqual(['decision', 'blocked']);
-      expect(model()?.outbox.map(pending => pending.input.id)).toEqual([stopped.id, queued.id]);
+      expect(pendingInChat(model()).map(pending => pending.stuck?.kind)).toEqual(['decision', 'blocked']);
+      expect(pendingInChat(model()).map(pending => pending.input.id)).toEqual([stopped.id, queued.id]);
     });
     it('shows B’s question-changed note and opens the answer box while A still shows its decision', () => {
       const { session, model, stopped, queued } = behind();
       session.items['2']!.question_revision = 2; queued.payload.target_snapshot.question_revision = 1;
       const detail = model();
-      expect(detail?.outbox.find(pending => pending.input.id === queued.id)?.stuck).toMatchObject({ kind: 'held', text: 'The question changed — review and send again' });
-      expect(detail?.outbox.find(pending => pending.input.id === stopped.id)?.stuck).toMatchObject({ kind: 'decision', retry: true, settle: 'skip' });
+      expect(pendingInChat(detail).find(pending => pending.input.id === queued.id)?.stuck).toMatchObject({ kind: 'held', text: 'The question changed — review and send again' });
+      expect(pendingInChat(detail).find(pending => pending.input.id === stopped.id)?.stuck).toMatchObject({ kind: 'decision', retry: true, settle: 'skip' });
       // The newer question is the owner's to answer: the held message does not hold the answer box.
       expect(detail?.answer).not.toBeNull();
     });
   });
   it('keeps the decision in the detail panel when a later message is queued behind the stopped delivery on the same item', () => {
     const session = seed(), stopped = session.inputs[id('74')]!, successor = structuredClone(stopped);
-    successor.id = id('f4'); successor.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1;
+    successor.message_id = id('e4'); successor.id = id('f4'); successor.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1;
     successor.state = 'queued'; successor.attempts = []; successor.active_attempt_id = null;
     session.inputs[successor.id] = successor;
     const detail = detailModel({ session: immutable(session), itemId: '7', now: Date.parse('2026-10-03T12:00:00.000Z'), mode: null, later: false, saving: null });
     // Each unsettled message is a pending bubble of its own; the stopped one keeps its Retry / Mark as done.
-    expect(detail?.outbox.map(pending => pending.input.id)).toEqual([stopped.id, successor.id]);
-    expect(detail?.outbox.find(pending => pending.input.id === stopped.id)?.stuck).toMatchObject({ kind: 'decision', retry: true, settle: 'skip' });
+    expect(pendingInChat(detail).map(pending => pending.input.id)).toEqual([stopped.id, successor.id]);
+    expect(pendingInChat(detail).find(pending => pending.input.id === stopped.id)?.stuck).toMatchObject({ kind: 'decision', retry: true, settle: 'skip' });
     // The delivery the panel follows is the stopped one's (it needs a decision), not the newest message: its fix is shown,
     // so no delivery line runs over it. Even a newer message already on its way (another connection) does not take it over.
     expect(detail?.delivery).toBeNull();
     successor.state = 'in_flight';
     const flying = detailModel({ session: immutable(session), itemId: '7', now: Date.parse('2026-10-03T12:00:00.000Z'), mode: null, later: false, saving: null });
-    expect(flying?.outbox.map(pending => pending.input.id)).toEqual([stopped.id, successor.id]);
+    expect(pendingInChat(flying).map(pending => pending.input.id)).toEqual([stopped.id, successor.id]);
     expect(flying?.delivery).toBeNull();
   });
 });
@@ -346,12 +348,12 @@ describe('an owner message still in flight once its round has the result', () =>
     const entry = model()!.chat.find(entry => entry.id === input.message_id)!;
     expect(entry.you).toMatchObject({ how: 'said', text: expect.any(String) });
     expect(entry.pending).toBeNull();
-    expect(model()!.outbox.map(pending => pending.input.id)).not.toContain(input.id);
+    expect(pendingInChat(model()).map(pending => pending.input.id)).not.toContain(input.id);
   });
   it('still ends the conversation as a pending bubble while it has not reached the agent', () => {
     const { model, input } = setup('queued');
     expect(model()!.chat.find(entry => entry.id === input.message_id)?.pending).toBeTruthy();
-    expect(model()!.outbox.map(pending => pending.input.id)).toContain(input.id);
+    expect(pendingInChat(model()).map(pending => pending.input.id)).toContain(input.id);
   });
   it('is still a pending bubble when the only agent message in the round is older than it', () => {
     const { model, input, session, round } = setup('in_flight');
@@ -360,11 +362,11 @@ describe('an owner message still in flight once its round has the result', () =>
     // The agent's earlier text is still the round's text, but it is not an answer to the newer reply.
     expect(model()!.chat.some(entry => entry.message.author === 'agent')).toBe(true);
     expect(model()!.chat.find(entry => entry.id === input.message_id)?.pending).toBeTruthy();
-    expect(model()!.outbox.map(pending => pending.input.id)).toContain(input.id);
+    expect(pendingInChat(model()).map(pending => pending.input.id)).toContain(input.id);
     // An agent message numbered after the reply answers it again.
     session.messages.find(value => value.id === round.agent_message_ids[0])!.number = message.number + 1;
     expect(model()!.chat.find(entry => entry.id === input.message_id)?.pending).toBeNull();
-    expect(model()!.outbox.map(pending => pending.input.id)).not.toContain(input.id);
+    expect(pendingInChat(model()).map(pending => pending.input.id)).not.toContain(input.id);
   });
   it('is answered by a result that handled it, and not by one that handled only older messages', () => {
     const { model, input, session, round } = setup('in_flight');
@@ -374,15 +376,15 @@ describe('an owner message still in flight once its round has the result', () =>
     round.result_input_ids = [earlier.id];
     const result = earlier.attempts.find(attempt => attempt.domain_result)!.domain_result!;
     result.handled_through_message_number = message.number - 1;
-    expect(model()!.outbox.map(pending => pending.input.id)).toContain(input.id);
+    expect(pendingInChat(model()).map(pending => pending.input.id)).toContain(input.id);
     result.handled_through_message_number = message.number;
-    expect(model()!.outbox.map(pending => pending.input.id)).not.toContain(input.id);
+    expect(pendingInChat(model()).map(pending => pending.input.id)).not.toContain(input.id);
   });
   it('is a pending bubble when its round has no result yet', () => {
     const { model, input, session, round } = setup('in_flight');
     round.agent_message_ids = []; session.messages.filter(value => value.author === 'agent' && value.item_id === '2').forEach(value => { value.item_id = '1'; });
     expect(model()!.chat.find(entry => entry.id === input.message_id)?.result).toBe('');
     expect(model()!.chat.find(entry => entry.id === input.message_id)?.pending).toBeTruthy();
-    expect(model()!.outbox.map(pending => pending.input.id)).toContain(input.id);
+    expect(pendingInChat(model()).map(pending => pending.input.id)).toContain(input.id);
   });
 });

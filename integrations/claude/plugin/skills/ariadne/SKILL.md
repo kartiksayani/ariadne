@@ -27,12 +27,12 @@ Read these files, beside this one, only when they apply:
 
 | Read | When |
 |---|---|
-| `inputs.md` | A message starting `[ARIADNE_INPUT:`; closing a parent |
+| `inputs.md` | A message starting `[ARIADNE_INPUT:` |
 | `errors.md` | Preparing an unfamiliar request; an `ariadne` command exits non-zero |
 | `reconnect.md` | After `/clear` or `/compact`, or on attaching a fresh conversation |
 | `report.md` | Filing a report, audit, test run or investigation |
 | `review.md` | Reviewing a PR or document, or comparing options |
-| `checklist.md` | Filing a plan, migration or long-running work |
+| `checklist.md` | Filing a plan, migration or long-running work; closing a parent |
 | `follow-up.md` | Answering the owner on an item or topic |
 
 ## Commands
@@ -78,7 +78,7 @@ for example `[cache choice](item:3.2)`; never use a bare item number such as
 | `op` | Required | Optional |
 |---|---|---|
 | `topic.add` | `name` | `short`, `ref` |
-| `item.add` | `question`, `type`, `topic` | `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
+| `item.add` | `question`, `type` | `topic` (the request's only `topic.add`; nested `children` inherit their parent's topic), `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
 | `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `short` |
 | `item.ask` | `item`, `ask` | `options` |
 | `item.status` | `item`, `status` | `outcome`, `why`, `reason` |
@@ -86,7 +86,8 @@ for example `[cache choice](item:3.2)`; never use a bare item number such as
 | `reply` | `item`, `text` | `ref`, `round_id` |
 | `round.close` | `round_id` | |
 
-For defaults, nested children, reference syntax, transitions and field limits,
+Set `topic` explicitly if neither default applies.
+For other defaults, nested children, reference syntax, transitions and field limits,
 read `errors.md` when preparing an unfamiliar request.
 
 Every topic and item you create gets a `short` label: a 2-4 word noun phrase of

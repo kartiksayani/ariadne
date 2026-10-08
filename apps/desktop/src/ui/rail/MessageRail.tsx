@@ -112,7 +112,7 @@ export function MessageRail({ service, store, drafts, selectedItemId = null, hov
       {messages?.map(message => {
         const unsent = live ? notSent(live, message) : null;
         // The Not sent line sits under the card, not in it: its button can't live inside the card's own button.
-        return <div className={`pw-excerpt-group${unsent && (unsent.input.cancel_cause ?? 'owner') === 'owner' ? ' pw-excerpt-cancelled' : ''}`} key={message.id}>
+        return <div className={`pw-excerpt-group${unsent ? ' pw-excerpt-cancelled' : ''}`} key={message.id}>
           <RailExcerpt id={message.id} view={excerptView(message, at, earlierAgent)} active={message.id === hovered || message.id === pinned}
             highlight={focus !== null && messageItems(message).includes(focus)}
             onHover={on => setHovered(previous => on ? message.id : previous === message.id ? null : previous)}

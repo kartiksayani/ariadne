@@ -536,6 +536,49 @@ fn the_core_and_on_demand_files_stay_small_and_are_each_pointed_at() {
     assert!(RECONNECT.contains("`ariadne read` once"));
 }
 
+#[test]
+fn the_skill_routes_parent_closure_to_the_file_that_teaches_it() {
+    assert!(CHECKLIST.contains("## Closing the parent"));
+    assert!(INPUTS.contains("See `checklist.md` for when and how to close a parent"));
+    assert!(!REVIEW.contains("closing rule in `inputs.md`"));
+    for directory in SKILL_DIRECTORIES {
+        let files = generated(directory);
+        let route = files[0]
+            .1
+            .lines()
+            .find(|line| line.contains("closing a parent"))
+            .expect("core must route parent closure");
+        assert!(route.starts_with("| `checklist.md` |"), "{route}");
+    }
+}
+
+#[test]
+fn the_core_marks_topic_optional_and_explains_its_defaults() {
+    for directory in SKILL_DIRECTORIES {
+        let files = generated(directory);
+        let row = files[0]
+            .1
+            .lines()
+            .find(|line| line.starts_with("| `item.add` |"))
+            .unwrap();
+        let columns: Vec<_> = row.split('|').map(str::trim).collect();
+        assert!(!columns[2].contains("`topic`"), "{row}");
+        assert!(columns[3].contains("`topic`"), "{row}");
+        assert!(columns[3].contains("the request's only `topic.add`"));
+        assert!(columns[3].contains("nested `children` inherit their parent's topic"));
+        assert!(files[0]
+            .1
+            .contains("Set `topic` explicitly if neither default applies."));
+    }
+    // The opening example omits topic on both the parent and its child. The
+    // real CLI wires both to the sole topic.add, as the core table promises.
+    let (seeded, _, _) = Seeded::committed(&examples(RULES)[0]);
+    let session = seeded.session();
+    let (topic, items) = topic_items(&session, "Review: PR #812");
+    assert_eq!(by_short(&items, "Review summary").topic_id, topic.id);
+    assert_eq!(by_short(&items, "No jitter").topic_id, topic.id);
+}
+
 /// The compact receipt names the values the next request needs.
 fn assert_compact(data: &Value) {
     UuidV4::new(data["op_id"].as_str().unwrap()).unwrap();

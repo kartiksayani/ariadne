@@ -30,6 +30,31 @@ describe('the single item chat', () => {
     expect(screen.queryByRole('region', { name: 'Timeline' })).toBeNull();
   });
 
+  it.each([
+    { kind: 'answer' as const, note: '', choice: true, text: 'You chose “Keep complete history”' },
+    { kind: 'answer' as const, note: 'Keep this exact note, too.', choice: true, text: 'You chose “Keep complete history”' },
+    { kind: 'bring' as const, note: '', choice: false, text: 'Bring it up' },
+    { kind: 'drop' as const, note: '', choice: false, text: 'Drop it' },
+  ])('keeps the cancelled $kind and note "$note" when its message body is empty', async ({ kind, note, choice, text }) => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session, answer = session.answers[0]!, input = session.inputs[answer.input_id]!;
+    input.state = 'cancelled'; input.cancel_cause = 'owner'; input.kind = kind; input.attempts = [];
+    input.payload.text = note;
+    input.payload.selected_option_id = choice ? answer.selected_option_id : null;
+    input.payload.target_snapshot.options = structuredClone(answer.options_snapshot);
+    session.messages.find(message => message.id === input.message_id)!.body = '';
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} />);
+    const chat = await screen.findByRole('region', { name: 'Conversation' });
+    const turn = chat.querySelector<HTMLElement>(`[data-message-id="${input.message_id}"]`)!;
+    expect(model(session).chat.find(entry => entry.id === input.message_id)!.you).toEqual({ how: choice ? 'chose' : 'action', text: choice ? 'Keep complete history' : text, note });
+    expect(turn.classList.contains('detail-turn-cancelled')).toBe(true);
+    expect(turn.hasAttribute('data-owner-said')).toBe(false);
+    expect(within(turn).getByText(text)).toBeTruthy();
+    if (note) expect(within(turn).getByText(note)).toBeTruthy();
+    expect(within(turn).getByText('Cancelled before it reached the agent')).toBeTruthy();
+  });
+
   it('puts the short result under the owner only when no full agent message follows before the next owner', () => {
     const session = structuredClone(demo) as Session, answer = session.answers[0]!;
     const round = session.rounds[session.items['1']!.current_round_id!]!;

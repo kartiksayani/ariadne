@@ -6,7 +6,7 @@ import type { RevealedItem } from './data/routes';
 import { plainFailure } from './data/plain';
 import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
-import { blockedDraft, emptyDraft, OwnerDraftStore } from './state/drafts/store';
+import { OwnerDraftStore } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationGraph } from './ui/graph/NavigationGraph';
@@ -330,15 +330,13 @@ function Workspace({ application }: { application: Application }) {
     const current = store && route && sameSession(route, target) ? store.getSnapshot() : application.waiting.sessionState(target);
     const session = current?.snapshot?.session, item = session?.items[target.item_id];
     const draftState = application.drafts.getSnapshot(), entry = application.drafts.find(target, target.item_id, 'answer');
-    const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
-    const guard = entry && session ? blockedDraft(entry.draft, session) : null;
     if (!session || !item || current?.status !== 'ready' || current.error || session.state !== 'active'
       || session.topics[item.topic_id]?.archived_at !== null || displayStatus(session, item) !== 'waiting_on_me'
       || state.writing || state.pendingOperationId !== null || !draftState.ready || draftState.preferenceUncertain
       || quickRequests.current.has(JSON.stringify(target))
       || Object.values(draftState.entries).some(value => sameSession(value.draft.session, target) && value.draft.target.item_id === item.id && (value.saving || value.uncertain))
-      || entry?.receipt || guard && guard !== emptyDraft
-      || index !== undefined && (!item.options[index] || connectionOf(binding, binding ? current.presence[binding.id] : null) !== 'connected')) return false;
+      || entry?.receipt
+      || index !== undefined && !item.options[index]) return false;
     focusOwner(target, 'answer', index, undefined, index === undefined ? 'words' : 'send', index === undefined ? undefined : {
       optionId: item.options[index]!.id, revision: item.revision, questionRevision: item.question_revision, bindingId: session.active_binding_id,
     });

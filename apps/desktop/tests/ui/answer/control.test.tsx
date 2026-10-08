@@ -26,11 +26,11 @@ describe('answer choice with an optional note', () => {
     expect(values.onSendText).toHaveBeenCalledTimes(2);
     expect(values.onSendOption).toHaveBeenCalledTimes(1);
   });
-  it.each([{ variant: 'compact' as const }, { variant: 'full' as const, noText: true }])('keeps a control without a text box option-only: %o', changes => {
+  it.each([{ variant: 'compact' as const }, { variant: 'full' as const, noText: true }])('uses the saved draft note for a control without a text box: %o', changes => {
     const values = props(changes); render(<AnswerControl {...values} />);
     expect(screen.queryByRole('textbox')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: changes.variant === 'compact' ? 'Send answer' : 'Send “Keep the design”' }));
-    expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, '');
+    expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, undefined);
     expect(screen.getByTitle('Press 1 to select, ⌥1 to send with your note')).toBeTruthy();
   });
   it('offers a reply without a selected option and labels an empty note as a plain option send', () => {

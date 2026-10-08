@@ -7,7 +7,7 @@ still apply.
 ## Review
 
 - The first item is a summary, an `explanation` left `open` with no ask, the PR in
-  `links`. The parent is closed by the closing rule in `inputs.md` once every child is settled.
+  `links`. The parent is closed by the closing rule in `checklist.md` once every child is settled.
 - Under it, the verdict is a `decision` with its own `ask` and options such as "Request
   changes", "Approve as is" and "Comment only".
 - Each comment you would post is its own `decision` child: `question` is the comment

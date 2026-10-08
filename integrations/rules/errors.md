@@ -2,7 +2,7 @@
 
 ## Request details
 
-- Defaults. `topic`: the request's only `topic.add` (a child takes its parent's).
+- Defaults. `topic`: the request's only `topic.add` (nested `children` take their parent's).
   `status`: `waiting_on_me` with an `ask`, else `open`. `owner`: you; `{"kind":"me"}`
   with an `ask`; others are `{"kind":"other","name":"N"}`. Option `id`: 1, 2, ...
   `ref`: r1, r2, ... by position; name one only to reference it later. An ask's
