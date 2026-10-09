@@ -1,5 +1,5 @@
-//! Rebind after /clear: a fresh conversation takes over the session whatever
-//! its inputs. Pending work follows the session to the new binding.
+//! Rebind after /clear disconnects the old conversation first. Pending work
+//! follows the session to the new binding.
 use ariadne_agent_protocol::{
     Availability, Compatibility, EventPayload, NormalizedEvent, TurnFinishedStatus,
 };
@@ -35,9 +35,12 @@ fn one() -> SchemaVersion {
     SchemaVersion::new(1).unwrap()
 }
 fn seed() -> Session {
-    serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap()
+    let mut session: Session =
+        serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap();
+    session.bindings.0.get_mut(&id(3)).unwrap().adapter_id = "claude_code_mod".into();
+    session
 }
-/// The seeded binding 3 runs adapter `fake.local`.
+/// The seeded binding 3 runs the Claude adapter with test-owned host facts.
 fn facts(params: &BindingConnectParams) -> VerifiedHost {
     let b = seed().bindings.0[&id(3)].clone();
     VerifiedHost {
@@ -67,13 +70,18 @@ struct Setup {
 }
 impl Setup {
     fn new() -> Self {
+        Self::with_adapter("claude_code_mod")
+    }
+    fn with_adapter(adapter: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::open(home.path()).unwrap();
         registry.register(root.path(), &id(99), || id(1)).unwrap();
+        let mut session = seed();
+        session.bindings.0.get_mut(&id(3)).unwrap().adapter_id = adapter.into();
         Store::open_registered(&store_dir(home.path(), 1), id(1))
             .unwrap()
-            .create(&seed())
+            .create(&session)
             .unwrap();
         Self {
             home,
@@ -237,9 +245,11 @@ impl Setup {
         };
         Ok(binding_id)
     }
-    /// The conversation after /clear: same adapter, another host session.
+    /// /clear ends the old session before connecting the fresh conversation.
     fn clear(&self, n: u64) -> UuidV4 {
-        self.connect("fake.local", "cleared-thread", n).unwrap()
+        self.binding_state("disconnect", &id(3), n + 1000);
+        self.connect("claude_code_mod", "cleared-thread", n)
+            .unwrap()
     }
     fn binding_state(&self, kind: &str, binding: &UuidV4, n: u64) {
         let params = BindingStateParams {
@@ -289,17 +299,54 @@ impl Setup {
 }
 
 #[test]
+fn same_non_claude_adapter_replaces_a_live_conversation_with_pending_work() {
+    let s = Setup::with_adapter("fake.local");
+    let sent = s.queue(100);
+    let queued = s.queue(101);
+    let attempt = s.claim(&id(3), 102);
+    let before = s.saved();
+    let new = s.connect("fake.local", "other-thread", 103).unwrap();
+    let saved = s.saved();
+    assert_ne!(new, id(3));
+    assert_eq!(saved.active_binding_id, Some(new.clone()));
+    assert_eq!(saved.messages, before.messages);
+    assert_eq!(saved.inputs.0[&sent].binding_id, new);
+    assert_eq!(saved.inputs.0[&sent].state, InputState::NeedsAttention);
+    assert_eq!(
+        saved.inputs.0[&sent].active_attempt_id,
+        Some(attempt.attempt_id)
+    );
+    assert_eq!(saved.inputs.0[&queued].binding_id, new);
+    assert_eq!(saved.inputs.0[&queued].state, InputState::Queued);
+    assert_eq!(
+        saved.bindings.0[&new].pause_reason,
+        Some(PauseReason::Uncertain)
+    );
+    assert_eq!(s.blocked(&new, 104), Some(BarrierReason::RecoveryRequired));
+}
+
+#[test]
 fn clear_rebind_moves_unsent_inputs_in_order_to_the_new_conversation() {
     let s = Setup::new();
     let first = s.queue(100);
     let second = s.queue(101);
+    let before = s.saved();
     let new = s.clear(102);
     let saved = s.saved();
     assert_eq!(saved.active_binding_id, Some(new.clone()));
     for input in [&first, &second] {
         assert_eq!(saved.inputs.0[input].binding_id, new);
         assert_eq!(saved.inputs.0[input].state, InputState::Queued);
+        assert_eq!(
+            saved.inputs.0[input].message_id,
+            before.inputs.0[input].message_id
+        );
+        assert_eq!(
+            saved.inputs.0[input].payload,
+            before.inputs.0[input].payload
+        );
     }
+    assert_eq!(saved.messages, before.messages);
     let binding = &saved.bindings.0[&new];
     assert_eq!(binding.dispatch_state, DispatchState::Enabled);
     assert_eq!(binding.pause_reason, None);
@@ -422,8 +469,7 @@ fn clear_rebind_carries_the_owner_pause_unchanged() {
 }
 
 #[test]
-fn only_a_live_conversation_of_another_adapter_refuses_the_rebind() {
-    // Live, connected and of another adapter: a real conflict, pending or not.
+fn another_adapter_cannot_take_a_live_claude_conversation_but_disconnected_work_moves() {
     let s = Setup::new();
     s.queue(100);
     let before = s.saved();

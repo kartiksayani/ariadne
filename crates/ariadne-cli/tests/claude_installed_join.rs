@@ -266,21 +266,21 @@ impl Fixture {
         // unchanged-operation retry. Its former 3s deadline was shorter than a
         // single declared control request; bound this join by three requests.
         let until = Instant::now() + CONTROL_TIMEOUT * 3;
+        let summary = "This conversation is connected to Ariadne. File your work as you go; the ariadne skill has the rest.\nThis resumes an earlier session: read reconnect.md in the ariadne skill first.";
         let connected = loop {
             let connected = self
                 .sdk
                 .command(json!({"action":"connect","session":id(2)}));
             let text = connected["value"]["text"].as_str().unwrap();
-            if text.starts_with("Ariadne connected: ") {
-                assert!(text.contains("This resumes an earlier session"));
+            if text == summary {
                 break connected;
             }
             assert!(Instant::now() < until, "{connected}");
             assert!(connected["prompts"].as_array().unwrap().is_empty());
             std::thread::sleep(Duration::from_millis(10));
         };
-        // The Mod prints only a short summary; the saved IDs come from the
-        // helper's connect receipt, which the summary must repeat.
+        // The owner gets a plain summary. Claude's conversation note must
+        // carry the exact routing from the saved helper receipt.
         let connect_receipts: Vec<Value> = connected["replies"]
             .as_array()
             .unwrap()
@@ -302,11 +302,25 @@ impl Fixture {
         let generation: UuidV4 =
             serde_json::from_value(receipt["data"]["generation"].clone()).unwrap();
         let text = connected["value"]["text"].as_str().unwrap();
-        assert!(text.contains("\nCommand: /"));
-        assert!(text.contains(&format!(
-            "binding {}, generation {}",
+        assert_eq!(text, summary);
+        let appended = connected["appended"].as_array().unwrap();
+        assert_eq!(appended.len(), 1);
+        let routing = appended[0]["message"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(routing.contains(&format!(
+            "\nCommand: {}\n",
+            self.helper.canonicalize().unwrap().display()
+        )));
+        assert!(routing.contains(&format!(
+            "use binding {} and generation {} in every ariadne command",
             binding.as_str(),
             generation.as_str()
+        )));
+        assert!(routing.contains(&format!(
+            "session {} in project {}",
+            id(2).as_str(),
+            id(1).as_str()
         )));
         assert!(!text.contains("setup_instruction") && text.len() < 1024);
         let initial = self.saved();
@@ -643,15 +657,16 @@ fn missing_installed_helper_or_resource_cannot_advertise_a_qualified_connection(
         let failed = fixture
             .sdk
             .command(json!({"action":"connect","session":id(2)}));
-        // The owner reads one plain sentence: the app is not reachable for a
-        // missing resource, and a generic one when the helper itself is gone.
+        // Neither missing installed resources nor a rejected helper process
+        // proves that the app is closed. Keep both next steps plain.
         let sentence = if missing_helper {
-            "That did not complete. Something went wrong while talking to Ariadne. Open the Ariadne app and try again; if it keeps happening, update Ariadne."
+            "That did not complete. Ariadne could not finish connecting this conversation. Run /ariadne-connect again; if it keeps happening, update Ariadne and its Claude plugin."
         } else {
-            "That did not complete. Ariadne isn't open, so this session's work isn't being recorded. Open Ariadne and it will reconnect."
+            "That did not complete. Open the Ariadne app, then run /ariadne-connect again."
         };
         assert_eq!(failed["value"]["text"], sentence);
         assert!(!failed["logs"].as_array().unwrap().is_empty());
+        assert!(failed["appended"].as_array().unwrap().is_empty());
         assert!(failed["prompts"].as_array().unwrap().is_empty());
         assert!(failed["reports"].as_array().unwrap().is_empty());
         assert_eq!(fixture.saved(), before);
@@ -672,10 +687,17 @@ fn installed_session_end_reports_saved_scope_after_sdk_loses_actual_status_resul
     let pending = fixture
         .sdk
         .command(json!({"action":"connect","session":id(2)}));
-    assert!(pending["logs"].as_array().unwrap().iter().any(|log| log
-        .as_str()
+    let sentence = "Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.";
+    assert_eq!(
+        pending["value"]["text"],
+        format!("That did not complete. {sentence}")
+    );
+    assert!(pending["logs"]
+        .as_array()
         .unwrap()
-        .contains("was saved; connection status remains pending")));
+        .iter()
+        .any(|log| log == sentence));
+    assert!(pending["appended"].as_array().unwrap().is_empty());
     assert!(pending["prompts"].as_array().unwrap().is_empty());
     let saved = fixture.saved();
     let binding = saved.active_binding_id.as_ref().unwrap();

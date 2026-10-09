@@ -32,7 +32,7 @@ describe('supported Mod entry convention', () => {
     expect(timer.cancelled).toBe(true);await timer.callback();
     expect(recorded).toHaveLength(4);expect(h.prompts).toEqual([]);
   });
-  it('announces exact saved IDs before status and retains the connect operation while route publication or its acknowledgement is pending', async () => {
+  it('announces saved IDs before status and retries the same operation once publication succeeds', async () => {
     for (const loseAnnouncementAck of [false,true]) {
       let published = false, lost = false;
       const bound = [];
@@ -49,21 +49,18 @@ describe('supported Mod entry convention', () => {
       const hooks = callbacks(descriptor);
       await hooks.get('session.start')(h.$,{},next);
       await hooks.get('ariadne-connect')(h.$,{args:ids.session});
-      expect(h.logs.at(-1)).toContain('was saved; connection status remains pending');
+      expect(h.logs.at(-1)).toContain('Run /ariadne-connect');
       expect(bound).toEqual([{binding_id:ids.binding,generation:ids.generation}]);
-      const connect = h.calls.find(call => call.argv[1] === 'binding');
-      const original = connect.options.stdin;
+      const original = h.calls.find(call => call.argv[1] === 'binding').options.stdin;
       await h.timer().callback();
       expect(h.calls.some(call => call.argv[2] === 'claim')).toBe(false);
-      expect(h.prompts).toEqual([]);
-      await hooks.get('ariadne-connect')(h.$,{args:ids.input});
-      expect(h.calls.filter(call => call.argv[1] === 'binding')).toHaveLength(1);
       await h.timers().find(timer => timer.ms === 30000).callback();
       expect(bound.at(-1)).toEqual(bound[0]);
       published = true;
       const retried = await hooks.get('ariadne-connect')(h.$,{args:ids.session});
-      expect(retried.text).toContain(`binding ${ids.binding}, generation ${ids.generation}`);
-      expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
+      expect(retried.text).toContain('connected to Ariadne');
+      expect(h.calls.filter(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only')).map(call => call.options.stdin)).toEqual([original,original]);
+      expect(h.calls.filter(call => call.argv.includes('--replay-only')).map(call => call.options.stdin)).toEqual([original]);
       expect(h.calls.filter(call => call.argv[2] === 'report')).toEqual([]);
       expect(h.prompts).toEqual([]);
     }
@@ -79,7 +76,7 @@ describe('supported Mod entry convention', () => {
     const heartbeat = unsupported.timers().find(timer => timer.ms === 30000);
     await heartbeat.callback();await heartbeat.callback();
     // One plain notice for the whole outage, not one per heartbeat.
-    expect(unsupported.logs).toEqual(['Ariadne: could not reach the Ariadne app. This conversation will show there once the app is running.']);
+    expect(unsupported.logs).toEqual(["This version of Claude Code or Ariadne can't do that yet. Update Claude Code and the Ariadne app, then try again."]);
     expect(unsupported.calls.filter(call => call.argv[2] === 'claim')).toEqual([]);
     expect(unsupported.events).toEqual([]);
   });
@@ -94,9 +91,11 @@ describe('supported Mod entry convention', () => {
       const hooks = callbacks(descriptor);
       await hooks.get('session.start')(h.$,{},next);
       await hooks.get('ariadne-connect')(h.$,{args:ids.session});
-      const original = h.calls.find(call => call.argv[1] === 'binding').options.stdin;
+      const original = h.calls.find(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only')).options.stdin;
       await hooks.get('ariadne-connect')(h.$,{args:ids.session});
-      expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
+      const mutations = h.calls.filter(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only'));
+      expect(mutations.map(call => call.options.stdin)).toEqual([original,original]);
+      expect(h.calls.find(call => call.argv.includes('--replay-only')).options.stdin).toBe(original);
       h.timer().callback();
       expect(h.calls.some(call => call.argv[2] === 'claim')).toBe(false);
       await hooks.get('session.end')(h.$,{},next);
@@ -133,6 +132,24 @@ describe('supported Mod entry convention', () => {
       expect(h.prompts).toEqual([]);
       expect(h.timers().every(timer => timer.cancelled)).toBe(true);
     }
+  });
+  it('keeps the saved scope for session end when the SDK loses a successful status reply, with plain pending advice', async () => {
+    const h = host({handler:argv => {
+      if (argv[2] === 'connection-status') throw new Error('SDK lost the successful helper status reply');
+    }});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);
+    const pending = await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+    const sentence = 'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.';
+    expect(pending.text).toBe(`That did not complete. ${sentence}`);
+    expect(h.logs).toEqual([sentence]);
+    expect(h.appended).toEqual([]);
+    await hooks.get('session.end')(h.$,{},next);
+    expect(h.events).toHaveLength(1);
+    expect(h.events[0]).toMatchObject({kind:'disconnected',binding_id:ids.binding,generation:ids.generation,input_id:null,attempt_id:null});
+    expect(h.calls.some(call => call.argv[2] === 'claim')).toBe(false);
+    expect(h.prompts).toEqual([]);
+    expect(h.timers().every(timer => timer.cancelled)).toBe(true);
   });
   it('keeps distinct old and pending saved scopes through session end without replacing failed old evidence', async () => {
     let connects = 0, holdStatus = false, failOldReport = true;
@@ -175,19 +192,17 @@ describe('supported Mod entry convention', () => {
     const h = host();const hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);
     const result = await hooks.get('ariadne-connect')(h.$,{args:` ${ids.session} `});
-    const [summary,command,advice,...guidance] = result.text.split('\n');
-    expect(summary).toBe(`Ariadne connected: binding ${ids.binding}, generation ${ids.generation}.`);
-    expect(command).toBe(`Command: ${descriptor.helperPath}`);
-    expect(advice).toBe('File your work as you go; the ariadne skill has the rest.');
+    const [summary,...guidance] = result.text.split('\n');
+    expect(summary).toBe('This conversation is connected to Ariadne. File your work as you go; the ariadne skill has the rest.');
     // The inline rules live in the skill, not in the connect output.
     expect(result.text).not.toContain('[ARIADNE_INPUT:');
     expect(result.text).not.toContain('Never edit .ariadne/');
     expect(result.text).not.toContain('"instruction"');
     expect(guidance.join('\n')).toBe('This resumes an earlier session: read reconnect.md in the ariadne skill first.');
-    expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => JSON.parse(call.options.stdin).command.params.existing_session_id)).toEqual([ids.session]);
+    expect(h.calls.filter(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only')).map(call => JSON.parse(call.options.stdin).command.params.existing_session_id)).toEqual([ids.session]);
     expect(h.prompts).toEqual([]);
-    // The command output carries the routing; no extra conversation note.
-    expect(h.appended).toEqual([]);
+    // Routing goes to Claude in the existing conversation note.
+    expect(h.appended).toHaveLength(1);
   });
   it('rejects malformed selectors before owner transitions and never infers a session', async () => {
     const h = host();const hooks = callbacks(descriptor);
@@ -197,7 +212,7 @@ describe('supported Mod entry convention', () => {
     }
     expect(h.calls.filter(call => call.argv[1] === 'binding' || call.argv[1] === 'project')).toEqual([]);
     await hooks.get('ariadne-connect')(h.$,{args:''});
-    expect(JSON.parse(h.calls.find(call => call.argv[1] === 'binding').options.stdin).command.params.existing_session_id).toBe(null);
+    expect(JSON.parse(h.calls.find(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only')).options.stdin).command.params.existing_session_id).toBe(null);
     expect(h.prompts).toEqual([]);
   });
   it('registers all commands, guarded one-second poll, scoped status/disconnect and session-end timer cancellation', async () => {
@@ -208,8 +223,8 @@ describe('supported Mod entry convention', () => {
     expect(h.commands[0].argumentHint).toBe('[session-id]');
     expect(h.timer().ms).toBe(1000);
     const result = await hooks.get('ariadne-connect')(h.$);
-    expect(result.text).toMatch(/^Ariadne connected: binding \S+, generation \S+\.\nCommand: \/\S+\nFile your work as you go; the ariadne skill has the rest\.$/);
-    expect(result.text).toContain(descriptor.helperPath);
+    expect(result.text).toBe('This conversation is connected to Ariadne. File your work as you go; the ariadne skill has the rest.');
+    expect(h.appended[0].message.content[0].text).toContain(descriptor.helperPath);
     expect(result.text).not.toContain('{');
     expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.connection_state).toBe('connected');
     h.timer().callback();
@@ -224,7 +239,7 @@ describe('supported Mod entry convention', () => {
       await hooks.get('session.start')(h.$,{},next);
       expect(h.timer()).toBe(null);expect(h.calls.filter(call => call.argv[2] !== 'announce')).toEqual([]);
       expect((await hooks.get('ariadne-connect')(h.$)).text).toContain('did not complete');
-      expect(h.logs.some(log => log.includes('matching') || log.includes('2.1.287'))).toBe(true);
+      expect(h.logs.some(log => log.includes('match') || log.includes('2.1.287'))).toBe(true);
       expect(h.calls.filter(call => call.argv[2] !== 'announce')).toEqual([]);
     }
   });
@@ -307,7 +322,7 @@ describe('supported Mod entry convention', () => {
     await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
     h.timer().callback();await entered.promise;
     const reconnect = hooks.get('ariadne-connect')(h.$);
-    expect(h.calls.filter(call => call.argv[1] === 'binding')).toHaveLength(1);
+    expect(h.calls.filter(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only'))).toHaveLength(1);
     claim.resolve({exitCode:0,stdout:JSON.stringify({api_version:1,ok:true,data:value}),stderr:''});
     expect((await reconnect).text).toContain('Claude is still answering a message from Ariadne');
     expect(h.prompts).toEqual([{text:value.formatted_payload,asUser:true}]);
@@ -327,7 +342,7 @@ describe('supported Mod entry convention', () => {
     const accepted = reports.filter(report => report.kind === 'accepted');
     expect(accepted.length).toBeGreaterThan(1);
     expect(accepted.every(report => report.event_id === reports[0].event_id)).toBe(true);
-    expect(h.calls.filter(call => call.argv[1] === 'binding')).toHaveLength(1);
+    expect(h.calls.filter(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only'))).toHaveLength(1);
     expect(h.prompts).toHaveLength(1);
   });
   it('retries an unconfirmed claim with its original request ID before refusing an owner command', async () => {
@@ -337,7 +352,7 @@ describe('supported Mod entry convention', () => {
     await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
     h.timer().callback();await entered.promise;
     const reconnect = hooks.get('ariadne-connect')(h.$);claim.resolve(failure('delivery_uncertain'));
-    expect((await reconnect).text).toBe('Ariadne could not confirm a message it was fetching from the app. Make sure the Ariadne app is open, then run the command again.');
+    expect((await reconnect).text).toBe('Ariadne could not confirm a message it was fetching. Run /ariadne-connect again; if it keeps happening, check the pending message in Ariadne.');
     const original = h.calls.find(call => call.argv[2] === 'claim').argv.at(-1);
     const local = JSON.parse((await hooks.get('ariadne-status')(h.$)).text).local;
     expect(local.pending_claim_request_id).toBe(original);expect(local.admission_open).toBe(true);
@@ -346,7 +361,7 @@ describe('supported Mod entry convention', () => {
     await hooks.get('session.end')(h.$,{},next);
     const claims = h.calls.filter(call => call.argv[2] === 'claim').map(call => call.argv.at(-1));
     expect(claims.every(id => id === original)).toBe(true);expect(h.prompts).toEqual([]);
-    expect(h.calls.filter(call => call.argv[1] === 'binding')).toHaveLength(1);
+    expect(h.calls.filter(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only'))).toHaveLength(1);
   });
   it('heals an unconfirmed claim during an owner command and then runs the command', async () => {
     let fail = true;
@@ -369,7 +384,7 @@ describe('supported Mod entry convention', () => {
       await h.timer().callback();
       await vi.waitFor(() => expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(1));
       const result = (await hooks.get('ariadne-disconnect')(h.$)).text;
-      expect(result).not.toBe('Ariadne could not confirm a message it was fetching from the app. Make sure the Ariadne app is open, then run the command again.');
+      expect(result).not.toBe('Ariadne could not confirm a message it was fetching. Run /ariadne-connect again; if it keeps happening, check the pending message in Ariadne.');
       expect(JSON.parse(result).data.kind).toBe('binding_state');
       expect(h.prompts).toEqual([]);
     });
@@ -389,7 +404,7 @@ describe('supported Mod entry convention', () => {
     // A failed owner command reopens the old loop instead of shutting it for good.
     expect(local.active).toBe(null);expect(local.admission_open).toBe(true);
     await hooks.get('ariadne-connect')(h.$);
-    const mutations = h.calls.filter(call => call.argv[1] === 'binding');
+    const mutations = h.calls.filter(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only'));
     expect(mutations).toHaveLength(3);expect(mutations[2].options.stdin).toBe(mutations[1].options.stdin);
     expect(h.prompts).toEqual([]);
   });
@@ -501,8 +516,8 @@ describe('conversation changes, relaunch and removal', () => {
     expect(h.logs.join('\n')).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
     expect(h.prompts).toEqual([]);
     // Claude learns the new routing from a conversation note, not a prompt.
-    expect(h.appended).toHaveLength(1);
-    const [note] = h.appended;
+    expect(h.appended).toHaveLength(2);
+    const note = h.appended.at(-1);
     expect(note.message.type).toBe('user');
     expect(note.message.content).toHaveLength(1);
     expect(note.message.content[0].type).toBe('text');
@@ -518,25 +533,26 @@ describe('conversation changes, relaunch and removal', () => {
   });
   it('shell-quotes a helper path that needs it, in the connect summary and in the reconnect note', async () => {
     for (const [helperPath,printed] of [
-      ['/Users/o wner/Ariadne App/bin/ariadne',`'/Users/o wner/Ariadne App/bin/ariadne'`],
-      ["/Users/o'wner/bin/ariadne",`'/Users/o'\\''wner/bin/ariadne'`],
+      ['/installed/o wner/Ariadne App/bin/ariadne',`'/installed/o wner/Ariadne App/bin/ariadne'`],
+      ["/installed/o'wner/bin/ariadne",`'/installed/o'\\''wner/bin/ariadne'`],
       ['/installed/ariadne-1.0_x/bin/ariadne','/installed/ariadne-1.0_x/bin/ariadne'],
     ]) {
       const config = {...descriptor,helperPath};
       const h = rotatingApp();const hooks = callbacks(config);
       await hooks.get('session.start')(h.$,{},next);
       const summary = (await hooks.get('ariadne-connect')(h.$,{args:ids.session})).text;
-      expect(summary.split('\n')[1]).toBe(`Command: ${printed}`);
+      expect(summary).not.toContain(helperPath);
+      expect(h.appended.at(-1).message.content[0].text.split('\n')).toContain(`Command: ${printed}`);
       await hooks.get('session.end')(h.$,{reason:'clear'},next);
       await h.timer().callback();
-      await vi.waitFor(() => expect(h.appended).toHaveLength(1));
-      expect(h.appended[0].message.content[0].text.split('\n')).toContain(`Command: ${printed}`);
+      await vi.waitFor(() => expect(h.appended).toHaveLength(2));
+      expect(h.appended.at(-1).message.content[0].text.split('\n')).toContain(`Command: ${printed}`);
     }
   });
-  it('prints the closed-app notice again in the new conversation after a conversation change', async () => {
+  it('prints the unsupported-host notice again in the new conversation after a conversation change', async () => {
     const h = rotatingApp({before:argv => argv[2] === 'announce' ? failure('unsupported') : undefined});
     const hooks = callbacks(descriptor);
-    const outage = 'Ariadne: could not reach the Ariadne app. This conversation will show there once the app is running.';
+    const outage = "This version of Claude Code or Ariadne can't do that yet. Update Claude Code and the Ariadne app, then try again.";
     await hooks.get('session.start')(h.$,{},next);
     const heartbeat = h.timers().find(timer => timer.ms === 30000);
     await heartbeat.callback();
@@ -576,8 +592,8 @@ describe('conversation changes, relaunch and removal', () => {
     await h.timer().callback();
     await vi.waitFor(() => expect(connects(h)).toHaveLength(2));
     expect(connects(h)[1]).toMatchObject({external_session_id:'original-host-session',existing_session_id:ids.session});
-    await vi.waitFor(() => expect(h.appended).toHaveLength(1));
-    expect(h.appended[0].message.content[0].text).toContain(`generation ${ids.attempt}`);
+    await vi.waitFor(() => expect(h.appended).toHaveLength(2));
+    expect(h.appended.at(-1).message.content[0].text).toContain(`generation ${ids.attempt}`);
   });
   it('retries the routing note on the poll tick while the engine has no conversation to take it', async () => {
     let refuse = true;
@@ -620,7 +636,7 @@ describe('conversation changes, relaunch and removal', () => {
     const first = rotatingApp({store});const hooks = callbacks(descriptor);
     await hooks.get('session.start')(first.$,{},next);await hooks.get('ariadne-connect')(first.$,{args:ids.session});
     await hooks.get('session.end')(first.$,{},next);
-    expect([...store.keys()]).toEqual(['binding:original-host-session']);
+    expect([...store.keys()].filter(key => key.startsWith('binding:'))).toEqual(['binding:original-host-session']);
     // `claude --resume`: a new process, same Claude conversation.
     const resumed = rotatingApp({store});const again = callbacks(descriptor);
     await again.get('session.start')(resumed.$,{},next);
@@ -641,9 +657,9 @@ describe('conversation changes, relaunch and removal', () => {
     const store = new Map();
     const h = rotatingApp({store});const hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
-    expect(store.size).toBe(1);
+    expect([...store.keys()].filter(key => key.startsWith('binding:')).length).toBe(1);
     await hooks.get('ariadne-disconnect')(h.$);
-    expect(store.size).toBe(0);
+    expect([...store.keys()].filter(key => key.startsWith('binding:')).length).toBe(0);
     expect((await hooks.get('ariadne-disconnect')(h.$)).text).toBe('This conversation is not connected to Ariadne.');
     const relaunched = rotatingApp({store});
     await callbacks(descriptor).get('session.start')(relaunched.$,{},next);
@@ -657,7 +673,7 @@ describe('conversation changes, relaunch and removal', () => {
     await vi.waitFor(() => expect(h.logs).toContain('Ariadne: the Ariadne session for this conversation no longer exists. Run /ariadne-connect to connect again.'));
     const heartbeat = h.timers().find(timer => timer.ms === 30000);
     await heartbeat.callback();await heartbeat.callback();
-    expect(connects(h)).toHaveLength(1);expect(store.size).toBe(0);
+    expect(connects(h)).toHaveLength(1);expect([...store.keys()].filter(key => key.startsWith('binding:')).length).toBe(0);
     expect(h.logs.filter(log => log.includes('no longer exists'))).toHaveLength(1);
   });
   it('says once that the session is connected to another conversation, and retries quietly until the app accepts', async () => {
@@ -673,7 +689,7 @@ describe('conversation changes, relaunch and removal', () => {
     expect(h.logs.filter(log => log === 'This Ariadne session is connected to another conversation.')).toHaveLength(1);
     refuse = false;await heartbeat.callback();
     expect(h.logs.at(-1)).toBe('Ariadne: this conversation is connected to its Ariadne session again.');
-    expect(store.size).toBe(1);
+    expect([...store.keys()].filter(key => key.startsWith('binding:')).length).toBe(1);
   });
   it('stops polling once and stays discoverable when the app removed the session', async () => {
     const store = new Map();
@@ -688,7 +704,7 @@ describe('conversation changes, relaunch and removal', () => {
     expect(claimScopes(h)).toHaveLength(1);
     expect(announced(h).at(-1).binding_scope).toBe(null);
     expect(h.logs.filter(log => log.startsWith('This session was removed'))).toHaveLength(1);
-    expect(store.size).toBe(0);
+    expect([...store.keys()].filter(key => key.startsWith('binding:')).length).toBe(0);
     expect(connects(h)).toHaveLength(1);
   });
   it('falls back to an unbound announcement when the app no longer knows the bound scope', async () => {
@@ -703,7 +719,7 @@ describe('conversation changes, relaunch and removal', () => {
     expect(h.logs.slice(before)).toEqual([]);
   });
   it('tells the owner once per outage, in plain words, and again only after the app recovered and failed again', async () => {
-    const closed = "Ariadne isn't open, so this session's work isn't being recorded. Open Ariadne and it will reconnect.";
+    const closed = "Ariadne can't be reached, so this session's work isn't being recorded. Open Ariadne and it will reconnect.";
     let down = false;
     const h = host({handler:argv => down && argv[1] !== '--version' ? failure('host_unreachable') : undefined});
     const hooks = callbacks(descriptor);
@@ -724,7 +740,7 @@ describe('conversation changes, relaunch and removal', () => {
     await hooks.get('ariadne-status')(h.$);
     await hooks.get('ariadne-status')(h.$);
     expect(h.logs.slice(quiet)).toEqual([closed,closed]);
-    expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper/);
+    expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper|isn't open|app is closed/);
   });
   it('gives each helper failure code its own plain sentence with a next step, shown once per change of state', async () => {
     let code = 'stale_generation', details, armed = false;

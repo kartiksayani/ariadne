@@ -1308,6 +1308,7 @@ fn late_facts_core_already_settled_are_acknowledged_and_later_claims_continue() 
         blocking_input_ids: vec![],
         dispatch_must_pause: true,
         partial_removal: None,
+        connected_session_name: None,
     }));
     let core = Arc::new(ClaimIdle {
         inner: service::ScriptedCoreService::new([

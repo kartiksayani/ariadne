@@ -32,6 +32,13 @@ export function host({claim = null, submit = () => Promise.resolve({text:claim.f
   append = async () => ({uuid:'appended-row'})} = {}) {
   const calls = [], events = [], prompts = [], logs = [], commands = [], appended = [];
   const waiters = [];
+  const savedConnects = new Map();
+  function reply(argv, options, response) {
+    if (argv[1] === 'binding' && argv[2] === 'connect' && !argv.includes('--replay-only') && response.exitCode === 0) {
+      savedConnects.set(JSON.parse(options.stdin).command.op_id,JSON.parse(response.stdout).data);
+    }
+    return response;
+  }
   let timer = null;
   const timers = [];
   let external = binding.external_session_id;
@@ -46,7 +53,7 @@ export function host({claim = null, submit = () => Promise.resolve({text:claim.f
       delete:async key => {store.delete(key);},keys:async () => [...store.keys()]},
     process:{run:async (argv,options) => {
       calls.push({argv,options});
-      if (handler) {const response = await handler(argv,options);if (response !== undefined) return response;}
+      if (handler) {const response = await handler(argv,options);if (response !== undefined) return reply(argv,options,response);}
       if (argv[1] === '--version') return {exitCode:0,stdout:'ariadne 0.1.0\n',stderr:''};
       if (argv[1] === 'project') {
         const request = JSON.parse(options.stdin);
@@ -54,9 +61,10 @@ export function host({claim = null, submit = () => Promise.resolve({text:claim.f
       }
       if (argv[1] === 'binding') {
         const request = JSON.parse(options.stdin);
-        return success({operation_id:request.command.op_id,session_id:ids.session,revision:2,data:argv[2] === 'connect'
+        if (argv.includes('--replay-only')) return success(savedConnects.get(request.command.op_id) ?? null);
+        return reply(argv,options,success({operation_id:request.command.op_id,session_id:ids.session,revision:2,data:argv[2] === 'connect'
           ? {kind:'binding_connect',binding_id:ids.binding,generation:ids.generation,capabilities:capabilities(),setup_instruction:'Use published Ariadne domain commands.'}
-          : {kind:'binding_state',binding_id:ids.binding,generation:ids.generation,dispatch_state:'disconnected',owner_paused:false,pause_reason:null,connection_state:'disconnected'}});
+          : {kind:'binding_state',binding_id:ids.binding,generation:ids.generation,dispatch_state:'disconnected',owner_paused:false,pause_reason:null,connection_state:'disconnected'}}));
       }
       if (argv[2] === 'connection-status') return success(status);
       if (argv[2] === 'announce') {

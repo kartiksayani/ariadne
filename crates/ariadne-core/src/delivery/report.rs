@@ -157,6 +157,7 @@ impl DeliveryService<'_> {
                     blocking_input_ids: vec![],
                     dispatch_must_pause: true,
                     partial_removal: None,
+                    connected_session_name: None,
                 }));
                 Err(e.into())
             }

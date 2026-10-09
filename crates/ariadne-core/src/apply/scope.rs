@@ -185,6 +185,7 @@ pub(super) fn reason(context: &AgentContext, reason: BarrierReason) -> Box<Error
         blocking_input_ids: vec![],
         dispatch_must_pause: false,
         partial_removal: None,
+        connected_session_name: None,
     })
 }
 

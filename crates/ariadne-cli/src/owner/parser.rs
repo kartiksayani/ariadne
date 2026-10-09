@@ -4,6 +4,7 @@ use std::io::Read;
 pub(super) enum Request {
     Query(OwnerQueryRequest),
     Mutation(OwnerMutationRequest),
+    ReplayConnect(OwnerMutationRequest),
 }
 
 pub(super) fn invalid(message: &str) -> CoreError {
@@ -21,12 +22,19 @@ pub(super) fn parse(args: &[&str], input: &mut dyn Read) -> Result<Request, Core
     let command = command(noun, verb).ok_or_else(|| invalid("Unknown owner command."))?;
     let mut stdin = false;
     let mut json = false;
+    let mut replay_only = false;
     for flag in rest.iter() {
         match *flag {
             "--json-stdin" if !stdin => stdin = true,
             "--json" if !json => json = true,
+            "--replay-only" if !replay_only => replay_only = true,
             _ => return Err(invalid("Unknown or repeated owner flag.")),
         }
+    }
+    if replay_only && (command != "binding_connect" || !stdin) {
+        return Err(invalid(
+            "--replay-only requires binding connect --json-stdin.",
+        ));
     }
     let request = if stdin {
         let bytes = read_stdin(input)?;
@@ -47,7 +55,11 @@ pub(super) fn parse(args: &[&str], input: &mut dyn Read) -> Result<Request, Core
                     "CLI command differs from the canonical command tag.",
                 ));
             }
-            Request::Mutation(request)
+            if replay_only {
+                Request::ReplayConnect(request)
+            } else {
+                Request::Mutation(request)
+            }
         }
     } else {
         let request = match command {
