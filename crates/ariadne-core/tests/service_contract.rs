@@ -939,8 +939,16 @@ fn owner_transport_routes_are_required_once_and_never_silently_overridden() {
         };
         assert!(wrapper.validate_wire().is_err());
     }
-    let command: OwnerCommand =
-        serde_json::from_value(inventory["owner_commands"][12].clone()).unwrap();
+    let command: OwnerCommand = serde_json::from_value(
+        inventory["owner_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|wire| wire["command"] == "topic_continue")
+            .expect("topic_continue is in the owner command inventory")
+            .clone(),
+    )
+    .unwrap();
     let contradictory = OwnerMutationRequest {
         session: Some(SessionRef {
             project_id: session.project_id.clone(),
@@ -953,7 +961,13 @@ fn owner_transport_routes_are_required_once_and_never_silently_overridden() {
         CoreErrorCode::BindingMismatch
     );
     assert!(serde_json::from_value::<QueryRequest>(json!({"command":"session_get","params":{"project_id":routing.project_id,"session_id":routing.session_id}})).is_err());
-    let mut old_submit = inventory["owner_commands"][5].clone();
+    let mut old_submit = inventory["owner_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|wire| wire["command"] == "input_submit")
+        .expect("input_submit is in the owner command inventory")
+        .clone();
     old_submit["params"]["session_id"] = json!(session.session_id);
     assert!(serde_json::from_value::<OwnerCommand>(old_submit).is_err());
 }

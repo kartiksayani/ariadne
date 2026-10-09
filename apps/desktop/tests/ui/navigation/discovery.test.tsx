@@ -50,7 +50,7 @@ function setup() {
         throw new Error(`Unexpected mutation ${name}`);
       }
       const data = name === 'preferences_get' ? preferences : name === 'project_list' ? { projects, counts: projects.items[0].counts }
-        : { sessions, counts: sessions.items[0].counts, active_total: 9, closed_total: 3 };
+        : { sessions, counts: sessions.items[0].counts, active_total: 9, closed_total: 3, archived_total: 0 };
       return { api_version: 1, ok: true, data: { kind: name, data } } as T;
     },
   };

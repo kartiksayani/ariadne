@@ -174,6 +174,11 @@ pub fn capture(
         })
         .collect();
     for summary in summaries {
+        // Archived sessions remain in the inventory checks, but never offer a
+        // tray target or a paused-binding note for work the owner put away.
+        if summary.archived_at.is_some() {
+            continue;
+        }
         let project = projects.get(&summary.project_id).ok_or_else(inconsistent)?;
         let session_label = session_label(summary.name.as_deref(), summary.active_binding.as_ref());
         if let Some(binding) = &summary.active_binding {
@@ -335,6 +340,48 @@ fn item_order(a: &ItemRef, b: &ItemRef) -> std::cmp::Ordering {
 #[cfg(test)]
 mod label_tests {
     use super::*;
+
+    #[test]
+    fn archived_sessions_have_no_tray_targets_or_binding_notes() {
+        let mut projects: Page<ProjectSummary> = serde_json::from_str(include_str!(
+            "../../../../../../fixtures/domain/projections/projects.json"
+        ))
+        .unwrap();
+        let mut sessions: Page<SessionSummary> = serde_json::from_str(include_str!(
+            "../../../../../../fixtures/domain/projections/sessions.json"
+        ))
+        .unwrap();
+        projects.items.truncate(1);
+        sessions.items.truncate(1);
+        let mut counts = projects.items[0].counts.clone();
+        counts.waiting_unanswered = NonnegativeSafeInteger::new(0).unwrap();
+        projects.items[0].counts = counts.clone();
+        sessions.items[0].archived_at = Some(UtcMillis::new("2026-10-09T00:00:00.000Z").unwrap());
+        sessions.items[0].state = SessionState::Closed;
+        sessions.items[0]
+            .active_binding
+            .as_mut()
+            .unwrap()
+            .owner_paused = true;
+        let captured = capture(|request| match request.request {
+            QueryRequest::ProjectList(_) => Ok(QueryResult::ProjectList(ProjectListResult {
+                projects: projects.clone(),
+                counts: counts.clone(),
+            })),
+            QueryRequest::SessionList(_) => Ok(QueryResult::SessionList(SessionListResult {
+                sessions: sessions.clone(),
+                active_total: NonnegativeSafeInteger::new(0).unwrap(),
+                closed_total: NonnegativeSafeInteger::new(0).unwrap(),
+                archived_total: NonnegativeSafeInteger::new(1).unwrap(),
+                counts: counts.clone(),
+            })),
+            _ => panic!("Archived sessions do not need a tray snapshot"),
+        })
+        .unwrap();
+        assert!(captured.rows.is_empty());
+        assert!(captured.labels.is_empty());
+        assert!(captured.diagnostics.is_empty());
+    }
 
     fn binding() -> BindingSummary {
         let page: Page<SessionSummary> = serde_json::from_str(include_str!(

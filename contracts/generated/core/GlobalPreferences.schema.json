@@ -38,6 +38,13 @@
     "selected_navigation": {
       "$ref": "#/$defs/NavigationSelection"
     },
+    "session_archive_expanded_project_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UuidV4"
+      },
+      "maxItems": 256
+    },
     "text_scale": {
       "type": "integer",
       "enum": [

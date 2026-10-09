@@ -6,7 +6,6 @@
 // docked under it (quick replies above a reply box that grows as you type).
 import { useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
-import { plainFailure } from '../../data/plain';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { sessionActionsFor } from '../../components/bindings/actions';
 import { PausedNote } from '../../components/bindings/DispatchChip';
@@ -18,7 +17,7 @@ import { StuckNote } from '../answer/StuckNote';
 import { NotSentLine } from '../answer/NotSentLine';
 import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain } from '../answer/held';
 import { useGrow } from '../answer/useGrow';
-import { AnswerSlot, changedText } from './AnswerSlot';
+import { AnswerSlot, answerSlotError, changedText } from './AnswerSlot';
 import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, singleParagraph, useProjectFile } from '../shared/MarkdownText';
 import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
@@ -185,11 +184,13 @@ function ItemLink({ link }: { readonly link: LinkView }) {
 
 export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
+  const item = session?.items[itemId], topic = item ? session?.topics[item.topic_id] : undefined;
+  const archived = session?.archived_at != null || topic?.archived_at != null;
   const submit = useDetailSubmit(drafts, store, itemId);
   const draftState = useOwnerDrafts(drafts);
   // An attempted or failed answer stays reachable here after the item stops waiting.
   const retained = session && draftState.ready ? drafts.find({ project_id: session.project_id, session_id: session.id }, itemId, 'answer') : undefined;
-  const retainedAnswer = !!(retained?.uncertain || retained?.error);
+  const retainedAnswer = !archived && !!(retained?.uncertain || retained?.error);
   const [mode, setMode] = useState<OpenMode | null>(null);
   const [focusBox, setFocusBox] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -209,7 +210,6 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
     replyDraft: mode === 'reply' || submit.written.length > 0, hiddenItemIds }) : null;
-  const item = session?.items[itemId];
   const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
   // boxes (drop reason, follow-up on a finished item) open on press.
@@ -468,7 +468,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </button><span className="detail-hint">Mark {STATUS[ackTo].label}</span>
     </section>}
     {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
-    {submit.error && !((model.answer || retainedAnswer) && draftState.error && submit.error === plainFailure(draftState.error))
+    {submit.error && !((model.answer || retainedAnswer) && submit.error === answerSlotError(draftState, retained))
       && <p className="detail-error" role="alert">{submit.error}</p>}
     {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
       {sectionLabel(model.open.title)}

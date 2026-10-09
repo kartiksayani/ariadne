@@ -503,6 +503,7 @@ fn duplicate_selected_identity_stops_with_both_paths_and_opaque_tuple_delimiters
                 Ok::<_, ()>(SavedReceiptData::SessionLifecycle {
                     state: session.state.clone(),
                     closed_at: session.closed_at.clone(),
+                    archived_at: None,
                     cancelled_input_ids: vec![],
                 })
             },
@@ -521,6 +522,7 @@ fn duplicate_selected_identity_stops_with_both_paths_and_opaque_tuple_delimiters
                 Ok::<_, ()>(SavedReceiptData::SessionLifecycle {
                     state: session.state.clone(),
                     closed_at: session.closed_at.clone(),
+                    archived_at: None,
                     cancelled_input_ids: vec![],
                 })
             },

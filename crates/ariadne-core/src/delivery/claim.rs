@@ -60,12 +60,16 @@ impl DeliveryService<'_> {
                         core(CoreErrorCode::StaleGeneration, "Claim generation changed").into(),
                     );
                 }
-                if session.state != SessionState::Active {
+                if session.state != SessionState::Active || session.archived_at.is_some() {
                     return Err(barrier(
                         session,
                         &request.binding_id,
                         CoreErrorCode::InvalidTransition,
-                        "The owner closed this session; reopening it resumes dispatch",
+                        if session.archived_at.is_some() {
+                            "The owner archived this session; restore it, then reopen it to resume sending"
+                        } else {
+                            "The owner closed this session; reopening it resumes dispatch"
+                        },
                         BarrierReason::SessionClosed,
                     )
                     .into());

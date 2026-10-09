@@ -153,10 +153,11 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `binding_connect` | op_id, project_id, adapter_id, external_session_id, endpoint config, existing_session_id? | validated session+binding IDs, generation, capabilities, setup instruction |
 | `binding_pause/resume/disconnect` | binding_id, expected_generation, op_id | persisted dispatch state; disconnect does not kill host |
 | `input_submit` | session_id, binding_id, item_id or topic_id, kind, text, selected_option_id?, expected_question_revision?, supersedes_answer_id? | atomically owner Message + Answer if applicable + Input; status unchanged |
-| `ack` | session ref, item_id, expected_revision (item), op_id | owner only; Open/InProgress moves to `ack_to` and clears it, with owner activity and status history; no input or delivery; refuses absent target, terminal state or unanswered ask (ADR-0093) |
+| `ack` | session ref, item_id, expected_revision (item), op_id | owner only; Open/InProgress moves to `ack_to` and clears it, with owner activity and status history; no input or delivery; refuses absent target, terminal state, unanswered ask or archived session; restore and reopen before Ack (ADR-0093, ADR-0095) |
 | `input_cancel` | queued, in-flight or needs-attention input_id, expected_revision, op_id, optional purpose (`delete` default, or `edit`: queued only) | abandons the input (attempts sealed, late facts ignored); preserve history, persist cancelled state + receipt |
 | `input_resolve` | input_id, attempt_id, decision (retry_unexecuted/resend/skip/request_result_repair/confirm_evidence/accept_result), reason (optional), expected_revision, op_id | queue recovery; decisions in queue spec; settling the last input needing attention resumes dispatch unless owner-paused; `accept_result` needs only a committed result (ADR-0088) |
 | `topic_archive/restore` | topic_id, expected_revision, op_id | lifecycle only; archive cancels the topic's unsent inputs and lists `cancelled_input_ids` (ADR-0090) |
+| `session_archive/restore` | session_id (route), expected_revision, op_id; restore accepts optional `reopen` (default false) | archive closes safely, pauses the binding and records `archived_at`; restore leaves Closed; Undo uses `reopen: true` to restore Active and sending atomically; receipt lists cancelled inputs and archive marker; reads stay available, owner input requires Restore then Reopen (ADR-0095) |
 | `session_label_set` | session_id (route), name\|null, description\|null, op_id | owner only; names a session in the owner's words. Both fields are replaced together; trimmed, blank clears. Name at most 60 characters, description at most 200 and one line. Allowed on active and closed sessions, refused (`not_found`) on a removed one. Does not touch `updated_at`; receipt `session_label {name, description}` carries the stored values (ADR-0091) |
 | `session_close/reopen` | session_id, expected_revision, op_id | close is one step: owner-pauses the binding, cancels queued and abandons in-flight/needs-attention inputs (receipt `cancelled_input_ids`), leaves items as they are; never terminate host; reopen clears the owner pause (ADR-0088) |
 | `topic_continue_preview` | source session/topic, target session | snapshot revision/hash, mapping preview, full summary, readiness |
@@ -279,7 +280,10 @@ complete|partial,unavailable_session_ids}`. Project/global counts aggregate
 accessible registered sessions; task Waiting/tray use waiting_unanswered,
 not raw waiting status. Topic and selected-session chips count nonarchived items
 before local search/filter; footer also shows visible vs total. Archived view has
-its own topic counts. All-sessions tabs use active/closed counts separately.
+its own topic counts. All-sessions lists use active/closed counts separately,
+excluding archived sessions, with a separate `archived_total`. Project/global
+counts and target choices exclude archived sessions; unfiltered session lists
+and direct reads retain them. `SessionSummary.archived_at` is optional (ADR-0095).
 Unknown inaccessible data yields partial, never zero. Sent includes generic
 requests as well as answers. Its entries preserve the original target snapshot.
 
@@ -786,8 +790,10 @@ input still requires an active Ariadne session and a valid target binding; if
 that session is closed, offer Reopen session first. Continue requires different
 source/target sessions and an active target with a valid binding. An unavailable
 host can receive a durable queued continuation, labelled queued, but an unknown
-or ambiguous binding cannot. Source may be closed or topic archived because
-copying is read-only there. No provider is launched by either action.
+or ambiguous binding cannot. Source may be closed or its topic archived because
+copying is read-only there, but an archived source session must be restored first:
+preview reports `source_archived`, and continuation refuses before target mutation.
+No provider is launched by either action.
 
 Native `HistoryActionService` returns canonical lifecycle blockers and saved
 receipts. Exact operation replay precedes mutable guards. Continue preview binds

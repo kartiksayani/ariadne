@@ -6,7 +6,7 @@ import type { RevealedItem } from './data/routes';
 import { plainFailure } from './data/plain';
 import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
-import { OwnerDraftStore } from './state/drafts/store';
+import { OwnerDraftStore, useOwnerDrafts } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationGraph } from './ui/graph/NavigationGraph';
@@ -194,6 +194,8 @@ function Workspace({ application }: { application: Application }) {
   const adapterChoices = useMemo(() => adapters.map(choice => choice.adapter_id === 'codex' && codexSocket ? { ...choice, default_socket_path: codexSocket } : choice), [codexSocket]);
   const store: SessionStore | null = navigation.selectedSession();
   const sessionState = useSyncExternalStore(store?.subscribe ?? noSubscription, store?.getSnapshot ?? noSession, store?.getSnapshot ?? noSession);
+  const draftState = useOwnerDrafts(application.drafts);
+  const ownerReady = draftState.ready && sessionState?.status === 'ready' && !sessionState.error && !!sessionState.snapshot;
   const route = sessionState?.route, key = route ? routeKey(route) : '';
   const earlier = route ? earlierAgent(route, state.sessions?.sessions.items ?? []) : null;
   const preferences = state.preferences, view = preferences?.sessions.find(value => route && routeKey(value.session) === key);
@@ -213,10 +215,10 @@ function Workspace({ application }: { application: Application }) {
   const [searchEdit, setSearchEdit] = useState<{ route: string; text: string; attempted: boolean } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   useEffect(() => {
-    if (sessionState?.status === 'ready' && !sessionState.error) {
+    if (ownerReady) {
       setRouteError(error => error === "Ariadne is still loading this session's latest changes. Try again." ? null : error);
     }
-  }, [sessionState?.status, sessionState?.error]);
+  }, [ownerReady, sessionState?.snapshot]);
   const graph = graphModes[key] ?? false;
   const currentReveal = localReveal?.store === store ? localReveal : state.reveal?.store === store ? state.reveal : null;
   const treeReveal = currentReveal === dismissedReveal ? null : currentReveal;

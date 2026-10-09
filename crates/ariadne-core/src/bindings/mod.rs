@@ -156,6 +156,13 @@ impl<'a> BindingService<'a> {
                 ),
                 None => selected,
             };
+            if target.is_some_and(|located| located.session.archived_at.is_some()) {
+                return Err(core(
+                    CoreErrorCode::InvalidTransition,
+                    "The selected host route belongs to an archived session",
+                    "Restore and reopen that session before reconnecting it.",
+                ));
+            }
             let mut occupied = occupied_ids(&sessions);
             let saved = setup.with_store(&params.project_id, |store| {
                 if let Some(located) = target {
@@ -254,7 +261,7 @@ impl BindingService<'_> {
                         "State command does not target the selected binding",
                         "Use the session's current selected binding."));
                 }
-                let closed = session.state != SessionState::Active;
+                let closed = session.state != SessionState::Active || session.archived_at.is_some();
                 let needs_attention = session.inputs.0.values().any(|input| {
                     input.binding_id == params.binding_id && input.state == InputState::NeedsAttention
                 });
@@ -272,7 +279,11 @@ impl BindingService<'_> {
                         if closed || binding.pause_reason.is_some() || needs_attention {
                             return Err(core(CoreErrorCode::InvalidTransition,
                                 "Resume requires an active session with recovery blockers resolved",
-                                "Resolve the recovery blocker or explicitly reopen the session first."));
+                                if session.archived_at.is_some() {
+                                    "Restore the archived session, then reopen it before resuming."
+                                } else {
+                                    "Resolve the recovery blocker or explicitly reopen the session first."
+                                }));
                         }
                         if binding.connection_state != ConnectionState::Connected {
                             return Err(core(CoreErrorCode::HostUnreachable,
@@ -562,6 +573,7 @@ fn new_session(id: UuidV4, project_id: UuidV4, binding: Binding, at: &UtcMillis)
         updated_at: at.clone(),
         revision: one,
         closed_at: None,
+        archived_at: None,
         counters: SessionCounters {
             next_root: one,
             next_topic_order: one,
@@ -593,7 +605,7 @@ fn connect_existing(
     at: &UtcMillis,
     operation_id: &UuidV4,
 ) -> Result<SavedReceiptData, BindingError> {
-    if session.state != SessionState::Active {
+    if session.state != SessionState::Active || session.archived_at.is_some() {
         return Err(core(
             CoreErrorCode::InvalidTransition,
             "A closed session cannot reconnect or rebind",

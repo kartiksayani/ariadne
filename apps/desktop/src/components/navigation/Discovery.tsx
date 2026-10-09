@@ -1,15 +1,25 @@
 import type { DesktopDiscoveryCandidate } from '../../generated/core';
 import { candidateIdentity, useDiscovery, type DiscoveryController } from '../../data/discovery';
+import type { Immutable } from '../../data';
+import type { SessionSummary } from '../../generated/domain/models';
+
+/** Discovery can outlive an archive; the registered session remains authoritative. */
+export function archivedCandidate(candidate: DesktopDiscoveryCandidate, sessions: readonly Immutable<SessionSummary>[]): boolean {
+  return sessions.some(session => session.archived_at != null && (candidate.session
+    ? candidate.session.project_id === session.project_id && candidate.session.session_id === session.session_id
+    : candidate.adapter_id === session.active_binding?.adapter_id && candidate.external_session_id === session.active_binding.external_session_id));
+}
 
 function untestedNotice(candidate: DesktopDiscoveryCandidate) {
   const product = candidate.adapter_id === 'codex' ? 'Codex' : 'Claude Code';
   return `This ${product} version is newer than the one Ariadne was tested with. It should work, but has not been verified.`;
 }
 
-export function CandidateList({ controller, root, select, selected }: { controller: DiscoveryController; root?: string;
+export function CandidateList({ controller, root, select, selected, sessions = [] }: { controller: DiscoveryController; root?: string;
+  sessions?: readonly Immutable<SessionSummary>[];
   select: (candidate: DesktopDiscoveryCandidate) => void; selected?: string | null }) {
   const state = useDiscovery(controller);
-  const candidates = state.snapshot?.candidates.filter(candidate => !root || candidate.cwd === root) ?? [];
+  const candidates = state.snapshot?.candidates.filter(candidate => (!root || candidate.cwd === root) && !archivedCandidate(candidate, sessions)) ?? [];
   return <div className="nav-discovery">
     <p>Host facts are advisory. Loaded means daemon membership; freshness does not prove execution readiness.</p>
     {state.error && <p role="alert">{state.error}</p>}

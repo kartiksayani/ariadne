@@ -53,6 +53,11 @@ describe('graph model', () => {
     session.inputs[input.id] = input;
     const counts = build({ session }).topics[0].counts;
     expect(counts).toBe('1 waiting on you · 1 waiting on agent · 1 to ack · 1 open · 1 in progress · 2 closed');
+    session.archived_at = session.updated_at;
+    expect(build({ session }).topics[0].counts).not.toContain('to ack');
+    expect(build({ session }).nodes.get(ack.id)!.ack).toBeNull();
+    session.archived_at = null;
+    expect(build({ session }).topics[0].counts).toContain('1 to ack');
     ack.ack_to = null;
     expect(build({ session }).topics[0].counts).not.toContain('to ack');
   });

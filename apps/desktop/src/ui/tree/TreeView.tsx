@@ -278,7 +278,8 @@ export function TreeView(props: TreeViewProps) {
   const options = answerRow?.item.options ?? [];
   const pickedIndex = entry?.draft.selected_option_id ? options.findIndex(option => option.id === entry.draft.selected_option_id) : -1;
   const chosen = pickedIndex >= 0 ? pickedIndex : options.findIndex(option => option.recommended);
-  const blocked = session?.state !== 'active' ? 'This session is closed. Reopen it to answer.'
+  const blocked = session?.archived_at != null ? 'This session is archived. Restore it, then reopen it to answer.'
+    : session?.state !== 'active' ? 'This session is closed. Reopen it to answer.'
     : bar?.connection === 'reconnecting' ? reconnectingNote(bar.agent) : null;
   const focusRow = (key: string) => { setFocusKey(key); elements.current.get(key)?.focus({ preventScroll: true }); };
   const send = (change: { selected_option_id: string | null; text: string }) => {
@@ -346,7 +347,14 @@ export function TreeView(props: TreeViewProps) {
       select(row.item.id); return true;
     }),
     answer: onRow((row, _index, _intent, event) => {
-      if (row.kind === 'item' && session && ackTarget(session, row.item)) { if (!event.repeat) void ack.run(row.item.id); return true; }
+      if (row.kind === 'item' && session && ackTarget(session, row.item)) {
+        if (!event.repeat) {
+          if (viewBusy) noticeStore.push({ id: 'tree-ack-view-saving', icon: 'ph ph-warning-circle', dismissible: true,
+            text: 'Another view change is being saved. Wait for it, then try Ack again.' });
+          else void ack.run(row.item.id);
+        }
+        return true;
+      }
       if (answerable(row)) { if (answering === row.key) setAnswering(null); else openAnswer(row.key); return true; }
       const oldest = session ? oldestWaiting(session) : null, target = oldest ? latest.current.rows.find(value => value.key === oldest.id) : undefined;
       if (!answerable(target)) return false;

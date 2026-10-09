@@ -36,7 +36,7 @@ function projectPage(items = [fixture().project], cursor: QueryCursor | null = n
     projects: { items, next_cursor: cursor, snapshot_revision: revision } } });
 }
 function sessionPage(items = [fixture().summary], cursor: QueryCursor | null = null, revision = 21): QueryEnvelope {
-  return envelope({ kind: 'session_list', data: { counts: structuredClone(counts), active_total: 1, closed_total: 0,
+  return envelope({ kind: 'session_list', data: { counts: structuredClone(counts), active_total: 1, closed_total: 0, archived_total: 0,
     sessions: { items, next_cursor: cursor, snapshot_revision: revision } } });
 }
 function loaded(session = mutableSession()): QueryEnvelope { return envelope({ kind: 'session_get', data: { session, freshness: 'fresh' } }); }

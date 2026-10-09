@@ -151,10 +151,20 @@ fn copy(
     allocate: &mut impl FnMut() -> UuidV4,
     at: &UtcMillis,
 ) -> Result<SavedReceiptData, CoreError> {
-    if target.state != SessionState::Active {
+    if source.archived_at.is_some() {
         return Err(core(
             CoreErrorCode::InvalidTransition,
-            "Explicitly reopen the target session before continuing a topic",
+            "Restore the archived source session before continuing a topic",
+        ));
+    }
+    if target.state != SessionState::Active || target.archived_at.is_some() {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            if target.archived_at.is_some() {
+                "Restore the archived target session, then reopen it before continuing a topic"
+            } else {
+                "Explicitly reopen the target session before continuing a topic"
+            },
         ));
     }
     let binding = preview::selected(target)

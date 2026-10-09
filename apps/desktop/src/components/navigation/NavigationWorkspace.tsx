@@ -114,7 +114,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   if (session.status === 'loading' && !session.snapshot) return <LoadingSession />;
   return <>
     {session.error && <p role="alert">{plainFailure(session.error)}</p>}
-    {session.snapshot?.session.state === 'closed' && <p className="nav-banner">Closed session · opening this tab does not resume dispatch.</p>}
+    {session.snapshot?.session.state === 'closed' && <p className="nav-banner">{session.snapshot.session.archived_at != null ? 'Archived session · restore it, then reopen it to resume sending.' : 'Closed session · opening this tab does not resume dispatch.'}</p>}
     {matchingReveal?.kind === 'missing_item' && <p className="nav-banner" role="status">{matchingReveal.banner}</p>}
     {renderSession({ store, preferences, temporaryExpandedItemIds: matchingReveal?.kind === 'item' ? matchingReveal.temporaryExpandedItemIds : [],
       missingItemBanner: matchingReveal?.kind === 'missing_item' ? matchingReveal.banner : null })}
@@ -160,12 +160,17 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   };
   const openViews: readonly Immutable<SessionPreferences>[] = state.preferences?.sessions.filter(view => view.tab_open && !hidden.session(view.session))
     .sort((a, b) => a.tab_order - b.tab_order || key(a.session).localeCompare(key(b.session))) ?? [];
+  const archivedTab = (view: Immutable<SessionPreferences>) => {
+    const summary = sessions.find(value => key(value) === key(view.session));
+    return summary ? summary.archived_at != null : store.opened.get(view.session)?.getSnapshot().snapshot?.session.archived_at != null;
+  };
+  const unarchivedViews = openViews.filter(view => !archivedTab(view));
   const projectNameOf = (projectId: string) => { const project = projects.find(value => value.project_id === projectId); return project ? projectName(project) : 'Unavailable project'; };
   const at = now();
   const tabs = tabModels({ selection: selection.kind === 'project' ? 'projects' : selection.kind, projectCount: projects.length,
     sessions: openViews.map(view => {
       const summary = sessions.find(value => key(value) === key(view.session));
-      return { id: key(view.session), project: projectNameOf(view.session.project_id), agent: summary?.active_binding ? agentName(summary.active_binding.adapter_id) : null,
+      return { id: key(view.session), archived: archivedTab(view), project: projectNameOf(view.session.project_id), agent: summary?.active_binding ? agentName(summary.active_binding.adapter_id) : null,
         where: summary?.active_binding?.host_location ?? null, naming: summary,
         createdAt: summary ? Date.parse(summary.created_at) : null, endedAt: summary ? Date.parse(summary.closed_at ?? summary.updated_at) : null, running: summary ? running(summary) : false,
         on: selection.kind === 'session' && key(selection.session) === key(view.session) };
@@ -177,7 +182,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   };
   const closeTab = (id: string) => { const view = openViews.find(value => key(value.session) === id); if (view) void store.closeTab(view.session); };
   const headerInput: HeaderInput = selection.kind === 'all_sessions'
-    ? { kind: 'all_sessions', openTabs: openViews.length, openProjects: new Set(openViews.map(view => view.session.project_id)).size }
+    ? { kind: 'all_sessions', openTabs: unarchivedViews.length, openProjects: new Set(unarchivedViews.map(view => view.session.project_id)).size }
     : selection.kind === 'session' ? { kind: 'session', facts: session ?? null, fallbackAgent: selectedSession?.active_binding ? agentName(selectedSession.active_binding.adapter_id) : null }
       : { kind: 'projects', projectCount: projects.length, runningAgents: sessions.filter(running).length, projectPath: selectedProject?.canonical_root ?? null };
   const global = state.projects?.counts;
@@ -189,6 +194,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   // and goes with its session: dismissed, removed (or pending removal), or another page shown.
   const setup = state.setup;
   const setupCard = setup?.data.kind === 'binding_connect' && selectedProject && selectedProject.project_id === state.setupProjectId
+    && !sessions.some(summary => summary.session_id === setup.session_id && summary.archived_at != null)
     && !hidden.session({ project_id: selectedProject.project_id, session_id: setup.session_id })
     ? <SetupCard setup={setup} adapterId={state.setupAdapterId} onDismiss={() => store.dismissSetup()} /> : null;
   const openTabs = new Set(openViews.map(view => key(view.session)));

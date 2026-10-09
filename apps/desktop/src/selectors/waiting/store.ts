@@ -56,7 +56,7 @@ async function catalogue(service: RendererService, stopped: () => boolean): Prom
     const page = await service.query({ session: null,
       request: { command: 'session_list', params: { project_id: null, state: null, cursor, limit: 100 } } });
     if (stopped()) throw new ServiceFailure('transport');
-    const metadata = JSON.stringify([page.counts, page.active_total, page.closed_total]);
+    const metadata = JSON.stringify([page.counts, page.active_total, page.closed_total, page.archived_total]);
     if (sessionMetadata !== undefined && metadata !== sessionMetadata) throw new ServiceFailure('invalid_response');
     sessionMetadata = metadata; result = page;
     return page.sessions;
@@ -146,6 +146,7 @@ export class WaitingStore {
         const capturedStores = new Map<string, SessionStore>();
         // Sequential registered reads bound concurrent IO without truncating the catalogue.
         for (const summary of capture.sessions) {
+          if (summary.archived_at != null) continue;
           const project = projects.get(summary.project_id);
           if (!project) throw new ServiceFailure('invalid_response');
           const store = this.opened.open({ project_id: summary.project_id, session_id: summary.session_id });

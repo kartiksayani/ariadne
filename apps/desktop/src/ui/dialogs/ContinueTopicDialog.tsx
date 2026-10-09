@@ -40,7 +40,7 @@ export interface ContinueTarget { readonly route: SessionRef; readonly label: st
 /** The sessions a topic of `source` can continue in: the other active sessions, those of its own project first. */
 export function continueTargets(source: SessionRef, sessions: readonly Immutable<SessionSummary>[]): ContinueTarget[] {
   const own = (session: Immutable<SessionSummary>) => session.project_id === source.project_id;
-  return sessions.filter(session => session.state === 'active' && !sameRoute(session, source))
+  return sessions.filter(session => session.archived_at == null && session.state === 'active' && !sameRoute(session, source))
     .sort((a, b) => Number(own(b)) - Number(own(a)))
     .map(session => {
       const binding = session.active_binding;
@@ -79,6 +79,7 @@ const agentOf = (session: Immutable<Session> | undefined) => {
   return binding ? agentName(binding.adapter_id) : 'the agent';
 };
 const blockedWords: Record<string, string> = {
+  source_archived: 'the source session is archived; restore it before continuing',
   target_closed: 'that session is closed',
   binding_unknown: 'Ariadne can’t tell which agent is connected',
   binding_ambiguous: 'more than one agent is connected',

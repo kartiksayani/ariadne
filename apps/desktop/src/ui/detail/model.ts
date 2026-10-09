@@ -209,7 +209,8 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const created = byId.get(item.created_message_id);
   const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
-  const readOnly = session.state !== 'active' || !topic || topic.archived_at !== null;
+  const archived = session.archived_at != null || topic?.archived_at != null;
+  const readOnly = archived || session.state !== 'active' || !topic;
   const offline = connectionOf(binding, presence) === 'reconnecting';
   const sub = submission(session, item, saving);
   // The latest unsettled message to this item, or a stopped one needing a decision. A held one (written for an older question)
@@ -267,14 +268,14 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     if (offline && open) open = { ...open, hint: `Reconnecting to ${agent}. These come back with the connection.` };
   }
 
-  const answerable = status === 'waiting' && !pending;
+  const answerable = !archived && status === 'waiting' && !pending;
   // The answer slot hides while its input is pending; a follow-up reply still queues behind it.
   // A reply being written stays when the hold clears, next to the answer box. A waiting item's words go out as a reply
   // (`sentAs`), so the button says reply: "follow-up" is only ever the kind sent on a finished item.
   const followUp = !readOnly && status === 'waiting' && (pending || replyDraft) ? { label: `Add a ${sentAs(status)}`,
     hint: pending ? 'Queued behind the answer in flight' : 'Your reply is kept. Send it, or answer below.', disabled: offline } : null;
   const recommended = item.options.findIndex(option => option.recommended);
-  const blocked = session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
+  const blocked = session.archived_at != null ? 'This session is archived. Restore it, then reopen it to answer.' : session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
     : offline ? reconnectingNote(agent) : null;
 
   const rounds = Object.values(session.rounds).filter((round): round is Immutable<Round> => !!round && round.item_id === item.id).sort((a, b) => a.ordinal - b.ordinal);

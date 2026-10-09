@@ -81,6 +81,7 @@ fn owner_receipt_checks_original_operation_route_and_variant_without_new_replay_
     saved.data = SavedReceiptData::SessionLifecycle {
         state: SessionState::Closed,
         closed_at: None,
+        archived_at: None,
         cancelled_input_ids: vec![],
     };
     assert!(validate_owner_receipt(&request, &receipt).is_err());

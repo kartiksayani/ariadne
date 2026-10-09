@@ -418,3 +418,141 @@ fn legacy_open_ask_without_a_round_can_receive_a_reply_then_ack() {
         "Ack preserves the queued reply and sends nothing new"
     );
 }
+
+#[test]
+fn session_archive_preserves_ack_proposals_and_refuses_ack_until_restored_and_reopened() {
+    let source = proposed(AckTarget::Done);
+    let key = ItemRef::new("1").unwrap();
+    let setup = Setup::new(&source);
+    let archive = OwnerCommand::SessionArchive {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(400),
+        params: SessionLifecycleParams {
+            expected_revision: source.revision,
+        },
+    };
+    let MutationReceipt::Session(receipt) =
+        setup.service().execute(&owner(), &archive, at()).unwrap()
+    else {
+        panic!("session receipt")
+    };
+    assert!(matches!(
+        receipt.data,
+        SavedReceiptData::SessionLifecycle {
+            ref cancelled_input_ids,
+            archived_at: Some(_),
+            ..
+        } if cancelled_input_ids.is_empty()
+    ));
+    let archived = setup.read();
+    assert_eq!(archived.items, source.items);
+    assert_eq!(archived.items.0[&key].ack_to, Some(AckTarget::Done));
+    let before = setup.bytes();
+    let error = refused(setup.service().acknowledge(
+        &owner(),
+        &command(archived.items.0[&key].revision.value()),
+        at(),
+        || panic!("archived Ack must not allocate a message"),
+    ));
+    assert_eq!(error.code, CoreErrorCode::InvalidTransition);
+    assert_eq!(
+        error.message,
+        "This session is archived. Restore it, then reopen it to acknowledge this item."
+    );
+    assert_eq!(setup.bytes(), before);
+    let restore = OwnerCommand::SessionRestore {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(401),
+        params: SessionRestoreParams {
+            expected_revision: archived.revision,
+            reopen: true,
+        },
+    };
+    setup.service().execute(&owner(), &restore, at()).unwrap();
+    setup
+        .service()
+        .acknowledge(&owner(), &command(1), at(), || id(301))
+        .unwrap();
+    assert_eq!(setup.read().items.0[&key].status, ItemStatus::Done);
+}
+
+#[test]
+fn archived_ack_items_leave_aggregate_counts_but_remain_in_the_catalogue() {
+    let source = proposed(AckTarget::Done);
+    let setup = Setup::new(&source);
+    let context = QueryContext::owner(OwnerContext::from_trusted_entrypoint(OwnerScope::Registry));
+    let query = ariadne_core::queries::QueryService::new(&setup.registry);
+    let sessions = QueryRequest::SessionList(SessionListRequest {
+        project_id: Some(id(1)),
+        state: None,
+        cursor: None,
+        limit: PageLimit::new(10).unwrap(),
+    });
+    let projects = QueryRequest::ProjectList(ProjectListRequest {
+        cursor: None,
+        limit: PageLimit::new(10).unwrap(),
+    });
+    let QueryResult::SessionList(before) = query.query(&context, &sessions).unwrap() else {
+        panic!("sessions")
+    };
+    assert!(before.counts.items_by_status.open.value() > 0);
+    assert!(before.counts.items_by_status.done.value() > 0);
+    assert_eq!(before.counts.waiting_unanswered.value(), 0);
+    setup
+        .service()
+        .execute(
+            &owner(),
+            &OwnerCommand::SessionArchive {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(400),
+                params: SessionLifecycleParams {
+                    expected_revision: source.revision,
+                },
+            },
+            at(),
+        )
+        .unwrap();
+    let QueryResult::SessionList(archived) = query.query(&context, &sessions).unwrap() else {
+        panic!("sessions")
+    };
+    assert_eq!(archived.sessions.items.len(), 1);
+    assert_eq!(archived.archived_total.value(), 1);
+    assert_eq!(archived.active_total.value(), 0);
+    assert_eq!(archived.closed_total.value(), 0);
+    assert!(archived.sessions.items[0].archived_at.is_some());
+    assert_eq!(
+        archived.sessions.items[0].counts.items_by_status.open, before.counts.items_by_status.open,
+        "archived session summaries retain their readable historical counts"
+    );
+    assert_eq!(archived.counts.items_by_status.open.value(), 0);
+    assert_eq!(archived.counts.items_by_status.done.value(), 0);
+    assert_eq!(archived.counts.waiting_unanswered.value(), 0);
+    let QueryResult::ProjectList(archived_projects) = query.query(&context, &projects).unwrap()
+    else {
+        panic!("projects")
+    };
+    assert_eq!(archived_projects.counts, archived.counts);
+    assert_eq!(archived_projects.projects.items[0].counts, archived.counts);
+    let current = setup.read();
+    setup
+        .service()
+        .execute(
+            &owner(),
+            &OwnerCommand::SessionRestore {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(401),
+                params: SessionRestoreParams {
+                    expected_revision: current.revision,
+                    reopen: false,
+                },
+            },
+            at(),
+        )
+        .unwrap();
+    let QueryResult::SessionList(restored) = query.query(&context, &sessions).unwrap() else {
+        panic!("sessions")
+    };
+    assert_eq!(restored.counts, before.counts);
+    assert_eq!(restored.closed_total.value(), 1);
+    assert_eq!(restored.archived_total.value(), 0);
+}

@@ -131,6 +131,7 @@ fn resolve(
         }
     } else {
         if session.state != SessionState::Active
+            || session.archived_at.is_some()
             || input.active_attempt_id.as_ref() != Some(&params.attempt_id)
             || binding.active_input_id.as_ref() != Some(&input.id)
             || attempt.sealed_at.is_some()

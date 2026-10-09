@@ -99,6 +99,7 @@ fn actor_scopes_share_operation_uuid_without_sharing_replay() {
             Ok(SavedReceiptData::SessionLifecycle {
                 state: session.state.clone(),
                 closed_at: session.closed_at.clone(),
+                archived_at: None,
                 cancelled_input_ids: vec![],
             })
         },
@@ -124,6 +125,7 @@ fn command_key_order_is_irrelevant_but_exact_text_and_revisions_are_part_of_dige
             Ok(SavedReceiptData::SessionLifecycle {
                 state: session.state.clone(),
                 closed_at: session.closed_at.clone(),
+                archived_at: None,
                 cancelled_input_ids: vec![],
             })
         });
@@ -164,6 +166,7 @@ fn routing_is_included_by_the_store_even_when_command_input_is_identical() {
                 Ok(SavedReceiptData::SessionLifecycle {
                     state: session.state.clone(),
                     closed_at: None,
+                    archived_at: None,
                     cancelled_input_ids: vec![],
                 })
             },
@@ -197,6 +200,7 @@ fn merged_history_validation_runs_on_both_live_and_candidate_snapshots() {
             Ok(SavedReceiptData::SessionLifecycle {
                 state: candidate.state.clone(),
                 closed_at: None,
+                archived_at: None,
                 cancelled_input_ids: vec![],
             })
         },
@@ -405,6 +409,7 @@ fn invalid_candidates_and_callback_errors_have_no_persistent_effects() {
             Ok(SavedReceiptData::SessionLifecycle {
                 state: candidate.state.clone(),
                 closed_at: None,
+                archived_at: None,
                 cancelled_input_ids: vec![],
             })
         },
@@ -440,6 +445,7 @@ fn transaction_bookkeeping_identity_and_old_receipts_cannot_be_changed_by_callba
                 Ok(SavedReceiptData::SessionLifecycle {
                     state: candidate.state.clone(),
                     closed_at: None,
+                    archived_at: None,
                     cancelled_input_ids: vec![],
                 })
             },
@@ -677,6 +683,7 @@ fn keyed_in_process_lock_wait_is_bounded_and_other_sessions_remain_available() {
                     Ok(SavedReceiptData::SessionLifecycle {
                         state: session.state.clone(),
                         closed_at: None,
+                        archived_at: None,
                         cancelled_input_ids: vec![],
                     })
                 },

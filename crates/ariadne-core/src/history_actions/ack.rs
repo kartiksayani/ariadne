@@ -12,6 +12,13 @@ pub(super) fn apply(
     let OwnerCommand::Ack { params, op_id, .. } = command else {
         unreachable!("validated Ack command")
     };
+    if session.archived_at.is_some() {
+        return Err(CoreError::new(
+            CoreErrorCode::InvalidTransition,
+            "This session is archived. Restore it, then reopen it to acknowledge this item.",
+            "Restore the session, then reopen it before acknowledging this item.",
+        ));
+    }
     let old = session
         .items
         .0

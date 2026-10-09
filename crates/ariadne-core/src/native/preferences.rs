@@ -169,6 +169,7 @@ fn defaults() -> PreferencesSnapshot {
             notification_preview: false,
             detail_width: None,
             waiting_collapsed: false,
+            session_archive_expanded_project_ids: vec![],
         },
         sessions: vec![],
         later: vec![],
@@ -298,6 +299,25 @@ fn validate(record: &Record) -> Result<(), CoreError> {
 fn layout_bounds(entry: &PreferencesPatchEntry) -> Result<(), CoreError> {
     match entry {
         PreferencesPatchEntry::SetGlobal { preferences } => {
+            if preferences.session_archive_expanded_project_ids.len()
+                > SESSION_ARCHIVE_EXPANSION_CAPACITY
+            {
+                return Err(errors::local(
+                    CoreErrorCode::CapacityExceeded,
+                    "Expanded session archive groups exceed the 256 entry bound",
+                ));
+            }
+            let mut projects = BTreeSet::new();
+            if !preferences
+                .session_archive_expanded_project_ids
+                .iter()
+                .all(|id| projects.insert(id))
+            {
+                return Err(errors::local(
+                    CoreErrorCode::InvalidArgument,
+                    "Duplicate expanded session archive project",
+                ));
+            }
             if !TEXT_SCALE_STEPS.contains(&preferences.text_scale) {
                 return Err(errors::local(
                     CoreErrorCode::InvalidArgument,

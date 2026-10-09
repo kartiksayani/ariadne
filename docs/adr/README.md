@@ -106,3 +106,7 @@ the owner's local Ack action for read-only work, with an agent-selected target.
 
 [ADR-0094](ADR-0094-item-links.md) adds optional related item declarations,
 bidirectional detail references and dashed links for the selected graph item.
+
+[ADR-0095](ADR-0095-session-archive.md) puts finished sessions in a remembered,
+folded Archived group, closes them safely, and restores them as Closed while
+keeping their history readable.

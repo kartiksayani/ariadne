@@ -609,6 +609,7 @@ mutations! {
     binding_pause => BindingPause, binding_resume => BindingResume, binding_disconnect => BindingDisconnect,
     input_submit => InputSubmit, input_cancel => InputCancel, input_resolve => InputResolve,
     topic_archive => TopicArchive, topic_restore => TopicRestore, session_close => SessionClose,
+    session_archive => SessionArchive, session_restore => SessionRestore,
     session_reopen => SessionReopen, topic_continue => TopicContinue, preferences_patch => PreferencesPatch,
     item_remove => ItemRemove, topic_remove => TopicRemove,
     session_remove => SessionRemove, project_remove => ProjectRemove,

@@ -30,7 +30,10 @@ export function SessionBar({ bar, busy, onClose, dispatch, onRename }: {
     <span className="tree-session-actions">
       <CopySessionId sessionId={bar.sessionId} />
       {onRename && <RenameButton disabled={busy || !!editor} onClick={() => setRenaming(true)} />}
-      {bar.closed
+      {bar.archived
+        ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={onClose}
+          title="Restore this session as Closed. Reopen it when you want to resume sending."><i className="ph ph-arrow-counter-clockwise" />Restore session</button>
+        : bar.closed
         ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={onClose}
           title="Mark this session Active in Ariadne again. Sending to the agent resumes."><i className="ph ph-arrow-counter-clockwise" />Reopen session</button>
         : <button type="button" className="btn btn-ghost" disabled={busy} onClick={onClose}

@@ -833,7 +833,7 @@ fn purge(
 
 /// The binding a notice is queued on: the selected binding of an active session.
 fn told_binding(session: &Session) -> Option<UuidV4> {
-    if session.state != SessionState::Active {
+    if session.state != SessionState::Active || session.archived_at.is_some() {
         return None;
     }
     preview::selected(session).map(|binding| binding.id.clone())

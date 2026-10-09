@@ -165,6 +165,7 @@ impl Setup {
                     Ok::<_, &'static str>(SavedReceiptData::SessionLifecycle {
                         state: s.state.clone(),
                         closed_at: s.closed_at.clone(),
+                        archived_at: None,
                         cancelled_input_ids: vec![],
                     })
                 },
@@ -1976,4 +1977,45 @@ fn oversized_final_instruction_or_response_has_no_persisted_session_effects() {
             .unwrap()
             .is_none());
     }
+}
+
+#[test]
+fn archived_host_route_refuses_explicit_and_implicit_reconnect_without_new_session() {
+    let t = Setup::new(1);
+    let mut archived = seed();
+    archived.state = SessionState::Closed;
+    archived.closed_at = Some(at());
+    archived.archived_at = Some(at());
+    let binding = archived.bindings.0.get_mut(&id(3)).unwrap();
+    binding.owner_paused = true;
+    binding.dispatch_state = DispatchState::Paused;
+    t.store(1).create(&archived).unwrap();
+    let bytes =
+        fs::read(store_dir(t.home.path(), 1).join(format!("sessions/{}.json", id(2).as_str())))
+            .unwrap();
+    for existing in [Some(id(2)), None] {
+        let cmd = command(
+            1,
+            &archived.bindings.0[&id(3)].external_session_id,
+            300,
+            existing,
+        );
+        let error = t
+            .service()
+            .connect(
+                &owner(),
+                &cmd,
+                |params| Ok(facts(params)),
+                || panic!("archived route allocates no ids"),
+                at(),
+            )
+            .unwrap_err();
+        assert_eq!(core_code(error), CoreErrorCode::InvalidTransition);
+    }
+    assert_eq!(t.store(1).read(&id(2)).unwrap(), archived);
+    assert_eq!(
+        fs::read(store_dir(t.home.path(), 1).join(format!("sessions/{}.json", id(2).as_str())))
+            .unwrap(),
+        bytes
+    );
 }

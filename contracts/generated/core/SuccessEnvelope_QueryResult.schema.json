@@ -729,6 +729,7 @@
       "type": "string",
       "enum": [
         "same_session",
+        "source_archived",
         "target_closed",
         "binding_unknown",
         "binding_ambiguous",
@@ -1224,6 +1225,13 @@
         },
         "selected_navigation": {
           "$ref": "#/$defs/NavigationSelection"
+        },
+        "session_archive_expanded_project_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "maxItems": 256
         },
         "text_scale": {
           "type": "integer",
@@ -4211,6 +4219,16 @@
         {
           "type": "object",
           "properties": {
+            "archived_at": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UtcMillis"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "cancelled_input_ids": {
               "type": "array",
               "items": {
@@ -4704,6 +4722,16 @@
             "$ref": "#/$defs/Answer"
           }
         },
+        "archived_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "bindings": {
           "$ref": "#/$defs/UniqueMap4"
         },
@@ -4839,6 +4867,9 @@
         "active_total": {
           "$ref": "#/$defs/NonnegativeSafeInteger"
         },
+        "archived_total": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        },
         "closed_total": {
           "$ref": "#/$defs/NonnegativeSafeInteger"
         },
@@ -4854,6 +4885,7 @@
         "sessions",
         "active_total",
         "closed_total",
+        "archived_total",
         "counts"
       ]
     },
@@ -5062,6 +5094,16 @@
           "anyOf": [
             {
               "$ref": "#/$defs/BindingSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "archived_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
             },
             {
               "type": "null"

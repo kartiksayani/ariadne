@@ -39,6 +39,7 @@ function itemOrder(left: string, right: string): number {
 export function waitingRows(sessions: readonly WaitingSession[]): readonly WaitingRow[] {
   const rows: WaitingRow[] = [];
   for (const { project, summary, session } of sessions) {
+    if (session.archived_at != null) continue;
     for (const item of Object.values(session.items)) {
       if (!item || session.topics[item.topic_id]?.archived_at !== null || !unanswered(session, item)) continue;
       const round = item.current_round_id ? session.rounds[item.current_round_id] : undefined;
@@ -58,6 +59,7 @@ export function waitingRows(sessions: readonly WaitingSession[]): readonly Waiti
 export function sentRows(sessions: readonly WaitingSession[]): readonly SentRow[] {
   const rows: SentRow[] = [];
   for (const { project, summary, session } of sessions) {
+    if (session.archived_at != null) continue;
     for (const input of Object.values(session.inputs)) {
       if (!input || !['queued', 'in_flight', 'needs_attention'].includes(input.state)) continue;
       const item = input.target.item_id ? session.items[input.target.item_id] ?? null : null;

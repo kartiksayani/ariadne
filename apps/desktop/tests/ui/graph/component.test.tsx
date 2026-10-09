@@ -215,6 +215,7 @@ describe('session graph view', () => {
     const legend = within(document.querySelector('.graph-legend')! as HTMLElement);
     for (const [text, title] of [['Thread', 'Thread to the selected item'], ['Related', 'Related to the selected item'], ['Replaced by', 'Replaced by'], ['Waiting on me', 'Waiting on me'], ['Closed', 'Closed']]) {
       expect(legend.getByText(text!).closest('.graph-legend-key')?.getAttribute('title')).toBe(title);
+      expect(legend.getByLabelText(title!)).toBe(legend.getByText(text!).closest('.graph-legend-key'));
     }
     expect(legend.getByText('One graph per topic').getAttribute('title')).toBe('One graph per topic');
     const card = screen.getByRole('region', { name: 'Delivery decisions' });

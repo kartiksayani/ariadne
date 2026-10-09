@@ -76,6 +76,8 @@ impl<'a> HistoryActionService<'a> {
             | OwnerCommand::TopicRestore { api_version, .. }
             | OwnerCommand::SessionClose { api_version, .. }
             | OwnerCommand::SessionReopen { api_version, .. }
+            | OwnerCommand::SessionArchive { api_version, .. }
+            | OwnerCommand::SessionRestore { api_version, .. }
             | OwnerCommand::SessionLabelSet { api_version, .. }
             | OwnerCommand::Ack { api_version, .. } => api_version,
             _ => {
@@ -103,6 +105,12 @@ impl<'a> HistoryActionService<'a> {
             }
             OwnerCommand::SessionReopen { params, .. } => {
                 crate::receipts::normalized("session_reopen", params)?
+            }
+            OwnerCommand::SessionArchive { params, .. } => {
+                crate::receipts::normalized("session_archive", params)?
+            }
+            OwnerCommand::SessionRestore { params, .. } => {
+                crate::receipts::normalized("session_restore", params)?
             }
             // Digest the stored form, so a retry typed with other spacing replays.
             OwnerCommand::SessionLabelSet { params, .. } => {

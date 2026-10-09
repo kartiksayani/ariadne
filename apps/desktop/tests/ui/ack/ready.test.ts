@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { createDesktopService } from '../../../src/data/service';
+import { createDesktopService, CoreFailure } from '../../../src/data/service';
 import { SessionStore } from '../../../src/data/session-store';
 import { SessionActions } from '../../../src/components/bindings/actions';
 import { acknowledge, ackFailure } from '../../../src/ui/shared/ack';
@@ -38,6 +38,22 @@ it('rechecks Ack eligibility after refresh and reports a question that now needs
   });
   expect(await acknowledge(actions, '1.1').catch(ackFailure)).toContain('any question waiting for you');
   expect(transport.mutations).toHaveLength(0);
+});
+
+it('refuses Ack plainly when a stale refresh reveals the session was archived', async () => {
+  const { transport, store, state, actions } = await ready();
+  vi.spyOn(store, 'refresh').mockImplementation(async () => {
+    const snapshot = state.snapshot!;
+    vi.mocked(store.getSnapshot).mockReturnValue({ ...state, snapshot: { ...snapshot,
+      session: { ...snapshot.session, state: 'closed', archived_at: snapshot.session.updated_at } } });
+  });
+  expect(await acknowledge(actions, '1.1').catch(ackFailure)).toBe('This session is archived. Restore it, then reopen it to acknowledge this item.');
+  expect(transport.mutations).toHaveLength(0);
+});
+
+it('preserves the plain archive refusal when Core rejects an Ack that raced with archive', () => {
+  const message = 'This session is archived. Restore it, then reopen it to acknowledge this item.';
+  expect(ackFailure(new CoreFailure({ code: 'invalid_transition', message, hint: 'Restore and reopen this session.', retryable: false, field_errors: [] }))).toBe(message);
 });
 
 it('abandons a stale Ack click when its selection changes before refresh returns', async () => {

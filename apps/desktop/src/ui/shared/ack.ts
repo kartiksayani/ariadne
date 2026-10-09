@@ -10,6 +10,7 @@ export const ackTitle = (target: NonNullable<Item['ack_to']>) => `Ack: mark ${ST
 
 class AckUnavailable extends Error {}
 const ackRefusal = 'This item can’t be acknowledged now. Check its current status and any question waiting for you.';
+const archivedRefusal = 'This session is archived. Restore it, then reopen it to acknowledge this item.';
 const waiting = new WeakMap<SessionActions, { readonly cancelled: () => boolean }>();
 export const ackWaiting = (actions: SessionActions) => { const attempt = waiting.get(actions); return !!attempt && !attempt.cancelled(); };
 export const ackBlocked = (actions: SessionActions): string | null => {
@@ -21,6 +22,7 @@ export const ackBlocked = (actions: SessionActions): string | null => {
 
 export function ackFailure(failure: unknown): string {
   if (failure instanceof AckUnavailable) return failure.message;
+  if (failure instanceof CoreFailure && failure.error.code === 'invalid_transition' && failure.error.message === archivedRefusal) return archivedRefusal;
   return failure instanceof CoreFailure && failure.error.code === 'invalid_transition'
     ? 'This item can’t be acknowledged now. Check its current status and any question waiting for you.'
     : plainFailure(failure, 'Ack could not be saved. Try again.');
@@ -44,6 +46,7 @@ export async function acknowledge(actions: SessionActions, itemId: string, cance
     if (cancelled()) return false;
     const current = store.getSnapshot(), session = current.snapshot?.session, item = session?.items[itemId];
     if (actions.session !== store || current.status !== 'ready' || current.error || !session) throw new AckUnavailable("Ariadne is still loading this session's latest changes. Try again.");
+    if (session.archived_at != null) throw new AckUnavailable(archivedRefusal);
     if (!item || !ackTarget(session, item)) throw new AckUnavailable(ackRefusal);
     if (!proposal || item.ack_to !== proposal.ack_to || item.question !== proposal.question || item.ask !== proposal.ask
         || item.outcome !== proposal.outcome || item.why !== proposal.why) throw new AckUnavailable('This item changed. Read its current proposal, then try Ack again.');

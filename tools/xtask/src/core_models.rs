@@ -99,6 +99,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         InputResolveParams,
         TopicLifecycleParams,
         SessionLifecycleParams,
+        SessionRestoreParams,
         SessionLabelParams,
         TopicContinueParams,
         ItemRemoveParams,

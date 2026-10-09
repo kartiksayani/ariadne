@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SessionRestoreParams",
+  "description": "Restore normally leaves the session Closed. Undo of an active archive\nrequests reopening in the same revision-guarded transaction.",
+  "type": "object",
+  "properties": {
+    "expected_revision": {
+      "$ref": "#/$defs/PositiveSafeInteger"
+    },
+    "reopen": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "expected_revision"
+  ],
+  "$defs": {
+    "PositiveSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 1
+    }
+  }
+}

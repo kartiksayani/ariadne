@@ -462,6 +462,15 @@ describe('session tree filters', () => {
     expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
     expect(screen.queryByText(/items matching/)).toBeNull();
   });
+  it('excludes archived sessions from Ack buttons and topic counts', async () => {
+    await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!;
+      session.items['1.1']!.ack_to = 'done';
+      session.state = 'closed'; session.archived_at = session.updated_at;
+    } });
+    expect(screen.queryByRole('button', { name: 'Ack: mark Done' })).toBeNull();
+    expect(screen.queryByText(/to ack/)).toBeNull();
+  });
   it('counts only items in the current archive mode', async () => {
     const view = await mount({ configure: value => {
       const session = value.sessions.get(route.session_id)!;
@@ -1001,6 +1010,16 @@ describe('session tree inline answering', () => {
     await mount({ configure: options });
     row('4').focus(); fireEvent.keyDown(row('4'), { key: 'a' });
     await waitFor(() => expect(control()).not.toBeNull()); expect(document.activeElement).toBe(row('2'));
+  });
+  it('explains Restore before Reopen when answering in an archived session', async () => {
+    await mount({ configure: transport => {
+      options(transport);
+      const session = transport.sessions.get(route.session_id)!;
+      session.state = 'closed'; session.archived_at = session.updated_at;
+    } });
+    row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
+    await waitFor(() => expect(control()).not.toBeNull());
+    expect(within(control()!).getByText('This session is archived. Restore it, then reopen it to answer.')).toBeTruthy();
   });
   it('blocks sending in a closed session', async () => {
     await mount({ configure: transport => { options(transport); transport.sessions.get(route.session_id)!.state = 'closed'; } });

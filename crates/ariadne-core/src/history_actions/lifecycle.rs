@@ -97,60 +97,174 @@ pub(super) fn apply(
                 cancelled_input_ids,
             })
         }
-        OwnerCommand::SessionClose { params, .. } | OwnerCommand::SessionReopen { params, .. } => {
-            revision(params.expected_revision, session.revision)?;
-            let close = matches!(command, OwnerCommand::SessionClose { .. });
-            if close == (session.state == SessionState::Closed) {
+        OwnerCommand::SessionClose { .. }
+        | OwnerCommand::SessionReopen { .. }
+        | OwnerCommand::SessionArchive { .. }
+        | OwnerCommand::SessionRestore { .. } => {
+            let expected = match command {
+                OwnerCommand::SessionClose { params, .. }
+                | OwnerCommand::SessionReopen { params, .. }
+                | OwnerCommand::SessionArchive { params, .. } => params.expected_revision,
+                OwnerCommand::SessionRestore { params, .. } => params.expected_revision,
+                _ => unreachable!("session lifecycle command"),
+            };
+            revision(expected, session.revision)?;
+            let archive = matches!(command, OwnerCommand::SessionArchive { .. });
+            let restore = matches!(command, OwnerCommand::SessionRestore { .. });
+            let reopen = matches!(command, OwnerCommand::SessionReopen { .. })
+                || matches!(command, OwnerCommand::SessionRestore { params, .. } if params.reopen);
+            if archive && session.archived_at.is_some() {
+                return Err(core(
+                    CoreErrorCode::InvalidTransition,
+                    "The session is already archived",
+                ));
+            }
+            if restore && session.archived_at.is_none() {
+                return Err(core(
+                    CoreErrorCode::InvalidTransition,
+                    "The session is not archived",
+                ));
+            }
+            if reopen && !restore && session.archived_at.is_some() {
+                return Err(core(
+                    CoreErrorCode::InvalidTransition,
+                    "Restore the archived session before reopening it",
+                ));
+            }
+            if !archive && !restore && (reopen == (session.state == SessionState::Active)) {
                 return Err(core(
                     CoreErrorCode::InvalidTransition,
                     "The session already has the requested lifecycle state",
                 ));
             }
-            // Close is one step: it pauses dispatch, cancels every pending input
-            // (abandoning one in flight, unless its result committed: that one
-            // is handled) and leaves items as they are. Reopen carries on: it
-            // lifts the owner pause, including one made earlier.
-            let mut cancelled_input_ids = vec![];
-            if close {
-                let pending: Vec<_> = session
-                    .inputs
-                    .0
-                    .values()
-                    .filter(|input| pending(input))
-                    .map(|input| input.id.clone())
-                    .collect();
-                for id in pending {
-                    if crate::delivery_join::abandon(session, &id, CancelCause::SessionClosed, at)
-                        == Some(InputState::Cancelled)
-                    {
-                        cancelled_input_ids.push(id);
-                    }
+            // Undo of an active archive reuses Reopen under this same transaction.
+            // Ordinary Restore and archiving Closed leave dispatch and inputs alone.
+            let cancelled_input_ids = if restore && !reopen {
+                vec![]
+            } else if archive && session.state == SessionState::Closed {
+                // Old Closed sessions may still hold pending messages. Cancel
+                // them as promised, keeping the original close time.
+                if session.inputs.0.values().any(pending) {
+                    let closed_at = session.closed_at.clone();
+                    let cancelled = set_closed(session, true, at);
+                    session.closed_at = closed_at;
+                    cancelled
+                } else {
+                    vec![]
                 }
-            }
-            let bindings: Vec<_> = session.bindings.0.keys().cloned().collect();
-            for id in &bindings {
-                crate::delivery_join::release_barrier(session, id);
-            }
-            if let Some(binding) = session
-                .active_binding_id
-                .clone()
-                .and_then(|id| session.bindings.0.get_mut(&id))
-            {
-                binding.owner_paused = close;
-                binding.dispatch_state = crate::bindings::dispatch(binding, false);
-            }
-            session.state = if close {
-                SessionState::Closed
             } else {
-                SessionState::Active
+                set_closed(session, !reopen, at)
             };
-            session.closed_at = close.then(|| at.clone());
+            if archive {
+                session.archived_at = Some(at.clone());
+            } else if restore {
+                session.archived_at = None;
+            }
+            if archive || restore {
+                record_archive_history(session, command, archive, at)?;
+            }
             Ok(SavedReceiptData::SessionLifecycle {
                 state: session.state.clone(),
                 closed_at: session.closed_at.clone(),
+                archived_at: session.archived_at.clone(),
                 cancelled_input_ids,
             })
         }
         _ => unreachable!("validated lifecycle command"),
     }
+}
+
+/// Close pauses dispatch and abandons pending inputs exactly once. Reopen lifts
+/// the owner pause; Undo can restore and reopen atomically through this path.
+fn set_closed(session: &mut Session, close: bool, at: &UtcMillis) -> Vec<UuidV4> {
+    let mut cancelled_input_ids = vec![];
+    if close {
+        let pending: Vec<_> = session
+            .inputs
+            .0
+            .values()
+            .filter(|input| pending(input))
+            .map(|input| input.id.clone())
+            .collect();
+        for id in pending {
+            if crate::delivery_join::abandon(session, &id, CancelCause::SessionClosed, at)
+                == Some(InputState::Cancelled)
+            {
+                cancelled_input_ids.push(id);
+            }
+        }
+    }
+    let bindings: Vec<_> = session.bindings.0.keys().cloned().collect();
+    for id in &bindings {
+        crate::delivery_join::release_barrier(session, id);
+    }
+    if let Some(binding) = session
+        .active_binding_id
+        .clone()
+        .and_then(|id| session.bindings.0.get_mut(&id))
+    {
+        binding.owner_paused = close;
+        binding.dispatch_state = crate::bindings::dispatch(binding, false);
+    }
+    session.state = if close {
+        SessionState::Closed
+    } else {
+        SessionState::Active
+    };
+    session.closed_at = close.then(|| at.clone());
+    cancelled_input_ids
+}
+
+fn record_archive_history(
+    session: &mut Session,
+    command: &OwnerCommand,
+    archive: bool,
+    at: &UtcMillis,
+) -> Result<(), CoreError> {
+    let id = command.operation_id().clone();
+    if session.messages.iter().any(|message| message.id == id) {
+        return Err(core(
+            CoreErrorCode::InvalidArgument,
+            "The archive operation ID is already a history message ID",
+        ));
+    }
+    let number = session.counters.next_message;
+    session.counters.next_message =
+        PositiveSafeInteger::new(number.value().checked_add(1).ok_or_else(|| {
+            core(
+                CoreErrorCode::CapacityExceeded,
+                "The message counter reached its limit",
+            )
+        })?)
+        .map_err(|_| {
+            core(
+                CoreErrorCode::CapacityExceeded,
+                "The message counter reached its limit",
+            )
+        })?;
+    session.messages.push(Message {
+        id,
+        number,
+        author: MessageAuthor::System,
+        kind: MessageKind::Lifecycle,
+        body: if archive {
+            "Session archived."
+        } else if session.state == SessionState::Active {
+            "Session restored and reopened."
+        } else {
+            "Session restored; it remains closed."
+        }
+        .into(),
+        created_at: at.clone(),
+        item_id: None,
+        topic_id: None,
+        items_touched: vec![],
+        binding_id: None,
+        input_id: None,
+        attempt_id: None,
+        host_turn_id: None,
+        round_id: None,
+        origin: None,
+    });
+    Ok(())
 }

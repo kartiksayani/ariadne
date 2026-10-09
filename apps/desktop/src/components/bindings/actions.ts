@@ -53,7 +53,8 @@ export function definitiveRejection(failure: CoreFailure | ServiceFailure, comma
   // their error codes cannot establish that the original operation was unsaved.
   const lifecycle = command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect';
   const history = command.command === 'topic_archive' || command.command === 'topic_restore'
-    || command.command === 'session_close' || command.command === 'session_reopen';
+    || command.command === 'session_close' || command.command === 'session_reopen'
+    || command.command === 'session_archive' || command.command === 'session_restore';
   // History lifecycle guards and Continue's freshness/copy guards execute
   // inside target Store.transact, after locked exact-operation replay. Generic
   // routing/source IO errors (including binding_mismatch) remain uncertain.
@@ -121,6 +122,12 @@ export class SessionActions {
           ? data.kind === 'session_lifecycle' && receipt.revision === command.params.expected_revision + 1
             && data.state === (command.command === 'session_close' ? 'closed' : 'active')
             && (command.command === 'session_close' ? timestamp(data.closed_at) : data.closed_at === null)
+        : command.command === 'session_archive' || command.command === 'session_restore'
+          ? data.kind === 'session_lifecycle' && receipt.revision === command.params.expected_revision + 1
+            && (command.command === 'session_restore' && command.params.reopen
+              ? data.state === 'active' && data.closed_at === null
+              : data.state === 'closed' && timestamp(data.closed_at))
+            && (command.command === 'session_archive' ? timestamp(data.archived_at) : data.archived_at == null)
         : command.command === 'session_label_set'
           // Core stores the trimmed text and clears a blank field to null.
           ? data.kind === 'session_label' && (data.name ?? null) === (command.params.name?.trim() || null)

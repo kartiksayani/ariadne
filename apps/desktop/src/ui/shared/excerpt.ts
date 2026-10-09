@@ -20,7 +20,7 @@ export interface ExcerptView {
 /** A message's number, with the agent's name for an earlier session's message: "#19", "codex #19". */
 export const messageNumber = (message: Immutable<Message>, agent: string | null = null) => agent ? `${agent} #${message.number}` : `#${message.number}`;
 
-const running = (session: Immutable<SessionSummary>) => session.state === 'active' && session.active_binding?.connection_state === 'connected';
+const running = (session: Immutable<SessionSummary>) => session.archived_at == null && session.state === 'active' && session.active_binding?.connection_state === 'connected';
 /**
  * The agent name an earlier session's messages carry (Ariadne.dc.html:1788, as the Waiting cards' "asked in codex #19"):
  * set while this session's agent isn't running and another session of its project is; null otherwise.

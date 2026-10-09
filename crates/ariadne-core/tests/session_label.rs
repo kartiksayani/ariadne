@@ -351,6 +351,7 @@ fn the_registry_scope_and_other_receipt_kinds_do_not_pass() {
     wrong.data = SavedReceiptData::SessionLifecycle {
         state: SessionState::Closed,
         closed_at: None,
+        archived_at: None,
         cancelled_input_ids: vec![],
     };
     assert!(

@@ -310,6 +310,8 @@ impl OwnerCommand {
             | Self::TopicRestore { op_id, .. }
             | Self::SessionClose { op_id, .. }
             | Self::SessionReopen { op_id, .. }
+            | Self::SessionArchive { op_id, .. }
+            | Self::SessionRestore { op_id, .. }
             | Self::TopicContinue { op_id, .. }
             | Self::PreferencesPatch { op_id, .. }
             | Self::ItemRemove { op_id, .. }
@@ -347,6 +349,23 @@ impl OwnerCommand {
                 for entry in &params.entries {
                     match entry {
                         PreferencesPatchEntry::SetGlobal { preferences } => {
+                            if preferences.session_archive_expanded_project_ids.len()
+                                > SESSION_ARCHIVE_EXPANSION_CAPACITY
+                            {
+                                return Err(CoreError::new(
+                                    CoreErrorCode::CapacityExceeded,
+                                    "Expanded session archive groups exceed the 256 entry bound",
+                                    "Fold archive groups before saving preferences.",
+                                ));
+                            }
+                            let mut archive_projects = std::collections::BTreeSet::new();
+                            if !preferences
+                                .session_archive_expanded_project_ids
+                                .iter()
+                                .all(|id| archive_projects.insert(id))
+                            {
+                                return Err(invalid("Duplicate expanded session archive project"));
+                            }
                             if preferences.notification_ledger.len() > NOTIFICATION_LEDGER_CAPACITY
                             {
                                 return Err(CoreError::new(CoreErrorCode::CapacityExceeded,
@@ -1097,7 +1116,10 @@ pub fn validate_owner_receipt(
                         OwnerCommand::TopicArchive { .. } | OwnerCommand::TopicRestore { .. },
                         SavedReceiptData::TopicLifecycle { .. }
                     ) | (
-                        OwnerCommand::SessionClose { .. } | OwnerCommand::SessionReopen { .. },
+                        OwnerCommand::SessionClose { .. }
+                            | OwnerCommand::SessionReopen { .. }
+                            | OwnerCommand::SessionArchive { .. }
+                            | OwnerCommand::SessionRestore { .. },
                         SavedReceiptData::SessionLifecycle { .. }
                     ) | (OwnerCommand::Ack { .. }, SavedReceiptData::ItemAck { .. })
                         | (

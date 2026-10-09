@@ -65,6 +65,7 @@ const sendBlocked = (draft: Immutable<OwnerDraft>, session: Immutable<Session>):
 function topicBlocked(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
   const topic = session.topics[draft.target.topic_id];
   if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !topic || draft.intent !== TOPIC_REPLY) return 'The saved target is unavailable. Open its registered session.';
+  if (session.archived_at != null) return 'This session is archived. Restore it, then reopen it to send this reply.';
   if (session.state !== 'active') return 'This session is closed. Reopen it to send this reply.';
   if (topic.archived_at !== null) return 'This topic is archived. Restore it to send this reply.';
   if (session.active_binding_id !== draft.binding_id || !session.bindings[draft.binding_id]) return 'The selected binding changed. Review the current target before sending.';
@@ -74,6 +75,7 @@ export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Se
   if (draft.target.item_id === null) return topicBlocked(draft, session);
   const item = session.items[draft.target.item_id];
   if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !item || item.topic_id !== draft.target.topic_id) return 'The saved target is unavailable. Open its registered session.';
+  if (session.archived_at != null) return 'This session is archived. Restore it, then reopen it to send this reply.';
   if (session.state !== 'active') return 'This session is closed. Reopen it to send this reply.';
   if (session.topics[item.topic_id]?.archived_at !== null) return 'This topic is archived. Restore it to send this reply.';
   if (session.active_binding_id !== draft.binding_id || !session.bindings[draft.binding_id]) return 'The selected binding changed. Review the current target before sending.';

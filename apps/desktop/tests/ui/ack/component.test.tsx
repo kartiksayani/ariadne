@@ -11,8 +11,9 @@ import { currentQuestionReplied, ownerReplied } from '../../../src/selectors/wai
 import { continueGroups } from '../../../src/ui/pages/model';
 import { AppTransport, route } from '../app/transport';
 import { sessionButton } from '../app/open';
+import { notices } from '../../../src/ui/pages/notices';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
 
 class AckTransport extends AppTransport {
   refuse = false;
@@ -63,6 +64,31 @@ async function mount(transport = new AckTransport()) {
 }
 
 describe('local acknowledgement', () => {
+  it('explains keyboard Ack during a view save and allows it once the view is saved', async () => {
+    const transport = await mount();
+    let release!: () => void, saving = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch') { saving = true; await gate; }
+      return invoke(name, args);
+    });
+    const band = row().closest('.tree-topic-group')!.querySelector<HTMLElement>('[role="treeitem"]')!;
+    band.focus(); fireEvent.keyDown(band, { key: 'ArrowLeft' });
+    await waitFor(() => expect(saving).toBe(true));
+    // Unfolding acts locally while the preference write is still pending.
+    fireEvent.keyDown(band, { key: 'ArrowRight' });
+    const button = within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack: mark Done' });
+    expect(button.disabled).toBe(true);
+    row().focus(); fireEvent.keyDown(row(), { key: 'a' });
+    expect(screen.getByText('Another view change is being saved. Wait for it, then try Ack again.')).toBeTruthy();
+    expect(acks(transport)).toHaveLength(0);
+    await act(async () => { release(); });
+    await waitFor(() => expect(within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack: mark Done' }).disabled).toBe(false));
+    await act(async () => { fireEvent.keyDown(row(), { key: 'a' }); });
+    await waitFor(() => expect(acks(transport)).toHaveLength(1));
+  });
+
   it.each(['tree', 'detail', 'graph'] as const)('explains a keyboard Ack from %s while another change is being saved or awaits confirmation', async source => {
     const transport = await mount();
     fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');

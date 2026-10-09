@@ -180,6 +180,7 @@ pub struct SessionListResult {
     pub sessions: Page<SessionSummary>,
     pub active_total: NonnegativeSafeInteger,
     pub closed_total: NonnegativeSafeInteger,
+    pub archived_total: NonnegativeSafeInteger,
     pub counts: SummaryCounts,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -262,6 +263,7 @@ pub enum ContinueReadiness {
 #[serde(rename_all = "snake_case")]
 pub enum ContinueBlockReason {
     SameSession,
+    SourceArchived,
     TargetClosed,
     BindingUnknown,
     BindingAmbiguous,

@@ -138,6 +138,7 @@ export interface TabModel {
 }
 
 export interface SessionTabFacts {
+  readonly archived?: boolean;
   readonly id: string;
   readonly project: string;
   readonly agent: string | null;
@@ -164,7 +165,7 @@ export function tabModels(input: { readonly selection: 'projects' | 'all_session
     id, on, iconSize: '14px', iconColor: neutral(72), project: null, closable: false, ...extra });
   return [
     base('projects', input.selection === 'projects', { label: 'Projects', sub: '', icon: 'ph ph-folders', title: 'All projects' }),
-    base('all_sessions', input.selection === 'all_sessions', { label: 'All sessions', sub: input.sessions.length ? String(input.sessions.length) : '',
+    base('all_sessions', input.selection === 'all_sessions', { label: 'All sessions', sub: input.sessions.filter(session => !session.archived).length ? String(input.sessions.filter(session => !session.archived).length) : '',
       icon: 'ph ph-squares-four', title: 'Every session in the projects you have open' }),
     ...input.sessions.map(session => {
       const agent = session.agent ?? 'No agent';

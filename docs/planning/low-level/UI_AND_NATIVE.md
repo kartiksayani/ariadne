@@ -233,6 +233,15 @@ Archive and close are confirmed one-step metadata operations:
 - `topic.archive` is always offered (ADR-0090). The confirmation says, in plain words, how many open items stay as they are and how many of the owner's messages haven't reached the agent yet and are cancelled. Items in an archived topic leave every "Waiting on me" count and come back on restore. Restore uses `topic.restore` and preserves IDs/history; cancelled messages stay cancelled.
 - `session.close` is one confirmed step (ADR-0088). It records an owner pause on the active binding, cancels queued inputs, abandons in-flight and needs-attention inputs, and leaves items as they are. The receipt lists the cancelled inputs, so the confirmation can say how many unsent messages are dropped. It marks Ariadne metadata only; it never signals or terminates the terminal process. `session.reopen` reactivates the record and clears the owner pause, including an earlier explicit Pause.
 - Tab close changes navigation only. It does not close a session, remove its project registration, or discard drafts.
+- Session cards on project and All sessions pages offer Archive (ADR-0095).
+  Confirm Active sessions, waiting questions and pending messages, explaining
+  the close, waiting questions and cancelled messages in plain words. Offer Undo after archiving. Archived sessions leave Active and
+  Closed and enter a bottom `Archived · N` group, folded by default with its
+  per-project expansion saved in `session_archive_expanded_project_ids`.
+  Restore leaves Closed; Undo returns Active sessions to Active and resumes sending
+  atomically, while Closed sessions stay Closed. Cancelled messages stay cancelled.
+  Reading and Remove remain available. Other totals, project cards, menus, tray,
+  Waiting, discovery and Connect existing session exclude archived targets.
 
 ### Remove
 

@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App, { DesktopApp } from '../../src/App';
 import { createDesktopService } from '../../src/data/service';
+import { RegisteredRoutes } from '../../src/data/routes';
+import { OwnFailure } from '../../src/data/plain';
 import { WaitingStore } from '../../src/selectors/waiting/store';
 import { MessageRail } from '../../src/ui/rail/MessageRail';
 import { TreeView } from '../../src/ui/tree/TreeView';
@@ -49,6 +51,54 @@ function setup(strict = false) {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('ordinary desktop composition', () => {
+  it('clears a route loading refusal on a same-revision ready capture', async () => {
+    const { transport } = setup();
+    await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
+    await screen.findByLabelText('Detail of #1.1');
+    const bring = await screen.findByRole<HTMLButtonElement>('button', { name: 'Bring it up' });
+    await waitFor(() => expect(bring.disabled).toBe(false));
+    const { store } = vi.mocked(TreeView).mock.lastCall![0];
+    const before = store.getSnapshot();
+    const loading = "Ariadne is still loading this session's latest changes. Try again.";
+    vi.spyOn(RegisteredRoutes.prototype, 'revealItem').mockRejectedValueOnce(new OwnFailure({
+      code: 'snapshot_changed', message: loading, hint: '', retryable: true, field_errors: [],
+    }));
+    fireEvent.click(bring);
+    expect(await screen.findByText(loading)).toBeTruthy();
+    expect(store.getSnapshot().status).toBe('ready');
+    await act(async () => { await store.refresh(); });
+    expect(store.getSnapshot().status).toBe('ready');
+    expect(store.getSnapshot().snapshot).not.toBe(before.snapshot);
+    expect(store.getSnapshot().snapshot!.session).toBe(before.snapshot!.session);
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
+    expect(screen.queryByText(loading)).toBeNull();
+  });
+
+  it('keeps a different route refusal after another ready capture', async () => {
+    const { transport } = setup();
+    await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
+    await screen.findByLabelText('Detail of #1.1');
+    const bring = await screen.findByRole<HTMLButtonElement>('button', { name: 'Bring it up' });
+    await waitFor(() => expect(bring.disabled).toBe(false));
+    const { store } = vi.mocked(TreeView).mock.lastCall![0];
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'reveal_item') return {
+        api_version: 1, ok: false, error: { code: 'revision_conflict', message: 'Changed', hint: 'Retry.', retryable: true, field_errors: [] },
+      };
+      return invoke(name, args);
+    });
+    fireEvent.click(bring);
+    const refusal = 'This changed while you were working. Look at it as it is now, then try again.';
+    expect(await screen.findByText(refusal)).toBeTruthy();
+    await act(async () => { await store.refresh(); });
+    expect(store.getSnapshot().status).toBe('ready');
+    expect(screen.getByText(refusal)).toBeTruthy();
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
+  });
+
   it('explains a detail Bring overtaken by a session refresh during draft loading', async () => {
     const { transport } = setup();
     await openSession();

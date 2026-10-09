@@ -274,6 +274,9 @@ pub struct SessionSummary {
     pub created_at: UtcMillis,
     pub updated_at: UtcMillis,
     pub closed_at: Option<UtcMillis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub archived_at: Option<UtcMillis>,
     pub active_binding: Option<BindingSummary>,
     pub counts: SummaryCounts,
     // Every topic in the session, archived included; `counts.archived_topics`

@@ -199,6 +199,8 @@ fn desktop_handler<R: tauri::Runtime>(
         commands::topic_restore,
         commands::session_close,
         commands::session_reopen,
+        commands::session_archive,
+        commands::session_restore,
         commands::session_label_set,
         commands::ack,
         commands::topic_continue,

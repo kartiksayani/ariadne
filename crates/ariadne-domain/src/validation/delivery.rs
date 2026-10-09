@@ -32,6 +32,12 @@ pub fn validate_prepared_payload(
 }
 
 pub fn validate_session_delivery(session: &Session) -> Result<(), ValidationError> {
+    require(
+        session.archived_at.is_none()
+            || (session.state == SessionState::Closed && session.closed_at.is_some()),
+        "session.archived_at/state",
+        ValidationErrorKind::InvalidState,
+    )?;
     let mut attempts = BTreeSet::new();
     let mut claims = BTreeSet::new();
     distinct(session.inputs.0.values().map(|i| i.seq), "inputs.seq")?;

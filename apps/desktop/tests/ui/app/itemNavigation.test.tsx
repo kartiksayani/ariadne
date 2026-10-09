@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
+import { immutable } from '../../../src/data/session-store';
+import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { AppTransport, route, secondId } from './transport';
 import { sessionButton } from './open';
 
@@ -38,6 +40,55 @@ async function setup(transport = new AppTransport()) {
 }
 
 describe('composed item navigation', () => {
+  it.each([
+    { archive: 'session', retained: false }, { archive: 'session', retained: true },
+    { archive: 'topic', retained: false }, { archive: 'topic', retained: true },
+  ])('reads a related waiting target in an archived $archive without owner inputs (retained draft: $retained)', async ({ archive, retained }) => {
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    session.items['8']!.related = ['2'];
+    session.items['2']!.options = [{ id: 'choice', label: 'Keep it', consequence: 'Keep this choice.', recommended: true }];
+    let draftId: string | null = null;
+    if (retained) {
+      const drafts = new OwnerDraftStore(createDesktopService(transport));
+      await drafts.load();
+      draftId = drafts.begin(immutable(session), '2', 'answer');
+      drafts.edit(draftId!, { text: 'Keep this attempted answer.' });
+      transport.failNext = 'input_submit';
+      expect(await drafts.submit(draftId!)).toBe(false);
+    }
+    const submissions = () => transport.mutations.filter(request => request.command.command === 'input_submit');
+    const sentBeforeReading = submissions().length;
+    await setup(transport); await openSession(); await pick('8');
+    if (archive === 'session') {
+      session.state = 'closed'; session.closed_at = session.updated_at; session.archived_at = session.updated_at;
+    } else session.topics[session.items['2']!.topic_id]!.archived_at = session.updated_at;
+    ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: /^#2 / }));
+    const detail = screen.getByLabelText('Detail of #2');
+    expect(within(detail).getByRole('region', { name: 'Conversation' })).toBeTruthy();
+    expect(detail.querySelector('[data-owner-input]')).toBeNull();
+    expect(within(detail).queryByRole('textbox')).toBeNull();
+    expect(within(detail).queryByRole('region', { name: 'Your answer' })).toBeNull();
+    await keyDown(document.body, 'a'); await keyDown(document.body, '1', true);
+    expect(detail.querySelector('[data-owner-input]')).toBeNull();
+    expect(submissions()).toHaveLength(sentBeforeReading);
+    if (retained) expect(transport.preferences.drafts.find(draft => draft.op_id === draftId)?.text).toBe('Keep this attempted answer.');
+  });
+
+  it('keeps a related waiting target’s blocked answer visible in a closed unarchived session', async () => {
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    session.items['8']!.related = ['2'];
+    await setup(transport); await openSession(); await pick('8');
+    session.state = 'closed'; session.closed_at = session.updated_at; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: /^#2 / }));
+    const detail = screen.getByLabelText('Detail of #2');
+    expect(within(detail).getByRole('region', { name: 'Your answer' })).toBeTruthy();
+    expect(within(detail).getByText('This session is closed. Reopen it to answer.')).toBeTruthy();
+    expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
+  });
+
   it('reveals a hidden related descendant and preserves links, hiding, and Back/Forward navigation', async () => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
     session.items['4']!.related = ['1.1', '8'];

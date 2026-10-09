@@ -111,6 +111,7 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   useEffect(() => { if (follows && session && entry) drafts.rebind(entry.draft.op_id, session); }, [follows, session, entry, drafts]);
   const guard = draft && session ? blockedDraft(draft, session) : null;
   const blocked = !session || !draft ? null : !current ? stale
+    : session.archived_at != null ? 'This session is archived. Restore it, then reopen it to answer.'
     : session.state !== 'active' && intent === 'answer' ? 'This session is closed. Reopen it to answer.'
       : connection === 'reconnecting' ? reconnectingNote(agent)
         : guard === emptyDraft ? null : guard;

@@ -82,6 +82,12 @@ fn submit(
     allocate: &mut impl FnMut() -> UuidV4,
     at: &UtcMillis,
 ) -> Result<SavedReceiptData, CoreError> {
+    if session.archived_at.is_some() {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "Restore and reopen the archived session before submitting an owner input",
+        ));
+    }
     if params.kind == InputKind::TopicReply {
         return submit_topic_reply(session, params, allocate, at);
     }
@@ -97,7 +103,7 @@ fn submit(
             "Removal notices are created by item_remove and topic_remove",
         ));
     }
-    if session.state != SessionState::Active {
+    if session.state != SessionState::Active || session.archived_at.is_some() {
         return Err(core(
             CoreErrorCode::InvalidTransition,
             "Explicitly reopen the session before submitting an owner input",
@@ -296,7 +302,7 @@ fn submit_topic_reply(
             "A topic reply targets the topic alone and carries text only",
         ));
     }
-    if session.state != SessionState::Active {
+    if session.state != SessionState::Active || session.archived_at.is_some() {
         return Err(core(
             CoreErrorCode::InvalidTransition,
             "Explicitly reopen the session before submitting an owner input",
