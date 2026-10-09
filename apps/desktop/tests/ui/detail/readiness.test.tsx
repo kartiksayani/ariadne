@@ -8,7 +8,7 @@ import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
 import { AppTransport, route } from '../app/transport';
 
 const stores: SessionStore[] = [];
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); vi.useRealTimers(); vi.restoreAllMocks(); });
 const loadingError = "Ariadne is still loading this session's latest changes. Try again.";
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
 
@@ -21,7 +21,31 @@ async function setup() {
 }
 
 describe('detail actions while the owner view is stale', () => {
-  it.each(['click', 'key'] as const)('explains a stale reopen by %s and requires a new action after refreshing', async trigger => {
+  it.each([{ itemId: '1', action: 'Follow up', label: 'Follow-up message' }, { itemId: '1.1', action: 'Reply', label: 'Reply message' }])('keeps $action and its words locked until saved drafts load', async ({ itemId, action, label }) => {
+    const transport = new AppTransport(), service = createDesktopService(transport);
+    const store = new SessionStore(service, route), drafts = new OwnerDraftStore(service);
+    stores.push(store);
+    await store.refresh();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'preferences_get') await gate;
+      return invoke(name, args);
+    });
+    render(<ItemDetail store={store} drafts={drafts} itemId={itemId} later={false} onOpenItem={vi.fn()} />);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: action }).disabled).toBe(true);
+    const standing = screen.queryByLabelText<HTMLTextAreaElement>(label);
+    if (standing) expect(standing.disabled).toBe(true);
+    await act(async () => { release(); await drafts.load(); });
+    const button = screen.getByRole<HTMLButtonElement>('button', { name: action });
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    fireEvent.change(screen.getByLabelText(label), { target: { value: 'Retain these words.' } });
+    expect(screen.getByLabelText<HTMLTextAreaElement>(label).value).toBe('Retain these words.');
+  });
+
+  it.each(['click', 'key'] as const)('retains exactly one stale reopen by %s after an agent apply', async trigger => {
     const { transport, store, drafts } = await setup();
     const props = { store, drafts, itemId: '1', later: false, onOpenItem: vi.fn() };
     const view = render(<ItemDetail {...props} />);
@@ -34,22 +58,24 @@ describe('detail actions while the owner view is stale', () => {
       return invoke(name, args);
     });
     const session = transport.sessions.get(route.session_id)!;
+    expect(session.items['1']!.status).toBe('done');
+    ++session.items['1']!.revision;
     ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
     expect(store.getSnapshot().status).toBe('stale');
     if (trigger === 'click') {
       expect(reopen.disabled).toBe(false);
       fireEvent.click(reopen);
+      fireEvent.click(reopen);
     } else view.rerender(<ItemDetail {...props} focusRequest={{ token: 1, intent: 'reopen' }} />);
-    expect(await screen.findByRole('alert')).toHaveProperty('textContent', loadingError);
     expect(sends(transport)).toHaveLength(0);
     await act(async () => { release(); });
     await waitFor(() => expect(store.getSnapshot().status).toBe('ready'));
-    expect(sends(transport)).toHaveLength(0);
-    if (trigger === 'click') fireEvent.click(reopen);
-    else view.rerender(<ItemDetail {...props} focusRequest={{ token: 2, intent: 'reopen' }} />);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: { kind: 'reopen', target: { item_id: '1' } } } });
+    expect(drafts.find(route, '1', 'reopen')!.draft.target_revision).toBe(session.items['1']!.revision);
+    expect(Object.values(session.inputs).filter(input => input?.kind === 'reopen' && input.target.item_id === '1')).toHaveLength(1);
+    expect(screen.queryByText(loadingError)).toBeNull();
   });
 
   it('does not replay a stale reopen after navigation to a different item', async () => {
@@ -67,11 +93,125 @@ describe('detail actions while the owner view is stale', () => {
     ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
     fireEvent.click(screen.getByRole('button', { name: 'Back to Open' }));
-    await screen.findByText(loadingError);
     view.rerender(<ItemDetail {...props} itemId="5" />);
     await act(async () => { release(); });
     await waitFor(() => expect(store.getSnapshot().status).toBe('ready'));
     expect(screen.queryByText(loadingError)).toBeNull();
+    expect(sends(transport)).toHaveLength(0);
+    expect(drafts.find(route, '1', 'reopen')).toBeUndefined();
+  });
+
+  it('opens Follow up while an agent apply is refreshing and sends exactly once after review', async () => {
+    const { transport, store, drafts } = await setup();
+    render(<ItemDetail store={store} drafts={drafts} itemId="1" later={false} onOpenItem={vi.fn()} />);
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get') await gate;
+      return invoke(name, args);
+    });
+    const session = transport.sessions.get(route.session_id)!;
+    expect(session.items['1']!.status).toBe('done');
+    ++session.items['1']!.revision;
+    ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    const followup = screen.getByRole<HTMLButtonElement>('button', { name: 'Follow up' });
+    expect(followup.disabled).toBe(false);
+    fireEvent.click(followup);
+    fireEvent.change(screen.getByLabelText('Follow-up message'), { target: { value: 'Please check this once more.' } });
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send follow-up' }).disabled).toBe(true);
+    await act(async () => { release(); });
+    await waitFor(() => expect(store.getSnapshot().status).toBe('ready'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review current target' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send follow-up' }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: { kind: 'followup', text: 'Please check this once more.' } } });
+    expect(drafts.find(route, '1', 'followup')!.draft.target_revision).toBe(session.items['1']!.revision);
+    expect(Object.values(session.inputs).filter(input => input?.kind === 'followup' && input.target.item_id === '1')).toHaveLength(1);
+  });
+
+  it('shows a plain timeout and never replays a reopen when the late refresh finishes', async () => {
+    const { transport, store, drafts } = await setup();
+    render(<ItemDetail store={store} drafts={drafts} itemId="1" later={false} onOpenItem={vi.fn()} />);
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get') await gate;
+      return invoke(name, args);
+    });
+    const session = transport.sessions.get(route.session_id)!;
+    ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Open' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByRole('alert')).toHaveProperty('textContent', loadingError);
+    await act(async () => { release(); await store.refresh(); });
+    expect(sends(transport)).toHaveLength(0);
+    expect(drafts.find(route, '1', 'reopen')).toBeUndefined();
+  });
+
+  it.each(['reopen', 'followup'] as const)('sends one %s when the prior agent result has rendered but the store is still stale', async intent => {
+    const { transport, store, drafts } = await setup();
+    render(<ItemDetail store={store} drafts={drafts} itemId="1" later={false} onOpenItem={vi.fn()} />);
+    const session = transport.sessions.get(route.session_id)!;
+    const result = session.messages.find(message => message.author === 'agent' && message.item_id === '1')!;
+    result.body = 'The previous CLI-applied result is visible.';
+    ++session.items['1']!.revision;
+    ++session.revision;
+    const invoke = transport.invoke.bind(transport);
+    let stale = true, release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get') {
+        if (stale) return { api_version: 1, ok: true, data: { kind: name, data: { session: structuredClone(session), freshness: 'stale' } } };
+        await gate;
+      }
+      return invoke(name, args);
+    });
+    await act(async () => { await store.refresh(); });
+    expect(screen.getByText(result.body)).toBeTruthy();
+    expect(store.getSnapshot().status).toBe('stale');
+    stale = false;
+    fireEvent.click(screen.getByRole('button', { name: intent === 'reopen' ? 'Back to Open' : 'Follow up' }));
+    if (intent === 'followup') {
+      fireEvent.change(screen.getByLabelText('Follow-up message'), { target: { value: 'One deliberate follow-up.' } });
+      void store.refresh();
+    }
+    await act(async () => { release(); await store.refresh(); });
+    if (intent === 'followup') fireEvent.click(screen.getByRole('button', { name: 'Send follow-up' }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ params: { kind: intent, target: { item_id: '1' } } });
+    expect(session.items['1']!.status).toBe('done');
+  });
+
+  it.each(['question', 'binding', 'status', 'waiting', 'refresh failure'] as const)('shows a plain refusal if %s changes during the reopen wait', async change => {
+    const { transport, store, drafts } = await setup();
+    render(<ItemDetail store={store} drafts={drafts} itemId="1" later={false} onOpenItem={vi.fn()} />);
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get') {
+        await gate;
+        if (change === 'refresh failure') throw new Error('Lost refresh');
+      }
+      return invoke(name, args);
+    });
+    const session = transport.sessions.get(route.session_id)!;
+    ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Open' }));
+    if (change === 'question') session.items['1']!.question = 'A different question';
+    if (change === 'binding') session.active_binding_id = null;
+    if (change === 'status') session.items['1']!.status = 'open';
+    if (change === 'waiting') session.items['1']!.status = 'waiting_on_me';
+    await act(async () => { release(); });
+    const error = change === 'refresh failure' ? loadingError : change === 'status' || change === 'waiting'
+      ? 'This action is no longer available for the current item.' : 'This item changed. Review it before sending. Your text is kept.';
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', error);
     expect(sends(transport)).toHaveLength(0);
     expect(drafts.find(route, '1', 'reopen')).toBeUndefined();
   });

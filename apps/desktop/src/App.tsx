@@ -373,6 +373,7 @@ function Workspace({ application }: { application: Application }) {
     const identity = JSON.stringify(target);
     if (bringing.current.has(identity)) return;
     bringing.current.add(identity);
+    setRouteError(null);
     const token = ++shortcutSequence.current, navigationRequest = navigation.getNavigationRequest();
     setOwnerFocus(null);
     try {
@@ -384,7 +385,10 @@ function Workspace({ application }: { application: Application }) {
       await application.drafts.load();
       if (shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       const current = result.store.getSnapshot(), session = current.snapshot?.session;
-      if (!session || current.status !== 'ready' || current.error) return;
+      if (!session || current.status !== 'ready' || current.error) {
+        setRouteError("Ariadne is still loading this session's latest changes. Try again.");
+        return;
+      }
       const existing = application.drafts.find(target, target.item_id, 'bring');
       if (shortcutSequence.current === token) setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent: 'bring', token });
       // An existing draft, attempted operation or receipt always needs review.
