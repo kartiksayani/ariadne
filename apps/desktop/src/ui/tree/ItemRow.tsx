@@ -8,7 +8,7 @@ import { Markdown } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
 import { closed, visual, type Guide, type ItemRow as Row } from './model';
 
-export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly label?: string }
+export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly label?: string; readonly disabled?: boolean; readonly persistent?: boolean }
 
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
 
@@ -42,8 +42,8 @@ function preview(row: Row, jump: () => void, open: boolean): Preview | null {
       <button type="button" className="tree-jump" onClick={event => { event.stopPropagation(); jump(); }}>{row.replacedBy.question}</button>
       <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div> };
   }
-  if (closed(item.status) && item.outcome) {
-    return { text: item.outcome, node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} />
+  if ((closed(item.status) || ((item.status === 'open' || item.status === 'in_progress') && item.ack_to)) && item.outcome) {
+    return { text: item.outcome, node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${item.ack_to ?? visual(item.status)})` }} />
       <Markdown className="tree-clamp" text={item.outcome} compact={!open} /></div> };
   }
   return null;
@@ -113,6 +113,10 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
   const item = row.item, status = visual(row.status);
   const details = preview(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); }, unfolded);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
+  const actionButton = (action: RowAction) => <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
+    className={`tree-action${action.label ? ' tree-action-label' : ''}${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
+    onClick={event => { event.stopPropagation(); action.run(); }}>{action.glyph ?? <i className={action.icon} />}{action.label}</button>;
+  const persistent = actions.filter(action => action.persistent), hover = actions.filter(action => !action.persistent);
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
     data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key} data-highlight={highlight ?? undefined}
@@ -137,9 +141,8 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
     </div>
     <div className="tree-end">
       {row.rounds >= 2 && <span className="tree-round" title="Rounds of back and forth"><i className="ph ph-arrows-clockwise" />Round {row.rounds}</span>}
-      {actions.length > 0 && <span className="tree-actions">{actions.map(action => <button key={action.title} type="button" tabIndex={-1}
-        className={`tree-action${action.label ? ' tree-action-label' : ''}`} title={action.title} aria-label={action.title}
-        onClick={event => { event.stopPropagation(); action.run(); }}>{action.glyph ?? <i className={action.icon} />}{action.label}</button>)}</span>}
+      {persistent.length > 0 && <span className="tree-ack-slot">{persistent.map(actionButton)}</span>}
+      {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
       <span className="tree-id">{item.id}</span>
       <StatusBadge status={status} label={row.badge} variant="text" />
     </div>

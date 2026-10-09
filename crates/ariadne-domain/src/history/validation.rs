@@ -72,6 +72,18 @@ pub fn validate_session_history(session: &Session) -> Result<(), HistoryError> {
                     )?;
                     agent(session, message)?;
                 }
+                (MessageAuthor::Owner, MessageKind::Activity) => {
+                    text(&message.body, true, 4096)?;
+                    require(
+                        message.binding_id.is_none()
+                            && message.input_id.is_none()
+                            && message.attempt_id.is_none()
+                            && message.host_turn_id.is_none()
+                            && message.round_id.is_none()
+                            && message.item_id.is_some(),
+                        HistoryError::InvalidProvenance,
+                    )?;
+                }
                 (MessageAuthor::System, MessageKind::Lifecycle) => {
                     text(&message.body, true, usize::MAX)?;
                     if let Some(id) = &message.binding_id {
@@ -740,6 +752,14 @@ pub(crate) fn copied_message(
             (MessageAuthor::Agent, MessageKind::Reply | MessageKind::Activity) => {
                 message.input_id.is_some() == message.attempt_id.is_some()
                     && (message.attempt_id.is_some() || message.host_turn_id.is_none())
+            }
+            (MessageAuthor::Owner, MessageKind::Activity) => {
+                message.input_id.is_none()
+                    && message.attempt_id.is_none()
+                    && message.host_turn_id.is_none()
+                    && message.binding_id.is_none()
+                    && message.round_id.is_none()
+                    && message.item_id.is_some()
             }
             (MessageAuthor::System, MessageKind::Lifecycle) => true,
             _ => false,

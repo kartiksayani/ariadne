@@ -613,6 +613,7 @@ mutations! {
     item_remove => ItemRemove, topic_remove => TopicRemove,
     session_remove => SessionRemove, project_remove => ProjectRemove,
     session_label_set => SessionLabelSet,
+    ack => Ack,
 }
 
 #[cfg(test)]

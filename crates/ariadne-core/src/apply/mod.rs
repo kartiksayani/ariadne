@@ -45,8 +45,31 @@ impl<'a> ApplyService<'a> {
         &self,
         context: &AgentContext,
         request: &ApplyRequest,
+        allocate: impl FnMut() -> UuidV4,
+        at: UtcMillis,
+    ) -> Result<(ApplyReceipt, bool), ApplyError> {
+        self.execute_with_repairs(context, request, allocate, at, None)
+    }
+    /// CLI status repairs run under the writer lock, after replay lookup.
+    pub fn execute_lenient(
+        &self,
+        context: &AgentContext,
+        request: &ApplyRequest,
+        allocate: impl FnMut() -> UuidV4,
+        at: UtcMillis,
+    ) -> Result<(ApplyReceipt, bool, Vec<String>), ApplyError> {
+        let mut repairs = vec![];
+        let (receipt, replayed) =
+            self.execute_with_repairs(context, request, allocate, at, Some(&mut repairs))?;
+        Ok((receipt, replayed, repairs))
+    }
+    fn execute_with_repairs(
+        &self,
+        context: &AgentContext,
+        request: &ApplyRequest,
         mut allocate: impl FnMut() -> UuidV4,
         at: UtcMillis,
+        repairs: Option<&mut Vec<String>>,
     ) -> Result<(ApplyReceipt, bool), ApplyError> {
         let (store, intent) = self.open(context, request)?;
         let (receipt, replayed) = store.transact_noting_replay(
@@ -56,7 +79,7 @@ impl<'a> ApplyService<'a> {
             },
             &request.op_id,
             &intent,
-            |session| batch::execute(session, context, request, &mut allocate, &at),
+            |session| batch::execute(session, context, request, &mut allocate, &at, repairs),
         )?;
         validate_apply_receipt(&receipt, context, request)?;
         Ok((receipt, replayed))
@@ -68,8 +91,31 @@ impl<'a> ApplyService<'a> {
         &self,
         context: &AgentContext,
         request: &ApplyRequest,
+        allocate: impl FnMut() -> UuidV4,
+        at: UtcMillis,
+    ) -> Result<ApplyPreview, ApplyError> {
+        self.preview_with_repairs(context, request, allocate, at, None)
+    }
+    /// Validate-only version of the CLI's state-aware status repair.
+    pub fn preview_lenient(
+        &self,
+        context: &AgentContext,
+        request: &ApplyRequest,
+        allocate: impl FnMut() -> UuidV4,
+        at: UtcMillis,
+    ) -> Result<(ApplyPreview, Vec<String>), ApplyError> {
+        let mut repairs = vec![];
+        let preview =
+            self.preview_with_repairs(context, request, allocate, at, Some(&mut repairs))?;
+        Ok((preview, repairs))
+    }
+    fn preview_with_repairs(
+        &self,
+        context: &AgentContext,
+        request: &ApplyRequest,
         mut allocate: impl FnMut() -> UuidV4,
         at: UtcMillis,
+        repairs: Option<&mut Vec<String>>,
     ) -> Result<ApplyPreview, ApplyError> {
         let (store, intent) = self.open(context, request)?;
         let staged = store.preview(
@@ -79,7 +125,7 @@ impl<'a> ApplyService<'a> {
             },
             &request.op_id,
             &intent,
-            |session| batch::execute(session, context, request, &mut allocate, &at),
+            |session| batch::execute(session, context, request, &mut allocate, &at, repairs),
         )?;
         validate_apply_receipt(&staged.receipt, context, request)?;
         Ok(ApplyPreview {

@@ -6,16 +6,17 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { assertStatusFilters, choose, observeTreeAnchor, observeTreeClickReadiness, publishTreeRequest, treeBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { assertStatusFilters, choose, observeTreeAnchor, observeTreeClickReadiness, publishTreeRequest, treeBatch, treeCompletionBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
 
 for (const scenario of ['multi-select', 'exclusive-selection', 'incorrect-saved-set']) {
   test(`native status steps verify combined rows, deselection and saved sets: ${scenario}`, async () => {
     const operations = Array.from({ length: 20 }, (_, index) => treeBatch('topic', index + 1)).flat();
     const ids = operations.map(operation => operation.ref.replace('native_root_', '').replace('native_child_', '').replace('_', '.'));
+    const doneIds = new Set(Array.from({ length: 20 }, (_, index) => treeCompletionBatch(index + 1)).flat().map(operation => operation.item.id));
     const closed = ['decided', 'done', 'dropped', 'replaced'], selected = new Set(), calls = [];
     let statuses = [];
-    const shown = () => ids.filter((id, index) => selected.size !== 1 || (selected.has('closed') ? operations[index].status === 'done'
-      : operations[index].status === 'open' || operations[index].parent === null));
+    const shown = () => ids.filter((id, index) => selected.size !== 1 || (selected.has('closed') ? doneIds.has(id)
+      : !doneIds.has(id) || operations[index].parent === null));
     const document = { querySelectorAll: () => (selected.size ? ['open', 'closed'].filter(chip => selected.has(chip)) : ['all']).map(chip => ({ dataset: { chip } })) };
     const context = {
       assert: { ...assert, deepEqual: (actual, expected, message) => assert.deepEqual(globalThis.structuredClone(actual), globalThis.structuredClone(expected), message) },
@@ -237,7 +238,7 @@ test('2,000-item / 5,000-message corpus requests pass real CLI wire validation a
     const read = async () => JSON.parse(await readFile(sessionPath, 'utf8'));
     const beforeBytes = await readFile(sessionPath), before = await read(), binding = before.bindings[before.active_binding_id];
     const publish = async (operations, summary = '') => {
-      const revisions = Object.fromEntries(operations.filter(operation => operation.op === 'reply').map(operation => [operation.item.id, 1]));
+      const revisions = Object.fromEntries(operations.filter(operation => operation.item?.id).map(operation => [operation.item.id, 1]));
       const request = { op_id: randomUUID(), source_input_id: null, attempt_id: null, expected_item_revisions: revisions,
         expected_topic_revisions: {}, summary, operations, input_result: null };
       assert.ok(Buffer.byteLength(JSON.stringify(request)) < 512 * 1024);
@@ -247,14 +248,22 @@ test('2,000-item / 5,000-message corpus requests pass real CLI wire validation a
       assert.deepEqual(await readFile(sessionPath), beforeBytes);
     };
     await publish([{ op: 'topic.add', ref: 'native_tree_topic', name: 'Native tree acceptance' }]);
-    const topicId = randomUUID(), operations = [];
+    const topicId = randomUUID(), operations = [], completions = [];
     for (let branch = 1; branch <= 20; branch++) {
       const batch = treeBatch(topicId, branch); operations.push(...batch); await publish(batch);
+      const completion = treeCompletionBatch(branch); completions.push(...completion); await publish(completion);
     }
     assert.equal(operations.length, 2000);
     assert.equal(operations.filter(item => item.parent === null).length, 20);
-    assert.equal(operations.filter(item => item.status === 'open').length, 1320);
-    assert.equal(operations.filter(item => item.status === 'done').length, 680);
+    assert.ok(operations.every(item => item.status === 'open' && !Object.hasOwn(item, 'ack_to')),
+      'Every root and child must be created nonterminal without invoking lenient Ack repairs');
+    assert.equal(completions.length, 680);
+    const ids = new Set(operations.map(operation => operation.ref.replace('native_root_', '').replace('native_child_', '').replace('_', '.')));
+    const completedIds = new Set(completions.map(operation => operation.item.id));
+    assert.equal(completedIds.size, 680); assert.equal(ids.size - completedIds.size, 1320);
+    assert.ok(completions.every(operation => operation.op === 'item.status' && operation.status === 'done'
+      && ids.has(operation.item.id) && !Object.hasOwn(operation, 'ack_to')
+      && operation.outcome.includes('\n') && operation.why === 'Retain the complete native outcome.'));
     assert.equal(operations.filter(item => item.owner.kind === 'me').length, 1000);
     assert.ok(operations.some(item => item.question.includes('Native café needle.')));
     const replies = [];

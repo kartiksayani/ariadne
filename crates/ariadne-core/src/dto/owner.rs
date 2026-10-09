@@ -32,6 +32,7 @@ owner_commands!(
     SessionRemove(SessionRemoveParams),
     ProjectRemove(ProjectRemoveParams),
     SessionLabelSet(SessionLabelParams),
+    Ack(ItemAckParams),
 );
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -134,6 +135,14 @@ pub struct TopicContinueParams {
     pub target: SessionRef,
     pub target_binding_id: UuidV4,
     pub summary: String,
+}
+
+/// Explicit owner acknowledgment of an agent-proposed terminal state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ItemAckParams {
+    pub item_id: ItemRef,
+    pub expected_revision: PositiveSafeInteger,
 }
 
 /// Removes the item and everything below it (session route).

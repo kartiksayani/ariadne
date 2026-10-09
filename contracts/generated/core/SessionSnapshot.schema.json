@@ -25,6 +25,15 @@
         "uncertain"
       ]
     },
+    "AckTarget": {
+      "description": "Terminal state the agent proposes for an explicit owner acknowledgment.",
+      "type": "string",
+      "enum": [
+        "decided",
+        "done",
+        "dropped"
+      ]
+    },
     "AdapterConfig": {
       "type": "object",
       "properties": {
@@ -1060,6 +1069,16 @@
     "Item": {
       "type": "object",
       "properties": {
+        "ack_to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AckTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "ask": {
           "type": [
             "string",
@@ -2308,6 +2327,35 @@
             "kind",
             "name",
             "description"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "item_id": {
+              "$ref": "#/$defs/ItemRef"
+            },
+            "item_revision": {
+              "$ref": "#/$defs/PositiveSafeInteger"
+            },
+            "kind": {
+              "type": "string",
+              "const": "item_ack"
+            },
+            "message_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "status": {
+              "$ref": "#/$defs/ItemStatus"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "item_id",
+            "item_revision",
+            "status",
+            "message_id"
           ]
         },
         {

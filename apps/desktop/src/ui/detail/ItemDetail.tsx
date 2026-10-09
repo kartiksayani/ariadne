@@ -11,6 +11,8 @@ import { sessionActionsFor } from '../../components/bindings/actions';
 import { PausedNote } from '../../components/bindings/DispatchChip';
 import { useSupervisorHealth } from '../../components/bindings/health';
 import type { OwnerFocusRequest, PendingSubmission } from '../answer/useSubmit';
+import { ackTarget, ackTitle, useAck } from '../shared/ack';
+import { STATUS } from '../shared/status';
 import { StuckNote } from '../answer/StuckNote';
 import { NotSentLine } from '../answer/NotSentLine';
 import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain } from '../answer/held';
@@ -200,11 +202,13 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   // The session's write barrier, shared with the session bar: Resume, Cancel and Retry go through it.
   const actions = useMemo(() => sessionActionsFor(drafts.service, store), [drafts, store]);
+  const ack = useAck(actions, itemId);
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
     replyDraft: mode === 'reply' || submit.written.length > 0 }) : null;
   const item = session?.items[itemId];
+  const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
   // boxes (drop reason, follow-up on a finished item) open on press.
   // Words are bound to the draft they were typed in: the box edits that draft in place whatever the item's status does, and
@@ -340,7 +344,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </div>
     </div>}
   </div>;
-  const docked = !!(model.open || model.followUp || model.answer || retainedAnswer || owner);
+  const docked = !!(model.open || model.followUp || model.answer || retainedAnswer || owner || ackTo || ack.error || submit.error);
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
@@ -446,36 +450,41 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     </div>
 
     {docked && <div className="detail-dock">
+    {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
+      <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo)} aria-label={ackTitle(ackTo)}
+        disabled={ack.busy} onClick={() => { void ack.run(item.id); }}>
+        <i className="ph ph-check" aria-hidden="true" />Ack<span className="detail-key" aria-hidden="true">a</span>
+      </button><span className="detail-hint">Mark {STATUS[ackTo].label}</span>
+    </section>}
+    {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
+    {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
     {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
       {sectionLabel(model.open.title)}
       <div className="detail-actions" role="group" aria-label="Item actions">
         {model.open.actions.map(action => <button type="button" key={action.action} className={`btn ${action.primary ? 'btn-primary' : 'btn-secondary'} detail-action`}
-          aria-pressed={action.primary ? undefined : action.pressed} disabled={action.disabled || (!submit.ready && action.action !== 'later')} title={action.title}
+          aria-pressed={action.primary ? undefined : action.pressed} disabled={action.disabled || (!draftState.ready && action.action !== 'later') || (!submit.ready && action.action === 'bring') || (action.action === 'reopen' && submit.locked('reopen'))} title={action.title}
           onClick={() => act(action.action)}>
           <i className={action.icon} aria-hidden="true" />{action.label}<span className="detail-key" aria-hidden="true">{action.key}</span>
         </button>)}
       </div>
       <div className="detail-hint">{model.open.hint}</div>
       {!owner && <PausedNote actions={actions} />}
-      {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
       {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
     </section>}
 
     {model.followUp && <section className="detail-section detail-open" aria-label="Reply">
       <div className="detail-actions" role="group" aria-label="Item actions">
-        <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !submit.ready}
+        <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !draftState.ready}
           title="Reply in your own words" onClick={() => openBox('reply')}>
           <i className="ph ph-chat-text" aria-hidden="true" />{model.followUp.label}<span className="detail-key" aria-hidden="true">r</span>
         </button>
       </div>
       <div className="detail-hint">{model.followUp.hint}</div>
-      {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
     </section>}
 
     {/* The one place the owner's boxes live: the same mount for every status, so typing and focus survive a status change. */}
     {owner && <section className="detail-section detail-open" aria-label="Your message">
       {owner}
-      {!model.open && !model.followUp && submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
     </section>}
 
     {(model.answer || retainedAnswer) && <section className="detail-section detail-answer" aria-label="Your answer">

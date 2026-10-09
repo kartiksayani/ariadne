@@ -45,6 +45,7 @@ export function definitiveRejection(failure: CoreFailure | ServiceFailure, comma
   if (failure.error.code === 'invalid_argument') return true;
   if (command.command === 'binding_connect' && connectRejections.includes(failure.error.code)) return true;
   if (command.command === 'input_cancel' && ['revision_conflict', 'invalid_transition', 'not_found'].includes(failure.error.code)) return true;
+  if (command.command === 'ack' && ['revision_conflict', 'invalid_transition'].includes(failure.error.code)) return true;
   // Verified replay-first transaction guards in recovery/mod.rs and
   // bindings/mod.rs reject before publication. Recovery's delivery_uncertain
   // denotes missing idle attestation or ineligible retry before mutation.
@@ -132,6 +133,9 @@ export class SessionActions {
             && data.continuation.source_revision === command.params.source_revision
             && data.continuation.source_sha256 === command.params.source_sha256
             && data.continuation.summary === command.params.summary
+        : command.command === 'ack' ? data.kind === 'item_ack' && data.item_id === command.params.item_id
+          && data.item_revision === command.params.expected_revision + 1
+          && ['decided', 'done', 'dropped'].includes(data.status) && uuid(data.message_id)
         : command.command === 'binding_connect' ? data.kind === 'binding_connect'
         : command.command === 'input_cancel' ? data.kind === 'input_cancel' && data.input_id === command.params.input_id
         : command.command === 'input_resolve' ? data.kind === 'input_resolve' && data.input_id === command.params.input_id
@@ -141,7 +145,9 @@ export class SessionActions {
           && data.binding_id === command.params.binding_id && data.generation === command.params.expected_generation;
       if (!matches) throw new ServiceFailure('invalid_response');
       this.publish({ pending: null, receipt: immutable(receipt) });
-      await this.session.refresh();
+      // A readiness wait can still be seeding presence after publishing its snapshot.
+      // Read again after that flight so the just-saved change reaches the view.
+      await this.session.refresh(true);
       return true;
     } catch (error: unknown) {
       const failure = error instanceof CoreFailure || error instanceof ServiceFailure ? error : new ServiceFailure('transport');
