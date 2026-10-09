@@ -35,9 +35,10 @@ fn add(target: &mut NonnegativeSafeInteger, value: u64) -> Result<(), CoreError>
 ///
 /// An item stops waiting on the owner once the owner sent anything to its current
 /// question (answer, reply, note, drop...) that is on its way (queued or in
-/// flight) or handled, or a standing answer. Handled Bring/Reopen requests do not
-/// answer a question. Failed delivery (needs attention), cancelled and skipped
-/// inputs need the owner again. Mirrors the TypeScript `ownerReplied` selector.
+/// flight), or a standing answer. Handled replies count only for Open/InProgress
+/// items, where Ack can retain the answered episode. Failed delivery (needs
+/// attention), cancelled and skipped inputs need the owner again. Mirrors the
+/// TypeScript `ownerReplied` selector.
 pub fn waiting_unanswered(session: &Session, item: &Item) -> bool {
     item.status == ItemStatus::WaitingOnMe && question_unanswered(session, item)
 }
@@ -82,7 +83,8 @@ pub(crate) fn question_unanswered(session: &Session, item: &Item) -> bool {
                 .is_some_and(matches_question_revision)
             // Bring/Reopen asks the agent to raise a question, not answers it.
             && (matches!(input.state, InputState::Queued | InputState::InFlight)
-                || input.state == InputState::Handled
+                || matches!(item.status, ItemStatus::Open | ItemStatus::InProgress)
+                    && input.state == InputState::Handled
                     && matches!(
                         input.kind,
                         InputKind::Answer
@@ -309,15 +311,34 @@ mod tests {
     fn any_owner_input_kind_on_its_way_moves_the_turn_to_the_agent() {
         use InputKind::{Answer, Drop, Followup, Note, Reply};
         for kind in [Answer, Reply, Note, Followup, Drop] {
-            for state in [
-                InputState::Queued,
-                InputState::InFlight,
-                InputState::Handled,
-            ] {
+            for state in [InputState::Queued, InputState::InFlight] {
                 let mut session = seed();
                 send(&mut session, kind.clone(), state.clone(), 1);
                 assert!(!waiting(&session), "{kind:?} {state:?}");
             }
+        }
+    }
+
+    #[test]
+    fn handled_inputs_leave_a_waiting_question_answerable_but_allow_ack() {
+        for kind in [
+            InputKind::Answer,
+            InputKind::Reply,
+            InputKind::Note,
+            InputKind::Followup,
+            InputKind::Drop,
+        ] {
+            let mut session = seed();
+            send(&mut session, kind.clone(), InputState::Handled, 1);
+            assert!(waiting(&session), "{kind:?}");
+            let key = ItemRef::new(ITEM).unwrap();
+            for status in [ItemStatus::Open, ItemStatus::InProgress] {
+                session.items.0.get_mut(&key).unwrap().status = status;
+                assert!(!question_unanswered(&session, &session.items.0[&key]));
+            }
+            session.items.0.get_mut(&key).unwrap().question_revision =
+                PositiveSafeInteger::new(3).unwrap();
+            assert!(question_unanswered(&session, &session.items.0[&key]));
         }
     }
 
@@ -366,8 +387,8 @@ mod tests {
             InputState::Handled,
         ] {
             let mut session = seed();
-            send(&mut session, InputKind::Reply, state, 1);
-            assert!(!waiting(&session));
+            send(&mut session, InputKind::Reply, state.clone(), 1);
+            assert_eq!(waiting(&session), state == InputState::Handled);
             let item = session
                 .items
                 .0
@@ -379,6 +400,8 @@ mod tests {
                 "a re-ask must wait even with identical content"
             );
             send(&mut session, InputKind::Reply, InputState::Handled, 2);
+            assert!(waiting(&session));
+            send(&mut session, InputKind::Reply, InputState::Queued, 2);
             assert!(!waiting(&session));
         }
     }

@@ -292,9 +292,21 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
         self.target(session, id)?;
         // Only an existing Ack proposal needs protection from agent completion.
         // Source fields were authenticated by scope::authorize before mutations.
+        let answers_owner_input = self
+            .request
+            .source_input_id
+            .as_ref()
+            .and_then(|input_id| session.inputs.0.get(input_id))
+            .is_some_and(|input| {
+                input.target.item_id.as_ref() == Some(id)
+                    && matches!(
+                        input.kind,
+                        InputKind::Drop | InputKind::Reply | InputKind::Answer
+                    )
+            });
         if self.original_items.contains(id)
             && session.items.0[id].ack_to.is_some()
-            && self.request.source_input_id.is_none()
+            && !answers_owner_input
         {
             if let ItemChange::Status {
                 status,

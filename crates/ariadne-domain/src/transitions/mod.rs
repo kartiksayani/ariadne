@@ -173,7 +173,14 @@ pub fn transition_item(
                     .iter()
                     .find(|message| message.id == context.cause_message_id)
                     .and_then(|message| message.input_id.as_ref())
-                    .is_some_and(|input_id| session.inputs.0.contains_key(input_id));
+                    .and_then(|input_id| session.inputs.0.get(input_id))
+                    .is_some_and(|input| {
+                        input.target.item_id.as_ref() == Some(&old.id)
+                            && matches!(
+                                input.kind,
+                                InputKind::Drop | InputKind::Reply | InputKind::Answer
+                            )
+                    });
                 if (old.ack_to.is_some() && !answers_owner_input) || ack_to.is_some() {
                     return Err(TransitionError::InvalidTransition);
                 }

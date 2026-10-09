@@ -35,18 +35,22 @@ question or sending a message to the agent.
   Existing items without `ack_to` retain terminal status transitions. With
   `ack_to`, terminal `item.status` is refused in strict filing or repaired in
   lenient filing unless the authenticated request answers an owner input
-  (`source_input_id`), such as Drop or “close it”. Owner-directed completion
+  (`source_input_id`) targeting that same item with kind Drop, Reply or Answer,
+  such as Drop or “close it”. Owner-directed completion
   passes and clears `ack_to`. Superseded work uses `item.replace` with its live
   replacement link, also clearing `ack_to`.
 - Lenient status repair applies only to existing items with `ack_to` and no
-  owner input: keep Open with the requested Decided, Done or Dropped target,
+  qualifying owner input on that item: keep Open with the requested Decided, Done or Dropped target,
   retaining outcome and why. Unlike creation expansion, this decision needs
   live state. It runs under the store lock after replay lookup, against the
   original request intent; operation IDs and digests never depend on live state.
   Both preview and commit report repairs. Exact retries still replay after Ack.
-- A Handled owner reply on the current question counts as replied, alongside
-  Queued/InFlight inputs and standing answers. Core counts, Ack and filing share
-  the same predicate; the TypeScript selector mirrors it. Failed, cancelled,
+- A Handled owner reply on the current question counts as replied only for Open
+  and InProgress items, preserving the answered episode for Ack. Waiting on me
+  counts only Queued/InFlight inputs and standing answers: explaining an owner
+  follow-up or returning `unable` for Drop leaves the question answerable.
+  Core counts, Ack and filing share the same predicate; the TypeScript selector
+  mirrors it. Failed, cancelled,
   skipped, superseded and older-question inputs do not count. Handled inputs
   count only Answer/Reply/Note/Followup/Drop; a Handled Bring/Reopen requests
   an ask and cannot answer it, even at the same question revision. A newer ask

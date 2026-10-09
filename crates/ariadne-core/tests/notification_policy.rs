@@ -551,14 +551,7 @@ fn partial_capacity_pauses_without_eviction_then_complete_capture_compacts() {
 fn capture_uses_global_counts_labels_and_registered_snapshots() {
     let projects: Page<ProjectSummary> = fixture("domain/projections/projects.json");
     let sessions: Page<SessionSummary> = fixture("domain/projections/sessions.json");
-    let mut session: Session = fixture("domain/demo/session.json");
-    // Keep this capture fixture unanswered, consistent with its global counts.
-    session
-        .inputs
-        .0
-        .get_mut(&UuidV4::new("00000000-0000-4000-8000-000000000071").unwrap())
-        .unwrap()
-        .state = InputState::Skipped;
+    let session: Session = fixture("domain/demo/session.json");
     let counts = projects.items[0].counts.clone();
     let read = |request: OwnerQueryRequest| {
         Ok(match request.request {

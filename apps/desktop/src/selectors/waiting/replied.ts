@@ -8,6 +8,7 @@ import type { Immutable } from '../../data';
 /** The status the owner sees: the item's status, or Waiting on agent once the owner replied. */
 export type DisplayStatus = ItemStatus | 'waiting_on_agent';
 
+// Handled replies count for Open/InProgress Ack items, never a still-waiting ask.
 // A handled Bring/Reopen requests an ask; it does not answer that ask.
 // Failed delivery (needs_attention), cancelled and skipped inputs need the owner again.
 const replyKinds = new Set(['answer', 'reply', 'note', 'followup', 'drop']);
@@ -15,7 +16,7 @@ const needsOwner = new Set(['cancelled', 'skipped', 'needs_attention']);
 
 /**
  * True when the item waits on the owner but the owner already sent something to
- * its current question (answer, reply, note, drop...) that is on its way or handled,
+ * its current question (answer, reply, note, drop...) that is on its way,
  * or an answer to it stands (the agent has not opened a new round yet). Mirrors core's
  * `waiting_unanswered`, so every count agrees.
  */
@@ -35,7 +36,7 @@ export function currentQuestionReplied(session: Immutable<Session>, item: Immuta
   const questionRevisions = new Set([item.question_revision, ...retained ? [round.question_revision] : []]);
   const superseded = (answerId: string | null) => !!answerId && session.answers.some(newer => newer.supersedes_answer_id === answerId);
   const pending = Object.values(session.inputs).some(input => !!input && input.target.item_id === item.id
-    && (input.state === 'queued' || input.state === 'in_flight' || input.state === 'handled' && replyKinds.has(input.kind))
+    && (input.state === 'queued' || input.state === 'in_flight' || canRetain && input.state === 'handled' && replyKinds.has(input.kind))
     && questionRevisions.has(input.payload.target_snapshot.question_revision ?? -1) && !superseded(input.answer_id));
   return pending || session.answers.some(answer => answer.item_id === item.id && questionRevisions.has(answer.question_revision)
     && !superseded(answer.id) && !needsOwner.has(session.inputs[answer.input_id]?.state ?? 'handled'));

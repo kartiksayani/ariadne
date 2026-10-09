@@ -376,6 +376,27 @@ impl Seeded {
         selected_option_id: Option<String>,
         expected_question_revision: Option<PositiveSafeInteger>,
     ) -> (UuidV4, u64) {
+        let turn = if text == "close it" || text == "Drop this question." {
+            TurnState::Completed
+        } else {
+            TurnState::Running
+        };
+        self.deliver_input_with_turn(
+            kind,
+            text,
+            selected_option_id,
+            expected_question_revision,
+            turn,
+        )
+    }
+    fn deliver_input_with_turn(
+        &self,
+        kind: InputKind,
+        text: &str,
+        selected_option_id: Option<String>,
+        expected_question_revision: Option<PositiveSafeInteger>,
+        turn: TurnState,
+    ) -> (UuidV4, u64) {
         let command = OwnerCommand::InputSubmit {
             api_version: SchemaVersion::new(1).unwrap(),
             op_id: id(700),
@@ -445,11 +466,7 @@ impl Seeded {
                         acceptance_receipt: None,
                         acceptance_observed_at: Some(at()),
                         host_turn_id: Some("host-turn".into()),
-                        turn_state: if text == "close it" || text == "Drop this question." {
-                            TurnState::Completed
-                        } else {
-                            TurnState::Running
-                        },
+                        turn_state: turn,
                         turn_observed_at: Some(at()),
                         domain_result: None,
                         result_state: ResultState::Pending,
@@ -1150,6 +1167,62 @@ fn error_table_exit_codes_match_the_real_cli_exit_mapping() {
         CoreErrorCode::HostUnreachable,
     ] {
         assert_eq!(code.cli_exit(), 4);
+    }
+}
+
+#[test]
+fn handling_a_question_reply_or_unable_drop_keeps_the_parent_waiting_on_the_owner() {
+    for (kind, text, outcome, explanation) in [
+        (
+            InputKind::Reply,
+            "what does B mean?",
+            "answered",
+            "B keeps the current plan.",
+        ),
+        (
+            InputKind::Drop,
+            "Drop this question.",
+            "unable",
+            "The question still needs your choice.",
+        ),
+    ] {
+        let seeded = Seeded::new();
+        seeded.succeeds(&[], &json!({
+            "expected_item_revisions": {"1": seeded.revision("1")},
+            "operations": [{"op": "item.ask", "item": {"id": "1"}, "ask": "Choose A or B?",
+                "options": [{"label": "A", "consequence": "Change the plan."}, {"label": "B", "consequence": "Keep the plan."}]}]
+        }));
+        let (input, number) =
+            seeded.deliver_input_with_turn(kind, text, None, None, TurnState::Completed);
+        let before = seeded.session();
+        let parent_id = ItemRef::new("1").unwrap();
+        let question_revision = before.items.0[&parent_id].question_revision;
+        let round = before.items.0[&parent_id].current_round_id.clone().unwrap();
+        let request = json!({
+            "source_input_id": input, "attempt_id": id(0x11),
+            "expected_item_revisions": {"1": seeded.revision("1")},
+            "operations": [{"op": "reply", "ref": "r1", "item": {"id": "1"}, "text": explanation}],
+            "input_result": {"outcome": outcome, "explanation": explanation,
+                "reply_refs": [{"ref": "r1"}], "handled_through_message_number": number}
+        });
+        seeded.succeeds(&[], &request);
+        let saved = seeded.session();
+        let parent = &saved.items.0[&parent_id];
+        assert_eq!(saved.inputs.0[&input].state, InputState::Handled);
+        let result = saved.inputs.0[&input].attempts[0]
+            .domain_result
+            .as_ref()
+            .unwrap();
+        assert_eq!(serde_json::to_value(&result.outcome).unwrap(), outcome);
+        assert_eq!(result.reply_message_ids.len(), 1);
+        assert_eq!(parent.status, ItemStatus::WaitingOnMe);
+        assert_eq!(parent.question_revision, question_revision);
+        assert_eq!(parent.current_round_id.as_ref(), Some(&round));
+        assert_eq!(parent.ask.as_deref(), Some("Choose A or B?"));
+        assert_eq!(parent.options.len(), 2);
+        assert!(saved.rounds.0[&round].closed_at.is_none());
+        assert!(ariadne_core::queries::waiting_unanswered(&saved, parent));
+        assert!(saved.answers.is_empty());
     }
 }
 

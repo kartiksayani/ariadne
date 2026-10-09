@@ -1667,6 +1667,54 @@ fn ack_target_is_optional_on_old_data_and_restricted_on_wire() {
 }
 
 #[test]
+fn ack_completion_requires_drop_reply_or_answer_targeting_the_same_item() {
+    for kind in [
+        InputKind::Drop,
+        InputKind::Reply,
+        InputKind::Answer,
+        InputKind::Note,
+        InputKind::Followup,
+        InputKind::Bring,
+        InputKind::Reopen,
+        InputKind::Continue,
+        InputKind::Removed,
+        InputKind::TopicReply,
+    ] {
+        for target in ["1", "2"] {
+            for terminal in [ItemStatus::Decided, ItemStatus::Done, ItemStatus::Dropped] {
+                let mut s = session();
+                s.counters.next_root = positive(3);
+                s.items.0.insert(reference("2"), item("2", None, 2));
+                s.items.0.get_mut(&reference(target)).unwrap().ack_to = Some(AckTarget::Done);
+                add_owner_input(&mut s, 9, 2, InputState::Handled);
+                let input = s.inputs.0.get_mut(&uuid(109)).unwrap();
+                input.kind = kind.clone();
+                input.payload.intent = kind.clone();
+                s.messages[0].input_id = Some(uuid(109));
+                s.messages[0].items_touched.push(reference("2"));
+                let before = s.clone();
+                let result = transition_item(
+                    &s,
+                    &reference(target),
+                    &status(terminal.clone()),
+                    &context(&s),
+                );
+                if target == "1"
+                    && matches!(kind, InputKind::Drop | InputKind::Reply | InputKind::Answer)
+                {
+                    let candidate = result.unwrap();
+                    assert_eq!(candidate.status, terminal);
+                    assert_eq!(candidate.ack_to, None);
+                } else {
+                    assert_eq!(result.unwrap_err(), TransitionError::InvalidTransition);
+                }
+                assert_eq!(s, before);
+            }
+        }
+    }
+}
+
+#[test]
 fn agents_cannot_finish_ack_items_but_can_replace_superseded_work() {
     for target in [AckTarget::Decided, AckTarget::Done, AckTarget::Dropped] {
         let mut s = session();

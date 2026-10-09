@@ -1673,6 +1673,64 @@ fn owner_drop_and_close_reply_can_finish_existing_ack_questions() {
 }
 
 #[test]
+fn owner_input_on_another_item_or_noncompletion_kind_cannot_bypass_ack() {
+    for (kind, target) in [
+        (InputKind::Drop, "2"),
+        (InputKind::Reply, "2"),
+        (InputKind::Note, "1"),
+        (InputKind::Followup, "1"),
+    ] {
+        for terminal in [AckTarget::Decided, AckTarget::Done, AckTarget::Dropped] {
+            let mut source = seed();
+            let proposal = source.items.0.get_mut(&item(target)).unwrap();
+            proposal.status = ItemStatus::Open;
+            proposal.ack_to = Some(AckTarget::Done);
+            proposal.outcome = Some("Original proposal.".into());
+            proposal.why = Some("Original evidence.".into());
+            assert!(proposal.ask.is_none());
+            let setup = Setup::new(&source);
+            let input = setup.prepare_kind(TurnState::Completed, kind.clone(), "Owner context.");
+            let mut close = setup.dispatched(1015, &input);
+            close
+                .expected_item_revisions
+                .0
+                .insert(item(target), setup.saved().items.0[&item(target)].revision);
+            close.operations.push(Operation::ItemStatus {
+                item: existing(target),
+                status: terminal.status(),
+                ack_to: None,
+                outcome: Some("Revised proposal.".into()),
+                why: Some("Revised evidence.".into()),
+                reason: None,
+            });
+            let before = setup.bytes();
+            let error = core_error(setup.execute(&close).unwrap_err());
+            assert_eq!(error.code, CoreErrorCode::InvalidTransition);
+            assert!(error.message.contains("owner's Ack"));
+            assert_eq!(setup.bytes(), before);
+
+            let (_, replayed, repairs) = ApplyService::new(&setup.registry)
+                .execute_lenient(
+                    &setup.context(Some(&input)),
+                    &close,
+                    || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                    at(),
+                )
+                .unwrap();
+            assert!(!replayed);
+            assert_eq!(repairs.len(), 1);
+            let saved = setup.saved();
+            let proposal = &saved.items.0[&item(target)];
+            assert_eq!(proposal.status, ItemStatus::Open);
+            assert_eq!(proposal.ack_to, Some(terminal));
+            assert_eq!(proposal.outcome.as_deref(), Some("Revised proposal."));
+            assert_eq!(proposal.why.as_deref(), Some("Revised evidence."));
+            assert_eq!(saved.inputs.0[&input].state, InputState::Handled);
+        }
+    }
+}
+
+#[test]
 fn agent_can_drop_its_unanswered_question_without_an_ack_target() {
     let setup = Setup::new(&seed());
     let mut ask = guarded(1004, "1", 1);

@@ -94,14 +94,25 @@ describe('current Waiting and immutable Sent selection', () => {
     old.kind = kind; old.payload.intent = kind;
     expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
   });
-  it.each(['answer', 'reply', 'note', 'followup', 'drop'] as const)('a handled %s answers only its question revision', kind => {
+  it.each(['answer', 'reply', 'note', 'followup', 'drop'] as const)('a handled %s leaves the waiting question answerable', kind => {
     const seed = fixture(), session = seed.session, old = session.inputs[inputId('71')]!;
     old.kind = kind; old.payload.intent = kind;
-    expect(waitingRows([seed])).toHaveLength(0);
+    expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
     ++session.items['2']!.question_revision;
     expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
     old.payload.target_snapshot.question_revision = session.items['2']!.question_revision;
-    expect(waitingRows([seed])).toHaveLength(0);
+    expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
+  });
+  it('keeps the question answerable after the agent explains an owner follow-up', async () => {
+    const { store, transport, drafts } = setup(), seed = withOptions(), reply = seed.inputs[inputId('71')]!;
+    reply.kind = 'reply'; reply.payload.intent = 'reply'; reply.payload.text = 'What does B mean?';
+    const agentReply = structuredClone(seed.messages.find(message => message.author === 'agent')!);
+    agentReply.id = inputId('99'); agentReply.item_id = '2'; agentReply.kind = 'reply'; agentReply.body = 'B means changing the design.';
+    seed.messages.push(agentReply);
+    transport.capture(seed); await store.start();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    expect(document.querySelector('[data-waiting-item="2"]')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Send answer' })).toBeTruthy();
   });
   it('keeps a new ask beside the old sent answer and its complete original payload', () => {
     const seed = fixture(), session = seed.session as Session;
