@@ -1501,3 +1501,33 @@ fn session_summary_carries_the_owner_name_and_description_only_when_set() {
     let json = serde_json::to_string(summary).unwrap();
     assert!(!json.contains("\"name\"") && !json.contains("\"description\""));
 }
+
+#[test]
+fn related_projection_skips_missing_targets_without_changing_saved_data() {
+    let mut session = seed();
+    let related = Some(vec![reference("2"), reference("99")]);
+    session.items.0.get_mut(&reference("1")).unwrap().related = related.clone();
+    let setup = Setup::new(&session);
+    let QueryResult::SessionRead(SessionReadResult::Items(items)) = setup
+        .query(
+            &owner(),
+            &QueryRequest::SessionRead(SessionReadRequest {
+                selection: ReadView::Items {
+                    topic_id: None,
+                    item_id: Some(reference("1")),
+                    parent_item_id: None,
+                    statuses: vec![],
+                    archived: None,
+                },
+                cursor: None,
+                limit: limit(100),
+                item_pages: vec![],
+            }),
+        )
+        .unwrap()
+    else {
+        panic!("items")
+    };
+    assert_eq!(items.items[0].item.related, Some(vec![reference("2")]));
+    assert_eq!(setup.saved().items.0[&reference("1")].related, related);
+}

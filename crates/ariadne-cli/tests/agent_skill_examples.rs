@@ -597,9 +597,10 @@ fn the_skill_text_names_no_retired_field_or_receipt_shape() {
     }
     // The lenient defaults the errors file teaches are the ones the CLI applies.
     for needle in [
-        "`owner`: you; `{\"kind\":\"me\"}`",
-        "`ref`: r1, r2, ...",
-        "Option `id`: 1, 2",
+        "`owner` is you, or",
+        "`{\"kind\":\"me\"}` with `ask`",
+        "refs: r1, r2, ... by position",
+        "Option ids: 1, 2, ...",
     ] {
         assert!(ERRORS.contains(needle), "{needle}");
     }
@@ -692,8 +693,8 @@ fn the_core_marks_topic_optional_and_explains_its_defaults() {
         let columns: Vec<_> = row.split('|').map(str::trim).collect();
         assert!(!columns[2].contains("`topic`"), "{row}");
         assert!(columns[3].contains("`topic`"), "{row}");
-        assert!(columns[3].contains("the request's only `topic.add`"));
-        assert!(columns[3].contains("nested `children` inherit their parent's topic"));
+        assert!(columns[3].contains("the only `topic.add`"));
+        assert!(columns[3].contains("children inherit their parent's topic"));
         assert!(files[0]
             .1
             .contains("Set `topic` explicitly if neither default applies."));
@@ -719,11 +720,11 @@ fn assert_compact(data: &Value) {
 fn every_terminal_example_commits_on_a_seeded_session() {
     // The core's two examples and every kind-of-work example that does not
     // answer a dispatched input.
-    let blocks: Vec<String> = [RULES, REPORT, REVIEW, CHECKLIST]
+    let blocks: Vec<String> = [RULES, ERRORS, REPORT, REVIEW, CHECKLIST]
         .into_iter()
         .flat_map(examples)
         .collect();
-    assert_eq!(blocks.len(), 5, "expected five terminal examples");
+    assert_eq!(blocks.len(), 6, "expected six terminal examples");
     for block in &blocks {
         let (seeded, request, data) = Seeded::committed(block);
         assert!(request["source_input_id"].is_null());
@@ -807,6 +808,23 @@ fn by_short<'a>(items: &[&'a Item], short: &str) -> &'a Item {
         .copied()
         .find(|i| i.short.as_deref() == Some(short))
         .unwrap_or_else(|| panic!("no item {short}"))
+}
+
+/// The connection example persists an existing cross-topic prerequisite and a
+/// finding created earlier in the same request, without reciprocal writes.
+#[test]
+fn the_connection_example_links_only_the_declaring_item() {
+    let (seeded, _, _) = Seeded::committed(&examples(ERRORS)[0]);
+    let session = seeded.session();
+    let (_, items) = topic_items(&session, "Notes sync");
+    let notes = by_short(&items, "Offline notes");
+    let sync = by_short(&items, "Sync local notes");
+    let cache = &session.items.0[&ItemRef::new("1").unwrap()];
+    assert_ne!(sync.topic_id, cache.topic_id);
+    assert_eq!(sync.related, Some(vec![cache.id.clone(), notes.id.clone()]));
+    for target in [cache, notes] {
+        assert!(target.related.is_none());
+    }
 }
 
 /// The report keeps completed reading material Open with explicit Ack targets,
@@ -1157,9 +1175,10 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
         assert!(RULES.contains(needle), "{needle}");
     }
     for needle in [
-        "Refer to another item only as a markdown link `[short label](item:<item id>)`",
-        "`[cache choice](item:3.2)`",
-        "clickable navigation",
+        "Set `related` only when a connection helps the owner",
+        "Omit it by default",
+        "In prose use `[label](item:3.2)`, never bare",
+        "clickable prose links do not create `related` connections",
     ] {
         assert!(RULES.contains(needle), "{needle}");
     }

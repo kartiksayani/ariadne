@@ -49,6 +49,105 @@ const ids = () => [...document.querySelectorAll<HTMLElement>('.graph-node')].map
 const selected = () => document.querySelector<HTMLElement>('.graph-node[aria-selected="true"]')?.dataset.itemId;
 
 describe('session graph view', () => {
+  it('draws same-topic connections beneath hierarchy paths and measured cross-topic connections for either selection', async () => {
+    const session = graphSession(); session.items['1']!.related = ['2', '8'];
+    let measurable = true;
+    let horizontalOffset = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.dataset.itemId === '8' ? 500 : 60;
+      const left = (this.dataset.itemId === '8' ? 1000 : 46) - horizontalOffset;
+      const width = this.classList.contains('graph-node') && measurable ? 190 : this.classList.contains('graph-cards') ? 200 : 0;
+      return { left, top, right: left + width, bottom: top + 66, width, height: 66, x: left, y: top, toJSON() {} };
+    });
+    const value = await setup(session, preferences({ selected_item_id: '1' }));
+    render(<value.Composition />);
+    const same = document.querySelector('[data-edge="related:1:2"]')!;
+    const parent = document.querySelector('[data-edge="parent:1:1.1"]')!;
+    expect(same.compareDocumentPosition(parent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const cross = document.querySelector('.graph-cross-related [data-edge="related:1:8"]')!;
+    // A deep target can lie beyond the cards container's initial 200px viewport.
+    expect(cross.getAttribute('d')).toBe('M95 66 L1049 440');
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/graph/graph.css'), 'utf8');
+    const overlayRule = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(([, rule]) => rule!.trim() === '.graph-cross-related')![2];
+    expect(overlayRule).toMatch(/overflow:\s*visible;/);
+    expect(cross.hasAttribute('marker-end')).toBe(false);
+    horizontalOffset = 600;
+    fireEvent.scroll(document.querySelector('.graph-scroll')!, { target: { scrollLeft: 600 } });
+    fireEvent(window, new Event('resize'));
+    expect(document.querySelector('[data-edge="related:1:8"]')!.getAttribute('d')).toBe('M95 66 L1049 440');
+    fireEvent.click(node('8'));
+    await waitFor(() => expect(value.reveals).toEqual([['8', true]]));
+    expect(document.querySelector('[data-edge="related:1:2"]')).toBeNull();
+    expect(document.querySelector('[data-edge="related:8:1"]')).toBeTruthy();
+    measurable = false; fireEvent(window, new Event('resize'));
+    expect(document.querySelector('[data-edge="related:8:1"]')).toBeNull();
+  });
+
+  it('does not draw related connections without a selection', async () => {
+    const session = graphSession(); session.items['1']!.related = ['2', '8'];
+    const value = await setup(session); render(<value.Composition />);
+    expect(document.querySelector('.graph-edges .graph-related, .graph-cross-related .graph-related')).toBeNull();
+  });
+
+  it('explains related connections with a matching undirected dashed key distinct from replacement arcs', async () => {
+    const session = graphSession(); session.items['1']!.related = ['2'];
+    const value = await setup(session, preferences({ selected_item_id: '1' })); render(<value.Composition />);
+    const key = screen.getByTitle('Related to the selected item');
+    expect(key.textContent).toBe('Related');
+    const sample = key.querySelector('svg path')!;
+    expect(sample.classList.contains('graph-related')).toBe(true);
+    expect(document.querySelector('[data-edge="related:1:2"]')!.classList.contains('graph-related')).toBe(true);
+    expect(sample.hasAttribute('marker-end')).toBe(false);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/graph/graph.css'), 'utf8');
+    const rule = (selector: string) => [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(([, value]) => value!.trim() === selector)![2]!;
+    expect(rule('.graph-related')).toMatch(/stroke:\s*color-mix\(in srgb, var\(--color-text\)/);
+    expect(rule('.graph-replaced')).toMatch(/stroke:\s*var\(--st-replaced\);/);
+    expect(rule('.graph-related')).toMatch(/stroke-dasharray:\s*6 5;/);
+    expect(rule('.graph-replaced')).toMatch(/stroke-dasharray:\s*4 4;/);
+    expect(screen.getByTitle('Replaced by').querySelector('.graph-legend-replaced')).toBeTruthy();
+  });
+
+  it('finds and observes only cross-topic endpoints and their cards, updating paths after their layout changes', async () => {
+    const session = graphSession(); session.items['1']!.related = ['8'];
+    const unrelatedTopic = '00000000-0000-4000-8000-000000000099';
+    const template = Object.values(session.topics)[0]!;
+    session.topics[unrelatedTopic] = { ...template, id: unrelatedTopic, name: 'Separate notes', order: 3 };
+    session.items['9'] = { ...session.items['8']!, id: '9', topic_id: unrelatedTopic, ordinal: 9 };
+    let targetTop = 500;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.dataset.itemId === '8' ? targetTop : 60;
+      const left = this.dataset.itemId === '8' ? 1000 : 46;
+      return new DOMRect(left, top, this.classList.contains('graph-node') ? 190 : 200, 66);
+    });
+    const observers: { measure: () => void; observed: Element[]; disconnect: ReturnType<typeof vi.fn> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      readonly state;
+      constructor(measure: () => void) {
+        this.state = { measure, observed: [] as Element[], disconnect: vi.fn() }; observers.push(this.state);
+      }
+      observe(element: Element) { this.state.observed.push(element); }
+      disconnect() { this.state.disconnect(); }
+    });
+    try {
+      const scans = vi.spyOn(Element.prototype, 'querySelectorAll');
+      const value = await setup(session, preferences({ selected_item_id: '1' })); render(<value.Composition />);
+      const observer = observers.at(-1)!;
+      const endpoints = [node('1'), node('8')];
+      expect(new Set(observer.observed)).toEqual(new Set([...endpoints, ...endpoints.map(endpoint => endpoint.closest('.graph-card')!)]));
+      expect(observer.observed).not.toContain(node('2'));
+      expect(observer.observed).not.toContain(node('9').closest('.graph-card'));
+      expect(scans.mock.calls.some(([selector]) => selector === '.graph-node' || selector === '.graph-card')).toBe(false);
+      const path = () => document.querySelector('[data-edge="related:1:8"]')!;
+      expect(path().getAttribute('d')).toBe('M95 66 L1049 440');
+      targetTop = 700; act(() => observer.measure());
+      expect(path().getAttribute('d')).toBe('M95 66 L1049 640');
+      fireEvent.click(node('2'));
+      await waitFor(() => expect(value.reveals).toEqual([['2', true]]));
+      expect(observer.disconnect).toHaveBeenCalled();
+      expect(document.querySelector('.graph-cross-related')).toBeNull();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('fades hidden branches while keeping click and outside selection paths into detail', async () => {
     const value = await setup(undefined, preferences({ hidden_item_ids: ['1'] }));
     const { rerender } = render(<value.Composition />);
@@ -113,7 +212,11 @@ describe('session graph view', () => {
 
   it('renders the legend and one card per topic with its nodes and edges', async () => {
     const value = await setup(); render(<value.Composition />);
-    for (const text of ['Thread to the selected item', 'Replaced by', 'Waiting on me', 'Closed', 'One graph per topic']) expect(screen.getByText(text)).toBeTruthy();
+    const legend = within(document.querySelector('.graph-legend')! as HTMLElement);
+    for (const [text, title] of [['Thread', 'Thread to the selected item'], ['Related', 'Related to the selected item'], ['Replaced by', 'Replaced by'], ['Waiting on me', 'Waiting on me'], ['Closed', 'Closed']]) {
+      expect(legend.getByText(text!).closest('.graph-legend-key')?.getAttribute('title')).toBe(title);
+    }
+    expect(legend.getByText('One graph per topic').getAttribute('title')).toBe('One graph per topic');
     const card = screen.getByRole('region', { name: 'Delivery decisions' });
     expect(within(card).getByText('1 waiting on you · 2 open · 1 in progress · 2 closed')).toBeTruthy();
     expect(within(card).getByText('codex · yesterday')).toBeTruthy();

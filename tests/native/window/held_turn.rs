@@ -156,6 +156,7 @@ fn quit_preserves_running_external_turn_and_queued_input_with_real_native_runtim
                     options: None,
                     note: None,
                     links: None,
+                    related: None,
                     outcome: None,
                     why: None,
                     replaced_by: None,

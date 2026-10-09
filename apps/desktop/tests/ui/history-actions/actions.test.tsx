@@ -94,6 +94,80 @@ describe('guarded history controls', () => {
     expect(result.current.error).toBeNull();
     expect(value.transport.mutations).toHaveLength(1);
   });
+  it.each(['archive', 'restore', 'undo'] as const)('waits for a confirmed Pause refresh before %s and saves exactly once', async kind => {
+    const value = await setup(true), { result } = renderHook(() => useLifecycle(value.actions));
+    if (kind !== 'archive') {
+      act(() => { result.current.archive(value.topic.id); });
+      await waitFor(() => expect(result.current.archived).not.toBeNull());
+    }
+    const before = value.transport.mutations.length;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = value.transport.invoke.bind(value.transport);
+    vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_list') await gate;
+      return invoke(name, args);
+    });
+    const session = value.transport.source, binding = session.bindings[session.active_binding_id!]!;
+    let pause!: Promise<boolean>;
+    act(() => { pause = value.actions.execute({ command: 'binding_pause', api_version: 1, op_id: '', params: {
+      binding_id: binding.id, expected_generation: binding.generation,
+    } }, session.revision); });
+    await waitFor(() => {
+      expect(value.store.getSnapshot().snapshot?.session.bindings[binding.id]?.owner_paused).toBe(true);
+      expect(value.store.getSnapshot().status).toBe('ready');
+      expect(value.actions.getSnapshot().writing).toBe(true);
+      expect(value.actions.getSnapshot().pending).toBeNull();
+    });
+    const click = () => kind === 'undo' ? result.current.undo() : result.current[kind](value.topic.id);
+    act(() => { click(); click(); });
+    expect(value.transport.mutations).toHaveLength(before + 1);
+    await act(async () => { release(); await pause; });
+    await waitFor(() => expect(value.transport.mutations).toHaveLength(before + 2));
+    expect(value.transport.mutations.at(-1)!.command.command).toBe(kind === 'archive' ? 'topic_archive' : 'topic_restore');
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.error).toBeNull();
+    expect(value.topic.archived_at === null).toBe(kind !== 'archive');
+  });
+  it('reports a stuck post-save barrier after five seconds and never replays the abandoned archive', async () => {
+    const value = await setup(true), { result } = renderHook(() => useLifecycle(value.actions));
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = value.transport.invoke.bind(value.transport);
+    vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_list') await gate;
+      return invoke(name, args);
+    });
+    const session = value.transport.source, binding = session.bindings[session.active_binding_id!]!;
+    let pause!: Promise<boolean>;
+    act(() => { pause = value.actions.execute({ command: 'binding_pause', api_version: 1, op_id: '', params: {
+      binding_id: binding.id, expected_generation: binding.generation,
+    } }, session.revision); });
+    await waitFor(() => expect(value.actions.getSnapshot().pending).toBeNull());
+    expect(value.actions.getSnapshot().writing).toBe(true);
+    vi.useFakeTimers();
+    act(() => { result.current.archive(value.topic.id); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(result.current.error).toBe('Another change is being saved. Wait for it, then try again.');
+    await act(async () => { release(); await pause; });
+    expect(value.transport.mutations.map(request => request.command.command)).toEqual(['binding_pause']);
+    expect(value.topic.archived_at).toBeNull();
+    vi.useRealTimers();
+  });
+  it.each(['archive', 'restore'] as const)('reports a disappeared topic after refreshing before %s', async kind => {
+    const value = await setup(true), { result } = renderHook(() => useLifecycle(value.actions));
+    if (kind === 'restore') {
+      act(() => { result.current.archive(value.topic.id); });
+      await waitFor(() => expect(result.current.archived).not.toBeNull());
+    }
+    const before = value.transport.mutations.length;
+    const { release } = await staleRefresh(value);
+    act(() => { result.current[kind](value.topic.id); });
+    delete value.transport.source.topics[value.topic.id];
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(result.current.error).toBe('This topic is no longer available. Reload the session and try again.');
+    expect(value.transport.mutations).toHaveLength(before);
+  });
   it('waits for a stale capture and archives once against the latest revisions even after repeated prompt clicks', async () => {
     const value = await setup(true); render(<HistoryActions {...value.props} />);
     const { release } = await staleRefresh(value);
@@ -207,6 +281,22 @@ describe('guarded history controls', () => {
     await waitFor(() => expect(dialog().getByRole('alert').textContent).toContain("Ariadne is still loading this session's latest changes. Try again."));
     expect(value.transport.mutations).toHaveLength(0);
   });
+  it.each(['Close session', 'Reopen session'] as const)('keeps a refused %s error in its dialog and clears it on Cancel', async kind => {
+    const value = await setup(true);
+    if (kind === 'Reopen session') {
+      value.transport.source.state = 'closed'; value.transport.source.closed_at = value.transport.source.updated_at;
+      ++value.transport.source.revision; await value.store.refresh();
+    }
+    render(<HistoryActions {...value.props} />);
+    fireEvent.click(screen.getByRole('button', { name: kind }));
+    vi.spyOn(value.actions, 'execute').mockResolvedValue(false);
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: kind })); });
+    expect(dialog().getByRole('alert').textContent).toContain('The change was not saved. Reload the session and try again.');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(value.transport.mutations).toHaveLength(0);
+  });
   it('keeps the shared write guard when another owner action starts during the refresh', async () => {
     const value = await setup(true); render(<HistoryActions {...value.props} />);
     const { release } = await staleRefresh(value);
@@ -224,7 +314,9 @@ describe('guarded history controls', () => {
     await act(async () => { release(); await value.store.refresh(); });
     expect(value.transport.mutations.map(value => value.command.command)).toEqual(['session_close']);
     expect(value.topic.archived_at).toBeNull();
+    expect(screen.getByRole('alert').textContent).toBe('Another change is being saved. Wait for it, then try again.');
     await act(async () => { finish(); });
+    expect(value.transport.mutations.map(value => value.command.command)).toEqual(['session_close']);
   });
   it.each(['Restore', 'Undo', 'Close session', 'Reopen session'] as const)('waits for a stale refresh before %s without duplicate writes', async kind => {
     const value = await setup(true); render(<HistoryActions {...value.props} />);

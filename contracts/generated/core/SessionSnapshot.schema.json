@@ -590,22 +590,22 @@
       "type": "object",
       "properties": {
         "answer_id_map": {
-          "$ref": "#/$defs/UniqueMap12"
+          "$ref": "#/$defs/UniqueMap13"
         },
         "confirmed_at": {
           "$ref": "#/$defs/UtcMillis"
         },
         "item_id_map": {
-          "$ref": "#/$defs/UniqueMap11"
+          "$ref": "#/$defs/UniqueMap12"
         },
         "message_id_map": {
-          "$ref": "#/$defs/UniqueMap12"
+          "$ref": "#/$defs/UniqueMap13"
         },
         "operation_id": {
           "$ref": "#/$defs/UuidV4"
         },
         "round_id_map": {
-          "$ref": "#/$defs/UniqueMap12"
+          "$ref": "#/$defs/UniqueMap13"
         },
         "source_project_id": {
           "$ref": "#/$defs/UuidV4"
@@ -1172,6 +1172,15 @@
               "type": "null"
             }
           ]
+        },
+        "related": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
         },
         "replaced_by": {
           "anyOf": [
@@ -2460,6 +2469,16 @@
                 "$ref": "#/$defs/MessageIdentity"
               }
             },
+            "pruned_related": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UniqueMap11"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "queue_join_state": {
               "anyOf": [
                 {
@@ -2723,7 +2742,7 @@
           ]
         },
         "continuations": {
-          "$ref": "#/$defs/UniqueMap13"
+          "$ref": "#/$defs/UniqueMap14"
         },
         "counters": {
           "$ref": "#/$defs/SessionCounters"
@@ -3040,11 +3059,24 @@
       "additionalProperties": false,
       "patternProperties": {
         "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])": {
-          "$ref": "#/$defs/ItemRef"
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
         }
       }
     },
     "UniqueMap12": {
+      "description": "Deterministically serialized map that rejects duplicate keys on read.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991)(?:\\.(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990[0-9]{0}|9007199254740991))*(?![\\s\\S])": {
+          "$ref": "#/$defs/ItemRef"
+        }
+      }
+    },
+    "UniqueMap13": {
       "description": "Deterministically serialized map that rejects duplicate keys on read.",
       "type": "object",
       "additionalProperties": false,
@@ -3054,7 +3086,7 @@
         }
       }
     },
-    "UniqueMap13": {
+    "UniqueMap14": {
       "description": "Deterministically serialized map that rejects duplicate keys on read.",
       "type": "object",
       "additionalProperties": false,

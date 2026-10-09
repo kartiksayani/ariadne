@@ -69,6 +69,7 @@ fn item(id: &str, parent: Option<&str>, ordinal: u64) -> Item {
         note: None,
         options: vec![],
         links: vec![],
+        related: None,
         outcome: None,
         why: None,
         replaced_by: None,
@@ -264,6 +265,7 @@ fn edit() -> ItemChange {
         item_type: None,
         note: Some(Some("Progress".into())),
         links: None,
+        related: None,
         short: None,
     }
 }
@@ -771,6 +773,7 @@ fn asks_create_new_question_revisions_while_replies_notes_children_do_not() {
             item_type: Some(ItemType::Decision),
             note: Some(None),
             links: Some(vec![]),
+            related: None,
             short: None,
         },
     );
@@ -784,6 +787,7 @@ fn asks_create_new_question_revisions_while_replies_notes_children_do_not() {
             item_type: None,
             note: None,
             links: None,
+            related: None,
             short: None,
         },
     );
@@ -927,6 +931,7 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
             item_type: None,
             note: None,
             links: None,
+            related: None,
             short: None,
         },
         ItemChange::Edit {
@@ -934,6 +939,7 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
             item_type: None,
             note: None,
             links: None,
+            related: None,
             short: Some(Some("x".repeat(41))),
         },
         ItemChange::Ask {
@@ -1497,6 +1503,7 @@ fn short_edit(short: Option<Option<&str>>) -> ItemChange {
         item_type: None,
         note: None,
         links: None,
+        related: None,
         short: short.map(|value| value.map(Into::into)),
     }
 }
@@ -1637,6 +1644,108 @@ fn stored_records_without_short_load_and_serialize_unchanged() {
     item["short"] = json!(null);
     assert_eq!(serde_json::from_value::<Item>(item).unwrap().short, None);
 }
+
+fn related_edit(related: Option<Vec<ItemRef>>) -> ItemChange {
+    ItemChange::Edit {
+        question: None,
+        item_type: None,
+        note: None,
+        links: None,
+        related,
+        short: None,
+    }
+}
+
+#[test]
+fn related_transitions_replace_keep_clear_and_preserve_removed_targets() {
+    let mut s = session();
+    s.counters.next_root = positive(3);
+    s.items.0.insert(reference("2"), item("2", None, 2));
+    let changed = apply(&mut s, &related_edit(Some(vec![reference("2")])));
+    assert_eq!(changed.related, Some(vec![reference("2")]));
+    assert_eq!(changed.question_revision, positive(1));
+    s.items.0.remove(&reference("2"));
+    validate_session_items(&s).unwrap();
+    assert_eq!(apply(&mut s, &edit()).related, Some(vec![reference("2")]));
+    assert_eq!(
+        apply(&mut s, &related_edit(None)).related,
+        Some(vec![reference("2")])
+    );
+    assert_eq!(
+        apply(&mut s, &related_edit(Some(vec![]))).related,
+        Some(vec![])
+    );
+}
+
+#[test]
+fn related_lists_accept_thirty_two_and_reject_thirty_three_in_storage_and_edits() {
+    let mut s = session();
+    let targets: Vec<_> = (2..=33)
+        .map(|number| reference(&number.to_string()))
+        .collect();
+    s.items.0.get_mut(&reference("1")).unwrap().related = Some(targets.clone());
+    validate_session_items(&s).unwrap();
+    let mut oversized = s.clone();
+    oversized
+        .items
+        .0
+        .get_mut(&reference("1"))
+        .unwrap()
+        .related
+        .as_mut()
+        .unwrap()
+        .push(reference("34"));
+    let error = validate_session_items(&oversized).unwrap_err();
+    assert_eq!(error.path, "items.1.related");
+    assert_eq!(error.kind, ValidationErrorKind::TooMany { maximum: 32 });
+    let mut unresolved = targets.clone();
+    unresolved.push(reference("34"));
+    assert!(
+        matches!(reject(&s, &related_edit(Some(unresolved)), &context(&s)),
+        TransitionError::Validation(error) if error.path == "edit.related"
+            && error.kind == ValidationErrorKind::TooMany { maximum: 32 })
+    );
+
+    s.counters.next_root = positive(35);
+    for number in 2..=34 {
+        let id = number.to_string();
+        s.items.0.insert(reference(&id), item(&id, None, number));
+    }
+    assert_eq!(
+        apply(&mut s, &related_edit(Some(targets.clone()))).related,
+        Some(targets.clone())
+    );
+    let mut oversized = targets;
+    oversized.push(reference("34"));
+    assert!(
+        matches!(reject(&s, &related_edit(Some(oversized)), &context(&s)),
+        TransitionError::Validation(error) if error.kind == ValidationErrorKind::TooMany { maximum: 32 })
+    );
+}
+
+#[test]
+fn related_transitions_reject_self_duplicates_and_missing_explicit_targets() {
+    let mut s = session();
+    s.counters.next_root = positive(3);
+    s.items.0.insert(reference("2"), item("2", None, 2));
+    for (targets, kind) in [
+        (vec![reference("1")], ValidationErrorKind::InvalidState),
+        (
+            vec![reference("2"), reference("2")],
+            ValidationErrorKind::Duplicate,
+        ),
+        (vec![reference("99")], ValidationErrorKind::MissingReference),
+    ] {
+        assert!(
+            matches!(reject(&s, &related_edit(Some(targets)), &context(&s)), TransitionError::Validation(error) if error.kind == kind)
+        );
+    }
+    assert!(
+        matches!(reject(&s, &related_edit(Some(vec![reference("99")])), &context(&s)),
+        TransitionError::Validation(error) if error.path == "edit.related.99")
+    );
+}
+
 #[test]
 fn ack_target_is_optional_on_old_data_and_restricted_on_wire() {
     let old = session();

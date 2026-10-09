@@ -36,7 +36,7 @@ import { useWindowKeys } from './ui/shell/windowKeys';
 import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
 import { connectionOf } from './ui/shared/connection';
-import { acknowledge, ackFailure, ackTarget, ackWaiting } from './ui/shared/ack';
+import { acknowledge, ackBlocked, ackFailure, ackTarget } from './ui/shared/ack';
 import { displayStatus } from './selectors/waiting/replied';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
@@ -212,6 +212,11 @@ function Workspace({ application }: { application: Application }) {
   const [highlightedMessages, setHighlightedMessages] = useState<ReadonlySet<string>>(new Set());
   const [searchEdit, setSearchEdit] = useState<{ route: string; text: string; attempted: boolean } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  useEffect(() => {
+    if (sessionState?.status === 'ready' && !sessionState.error) {
+      setRouteError(error => error === "Ariadne is still loading this session's latest changes. Try again." ? null : error);
+    }
+  }, [sessionState?.status, sessionState?.error]);
   const graph = graphModes[key] ?? false;
   const currentReveal = localReveal?.store === store ? localReveal : state.reveal?.store === store ? state.reveal : null;
   const treeReveal = currentReveal === dismissedReveal ? null : currentReveal;
@@ -524,8 +529,12 @@ function Workspace({ application }: { application: Application }) {
       const store = navigation.opened.open(target), session = store.getSnapshot().snapshot?.session, item = session?.items[target.item_id];
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
-      const action = actions.getSnapshot();
-      if (repeat || action.writing || action.pending || ackWaiting(actions)) return true;
+      if (repeat) return true;
+      const blocked = ackBlocked(actions);
+      if (blocked) {
+        notices.push({ id: 'ack-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: blocked });
+        return true;
+      }
       const attempted = ++ackRequest.current;
       notices.dismiss('ack-save-failed');
       void acknowledge(actions, item.id, () => attempted !== ackRequest.current).then(saved => {
@@ -581,6 +590,7 @@ function Workspace({ application }: { application: Application }) {
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
         highlightedMessageIds={highlightedMessages} later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
+        hiddenItemIds={view?.hidden_item_ids}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)}
         provenance={<CopiedProvenance store={store} itemId={selectedId}
           projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={async target => {

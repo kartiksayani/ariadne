@@ -12,6 +12,7 @@ pub enum ItemChange {
         item_type: Option<ItemType>,
         note: Option<Option<String>>,
         links: Option<Vec<ItemLinkTarget>>,
+        related: Option<Vec<ItemRef>>,
         /// `None` keeps the label, `Some(None)` clears it, `Some(Some(_))` sets
         /// the trimmed value.
         short: Option<Option<String>>,
@@ -100,6 +101,7 @@ pub fn transition_item(
             item_type,
             note,
             links,
+            related,
             short,
         } => {
             if let Some(short) = short {
@@ -119,6 +121,21 @@ pub fn transition_item(
             }
             if let Some(note) = note {
                 item.note = note.clone();
+            }
+            if let Some(related) = related {
+                validation::require(
+                    related.len() <= 32,
+                    "edit.related",
+                    ValidationErrorKind::TooMany { maximum: 32 },
+                )?;
+                for target in related {
+                    validation::require(
+                        session.items.0.contains_key(target),
+                        format!("edit.related.{}", target.as_str()),
+                        ValidationErrorKind::MissingReference,
+                    )?;
+                }
+                item.related = Some(related.clone());
             }
             if let Some(links) = links {
                 item.links = links.clone();

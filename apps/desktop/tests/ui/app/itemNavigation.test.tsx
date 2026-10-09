@@ -30,8 +30,7 @@ function selected(id: string) {
 async function pick(id: string) {
   await click(document.querySelector(`[role="treeitem"][data-item-id="${id}"]`)!); await selected(id);
 }
-async function setup() {
-  const transport = new AppTransport();
+async function setup(transport = new AppTransport()) {
   // The in-memory transport resolves immediately. Flush its promise/effect chain
   // at each interaction instead of polling the DOM between partial renders.
   await act(async () => { render(<DesktopApp service={createDesktopService(transport)} />); });
@@ -39,6 +38,29 @@ async function setup() {
 }
 
 describe('composed item navigation', () => {
+  it('reveals a hidden related descendant and preserves links, hiding, and Back/Forward navigation', async () => {
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    session.items['4']!.related = ['1.1', '8'];
+    const view = () => transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
+    view().hidden_item_ids = ['1'];
+    await setup(transport); await openSession(); await pick('4');
+    expect(document.querySelector('[role="treeitem"][data-item-id="1.1"]')).toBeNull();
+    const links = document.querySelector<HTMLElement>('.detail-related')!;
+    const hidden = within(links).getByRole('button', { name: /^#1\.1 .*\(hidden\)/ });
+    expect(hidden.classList.contains('is-hidden')).toBe(true);
+    await click(hidden); selected('1.1');
+    expect(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!.classList.contains('tree-item-hidden')).toBe(true);
+    expect(document.querySelector('.tree-hidden-group')!.getAttribute('aria-expanded')).toBe('true');
+    expect(view().hidden_item_ids).toEqual(['1']);
+    await click(control('Back')); selected('4');
+    expect(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: /^#1\.1 .*\(hidden\)/ })).toBeTruthy();
+    await click(control('Forward')); selected('1.1');
+    // The reverse connection navigates through the same history even though only item 4 declared it.
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: /^#4 / })); selected('4');
+    await click(control('Back')); selected('1.1');
+    expect(view().hidden_item_ids).toEqual(['1']);
+  });
+
   it('records tree, detail child and breadcrumb selections, traverses without pushing, and branches after a new selection', async () => {
     await setup(); await openSession(); await pick('1');
     expect(control('Back').disabled).toBe(true); expect(control('Forward').disabled).toBe(true);

@@ -149,6 +149,7 @@ describe('detail actions while the owner view is stale', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(screen.getByRole('alert')).toHaveProperty('textContent', loadingError);
     await act(async () => { release(); await store.refresh(); });
+    expect(screen.queryByText(loadingError)).toBeNull();
     expect(sends(transport)).toHaveLength(0);
     expect(drafts.find(route, '1', 'reopen')).toBeUndefined();
   });
@@ -187,7 +188,7 @@ describe('detail actions while the owner view is stale', () => {
     expect(session.items['1']!.status).toBe('done');
   });
 
-  it.each(['question', 'binding', 'status', 'waiting', 'refresh failure'] as const)('shows a plain refusal if %s changes during the reopen wait', async change => {
+  it.each(['question', 'binding', 'status', 'waiting', 'decided', 'outcome', 'why', 'refresh failure'] as const)('shows a plain refusal if %s changes during the reopen wait', async change => {
     const { transport, store, drafts } = await setup();
     render(<ItemDetail store={store} drafts={drafts} itemId="1" later={false} onOpenItem={vi.fn()} />);
     const invoke = transport.invoke.bind(transport);
@@ -208,12 +209,48 @@ describe('detail actions while the owner view is stale', () => {
     if (change === 'binding') session.active_binding_id = null;
     if (change === 'status') session.items['1']!.status = 'open';
     if (change === 'waiting') session.items['1']!.status = 'waiting_on_me';
+    if (change === 'decided') session.items['1']!.status = 'decided';
+    if (change === 'outcome') session.items['1']!.outcome = 'A different result to review.';
+    if (change === 'why') session.items['1']!.why = 'A different rationale to review.';
     await act(async () => { release(); });
-    const error = change === 'refresh failure' ? loadingError : change === 'status' || change === 'waiting'
-      ? 'This action is no longer available for the current item.' : 'This item changed. Review it before sending. Your text is kept.';
+    const error = change === 'refresh failure' ? loadingError : 'This item changed. Review it before sending. Your text is kept.';
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', error);
     expect(sends(transport)).toHaveLength(0);
     expect(drafts.find(route, '1', 'reopen')).toBeUndefined();
+  });
+
+  it('shows one alert for a failed answer in the waiting detail and retains the owner’s text', async () => {
+    const { transport, store, drafts } = await setup();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const box = await screen.findByLabelText('Reply in your own words');
+    await waitFor(() => expect((box as HTMLTextAreaElement).disabled).toBe(false));
+    fireEvent.change(box, { target: { value: 'Keep my exact answer.' } });
+    transport.failNext = 'input_submit';
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    await waitFor(() => expect(drafts.find(route, '2', 'answer')?.uncertain).toBe(true));
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect((box as HTMLTextAreaElement).value).toBe('Keep my exact answer.');
+    expect(sends(transport)).toHaveLength(1);
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = 'done'; ++session.items['2']!.revision; ++session.revision;
+    await act(async () => { await store.refresh(); });
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Keep my exact answer.');
+    expect(screen.getByRole('button', { name: 'Try sending again' })).toBeTruthy();
+  });
+
+  it('shows one alert when saving a waiting answer draft fails before submission', async () => {
+    const { transport, store, drafts } = await setup();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const box = await screen.findByLabelText<HTMLTextAreaElement>('Reply in your own words');
+    await waitFor(() => expect(box.disabled).toBe(false));
+    transport.failNext = 'preferences_patch';
+    fireEvent.change(box, { target: { value: 'Retain my unsent draft.' } });
+    await waitFor(() => expect(drafts.getSnapshot().preferenceUncertain).toBe(true));
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(box.value).toBe('Retain my unsent draft.');
+    expect(sends(transport)).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Try saving your draft again' })).toBeTruthy();
   });
 
   it('explains a numeric shortcut blocked after its request was queued and keeps the note', async () => {

@@ -32,15 +32,16 @@ One JSON object on stdin. Only `operations` is required.
 
 Reuse receipt revisions and item numbers as `{"id":...}`. Omit optional fields.
 
-Refer to another item only as a markdown link `[short label](item:<item id>)`, e.g.
-`[cache choice](item:3.2)`, never a bare "item 3.2" or "#3.2"; these links
-provide clickable navigation.
+Set `related` only when a connection helps the owner: a point depends on,
+duplicates or follows from another. Omit it by default; declare it once on either
+item, across topics in this session. In prose use `[label](item:3.2)`, never bare
+item numbers: clickable prose links do not create `related` connections.
 
 | `op` | Required | Optional |
 |---|---|---|
 | `topic.add` | `name` | `short`, `ref` |
-| `item.add` | `question`, `type` | `topic` (the request's only `topic.add`; nested `children` inherit their parent's topic), `short`, `status`, `ack_to`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
-| `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `short` |
+| `item.add` | `question`, `type` | `topic` (the only `topic.add`; children inherit their parent's topic), `short`, `status`, `ack_to`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `related`, `outcome`, `why`, `children`, `ref` |
+| `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `related`, `short` |
 | `item.ask` | `item`, `ask` | `options` |
 | `item.status` | `item`, `status` | `ack_to`, `outcome`, `why`, `reason` |
 | `item.replace` | `item`, `replacement`, `outcome`, `why` | |
@@ -65,8 +66,7 @@ When connected or told "use Ariadne", organise the work there yourself.
   the end or post the same report twice.
 - **Route.** File results over a few lines or with multiple points, including
   findings. Chat is 1-3 lines pointing at the topic. Owner instructions win.
-- **Topic.** One per concern (PR, test run, incident, plan), named for its object;
-  never one per step.
+- **Topic.** One per concern (PR, test run, incident, plan), not per step.
 - **Tree.** Summary first: result and what waits on the owner; then whole-work
   decisions and sections in reading order. Points are children; sub-points nest.
   Each point the owner may decide, comment on or track appears once, with its
@@ -88,8 +88,9 @@ When connected or told "use Ariadne", organise the work there yourself.
 - **Ack.** New reading material starts `open` with `ack_to`: usually `done`,
   recorded decisions `decided`, ruled-out points `dropped`. Ack moves it there
   without agent delivery. An ask may coexist; Ack waits for the owner reply.
-  Keep `ack_to` work open unless an owner input directs completion: terminal
-  `item.status` with `source_input_id` clears the target. Existing work without
+  Keep `ack_to` work open unless an Answer, Reply or Drop input targets that
+  item and directs completion: terminal `item.status` with `source_input_id`
+  clears the target. Existing work without
   `ack_to` can close normally. Use `item.replace` for superseded work.
   Keep unanswered asks `waiting_on_me`; explain withdrawal with a new
   `ack_to: "dropped"` item. Permission to act needs a real question and a
@@ -107,9 +108,8 @@ When connected or told "use Ariadne", organise the work there yourself.
 - **Proposals** (comments to post, fixes to apply): one child each with its own
   `ask` and options. The parent is a summary with no ask. Never file them `done`
   under one blanket ask on the parent.
-- **Choice notes.** A choice can carry free text; follow the note even over the
-  option's consequence, ask on that item if ambiguous, and reflect it in the
-  input result (`inputs.md`).
+- **Choice notes.** Free text overrides the option's consequence; ask there if
+  ambiguous and reflect the note in the input result (`inputs.md`).
 - **Ripple updates.** After an owner answer or reply, check other items across
   topics for wrong outcomes, moot questions or needed follow-ups. Update affected
   items together where possible, naming each in the input result as
