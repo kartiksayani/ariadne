@@ -67,22 +67,30 @@ async function captureBusy(configuration) {
   } catch (error) { facts.observationError = error.message; }
   await writeFile(join(evidence, 'native-app-busy.json'), JSON.stringify(facts, null, 2));
 }
-function item(reference, topicId, parent, question, status, owner, outcome = null) {
-  return { op: 'item.add', ref: reference, topic: { id: topicId }, parent, question, type: 'task', status, owner,
-    ask: null, options: null, note: null, links: null, outcome, why: outcome === null ? null : 'Retain the complete native outcome.', replaced_by: null, source_round_id: null };
+function item(reference, topicId, parent, question, owner) {
+  return { op: 'item.add', ref: reference, topic: { id: topicId }, parent, question, type: 'task', status: 'open', owner,
+    ask: null, options: null, note: null, links: null, outcome: null, why: null, replaced_by: null, source_round_id: null };
 }
 // Deterministic content is published through actual CLI/Core/Store, never by
 // writing session JSON or replacing the native renderer's service/DOM.
 export function treeBatch(topicId, branch) {
   const root = `native_root_${branch}`;
-  const operations = [item(root, topicId, null, `Native branch ${branch}\nThe complete branch sentence remains visible.`, 'done', { kind: 'other', name: 'Native collaborator' },
-    `Full terminal outcome ${branch}\nThis second outcome line must remain readable.`)];
+  const operations = [item(root, topicId, null, `Native branch ${branch}\nThe complete branch sentence remains visible.`, { kind: 'other', name: 'Native collaborator' })];
   for (let child = 1; child <= 99; child++) {
-    const done = child % 3 === 0;
     const question = `Native sentence ${branch}.${child}\nFull retained second line for ${branch}.${child}.\nUnique token_${branch}_${child}_end.${branch === 1 && child === 1 ? '\nNative café needle.' : ''}`;
-    operations.push(item(`native_child_${branch}_${child}`, topicId, { ref: root }, question, done ? 'done' : 'open',
-      child % 2 === 1 ? { kind: 'me' } : { kind: 'other', name: 'Native collaborator' }, done ? `Complete child outcome ${branch}.${child}\nKeep this second line too.` : null));
+    operations.push(item(`native_child_${branch}_${child}`, topicId, { ref: root }, question,
+      child % 2 === 1 ? { kind: 'me' } : { kind: 'other', name: 'Native collaborator' }));
   }
+  return operations;
+}
+// Closed rows are fixture setup, not new unread reports. Finish the existing
+// Open items in a later Apply without an acknowledgment target (ADR-0093).
+export function treeCompletionBatch(branch) {
+  const finish = (id, outcome) => ({ op: 'item.status', item: { id }, status: 'done', outcome,
+    why: 'Retain the complete native outcome.', reason: null });
+  const operations = [finish(String(branch), `Full terminal outcome ${branch}\nThis second outcome line must remain readable.`)];
+  for (let child = 3; child <= 99; child += 3)
+    operations.push(finish(`${branch}.${child}`, `Complete child outcome ${branch}.${child}\nKeep this second line too.`));
   return operations;
 }
 export function treeMessageBatch(first, count) {
@@ -113,7 +121,16 @@ async function seedTree(configuration) {
   await awaitConnected(tree);
   const publication = [await apply(tree, [{ op: 'topic.add', ref: 'native_tree_topic', name: 'Native tree acceptance' }], {}, '', true)];
   const topic = Object.values((await snapshot(tree)).topics).find(topic => topic.name === 'Native tree acceptance'); assert.ok(topic);
-  for (let branch = 1; branch <= 20; branch++) publication.push(await apply(tree, treeBatch(topic.id, branch), {}, '', true));
+  for (let branch = 1; branch <= 20; branch++) {
+    publication.push(await apply(tree, treeBatch(topic.id, branch), {}, '', true));
+    const created = await snapshot(tree), completion = treeCompletionBatch(branch);
+    for (const operation of completion) {
+      assert.equal(created.items[operation.item.id].status, 'open');
+      assert.equal(created.items[operation.item.id].ack_to ?? null, null);
+    }
+    const revisions = Object.fromEntries(completion.map(operation => [operation.item.id, created.items[operation.item.id].revision]));
+    publication.push(await apply(tree, completion, revisions, '', true));
+  }
   let live = await snapshot(tree), nextMessage = 1;
   while (live.messages.length < 5000) {
     // Every nonempty apply adds one genuine activity message as well as its
@@ -124,6 +141,9 @@ async function seedTree(configuration) {
     nextMessage += operations.length; live = await snapshot(tree);
   }
   const session = await snapshot(tree); assert.equal(Object.keys(session.items).length, 2000); assert.equal(Object.keys(session.inputs).length, 0);
+  assert.equal(Object.values(session.items).filter(item => item.status === 'open').length, 1320);
+  assert.equal(Object.values(session.items).filter(item => item.status === 'done').length, 680);
+  assert.ok(Object.values(session.items).every(item => (item.ack_to ?? null) === null));
   assert.equal(session.messages.length, 5000, 'The native performance corpus must meet the complete 2,000-item / 5,000-message target');
   assert.equal(session.bindings[tree.bindingId].external_session_id, selected.externalSessionId);
   tree.topicId = topic.id;

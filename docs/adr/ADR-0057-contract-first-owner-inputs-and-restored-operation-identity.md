@@ -54,4 +54,3 @@ the seam. Full assembled/native P4.6 acceptance remains pending until proven.
 
 See [UI state and owner inputs](../planning/low-level/UI_AND_NATIVE.md#5-owner-input-and-delivery-ui)
 and [module acceptance joins](../planning/MODULE_CONTRACTS.md#implementation-prerequisites-and-acceptance-joins).
-MCP/Seezo remain disabled under the owner waiver; organization guidance was not checked.

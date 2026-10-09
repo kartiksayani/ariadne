@@ -61,9 +61,6 @@ Doctor omits credentials, environment dumps, domain bodies and raw host payloads
 P6.4 owns app/helper packaging and version-pointer publication; packaged/native and
 live existing-host acceptance remain their original task joins.
 
-MCP/Seezo remain disabled under the current-session owner waiver. Organization
-security guidance was not checked; no organizational approval is claimed.
-
 See [SETUP §§3,6,8](../planning/low-level/SETUP_AND_DELIVERY.md),
 [ADR-0037](ADR-0037-claude-native-compatibility-and-normalization.md), and
 [MODULE_CONTRACTS](../planning/MODULE_CONTRACTS.md#implementation-prerequisites-and-acceptance-joins).

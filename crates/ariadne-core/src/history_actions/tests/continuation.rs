@@ -113,7 +113,7 @@ fn locked_replay_wins_over_stale_owned_source_after_initial_replay_miss() {
 }
 
 #[test]
-fn continuation_remaps_copied_related_targets_and_drops_external_number_collisions() {
+fn continuation_keeps_ack_proposals_and_remaps_related_without_external_collisions() {
     let root = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
     let registry = ariadne_store::registry::Registry::open(home.path()).unwrap();
@@ -131,6 +131,11 @@ fn continuation_remaps_copied_related_targets_and_drops_external_number_collisio
         external.clone(),
         ItemRef::new("98").unwrap(),
     ]);
+    let proposal = source.items.0.get_mut(&source_item).unwrap();
+    proposal.ack_to = Some(AckTarget::Done);
+    proposal.outcome = Some("Exact completion proposal.".into());
+    proposal.why = Some("Exact supporting evidence.".into());
+    source.items.0.get_mut(&internal).unwrap().related = Some(vec![source_item.clone()]);
     let mut outside_topic = source.topics.0[&id(5)].clone();
     outside_topic.id = id(7);
     outside_topic.order = PositiveSafeInteger::new(2).unwrap();
@@ -198,7 +203,15 @@ fn continuation_remaps_copied_related_targets_and_drops_external_number_collisio
         copied.items.0[&ItemRef::new("100").unwrap()].related,
         Some(vec![ItemRef::new("101").unwrap()])
     );
-    assert_eq!(copied.items.0[&ItemRef::new("101").unwrap()].related, None);
+    assert_eq!(
+        copied.items.0[&ItemRef::new("101").unwrap()].related,
+        Some(vec![ItemRef::new("100").unwrap()])
+    );
+    let proposal = &copied.items.0[&ItemRef::new("100").unwrap()];
+    assert_eq!(proposal.status, ItemStatus::Open);
+    assert_eq!(proposal.ack_to, Some(AckTarget::Done));
+    assert_eq!(proposal.outcome, source.items.0[&source_item].outcome);
+    assert_eq!(proposal.why, source.items.0[&source_item].why);
     assert_eq!(
         copied.items.0[&source_item].related,
         source.items.0[&source_item].related

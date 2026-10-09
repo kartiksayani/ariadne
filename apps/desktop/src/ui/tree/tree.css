@@ -827,6 +827,17 @@
   font-size: calc(14px * var(--text-scale));
 }
 
+/* Ack stays visible; the adjacent hover actions already reserve their space. */
+.tree-ack-slot {
+  display: flex;
+  flex: none;
+}
+
+.tree-action-ack {
+  border: 1px solid var(--color-divider);
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
 .tree-topic-action:hover,
 .tree-action:hover {
   color: var(--color-text);
@@ -977,8 +988,11 @@
 
 .tree-action-label {
   display: flex;
+  align-items: center;
   gap: 4px;
   width: auto;
   padding: 0 5px;
+  font: inherit;
   font-size: calc(11px * var(--text-scale));
+  white-space: nowrap;
 }

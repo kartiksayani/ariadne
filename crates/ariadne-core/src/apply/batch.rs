@@ -16,6 +16,7 @@ pub(super) fn execute(
     request: &ApplyRequest,
     allocate: &mut impl FnMut() -> UuidV4,
     at: &UtcMillis,
+    repairs: Option<&mut Vec<String>>,
 ) -> Result<SavedReceiptData, CoreError> {
     scope::authorize(session, context, request)?;
     let original_items = session.items.0.keys().cloned().collect();
@@ -42,6 +43,7 @@ pub(super) fn execute(
     let mut batch = Batch {
         context,
         request,
+        repairs,
         allocate,
         at,
         original_items,
@@ -152,6 +154,7 @@ pub(super) fn execute(
 pub(super) struct Batch<'a, F> {
     pub context: &'a AgentContext,
     pub request: &'a ApplyRequest,
+    repairs: Option<&'a mut Vec<String>>,
     allocate: &'a mut F,
     pub at: &'a UtcMillis,
     original_items: BTreeSet<ItemRef>,
@@ -359,9 +362,82 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
         &mut self,
         session: &mut Session,
         id: &ItemRef,
-        change: ItemChange,
+        mut change: ItemChange,
     ) -> Result<(), CoreError> {
         self.target(session, id)?;
+        // Only an existing Ack proposal needs protection from agent completion.
+        // Source fields were authenticated by scope::authorize before mutations.
+        let answers_owner_input = self
+            .request
+            .source_input_id
+            .as_ref()
+            .and_then(|input_id| session.inputs.0.get(input_id))
+            .is_some_and(|input| {
+                input.target.item_id.as_ref() == Some(id)
+                    && matches!(
+                        input.kind,
+                        InputKind::Drop | InputKind::Reply | InputKind::Answer
+                    )
+            });
+        if self.original_items.contains(id)
+            && session.items.0[id].ack_to.is_some()
+            && !answers_owner_input
+        {
+            if let ItemChange::Status {
+                status,
+                ack_to,
+                reason,
+                ..
+            } = &mut change
+            {
+                let target = match status {
+                    ItemStatus::Decided => Some(AckTarget::Decided),
+                    ItemStatus::Done => Some(AckTarget::Done),
+                    ItemStatus::Dropped => Some(AckTarget::Dropped),
+                    _ => None,
+                };
+                if let Some(target) = target {
+                    let Some(repairs) = &mut self.repairs else {
+                        return Err(core(
+                            CoreErrorCode::InvalidTransition,
+                            "This item is waiting for the owner's Ack; keep it open with ack_to, keep an unanswered question waiting_on_me, explain withdrawal in a new item with ack_to \"dropped\", or use item.replace for superseded work",
+                        ));
+                    };
+                    *status = ItemStatus::Open;
+                    *ack_to = Some(target);
+                    reason.get_or_insert_with(|| {
+                        "Finished work; waiting for the owner's Ack.".into()
+                    });
+                    repairs.push(format!(
+                        "item {}: kept open with ack_to `{}`; owner Ack is required to finish.",
+                        id.as_str(),
+                        match target {
+                            AckTarget::Decided => "decided",
+                            AckTarget::Done => "done",
+                            AckTarget::Dropped => "dropped",
+                        }
+                    ));
+                }
+            }
+        }
+        if !self.original_items.contains(id)
+            && matches!(
+                &change,
+                ItemChange::Replace { .. }
+                    | ItemChange::Status {
+                        status: ItemStatus::Decided
+                            | ItemStatus::Done
+                            | ItemStatus::Dropped
+                            | ItemStatus::Replaced,
+                        ..
+                    }
+            )
+        {
+            return Err(core(
+                CoreErrorCode::InvalidArgument,
+                "A newly created item must remain nonterminal; use open with ack_to, or waiting_on_me for an unanswered question",
+            ));
+        }
         let cause = self.cause(session, id);
         let context = TransitionContext {
             binding_id: self.context.binding_id().clone(),
@@ -376,6 +452,51 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             expected_question_revision: None,
         };
         let candidate = transition_item(session, id, &change, &context).map_err(transition)?;
+        let old = &session.items.0[id];
+        let owner_reopens_terminal = matches!(
+            old.status,
+            ItemStatus::Decided | ItemStatus::Done | ItemStatus::Dropped | ItemStatus::Replaced
+        ) && self
+            .request
+            .source_input_id
+            .as_ref()
+            .and_then(|input_id| session.inputs.0.get(input_id))
+            .is_some_and(|input| {
+                input.target.item_id.as_ref() == Some(id)
+                    && matches!(input.kind, InputKind::Bring | InputKind::Reopen)
+            });
+        if matches!(candidate.status, ItemStatus::Open | ItemStatus::InProgress)
+            && candidate
+                .ask
+                .as_ref()
+                .is_some_and(|ask| !ask.trim().is_empty())
+            && if old.status == ItemStatus::WaitingOnMe {
+                // Operations precede result commit: our own clarification must
+                // not count as an InFlight answer when leaving WaitingOnMe.
+                crate::queries::question_unanswered_with_handled_input(
+                    session,
+                    old,
+                    self.request
+                        .source_input_id
+                        .as_ref()
+                        .filter(|_| !answers_owner_input),
+                )
+            } else {
+                // The owner can bring a terminal item back with its old ask.
+                // Otherwise Bring/Reopen does not answer an Open/InProgress ask.
+                !owner_reopens_terminal
+                    && crate::queries::question_unanswered_with_handled_input(
+                        session,
+                        &candidate,
+                        self.request.source_input_id.as_ref(),
+                    )
+            }
+        {
+            return Err(core(
+                CoreErrorCode::InvalidTransition,
+                "A question still waits for the owner; use item.ask to put it waiting_on_me, or use ack_to \"dropped\" on a separate new item to explain withdrawing it, or item.replace for a replacement question",
+            ));
+        }
         if matches!(change, ItemChange::Ask { .. }) {
             *session = history_api::open_ask_round(session, candidate, &cause, self.at.clone())
                 .map_err(history)?;
@@ -446,6 +567,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             Operation::ItemStatus {
                 item,
                 status,
+                ack_to,
                 outcome,
                 why,
                 reason,
@@ -456,6 +578,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                     &id,
                     ItemChange::Status {
                         status: status.clone(),
+                        ack_to: *ack_to,
                         outcome: outcome.clone(),
                         why: why.clone(),
                         reason: reason.clone(),
@@ -631,6 +754,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             short: short_label(draft.short.as_deref())?,
             item_type: draft.item_type.clone(),
             status: draft.status.clone(),
+            ack_to: draft.ack_to,
             owner: draft.owner.clone(),
             revision: one(),
             question_revision: one(),

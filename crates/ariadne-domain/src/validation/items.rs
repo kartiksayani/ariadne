@@ -152,6 +152,11 @@ pub(super) fn validate_candidate_indexed(
         )?;
         // Targets may have been removed; retain the declared relationship.
     }
+    require(
+        item.ack_to.is_none() || !terminal(&item.status),
+        format!("{path}.ack_to"),
+        ValidationErrorKind::InvalidState,
+    )?;
     if terminal(&item.status) {
         require(
             item.outcome.is_some() && item.why.is_some(),
@@ -160,7 +165,8 @@ pub(super) fn validate_candidate_indexed(
         )?;
     } else {
         require(
-            item.outcome.is_none() && item.why.is_none() && item.replaced_by.is_none(),
+            (item.ack_to.is_some() || (item.outcome.is_none() && item.why.is_none()))
+                && item.replaced_by.is_none(),
             format!("{path}.outcome/why/replaced_by"),
             ValidationErrorKind::InvalidState,
         )?;

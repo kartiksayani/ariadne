@@ -153,6 +153,7 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `binding_connect` | op_id, project_id, adapter_id, external_session_id, endpoint config, existing_session_id? | validated session+binding IDs, generation, capabilities, setup instruction |
 | `binding_pause/resume/disconnect` | binding_id, expected_generation, op_id | persisted dispatch state; disconnect does not kill host |
 | `input_submit` | session_id, binding_id, item_id or topic_id, kind, text, selected_option_id?, expected_question_revision?, supersedes_answer_id? | atomically owner Message + Answer if applicable + Input; status unchanged |
+| `ack` | session ref, item_id, expected_revision (item), op_id | owner only; Open/InProgress moves to `ack_to` and clears it, with owner activity and status history; no input or delivery; refuses absent target, terminal state or unanswered ask (ADR-0093) |
 | `input_cancel` | queued, in-flight or needs-attention input_id, expected_revision, op_id, optional purpose (`delete` default, or `edit`: queued only) | abandons the input (attempts sealed, late facts ignored); preserve history, persist cancelled state + receipt |
 | `input_resolve` | input_id, attempt_id, decision (retry_unexecuted/resend/skip/request_result_repair/confirm_evidence/accept_result), reason (optional), expected_revision, op_id | queue recovery; decisions in queue spec; settling the last input needing attention resumes dispatch unless owner-paused; `accept_result` needs only a committed result (ADR-0088) |
 | `topic_archive/restore` | topic_id, expected_revision, op_id | lifecycle only; archive cancels the topic's unsent inputs and lists `cancelled_input_ids` (ADR-0090) |
@@ -521,13 +522,33 @@ input_result: ResultDraft|null
 | Operation | Required fields and optional fields |
 |---|---|
 | `topic.add` | `ref,name`; optional `short` |
-| `item.add` | `ref,topic,parent?,question,type,status,owner`; optional short/ask/options/note/links/related/outcome/why/replaced_by/source_round_id |
+| `item.add` | `ref,topic,parent?,question,type,status,owner`; optional short/ack_to/ask/options/note/links/related/outcome/why/replaced_by/source_round_id; strict core rejects terminal creation |
 | `item.edit` | `item,patch` restricted to question/type/note/links/related/short; expected revision |
 | `item.ask` | `item,ask,options,recipient_binding_id`; opens new round + waiting episode, owner=me |
-| `item.status` | `item,status`; `outcome,why` required for decided/done/dropped; `reason` required for other transitions; replaced uses item.replace; waiting uses item.ask |
+| `item.status` | `item,status`; optional `ack_to` for open/in_progress with proposed outcome/why; `outcome,why` required for decided/done/dropped; `reason` required for other transitions; replaced uses item.replace; waiting uses item.ask |
 | `item.replace` | `item,replacement,outcome,why` |
 | `reply` | `ref,item,text,round_id?`; exactly one full item reply |
 | `round.close` | `round_id`; immutable history retained |
+
+`ack_to` is `decided`, `done` or `dropped`, never `replaced`. A read-only item is
+created Open with this target; its intended outcome and why may be supplied and
+are retained until Ack. Under ADR-0092 the CLI repairs Decided/Done/Dropped
+creation to Open with the requested `ack_to`, recursively for nested children,
+and reports the repair. Strict core rejects terminal creation. Replaced is never
+repaired because it requires replacement provenance. An unanswered ask blocks
+Ack even when the item carries a target. New items with an ask require
+waiting_on_me and an answer round; lenient filing repairs explicit open/in_progress
+asks to that state while retaining their target and text. Agents finish summaries
+with item.status open + ack_to. Strict core refuses terminal status while Ack is
+pending unless an authenticated Answer, Reply or Drop input targets that same item
+and directs completion; completion clears the target. The lenient CLI repairs
+other terminal status requests on existing Ack items to open + ack_to under the
+store lock after replay lookup, preserving text and the original request's retry
+identity. Existing items without ack_to retain normal terminal transitions.
+item.replace remains available for superseded work and clears ack_to. Omitting
+the status target keeps an existing proposal. Owner Ack clears the target. Continue
+is an owner action and keeps finished copies finished. Both agent item reads and
+owner session snapshots include the field.
 
 In `item.edit.patch`, omitted `note` leaves it unchanged, explicit null clears it,
 and a string preserves its exact text, including an empty string. `short`

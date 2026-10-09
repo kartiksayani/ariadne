@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 import type { Server } from 'node:http';
 
 test('scrolls full variable tree rows with the session bar, setup and filters accessible', async ({ page }, testInfo) => {
+  // Visiting every session-bar control at both sizes needs more time on loaded CI runners.
+  test.setTimeout(480_000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -69,7 +71,7 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     const usefulRows = 64;
     expect(before.rowsHeight).toBeGreaterThan(usefulRows);
     const row = tree.locator('[data-item-id="10.50"]');
-    await row.evaluate(element => element.scrollIntoView({ block: 'start' }));
+    // Clicking scrolls the row into view before selecting it.
     await row.click();
     await expect(row).toHaveAttribute('aria-selected', 'true');
     const after = await geometry();

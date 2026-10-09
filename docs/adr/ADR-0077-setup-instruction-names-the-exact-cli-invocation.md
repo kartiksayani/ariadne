@@ -12,7 +12,7 @@ fail in an agent's tool shell:
 
 - The helper is not on PATH, so `ariadne` was not found.
 - The shell does not inherit `ARIADNE_HOME`. With the helper found by absolute
-  path, the CLI opened `/Users/<owner>/.ariadne` and failed with `io_error`
+  path, the CLI opened `<home>/.ariadne` and failed with `io_error`
   because the app's data root was elsewhere.
 
 The owner had to tell Codex the absolute helper path and an `env ARIADNE_HOME=…`

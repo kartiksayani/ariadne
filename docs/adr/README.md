@@ -101,5 +101,8 @@ pickers and confirmations; the agent line becomes the quieter label.
 `--dry-run`, makes the default receipt compact (`--full` for the old one) and gives
 `ariadne read --view items` `--topic` and `--archived`.
 
+[ADR-0093](ADR-0093-owner-acknowledgment.md) keeps new items nonterminal and adds
+the owner's local Ack action for read-only work, with an agent-selected target.
+
 [ADR-0094](ADR-0094-item-links.md) adds optional related item declarations,
 bidirectional detail references and dashed links for the selected graph item.

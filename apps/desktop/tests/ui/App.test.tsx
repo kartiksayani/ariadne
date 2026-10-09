@@ -49,6 +49,38 @@ function setup(strict = false) {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('ordinary desktop composition', () => {
+  it('explains a detail Bring overtaken by a session refresh during draft loading', async () => {
+    const { transport } = setup();
+    await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
+    await screen.findByLabelText('Detail of #1.1');
+    const bring = await screen.findByRole<HTMLButtonElement>('button', { name: 'Bring it up' });
+    await waitFor(() => expect(bring.disabled).toBe(false));
+    const invoke = transport.invoke.bind(transport);
+    let loaded = false, releaseDrafts!: () => void, releaseSession!: () => void;
+    const draftGate = new Promise<void>(resolve => { releaseDrafts = resolve; });
+    const sessionGate = new Promise<void>(resolve => { releaseSession = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'preferences_get') { loaded = true; await draftGate; }
+      if (loaded && 'request' in args.request && args.request.request.command === 'session_get') await sessionGate;
+      return invoke(name, args);
+    });
+    fireEvent.click(bring);
+    await waitFor(() => expect(loaded).toBe(true));
+    const session = transport.sessions.get(route.session_id)!;
+    ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); releaseDrafts(); });
+    expect(await screen.findByText("Ariadne is still loading this session's latest changes. Try again.")).toBeTruthy();
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
+    await act(async () => { releaseSession(); });
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
+    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Bring it up' }).disabled).toBe(false));
+    expect(screen.queryByText("Ariadne is still loading this session's latest changes. Try again.")).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Bring it up' }));
+    await waitFor(() => expect(mutations(transport, 'input_submit')).toHaveLength(1));
+    expect(screen.queryByText("Ariadne is still loading this session's latest changes. Try again.")).toBeNull();
+  });
+
   it('opens the product navigator and reports an unavailable native service', async () => {
     render(<App />);
     expect(await screen.findByRole('heading', { name: 'Projects' })).toBeTruthy();
@@ -172,7 +204,7 @@ describe('ordinary desktop composition', () => {
     expect(transport.preferences).toEqual(before); expect(transport.mutations).toHaveLength(writes);
     fireEvent.click(screen.getByRole('button', { name: 'Hide messages' }));
     await waitFor(() => expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBeNull());
-  });
+  }, 15_000); // Full tree/graph/detail/rail composition needs headroom under CI coverage.
   it('keeps the selected tree and complete rail idle when another session publishes presence', async () => {
     const starts = vi.spyOn(WaitingStore.prototype, 'start');
     const transport = new AppTransport(), second = transport.sessions.get(secondId)!;

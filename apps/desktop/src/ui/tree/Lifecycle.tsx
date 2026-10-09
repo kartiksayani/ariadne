@@ -74,7 +74,7 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
   };
   // Reserve before yielding so repeated clicks cannot queue duplicate writes.
   // Rebuild the action from the refreshed capture, retaining SessionActions' write barrier.
-  const withReady = async (change: (current: NonNullable<typeof session>) => Promise<boolean> | boolean) => {
+  const withReady = async (change: (current: NonNullable<typeof session>) => Promise<boolean> | boolean, notReady?: () => void) => {
     if (running.current || actions.getSnapshot().writing || actions.getSnapshot().pending) return false;
     running.current = true;
     let abandon!: () => void;
@@ -99,8 +99,11 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
       readyWait.current = null;
       const current = store.getSnapshot();
       if (!refreshed || actions.session !== store || current.status !== 'ready' || current.error || !current.snapshot) {
-        setError(loadingError);
-        setConfirming(value => value && { ...value, error: loadingError });
+        if (notReady) notReady();
+        else {
+          setError(loadingError);
+          setConfirming(value => value && { ...value, error: loadingError });
+        }
         return false;
       }
       if (actions.getSnapshot().writing || actions.getSnapshot().pending) return false;
@@ -109,12 +112,15 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
     } finally { clearTimeout(timeout); readyWait.current = null; running.current = false; setWaiting(false); }
   };
   const rename = async (name: string, description: string) => {
-    let failure: string | null = loadingError;
+    if (running.current || actions.getSnapshot().writing) return 'Another change is being saved. Wait for it, then try again.';
+    if (actions.getSnapshot().pending) return 'Ariadne isn’t sure your last change was saved. Check again before renaming this session.';
+    let failure: string | null = 'Another change is being saved. Wait for it, then try again.';
     const saved = await withReady(async current => {
       failure = await saveSessionLabel(actions, current.revision, name, description);
       return failure === null;
-    });
-    return saved ? null : failure;
+    }, () => { failure = loadingError; });
+    return saved ? null : actions.getSnapshot().pending
+      ? 'Ariadne isn’t sure your last change was saved. Check again before renaming this session.' : failure;
   };
   const run = async (command: OwnerCommand, current: NonNullable<typeof session>) => {
     const saved = await actions.execute(command, current.revision);

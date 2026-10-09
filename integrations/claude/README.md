@@ -1,7 +1,7 @@
 # Claude Mod
 
 This plugin uses the Claude Code **2.1.287** SDK proven by the preserved
-[POC](https://github.com/kartiksayani/ariadne/tree/a5e306f/poc/claude-mods).
+[POC](https://github.com/kartiksayani/ariadne/tree/reference/planning-and-pocs/poc/claude-mods).
 A read-only installed CLI observation returned **2.1.289** during implementation.
 Per [ADR-0071](../../docs/adr/ADR-0071-require-minimum-host-version.md),
 2.1.287 is the qualified baseline and the minimum required version; any newer

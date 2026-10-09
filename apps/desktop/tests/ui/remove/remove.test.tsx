@@ -114,7 +114,7 @@ describe('the removal queue', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS * 4); });
     expect(service.removeSession).not.toHaveBeenCalled();
     const projectOp = queue.schedule({ kind: 'project', project_id: route.project_id },
-      { kind: 'project', name: 'payments', path: '/code/payments', sessions: 2, topics: 3, items: 9, waiting: 1 });
+      { kind: 'project', name: 'notes', path: '/code/notes', sessions: 2, topics: 3, items: 9, waiting: 1 });
     await settle();
     expect(service.removeSession).toHaveBeenCalledWith({ ...route, expected_revision: session.revision }, sessionOp);
     expect(queue.getSnapshot().project(route.project_id)).toBe(true);
@@ -160,7 +160,7 @@ describe('the removal queue', () => {
   it('runs on visibilitychange to hidden', async () => {
     const { service, queue } = harness();
     const detach = queue.attach(window);
-    queue.schedule({ kind: 'project', project_id: route.project_id }, { kind: 'project', name: 'payments', path: '/p', sessions: 0, topics: 0, items: 0, waiting: 0 });
+    queue.schedule({ kind: 'project', project_id: route.project_id }, { kind: 'project', name: 'notes', path: '/p', sessions: 0, topics: 0, items: 0, waiting: 0 });
     const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     document.dispatchEvent(new Event('visibilitychange')); await settle();
     expect(service.removeProject).toHaveBeenCalledOnce();

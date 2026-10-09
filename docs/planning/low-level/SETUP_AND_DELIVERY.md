@@ -374,7 +374,7 @@ Example summary:
 ```text
 Claude 2.1.287: supported
 Codex 0.160.0: supported
-Project: /work/payments (registered)
+Project: /work/notes (registered)
 Bindings: Claude connected; Codex stale (last seen 4m ago)
 Recovery: 1 uncertain input requires review; dispatch paused for that binding
 Result: warning — run `ariadne recovery show <binding-id>` to inspect

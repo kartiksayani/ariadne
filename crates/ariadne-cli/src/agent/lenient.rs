@@ -1,6 +1,6 @@
-//! Lenient `ariadne apply` input: fills defaults, allocates refs and flattens
-//! `children`, producing the strict wire `ApplyRequest`. Core validates the result
-//! exactly as it validates a fully explicit request; nothing here relaxes a rule.
+//! Lenient `ariadne apply` input: fills defaults, allocates refs, flattens
+//! `children` and repairs terminal creation into Open with an Ack target.
+//! Core validates the resulting strict wire `ApplyRequest` without relaxing a rule.
 use super::{bad_request, bad_stdin, invalid};
 use ariadne_core::*;
 use ariadne_domain::models::*;
@@ -16,6 +16,8 @@ pub struct Expanded {
     /// Set when the CLI chose the `op_id`. It is derived from the request, so a
     /// retry of the identical request carries the same one and replays.
     pub generated_op_id: Option<UuidV4>,
+    /// Plain explanations of repairs made before strict validation.
+    pub repairs: Vec<String>,
 }
 
 /// Stands in for `op_id` while the request is expanded; replaced by the derived id.
@@ -53,7 +55,7 @@ pub fn expand(bytes: &[u8], binding: &UuidV4) -> Result<Expanded, CoreError> {
         Some(Value::Array(list)) => std::mem::take(list),
         _ => Vec::new(),
     };
-    let flattened = Expander::new(binding, &operations).run(operations)?;
+    let (flattened, repairs) = Expander::new(binding, &operations).run(operations)?;
     // Operations are decoded one at a time so an error names its position.
     let mut parsed = Vec::with_capacity(flattened.len());
     for (path, operation) in flattened {
@@ -80,6 +82,7 @@ pub fn expand(bytes: &[u8], binding: &UuidV4) -> Result<Expanded, CoreError> {
     Ok(Expanded {
         request,
         generated_op_id,
+        repairs,
     })
 }
 
@@ -114,12 +117,15 @@ fn derived_op_id(binding: &UuidV4, request: &ApplyRequest) -> Result<UuidV4, Cor
         .map_err(|_| invalid("Cannot derive an op_id from this request."))
 }
 
+type FlatOperations = Vec<(String, Value)>;
+
 struct Expander {
     binding: String,
     used: BTreeSet<String>,
     next: u64,
     topic_adds: usize,
     default_topic: Option<Value>,
+    repairs: Vec<String>,
 }
 
 impl Expander {
@@ -138,15 +144,16 @@ impl Expander {
             next: 0,
             topic_adds,
             default_topic: None,
+            repairs: Vec::new(),
         }
     }
 
-    fn run(mut self, operations: Vec<Value>) -> Result<Vec<(String, Value)>, CoreError> {
+    fn run(mut self, operations: Vec<Value>) -> Result<(FlatOperations, Vec<String>), CoreError> {
         let mut out = Vec::new();
         for (index, operation) in operations.into_iter().enumerate() {
             self.operation(operation, format!("operations[{index}]"), &mut out)?;
         }
-        defer_related(out)
+        Ok((defer_related(out)?, self.repairs))
     }
 
     /// A fresh `r1`, `r2`, ... that no request ref uses.
@@ -175,7 +182,7 @@ impl Expander {
         &mut self,
         operation: Value,
         path: String,
-        out: &mut Vec<(String, Value)>,
+        out: &mut FlatOperations,
     ) -> Result<(), CoreError> {
         let Value::Object(mut object) = operation else {
             out.push((path, operation));
@@ -217,13 +224,40 @@ impl Expander {
         Ok(())
     }
 
+    /// Repairs depend only on request bytes, so retries retain their operation ID
+    /// even after the owner acknowledges the item or other work changes it.
+    fn repair_completion(
+        &mut self,
+        object: &mut Map<String, Value>,
+        path: &str,
+    ) -> Result<(), CoreError> {
+        if let Some(status @ ("decided" | "done" | "dropped")) =
+            object.get("status").and_then(Value::as_str)
+        {
+            let status = status.to_string();
+            if let Some(target) = object.get("ack_to").filter(|target| !target.is_null()) {
+                if target.as_str() != Some(status.as_str()) {
+                    return Err(bad_request(format!(
+                        "{path}: status `{status}` conflicts with ack_to {target}; use status `open` with the intended ack_to"
+                    )));
+                }
+            }
+            object.insert("status".into(), json!("open"));
+            object.insert("ack_to".into(), json!(status));
+            self.repairs.push(format!(
+                "{path}: created open with ack_to `{status}`; owner Ack is required to finish."
+            ));
+        }
+        Ok(())
+    }
+
     /// `parent` is the enclosing item's ref and topic when this is a child.
     fn item_add(
         &mut self,
         mut object: Map<String, Value>,
         path: String,
         parent: Option<(&str, Option<&Value>)>,
-        out: &mut Vec<(String, Value)>,
+        out: &mut FlatOperations,
     ) -> Result<(), CoreError> {
         let children = match object.remove("children") {
             None | Some(Value::Null) => Vec::new(),
@@ -268,6 +302,24 @@ impl Expander {
         object
             .entry("status")
             .or_insert_with(|| json!(if asking { "waiting_on_me" } else { "open" }));
+        if object.get("status").and_then(Value::as_str) == Some("replaced") {
+            return Err(bad_request(format!(
+                "{path}: replaced creation is refused; create a nonterminal item instead"
+            )));
+        }
+        self.repair_completion(&mut object, &path)?;
+        if asking
+            && matches!(
+                object.get("status").and_then(Value::as_str),
+                Some("open" | "in_progress")
+            )
+        {
+            object.insert("status".into(), json!("waiting_on_me"));
+            object.insert("owner".into(), json!({"kind": "me"}));
+            self.repairs.push(format!(
+                "{path}: changed to waiting_on_me so the owner can answer the ask; ack_to and text are preserved."
+            ));
+        }
         let waiting = object.get("status").and_then(Value::as_str) == Some("waiting_on_me");
         match object.get_mut("owner") {
             None => {
@@ -636,9 +688,67 @@ mod tests {
              "owner": {"kind": "agent"}}
         ]}));
         let operations = &wire(&request)["operations"];
-        assert_eq!(operations[0]["status"], "in_progress");
-        assert_eq!(operations[0]["owner"]["kind"], "agent");
+        assert_eq!(operations[0]["status"], "waiting_on_me");
+        assert_eq!(operations[0]["owner"]["kind"], "me");
         assert_eq!(operations[1]["owner"]["binding_id"], BINDING);
+    }
+
+    #[test]
+    fn terminal_creation_repairs_every_nested_item_and_preserves_authored_completion() {
+        for status in ["decided", "done", "dropped"] {
+            let expanded = run(&json!({"operations": [{
+                "op": "item.add", "topic": {"id": TOPIC}, "type": "finding",
+                "question": "Root", "status": status, "outcome": "Exact outcome",
+                "why": "Exact why", "note": "Exact note", "children": [{
+                    "type": "finding", "question": "Child", "status": status,
+                    "outcome": "Child outcome", "why": "Child why", "children": [{
+                        "type": "finding", "question": "Grandchild", "status": status
+                    }]
+                }]
+            }]}))
+            .unwrap();
+            let value = wire(&expanded.request);
+            for operation in value["operations"].as_array().unwrap() {
+                assert_eq!(operation["status"], "open");
+                assert_eq!(operation["ack_to"], status);
+            }
+            assert_eq!(value["operations"][0]["outcome"], "Exact outcome");
+            assert_eq!(value["operations"][0]["why"], "Exact why");
+            assert_eq!(value["operations"][0]["note"], "Exact note");
+            assert_eq!(expanded.repairs.len(), 3);
+            assert!(expanded.repairs[2].contains("operations[0].children[0].children[0]"));
+            // Repair notes are presentation; equivalent explicit operations hash identically.
+            let mut explicit = value;
+            explicit.as_object_mut().unwrap().remove("op_id");
+            let again = run(&explicit).unwrap();
+            assert_eq!(expanded.generated_op_id, again.generated_op_id);
+            assert!(again.repairs.is_empty());
+        }
+    }
+
+    #[test]
+    fn explicit_ack_target_is_kept_and_conflicting_terminal_creation_is_refused() {
+        for target in ["decided", "done", "dropped"] {
+            let request = json!({"operations": [{
+                "op": "item.add", "topic": {"id": TOPIC}, "question": "Q",
+                "type": "task", "status": "open", "ack_to": target
+            }]});
+            let expanded = run(&request).unwrap();
+            assert_eq!(wire(&expanded.request)["operations"][0]["ack_to"], target);
+            assert!(expanded.repairs.is_empty());
+            for supplied in [Value::Null, json!(target)] {
+                let mut terminal = request.clone();
+                terminal["operations"][0]["status"] = json!(target);
+                terminal["operations"][0]["ack_to"] = supplied;
+                assert_eq!(run(&terminal).unwrap().repairs.len(), 1);
+            }
+        }
+        let conflict = message(json!({"operations": [{
+            "op": "item.add", "topic": {"id": TOPIC}, "question": "Q",
+            "type": "task", "status": "done", "ack_to": "dropped"
+        }]}));
+        assert!(conflict.contains("operations[0]"), "{conflict}");
+        assert!(conflict.contains("conflicts with ack_to"), "{conflict}");
     }
 
     #[test]
@@ -751,8 +861,56 @@ mod tests {
              "outcome": "o", "why": "w"},
             {"op": "item.edit", "item": {"id": "1"}, "patch": {"question": "Q2"}}]}));
         let value = wire(&request);
+        assert_eq!(value["operations"][0]["status"], "done");
+        assert_eq!(value["operations"][0]["ack_to"], Value::Null);
         assert_eq!(value["operations"][0]["reason"], Value::Null);
         assert_eq!(value["operations"][1]["patch"]["type"], Value::Null);
+    }
+
+    #[test]
+    fn existing_terminal_statuses_pass_through_without_request_only_repairs() {
+        for target in ["decided", "done", "dropped"] {
+            for source in [Value::Null, json!(TOPIC)] {
+                let input = json!({"source_input_id": source, "operations": [{
+                    "op": "item.status", "item": {"id": "1"}, "status": target,
+                    "outcome": "Exact outcome", "why": "Exact why"
+                }]});
+                let expanded = run(&input).unwrap();
+                assert_eq!(expanded.request, run(&input).unwrap().request);
+                let operation = &wire(&expanded.request)["operations"][0];
+                assert_eq!(operation["status"], target);
+                assert!(operation["ack_to"].is_null());
+                assert!(expanded.repairs.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_unanswered_asks_are_repaired_to_waiting_even_with_completion_targets() {
+        for status in ["open", "in_progress", "done", "decided", "dropped"] {
+            let target = match status {
+                "decided" => "decided",
+                "dropped" => "dropped",
+                _ => "done",
+            };
+            let input = json!({"operations": [{"op": "item.add", "topic": {"id": TOPIC},
+                "type": "explanation", "question": "Proposed result", "status": status,
+                "owner": {"kind": "agent"}, "ask": "May I proceed?", "ack_to": target,
+                "outcome": "Exact result", "why": "Exact reasoning"}]});
+            let expanded = run(&input).unwrap();
+            let operation = &wire(&expanded.request)["operations"][0];
+            assert_eq!(operation["status"], "waiting_on_me");
+            assert_eq!(operation["owner"], json!({"kind": "me"}));
+            assert_eq!(operation["ack_to"], target);
+            assert_eq!(operation["ask"], "May I proceed?");
+            assert_eq!(operation["outcome"], "Exact result");
+            assert_eq!(operation["why"], "Exact reasoning");
+            assert!(expanded
+                .repairs
+                .iter()
+                .any(|repair| repair.contains("so the owner can answer")));
+            expanded.request.validate_wire().unwrap();
+        }
     }
 
     #[test]

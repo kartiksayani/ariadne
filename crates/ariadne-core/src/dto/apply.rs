@@ -78,6 +78,9 @@ pub enum Operation {
     ItemStatus {
         item: EntityRef,
         status: ItemStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        ack_to: Option<AckTarget>,
         outcome: Option<String>,
         why: Option<String>,
         reason: Option<String>,
@@ -154,6 +157,9 @@ pub struct ItemAddOperation {
     #[serde(rename = "type")]
     pub item_type: ItemType,
     pub status: ItemStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub ack_to: Option<AckTarget>,
     pub owner: ItemOwner,
     pub ask: Option<String>,
     pub options: Option<Vec<ItemOption>>,

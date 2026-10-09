@@ -476,6 +476,31 @@
         "op_id",
         "params"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "command": {
+          "type": "string",
+          "const": "ack"
+        },
+        "op_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "params": {
+          "$ref": "#/$defs/ItemAckParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "api_version",
+        "op_id",
+        "params"
+      ]
     }
   ],
   "$defs": {
@@ -844,6 +869,23 @@
       "required": [
         "topic_id",
         "item_id"
+      ]
+    },
+    "ItemAckParams": {
+      "description": "Explicit owner acknowledgment of an agent-proposed terminal state.",
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "expected_revision"
       ]
     },
     "ItemOwner": {

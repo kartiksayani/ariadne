@@ -37,7 +37,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         ($($type:ty),+ $(,)?) => { $(add::<$type>(&mut files, &mut declarations)?;)+ };
     }
     register!(
-        Project, Session, SessionState, SessionCounters, Topic, Item, ItemType, ItemStatus,
+        Project, Session, SessionState, SessionCounters, Topic, Item, ItemType, ItemStatus, AckTarget,
         ItemOwner, ItemOption, ItemLinkTarget, LinkKind, StatusHistoryEntry, Message,
         MessageAuthor, MessageKind, Answer, Round, TopicOrigin, ItemOrigin, MessageOrigin, MessageSourceTarget,
         RoundOrigin, EndpointFingerprint, EndpointRef, AdapterConfig, Capability,

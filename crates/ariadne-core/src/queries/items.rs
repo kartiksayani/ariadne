@@ -350,6 +350,7 @@ fn snapshot(session: &Session, item: &Item) -> ItemSnapshot {
         short: item.short.clone(),
         item_type: item.item_type.clone(),
         status: item.status.clone(),
+        ack_to: item.ack_to,
         owner: item.owner.clone(),
         revision: item.revision,
         question_revision: item.question_revision,

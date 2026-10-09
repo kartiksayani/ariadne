@@ -21,7 +21,7 @@ acceptance, not assumed successes.
    state/read models and acceptance checks.
 6. [Roadmap](ROADMAP.md) and [Verification](low-level/VERIFICATION.md).
 
-The [gap audit](https://github.com/kartiksayani/ariadne/blob/a5e306f/docs/planning/ARCHITECTURE_AUDIT.md) records what was missing, where each gap was
+The [gap audit](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/docs/planning/ARCHITECTURE_AUDIT.md) records what was missing, where each gap was
 closed, and which execution gates remain. [Decisions](../../DECISIONS.md) records
 current choices; the archive preserves historical revisions.
 
@@ -37,11 +37,12 @@ current choices; the archive preserves historical revisions.
 
 ## Evidence and boundaries
 
-[Claude seven-check proof](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/claude-mods/RESULTS.md),
-[Codex eight-check proof](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/RESULTS.md). Both used existing
+[Claude seven-check proof](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/claude-mods/RESULTS.md),
+[Codex eight-check proof](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/RESULTS.md). Both used existing
 conversations; production domain tools/store/native app remain to be implemented.
 Original ZIP has a [verified member checksum manifest](assets/design-manifest.json).
 Provider research and older smoke reports are preserved in the
-[immutable planning archive](https://github.com/kartiksayani/ariadne/tree/a5e306f).
-Use the current LLD for implementation. Publishing this curated repository is
-authorized. Organization security guidance was not checked under the owner's waiver.
+[planning archive](https://github.com/kartiksayani/ariadne/tree/reference/planning-and-pocs).
+Use the current LLD for implementation.
+
+Publishing this curated repository is authorized.

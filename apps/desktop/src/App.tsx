@@ -36,6 +36,7 @@ import { useWindowKeys } from './ui/shell/windowKeys';
 import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
 import { connectionOf } from './ui/shared/connection';
+import { acknowledge, ackBlocked, ackFailure, ackTarget } from './ui/shared/ack';
 import { displayStatus } from './selectors/waiting/replied';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
@@ -85,6 +86,7 @@ function workspaceKeys(app: {
   readonly oldestWaiting: () => ItemRoute | undefined;
   readonly focusOwner: (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => void;
   readonly quickAnswer: (target: ItemRoute, index?: number) => boolean;
+  readonly ack: (target: ItemRoute, repeat: boolean) => boolean;
   readonly queueBring: (target: ItemRoute) => Promise<void>;
   readonly toggleHidden: (target: ItemRoute) => boolean;
   readonly toggleLater: (target: ItemRoute, itemId: string) => boolean;
@@ -108,6 +110,7 @@ function workspaceKeys(app: {
     escape: () => { app.closeDetail(); app.clearFilters?.(); return false; },
     answer: (_intent, event) => {
       const focused = app.focused(event);
+      if (focused && app.ack(focused.target, event.repeat)) return true;
       const question = focused && focused.item.status === 'waiting_on_me' ? focused.target : app.oldestWaiting();
       if (!question) return false;
       app.focusOwner({ ...question }, 'answer'); return true;
@@ -209,10 +212,30 @@ function Workspace({ application }: { application: Application }) {
   const [highlightedMessages, setHighlightedMessages] = useState<ReadonlySet<string>>(new Set());
   const [searchEdit, setSearchEdit] = useState<{ route: string; text: string; attempted: boolean } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  useEffect(() => {
+    if (sessionState?.status === 'ready' && !sessionState.error) {
+      setRouteError(error => error === "Ariadne is still loading this session's latest changes. Try again." ? null : error);
+    }
+  }, [sessionState?.status, sessionState?.error]);
   const graph = graphModes[key] ?? false;
   const currentReveal = localReveal?.store === store ? localReveal : state.reveal?.store === store ? state.reveal : null;
   const treeReveal = currentReveal === dismissedReveal ? null : currentReveal;
   const selectedId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
+  const ackRequest = useRef(0);
+  const ackActions = store ? application.actions.forSession(store) : null;
+  const ackState = useSyncExternalStore(ackActions?.subscribe ?? noSubscription, ackActions?.getSnapshot ?? noSession, ackActions?.getSnapshot ?? noSession);
+  useEffect(() => {
+    ++ackRequest.current;
+    notices.dismiss('ack-save-failed');
+    return () => { ++ackRequest.current; };
+  }, [key, selectedId]);
+  useEffect(() => {
+    const receipt = ackState?.receipt;
+    if (receipt && 'data' in receipt && receipt.data.kind === 'item_ack') {
+      ++ackRequest.current;
+      notices.dismiss('ack-save-failed');
+    }
+  }, [ackState?.receipt]);
   const historyReveal = useRef<RevealedItem | null>(null);
   const historySession = sessionState?.snapshot?.session;
   const existsInHistory = useCallback((id: string) => !!route && !!historySession?.items[id] && !hidden.item(route, historySession, id),
@@ -333,6 +356,12 @@ function Workspace({ application }: { application: Application }) {
     const current = store && route && sameSession(route, target) ? store.getSnapshot() : application.waiting.sessionState(target);
     const session = current?.snapshot?.session, item = session?.items[target.item_id];
     const draftState = application.drafts.getSnapshot(), entry = application.drafts.find(target, target.item_id, 'answer');
+    if (session && item && (current?.status !== 'ready' || current.error)) {
+      notices.push({ id: 'quick-answer-not-ready', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+        text: "Ariadne is still loading this session's latest changes. Try again." });
+      return true;
+    }
+    notices.dismiss('quick-answer-not-ready');
     if (!session || !item || current?.status !== 'ready' || current.error || session.state !== 'active'
       || session.topics[item.topic_id]?.archived_at !== null || displayStatus(session, item) !== 'waiting_on_me'
       || state.writing || state.pendingOperationId !== null || !draftState.ready || draftState.preferenceUncertain
@@ -349,6 +378,7 @@ function Workspace({ application }: { application: Application }) {
     const identity = JSON.stringify(target);
     if (bringing.current.has(identity)) return;
     bringing.current.add(identity);
+    setRouteError(null);
     const token = ++shortcutSequence.current, navigationRequest = navigation.getNavigationRequest();
     setOwnerFocus(null);
     try {
@@ -360,7 +390,10 @@ function Workspace({ application }: { application: Application }) {
       await application.drafts.load();
       if (shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       const current = result.store.getSnapshot(), session = current.snapshot?.session;
-      if (!session || current.status !== 'ready' || current.error) return;
+      if (!session || current.status !== 'ready' || current.error) {
+        setRouteError("Ariadne is still loading this session's latest changes. Try again.");
+        return;
+      }
       const existing = application.drafts.find(target, target.item_id, 'bring');
       if (shortcutSequence.current === token) setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent: 'bring', token });
       // An existing draft, attempted operation or receipt always needs review.
@@ -492,7 +525,26 @@ function Workspace({ application }: { application: Application }) {
   const selectedHidden = !!sessionState?.snapshot?.session && !!selectedId
     && hiddenItems(sessionState.snapshot.session, new Set(view?.hidden_item_ids ?? [])).has(selectedId);
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({
-    store: !!store, closeDetail, focusOwner, quickAnswer, queueBring, archiveTopic: topicId => {
+    store: !!store, closeDetail, focusOwner, quickAnswer, queueBring, ack: (target, repeat) => {
+      const store = navigation.opened.open(target), session = store.getSnapshot().snapshot?.session, item = session?.items[target.item_id];
+      if (!session || !item || !ackTarget(session, item)) return false;
+      const actions = application.actions.forSession(store);
+      if (repeat) return true;
+      const blocked = ackBlocked(actions);
+      if (blocked) {
+        notices.push({ id: 'ack-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: blocked });
+        return true;
+      }
+      const attempted = ++ackRequest.current;
+      notices.dismiss('ack-save-failed');
+      void acknowledge(actions, item.id, () => attempted !== ackRequest.current).then(saved => {
+        const error = actions.getSnapshot().error;
+        if (attempted === ackRequest.current && !saved && error) notices.push({ id: 'ack-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
+      }).catch(error => {
+        if (attempted === ackRequest.current) notices.push({ id: 'ack-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
+      });
+      return true;
+    }, archiveTopic: topicId => {
       const control = document.querySelector<HTMLButtonElement>(`[data-shortcut-archive-topic="${topicId}"]`);
       if (!control || control.disabled) return false;
       control.focus(); control.click(); return true;

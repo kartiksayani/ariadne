@@ -175,5 +175,3 @@ actual worktrees, GitHub and live contexts on resumption.
 
 Repository rulesets and their limits are documented in CONTRIBUTING. Do not change
 remote settings, remove existing worktrees/branches/history or read credentials.
-MCP/Seezo remain disabled under the current-session waiver; organization guidance
-was not checked.

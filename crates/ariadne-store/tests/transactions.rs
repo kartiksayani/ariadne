@@ -795,12 +795,12 @@ fn snapshot_written_before_session_names_loads_and_keeps_its_bytes() {
             },
         )
     };
-    named(101, "Billing fixes", "Sorting out the refund rules").unwrap();
+    named(101, "Sync fixes", "Sorting out the undo rules").unwrap();
     let saved = project.store().read(&id(2)).unwrap();
-    assert_eq!(saved.name.as_deref(), Some("Billing fixes"));
+    assert_eq!(saved.name.as_deref(), Some("Sync fixes"));
     assert_eq!(
         saved.description.as_deref(),
-        Some("Sorting out the refund rules")
+        Some("Sorting out the undo rules")
     );
     // An overlong name is refused and leaves the file as it was.
     let before = fs::read(project.live()).unwrap();
@@ -823,7 +823,7 @@ fn hand_edited_session_name_and_description_must_stay_one_bounded_line() {
         fs::write(project.live(), serde_json::to_vec(&edited).unwrap()).unwrap();
         store.read(&id(2))
     };
-    assert!(write(Some("Billing"), Some("Refunds")).is_ok());
+    assert!(write(Some("Sync"), Some("Undo")).is_ok());
     for (name, description, kind) in [
         (
             Some("x".repeat(61)),

@@ -110,9 +110,6 @@ Tests prove canonical registration, separate writer processes, identity conflict
 unavailable paths, replay/preflight ordering, generation fencing and history guards
 against actual JSON persistence. Invalid/future authoritative data remains read-only.
 
-MCP/Seezo remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no approval is claimed.
-
 ## Spec references
 
 - [DOMAIN binding identity](../planning/low-level/DOMAIN_AND_STORAGE.md#binding-and-presence)

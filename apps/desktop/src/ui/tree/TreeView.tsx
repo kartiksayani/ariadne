@@ -3,7 +3,7 @@
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
+import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute, SessionPreferences } from '../../generated/core';
 import type { Input, SessionSummary } from '../../generated/domain/models';
@@ -17,10 +17,11 @@ import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { AnswerControl } from '../answer/AnswerControl';
 import type { PendingSubmission } from '../answer/useSubmit';
 import { notices as noticeStore } from '../pages/notices';
-import { chipsOf, collapsedNote, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
+import { chipsOf, closed, collapsedNote, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { HiddenRow } from './HiddenRow';
 import { hiddenGroupKey, hiddenGroupsFor } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
+import { ackTarget, ackTitle, useAck } from '../shared/ack';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
 import { TopicReply } from '../answer/TopicReply';
@@ -101,7 +102,7 @@ export function TreeView(props: TreeViewProps) {
   const hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, route, hidden), [raw, route, hidden]);
   const view = preferences?.sessions.find(value => value.session.project_id === route.project_id && value.session.session_id === route.session_id) ?? null;
-  const busy = nav.writing || nav.pendingOperationId !== null || state.status !== 'ready';
+  const viewBusy = nav.writing || nav.pendingOperationId !== null;
   const archivedMode = view?.filters.archived ?? false;
   const later = useMemo(() => new Set(preferences?.later.filter(item => item.project_id === route.project_id && item.session_id === route.session_id)
     .map(item => item.item_id) ?? []), [preferences, route.project_id, route.session_id]);
@@ -119,9 +120,10 @@ export function TreeView(props: TreeViewProps) {
   const [sending, setSending] = useState(false);
   useOwnerDrafts(drafts);
   const lifecycle = useLifecycle(actions);
+  const ack = useAck(actions, selectedId);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const mounted = useRef(true), request = useRef(0);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, [store]);
   // Unmounting or swapping the rows for the graph leaves no row to fire mouseleave.
   const graphShown = !!graph;
   useEffect(() => () => onHoverItem(null), [onHoverItem, graphShown]);
@@ -199,10 +201,24 @@ export function TreeView(props: TreeViewProps) {
   };
   const clickedReveal = useRef<RevealedItem | null>(null);
   const select = (id: string, fromRow = true) => {
-    if (busy) return;
+    if (viewBusy) return;
     const call = ++request.current;
     setFocusKey(id);
-    void navigation.routes.revealItem({ ...route, item_id: id }).then(result => {
+    noticeStore.dismiss('tree-reveal-failed');
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let expired = false;
+    const loading = () => new OwnFailure({ code: 'snapshot_changed', message: "Ariadne is still loading this session's latest changes. Try again.", hint: '', retryable: true, field_errors: [] });
+    const reveal = async () => {
+      if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) await store.refresh(true);
+      if (expired || !mounted.current || call !== request.current) return null;
+      if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) throw loading();
+      const current = navigation.getSnapshot();
+      if (current.writing || current.pendingOperationId !== null) throw new OwnFailure({ code: 'store_busy',
+        message: 'Another view change is being saved. Wait for it, then try again.', hint: '', retryable: true, field_errors: [] });
+      return navigation.routes.revealItem({ ...route, item_id: id });
+    };
+    // Bound both the readiness wait and route read; only the latest click can select a row.
+    void Promise.race([reveal(), new Promise<null>((_resolve, reject) => { timeout = setTimeout(() => { expired = true; reject(loading()); }, 5000); })]).then(result => {
       if (!mounted.current || call !== request.current || !result) return;
       // Opening the clicked row holds still; a preview link reveals a different row.
       clickedReveal.current = fromRow ? result : null;
@@ -212,7 +228,7 @@ export function TreeView(props: TreeViewProps) {
       if (!mounted.current || call !== request.current) return;
       noticeStore.push({ id: 'tree-reveal-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
         text: `Item #${id} could not be opened. ${plainFailure(error, 'Try again.')}` });
-    });
+    }).finally(() => { clearTimeout(timeout); });
   };
   const toggleItem = (id: string) => {
     const row = latest.current.rows.find(value => value.key === id);
@@ -295,9 +311,9 @@ export function TreeView(props: TreeViewProps) {
   useEffect(() => { if (answering && !answerRow) setAnswering(null); }, [answering, answerRow]);
 
   // ------------------------------------------------------------ keyboard
-  const onRow = (act: (row: Row, index: number, intent: WorkspaceIntent) => boolean | void) => (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => {
+  const onRow = (act: (row: Row, index: number, intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => boolean | void) => (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => {
     const visible = latest.current.rows, index = visible.findIndex(row => row.key === event.currentTarget.dataset.row);
-    return index >= 0 ? act(visible[index], index, intent) : false;
+    return index >= 0 ? act(visible[index], index, intent, event) : false;
   };
   const move = (to: (index: number, visible: readonly Row[]) => number) => onRow((_row, index) => {
     const visible = latest.current.rows, next = visible[Math.max(0, Math.min(visible.length - 1, to(index, visible)))];
@@ -329,7 +345,8 @@ export function TreeView(props: TreeViewProps) {
       if (answering === row.key && chosen >= 0) { sendOption(chosen); return true; }
       select(row.item.id); return true;
     }),
-    answer: onRow(row => {
+    answer: onRow((row, _index, _intent, event) => {
+      if (row.kind === 'item' && session && ackTarget(session, row.item)) { if (!event.repeat) void ack.run(row.item.id); return true; }
       if (answerable(row)) { if (answering === row.key) setAnswering(null); else openAnswer(row.key); return true; }
       const oldest = session ? oldestWaiting(session) : null, target = oldest ? latest.current.rows.find(value => value.key === oldest.id) : undefined;
       if (!answerable(target)) return false;
@@ -574,8 +591,10 @@ export function TreeView(props: TreeViewProps) {
   const touchedMessage = highlightedMessages.size && session ? session.messages.find(message => highlightedMessages.has(message.id))?.number ?? null : null;
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
+    const ackTo = session && ackTarget(session, item);
+    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo), label: 'Ack', persistent: true, disabled: viewBusy || ack.busy, run: () => { void ack.run(item.id); } });
     const act = (intent: RowIntent) => () => onAct(intent, target, result => { clickedReveal.current = result; });
-    if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed) && running && !archivedMode && session?.state === 'active') {
+    if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed || closed(item.status)) && running && !archivedMode && session?.state === 'active') {
       const bring = { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') };
       if (item.status === 'open') list.push(bring, ...row.later ? [{ icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: act('later') }]
         : [{ icon: 'ph ph-chat-text', title: 'Reply (r)', run: act('reply') }, { icon: 'ph ph-x-circle', title: 'Drop (d)', run: act('drop') },
@@ -629,7 +648,7 @@ export function TreeView(props: TreeViewProps) {
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
       {items.map(row => row.kind === 'hidden'
         ? <HiddenRow key={row.key} row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
-        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={busy}
+        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={viewBusy}
         highlight={highlightedItems.has(row.key) ? 'strong' : row.collapsed?.ids.some(id => highlightedItems.has(id)) ? 'weak' : null}
         note={row.collapsed ? collapsedNote(row.collapsed, { items: highlightedItems, message: touchedMessage }) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
@@ -692,6 +711,7 @@ export function TreeView(props: TreeViewProps) {
       {archived.cancelled ? ` ${archived.cancelled} unsent message${archived.cancelled > 1 ? 's were' : ' was'} cancelled.` : ''}</Banner>}
     {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
+    {ack.error && <Banner icon="ph ph-warning-circle" alert>{ack.error}</Banner>}
     {lifecycle.error && <Banner icon="ph ph-warning-circle" alert>{lifecycle.error}</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}

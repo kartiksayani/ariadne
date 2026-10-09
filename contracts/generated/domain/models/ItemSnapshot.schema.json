@@ -4,6 +4,16 @@
   "description": "All current item fields except unbounded updated-message and status-history arrays.",
   "type": "object",
   "properties": {
+    "ack_to": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AckTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "ask": {
       "type": [
         "string",
@@ -195,6 +205,15 @@
     "origin"
   ],
   "$defs": {
+    "AckTarget": {
+      "description": "Terminal state the agent proposes for an explicit owner acknowledgment.",
+      "type": "string",
+      "enum": [
+        "decided",
+        "done",
+        "dropped"
+      ]
+    },
     "ItemLinkTarget": {
       "type": "object",
       "properties": {

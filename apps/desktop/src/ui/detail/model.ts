@@ -9,7 +9,7 @@ import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentName } from '../shell/model';
 import { shortLabel } from '../shared/short';
 import { excerptView, messageNumber, type ExcerptView } from '../shared/excerpt';
-import { statusKey, type StatusKey } from '../shared/status';
+import { STATUS, statusKey, type StatusKey } from '../shared/status';
 import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { counted, heldInput, notSent, stuckInput, withdrawn, type NotSent, type Stuck } from '../../selectors/waiting/stuck';
@@ -226,14 +226,15 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const outbox = active.map((input): PendingView => ({ input, ...sentView(input), caption: CAPTION[input.state] ?? '',
     stuck: saving ? null : stuckInput(session, input, presence, health) }));
   const pending = !!sub?.stage && sub.stage !== 'failed' && !held;
-  const outLabel = status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
+  const proposal = (status === 'open' || status === 'progress') ? item.ack_to : null;
+  const outLabel = proposal ? `Proposed ${STATUS[proposal].label}` : status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
   const ownerLabel = item.owner.kind === 'me' ? 'you' : item.owner.kind === 'agent' ? 'the agent' : item.owner.name;
   const showSteps = sub && (sub.stage !== null || (status !== 'waiting' && status !== 'open'));
 
   let open: OpenSection | null = null;
   // The dock stays for an open or in-progress item while a message is on its way: its box is always there, and a second
   // message queues behind the first. Bring it up and Drop wait until it settles, so they are never sent twice.
-  const keepsBox = status === 'open' || status === 'progress';
+  const keepsBox = status === 'open' || status === 'progress' || isClosed;
   if (!readOnly && (!pending || keepsBox) && status !== 'waiting') {
     const action = (value: ActionKey, key: string, label: string, icon: string, title: string, extra: Partial<OpenAction> = {}): OpenAction =>
       ({ action: value, key, label, icon, title, primary: false, pressed: mode === value, disabled: offline, ...extra });
@@ -382,7 +383,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     followUp,
     // The chat carries the ask once; the composer only carries the answer control.
     answer: answerable ? { heading: !showSteps, options: item.options, recommended, blocked } : null,
-    outcome: item.outcome ? { label: outLabel ?? 'Outcome', text: item.outcome, color: `var(--st-${status})` } : null,
+    outcome: item.outcome ? { label: outLabel ?? 'Outcome', text: item.outcome, color: `var(--st-${proposal ?? status})` } : null,
     note: item.note && status === 'progress' ? item.note : null,
     why: item.why,
     replaced: replacement ? kid(replacement) : null,

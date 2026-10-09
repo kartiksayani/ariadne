@@ -1529,6 +1529,15 @@
     {
       "inputSchema": {
         "$defs": {
+          "AckTarget": {
+            "description": "Terminal state the agent proposes for an explicit owner acknowledgment.",
+            "enum": [
+              "decided",
+              "done",
+              "dropped"
+            ],
+            "type": "string"
+          },
           "ApplyRequest": {
             "additionalProperties": false,
             "properties": {
@@ -1862,6 +1871,16 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "ack_to": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/AckTarget"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "ask": {
                     "type": [
                       "string",
@@ -2050,6 +2069,16 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "ack_to": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/AckTarget"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "item": {
                     "$ref": "#/$defs/EntityRef"
                   },

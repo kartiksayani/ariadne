@@ -3,6 +3,16 @@
   "title": "ItemAddOperation",
   "type": "object",
   "properties": {
+    "ack_to": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AckTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "ask": {
       "type": [
         "string",
@@ -130,6 +140,15 @@
     "source_round_id"
   ],
   "$defs": {
+    "AckTarget": {
+      "description": "Terminal state the agent proposes for an explicit owner acknowledgment.",
+      "type": "string",
+      "enum": [
+        "decided",
+        "done",
+        "dropped"
+      ]
+    },
     "EntityRef": {
       "anyOf": [
         {
