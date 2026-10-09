@@ -378,6 +378,18 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
         };
         let candidate = transition_item(session, id, &change, &context).map_err(transition)?;
         let old = &session.items.0[id];
+        let owner_reopens_terminal = matches!(
+            old.status,
+            ItemStatus::Decided | ItemStatus::Done | ItemStatus::Dropped | ItemStatus::Replaced
+        ) && self
+            .request
+            .source_input_id
+            .as_ref()
+            .and_then(|input_id| session.inputs.0.get(input_id))
+            .is_some_and(|input| {
+                input.target.item_id.as_ref() == Some(id)
+                    && matches!(input.kind, InputKind::Bring | InputKind::Reopen)
+            });
         if matches!(candidate.status, ItemStatus::Open | ItemStatus::InProgress)
             && candidate
                 .ask
@@ -395,18 +407,19 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                         .filter(|_| !answers_owner_input),
                 )
             } else {
-                // Bring/Reopen likewise cannot answer an Open/InProgress ask
-                // merely because this batch has not committed its result yet.
-                crate::queries::question_unanswered_with_handled_input(
-                    session,
-                    &candidate,
-                    self.request.source_input_id.as_ref(),
-                )
+                // The owner can bring a terminal item back with its old ask.
+                // Otherwise Bring/Reopen does not answer an Open/InProgress ask.
+                !owner_reopens_terminal
+                    && crate::queries::question_unanswered_with_handled_input(
+                        session,
+                        &candidate,
+                        self.request.source_input_id.as_ref(),
+                    )
             }
         {
             return Err(core(
                 CoreErrorCode::InvalidTransition,
-                "A question still waits for the owner; keep it waiting_on_me, or use ack_to \"dropped\" on a separate new item to explain withdrawing it, or item.replace for a replacement question",
+                "A question still waits for the owner; use item.ask to put it waiting_on_me, or use ack_to \"dropped\" on a separate new item to explain withdrawing it, or item.replace for a replacement question",
             ));
         }
         if matches!(change, ItemChange::Ask { .. }) {

@@ -1759,6 +1759,7 @@ fn agent_can_drop_its_unanswered_question_without_an_ack_target() {
     let error = core_error(setup.execute(&hide).unwrap_err());
     assert_eq!(error.code, CoreErrorCode::InvalidTransition);
     for guidance in [
+        "item.ask",
         "waiting_on_me",
         "ack_to \"dropped\"",
         "new item",
@@ -1909,8 +1910,8 @@ fn handled_clarification_cannot_abandon_an_unanswered_waiting_question() {
 }
 
 #[test]
-fn same_turn_followup_cannot_abandon_an_unanswered_waiting_question() {
-    for kind in [InputKind::Followup, InputKind::Note] {
+fn same_turn_followup_note_or_bring_cannot_abandon_an_unanswered_waiting_question() {
+    for kind in [InputKind::Followup, InputKind::Note, InputKind::Bring] {
         for status in [ItemStatus::Open, ItemStatus::InProgress] {
             for ack_to in [None, Some(AckTarget::Done)] {
                 for lenient in [false, true] {
@@ -1950,10 +1951,120 @@ fn same_turn_followup_cannot_abandon_an_unanswered_waiting_question() {
                     let error = core_error(error);
                     assert_eq!(error.code, CoreErrorCode::InvalidTransition);
                     assert!(error.message.contains("question still waits"), "{error:?}");
+                    assert!(error.message.contains("item.ask"), "{error:?}");
                     assert_eq!(setup.bytes(), before);
                     let saved = setup.saved();
                     assert_eq!(saved.items.0[&item("1")].status, ItemStatus::WaitingOnMe);
                     assert_eq!(saved.inputs.0[&source].state, InputState::InFlight);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn owner_bring_or_reopen_can_reopen_terminal_questions() {
+    for kind in [InputKind::Bring, InputKind::Reopen] {
+        for answered in [false, true] {
+            for status in [ItemStatus::Open, ItemStatus::InProgress] {
+                for lenient in [false, true] {
+                    let setup = Setup::new(&seed());
+                    let mut ask = guarded(1024, "1", 1);
+                    ask.operations.push(Operation::ItemAsk {
+                        item: existing("1"),
+                        ask: "Choose A or B?".into(),
+                        options: vec![],
+                        recipient_binding_id: id(3),
+                    });
+                    setup.execute(&ask).unwrap();
+                    if answered {
+                        InputService::new(&setup.registry)
+                            .execute(
+                                &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+                                    RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                                )),
+                                &OwnerCommand::InputSubmit {
+                                    api_version: SchemaVersion::new(1).unwrap(),
+                                    op_id: id(1025),
+                                    params: InputSubmitParams {
+                                        binding_id: id(3),
+                                        target: InputTarget {
+                                            topic_id: id(5),
+                                            item_id: Some(item("1")),
+                                        },
+                                        kind: InputKind::Answer,
+                                        text: "Choose B.".into(),
+                                        selected_option_id: None,
+                                        expected_question_revision: Some(
+                                            setup.saved().items.0[&item("1")].question_revision,
+                                        ),
+                                        supersedes_answer_id: None,
+                                    },
+                                },
+                                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                                at(),
+                            )
+                            .unwrap();
+                        setup.write(1026, |s| {
+                            s.bindings
+                                .0
+                                .get_mut(&id(3))
+                                .unwrap()
+                                .issued_through_message_number = NonnegativeSafeInteger::new(
+                                s.messages.last().unwrap().number.value(),
+                            )
+                            .unwrap();
+                        });
+                    }
+                    let saved = setup.saved();
+                    assert_eq!(
+                        ariadne_core::queries::waiting_unanswered(
+                            &saved,
+                            &saved.items.0[&item("1")]
+                        ),
+                        !answered,
+                    );
+                    let mut close = guarded(1027, "1", saved.items.0[&item("1")].revision.value());
+                    close.operations.push(Operation::ItemStatus {
+                        item: existing("1"),
+                        status: ItemStatus::Done,
+                        ack_to: None,
+                        outcome: Some("Finished.".into()),
+                        why: Some("No further work needed.".into()),
+                        reason: None,
+                    });
+                    setup.execute(&close).unwrap();
+                    assert_eq!(setup.saved().items.0[&item("1")].status, ItemStatus::Done);
+                    let source =
+                        setup.prepare_kind(TurnState::Completed, kind.clone(), "Revisit this.");
+                    let mut reopen = setup.dispatched(1028, &source);
+                    reopen.operations.push(Operation::ItemStatus {
+                        item: existing("1"),
+                        status: status.clone(),
+                        ack_to: None,
+                        outcome: None,
+                        why: None,
+                        reason: Some("Owner requested revisiting this.".into()),
+                    });
+                    if lenient {
+                        let (_, replayed, repairs) = ApplyService::new(&setup.registry)
+                            .execute_lenient(
+                                &setup.context(Some(&source)),
+                                &reopen,
+                                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                                at(),
+                            )
+                            .unwrap();
+                        assert!(!replayed && repairs.is_empty());
+                    } else {
+                        setup.execute(&reopen).unwrap();
+                    }
+                    let saved = setup.saved();
+                    let question = &saved.items.0[&item("1")];
+                    assert_eq!(question.status, status);
+                    assert_eq!(question.ask.as_deref(), Some("Choose A or B?"));
+                    assert_eq!(saved.inputs.0[&source].state, InputState::Handled);
+                    assert_eq!(saved.answers.len(), usize::from(answered));
                 }
             }
         }
