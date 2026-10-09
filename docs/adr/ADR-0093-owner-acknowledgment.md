@@ -89,8 +89,10 @@ the target. Ruled-out work can target Dropped.
 
 New read-only Finding or Explanation items (without an ask) require an explicit
 `ack_to`. Strict filing refuses omission with guidance to “choose ack_to ...”;
-lenient filing supplies `ack_to: "open"` and reports the repair. Tasks, decisions,
-questions and items with asks do not acquire an implicit Ack target. Existing
+lenient filing supplies the item's current nonterminal status (`open` or
+`in_progress`) as `ack_to` and reports the repair, so reading neither finishes
+the work nor moves it backwards. Tasks, decisions, questions and items with asks
+do not acquire an implicit Ack target. Existing
 items without a target remain valid. Terminal creation repair still retains
 the explicitly requested Decided, Done or Dropped as its target, preserving
 outcome and why; it does not replace that intent with Open.
@@ -98,8 +100,10 @@ outcome and why; it does not replace that intent with Open.
 The owner Ack command clears `ack_to` and applies exactly that recorded status,
 including Open or InProgress, under the writer lock with the expected revision.
 It records owner activity and status history and creates no input or delivery.
-Outcome and why survive nonterminal Ack just as they survive terminal Ack.
-Unanswered asks continue to block Ack.
+Outcome and why survive nonterminal Ack just as they survive terminal Ack,
+and remain through later nonterminal status changes. New Open/InProgress items
+may carry outcome or why only with `ack_to`; filing a new ordinary item without
+Ack still refuses that prose. Unanswered asks continue to block Ack.
 
 An agent may revise `ack_to` through `item.edit` on an Open/InProgress item that already
 has an Ack target. This changes only the target, retaining status and prose;
@@ -120,7 +124,8 @@ unread acknowledgment work visible without inflating Waiting counts.
 The CLI's deterministic operation ID still follows the expanded request.
 Repairs change terminal-creation requests relative to versions before Ack.
 Alpha.12 also changes previously accepted Open/InProgress findings/explanations
-without an ask or `ack_to`, because CLI expansion now adds `ack_to: "open"`.
+without an ask or `ack_to`, because CLI expansion now adds their current
+`open` or `in_progress` status as `ack_to`.
 Those old requests do not share the same derived ID or strict request digest
 across an upgrade. Before resending either kind of uncertain request from an
 older version, read the session and reconcile its original receipt first.

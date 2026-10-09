@@ -467,10 +467,10 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {docked && <div className="detail-dock">
     {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
-      <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo)} aria-label={ackTitle(ackTo)}
+      <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo, item.status)} aria-label={ackTitle(ackTo, item.status)}
         disabled={ack.busy} onClick={() => { void ack.run(item.id); }}>
         <i className="ph ph-check" aria-hidden="true" />Ack<span className="detail-key" aria-hidden="true">a</span>
-      </button><span className="detail-hint">{ackTitle(ackTo)}</span>
+      </button><span className="detail-hint">{ackTitle(ackTo, item.status)}</span>
     </section>}
     {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
     {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)

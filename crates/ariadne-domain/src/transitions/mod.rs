@@ -216,10 +216,17 @@ pub fn transition_item(
             validation::optional_text(reason, "status.reason", true, None)?;
             item.status = status.clone();
             item.ack_to = ack_to.or(old.ack_to);
+            // A nonterminal Ack clears the target, but later progress still
+            // carries the report the owner read.
+            let preserve_prose = item.ack_to.is_some()
+                || (matches!(old.status, ItemStatus::Open | ItemStatus::InProgress)
+                    && matches!(status, ItemStatus::Open | ItemStatus::InProgress));
             item.outcome = outcome
                 .clone()
-                .or_else(|| item.ack_to.and(old.outcome.clone()));
-            item.why = why.clone().or_else(|| item.ack_to.and(old.why.clone()));
+                .or_else(|| preserve_prose.then(|| old.outcome.clone()).flatten());
+            item.why = why
+                .clone()
+                .or_else(|| preserve_prose.then(|| old.why.clone()).flatten());
             item.replaced_by = None;
             leave_waiting(&mut item, old)?;
             history(&mut item, old, context, reason.clone());

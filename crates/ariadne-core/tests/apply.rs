@@ -1784,6 +1784,118 @@ fn open_creation_with_ack_proposal_preserves_completion_prose() {
 }
 
 #[test]
+fn strict_nonterminal_creation_prose_requires_ack_for_every_work_type() {
+    for item_type in [ItemType::Task, ItemType::Decision, ItemType::Question] {
+        for status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for (outcome, why) in [
+                (Some("Exact report."), None),
+                (None, Some("Exact reasoning.")),
+                (Some("Exact report."), Some("Exact reasoning.")),
+            ] {
+                let setup = Setup::new(&seed());
+                let mut r = request(990);
+                let mut op = add("work", uuid(5), None, false);
+                let Operation::ItemAdd(draft) = &mut op else {
+                    unreachable!()
+                };
+                draft.item_type = item_type.clone();
+                draft.status = status.clone();
+                draft.outcome = outcome.map(str::to_owned);
+                draft.why = why.map(str::to_owned);
+                r.operations.push(op);
+                let error = r.validate_wire().unwrap_err();
+                assert_eq!(error.code, CoreErrorCode::InvalidArgument);
+                assert_eq!(
+                    error.message,
+                    "item.add outcome and why require an explicit ack_to"
+                );
+                setup.rejected(&r, CoreErrorCode::InvalidArgument);
+                let Operation::ItemAdd(draft) = &mut r.operations[0] else {
+                    unreachable!()
+                };
+                draft.ack_to = Some(AckTarget::Open);
+                r.validate_wire().unwrap();
+                setup.execute(&r).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn nonterminal_ack_keeps_filed_prose_through_later_agent_status_changes() {
+    for item_type in [ItemType::Task, ItemType::Decision, ItemType::Question] {
+        for initial_status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for target in [AckTarget::Open, AckTarget::InProgress] {
+                let setup = Setup::new(&seed());
+                let mut r = request(990);
+                let mut op = add("work", uuid(5), None, false);
+                let Operation::ItemAdd(draft) = &mut op else {
+                    unreachable!()
+                };
+                draft.item_type = item_type.clone();
+                draft.status = initial_status.clone();
+                draft.ack_to = Some(target);
+                draft.outcome = Some("Exact report\nwith all details.".into());
+                draft.why = Some("Exact reasoning.".into());
+                r.operations.push(op);
+                let result = setup.execute(&r).unwrap();
+                let SavedReceiptData::Apply { allocated_refs, .. } = result.data else {
+                    unreachable!()
+                };
+                let AllocatedRef::Item { id: key } =
+                    &allocated_refs.0[&RequestRef::new("work").unwrap()]
+                else {
+                    unreachable!()
+                };
+                let before_ack = setup.saved();
+                ariadne_core::history_actions::HistoryActionService::new(&setup.registry)
+                    .acknowledge(
+                        &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+                            RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                        )),
+                        &OwnerCommand::Ack {
+                            api_version: SchemaVersion::new(1).unwrap(),
+                            op_id: id(991),
+                            params: ItemAckParams {
+                                item_id: key.clone(),
+                                expected_revision: before_ack.items.0[key].revision,
+                            },
+                        },
+                        at(),
+                        || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                    )
+                    .unwrap();
+                let acknowledged = setup.saved();
+                assert_eq!(acknowledged.items.0[key].status, target.status());
+                assert_eq!(acknowledged.items.0[key].ack_to, None);
+                assert_eq!(acknowledged.inputs, before_ack.inputs);
+                for (op_id, next_status) in [(992, ItemStatus::InProgress), (993, ItemStatus::Open)]
+                {
+                    let current = setup.saved();
+                    let mut progress =
+                        guarded(op_id, key.as_str(), current.items.0[key].revision.value());
+                    progress.operations.push(Operation::ItemStatus {
+                        item: existing(key.as_str()),
+                        status: next_status.clone(),
+                        ack_to: None,
+                        outcome: None,
+                        why: None,
+                        reason: Some("Continue the acknowledged work.".into()),
+                    });
+                    setup.execute(&progress).unwrap();
+                    let saved = setup.saved();
+                    let continued = &saved.items.0[key];
+                    assert_eq!(continued.status, next_status);
+                    assert_eq!(continued.ack_to, None);
+                    assert_eq!(continued.outcome, before_ack.items.0[key].outcome);
+                    assert_eq!(continued.why, before_ack.items.0[key].why);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn strict_read_only_creation_requires_an_explicit_ack_choice() {
     for item_type in [ItemType::Finding, ItemType::Explanation] {
         for status in [ItemStatus::Open, ItemStatus::InProgress] {

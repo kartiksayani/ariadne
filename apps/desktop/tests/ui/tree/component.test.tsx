@@ -469,6 +469,7 @@ describe('session tree filters', () => {
       session.state = 'closed'; session.archived_at = session.updated_at;
     } });
     expect(screen.queryByRole('button', { name: 'Ack → Done' })).toBeNull();
+    expect(screen.queryByText('Ack → Done')).toBeNull();
     expect(screen.queryByText(/to ack/)).toBeNull();
   });
   it('counts only items in the current archive mode', async () => {

@@ -64,27 +64,66 @@ async function mount(transport = new AckTransport()) {
 }
 
 describe('local acknowledgement', () => {
-  it.each((['open', 'in_progress'] as const).flatMap(status => (['open', 'in_progress', 'done'] as const).map(target => ({ status, target }))))(
-    'shows the real $status status with the $target Ack hint in tree, detail and graph', async ({ status, target }) => {
+  it.each([
+    { status: 'open', target: 'open', hint: 'Ack → keeps it open' },
+    { status: 'open', target: 'in_progress', hint: 'Ack → In progress' },
+    { status: 'open', target: 'done', hint: 'Ack → Done' },
+    { status: 'in_progress', target: 'open', hint: 'Ack → Open' },
+    { status: 'in_progress', target: 'in_progress', hint: 'Ack → keeps it in progress' },
+    { status: 'in_progress', target: 'done', hint: 'Ack → Done' },
+  ] as const)(
+    'shows the real $status status with the $target Ack hint in tree, detail and graph', async ({ status, target, hint }) => {
       const transport = new AckTransport(), item = transport.sessions.get(route.session_id)!.items['1.1']!;
       item.status = status; item.ack_to = target;
       item.outcome = 'Retry limits are recorded.'; item.why = 'The limits have an explicit owner.';
       const label = status === 'open' ? 'Open' : 'In progress', colour = status === 'open' ? 'open' : 'progress';
-      const hint = `Ack → ${target === 'open' ? 'keep open' : target === 'in_progress' ? 'In progress' : 'Done'}`;
       await mount(transport);
       expect(within(row()).getByRole('img', { name: label })).toBeTruthy();
       expect(row().querySelector('.tree-end .status-badge')?.textContent).toBe(label);
       expect(within(row()).getByText(hint)).toBeTruthy();
+      expect(within(row()).getByRole('button', { name: hint }).title).toBe(hint);
       expect(row().querySelector<HTMLElement>('.tree-outcome i')?.style.color).toBe(`var(--st-${colour})`);
       fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
       expect(detail().querySelector('.detail-badge')?.textContent).toBe(label);
       expect(detail().querySelector<HTMLElement>('.detail-badge .status-badge')?.style.color).toBe(`var(--st-${colour})`);
       expect(within(detail()).getByText(hint)).toBeTruthy();
+      expect(within(detail()).getByRole('button', { name: hint }).title).toBe(hint);
       expect(detail().querySelector<HTMLElement>('.detail-outcome .detail-label')?.style.color).toBe(`var(--st-${colour})`);
       fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic');
       expect(within(row()).getByRole('img', { name: label })).toBeTruthy();
       expect(row().querySelector<HTMLElement>('.graph-node-icon')?.style.color).toBe(`var(--st-${colour})`);
       expect(within(row()).getByText(hint)).toBeTruthy();
+      expect(acks(transport)).toHaveLength(0);
+    });
+
+  it.each((['open', 'in_progress'] as const).flatMap(status => (['archived', 'unanswered', 'answered'] as const).map(question => ({ status, question }))))(
+    'shows Ack hints only when available for $status with an $question question in tree, detail and graph', async ({ status, question }) => {
+      const transport = new AckTransport(), session = transport.sessions.get(route.session_id)!, item = session.items['1.1']!;
+      item.status = status; item.ack_to = 'done';
+      const input = structuredClone(Object.values(session.inputs).find(value => value)!);
+      session.inputs = {}; session.answers = [];
+      if (question !== 'archived') item.ask = 'Confirm these limits?';
+      if (question === 'answered') {
+        input.target.item_id = item.id; input.target.topic_id = item.topic_id;
+        input.answer_id = null; input.state = 'handled'; input.kind = 'reply'; input.payload.intent = 'reply';
+        input.payload.target_snapshot.question_revision = item.question_revision;
+        session.inputs[input.id] = input;
+      }
+      await mount(transport);
+      fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+      if (question === 'archived') {
+        session.state = 'closed'; session.archived_at = session.updated_at; ++session.revision;
+        act(() => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+      }
+      const available = question === 'answered';
+      await waitFor(() => expect(!!within(row()).queryByRole('button', { name: /^Ack/ })).toBe(available));
+      for (const host of [row(), detail()]) {
+        expect(!!within(host).queryByRole('button', { name: /^Ack/ })).toBe(available);
+        expect(!!within(host).queryByText(/^Ack →/)).toBe(available);
+      }
+      expect(!!screen.queryByText('1 to ack')).toBe(available);
+      fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic');
+      expect(!!within(row()).queryByText(/^Ack →/)).toBe(available);
       expect(acks(transport)).toHaveLength(0);
     });
 

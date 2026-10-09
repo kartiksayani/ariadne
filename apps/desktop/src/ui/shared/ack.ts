@@ -6,7 +6,8 @@ import { ackTarget } from '../../selectors/ack';
 import { STATUS, statusKey } from './status';
 
 export { ackTarget } from '../../selectors/ack';
-export const ackTitle = (target: NonNullable<Item['ack_to']>) => `Ack → ${target === 'open' ? 'keep open' : STATUS[statusKey[target]].label}`;
+export const ackTitle = (target: NonNullable<Item['ack_to']>, status: Item['status']) => `Ack → ${target === status && target === 'open'
+  ? 'keeps it open' : target === status && target === 'in_progress' ? 'keeps it in progress' : STATUS[statusKey[target]].label}`;
 
 class AckUnavailable extends Error {}
 const ackRefusal = 'This item can’t be acknowledged now. Check its current status and any question waiting for you.';

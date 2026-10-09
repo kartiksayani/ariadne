@@ -119,15 +119,16 @@ When connected, organise the work in Ariadne.
 | Work for later or someone else | task | `open`, owner `other` |
 | Something you will not do | any | `open`, `ack_to: "dropped"` |
 
-- **Ack.** Choose each `ack_to`: `open` when the owner just reads and work
-  continues, `in_progress` if underway, `done`/`decided` only if truly finished
-  once read, `dropped` if ruled out. Type alone never chooses it. New read-only
-  findings/explanations without an ask need an explicit target: strict filing
-  says "choose ack_to ..." when missing; the CLI repairs to `open` and reports
-  it. Ack clears the target, sets that status and sends no agent input. Change
-  an Open/InProgress Ack item's target with `item.edit.patch.ack_to`, preserving status and
-  prose. Keep it open for reading; owner-directed completion and replacement
-  exceptions are in `errors.md`. Ack waits for unanswered asks; keep them
+- **Ack.** Choose `ack_to`: `open` for reading while work continues,
+  `in_progress` if underway, `done`/`decided` only if finished once read,
+  `dropped` if ruled out. Type alone never chooses it. New findings/explanations
+  without an ask require it: strict filing says "choose ack_to ..."; the CLI
+  reports a repair using the current `open` or `in_progress` status.
+  New Open/InProgress items need `ack_to` for `outcome` or `why`.
+  Ack clears it, sets that status and sends no input. Change an Open/InProgress
+  Ack choice with `item.edit.patch.ack_to`, preserving status and prose.
+  Keep it open for reading; owner-directed completion and replacement exceptions
+  are in `errors.md`. Ack waits for unanswered asks; keep them
   `waiting_on_me`. Permission to act needs a real ask and a "Got it, go ahead"
   option. Finished progress tasks also await Ack.
 - **Fields.** `question`: one-sentence heading; `ask` and `options`: answer box;

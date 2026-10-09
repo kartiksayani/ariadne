@@ -223,6 +223,14 @@ impl ApplyRequest {
                             "choose ack_to: open, in_progress, decided, done or dropped",
                         ));
                     }
+                    if matches!(value.status, ItemStatus::Open | ItemStatus::InProgress)
+                        && value.ack_to.is_none()
+                        && (outcome.is_some() || why.is_some())
+                    {
+                        return Err(invalid(
+                            "item.add outcome and why require an explicit ack_to",
+                        ));
+                    }
                     text(question, 4096, true)?;
                     short_label(short.as_deref())?;
                     for value in [ask, outcome, why].into_iter().flatten() {

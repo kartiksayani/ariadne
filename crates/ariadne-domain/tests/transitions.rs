@@ -1265,10 +1265,6 @@ fn full_owner_and_agent_messages_obey_distinct_limits() {
 #[test]
 fn stored_item_status_fields_and_provenance_references_must_be_consistent() {
     let mut s = session();
-    s.items.0.get_mut(&reference("1")).unwrap().outcome =
-        Some("Retained report on open item".into());
-    validate_session_items(&s).unwrap();
-    let mut s = session();
     s.items.0.get_mut(&reference("1")).unwrap().waiting_since = Some(time());
     invalid(&s, ValidationErrorKind::InvalidState);
     let mut s = session();
@@ -1885,7 +1881,38 @@ fn agents_cannot_finish_ack_items_but_can_replace_superseded_work() {
         validate_session_items(&s).is_err(),
         "terminal items cannot retain Ack proposals"
     );
-    let mut s = session();
-    s.items.0.get_mut(&reference("1")).unwrap().outcome = Some("Unproposed".into());
-    validate_session_items(&s).unwrap();
+}
+
+#[test]
+fn stored_post_ack_prose_survives_nonterminal_agent_status_changes() {
+    for item_type in [ItemType::Task, ItemType::Decision, ItemType::Question] {
+        for initial_status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for (outcome, why) in [
+                (Some("Read report."), None),
+                (None, Some("Read reasoning.")),
+                (Some("Read report."), Some("Read reasoning.")),
+            ] {
+                let mut s = session();
+                // Ack has applied its nonterminal target and cleared the proposal.
+                let old = s.items.0.get_mut(&reference("1")).unwrap();
+                old.item_type = item_type.clone();
+                old.status = initial_status.clone();
+                old.outcome = outcome.map(str::to_owned);
+                old.why = why.map(str::to_owned);
+                assert_eq!(old.ack_to, None);
+                validate_session_items(&s).unwrap();
+                for next_status in [ItemStatus::InProgress, ItemStatus::Open] {
+                    let continued = apply(&mut s, &status(next_status.clone()));
+                    assert_eq!(continued.status, next_status);
+                    assert_eq!(continued.ack_to, None);
+                    assert_eq!(continued.outcome.as_deref(), outcome);
+                    assert_eq!(continued.why.as_deref(), why);
+                    let history = continued.status_history.last().unwrap();
+                    assert_eq!(history.previous_outcome.as_deref(), outcome);
+                    assert_eq!(history.previous_why.as_deref(), why);
+                    validate_session_items(&s).unwrap();
+                }
+            }
+        }
+    }
 }

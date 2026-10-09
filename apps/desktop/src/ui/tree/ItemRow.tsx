@@ -135,7 +135,7 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
       </div>
       <PreviewBlock row={row} value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
-      {item.ack_to && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(item.ack_to)}</div>}
+      {row.ack && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(row.ack, item.status)}</div>}
       {delivery(row, fix)}
       {note && <button type="button" className="tree-collapsed" tabIndex={-1} data-weak={highlight === 'weak' || undefined}
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className="ph ph-dots-three" />{note}</button>}

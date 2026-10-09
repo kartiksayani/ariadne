@@ -599,8 +599,8 @@ export function TreeView(props: TreeViewProps) {
   const touchedMessage = highlightedMessages.size && session ? session.messages.find(message => highlightedMessages.has(message.id))?.number ?? null : null;
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
-    const ackTo = session && ackTarget(session, item);
-    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo), label: 'Ack', persistent: true, disabled: viewBusy || ack.busy, run: () => { void ack.run(item.id); } });
+    const ackTo = row.ack;
+    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), label: 'Ack', persistent: true, disabled: viewBusy || ack.busy, run: () => { void ack.run(item.id); } });
     const act = (intent: RowIntent) => () => onAct(intent, target, result => { clickedReveal.current = result; });
     if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed || closed(item.status)) && running && !archivedMode && session?.state === 'active') {
       const bring = { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') };

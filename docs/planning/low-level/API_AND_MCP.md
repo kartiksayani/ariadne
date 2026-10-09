@@ -538,9 +538,11 @@ input_result: ResultDraft|null
 The agent chooses per item; there is no implicit Done. New Open/InProgress
 findings and explanations without an ask require an explicit choice in strict
 filing: "choose ack_to: open, in_progress, decided, done or dropped".
-Under ADR-0092 the lenient CLI repairs a missing choice to `open` and reports it;
+Under ADR-0092 the lenient CLI repairs a missing choice to the item's current
+nonterminal status (`open` or `in_progress`) and reports it;
 ordinary tasks, decisions and questions retain their existing creation behavior.
-Outcome and why may be supplied and remain visible after nonterminal Ack.
+New Open/InProgress items may supply outcome or why only with `ack_to`.
+That prose remains visible after nonterminal Ack and later nonterminal status changes.
 The CLI still repairs Decided/Done/Dropped
 creation to Open with the requested `ack_to`, recursively for nested children,
 and reports the repair. Strict core rejects terminal creation. Replaced is never
