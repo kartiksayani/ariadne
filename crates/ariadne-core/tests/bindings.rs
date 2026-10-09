@@ -932,10 +932,156 @@ fn owner_pause_and_resume_preserve_healthy_queued_and_inflight_work() {
 }
 
 #[test]
+fn a_different_conversation_cannot_take_a_claude_binding_without_disconnect() {
+    for connection in [
+        ConnectionState::Connected,
+        ConnectionState::Unknown,
+        ConnectionState::Reconnecting,
+    ] {
+        for paused in [false, true] {
+            for queued in [false, true] {
+                for adapter in ["claude_code_mod", "other.local"] {
+                    let s = Setup::new(1);
+                    let mut session = if queued { queued_input(seed()) } else { seed() };
+                    let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+                    binding.adapter_id = "claude_code_mod".into();
+                    binding.owner_paused = paused;
+                    binding.dispatch_state = if paused {
+                        DispatchState::Paused
+                    } else {
+                        DispatchState::Enabled
+                    };
+                    s.store(1).create(&session).unwrap();
+                    s.service()
+                        .state(
+                            &route(1, &id(2)),
+                            &state(if paused { "pause" } else { "resume" }, id(3), id(4), 20),
+                            at(),
+                        )
+                        .unwrap();
+                    if connection != ConnectionState::Connected {
+                        s.edit(&id(2), 21, |session| {
+                            let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+                            binding.connection_state = connection.clone();
+                            binding.dispatch_state = DispatchState::Disconnected;
+                        });
+                    }
+                    let session = s.store(1).read(&id(2)).unwrap();
+                    assert!(!session.operation_receipts.0.is_empty());
+                    let before = fs::read(s.live(1, &id(2))).unwrap();
+                    let index = s.home.path().join(".ariadne/bindings.json");
+                    let index_before = fs::read(&index).ok();
+                    let mut cmd = command(1, "different-conversation", 10, Some(id(2)));
+                    let OwnerCommand::BindingConnect { params, .. } = &mut cmd else {
+                        panic!("connect command")
+                    };
+                    params.adapter_id = adapter.into();
+                    assert_eq!(
+                        core_code(
+                            s.service()
+                                .connect(
+                                    &owner(),
+                                    &cmd,
+                                    |p| Ok(facts(p)),
+                                    || panic!("live-route refusal must precede UUID allocation"),
+                                    at(),
+                                )
+                                .unwrap_err()
+                        ),
+                        CoreErrorCode::BindingConflict,
+                        "old={connection:?}, paused={paused}, queued={queued}, new={adapter}"
+                    );
+                    assert_eq!(fs::read(s.live(1, &id(2))).unwrap(), before);
+                    assert_eq!(fs::read(&index).ok(), index_before);
+                    // This includes revision, selected route, owner messages,
+                    // assignments, pending inputs and all operation receipts.
+                    assert_eq!(s.store(1).read(&id(2)).unwrap(), session);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn connected_claude_reconnects_the_same_identity_without_moving_queued_work() {
+    for observed in [ConnectionState::Connected, ConnectionState::Unknown] {
+        for paused in [false, true] {
+            let s = Setup::new(1);
+            let mut session = queued_input(seed());
+            let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+            binding.adapter_id = "claude_code_mod".into();
+            binding.owner_paused = paused;
+            binding.dispatch_state = if paused {
+                DispatchState::Paused
+            } else {
+                DispatchState::Enabled
+            };
+            s.store(1).create(&session).unwrap();
+            let mut cmd = command(1, "existing-thread", 10, Some(id(2)));
+            let OwnerCommand::BindingConnect { params, .. } = &mut cmd else {
+                panic!("connect command")
+            };
+            params.adapter_id = "claude_code_mod".into();
+            let saved = receipt(
+                s.service()
+                    .connect(
+                        &owner(),
+                        &cmd,
+                        |params| {
+                            let mut host = facts(params);
+                            host.connection_state = observed.clone();
+                            Ok(host)
+                        },
+                        || s.allocate(),
+                        at(),
+                    )
+                    .unwrap(),
+            );
+            let (binding_id, generation) = handle(&saved);
+            assert_eq!(binding_id, id(3));
+            assert_ne!(generation, id(4));
+            let after = s.store(1).read(&id(2)).unwrap();
+            assert_eq!(after.active_binding_id, Some(id(3)));
+            assert_eq!(after.messages, session.messages);
+            assert_eq!(after.inputs, session.inputs);
+            assert_eq!(after.items, session.items);
+            assert_eq!(after.bindings.0[&id(3)].owner_paused, paused);
+            assert_eq!(after.bindings.0[&id(3)].pause_reason, None);
+            assert_eq!(after.bindings.0[&id(3)].connection_state, observed);
+            if observed == ConnectionState::Unknown {
+                // Native preflight rotates the same live conversation to Unknown
+                // before its bound announcement; that is not a release of its route.
+                let before = fs::read(s.live(1, &id(2))).unwrap();
+                let OwnerCommand::BindingConnect { params, op_id, .. } = &mut cmd else {
+                    panic!("connect command")
+                };
+                params.external_session_id = "different-conversation".into();
+                *op_id = id(11);
+                assert_eq!(
+                    core_code(
+                        s.service()
+                            .connect(
+                                &owner(),
+                                &cmd,
+                                |params| Ok(facts(params)),
+                                || panic!("unknown preflight must retain the live route"),
+                                at(),
+                            )
+                            .unwrap_err()
+                    ),
+                    CoreErrorCode::BindingConflict
+                );
+                assert_eq!(fs::read(s.live(1, &id(2))).unwrap(), before);
+            }
+        }
+    }
+}
+
+#[test]
 fn another_adapter_cannot_take_a_live_binding_then_rebind_preserves_history_and_frees_only_historical_route(
 ) {
     // Another adapter's conversation is a real conflict while the old one is
-    // live and has pending work, even paused. (Same-adapter /clear rebinds and
+    // live and has pending work, even paused. (Disconnected /clear rebinds and
     // disconnected bindings are covered in tests/rebind.rs.)
     for input_state in [
         InputState::Queued,

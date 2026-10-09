@@ -1,5 +1,5 @@
-//! Rebind after /clear: a fresh conversation takes over the session whatever
-//! its inputs. Pending work follows the session to the new binding.
+//! Rebind after /clear disconnects the old conversation first. Pending work
+//! follows the session to the new binding.
 use ariadne_agent_protocol::{
     Availability, Compatibility, EventPayload, NormalizedEvent, TurnFinishedStatus,
 };
@@ -35,9 +35,12 @@ fn one() -> SchemaVersion {
     SchemaVersion::new(1).unwrap()
 }
 fn seed() -> Session {
-    serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap()
+    let mut session: Session =
+        serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap();
+    session.bindings.0.get_mut(&id(3)).unwrap().adapter_id = "claude_code_mod".into();
+    session
 }
-/// The seeded binding 3 runs adapter `fake.local`.
+/// The seeded binding 3 runs the Claude adapter with test-owned host facts.
 fn facts(params: &BindingConnectParams) -> VerifiedHost {
     let b = seed().bindings.0[&id(3)].clone();
     VerifiedHost {
@@ -237,9 +240,11 @@ impl Setup {
         };
         Ok(binding_id)
     }
-    /// The conversation after /clear: same adapter, another host session.
+    /// /clear ends the old session before connecting the fresh conversation.
     fn clear(&self, n: u64) -> UuidV4 {
-        self.connect("fake.local", "cleared-thread", n).unwrap()
+        self.binding_state("disconnect", &id(3), n + 1000);
+        self.connect("claude_code_mod", "cleared-thread", n)
+            .unwrap()
     }
     fn binding_state(&self, kind: &str, binding: &UuidV4, n: u64) {
         let params = BindingStateParams {
@@ -293,13 +298,23 @@ fn clear_rebind_moves_unsent_inputs_in_order_to_the_new_conversation() {
     let s = Setup::new();
     let first = s.queue(100);
     let second = s.queue(101);
+    let before = s.saved();
     let new = s.clear(102);
     let saved = s.saved();
     assert_eq!(saved.active_binding_id, Some(new.clone()));
     for input in [&first, &second] {
         assert_eq!(saved.inputs.0[input].binding_id, new);
         assert_eq!(saved.inputs.0[input].state, InputState::Queued);
+        assert_eq!(
+            saved.inputs.0[input].message_id,
+            before.inputs.0[input].message_id
+        );
+        assert_eq!(
+            saved.inputs.0[input].payload,
+            before.inputs.0[input].payload
+        );
     }
+    assert_eq!(saved.messages, before.messages);
     let binding = &saved.bindings.0[&new];
     assert_eq!(binding.dispatch_state, DispatchState::Enabled);
     assert_eq!(binding.pause_reason, None);
@@ -422,8 +437,7 @@ fn clear_rebind_carries_the_owner_pause_unchanged() {
 }
 
 #[test]
-fn only_a_live_conversation_of_another_adapter_refuses_the_rebind() {
-    // Live, connected and of another adapter: a real conflict, pending or not.
+fn another_adapter_cannot_take_a_live_claude_conversation_but_disconnected_work_moves() {
     let s = Setup::new();
     s.queue(100);
     let before = s.saved();

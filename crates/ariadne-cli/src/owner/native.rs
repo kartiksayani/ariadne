@@ -12,6 +12,16 @@ pub(super) fn execute(request: Request) -> Result<serde_json::Value, CoreError> 
     } else {
         Registry::open_data_directory(&home)?
     };
+    if let Request::ReplayConnect(wrapper) = &request {
+        // A miss is terminal here: this route never relays a fresh connect.
+        let owner = OwnerContext::from_trusted_entrypoint(OwnerScope::Registry);
+        let receipt = BindingService::new(&registry).replay_connect(&owner, &wrapper.command)?;
+        if let Some(receipt) = &receipt {
+            validate_owner_receipt(wrapper, receipt)?;
+        }
+        return serde_json::to_value(receipt)
+            .map_err(|_| super::parser::invalid("Cannot serialize the canonical owner receipt."));
+    }
     let core = NativeCoreService::new(
         registry,
         || UuidV4::new(uuid::Uuid::new_v4().to_string()).expect("native UUIDv4"),

@@ -35,7 +35,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     projects: [
-      { test: { name: "claude-mod", environment: "node", include: [resolve(root, "../../tests/integrations/claude/**/*.test.js")] } },
+      { test: { name: "claude-mod", environment: "node", include: [resolve(root, "../../tests/integrations/claude/**/*.test.{js,mjs}")] } },
       { test: { name: 'desktop', environment: 'jsdom', include: ['tests/ui/**/*.test.{ts,tsx}'] } },
       { test: { name: 'reference', environment: 'jsdom', include: [resolve(root, '../../tests/ui/reference/**/*.test.{ts,tsx}')] } },
     ],

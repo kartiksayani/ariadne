@@ -11,12 +11,9 @@ describe('installed owner helper setup', () => {
     await expect(owner.connect(h.$,ids.session)).rejects.toThrow('commit_uncertain');
     const original = h.calls.at(-1).options.stdin;
     expect(JSON.parse(original)).toMatchObject({session:null,command:{params:{project_id:ids.project,existing_session_id:ids.session}}});
-    await expect(owner.connect(h.$,ids.input)).rejects.toThrow('different session');
-    await expect(owner.connect(h.$)).rejects.toThrow('different session');
-    expect(h.calls.at(-1).options.stdin).toBe(original);
     failing = false;
     const result = await owner.connect(h.$,ids.session);
-    expect(h.calls.filter(call => call.argv[1] === 'binding').map(call => call.options.stdin)).toEqual([original,original]);
+    expect(h.calls.filter(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only')).map(call => call.options.stdin)).toEqual([original,original]);
     expect(result.binding.session).toEqual({project_id:ids.project,session_id:ids.session});
     expect(result).not.toHaveProperty('instruction');
     expect(h.prompts).toEqual([]);
@@ -70,13 +67,13 @@ describe('installed owner helper setup', () => {
   it('reports pending status after the publish wait elapses on persistent not_found', async () => {
     const h = host({handler:argv => argv[2] === 'connection-status' ? failure('not_found') : undefined});
     await expect(setup(descriptor.helperPath,undefined,{waitMs:5,pollMs:1}).connect(h.$))
-      .rejects.toThrow(/connection status remains pending[\s\S]*\(not_found\)/);
+      .rejects.toThrow('connection status remains pending');
     expect(h.calls.filter(call => call.argv[2] === 'connection-status').length).toBeGreaterThan(1);
   });
   it('does not retry connection status errors other than not_found', async () => {
     const h = host({handler:argv => argv[2] === 'connection-status' ? failure('host_unreachable') : undefined});
     await expect(setup(descriptor.helperPath,undefined,{waitMs:2000,pollMs:1}).connect(h.$))
-      .rejects.toThrow('host_unreachable');
+      .rejects.toMatchObject({code:'host_unreachable',plain:'Open the Ariadne app, then run /ariadne-connect again.'});
     expect(h.calls.filter(call => call.argv[2] === 'connection-status')).toHaveLength(1);
   });
   it('uses canonical bootstrap wrappers and installed fixed provider facts, then validates scoped status', async () => {
@@ -99,7 +96,7 @@ describe('installed owner helper setup', () => {
     const owner = setup(descriptor.helperPath);
     await expect(owner.connect(h.$)).rejects.toThrow('commit_uncertain');
     failing = false;await owner.connect(h.$);
-    const connect = h.calls.filter(call => call.argv[1] === 'binding');
+    const connect = h.calls.filter(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only'));
     expect(connect[0].options.stdin).toBe(connect[1].options.stdin);
     expect(h.calls.filter(call => call.argv[1] === 'project')).toHaveLength(1);
     const other = host({handler:argv => argv[1] === 'project' ? failure() : undefined});
@@ -114,7 +111,7 @@ describe('installed owner helper setup', () => {
     const owner = setup(descriptor.helperPath);
     await expect(owner.connect(h.$,ids.session)).rejects.toThrow('commit_uncertain');
     h.switchSession('conversation-after-clear');
-    await expect(owner.connect(h.$,ids.session)).rejects.toThrow('changed with a pending');
+    await expect(owner.connect(h.$,ids.session)).rejects.toThrow('commit_uncertain');
     owner.forget();failing = false;
     const before = h.calls.length;
     // Status is read for the new conversation.
@@ -124,7 +121,7 @@ describe('installed owner helper setup', () => {
     const {binding} = await owner.connect(statusFor.$,ids.session);
     expect(binding.external_session_id).toBe('conversation-after-clear');
     expect(owner.current()).toEqual(binding);
-    expect(JSON.parse(statusFor.calls.find(call => call.argv[1] === 'binding').options.stdin).command.params)
+    expect(JSON.parse(statusFor.calls.find(call => call.argv[1] === 'binding' && !call.argv.includes('--replay-only')).options.stdin).command.params)
       .toMatchObject({external_session_id:'conversation-after-clear',existing_session_id:ids.session});
     expect(h.calls).toHaveLength(before);
     owner.forget();expect(owner.current()).toBe(null);

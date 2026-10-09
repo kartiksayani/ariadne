@@ -1,4 +1,5 @@
 import { bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, prepared, reportReceipt } from './contracts.js';
+import { bindingStatus, connectionGone } from './setup.js';
 
 // 'exact' when text is the payload, 'framed' when the payload sits intact as whole
 // lines inside host framing text, otherwise null.
@@ -27,8 +28,8 @@ export const NOTICES = Object.freeze({
 // What still holds a loop open, in the words /ariadne-connect and /ariadne-disconnect use.
 export const BUSY = Object.freeze({
   answering:'Claude is still answering a message from Ariadne. Run the command again after it finishes.',
-  reports:"Ariadne could not save Claude's last progress to the app yet. Make sure the Ariadne app is open, then run the command again.",
-  claim:'Ariadne could not confirm a message it was fetching from the app. Make sure the Ariadne app is open, then run the command again.',
+  reports:"Ariadne could not save Claude's last progress yet. Run the command again; if it keeps happening, check this session in Ariadne.",
+  claim:'Ariadne could not confirm a message it was fetching. Run /ariadne-connect again; if it keeps happening, check the pending message in Ariadne.',
 });
 // The binding no longer exists or another connection replaced it: polling cannot recover.
 export function bindingGone(error) {
@@ -365,6 +366,23 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     try { await poll($); }
     finally { admissionOpen = false; }
   }
+  async function recover($) {
+    if (busy() !== 'claim') return;
+    // Only an unconfirmed request can be retired here. Captured payloads,
+    // active turns and unsaved reports still block rotation.
+    try {
+      const value = envelope(await $.process.run([helperPath,'bridge','connection-status',...route,
+        '--request-id',globalThis.crypto.randomUUID()],{timeoutMs:5000}));
+      const current = bindingStatus(value,binding);
+      if (current.connection_state !== 'disconnected' && current.dispatch_state !== 'disconnected') return;
+    } catch (error) {
+      if (!connectionGone(error)) throw error;
+    }
+    claimId = null;
+    claimUnknown = false;
+    stopped = true;
+    admissionOpen = false;
+  }
   // Retry unsaved reports of a retired loop; true once nothing is left.
   async function drain($) {
     try { await flush($); } catch { /* retried later */ }
@@ -377,7 +395,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     if (claimId !== null) return 'claim';
     return null;
   }
-  return {poll,start,complete,stop,quiesce,settle,drain,busy,
+  return {poll,start,complete,stop,quiesce,settle,recover,drain,busy,
     reopen:() => { if (!stopped) admissionOpen = true; },
     outstanding:() => polling !== null || observations > 0 || active !== null || pending.length > 0 || claimId !== null || (capturedSubmission !== null && !capturedSubmission.settled),
     status:() => ({active:active ? {input_id:active.input_id,attempt_id:active.attempt_id,host_turn_id:active.turnId} : null,

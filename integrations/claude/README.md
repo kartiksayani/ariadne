@@ -82,6 +82,14 @@ Run focused contract consumers with
 they do not simulate domain eligibility or persistence. Default application
 coverage includes all handwritten Mod JS, including untested files.
 
+Run the restart/reload recovery cases independently with
+`node --test tests/integrations/claude/connect-recovery.test.mjs`; the same cases
+also run in the normal plugin and coverage suites. Connect checks obsolete local
+state against saved receipts and the app before starting again. Unchanged timeout
+retries keep their original request; live conversations elsewhere stay protected.
+The owner gets plain instructions, while exact operation IDs remain in the
+plugin store's bounded `connect-log` diagnostics. See [ADR-0096](../../docs/adr/ADR-0096-recover-stale-claude-connect.md).
+
 Real installer rendering, owner CLI commands, durable core/report composition,
 trusted native Claude qualification, discovery announcements, and live host
 acceptance remain the P6/P2.4/P2.2/P3.4/P3.7 joins. The installed `ariadne` helper provides

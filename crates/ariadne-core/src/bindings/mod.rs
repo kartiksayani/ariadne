@@ -641,15 +641,18 @@ fn connect_existing(
                             .any(|attempt| attempt.sealed_at.is_none())))
             })
     });
-    // A rebind replaces a disconnected binding, or one of the same adapter (a
-    // fresh conversation after /clear), whatever its inputs. Only a live
-    // conversation of another adapter is a real conflict; a paused one with
-    // nothing pending may still be replaced.
+    // A different identity cannot replace a Claude route until disconnected:
+    // native preflight saves Unknown while a live conversation awaits its bound
+    // announcement. /clear disconnects the old route before rebinding.
+    // Other adapters retain their established rule:
+    // same-adapter replacement, or another paused adapter with nothing pending.
     let live_elsewhere = !same
         && existing.is_some_and(|old| {
-            old.connection_state == ConnectionState::Connected
-                && old.adapter_id != host.adapter_id
-                && (has_unresolved || old.dispatch_state != DispatchState::Paused)
+            (old.adapter_id == "claude_code_mod"
+                && old.connection_state != ConnectionState::Disconnected)
+                || (old.connection_state == ConnectionState::Connected
+                    && old.adapter_id != host.adapter_id
+                    && (has_unresolved || old.dispatch_state != DispatchState::Paused))
         });
     if live_elsewhere {
         return Err(conflict(
