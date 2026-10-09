@@ -180,8 +180,12 @@ describe('session tree rows', () => {
     await act(async () => { release(); await value.store.refresh(); });
     expect(within(screen.getByRole('group', { name: 'Rename session' })).getByRole('alert').textContent)
       .toBe('Ariadne isn’t sure your last change was saved. Check again before renaming this session.');
+    expect(screen.queryByText('Ariadne isn’t sure your last change was saved. Check again before making another change.')).toBeNull();
     expect(value.transport.mutations.some(value => value.command.command === 'session_label_set')).toBe(false);
     expect((screen.getByLabelText('Session name') as HTMLInputElement).value).toBe('Keep this pending name');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('group', { name: 'Rename session' })).toBeNull();
+    expect(screen.queryByText('Ariadne isn’t sure your last change was saved. Check again before making another change.')).toBeNull();
   });
   it.each([
     ['not_found', 'Ariadne can’t find that any more. It may have been removed.'],
@@ -667,6 +671,51 @@ describe('session tree column states', () => {
 });
 
 describe('session tree lifecycle', () => {
+  it('archives an agent-seeded closed topic once when ready is published before Pause finishes refreshing', async () => {
+    const transport = new HistoryTransport();
+    const { store, actions } = await mount({ transport, configure: value => {
+      const session = value.sessions.get(route.session_id)!;
+      session.topics = {}; session.items = {}; session.inputs = {}; session.messages = []; session.rounds = {}; session.answers = [];
+    } });
+    const session = transport.source, binding = session.bindings[session.active_binding_id!]!;
+    const seed = new HistoryTransport().source;
+    const topic = structuredClone(Object.values(seed.topics)[0]!);
+    const item = structuredClone(Object.values(seed.items).find(item => item?.topic_id === topic.id)!);
+    item.status = 'done'; item.waiting_since = null; item.ack_to = null;
+    let releasePresence!: () => void;
+    const presence = new Promise<void>(resolve => { releasePresence = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_list') await presence;
+      if (name === 'session_get' && binding.owner_paused && !session.topics[topic.id]) {
+        // Seed the agent's completed Apply before the owner's post-save session read.
+        session.topics[topic.id] = topic; session.items[item.id] = item; ++session.revision;
+        transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+      }
+      return invoke(name, args);
+    });
+    let pause!: Promise<boolean>;
+    act(() => {
+      pause = actions.execute({ command: 'binding_pause', api_version: 1, op_id: '', params: {
+        binding_id: binding.id, expected_generation: binding.generation,
+      } }, session.revision);
+    });
+    await waitFor(() => {
+      expect(store.getSnapshot().status).toBe('ready');
+      expect(screen.getByText('Paused (by you)')).toBeTruthy();
+      expect(screen.getByText('Everything here is closed.')).toBeTruthy();
+    });
+    expect(document.querySelector('.tree-column')?.getAttribute('data-session-status')).toBe('ready');
+    expect(actions.getSnapshot().writing).toBe(true);
+    const prompt = screen.getByRole('button', { name: 'Archive topic' });
+    fireEvent.click(prompt); fireEvent.click(prompt);
+    expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(0);
+    await act(async () => { releasePresence(); await pause; await store.refresh(); });
+    await waitFor(() => expect(screen.getByText(`Archived “${topic.name}”.`)).toBeTruthy());
+    expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(1);
+    expect(topic.archived_at).not.toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
   it('archives a closed topic at once from its prompt, with Undo and View archive', async () => {
     const transport = new HistoryTransport();
     const { calls } = await mount({ transport, configure: value => {
