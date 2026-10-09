@@ -12,6 +12,7 @@ pub mod composition;
 #[cfg(feature = "e2e")]
 mod e2e_quit;
 pub mod native;
+mod navigation;
 pub mod watchers;
 
 #[derive(Deserialize)]
@@ -315,6 +316,7 @@ fn run_native(
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             native::routes::receive_launch(app.clone(), args);
         }))
+        .plugin(navigation::plugin())
         .manage(state)
         .manage(native::routes::NativeRoutes::default())
         .manage(native::window::NativeWindow::default())
