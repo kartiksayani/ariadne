@@ -1098,8 +1098,9 @@ class PackageTests(unittest.TestCase):
     def test_package_install_ends_with_a_short_plain_summary_without_ids(self):
         _, package = self.extract()
         summary = ("9 sessions in 3 projects; none connected right now.\n"
-                   "Open Ariadne. In each Claude session run /reload-plugins, then /ariadne-connect <session id> "
-                   "(Copy ID on the session card).\nRun `ariadne doctor` for details.\n")
+                   "Open Ariadne. In Claude, run /reload-plugins, then /ariadne-connect. "
+                   "For Codex, use Connect existing session in Ariadne and paste the copied instruction into Codex.\n"
+                   "Run `ariadne doctor` for details.\n")
         def invoke(args, **kwargs):
             if args[1:] == ["doctor", "--summary"]:
                 self.assertEqual(kwargs, {})
@@ -1114,6 +1115,8 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(lines[0], "Installed Ariadne 0.1.0.")
         self.assertEqual("\n".join(lines[1:]) + "\n", summary)
         self.assertNotRegex(self.output.getvalue(), r"[0-9a-f]{8}-[0-9a-f]{4}-")
+        self.assertNotIn("session id", self.output.getvalue())
+        self.assertNotIn("Copy ID", self.output.getvalue())
         self.assertNotIn("Result: warning", self.output.getvalue())
 
     def test_package_doctor_exit_four_keeps_the_install_and_reports_plain_guidance(self):

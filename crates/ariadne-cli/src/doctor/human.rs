@@ -168,7 +168,14 @@ pub(super) fn render(report: &Value, sessions: &[Session], summary: bool) -> Str
     let mut result = format!(
         "{counts}; {}.\n",
         if unknown_count > 0 {
-            format!("{connected_count} connections confirmed; live status unavailable for {unknown_count}")
+            format!(
+                "{connected_count} {} confirmed; live status unavailable for {unknown_count}",
+                if connected_count == 1 {
+                    "connection"
+                } else {
+                    "connections"
+                }
+            )
         } else if connected_count == 0 {
             "none connected right now".to_owned()
         } else {
@@ -243,7 +250,7 @@ pub(super) fn render(report: &Value, sessions: &[Session], summary: bool) -> Str
         for (_, problem) in problems.iter().take(2) {
             writeln!(result, "{problem}").expect("string write");
         }
-        for note in &notes {
+        for note in notes.iter().take(2) {
             writeln!(result, "{note}").expect("string write");
         }
         if sessions.is_empty() {
@@ -251,20 +258,34 @@ pub(super) fn render(report: &Value, sessions: &[Session], summary: bool) -> Str
         } else {
             result.push_str("Open Ariadne. In Claude, run /reload-plugins, then /ariadne-connect. For Codex, use Connect existing session in Ariadne and paste the copied instruction into Codex.\n");
         }
+        let mut remaining = Vec::new();
         if problems.len() > 2 {
-            writeln!(
-                result,
-                "Run `ariadne doctor` for details and {} more {}.",
+            remaining.push(format!(
+                "{} more {}",
                 problems.len() - 2,
                 if problems.len() == 3 {
                     "problem"
                 } else {
                     "problems"
                 }
+            ));
+        }
+        if notes.len() > 2 {
+            remaining.push(format!(
+                "{} more {}",
+                notes.len() - 2,
+                if notes.len() == 3 { "note" } else { "notes" }
+            ));
+        }
+        if remaining.is_empty() {
+            result.push_str("Run `ariadne doctor` for details.\n");
+        } else {
+            writeln!(
+                result,
+                "Run `ariadne doctor` for details and {}.",
+                remaining.join(" and ")
             )
             .expect("string write");
-        } else {
-            result.push_str("Run `ariadne doctor` for details.\n");
         }
     } else {
         for note in &notes {
@@ -355,6 +376,81 @@ mod tests {
     }
 
     #[test]
+    fn confirmed_connection_counts_use_singular_and_plural_with_unknown_status() {
+        let (mut report, mut sessions) = sample();
+        sessions[0].active_binding_id = Some("00000000-0000-4000-8000-000000000002".to_owned());
+        report["checks"].as_array_mut().unwrap().push(json!({
+            "code":"control.socket", "status":"ok", "facts":{"validated_socket":true}
+        }));
+        sessions.push(Session {
+            name: "Drafts".to_owned(),
+            checks: 0..0,
+            binding_ids: vec!["unknown".to_owned()],
+            active_binding_id: Some("unknown".to_owned()),
+            recovery_binding_ids: Vec::new(),
+        });
+        for count in 1..=2 {
+            for summary in [false, true] {
+                let text = render(&report, &sessions, summary);
+                let noun = if count == 1 {
+                    "connection"
+                } else {
+                    "connections"
+                };
+                assert!(
+                    text.contains(&format!(
+                        "{count} {noun} confirmed; live status unavailable for 1"
+                    )),
+                    "{text}"
+                );
+            }
+            sessions.push(Session {
+                name: "Tasks".to_owned(),
+                checks: sessions[0].checks.clone(),
+                binding_ids: sessions[0].binding_ids.clone(),
+                active_binding_id: sessions[0].active_binding_id.clone(),
+                recovery_binding_ids: Vec::new(),
+            });
+        }
+    }
+
+    #[test]
+    fn summary_caps_parked_copy_notes_and_full_view_keeps_every_detail() {
+        for count in [2, 3, 10] {
+            let (mut report, sessions) = sample();
+            for n in 0..count {
+                report["checks"].as_array_mut().unwrap().push(json!({
+                    "code":"store.legacy", "status":"warning",
+                    "message":format!("Parked copy /tmp/project-{n} is identical to the store; safe to delete.")
+                }));
+            }
+            let text = render(&report, &sessions, true);
+            assert_eq!(text.lines().count(), 5);
+            assert_eq!(
+                text.lines()
+                    .filter(|line| line.starts_with("Note:"))
+                    .count(),
+                2
+            );
+            assert!(!text.contains("Warning:"));
+            if count == 2 {
+                assert!(text.ends_with("Run `ariadne doctor` for details.\n"));
+            } else {
+                let noun = if count == 3 { "note" } else { "notes" };
+                assert!(text.ends_with(&format!(
+                    "Run `ariadne doctor` for details and {} more {noun}.\n",
+                    count - 2
+                )));
+                assert!(!text.contains("/tmp/project-2"));
+            }
+            let full = render(&report, &sessions, false);
+            for n in 0..count {
+                assert!(full.contains(&format!("Note: Parked copy /tmp/project-{n}")));
+            }
+        }
+    }
+
+    #[test]
     fn summary_is_bounded_and_reports_extra_problems_without_claiming_health() {
         let (mut report, sessions) = sample();
         for n in 0..4 {
@@ -368,6 +464,25 @@ mod tests {
         assert!(text.contains("Problem 0. Open Ariadne and check it."));
         assert!(text.contains("2 more problems"));
         assert!(!text.contains("00000000"));
+    }
+
+    #[test]
+    fn summary_reports_remaining_problems_and_notes_together() {
+        let (mut report, sessions) = sample();
+        for n in 0..3 {
+            report["checks"].as_array_mut().unwrap().extend([
+                json!({"code":"example.problem", "status":"warning",
+                    "message":format!("Problem {n}."), "hint":"Check it."}),
+                json!({"code":"store.legacy", "status":"warning",
+                    "message":format!("Parked copy /tmp/project-{n} is identical to the store; safe to delete.")}),
+            ]);
+        }
+        let text = render(&report, &sessions, true);
+        assert_eq!(text.lines().count(), 7);
+        assert!(text
+            .ends_with("Run `ariadne doctor` for details and 1 more problem and 1 more note.\n"));
+        assert!(!text.contains("Problem 2"));
+        assert!(!text.contains("/tmp/project-2"));
     }
 
     #[test]
@@ -503,7 +618,14 @@ mod tests {
             let text = render(&report, &[], summary);
             assert!(text.contains("Note: Newer Codex is untested."));
             assert!(text.contains("Note: Newer Claude is untested."));
-            assert!(text.contains("Note: Parked copy is identical to the store; safe to delete."));
+            if summary {
+                assert!(!text.contains("Note: Parked copy"));
+                assert!(text.contains("1 more note."));
+            } else {
+                assert!(
+                    text.contains("Note: Parked copy is identical to the store; safe to delete.")
+                );
+            }
             assert!(text.contains("Warning: First problem."));
             assert!(text.contains("Warning: Second problem."));
             assert!(!text.contains("more problems"));
