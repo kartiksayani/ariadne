@@ -892,16 +892,106 @@ describe('owner input component and durable draft controller', () => {
     value.unavailable(); await act(async () => { await value.store.refresh(); });
     expect(editor().value).toBe('Survives failure'); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); expect(value.calls).toHaveLength(0);
   });
-  it('prepares a separate reviewed draft only after definitive question rejection, retaining the old frozen record', async () => {
+  it('replaces a definitively rejected draft with one reviewed copy in the same save', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('question_changed');
     fireEvent.change(editor(), { target: { value: 'Owner explanation remains exact' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await screen.findByRole('button', { name: 'Edit and send again' }); const original = structuredClone(value.prefs.drafts[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Edit and send again' }));
     await screen.findByRole('button', { name: 'Review current target' }); expect(value.calls).toHaveLength(1); expect(editor().value).toBe('Owner explanation remains exact');
-    await waitFor(() => expect(value.prefs.drafts).toHaveLength(2)); expect(value.prefs.drafts[0]).toEqual(original);
+    await waitFor(() => expect(value.prefs.drafts).toHaveLength(1));
+    expect(value.prefs.drafts[0]?.text).toBe(original!.text);
+    expect(value.prefs.drafts[0]?.op_id).not.toBe(original!.op_id);
+    expect(value.drafts.getSnapshot().entries[original!.op_id]).toBeUndefined();
+    expect(value.writes.at(-1)).toMatchObject({ command: { params: { entries: [
+      { kind: 'delete_draft', operation_id: original!.op_id }, { kind: 'upsert_draft', draft: { text: original!.text } },
+    ] } } });
     fireEvent.click(screen.getByRole('button', { name: 'Review current target' })); value.outcome('ok');
     fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); await screen.findByText('Saved · Queue position #4');
-    expect(value.calls[1]?.command.op_id).not.toBe(value.calls[0]?.command.op_id); expect(value.prefs.drafts).toEqual([original]);
+    expect(value.calls[1]?.command.op_id).not.toBe(value.calls[0]?.command.op_id); expect(value.prefs.drafts).toEqual([]);
+  });
+  it('keeps both copies when replacing a rejected draft is unconfirmed, then removes the old copy on retry', async () => {
+    const value = await setup();
+    const id = value.drafts.begin(immutable(value.session), '2', 'answer')!;
+    await value.drafts.editSaved(id, { text: 'Keep every word on a failed save.' });
+    value.outcome('question_changed'); expect(await value.drafts.submit(id)).toBe(false);
+    value.preferenceOutcome('uncertain'); value.drafts.prepareRevised(id, immutable(value.session));
+    await waitFor(() => expect(value.drafts.getSnapshot().preferenceUncertain).toBe(true));
+    expect(Object.values(value.drafts.getSnapshot().entries).map(entry => entry.draft.text)).toEqual([
+      'Keep every word on a failed save.', 'Keep every word on a failed save.',
+    ]);
+    expect(value.drafts.savedAnswers(route, '2')).toHaveLength(1);
+    expect(value.prefs.drafts.map(draft => draft.op_id)).toEqual([id]);
+    const request = structuredClone(value.writes.at(-1));
+    value.preferenceOutcome('ok'); expect(await value.drafts.retryPreferences()).toBe(true);
+    expect(value.writes.at(-1)).toEqual(request);
+    expect(value.drafts.getSnapshot().entries[id]).toBeUndefined();
+    expect(value.drafts.savedAnswers(route, '2')[0]!.error).toBeNull();
+    expect(value.prefs.drafts).toHaveLength(1); expect(value.calls).toHaveLength(1);
+  });
+  it.each([false, true])('discards a saved answer with attempted=%s only after its save completes', async attempted => {
+    const draft = { ...attemptedDraft(), submission_attempted: attempted }, value = await setup([draft]);
+    const release = value.gatePrefs(), discarded = value.drafts.discard(draft.op_id);
+    await waitFor(() => expect(value.writes).toHaveLength(1));
+    expect(value.drafts.getSnapshot().entries[draft.op_id]!.draft.text).toBe(draft.text);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]!.saving).toBe(true);
+    expect(await value.drafts.discard(draft.op_id)).toBe(false);
+    expect(await value.drafts.submit(draft.op_id)).toBe(false);
+    expect(await value.drafts.editSaved(draft.op_id, { text: 'Overwritten' })).toBe(false);
+    release(); expect(await discarded).toBe(true);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]).toBeUndefined(); expect(value.prefs.drafts).toEqual([]);
+    expect(Object.values((await value.restart()).getSnapshot().entries)).toEqual([]);
+    expect(value.calls).toHaveLength(0);
+  });
+  it('retains discarded words after an uncertain save and removes them only on the exact preference retry', async () => {
+    const draft = attemptedDraft(), value = await setup([draft]); value.preferenceOutcome('uncertain');
+    expect(await value.drafts.discard(draft.op_id)).toBe(false);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]).toMatchObject({ saving: false, draft: { text: draft.text } });
+    expect(value.drafts.getSnapshot().entries[draft.op_id]!.error).toBeTruthy();
+    expect(value.prefs.drafts).toEqual([draft]);
+    expect(await value.drafts.discard(draft.op_id)).toBe(false);
+    const request = structuredClone(value.writes.at(-1));
+    value.preferenceOutcome('ok'); expect(await value.drafts.retryPreferences()).toBe(true);
+    expect(value.writes.at(-1)).toEqual(request);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]).toBeUndefined(); expect(value.prefs.drafts).toEqual([]);
+    expect(value.calls).toHaveLength(0);
+  });
+  it('retries a conflicting discard and leaves words available after definite rejection', async () => {
+    const draft = attemptedDraft(), value = await setup([draft]); value.conflictDeletes(3);
+    expect(await value.drafts.discard(draft.op_id)).toBe(false);
+    expect(value.writes).toHaveLength(3); expect(value.drafts.getSnapshot().preferenceUncertain).toBe(false);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]!.draft.text).toBe(draft.text);
+    expect(value.prefs.drafts).toEqual([draft]);
+    expect(await value.drafts.discard(draft.op_id)).toBe(true);
+    expect(value.writes).toHaveLength(4); expect(value.prefs.drafts).toEqual([]);
+  });
+  it('shows the latest saved copy once and discards every copy without deleting different words', async () => {
+    const old = attemptedDraft(), copy = { ...old, op_id: uuid(85), selected_option_id: null, submission_attempted: false };
+    const other = { ...copy, op_id: uuid(86), text: 'Different words' };
+    const value = await setup([old, copy, other]);
+    expect(value.drafts.savedAnswers(route, '2').map(entry => entry.draft.op_id)).toEqual([copy.op_id, other.op_id]);
+    expect(await value.drafts.discard(copy.op_id)).toBe(true);
+    expect(value.writes.at(-1)).toMatchObject({ command: { params: { entries: [
+      { kind: 'delete_draft', operation_id: old.op_id }, { kind: 'delete_draft', operation_id: copy.op_id },
+    ] } } });
+    expect(value.drafts.savedAnswers(route, '2').map(entry => entry.draft.text)).toEqual([other.text]);
+    expect(value.prefs.drafts).toEqual([other]);
+    expect(Object.values((await value.restart()).getSnapshot().entries).map(entry => entry.draft.op_id)).toEqual([other.op_id]);
+  });
+  it('uses plain wording for a message over the byte limit', async () => {
+    const value = await setup(), id = value.drafts.begin(immutable(value.session), '2', 'answer')!;
+    await value.drafts.editSaved(id, { text: 'é'.repeat(8193) });
+    expect(blockedDraft(value.drafts.getSnapshot().entries[id]!.draft, immutable(value.session))).toBe('This message is too long. Shorten it, then send.');
+    expect(await value.drafts.submit(id)).toBe(false); expect(value.calls).toHaveLength(0);
+  });
+  it('keeps a newer send failure when an earlier draft save finishes', async () => {
+    const value = await setup(), id = value.drafts.begin(immutable(value.session), '2', 'answer')!;
+    const release = value.gatePrefs(), edited = value.drafts.editSaved(id, { text: 'Keep this and the send error.' });
+    await waitFor(() => expect(value.writes).toHaveLength(1));
+    value.unavailable(); expect(await value.drafts.submit(id)).toBe(false);
+    const error = value.drafts.getSnapshot().entries[id]!.error; expect(error).toBeTruthy();
+    release(); expect(await edited).toBe(true);
+    expect(value.drafts.getSnapshot().entries[id]!.error).toBe(error);
+    expect(value.prefs.drafts[0]!.text).toBe('Keep this and the send error.'); expect(value.calls).toHaveLength(0);
   });
   it('never permits changed-payload recovery for operation reuse or restored unknown attempts', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('operation_reused');

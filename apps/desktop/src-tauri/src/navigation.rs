@@ -1,4 +1,5 @@
-use tauri::Manager;
+use ariadne_core::CoreError;
+use tauri::{Emitter, Manager};
 use url::Url;
 
 #[derive(Debug, PartialEq)]
@@ -41,6 +42,20 @@ fn decide(raw: &str, app_url: &Url) -> Navigation {
     }
 }
 
+fn report_open_result<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    label: &str,
+    result: Result<(), CoreError>,
+) {
+    if result.is_err()
+        && app
+            .emit_to(label, "ariadne://open_link_failed", ())
+            .is_err()
+    {
+        eprintln!("Ariadne could not report that the link did not open.");
+    }
+}
+
 pub(crate) fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     // Plugin hooks also cover the main window created from either Tauri config.
     tauri::plugin::Builder::new("navigation-guard")
@@ -49,8 +64,10 @@ pub(crate) fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             match decide(url.as_str(), &app_url) {
                 Navigation::Allow => true,
                 Navigation::OpenExternally(url) => {
+                    let app = webview.app_handle().clone();
+                    let label = webview.label().to_owned();
                     tauri::async_runtime::spawn(async move {
-                        let _ = crate::commands::open_link(url).await;
+                        report_open_result(&app, &label, crate::commands::open_link(url).await);
                     });
                     false
                 }
@@ -62,12 +79,49 @@ pub(crate) fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::{app_url, decide, Navigation};
+    use super::{app_url, decide, report_open_result, Navigation};
+    use ariadne_core::{CoreError, CoreErrorCode};
+    use std::sync::mpsc;
+    use tauri::Listener;
     use url::Url;
 
     fn origins() -> [Url; 2] {
         let dev = Url::parse("http://localhost:1420").unwrap();
         [app_url(Some(&dev), true), app_url(Some(&dev), false)]
+    }
+
+    #[test]
+    fn external_open_failures_emit_only_a_private_window_notice() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let (events, notices) = mpsc::channel();
+        app.listen_any("ariadne://open_link_failed", move |event| {
+            events.send(event.payload().to_owned()).unwrap();
+        });
+        let (global_events, global_notices) = mpsc::channel();
+        app.listen("ariadne://open_link_failed", move |_| {
+            global_events.send(()).unwrap();
+        });
+
+        report_open_result(app.handle(), "main", Ok(()));
+        assert!(matches!(notices.try_recv(), Err(mpsc::TryRecvError::Empty)));
+
+        report_open_result(
+            app.handle(),
+            "main",
+            Err(CoreError::new(
+                CoreErrorCode::IoError,
+                "https://example.com/private-link",
+                "Sensitive opener details must not enter the event.",
+            )),
+        );
+        assert_eq!(notices.try_recv().unwrap(), "null");
+        assert!(matches!(notices.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(matches!(
+            global_notices.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
     }
 
     #[test]

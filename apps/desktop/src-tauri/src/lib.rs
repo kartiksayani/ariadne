@@ -286,6 +286,10 @@ pub fn run_with_startup(
     run_native(Some(service), startup);
 }
 
+fn with_navigation_guard<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder.plugin(navigation::plugin())
+}
+
 fn run_native(
     service: Option<commands::DesktopService>,
     startup: impl FnOnce(
@@ -312,11 +316,11 @@ fn run_native(
     let wake_quitting = quitting.clone();
     #[cfg(target_os = "macos")]
     let wake_active = waking.clone();
-    let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+    let builder =
+        tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             native::routes::receive_launch(app.clone(), args);
-        }))
-        .plugin(navigation::plugin())
+        }));
+    let builder = with_navigation_guard(builder)
         .manage(state)
         .manage(native::routes::NativeRoutes::default())
         .manage(native::window::NativeWindow::default())

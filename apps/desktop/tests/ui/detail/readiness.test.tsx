@@ -314,6 +314,84 @@ describe('detail actions while the owner view is stale', () => {
     expect(drafts.getSnapshot().entries[id]!.draft.text).toBe(text.value);
     expect(transport.preferences.drafts.find(draft => draft.op_id === id)!.text).toBe(text.value);
     expect(sends(transport)).toHaveLength(0);
+    fireEvent.click(within(saved).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Saved message' })).toBeNull());
+    expect(drafts.getSnapshot().entries[id]).toBeUndefined();
+    expect(transport.preferences.drafts.some(draft => draft.op_id === id)).toBe(false);
+    expect(sends(transport)).toHaveLength(0);
+  });
+
+  it('keeps an attempted saved message visible while Discard is saving and after an unconfirmed save', async () => {
+    const { transport, store, drafts } = await setup();
+    const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    await drafts.editSaved(id, { text: 'Keep these attempted words.' });
+    transport.failNext = 'input_submit'; expect(await drafts.submit(id)).toBe(false);
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = 'done'; ++session.items['2']!.revision; ++session.revision;
+    await store.refresh();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let entered = false;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch') { entered = true; await gate; }
+      return invoke(name, args);
+    });
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const saved = screen.getByRole('region', { name: 'Saved message' });
+    const discard = within(saved).getByRole<HTMLButtonElement>('button', { name: 'Discard' });
+    transport.failNext = 'preferences_patch'; fireEvent.click(discard);
+    await waitFor(() => expect(entered).toBe(true));
+    expect(discard.disabled).toBe(true);
+    expect(within(saved).getByLabelText<HTMLTextAreaElement>('Saved answer text').value).toBe('Keep these attempted words.');
+    await act(async () => { release(); });
+    await waitFor(() => expect(drafts.getSnapshot().preferenceUncertain).toBe(true));
+    expect(within(saved).getByLabelText<HTMLTextAreaElement>('Saved answer text').value).toBe('Keep these attempted words.');
+    expect(within(saved).getAllByRole('alert')).toHaveLength(1);
+    expect(transport.preferences.drafts.find(draft => draft.op_id === id)!.text).toBe('Keep these attempted words.');
+    fireEvent.click(within(saved).getByRole('button', { name: 'Try saving your draft again' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Saved message' })).toBeNull());
+    expect(sends(transport)).toHaveLength(1);
+  });
+
+  it('shows one saved message for restored copies and Discard removes both', async () => {
+    const { transport, store, drafts } = await setup();
+    const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    await drafts.editSaved(id, { text: 'One piece of text.' });
+    const copy = structuredClone(transport.preferences.drafts[0]!); copy.op_id = crypto.randomUUID();
+    copy.submission_attempted = true; transport.preferences.drafts.unshift(copy);
+    await drafts.load();
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = 'done'; ++session.items['2']!.revision; ++session.revision;
+    await store.refresh();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const saved = screen.getByRole('region', { name: 'Saved message' });
+    expect(within(saved).getAllByRole('textbox')).toHaveLength(1);
+    fireEvent.click(within(saved).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Saved message' })).toBeNull());
+    expect(transport.preferences.drafts).toEqual([]);
+    expect(drafts.getSnapshot().entries[id]).toBeUndefined(); expect(drafts.getSnapshot().entries[copy.op_id]).toBeUndefined();
+    expect(sends(transport)).toHaveLength(0);
+  });
+
+  it('does not repeat an unrelated store error in each saved message', async () => {
+    const { transport, store, drafts } = await setup();
+    const session = store.getSnapshot().snapshot!.session;
+    const first = drafts.begin(session, '2', 'answer')!;
+    await drafts.editSaved(first, { text: 'First saved message.' });
+    const second = drafts.begin(session, '2', 'answer', true)!;
+    await drafts.editSaved(second, { text: 'Second saved message.' });
+    const live = transport.sessions.get(route.session_id)!;
+    live.items['2']!.status = 'done'; ++live.items['2']!.revision; ++live.revision;
+    await store.refresh();
+    const other = drafts.begin(store.getSnapshot().snapshot!.session, '1', 'note')!;
+    transport.failNext = 'preferences_patch'; expect(await drafts.editSaved(other, { text: 'Elsewhere.' })).toBe(false);
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const saved = screen.getByRole('region', { name: 'Saved message' });
+    expect(within(saved).getAllByRole('textbox')).toHaveLength(2);
+    expect(within(saved).queryAllByRole('alert')).toHaveLength(0);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(within(saved).getAllByRole<HTMLButtonElement>('button', { name: 'Discard' }).every(button => button.disabled)).toBe(true);
   });
 
   it.each(['update', 'restart'] as const)('clears an uncertain delivered answer on %s and removes the answer box', async recovery => {

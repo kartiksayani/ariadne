@@ -40,6 +40,9 @@ const validInputReceipt = (receipt: Immutable<SavedReceipt>, draft: Immutable<Ow
   && Number.isSafeInteger(receipt.revision) && receipt.revision > 0 && receipt.data.kind === 'input_submit'
   && !!receipt.data.input_id && !!receipt.data.message_id && receipt.data.input_seq > 0 && receipt.data.message_number > 0;
 const terminal = (item: Immutable<Item>) => ['decided', 'done', 'dropped', 'replaced'].includes(item.status);
+const sameMessage = (a: Immutable<OwnerDraft>, b: Immutable<OwnerDraft>) => sameSession(a.session, b.session)
+  && a.target.item_id === b.target.item_id && a.target.topic_id === b.target.topic_id && a.intent === b.intent
+  && a.text === b.text && (!!a.text || a.selected_option_id === b.selected_option_id);
 
 export function ownerActions(item: Immutable<Item>): OwnerIntent[] {
   return ['bring', ...(item.status === 'waiting_on_me' ? ['answer' as const] : []), 'reply', 'note', 'followup', 'drop',
@@ -48,7 +51,7 @@ export function ownerActions(item: Immutable<Item>): OwnerIntent[] {
 /** The guard text for a draft with neither a choice nor a message; controls show their own Send state instead. */
 export const emptyDraft = 'Choose an option or enter a message before sending.';
 const contentBlocked = (draft: Immutable<OwnerDraft>): string | null => !draft.selected_option_id && !draft.text.trim() ? emptyDraft
-  : new TextEncoder().encode(draft.text).length > 16 * 1024 ? 'Keep the message within 16 KiB.' : null;
+  : new TextEncoder().encode(draft.text).length > 16 * 1024 ? 'This message is too long. Shorten it, then send.' : null;
 const typed = new Set<InputKind>(['answer', 'reply', 'note', 'followup', TOPIC_REPLY]);
 /** The owner's own words outside an answer: core takes all three at any status, so the app sends the one that fits. */
 const words = new Set<InputKind>(['reply', 'note', 'followup']);
@@ -171,6 +174,24 @@ export class OwnerDraftStore {
   find(session: SessionRef, itemId: string, intent: OwnerIntent): DraftEntry | undefined {
     return Object.values(this.state.entries).reverse().find(entry => sameSession(entry.draft.session, session) && entry.draft.target.item_id === itemId && entry.draft.intent === intent);
   }
+  /** Latest copy of each unsent answer, including copies left by earlier draft recovery. */
+  savedAnswers(session: SessionRef, itemId: string): DraftEntry[] {
+    const entries = Object.values(this.state.entries).filter(entry => !entry.receipt && sameSession(entry.draft.session, session)
+      && entry.draft.target.item_id === itemId && entry.draft.intent === 'answer'
+      && (entry.draft.text || entry.draft.selected_option_id || entry.uncertain || entry.error));
+    return entries.filter((entry, index) => !entries.slice(index + 1).some(next => sameMessage(entry.draft, next.draft)));
+  }
+  /** Keep all copies until the preferences save confirms their deletion. */
+  async discard(id: string): Promise<boolean> {
+    const entry = this.state.entries[id];
+    if (!entry || entry.receipt || this.state.preferenceUncertain) return false;
+    const copies = Object.values(this.state.entries).filter(copy => !copy.receipt && sameMessage(entry.draft, copy.draft));
+    if (copies.some(copy => copy.saving)) return false;
+    for (const copy of copies) this.entry(copy.draft.op_id, { saving: true, error: null });
+    const saved = await this.save(copies.map(copy => ({ kind: 'delete_draft', operation_id: copy.draft.op_id })));
+    for (const copy of copies) this.entry(copy.draft.op_id, { saving: false, error: saved ? null : this.state.error });
+    return saved;
+  }
   begin(session: Immutable<Session>, itemId: string, intent: OwnerIntent, revised = false): string | null {
     const route = { project_id: session.project_id, session_id: session.id }, existing = this.find(route, itemId, intent);
     if (existing && !revised) return existing.draft.op_id;
@@ -245,7 +266,10 @@ export class OwnerDraftStore {
     const nextId = this.begin(session, previous.draft.target.item_id, previous.draft.intent as OwnerIntent, true);
     if (!nextId) return;
     const draft = { ...structuredClone(this.state.entries[nextId]!.draft), text: previous.draft.text, question_revision: null } as OwnerDraft;
-    this.entry(nextId, { draft: immutable(draft) }); void this.save([{ kind: 'upsert_draft', draft }]);
+    this.entry(id, { saving: true }); this.entry(nextId, { draft: immutable(draft), saving: true });
+    void this.save([{ kind: 'delete_draft', operation_id: id }, { kind: 'upsert_draft', draft }]).then(() => {
+      this.entry(id, { saving: false }); this.entry(nextId, { saving: false });
+    });
   }
   private save(entries: PreferencesPatchEntry[]): Promise<boolean> {
     const next = this.saves.then(() => {
@@ -296,6 +320,11 @@ export class OwnerDraftStore {
         this.pendingInputs.set(entry.draft.op_id, this.inputRequest(entry.draft));
         this.entry(entry.draft.op_id, { draft: immutable(entry.draft), uncertain: true });
       }
+      const entries = { ...this.state.entries };
+      for (const entry of this.pendingPreferenceEntries) if (entry.kind === 'delete_draft' && !entries[entry.operation_id]?.receipt) {
+        delete entries[entry.operation_id]; this.pendingInputs.delete(entry.operation_id);
+      }
+      this.publish({ entries: Object.freeze(entries) });
       this.pendingPreference = null; this.pendingPreferenceEntries = []; this.publish({ preferenceUncertain: false, error: null }); return true;
     } catch (error: unknown) {
       const reason = failure(error), uncertain = unknownCommit(reason);
@@ -325,7 +354,7 @@ export class OwnerDraftStore {
    */
   submit(id: string, as?: OwnerIntent): Promise<boolean> {
     const flight = this.flights.get(id); if (flight) return flight;
-    const entry = this.state.entries[id]; if (!entry || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
+    const entry = this.state.entries[id]; if (!entry || entry.saving || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
     this.entry(id, { saving: true, error: null });
     const next = this.send(id, as).finally(() => { this.flights.delete(id); this.entry(id, { saving: false }); });
     this.flights.set(id, next); return next;

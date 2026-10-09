@@ -6,6 +6,7 @@
 // docked under it (quick replies above a reply box that grows as you type).
 import { useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
+import { plainFailure } from '../../data/plain';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { sessionActionsFor } from '../../components/bindings/actions';
 import { PausedNote } from '../../components/bindings/DispatchChip';
@@ -213,10 +214,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     && round.question_revision === item.question_revision;
   const archived = session?.archived_at != null || (item && session?.topics[item.topic_id]?.archived_at != null);
   const showAnswer = !archived && currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error);
-  const savedAnswers = !showAnswer && session ? Object.values(draftState.entries).filter(entry => !entry.receipt
-    && entry.draft.session.project_id === session.project_id && entry.draft.session.session_id === session.id
-    && entry.draft.target.item_id === itemId && entry.draft.intent === 'answer'
-    && (entry.draft.text || entry.draft.selected_option_id || entry.uncertain || entry.error)) : [];
+  const savedAnswers = !showAnswer && session ? drafts.savedAnswers({ project_id: session.project_id, session_id: session.id }, itemId) : [];
   const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
   // boxes (drop reason, follow-up on a finished item) open on press.
@@ -475,7 +473,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </button><span className="detail-hint">Mark {STATUS[ackTo].label}</span>
     </section>}
     {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
-    {submit.error && !((showAnswer || savedAnswers.length > 0) && submit.error === answerSlotError(draftState, retained))
+    {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)
+      || savedAnswers.some(entry => entry.error && submit.error === plainFailure(entry.error)))
       && <p className="detail-error" role="alert">{submit.error}</p>}
     {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
       {sectionLabel(model.open.title)}
@@ -523,7 +522,9 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
           : 'Your saved choice is no longer listed.'}</p>}
         {entry.draft.text && <><textarea className="input" aria-label="Saved answer text" readOnly value={entry.draft.text} rows={3} />
           <CopyMessage text={entry.draft.text} /></>}
-        {answerSlotError(draftState, entry) && <p className="detail-error" role="alert">{answerSlotError(draftState, entry)}</p>}
+        <button type="button" className="btn btn-secondary" disabled={entry.saving || draftState.preferenceUncertain}
+          onClick={() => { void drafts.discard(entry.draft.op_id); }}>Discard</button>
+        {entry.error && <p className="detail-error" role="alert">{plainFailure(entry.error)}</p>}
       </div>)}
       {draftState.preferenceUncertain && <button type="button" className="btn btn-secondary" onClick={() => { void drafts.retryPreferences(); }}>Try saving your draft again</button>}
     </section>}

@@ -10,6 +10,16 @@ fn request(nonce: &str, payload: &str) -> PingRequest {
 }
 
 #[test]
+fn native_builder_registers_navigation_guard_without_creating_a_window() {
+    let app = with_navigation_guard(tauri::test::mock_builder())
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    assert!(app.webview_windows().is_empty());
+    assert!(app.handle().remove_plugin("navigation-guard"));
+    assert!(!app.handle().remove_plugin("navigation-guard"));
+}
+
+#[test]
 fn ordinary_receipts_use_private_owned_storage_and_cleanup() {
     let (state, owner) = PingState::ordinary().unwrap();
     let root = state.root.clone();
