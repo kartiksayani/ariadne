@@ -202,6 +202,7 @@ impl Setup {
                 options: None,
                 note: None,
                 links: None,
+                related: None,
                 outcome: None,
                 why: None,
                 replaced_by: None,

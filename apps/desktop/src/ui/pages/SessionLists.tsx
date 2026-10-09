@@ -1,5 +1,5 @@
 // Project page (1ac) and All sessions (1z), ported from Ariadne.dc.html:225-263.
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Immutable, SessionStore } from '../../data/session-store';
 import type { SessionRef } from '../../generated/core';
 import type { ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
@@ -18,6 +18,7 @@ import { cardDispatch, continuationLinks, projectName, projectRemoval, routeOf, 
 import { notices } from './notices';
 import { ArchiveSessionDialog, CloseSessionDialog, DispatchDialog } from './SessionDialogs';
 import { closeImpact } from '../../components/history-actions/selectors';
+import { waitForLifecycleReady } from '../shared/lifecycleReady';
 import './pages.css';
 
 export interface SessionGroup {
@@ -72,6 +73,9 @@ export function SessionLists(props: SessionListsProps) {
   const { navigation, actions, groups, sessions, snapshots, openTabs, now, disabled, onBack, overview, onOpenProject, onOpenSession, onRemove, children } = props;
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const lifecycleBusy = useRef(false);
+  const waiting = useRef<{ cancel: () => void } | null>(null);
+  const renameWaits = useRef(new Set<{ cancel: () => void }>());
+  useEffect(() => () => { waiting.current?.cancel(); renameWaits.current.forEach(attempt => attempt.cancel()); }, []);
   const [busy, setBusy] = useState<string | null>(null);
   /** The key of the card whose name is being edited. */
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -83,15 +87,6 @@ export function SessionLists(props: SessionListsProps) {
     void navigation.saveLayout({ session_archive_expanded_project_ids: ids }, state.preferences.revision);
   };
   const links = continuationLinks([...snapshots.values()]);
-  /** Opens the session's reader and waits for its snapshot. */
-  const ready = async (route: SessionRef) => {
-    const store = navigation.opened.open(route);
-    await store.refresh();
-    const state = store.getSnapshot();
-    if (state.error) throw state.error;
-    if (!state.snapshot) throw new Error('The session could not be read.');
-    return { store, session: state.snapshot.session, controller: actions.forSession(store) };
-  };
   const announceRestored = (summary: Immutable<SessionSummary>, reopen: boolean) => {
     const name = ownerName(summary), subject = name ? `“${name}”` : 'the session';
     notices.push({ icon: 'ph ph-arrow-counter-clockwise', dismissible: true,
@@ -123,14 +118,16 @@ export function SessionLists(props: SessionListsProps) {
     }
     lifecycleBusy.current = true;
     setBusy(key);
+    let cancel!: () => void;
+    const cancellation = new Promise<boolean>(resolve => { cancel = () => { attempt.cancelled = true; resolve(false); }; });
+    const attempt = { cancelled: false, cancellation, cancel };
+    waiting.current = attempt;
     try {
-      const { store, session, controller } = await ready(route);
+      const store = navigation.opened.open(route), controller = actions.forSession(store);
+      const readiness = await waitForLifecycleReady(controller, attempt, true);
+      if (!readiness.ok) { if (readiness.error) failed(null, readiness.error); return false; }
+      const session = readiness.session;
       const agent = sessionCardText(summary, null, now).agent, when = sessionWhen(Date.parse(summary.created_at), now);
-      // Reconcile the controller's existing action before offering a different one.
-      if (controller.getSnapshot().pending) {
-        setDialog({ kind: 'dispatch', store, agent, when, name: ownerName(session) });
-        return false;
-      }
       // Close is one confirmation in plain words; Reopen runs at once.
       if (kind === 'session_close') { setDialog({ kind: 'close', store, agent, when, name: ownerName(session) }); return false; }
       if (kind === 'session_archive') {
@@ -148,7 +145,7 @@ export function SessionLists(props: SessionListsProps) {
       await navigation.refresh();
       return done;
     } catch (error: unknown) { failed(error); return false; }
-    finally { lifecycleBusy.current = false; setBusy(null); }
+    finally { waiting.current = null; lifecycleBusy.current = false; if (!attempt.cancelled) setBusy(null); }
   };
   const dispatch = (summary: Immutable<SessionSummary>) => {
     const route = routeOf(summary), store = navigation.opened.open(route);
@@ -156,13 +153,20 @@ export function SessionLists(props: SessionListsProps) {
   };
   /** Saves the owner's name and description through the session's write barrier; the error in plain words, or null once saved. */
   const rename = async (summary: Immutable<SessionSummary>, name: string, description: string) => {
+    let cancel!: () => void;
+    const cancellation = new Promise<boolean>(resolve => { cancel = () => { attempt.cancelled = true; resolve(false); }; });
+    const attempt = { cancelled: false, cancellation, cancel };
+    renameWaits.current.add(attempt);
     try {
-      const { session, controller } = await ready(routeOf(summary));
-      const failure = await saveSessionLabel(controller, session.revision, name, description);
+      const controller = actions.forSession(navigation.opened.open(routeOf(summary)));
+      const readiness = await waitForLifecycleReady(controller, attempt, true);
+      if (!readiness.ok) return readiness.error ?? 'The name could not be saved. Try again.';
+      const failure = await saveSessionLabel(controller, readiness.session.revision, name, description);
       await navigation.refresh();
-      if (failure === null) setRenaming(null);
+      if (failure === null && !attempt.cancelled) setRenaming(null);
       return failure;
     } catch (error: unknown) { return plainFailure(error, 'The name could not be saved. Try again.'); }
+    finally { renameWaits.current.delete(attempt); }
   };
   const removeSession = (summary: Immutable<SessionSummary>) => {
     const counts = sessionRemoval(snapshots.get(sessionKey(summary)) ?? null, links.shared);

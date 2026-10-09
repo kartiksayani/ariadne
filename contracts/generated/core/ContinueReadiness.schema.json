@@ -53,6 +53,7 @@
       "type": "string",
       "enum": [
         "same_session",
+        "source_archived",
         "target_closed",
         "binding_unknown",
         "binding_ambiguous",

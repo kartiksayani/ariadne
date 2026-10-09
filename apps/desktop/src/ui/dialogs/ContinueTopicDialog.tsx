@@ -79,6 +79,7 @@ const agentOf = (session: Immutable<Session> | undefined) => {
   return binding ? agentName(binding.adapter_id) : 'the agent';
 };
 const blockedWords: Record<string, string> = {
+  source_archived: 'the source session is archived; restore it before continuing',
   target_closed: 'that session is closed',
   binding_unknown: 'Ariadne can’t tell which agent is connected',
   binding_ambiguous: 'more than one agent is connected',

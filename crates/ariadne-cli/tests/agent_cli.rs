@@ -1624,8 +1624,402 @@ fn the_help_example_uses_explicit_ack_targets_for_the_lenient_fixture() {
     expected["operations"][1]["children"][0]["status"] = json!("open");
     expected["operations"][1]["children"][0]["ack_to"] = json!("done");
     assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
-    for word in ["--dry-run", "--full", "--topic", "--archived", "children"] {
+    for word in [
+        "--dry-run",
+        "--full",
+        "--topic",
+        "--archived",
+        "children",
+        "related",
+        "display numbers",
+    ] {
         assert!(text.contains(word), "{word}");
+    }
+}
+
+#[test]
+fn related_numbers_and_batch_refs_apply_and_read_as_item_numbers() {
+    let setup = Setup::new(&seed());
+    envelope(&setup.apply(&json!({"operations": [
+        {"op":"topic.add", "name":"Another topic"},
+        {"op":"item.add", "ref":"finding", "type":"finding", "question":"Evidence", "related":["1", {"id":"2"}]},
+        {"op":"item.add", "type":"task", "question":"Act on evidence", "related":["finding"]}
+    ]})), 0);
+    let rows = setup.page(&["--view", "items", "--limit", "100"]);
+    let item =
+        |number: &str| rows.iter().find(|row| row["item"]["id"] == number).unwrap()["item"].clone();
+    assert_eq!(item("3")["related"], json!(["1", "2"]));
+    assert_eq!(item("4")["related"], json!(["3"]));
+    assert!(
+        item("1").get("related").is_none(),
+        "omitted old fields stay omitted"
+    );
+    let before = setup.bytes();
+    let mut params = read_params("items", 100);
+    params["selection"]["filters"]["item_id"] = json!("3");
+    let read = envelope(
+        &setup.agent(
+            &["read"],
+            &["--json-stdin", "--json"],
+            Some(&serde_json::to_vec(&params).unwrap()),
+        ),
+        0,
+    );
+    assert_eq!(
+        read["data"]["data"]["page"]["items"][0]["item"]["related"],
+        json!(["1", "2"])
+    );
+    assert_eq!(setup.bytes(), before, "reads never rewrite snapshots");
+
+    let revision = item("3")["revision"].clone();
+    envelope(
+        &setup.apply(
+            &json!({"expected_item_revisions":{"3":revision}, "operations":[
+                {"op":"item.edit", "item":{"id":"3"}, "patch":{"related":["4"]}}
+            ]}),
+        ),
+        0,
+    );
+    let saved = setup.store().read(&id(2)).unwrap();
+    let revision = saved.items.0[&ItemRef::new("3").unwrap()].revision.value();
+    envelope(
+        &setup.apply(
+            &json!({"expected_item_revisions":{"3":revision}, "operations":[
+                {"op":"item.edit", "item":{"id":"3"}, "patch":{"note":"Kept links"}}
+            ]}),
+        ),
+        0,
+    );
+    let saved = setup.store().read(&id(2)).unwrap();
+    let third = &saved.items.0[&ItemRef::new("3").unwrap()];
+    assert_eq!(
+        third.related.as_ref().unwrap(),
+        &[ItemRef::new("4").unwrap()]
+    );
+    envelope(
+        &setup.apply(
+            &json!({"expected_item_revisions":{"3":third.revision}, "operations":[
+                {"op":"item.edit", "item":{"id":"3"}, "patch":{"related":[]}}
+            ]}),
+        ),
+        0,
+    );
+    assert!(
+        setup.store().read(&id(2)).unwrap().items.0[&ItemRef::new("3").unwrap()]
+            .related
+            .as_ref()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn nested_ack_proposals_keep_forward_related_links_repairs_and_retry_identity() {
+    for status in ["decided", "done", "dropped", "open"] {
+        let setup = Setup::new(&seed());
+        let request = json!({"operations": [{
+            "op": "item.add", "ref": "summary", "topic": {"id": id(5)},
+            "type": "finding", "question": "Completed review", "status": status,
+            "ack_to": "done", "outcome": "Exact review result.", "why": "Verified.",
+            "related": ["child", "2"], "children": [{
+                "ref": "child", "type": "finding", "question": "Supporting evidence",
+                "status": "done", "related": ["summary"], "children": [{
+                    "type": "finding", "question": "Nested evidence", "status": "done",
+                    "related": ["summary", "child"]
+                }]
+            }]
+        }]});
+        // Explicit targets must agree with repaired terminal creation.
+        let mut request = request;
+        request["operations"][0]["ack_to"] = json!(if status == "open" { "done" } else { status });
+        let applied = envelope(&setup.apply(&request), 0);
+        assert_eq!(
+            applied["data"]["repairs"].as_array().unwrap().len(),
+            if status == "open" { 2 } else { 3 }
+        );
+        let saved = setup.store().read(&id(2)).unwrap();
+        let summary = &saved.items.0[&ItemRef::new("3").unwrap()];
+        assert_eq!(summary.status, ItemStatus::Open);
+        assert_eq!(
+            serde_json::to_value(summary.ack_to).unwrap(),
+            request["operations"][0]["ack_to"]
+        );
+        assert_eq!(summary.outcome.as_deref(), Some("Exact review result."));
+        assert_eq!(
+            summary.related,
+            Some(vec![
+                ItemRef::new("3.1").unwrap(),
+                ItemRef::new("2").unwrap()
+            ])
+        );
+        for (number, targets) in [("3.1", vec!["3"]), ("3.1.1", vec!["3", "3.1"])] {
+            let item = &saved.items.0[&ItemRef::new(number).unwrap()];
+            assert_eq!(item.status, ItemStatus::Open);
+            assert_eq!(item.ack_to, Some(AckTarget::Done));
+            assert_eq!(
+                item.related,
+                Some(
+                    targets
+                        .into_iter()
+                        .map(|id| ItemRef::new(id).unwrap())
+                        .collect()
+                )
+            );
+        }
+        let before_retry = setup.bytes();
+        assert_eq!(envelope(&setup.apply(&request), 0), as_replay(&applied));
+        assert_eq!(setup.bytes(), before_retry);
+        let rows = setup.page(&["--view", "items", "--limit", "100"]);
+        let row = rows.iter().find(|row| row["item"]["id"] == "3").unwrap();
+        assert_eq!(row["item"]["related"], json!(["3.1", "2"]));
+        assert_eq!(row["item"]["ack_to"], request["operations"][0]["ack_to"]);
+        let owner_request = json!({"session": {"project_id": id(1), "session_id": id(2)},
+            "command": {"command": "ack", "api_version": 1, "op_id": id(999),
+                "params": {"item_id": "3", "expected_revision": summary.revision}}});
+        envelope(
+            &setup.call(
+                &["item", "ack", "--json-stdin", "--json"],
+                Some(&serde_json::to_vec(&owner_request).unwrap()),
+            ),
+            0,
+        );
+        let acknowledged = setup.store().read(&id(2)).unwrap();
+        assert_eq!(acknowledged.items.0[&summary.id].related, summary.related);
+        assert_eq!(
+            acknowledged.items.0[&ItemRef::new("3.1").unwrap()],
+            saved.items.0[&ItemRef::new("3.1").unwrap()]
+        );
+    }
+}
+
+#[test]
+fn related_reads_filter_removed_targets_and_resends_report_pruning_even_on_replay() {
+    let mut session = seed();
+    let source = ItemRef::new("1").unwrap();
+    let related = vec![ItemRef::new("2").unwrap(), ItemRef::new("99").unwrap()];
+    session.items.0.get_mut(&source).unwrap().related = Some(related);
+    let setup = Setup::new(&session);
+    let before = setup.bytes();
+    let rows = setup.page(&["--view", "items", "--limit", "100"]);
+    let projected = rows.iter().find(|row| row["item"]["id"] == "1").unwrap();
+    assert_eq!(projected["item"]["related"], json!(["2"]));
+    assert_eq!(
+        setup.bytes(),
+        before,
+        "reads preserve the saved declaration"
+    );
+
+    let request = json!({"expected_item_revisions":{"1":session.items.0[&source].revision}, "operations":[
+        {"op":"item.edit", "item":{"id":"1"}, "patch":{"related":["99", "2"]}}
+    ]});
+    let compact = envelope(&setup.apply(&request), 0);
+    assert_eq!(compact["data"]["pruned_related"], json!({"1":["99"]}));
+    assert_eq!(
+        setup.store().read(&id(2)).unwrap().items.0[&source].related,
+        Some(vec![ItemRef::new("2").unwrap()])
+    );
+    let written = setup.bytes();
+    let replay = envelope(&setup.apply(&request), 0);
+    assert_eq!(
+        replay["data"]["pruned_related"],
+        compact["data"]["pruned_related"]
+    );
+    assert_eq!(
+        setup.bytes(),
+        written,
+        "resends replay without another write"
+    );
+    let full = envelope(
+        &setup.agent(
+            &["apply"],
+            &["--json-stdin", "--json", "--full"],
+            Some(&serde_json::to_vec(&request).unwrap()),
+        ),
+        0,
+    );
+    assert_eq!(full["data"]["data"]["pruned_related"], json!({"1":["99"]}));
+    assert_eq!(setup.bytes(), written);
+}
+
+#[test]
+fn related_forward_refs_include_nested_children_and_later_explicit_edits_win() {
+    let setup = Setup::new(&seed());
+    let request = json!({"operations":[
+        {"op":"item.add", "ref":"parent", "topic":{"id":id(5)}, "type":"task", "question":"Parent", "related":["child"], "children":[
+            {"ref":"child", "type":"finding", "question":"Child", "related":["parent"]}
+        ]},
+        {"op":"item.add", "ref":"pending", "topic":{"id":id(5)}, "type":"task", "question":"Pending", "related":[{"ref":"later"}]},
+        {"op":"item.edit", "item":{"ref":"pending"}, "patch":{"related":["1"]}},
+        {"op":"item.add", "ref":"later", "topic":{"id":id(5)}, "type":"finding", "question":"Later"},
+        {"op":"item.edit", "item":{"ref":"parent"}, "patch":{"related":["2", "3.1"]}}
+    ]});
+    let before = setup.bytes();
+    let preview = envelope(
+        &setup.apply_with(&["--dry-run"], &serde_json::to_vec(&request).unwrap()),
+        0,
+    );
+    assert_eq!(preview["data"]["dry_run"], true);
+    assert_eq!(setup.bytes(), before);
+    let receipt = envelope(&setup.apply(&request), 0);
+    assert_eq!(preview["data"]["op_id"], receipt["data"]["op_id"]);
+    assert_eq!(preview["data"]["items"], receipt["data"]["items"]);
+    let saved = setup.store().read(&id(2)).unwrap();
+    let related = |number: &str| {
+        saved.items.0[&ItemRef::new(number).unwrap()]
+            .related
+            .clone()
+            .unwrap()
+    };
+    assert_eq!(
+        related("3"),
+        [ItemRef::new("2").unwrap(), ItemRef::new("3.1").unwrap()]
+    );
+    assert_eq!(related("3.1"), [ItemRef::new("3").unwrap()]);
+    assert_eq!(related("4"), [ItemRef::new("1").unwrap()]);
+    let before = setup.bytes();
+    let replay = envelope(&setup.apply(&request), 0);
+    assert_eq!(replay["data"]["op_id"], receipt["data"]["op_id"]);
+    assert_eq!(replay["data"]["replayed"], true);
+    assert_eq!(setup.bytes(), before);
+
+    let clean = Setup::new(&seed());
+    envelope(&clean.apply(&json!({"operations":[
+        {"op":"item.add", "ref":"parent", "topic":{"id":id(5)}, "type":"task", "question":"Parent", "related":[{"ref":"child"}], "children":[
+            {"ref":"child", "type":"finding", "question":"Child"}
+        ]}
+    ]})), 0);
+    assert_eq!(clean.page(&[])[2]["item"]["related"], json!(["3.1"]));
+}
+
+#[test]
+fn related_invalid_self_duplicate_and_missing_targets_fail_atomically() {
+    let setup = Setup::new(&seed());
+    for (targets, message, target) in [
+        (json!(["1"]), "itself", "1"),
+        (json!(["2", {"id":"2"}]), "appears more than once", "2"),
+        (json!(["999"]), "does not exist in this session", "999"),
+        (
+            json!([{"ref":"missing"}]),
+            "no item in this batch has ref 'missing'",
+            "missing",
+        ),
+        (
+            json!(["bogus"]),
+            "no item in this batch has ref 'bogus'",
+            "bogus",
+        ),
+    ] {
+        let before = setup.bytes();
+        let error = envelope(
+            &setup.apply(&json!({"expected_item_revisions":{"1":1}, "operations":[
+                {"op":"topic.add", "name":"Must roll back"},
+                {"op":"item.edit", "item":{"id":"1"}, "patch":{"related":targets}}
+            ]})),
+            2,
+        );
+        assert_eq!(error["error"]["code"], "invalid_ref", "{error}");
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(message),
+            "{error}"
+        );
+        let message = error["error"]["message"].as_str().unwrap();
+        assert!(message.contains("item.edit"), "{error}");
+        assert!(message.contains(target), "{error}");
+        assert_eq!(setup.bytes(), before);
+    }
+    for targets in [
+        json!([3]),
+        json!({"id":"2"}),
+        json!([{"id":"2", "ref":"two"}]),
+    ] {
+        let before = setup.bytes();
+        let error = envelope(
+            &setup.apply(&json!({"expected_item_revisions":{"1":1}, "operations":[
+                {"op":"item.edit", "item":{"id":"1"}, "patch":{"related":targets}}
+            ]})),
+            2,
+        );
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("operations[0] (item.edit)"),
+            "{error}"
+        );
+        assert_eq!(setup.bytes(), before);
+    }
+    // A local ref and its allocated number cannot disguise a duplicate or self link.
+    for targets in [json!([{"ref":"first"}, "3"]), json!([{"ref":"second"}])] {
+        let before = setup.bytes();
+        let error = envelope(&setup.apply(&json!({"operations":[
+            {"op":"item.add", "ref":"first", "topic":{"id":id(5)}, "type":"task", "question":"First"},
+            {"op":"item.add", "ref":"second", "topic":{"id":id(5)}, "type":"task", "question":"Second", "related":targets}
+        ]})), 2);
+        assert_eq!(error["error"]["code"], "invalid_ref", "{error}");
+        assert_eq!(setup.bytes(), before);
+    }
+    let before = setup.bytes();
+    let malformed = envelope(&setup.apply(&json!({"operations":[
+        {"op":"item.add", "ref":"first", "topic":{"id":id(5)}, "type":"task", "question":"First", "related":[{"ref":"later"}, 3]},
+        {"op":"item.edit", "item":{"ref":"first"}, "patch":{"related":[]}},
+        {"op":"item.add", "ref":"later", "topic":{"id":id(5)}, "type":"task", "question":"Later"}
+    ]})), 2);
+    assert!(malformed["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("operations[0] (item.add)"));
+    assert_eq!(setup.bytes(), before);
+}
+
+#[test]
+fn related_lists_are_limited_before_nested_and_superseded_forward_expansion() {
+    let setup = Setup::new(&seed());
+    let targets: Vec<_> = (0..33).map(|index| format!("target{index}")).collect();
+    for (operations, path) in [
+        (
+            json!([
+                {"op":"item.add", "topic":{"id":id(5)}, "type":"task", "question":"Linked task", "related":targets}
+            ]),
+            "operations[0].related",
+        ),
+        (
+            json!([
+                {"op":"item.edit", "item":{"id":"1"}, "patch":{"related":targets}}
+            ]),
+            "operations[0].patch.related",
+        ),
+        (
+            json!([
+                {"op":"item.add", "topic":{"id":id(5)}, "type":"task", "question":"Parent", "children":[
+                    {"type":"task", "question":"Child", "related":targets}
+                ]}
+            ]),
+            "operations[0].children[0].related",
+        ),
+        (
+            json!([
+                {"op":"item.add", "ref":"first", "topic":{"id":id(5)}, "type":"task", "question":"First", "related":targets},
+                {"op":"item.edit", "item":{"ref":"first"}, "patch":{"related":[]}},
+                {"op":"item.add", "ref":"target32", "topic":{"id":id(5)}, "type":"task", "question":"Later"}
+            ]),
+            "operations[0].related",
+        ),
+    ] {
+        let before = setup.bytes();
+        let error = envelope(&setup.apply(&json!({"operations":operations})), 2);
+        assert_eq!(error["error"]["code"], "invalid_argument", "{error}");
+        let message = error["error"]["message"].as_str().unwrap();
+        assert!(message.contains(path), "{error}");
+        if path.contains(".patch.") {
+            assert!(message.contains("item.edit, item 1"), "{error}");
+        } else {
+            assert!(message.contains("item.add, ref '"), "{error}");
+        }
+        assert!(message.contains("at most 32 related items"), "{error}");
+        assert_eq!(setup.bytes(), before, "refusal never changes saved items");
     }
 }
 
@@ -1670,6 +2064,76 @@ fn existing_summary_completion_waits_for_ack_and_replays_after_the_owner_acks() 
         assert_eq!(envelope(&setup.apply(&completion), 0), expected);
         assert_eq!(setup.bytes(), before_retry);
     }
+}
+
+#[test]
+fn thirty_two_related_items_are_accepted_on_add_and_edit() {
+    let setup = Setup::new(&seed());
+    let mut operations: Vec<_> = (0..32)
+        .map(|index| {
+            json!({
+                "op":"item.add", "ref":format!("target{index}"), "topic":{"id":id(5)},
+                "type":"finding", "question":format!("Evidence {index}")
+            })
+        })
+        .collect();
+    let targets: Vec<_> = (0..32).map(|index| format!("target{index}")).collect();
+    operations.push(json!({"op":"item.add", "topic":{"id":id(5)}, "type":"task",
+        "question":"Linked task", "related":targets}));
+    envelope(&setup.apply(&json!({"operations":operations})), 0);
+    let session = setup.store().read(&id(2)).unwrap();
+    let linked = &session.items.0[&ItemRef::new("35").unwrap()];
+    assert_eq!(linked.related.as_ref().unwrap().len(), 32);
+    let numbers: Vec<_> = (3..35).map(|number| number.to_string()).collect();
+    envelope(
+        &setup.apply(&json!({"expected_item_revisions":{"1":1}, "operations":[
+            {"op":"item.edit", "item":{"id":"1"}, "patch":{"related":numbers}}
+        ]})),
+        0,
+    );
+    assert_eq!(
+        setup.store().read(&id(2)).unwrap().items.0[&ItemRef::new("1").unwrap()]
+            .related
+            .as_ref()
+            .unwrap()
+            .len(),
+        32
+    );
+}
+
+#[test]
+fn related_targets_in_another_registered_session_are_not_resolved() {
+    let setup = Setup::new(&seed());
+    let mut other: Session = serde_json::from_str(
+        &serde_json::to_string(&seed())
+            .unwrap()
+            .replace(id(3).as_str(), id(203).as_str()),
+    )
+    .unwrap();
+    other.id = id(20);
+    let mut third = other.items.0[&ItemRef::new("2").unwrap()].clone();
+    third.id = ItemRef::new("3").unwrap();
+    third.ordinal = PositiveSafeInteger::new(3).unwrap();
+    other.counters.next_root = PositiveSafeInteger::new(4).unwrap();
+    other.items.0.insert(third.id.clone(), third);
+    other.messages[0]
+        .items_touched
+        .push(ItemRef::new("3").unwrap());
+    setup.store().create(&other).unwrap();
+    let before = setup.bytes();
+    let error = envelope(
+        &setup.apply(&json!({"expected_item_revisions":{"1":1}, "operations":[
+            {"op":"item.edit", "item":{"id":"1"}, "patch":{"related":["3"]}}
+        ]})),
+        2,
+    );
+    assert_eq!(error["error"]["code"], "invalid_ref", "{error}");
+    assert!(error["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("does not exist in this session"));
+    assert_eq!(setup.bytes(), before);
+    assert_eq!(setup.store().read(&id(20)).unwrap(), other);
 }
 
 #[test]

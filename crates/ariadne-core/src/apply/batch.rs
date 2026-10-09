@@ -52,6 +52,7 @@ pub(super) fn execute(
         touched: BTreeSet::new(),
         topics: BTreeSet::new(),
         activity: None,
+        pruned_related: UniqueMap(Default::default()),
     };
     if !request.summary.trim().is_empty()
         || !request.operations.is_empty()
@@ -146,6 +147,7 @@ pub(super) fn execute(
         ),
         input_result_state: result_state,
         queue_join_state: join_state,
+        pruned_related: (!batch.pruned_related.0.is_empty()).then_some(batch.pruned_related),
     })
 }
 
@@ -161,6 +163,7 @@ pub(super) struct Batch<'a, F> {
     touched: BTreeSet<ItemRef>,
     topics: BTreeSet<UuidV4>,
     activity: Option<UuidV4>,
+    pruned_related: UniqueMap<ItemRef, Vec<ItemRef>>,
 }
 impl<F: FnMut() -> UuidV4> Batch<'_, F> {
     /// Agent writes to an archived topic refuse with the stable reason
@@ -200,6 +203,78 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 )),
             },
         }
+    }
+    fn related(
+        &mut self,
+        session: &Session,
+        source: &ItemRef,
+        references: Option<&[EntityRef]>,
+        operation: &str,
+    ) -> Result<Option<Vec<ItemRef>>, CoreError> {
+        let Some(references) = references else {
+            return Ok(None);
+        };
+        if references.len() > 32 {
+            return Err(core(
+                CoreErrorCode::InvalidArgument,
+                format!(
+                    "{operation}: item {} has too many related items; use at most 32",
+                    source.as_str()
+                ),
+            ));
+        }
+        let mut seen = BTreeSet::new();
+        let mut targets = Vec::new();
+        for reference in references {
+            let target = self.item_ref(reference).map_err(|_| {
+                let label = match reference {
+                    EntityRef::Existing(existing) => existing.id.as_str(),
+                    EntityRef::Local(local) => local.r#ref.as_str(),
+                };
+                core(
+                    CoreErrorCode::InvalidRef,
+                    format!("{operation}: no item in this batch has ref '{label}'"),
+                )
+            })?;
+            if &target == source {
+                return Err(core(
+                    CoreErrorCode::InvalidRef,
+                    format!(
+                        "{operation}: related item {} is the item itself; remove that link",
+                        target.as_str()
+                    ),
+                ));
+            }
+            if !seen.insert(target.clone()) {
+                return Err(core(
+                    CoreErrorCode::InvalidRef,
+                    format!(
+                        "{operation}: related item {} appears more than once; list it once",
+                        target.as_str()
+                    ),
+                ));
+            }
+            if !session.items.0.contains_key(&target) {
+                let declared = session
+                    .items
+                    .0
+                    .get(source)
+                    .and_then(|item| item.related.as_ref());
+                if declared.is_some_and(|ids| ids.contains(&target)) {
+                    let pruned = self.pruned_related.0.entry(source.clone()).or_default();
+                    if !pruned.contains(&target) {
+                        pruned.push(target);
+                    }
+                    continue;
+                }
+                return Err(core(
+                    CoreErrorCode::InvalidRef,
+                    format!("{operation}: related item {} does not exist in this session; remove that link", target.as_str()),
+                ));
+            }
+            targets.push(target);
+        }
+        Ok(Some(targets))
     }
     pub fn uuid_ref(&self, reference: &UuidRef, topic: bool) -> Result<UuidV4, CoreError> {
         match reference {
@@ -456,6 +531,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             Operation::ItemAdd(draft) => self.add(session, draft)?,
             Operation::ItemEdit { item, patch } => {
                 let id = self.item_ref(item)?;
+                let related = self.related(session, &id, patch.related.as_deref(), "item.edit")?;
                 self.change(
                     session,
                     &id,
@@ -464,6 +540,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                         item_type: patch.item_type.clone(),
                         note: patch.note.clone(),
                         links: patch.links.clone(),
+                        related,
                         short: patch.short.clone(),
                     },
                 )?;
@@ -626,6 +703,20 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 "Allocated item ID already exists",
             ));
         }
+        if draft.related.as_ref().is_some_and(|related| {
+            related.iter().any(|reference| {
+                matches!(reference, EntityRef::Local(local) if local.r#ref == draft.r#ref)
+            })
+        }) {
+            return Err(core(
+                CoreErrorCode::InvalidRef,
+                format!(
+                    "item.add: related ref '{}' names item {} itself; remove that link",
+                    draft.r#ref.as_str(),
+                    id.as_str()
+                ),
+            ));
+        }
         let waiting = draft.status == ItemStatus::WaitingOnMe;
         if waiting && draft.owner != (ItemOwner::Me {}) {
             return Err(core(
@@ -672,6 +763,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             note: draft.note.clone(),
             options: draft.options.clone().unwrap_or_default(),
             links: draft.links.clone().unwrap_or_default(),
+            related: self.related(session, &id, draft.related.as_deref(), "item.add")?,
             outcome: draft.outcome.clone(),
             why: draft.why.clone(),
             replaced_by,

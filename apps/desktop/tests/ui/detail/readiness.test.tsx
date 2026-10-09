@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { SessionStore } from '../../../src/data/session-store';
 import { createDesktopService } from '../../../src/data/service';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
+import { useDetailSubmit } from '../../../src/ui/detail/submit';
 import { AppTransport, route } from '../app/transport';
 
 const stores: SessionStore[] = [];
@@ -21,6 +22,29 @@ async function setup() {
 }
 
 describe('detail actions while the owner view is stale', () => {
+  it('clears a refused send notice when saved drafts finish loading in an already ready session', async () => {
+    const transport = new AppTransport(), service = createDesktopService(transport);
+    const store = new SessionStore(service, route), drafts = new OwnerDraftStore(service);
+    stores.push(store);
+    await store.refresh();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'preferences_get') await gate;
+      return invoke(name, args);
+    });
+    const { result } = renderHook(() => useDetailSubmit(drafts, store, '1.1'));
+    await act(async () => { expect(await result.current.send('reply', 'Keep these words.')).toBe(false); });
+    expect(result.current.error).toBe(loadingError);
+    expect(result.current.ready).toBe(false);
+    expect(store.getSnapshot().status).toBe('ready');
+    await act(async () => { release(); await drafts.load(); });
+    expect(result.current.ready).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(sends(transport)).toHaveLength(0);
+  });
+
   it.each([{ itemId: '1', action: 'Follow up', label: 'Follow-up message' }, { itemId: '1.1', action: 'Reply', label: 'Reply message' }])('keeps $action and its words locked until saved drafts load', async ({ itemId, action, label }) => {
     const transport = new AppTransport(), service = createDesktopService(transport);
     const store = new SessionStore(service, route), drafts = new OwnerDraftStore(service);
@@ -149,6 +173,7 @@ describe('detail actions while the owner view is stale', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(screen.getByRole('alert')).toHaveProperty('textContent', loadingError);
     await act(async () => { release(); await store.refresh(); });
+    expect(screen.queryByText(loadingError)).toBeNull();
     expect(sends(transport)).toHaveLength(0);
     expect(drafts.find(route, '1', 'reopen')).toBeUndefined();
   });
@@ -187,7 +212,7 @@ describe('detail actions while the owner view is stale', () => {
     expect(session.items['1']!.status).toBe('done');
   });
 
-  it.each(['question', 'binding', 'status', 'waiting', 'refresh failure'] as const)('shows a plain refusal if %s changes during the reopen wait', async change => {
+  it.each(['question', 'binding', 'status', 'waiting', 'decided', 'outcome', 'why', 'refresh failure'] as const)('shows a plain refusal if %s changes during the reopen wait', async change => {
     const { transport, store, drafts } = await setup();
     render(<ItemDetail store={store} drafts={drafts} itemId="1" later={false} onOpenItem={vi.fn()} />);
     const invoke = transport.invoke.bind(transport);
@@ -208,12 +233,110 @@ describe('detail actions while the owner view is stale', () => {
     if (change === 'binding') session.active_binding_id = null;
     if (change === 'status') session.items['1']!.status = 'open';
     if (change === 'waiting') session.items['1']!.status = 'waiting_on_me';
+    if (change === 'decided') session.items['1']!.status = 'decided';
+    if (change === 'outcome') session.items['1']!.outcome = 'A different result to review.';
+    if (change === 'why') session.items['1']!.why = 'A different rationale to review.';
     await act(async () => { release(); });
-    const error = change === 'refresh failure' ? loadingError : change === 'status' || change === 'waiting'
-      ? 'This action is no longer available for the current item.' : 'This item changed. Review it before sending. Your text is kept.';
+    const error = change === 'refresh failure' ? loadingError : 'This item changed. Review it before sending. Your text is kept.';
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', error);
     expect(sends(transport)).toHaveLength(0);
     expect(drafts.find(route, '1', 'reopen')).toBeUndefined();
+  });
+
+  it('shows one alert for a failed answer in the waiting detail and retains the owner’s text', async () => {
+    const { transport, store, drafts } = await setup();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const box = await screen.findByLabelText('Reply in your own words');
+    await waitFor(() => expect((box as HTMLTextAreaElement).disabled).toBe(false));
+    fireEvent.change(box, { target: { value: 'Keep my exact answer.' } });
+    transport.failNext = 'input_submit';
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    await waitFor(() => expect(drafts.find(route, '2', 'answer')?.uncertain).toBe(true));
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect((box as HTMLTextAreaElement).value).toBe('Keep my exact answer.');
+    expect(sends(transport)).toHaveLength(1);
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = 'done'; ++session.items['2']!.revision; ++session.revision;
+    await act(async () => { await store.refresh(); });
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Keep my exact answer.');
+    expect(screen.getByRole('button', { name: 'Try sending again' })).toBeTruthy();
+  });
+
+  it('shows one alert when saving a waiting answer draft fails before submission', async () => {
+    const { transport, store, drafts } = await setup();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const box = await screen.findByLabelText<HTMLTextAreaElement>('Reply in your own words');
+    await waitFor(() => expect(box.disabled).toBe(false));
+    transport.failNext = 'preferences_patch';
+    fireEvent.change(box, { target: { value: 'Retain my unsent draft.' } });
+    await waitFor(() => expect(drafts.getSnapshot().preferenceUncertain).toBe(true));
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(box.value).toBe('Retain my unsent draft.');
+    expect(sends(transport)).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Try saving your draft again' })).toBeTruthy();
+  });
+
+  it.each(['waiting', 'retained'] as const)('keeps a distinct draft-store failure visible beside a failed %s answer', async view => {
+    const { transport, store, drafts } = await setup();
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'input_submit') return {
+        api_version: 1, ok: false, error: { code: 'queue_full', message: 'Queue full', hint: 'Retry.', retryable: true, field_errors: [] },
+      };
+      return invoke(name, args);
+    });
+    const session = store.getSnapshot().snapshot!.session;
+    const answer = drafts.begin(session, '2', 'answer')!;
+    drafts.edit(answer, { text: 'Keep the failed answer.' });
+    expect(await drafts.submit(answer)).toBe(false);
+    if (view === 'retained') {
+      const live = transport.sessions.get(route.session_id)!;
+      live.items['2']!.status = 'done'; ++live.items['2']!.revision; ++live.revision;
+      await store.refresh();
+    }
+    transport.failNext = 'preferences_patch';
+    const note = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'note')!;
+    drafts.edit(note, { text: 'Keep this separate note too.' });
+    await waitFor(() => expect(drafts.getSnapshot().preferenceUncertain).toBe(true));
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const alerts = screen.getAllByRole('alert').map(alert => alert.textContent);
+    expect(alerts).toEqual(expect.arrayContaining([
+      'Too many messages are waiting. Let the agent catch up, then try again.',
+      'Ariadne couldn’t reach its background service. Try again.',
+    ]));
+    expect(alerts).toHaveLength(2);
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Keep the failed answer.');
+    expect(drafts.getSnapshot().entries[note]!.draft.text).toBe('Keep this separate note too.');
+  });
+
+  it('clears only the numeric shortcut loading notice when the session refresh becomes ready', async () => {
+    const { transport, store, drafts } = await setup();
+    const live = transport.sessions.get(route.session_id)!;
+    live.items['2']!.options = [{ id: 'choice', label: 'Keep it', consequence: 'Keep this choice.', recommended: true }];
+    ++live.revision;
+    await store.refresh();
+    const session = store.getSnapshot().snapshot!.session, item = session.items['2']!;
+    const id = drafts.begin(session, item.id, 'answer')!;
+    drafts.edit(id, { text: 'Keep my exact note.' });
+    const invoke = transport.invoke.bind(transport);
+    let stale = true;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (stale && 'request' in args.request && args.request.request.command === 'session_get') return {
+        api_version: 1, ok: true, data: { kind: name, data: { session: structuredClone(live), freshness: 'stale' } },
+      };
+      return invoke(name, args);
+    });
+    await store.refresh();
+    render(<AnswerSlot store={store} drafts={drafts} itemId={item.id} onEscape={vi.fn()}
+      focusRequest={{ token: 1, intent: 'answer', sendOption: true, optionIndex: 0,
+        answerTarget: { optionId: item.options[0]!.id, revision: item.revision, questionRevision: item.question_revision, bindingId: session.active_binding_id } }} />);
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', loadingError);
+    stale = false;
+    await act(async () => { await store.refresh(); });
+    expect(screen.queryByText(loadingError)).toBeNull();
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Keep my exact note.');
+    expect(sends(transport)).toHaveLength(0);
   });
 
   it('explains a numeric shortcut blocked after its request was queued and keeps the note', async () => {
@@ -229,6 +352,8 @@ describe('detail actions while the owner view is stale', () => {
       onEscape={vi.fn()} focusRequest={{ token: 1, intent: 'answer', sendOption: true, optionIndex: 0,
         answerTarget: { optionId: item.options[0]!.id, revision: item.revision, questionRevision: item.question_revision, bindingId: session.active_binding_id } }} />);
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'The agent is reconnecting. Try again shortly.');
+    await act(async () => { await store.refresh(); });
+    expect(screen.getByRole('alert')).toHaveProperty('textContent', 'The agent is reconnecting. Try again shortly.');
     expect(screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Keep my exact note.');
     expect(sends(transport)).toHaveLength(0);
   });

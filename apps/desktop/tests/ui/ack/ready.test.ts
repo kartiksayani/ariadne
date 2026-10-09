@@ -95,3 +95,17 @@ it('allows a new click to report its own readiness failure after the previous se
   expect(await second).toBe("Ariadne is still loading this session's latest changes. Try again.");
   expect(transport.mutations).toHaveLength(0);
 });
+
+it('explains an uncertain save that appeared while Ack waited for the ready session', async () => {
+  const { transport, store, state, actions } = await ready();
+  const action = actions.getSnapshot();
+  vi.spyOn(store, 'refresh').mockImplementation(async () => {
+    vi.mocked(store.getSnapshot).mockReturnValue(state);
+    vi.spyOn(actions, 'getSnapshot').mockReturnValue({ ...action, pending: { session: route, command: {
+      command: 'session_label_set', api_version: 1, op_id: crypto.randomUUID(), params: { name: 'Earlier name', description: null },
+    } } });
+  });
+  expect(await acknowledge(actions, '1.1').catch(ackFailure))
+    .toBe('Ariadne isn’t sure your last change was saved. Check again before trying Ack.');
+  expect(transport.mutations).toHaveLength(0);
+});

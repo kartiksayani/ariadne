@@ -263,6 +263,7 @@ pub enum ContinueReadiness {
 #[serde(rename_all = "snake_case")]
 pub enum ContinueBlockReason {
     SameSession,
+    SourceArchived,
     TargetClosed,
     BindingUnknown,
     BindingAmbiguous,

@@ -127,6 +127,18 @@ Topic and Item also carry optional `short` (ADR-0084): an agent-written 2-4 word
 label, trimmed, one line, at most 40 characters; omitted from JSON when absent, so
 stores written before it load and re-serialize unchanged.
 
+Item also carries optional `related: ItemRef[]`, at most 32 declarations
+([ADR-0094](../../adr/ADR-0094-item-links.md)).
+Declarations mean related in both directions within the same session, including
+across topics. Absent stays absent on serialization. Explicit writes reject self
+and duplicate targets and require existing targets, except a removed target
+already declared by that item may be resent. That related-list write prunes the
+removed targets and records their numbers in the saved receipt's `pruned_related`
+map. Stored dangling targets are tolerated after removal; reads and the UI show
+only live targets. New missing targets are refused with the operation and target.
+Continuation remaps only targets
+in the copied set. Inline Markdown item references do not declare relations.
+
 Item: `{id,ordinal,topic_id,parent,question,type,status,ack_to?,owner,revision,
 question_revision,next_child,ask,note,options,links,outcome,why,replaced_by,
 created_at,updated_at,created_message_id,updated_message_ids,status_history,
@@ -140,10 +152,14 @@ the lenient CLI repairs Decided/Done/Dropped to Open with the requested target,
 including nested children, and reports the repair. Open or InProgress items
 with a target may retain intended outcome/why text. item.status open/in_progress
 can set a target; omission keeps it and its existing text. Strict core refuses an
-agent terminal transition or replacement while the item has a target. The lenient
-CLI repairs terminal status requests to Open with the requested target and full
-completion text, independent of live state so exact retries remain stable. Owner
-Ack clears the target. An unanswered ask must keep its owner answer route: new asks
+agent terminal status while the item has a target, unless an authenticated Answer,
+Reply or Drop input targets that same item and directs completion. Such completion
+and item.replace clear ack_to. Existing items without a target retain terminal
+transitions. The lenient CLI repairs other terminal status requests on existing
+Ack items to Open with the requested target and full completion text. The repair
+uses live state under the store lock after replay lookup; operation identity and
+digest still follow the original request, so exact retries remain stable after Ack.
+Owner Ack clears the target. An unanswered ask must keep its owner answer route: new asks
 start Waiting on me with a round; lenient filing repairs explicit Open/InProgress
 asks accordingly, preserving the proposal.
 `owner={kind:me}|{kind:agent,binding_id}|{kind:other,name}`.
@@ -808,7 +824,9 @@ pause. Restore/reopen preserve domain/delivery history and IDs. CLI/CoreService
 consumer routing is a separate composition task.
 
 Continue is a **copy**, not shared mutable topic membership. Read a validated
-source snapshot and include source revision/hash in preview. Owner chooses an
+source snapshot and include source revision/hash in preview. An archived source
+session must be restored before continuing; a closed unarchived source remains
+eligible. Owner chooses an
 existing bound target session and confirms. Under target lock allocate new topic,
 items, messages and rounds; remap all internal refs in two passes; preserve full
 bodies and origin references. Continue is the owner's action, so terminal copies

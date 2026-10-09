@@ -1605,3 +1605,128 @@ fn archived_sessions_have_separate_totals_readable_history_and_no_aggregate_wait
     ));
     assert!(setup.query(&agent, &message_request(None, 100)).is_ok());
 }
+
+#[test]
+fn related_projection_skips_missing_targets_without_changing_saved_data() {
+    let mut session = seed();
+    let related = Some(vec![reference("2"), reference("99")]);
+    session.items.0.get_mut(&reference("1")).unwrap().related = related.clone();
+    let setup = Setup::new(&session);
+    let QueryResult::SessionRead(SessionReadResult::Items(items)) = setup
+        .query(
+            &owner(),
+            &QueryRequest::SessionRead(SessionReadRequest {
+                selection: ReadView::Items {
+                    topic_id: None,
+                    item_id: Some(reference("1")),
+                    parent_item_id: None,
+                    statuses: vec![],
+                    archived: None,
+                },
+                cursor: None,
+                limit: limit(100),
+                item_pages: vec![],
+            }),
+        )
+        .unwrap()
+    else {
+        panic!("items")
+    };
+    assert_eq!(items.items[0].item.related, Some(vec![reference("2")]));
+    assert_eq!(setup.saved().items.0[&reference("1")].related, related);
+}
+
+#[test]
+fn archived_related_reads_stay_in_the_same_session_and_create_no_owner_input() {
+    let mut session = seed();
+    let related = Some(vec![reference("2"), reference("99")]);
+    session.items.0.get_mut(&reference("1")).unwrap().related = related.clone();
+    let setup = Setup::new(&session);
+    let mut other = seed();
+    other.id = id(20);
+    let mut foreign = other.items.0[&reference("2")].clone();
+    foreign.id = reference("99");
+    foreign.ordinal = p(99);
+    foreign.question = "This item exists only in the other session".into();
+    other
+        .messages
+        .iter_mut()
+        .find(|message| message.id == foreign.created_message_id)
+        .unwrap()
+        .items_touched
+        .push(foreign.id.clone());
+    other.items.0.insert(foreign.id.clone(), foreign);
+    other.counters.next_root = p(100);
+    Store::open_registered(&store_dir(setup._home.path(), 1), id(1))
+        .unwrap()
+        .create(&other)
+        .unwrap();
+    ariadne_core::history_actions::HistoryActionService::new(&setup.registry)
+        .execute(
+            &owner_context(),
+            &OwnerCommand::SessionArchive {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(100),
+                params: SessionLifecycleParams {
+                    expected_revision: p(1),
+                },
+            },
+            UtcMillis::new("2026-10-09T12:00:00.000Z").unwrap(),
+        )
+        .unwrap();
+    let before = fs::read(setup.path()).unwrap();
+    let request = QueryRequest::SessionRead(SessionReadRequest {
+        selection: ReadView::Items {
+            topic_id: None,
+            item_id: Some(reference("1")),
+            parent_item_id: None,
+            statuses: vec![],
+            archived: None,
+        },
+        cursor: None,
+        limit: limit(100),
+        item_pages: vec![],
+    });
+    for context in [owner(), agent(0)] {
+        let QueryResult::SessionRead(SessionReadResult::Items(items)) =
+            setup.query(&context, &request).unwrap()
+        else {
+            panic!("items")
+        };
+        assert_eq!(items.items[0].item.related, Some(vec![reference("2")]));
+    }
+    let archived = setup.saved();
+    assert!(archived.archived_at.is_some());
+    assert_eq!(archived.items.0[&reference("1")].related, related);
+    assert!(archived.inputs.0.is_empty());
+    assert_eq!(fs::read(setup.path()).unwrap(), before);
+    let submit = OwnerCommand::InputSubmit {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(101),
+        params: InputSubmitParams {
+            binding_id: id(3),
+            target: InputTarget {
+                topic_id: id(5),
+                item_id: Some(reference("2")),
+            },
+            kind: InputKind::Note,
+            text: "Keep the related item readable".into(),
+            selected_option_id: None,
+            expected_question_revision: None,
+            supersedes_answer_id: None,
+        },
+    };
+    assert!(matches!(
+        InputService::new(&setup.registry).execute(
+            &owner_context(),
+            &submit,
+            || panic!("archived input cannot allocate"),
+            UtcMillis::new("2026-10-09T12:00:00.000Z").unwrap(),
+        ),
+        Err(ariadne_core::inputs::InputError::Core(CoreError {
+            code: CoreErrorCode::InvalidTransition,
+            ..
+        }))
+    ));
+    assert_eq!(fs::read(setup.path()).unwrap(), before);
+}

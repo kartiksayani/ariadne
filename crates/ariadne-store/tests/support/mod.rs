@@ -116,6 +116,7 @@ pub fn reply(
         topic_revisions: UniqueMap(std::collections::BTreeMap::new()),
         input_result_state: None,
         queue_join_state: None,
+        pruned_related: None,
     })
 }
 

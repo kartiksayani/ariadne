@@ -34,6 +34,8 @@ Restore, reading, and Remove remain available there.
 
 Archived sessions stay readable through desktop, agent reads, and CLI. Owner
 input and reconnecting are refused with instructions to restore and reopen.
+Related item links remain readable within the same archived session. Continue
+from an archived session is refused until the source session is restored.
 Ordinary totals, project counts, menus, the tray, Waiting, discovery targets,
 and connection choices exclude archived sessions. The full session catalogue
 retains them and reports a separate `archived_total`.

@@ -24,6 +24,10 @@ impl HistoryActionService<'_> {
             ContinueReadiness::Blocked {
                 reasons: vec![ContinueBlockReason::SameSession],
             }
+        } else if source.archived_at.is_some() {
+            ContinueReadiness::Blocked {
+                reasons: vec![ContinueBlockReason::SourceArchived],
+            }
         } else if target.state != SessionState::Active || target.archived_at.is_some() {
             ContinueReadiness::Blocked {
                 reasons: vec![ContinueBlockReason::TargetClosed],

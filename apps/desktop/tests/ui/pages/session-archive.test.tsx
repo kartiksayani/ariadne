@@ -20,8 +20,13 @@ import sessions from '../../../../../fixtures/domain/projections/sessions.json';
 import type { DesktopDiscoveryCandidate, OwnerDraft, OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
 import { closeImpact } from '../../../src/components/history-actions/selectors';
 import type { ProjectSummary, Session, SessionSummary } from '../../../src/generated/domain/models';
+import { SessionActionControllers } from '../../../src/components/bindings/actions';
+import { SessionLists } from '../../../src/ui/pages/SessionLists';
+import { ArchiveSessionDialog, CloseSessionDialog } from '../../../src/ui/pages/SessionDialogs';
+import { pendingError, savingError } from '../../../src/ui/shared/lifecycleReady';
 
-afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
+const barrierNavigations: NavigationStore[] = [];
+afterEach(() => { cleanup(); notices.clear(); barrierNavigations.splice(0).forEach(navigation => navigation.stop()); vi.restoreAllMocks(); vi.useRealTimers(); });
 const card = () => document.querySelector<HTMLElement>(`[data-session-card="${route.session_id}"]`)!;
 const commands = (transport: AppTransport) => transport.mutations.filter(request => request.command.command !== 'preferences_patch').map(request => request.command.command);
 async function setup(pending = false, all = false, transport = new AppTransport()) {
@@ -52,6 +57,188 @@ async function unfold() {
   await act(async () => { fireEvent.click(fold); });
   await screen.findAllByText('Review notes');
 }
+
+async function barrierSetup(archived = false, confirmation = false) {
+  const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+  session.name = 'Review notes';
+  if (archived) { session.state = 'closed'; session.closed_at = session.updated_at; session.archived_at = session.updated_at; }
+  transport.preferences.global.session_archive_expanded_project_ids = [route.project_id];
+  const service = createDesktopService(transport), navigation = new NavigationStore(service);
+  barrierNavigations.push(navigation);
+  await navigation.start();
+  const store = navigation.opened.open(route); await store.refresh();
+  const controllers = new SessionActionControllers(service), actions = controllers.forSession(store);
+  const onSaved = vi.fn(), onClose = vi.fn();
+  const view = confirmation
+    ? render(<ArchiveSessionDialog store={store} actions={actions} agent="codex" onClose={onClose} onSaved={onSaved} />)
+    : render(<SessionLists navigation={navigation} actions={controllers} groups={[{ project: navigation.getSnapshot().projects!.projects.items[0], openLink: false }]}
+      sessions={navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} openTabs={new Set()} now={Date.now()} disabled={false}
+      onOpenProject={() => undefined} onOpenSession={() => undefined} onRemove={async () => true} />);
+  return { transport, session, store, actions, onSaved, onClose, ...view };
+}
+
+/** Hold both the actual save and its reader's volatile-presence refresh. */
+function holdPause(transport: AppTransport) {
+  let save!: () => void, presence!: () => void, saved = false;
+  const saveGate = new Promise<void>(resolve => { save = resolve; });
+  const presenceGate = new Promise<void>(resolve => { presence = resolve; });
+  const invoke = transport.invoke.bind(transport);
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if ('command' in args.request && args.request.command.command === 'binding_pause') {
+      await saveGate;
+      const result = await invoke(name, args); saved = true; return result;
+    }
+    if (saved && name === 'session_list') await presenceGate;
+    return invoke(name, args);
+  });
+  return { save, presence };
+}
+
+function pause(fixture: Awaited<ReturnType<typeof barrierSetup>>) {
+  const binding = fixture.session.bindings[fixture.session.active_binding_id!]!;
+  return fixture.actions.execute({ command: 'binding_pause', api_version: 1, op_id: '', params: { binding_id: binding.id, expected_generation: binding.generation } }, fixture.session.revision);
+}
+
+describe('Session lifecycle write readiness', () => {
+  it.each([false, true])('waits for a save and its presence refresh before %s Archive/Restore uses the current revision', async archived => {
+    const fixture = await barrierSetup(archived), gates = holdPause(fixture.transport);
+    let write!: Promise<boolean>;
+    await act(async () => { write = pause(fixture); });
+    const original = fixture.session.revision;
+    await act(async () => { fireEvent.click(within(card()).getByRole('button', { name: archived ? 'Restore' : 'Archive' })); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(commands(fixture.transport)).toEqual([]);
+    await act(async () => { gates.save(); });
+    await waitFor(() => expect(fixture.actions.getSnapshot()).toMatchObject({ writing: true, pending: null }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(commands(fixture.transport)).toEqual(['binding_pause']);
+    await act(async () => { gates.presence(); await write; });
+    if (!archived) {
+      const dialog = await screen.findByRole('dialog', { name: 'Archive this session?' });
+      await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Archive session' })); });
+    }
+    await waitFor(() => expect(commands(fixture.transport)).toEqual(['binding_pause', archived ? 'session_restore' : 'session_archive']));
+    expect(fixture.transport.mutations.at(-1)?.command).toMatchObject({ params: { expected_revision: original + 1 } });
+  });
+
+  it('refuses a different lifecycle action while an uncertain saved action still needs Check again', async () => {
+    const fixture = await barrierSetup();
+    fixture.transport.failNext = 'binding_pause';
+    await act(async () => { expect(await pause(fixture)).toBe(false); });
+    const pending = fixture.actions.getSnapshot().pending;
+    await act(async () => { fireEvent.click(within(card()).getByRole('button', { name: 'Archive' })); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(commands(fixture.transport)).toEqual(['binding_pause']);
+    expect(fixture.actions.getSnapshot().pending).toBe(pending);
+    expect(notices.getSnapshot().map(notice => notice.text)).toContain(pendingError);
+  });
+
+  it('times out Restore in plain words and never submits it when the old write eventually finishes', async () => {
+    const fixture = await barrierSetup(true), gates = holdPause(fixture.transport);
+    vi.useFakeTimers();
+    let write!: Promise<boolean>;
+    await act(async () => { write = pause(fixture); fireEvent.click(within(card()).getByRole('button', { name: 'Restore' })); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(notices.getSnapshot().map(notice => notice.text)).toContain(savingError);
+    await act(async () => { gates.save(); gates.presence(); await write; });
+    expect(commands(fixture.transport)).toEqual(['binding_pause']);
+    expect(fixture.session.archived_at).toBeTruthy();
+  });
+
+  it('requires a renewed archive confirmation when a concurrent save refreshes its cancellation impacts', async () => {
+    const fixture = await barrierSetup(false, true), gates = holdPause(fixture.transport);
+    let write!: Promise<boolean>;
+    await act(async () => { write = pause(fixture); fireEvent.click(screen.getByRole('button', { name: 'Archive session' })); });
+    // A question becomes waiting as the save reaches disk, before its fresh reader completes.
+    const item = Object.values(fixture.session.items).find(item => item?.status !== 'waiting_on_me')!;
+    item.status = 'waiting_on_me';
+    await act(async () => { gates.save(); });
+    await waitFor(() => expect(fixture.actions.getSnapshot()).toMatchObject({ writing: true, pending: null }));
+    expect(commands(fixture.transport)).toEqual(['binding_pause']);
+    await act(async () => { gates.presence(); await write; });
+    expect(screen.getByText('The session changed. Check the updated details, then confirm again.')).toBeTruthy();
+    expect(screen.getByText(new RegExp(`${closeImpact(fixture.session).questions} questions are waiting`))).toBeTruthy();
+    expect(fixture.onSaved).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Archive session' })); });
+    expect(commands(fixture.transport)).toEqual(['binding_pause', 'session_archive']);
+    expect(fixture.onSaved).toHaveBeenCalledOnce();
+  });
+
+  it('cancels an archive confirmation wait without a late save after the previous write finishes', async () => {
+    const fixture = await barrierSetup(false, true), gates = holdPause(fixture.transport);
+    let write!: Promise<boolean>;
+    await act(async () => { write = pause(fixture); fireEvent.click(screen.getByRole('button', { name: 'Archive session' })); });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(fixture.onClose).toHaveBeenCalledOnce();
+    fixture.unmount();
+    await act(async () => { gates.save(); gates.presence(); await write; });
+    expect(commands(fixture.transport)).toEqual(['binding_pause']);
+    expect(fixture.onSaved).not.toHaveBeenCalled();
+  });
+
+  it('Close confirmation also waits for a saved change to finish refreshing before using its revision', async () => {
+    const fixture = await barrierSetup(false, true), gates = holdPause(fixture.transport);
+    fixture.rerender(<CloseSessionDialog store={fixture.store} actions={fixture.actions} agent="codex" when="Today" onClose={fixture.onClose} />);
+    const original = fixture.session.revision;
+    let write!: Promise<boolean>;
+    await act(async () => { write = pause(fixture); fireEvent.click(screen.getByRole('button', { name: 'Close session' })); });
+    await act(async () => { gates.save(); });
+    await waitFor(() => expect(fixture.actions.getSnapshot()).toMatchObject({ writing: true, pending: null }));
+    expect(commands(fixture.transport)).toEqual(['binding_pause']);
+    await act(async () => { gates.presence(); await write; });
+    await waitFor(() => expect(fixture.onClose).toHaveBeenCalledOnce());
+    expect(commands(fixture.transport)).toEqual(['binding_pause', 'session_close']);
+    expect(fixture.transport.mutations.at(-1)?.command).toMatchObject({ params: { expected_revision: original + 1 } });
+  });
+
+  it('card Rename waits for the same post-save refresh before saving the entered label', async () => {
+    const fixture = await barrierSetup(), gates = holdPause(fixture.transport);
+    fireEvent.click(within(card()).getByRole('button', { name: 'Rename' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Ready to review' } });
+    let write!: Promise<boolean>;
+    await act(async () => { write = pause(fixture); fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
+    await act(async () => { gates.save(); });
+    await waitFor(() => expect(fixture.actions.getSnapshot()).toMatchObject({ writing: true, pending: null }));
+    expect(commands(fixture.transport)).toEqual(['binding_pause']);
+    await act(async () => { gates.presence(); await write; });
+    await waitFor(() => expect(fixture.session.name).toBe('Ready to review'));
+    expect(commands(fixture.transport)).toEqual(['binding_pause', 'session_label_set']);
+  });
+
+  it.each(['Archive', 'Rename'] as const)('leaving the session page cancels its %s wait before the old save finishes', async action => {
+    const fixture = await barrierSetup(), gates = holdPause(fixture.transport);
+    let write!: Promise<boolean>;
+    await act(async () => { write = pause(fixture); });
+    fireEvent.click(within(card()).getByRole('button', { name: action }));
+    if (action === 'Rename') {
+      fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Ready to review' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    }
+    fixture.unmount();
+    await act(async () => { gates.save(); gates.presence(); await write; });
+    expect(commands(fixture.transport)).toEqual(['binding_pause']);
+    expect(fixture.session.name).toBe('Review notes');
+    expect(notices.getSnapshot()).toEqual([]);
+  });
+
+  it('Undo waits for a different save to settle and preserves its original revision guard', async () => {
+    const fixture = await barrierSetup();
+    await archive();
+    await waitFor(() => expect((within(card()).getByRole('button', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(false));
+    const undo = notices.getSnapshot().find(notice => notice.actions?.[0]?.label === 'Undo')!.actions![0].run;
+    const gates = holdPause(fixture.transport);
+    let write!: Promise<boolean>;
+    await act(async () => { write = pause(fixture); undo(); undo(); });
+    expect(commands(fixture.transport)).toEqual(['session_archive']);
+    await act(async () => { gates.save(); });
+    await waitFor(() => expect(fixture.actions.getSnapshot()).toMatchObject({ writing: true, pending: null }));
+    expect(commands(fixture.transport)).toEqual(['session_archive', 'binding_pause']);
+    await act(async () => { gates.presence(); await write; });
+    expect(commands(fixture.transport)).toEqual(['session_archive', 'binding_pause']);
+    expect(fixture.session.archived_at).toBeTruthy();
+    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toContain('The session could not be changed. Try again.'));
+  });
+});
 
 describe('Session archive cards', () => {
   it('keeps session archive confirmation counts unchanged by Open Ack proposals', async () => {

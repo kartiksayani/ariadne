@@ -1648,6 +1648,72 @@ fn session_archive_of_closed_session_only_changes_archive_and_lifecycle_history(
 }
 
 #[test]
+fn archived_source_blocks_continuation_and_old_preview_becomes_stale_without_writes() {
+    let setup = Setup::new(&seed());
+    setup.store().create(&target_seed()).unwrap();
+    let service = HistoryActionService::new(&setup.registry);
+    let initial = service.preview(&target_context(), &request(id(5))).unwrap();
+    assert!(matches!(initial.readiness, ContinueReadiness::Ready { .. }));
+    service
+        .execute(&context(), &command("session_archive", 1, 300), at())
+        .unwrap();
+    let source_bytes = setup.bytes();
+    let target_bytes = fs::read(session_path(&setup, 20)).unwrap();
+    assert_eq!(
+        error(service.continue_topic(
+            &target_context(),
+            &continuing(&initial, 200),
+            || panic!("archiving invalidates the old preview before allocation"),
+            at(),
+        ))
+        .code,
+        CoreErrorCode::PreviewStale
+    );
+    let archived = service.preview(&target_context(), &request(id(5))).unwrap();
+    assert!(matches!(
+        &archived.readiness,
+        ContinueReadiness::Blocked { reasons }
+            if reasons == &vec![ContinueBlockReason::SourceArchived]
+    ));
+    assert_eq!(
+        error(service.continue_topic(
+            &target_context(),
+            &continuing(&archived, 201),
+            || panic!("archived source cannot allocate"),
+            at(),
+        ))
+        .code,
+        CoreErrorCode::InvalidTransition
+    );
+    assert_eq!(setup.bytes(), source_bytes);
+    assert_eq!(fs::read(session_path(&setup, 20)).unwrap(), target_bytes);
+    assert!(setup.store().read(&id(20)).unwrap().inputs.0.is_empty());
+    // Restore leaves the source closed; history can still be continued from it.
+    service
+        .execute(&context(), &command("session_restore", 2, 301), at())
+        .unwrap();
+    let restored_bytes = setup.bytes();
+    let restored = service.preview(&target_context(), &request(id(5))).unwrap();
+    assert!(matches!(
+        restored.readiness,
+        ContinueReadiness::Ready { .. }
+    ));
+    service
+        .continue_topic(
+            &target_context(),
+            &continuing(&restored, 202),
+            allocator(10000),
+            at(),
+        )
+        .unwrap();
+    assert_eq!(setup.bytes(), restored_bytes);
+    assert_eq!(
+        setup.store().read(&id(2)).unwrap().state,
+        SessionState::Closed
+    );
+}
+
+#[test]
 fn legacy_session_read_and_refused_archive_leave_original_store_bytes_untouched() {
     let setup = Setup::new(&seed());
     fs::write(

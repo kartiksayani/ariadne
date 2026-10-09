@@ -117,6 +117,9 @@ pub struct ItemPatch {
     #[ts(optional, type = "string | null")]
     pub note: Option<Option<String>>,
     pub links: Option<Vec<ItemLinkTarget>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub related: Option<Vec<EntityRef>>,
     #[serde(
         default,
         deserialize_with = "crate::wire::nullable_patch",
@@ -162,6 +165,9 @@ pub struct ItemAddOperation {
     pub options: Option<Vec<ItemOption>>,
     pub note: Option<String>,
     pub links: Option<Vec<ItemLinkTarget>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub related: Option<Vec<EntityRef>>,
     pub outcome: Option<String>,
     pub why: Option<String>,
     pub replaced_by: Option<EntityRef>,

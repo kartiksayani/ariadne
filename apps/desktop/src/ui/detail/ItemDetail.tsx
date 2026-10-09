@@ -17,7 +17,7 @@ import { StuckNote } from '../answer/StuckNote';
 import { NotSentLine } from '../answer/NotSentLine';
 import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain } from '../answer/held';
 import { useGrow } from '../answer/useGrow';
-import { AnswerSlot, changedText } from './AnswerSlot';
+import { AnswerSlot, answerSlotError, changedText } from './AnswerSlot';
 import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, singleParagraph, useProjectFile } from '../shared/MarkdownText';
 import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
@@ -68,6 +68,7 @@ export interface ItemDetailProps {
   readonly earlierAgent?: string | null;
   /** Where a copied item came from (its Source item button): shown with the item's references, not under the composer. */
   readonly provenance?: ReactNode;
+  readonly hiddenItemIds?: readonly string[];
 }
 
 const sectionLabel = (text: string) => <div className="detail-label">{text}</div>;
@@ -181,13 +182,15 @@ function ItemLink({ link }: { readonly link: LinkView }) {
   return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
-export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance }: ItemDetailProps) {
+export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
+  const item = session?.items[itemId], topic = item ? session?.topics[item.topic_id] : undefined;
+  const archived = session?.archived_at != null || topic?.archived_at != null;
   const submit = useDetailSubmit(drafts, store, itemId);
   const draftState = useOwnerDrafts(drafts);
-  // An attempted answer stays reachable here (Try sending again) after the item stops waiting.
+  // An attempted or failed answer stays reachable here after the item stops waiting.
   const retained = session && draftState.ready ? drafts.find({ project_id: session.project_id, session_id: session.id }, itemId, 'answer') : undefined;
-  const retainedAnswer = !!retained?.uncertain;
+  const retainedAnswer = !archived && !!(retained?.uncertain || retained?.error);
   const [mode, setMode] = useState<OpenMode | null>(null);
   const [focusBox, setFocusBox] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -206,8 +209,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
-    replyDraft: mode === 'reply' || submit.written.length > 0 }) : null;
-  const item = session?.items[itemId];
+    replyDraft: mode === 'reply' || submit.written.length > 0, hiddenItemIds }) : null;
   const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
   // boxes (drop reason, follow-up on a finished item) open on press.
@@ -391,6 +393,15 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       <ChildrenBox kids={model.kids} onOpen={onOpenItem} />
     </section>}
 
+    {model.related.length > 0 && <section className="detail-section detail-related" aria-label="Related items">
+      {sectionLabel('Related items')}
+      {model.related.map(target => <button key={target.id} type="button" className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`}
+        title={target.question} aria-label={`#${target.id} ${target.label}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`} onClick={() => onOpenItem(target.id)}>
+        <span className="detail-related-number">#{target.id}</span><span className="detail-related-label">{target.label}</span>
+        {target.hidden && <span className="detail-related-hidden">Hidden</span>}<StatusBadge status={target.status} variant="text" />
+      </button>)}
+    </section>}
+
     {model.links.length > 0 && <section className="detail-section detail-links" aria-label="Item links">
       {sectionLabel('Links')}
       {model.links.map((link, index) => <ItemLink key={index} link={link} />)}
@@ -457,7 +468,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </button><span className="detail-hint">Mark {STATUS[ackTo].label}</span>
     </section>}
     {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
-    {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
+    {submit.error && !((model.answer || retainedAnswer) && submit.error === answerSlotError(draftState, retained))
+      && <p className="detail-error" role="alert">{submit.error}</p>}
     {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
       {sectionLabel(model.open.title)}
       <div className="detail-actions" role="group" aria-label="Item actions">

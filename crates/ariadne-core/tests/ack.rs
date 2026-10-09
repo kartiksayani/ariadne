@@ -96,6 +96,13 @@ fn native_ack_preserves_prose_records_owner_history_and_dispatches_nothing() {
         let item = source.items.0.get_mut(&key).unwrap();
         item.outcome = Some("Exact proposed outcome\nwith retained details.".into());
         item.why = Some("Exact proposed reason.".into());
+        item.related = Some(vec![ItemRef::new("2").unwrap()]);
+        source
+            .items
+            .0
+            .get_mut(&ItemRef::new("2").unwrap())
+            .unwrap()
+            .related = Some(vec![key.clone()]);
         let setup = Setup::new(&source);
         let before = setup.read();
         let core = NativeCoreService::new(
@@ -122,6 +129,12 @@ fn native_ack_preserves_prose_records_owner_history_and_dispatches_nothing() {
         assert_eq!(item.ack_to, None);
         assert_eq!(item.outcome, before.items.0[&key].outcome);
         assert_eq!(item.why, before.items.0[&key].why);
+        assert_eq!(item.related, before.items.0[&key].related);
+        assert_eq!(
+            saved.items.0[&ItemRef::new("2").unwrap()],
+            before.items.0[&ItemRef::new("2").unwrap()],
+            "Ack preserves incoming links without changing their source"
+        );
         assert_eq!(item.revision, p(2));
         assert_eq!(saved.inputs, before.inputs);
         assert_eq!(saved.bindings, before.bindings);

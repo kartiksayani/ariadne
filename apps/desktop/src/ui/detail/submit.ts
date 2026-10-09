@@ -15,6 +15,7 @@ import type { WordsKind } from './model';
 
 export type DetailIntent = Exclude<OwnerIntent, 'answer' | 'bring'>;
 const WORDS: ReadonlySet<string> = new Set<WordsKind>(['reply', 'note', 'followup']);
+const loadingError = "Ariadne is still loading this session's latest changes. Try again.";
 
 /** One of the item's drafts of the owner's words, as the dock shows it. */
 export interface Words {
@@ -60,6 +61,7 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
   const [sendError, setSendError] = useState<string | null>(null);
   const [reopening, setReopening] = useState(false);
+  const ready = state.ready && current.status === 'ready' && !current.error && !!session;
   const request = useRef<{ cancelled: boolean } | null>(null);
   useEffect(() => { void drafts.load(); }, [drafts]);
   useEffect(() => {
@@ -67,6 +69,9 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
     setReopening(false);
     return () => { if (request.current) request.current.cancelled = true; request.current = null; };
   }, [drafts, store, itemId]);
+  useEffect(() => {
+    if (ready) setSendError(error => error === loadingError ? null : error);
+  }, [ready, current.snapshot]);
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const find = (intent: DetailIntent): DraftEntry | undefined => route ? drafts.find(route, itemId, intent) : undefined;
   const intentOf = (target: DraftTarget): DetailIntent => typeof target === 'string' ? target : target.kind;
@@ -93,10 +98,9 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
   const lockedEntry = (entry: DraftEntry | undefined) => !state.ready || state.preferenceUncertain || (!!entry && (entry.saving || entry.uncertain));
   const changed = (target: DraftTarget) => changedEntry(entryOf(target));
   const review = (target: DraftTarget) => { const entry = entryOf(target); if (session && entry) { setSendError(null); drafts.review(entry.draft.op_id, session); } };
-  const ready = state.ready && current.status === 'ready' && !current.error && !!session;
   const mine = Object.values(state.entries).filter(entry => route && entry.draft.session.project_id === route.project_id
     && entry.draft.session.session_id === route.session_id && entry.draft.target.item_id === itemId);
-  const failed = mine.find(entry => entry.error);
+  const failed = mine.find(entry => entry.draft.intent !== 'answer' && entry.error);
   const written = mine.filter(entry => !entry.receipt && WORDS.has(entry.draft.intent) && entry.draft.text.trim())
     .map((entry): Words => ({ id: entry.draft.op_id, kind: entry.draft.intent as WordsKind, text: entry.draft.text, locked: lockedEntry(entry), changed: changedEntry(entry) }));
   return {
@@ -126,10 +130,13 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
         const sendingSession = latest.snapshot?.session;
         if (!drafts.getSnapshot().ready || !sendingSession || latest.status !== 'ready' || latest.error
             || (!attempt && sendingSession !== session)) {
-          setSendError("Ariadne is still loading this session's latest changes. Try again.");
+          setSendError(loadingError);
           return false;
         }
         if (attempt && (sendingSession.items[itemId]?.question !== session?.items[itemId]?.question
+            || sendingSession.items[itemId]?.status !== session?.items[itemId]?.status
+            || sendingSession.items[itemId]?.outcome !== session?.items[itemId]?.outcome
+            || sendingSession.items[itemId]?.why !== session?.items[itemId]?.why
             || sendingSession.active_binding_id !== session?.active_binding_id)) {
           setSendError('This item changed. Review it before sending. Your text is kept.');
           return false;

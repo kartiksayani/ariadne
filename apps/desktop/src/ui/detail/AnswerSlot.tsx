@@ -5,12 +5,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
-import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
+import { useOwnerDrafts, type DraftEntry, type DraftState, type OwnerDraftStore } from '../../state/drafts/store';
 import { AnswerControl, defaultSelection } from '../answer/AnswerControl';
 import { useSubmit, type OwnerFocusRequest, type PendingSubmission } from '../answer/useSubmit';
 
 /** The handoff's wording for a saved draft written against an older item revision or binding. */
 export const changedText ='This item changed. Review the current question and options; your text is retained.';
+const loadingError = "Ariadne is still loading this session's latest changes. Try again.";
+
+/** The failure this slot displays, including its loading and saved-input views. */
+export function answerSlotError(state: DraftState, entry: DraftEntry | undefined): string | null {
+  const error = state.ready && entry && entry.receipt?.data.kind !== 'input_submit' ? entry.error ?? state.error : state.error;
+  return error ? plainFailure(error) : null;
+}
 
 export interface AnswerSlotProps {
   readonly drafts: OwnerDraftStore;
@@ -40,7 +47,11 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning, onSaved: onSent, presence });
   const { entry } = submit;
+  const error = answerSlotError(state, entry);
   useEffect(() => { setShortcutStatus(null); }, [itemId, store]);
+  useEffect(() => {
+    if (state.ready && live && session) setShortcutStatus(status => status === loadingError ? null : status);
+  }, [state.ready, live, current.snapshot, session]);
   // Keyboard requests (a, 1–9) arrive as focus requests; a number is a deliberate choice.
   useEffect(() => {
     if (!focusRequest || focusRequest.intent !== 'answer' || handled.current === focusRequest.token || !entry) return;
@@ -53,7 +64,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
         && session?.active_binding_id === target.bindingId && choice?.id === target.optionId;
       const latest = store.getSnapshot();
       if (!live || latest.status !== 'ready' || latest.error || latest.snapshot?.session !== session) {
-        setShortcutStatus("Ariadne is still loading this session's latest changes. Try again.");
+        setShortcutStatus(loadingError);
       } else if (!sameTarget || submit.changed) setShortcutStatus('This item changed. Review it before sending. Your note is kept.');
       else if (blocked || submit.blocked) setShortcutStatus(submit.blocked ?? blocked ?? null);
       else if (entry.receipt) setShortcutStatus('This reply has already been sent.');
@@ -76,14 +87,14 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   }, [focusRequest, entry, item, drafts, state.preferenceUncertain, onFocusRequestConsumed, live, blocked, submit, session, store]);
   if (!item) return null;
   // data-owner-input marks every owner input of the detail (this slot and the action box) for native tests.
-  if (!state.ready || !entry) return <div className="detail-answer-slot" data-owner-input={mark} role="status">Loading saved drafts…{state.error && <p role="alert">{plainFailure(state.error)}</p>}</div>;
+  if (!state.ready || !entry) return <div className="detail-answer-slot" data-owner-input={mark} role="status">Loading saved drafts…{error && <p role="alert">{error}</p>}</div>;
   const preferences = state.preferenceUncertain && <button type="button" className="btn btn-secondary" onClick={submit.retryPreferences}>Try saving your draft again</button>;
   // Saved: the input is queued; the stepper above follows it once the session shows it.
   if (entry.receipt?.data.kind === 'input_submit') return <div className="detail-answer-slot" data-owner-input={mark}>
     <p role="status">Saved · Queue position #{entry.receipt.data.input_seq}</p>
     {shortcutStatus && <p role="alert">{shortcutStatus}</p>}
     <div className="detail-actions"><button type="button" className="btn btn-secondary" disabled={state.preferenceUncertain || entry.saving || !live} onClick={submit.another}>Write another input</button></div>
-    {state.error && <p className="detail-error" role="alert">{plainFailure(state.error)}</p>}
+    {error && <p className="detail-error" role="alert">{error}</p>}
     {preferences}
   </div>;
   const draft = entry.draft, options = item.options;
@@ -106,7 +117,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
         {entry.rejected && <button type="button" className="btn btn-secondary" disabled={entry.saving || state.preferenceUncertain} onClick={submit.prepareRevised}>Edit and send again</button>}
       </div>
     </div>}
-    {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
+    {error && <p className="detail-error" role="alert">{error}</p>}
     {preferences}
   </div>;
 }

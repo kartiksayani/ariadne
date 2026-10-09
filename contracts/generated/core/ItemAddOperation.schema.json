@@ -68,6 +68,15 @@
     "ref": {
       "$ref": "#/$defs/RequestRef"
     },
+    "related": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/EntityRef"
+      }
+    },
     "replaced_by": {
       "anyOf": [
         {

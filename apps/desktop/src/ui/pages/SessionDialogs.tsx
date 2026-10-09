@@ -3,10 +3,10 @@
 // Reconnect checks the same agent session again on the project-scoped path.
 // Close is one confirmation: it says what stays open and which unsent messages
 // it cancels, then closes.
-import { useRef } from 'react';
-import { plainFailure, useSession, type SessionStore } from '../../data';
+import { useEffect, useRef, useState } from 'react';
+import { plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { OwnerCommand } from '../../generated/core';
-import type { AdapterConfig } from '../../generated/domain/models';
+import type { AdapterConfig, Session } from '../../generated/domain/models';
 import { useSessionActions, type SessionActions } from '../../components/bindings/actions';
 import { useDispatch } from '../../components/bindings/DispatchChip';
 import { closeImpact, closeWarning } from '../../components/history-actions/selectors';
@@ -14,6 +14,44 @@ import { connectionOf } from '../shared/connection';
 import { sessionPhrase } from '../shell/model';
 import { Dialog } from '../dialogs/Dialog';
 import { notices } from './notices';
+import { waitForLifecycleReady } from '../shared/lifecycleReady';
+
+/** A confirmation owns its wait; closing it cancels admission, never a saved write. */
+function useLifecycleConfirmation(actions: SessionActions) {
+  const active = useRef<{ cancelled: boolean; cancellation: Promise<boolean>; cancel: () => void; saving: boolean } | null>(null);
+  const [busy, setBusy] = useState(false), [saving, setSaving] = useState(false), [error, setError] = useState<string | null>(null);
+  useEffect(() => () => active.current?.cancel(), []);
+  const run = async (confirmed: (session: Immutable<Session>) => Promise<void>) => {
+    if (active.current) return;
+    let cancel!: () => void;
+    const cancellation = new Promise<boolean>(resolve => { cancel = () => { attempt.cancelled = true; resolve(false); }; });
+    const attempt = { cancelled: false, cancellation, cancel, saving: false };
+    active.current = attempt;
+    setBusy(true); setError(null);
+    try {
+      const ready = await waitForLifecycleReady(actions, attempt, true);
+      if (!ready.ok) { if (ready.error) setError(ready.error); return; }
+      attempt.saving = true; setSaving(true);
+      await confirmed(ready.session);
+    } catch (failure: unknown) { if (!attempt.cancelled) setError(plainFailure(failure)); }
+    finally {
+      if (active.current === attempt) active.current = null;
+      if (!attempt.cancelled) { setBusy(false); setSaving(false); }
+    }
+  };
+  const cancel = () => {
+    if (active.current?.saving) return false;
+    active.current?.cancel();
+    return true;
+  };
+  return { busy, saving, error, setError, run, cancel };
+}
+
+const changedImpact = (before: Immutable<Session>, after: Immutable<Session>) => {
+  const left = closeImpact(before), right = closeImpact(after);
+  return before.state !== after.state || left.questions !== right.questions || left.unsent !== right.unsent || left.delivering !== right.delivering;
+};
+const confirmationChanged = 'The session changed. Check the updated details, then confirm again.';
 
 function Failure({ actions }: { readonly actions: SessionActions }) {
   const operation = useSessionActions(actions);
@@ -91,23 +129,33 @@ export function CloseSessionDialog({ store, actions, agent, when, name = null, o
 }) {
   const state = useSession(store), operation = useSessionActions(actions);
   const session = state.snapshot?.session;
-  const disabled = !session || session.state === 'closed' || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
+  const confirmation = useLifecycleConfirmation(actions);
+  const disabled = !session || session.state === 'closed' || confirmation.busy;
   const warning = session ? closeWarning(closeImpact(session), agent) : null;
   const close = async () => {
     if (!session || disabled) return;
-    if (!await actions.execute({ command: 'session_close', api_version: 1, op_id: '', params: { expected_revision: session.revision } }, session.revision)) return;
-    announceClosed(actions, agent, name);
-    onClose();
+    await confirmation.run(async refreshed => {
+      if (refreshed.state === 'closed') { confirmation.setError('This session is already closed.'); return; }
+      if (changedImpact(session, refreshed)) { confirmation.setError(confirmationChanged); return; }
+      if (!await actions.execute({ command: 'session_close', api_version: 1, op_id: '', params: { expected_revision: refreshed.revision } }, refreshed.revision)) {
+        confirmation.setError(plainFailure(actions.getSnapshot().error, 'The session could not be closed. Try again.')); return;
+      }
+      announceClosed(actions, agent, name);
+      onClose();
+    });
   };
+  const closing = operation.writing && operation.pending?.command.command === 'session_close';
+  const cancel = () => { if (!closing && confirmation.cancel()) onClose(); };
   const title = `Close ${sessionPhrase({ name }, agent, when)}?`;
-  return <Dialog label={title} width={520} onCancel={() => { if (!operation.writing) onClose(); }} onConfirm={() => { void close(); }}>
+  return <Dialog label={title} width={520} onCancel={cancel} onConfirm={() => { void close(); }}>
     <div className="dialog-title">{title}</div>
     <div className="pw-dialog-body">Ariadne marks the session Closed and keeps it read-only. The agent process isn’t touched.</div>
     {warning && <div className="pw-dialog-body" data-close-warning>{warning}</div>}
     <Failure actions={actions} />
+    {confirmation.error && <div className="pw-dialog-error" role="alert">{confirmation.error}</div>}
     <div className="dialog-actions">
-      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing} onClick={() => { void actions.retry(); }}>Check again</button>}
-      <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onClose}>Cancel</button>
+      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing || confirmation.busy} onClick={() => { void actions.retry(); }}>Check again</button>}
+      <button type="button" className="btn btn-ghost" disabled={confirmation.saving || closing} onClick={cancel}>Cancel</button>
       <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => { void close(); }}>
         <i className="ph ph-x-circle" aria-hidden="true" />Close session</button>
     </div>
@@ -119,25 +167,34 @@ export function ArchiveSessionDialog({ store, actions, agent, onClose, onSaved }
   readonly store: SessionStore; readonly actions: SessionActions; readonly agent: string; readonly onClose: () => void; readonly onSaved: (wasActive: boolean) => void;
 }) {
   const state = useSession(store), operation = useSessionActions(actions), session = state.snapshot?.session;
+  const confirmation = useLifecycleConfirmation(actions);
   // Keep the state submitted with the exact operation, even if its response is
   // lost and the reader subsequently captures the already archived session.
   const wasActive = useRef<boolean | null>(null);
   const warning = session ? closeWarning(closeImpact(session), agent, 'archiving') : null;
-  const disabled = !session || session.archived_at != null || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
+  const disabled = !session || session.archived_at != null || confirmation.busy;
   const archive = async () => {
     if (!session || disabled) return;
-    wasActive.current = session.state === 'active';
-    if (await actions.execute({ command: 'session_archive', api_version: 1, op_id: '', params: { expected_revision: session.revision } }, session.revision)) onSaved(wasActive.current);
+    await confirmation.run(async refreshed => {
+      if (refreshed.archived_at != null) { confirmation.setError('This session is already archived.'); return; }
+      if (changedImpact(session, refreshed)) { confirmation.setError(confirmationChanged); return; }
+      wasActive.current = refreshed.state === 'active';
+      if (await actions.execute({ command: 'session_archive', api_version: 1, op_id: '', params: { expected_revision: refreshed.revision } }, refreshed.revision)) onSaved(wasActive.current);
+      else confirmation.setError(plainFailure(actions.getSnapshot().error, 'The session could not be archived. Try again.'));
+    });
   };
-  return <Dialog label="Archive this session?" width={520} onCancel={() => { if (!operation.writing) onClose(); }} onConfirm={() => { void archive(); }}>
+  const archivePending = operation.pending?.command.command === 'session_archive';
+  const cancel = () => { if (!(archivePending && operation.writing) && confirmation.cancel()) onClose(); };
+  return <Dialog label="Archive this session?" width={520} onCancel={cancel} onConfirm={() => { void archive(); }}>
     <div className="dialog-title">Archive this session?</div>
     <div className="pw-dialog-body">{session?.state === 'active' ? 'Archiving closes this session and stops sending to the agent. ' : ''}All saved history stays. You can restore this session any time.</div>
     {warning && <div className="pw-dialog-body" data-close-warning>{warning}</div>}
     <Failure actions={actions} />
+    {confirmation.error && <div className="pw-dialog-error" role="alert">{confirmation.error}</div>}
     <div className="dialog-actions">
-      <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onClose}>Cancel</button>
-      {operation.pending
-        ? <button type="button" className="btn btn-primary" disabled={operation.writing} onClick={() => { void actions.retry().then(saved => { if (saved) onSaved(wasActive.current ?? false); }); }}>Check again</button>
+      <button type="button" className="btn btn-ghost" disabled={confirmation.saving || archivePending && operation.writing} onClick={cancel}>Cancel</button>
+      {archivePending
+        ? <button type="button" className="btn btn-primary" disabled={operation.writing || confirmation.busy} onClick={() => { void actions.retry().then(saved => { if (saved) onSaved(wasActive.current ?? false); }); }}>Check again</button>
         : <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => { void archive(); }}>Archive session</button>}
     </div>
   </Dialog>;
