@@ -366,6 +366,4 @@ packaged executable under hostile test environment and observe its OS PID/execut
 continuously for ten seconds, with no listener or E2E-root writes and bounded
 cleanup. This is test-service exclusion evidence, not native UX acceptance.
 
-Organization security guidance was not fetched under the owner's explicit
-the review tool/MCP waiver. The disposable native proof does not claim the review tool review or
-production application acceptance.
+The disposable native proof does not claim production application acceptance.

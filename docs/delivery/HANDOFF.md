@@ -31,8 +31,8 @@ Local verification for this task is `npm run check`, focused Vitest and `python3
 **Main: fddd998 (#134). Roadmap: 58/58 done; P8.11 (remove commands) merged in #125, P8.12 (short labels) in #131 and P8.13 (host location and topic counts) in #133 and #134.** P8.3 is done as the Paperwhite redesign (ADR-0086): work packages #126-#132 and the finish #136 sit on `feat/paperwhite-integration`, and its integration PR to main is pending. `npm run test:design` is the fidelity gate (thresholds = measured + 0.01). Follow-ups: rewrite UI_AND_NATIVE for the Paperwhite UI; fidelity of frames 1m, 1z, 1w and 1ac. Continue is one picker, `ui/dialogs/ContinueTopicDialog.tsx`, which the tree and the other entry points share; the old `components/history-actions/ContinueDialog` is gone. Topic folds are saved in the session preferences (`collapsed_topic_ids`, at most 256 kept) and survive a restart; the Waiting column's fold is saved in the global layout (`waiting_collapsed`), folds by itself below 1300 px without sideways scroll, and the `w` key toggles it. Still open: a Rust `ExitRequested` flush for pending removals; the removal `expected_revision` is read at run time, so agent edits in the undo window are removed silently. P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
 
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
-(docs, install-trial evidence, real README screenshot) as a2cfa9d at head 72dd525.
-At the #110 checkpoint, no open PRs were recorded. The release install trial ran on main 1e8d9e7 ([clean-install-1e8d9e7.md](../planning/evidence/release/clean-install-1e8d9e7.md)); its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; the owner still fills date and tester in the manual checklist ([manual-checklist.md](../planning/evidence/release/manual-checklist.md)). Duplicate and
+(docs, install-trial evidence and README updates) as a2cfa9d at head 72dd525.
+At the #110 checkpoint, no open PRs were recorded. The release install trial ran on main 1e8d9e7; its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; manual release checks still need the owner’s date, tester and results for V11, V21 and V24 in the [verification contract](../planning/low-level/VERIFICATION.md#required-acceptance-matrix). Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.
@@ -55,7 +55,6 @@ synthetic keys do not move focus.
 ## State after #109
 
 - P6.4: the isolated install, doctor and uninstall trial passed on the ed56f7d tree.
-  Evidence: [install-trial.md](../planning/evidence/release/install-trial.md).
 - P7.1: evidence is the green full-scope `quality` run on main a2cfa9d,
   [37418522364](https://github.com/kartiksayani/ariadne/actions/runs/37418522364)
   (dispatched by hand because the push of #110 cancelled the run on 1906583; pushes
@@ -63,7 +62,6 @@ synthetic keys do not move focus.
 - #109 run 2 failed only on the reference-capture first-load wait (fixed in ed56f7d).
   If it recurs as a ~31 s failure, set `optimizeDeps.entries` on the test's Vite server
   in `tests/ui/design/design.spec.mts` (the design harness, `npm run test:design`).
-- `docs/live-acceptance-plan` is published by this PR.
 - Worktrees under `.worktrees/` (preference-conflicts, host-version-tolerance,
   toolchain-minimums, doctor-first-run, release-handoff, codex-skill, readme-for-users)
   are contained in main; keep them. Superseded stack PRs #93, #94, #97, #98, #99,
@@ -75,9 +73,7 @@ The core owner-input to Claude turn to committed-result loop is proved live on C
 Code 2.1.291. P7.2 is done by owner ruling 2026-10-06 (no further paid host turns; core
 loops proven). Deferred rows: completion-before-result order, result repair, resend,
 second session, second project isolation and Ariadne app quit/relaunch;
-`npm run test:live` does not exist. Evidence:
-[CLAUDE-2026-10-06.md](../planning/evidence/live-acceptance/CLAUDE-2026-10-06.md);
-decision [ADR-0076](../adr/ADR-0076-claude-framed-plugin-prompts-and-turn-correlation.md).
+`npm run test:live` does not exist. Decision: [ADR-0076](../adr/ADR-0076-claude-framed-plugin-prompts-and-turn-correlation.md).
 Follow-ups the run surfaced:
 
 - Core, fixed in [ADR-0088](../adr/ADR-0088-core-never-dead-ends.md): an explicit rebind
@@ -99,8 +95,7 @@ resume, FIFO delivery via `codex queue`, turn correlation, explicit results comm
 P7.3 is done by owner ruling 2026-10-06 (no further paid host turns). Deferred rows:
 five inputs (two were run), closed-item message, disconnect/relaunch, duplicates, both
 join orders, missing-result/uncertain recovery, same-project/cross-project isolation,
-`npm run test:live` (does not exist). Evidence:
-[CODEX-2026-10-06.md](../planning/evidence/live-acceptance/CODEX-2026-10-06.md).
+`npm run test:live` (does not exist).
 Follow-ups the run surfaced:
 
 - D1-D6 (fresh-thread connect, RPC error text, setup instruction path and
@@ -178,15 +173,6 @@ Follow-ups the run surfaced:
 2. Complete the remaining alpha.7 acceptance before publishing a release; this task does not run native/e2e checks.
 3. Update the release checkpoint when alpha.7 is released.
 
-Earlier screenshot follow-up:
-
-- README screenshots are the design harness's app renders of frames 1a, 1d and 1b
-   (`docs/planning/assets/paperwhite-{tree,graph,detail}.png`, 1600×960, dark). The
-   former demo capture (`screenshot-dark-tree.png`) is removed. The capture tooling is uncommitted in
-   `.worktrees/post-106-batch` (`scripts/readme-screenshot.mjs`,
-   `apps/desktop/wdio.screenshot.conf.mjs`, `apps/desktop/tests/e2e/screenshot.spec.mjs`):
-   it reuses the native e2e build, moves the window onto the larger display through
-   the Accessibility API (the driver clamps `setWindowSize` to the built-in screen) and
-   runs in about 10 s. Commit it if a second capture is ever needed. The demo data shows
-   a raw agent id in the filter chips and "host unavailable" banners; polish the demo
-   data if that bothers users.
+Previous committed screenshots were removed for privacy. Use the current design
+harness (`npm run test:design`, [ADR-0086](../adr/ADR-0086-paperwhite-design.md))
+for future captures with neutral fixture data.

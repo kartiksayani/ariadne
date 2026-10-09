@@ -42,8 +42,7 @@ nor establishes the installed CLI/native composition or live-host acceptance.
 Existing Unix fake-daemon and argv fixtures prove initialization reuse with final
 reads, no pre-connect queue send, immutable selection, root/full-item rejection,
 same-target reconnect, replaced socket/executable rejection, and a queued final
-bind bounded by its original deadline. No provider host is launched. MCP/the review tool
-remain disabled under the owner's waiver; organization guidance was not checked.
+bind bounded by its original deadline. No provider host is launched.
 
 ## Spec references
 

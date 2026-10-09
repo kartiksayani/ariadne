@@ -77,9 +77,6 @@ not complete runtime task acceptance, installed application behavior or live-hos
 acceptance. Direct registered native Core reporting remains available after the
 desktop exits; a stopped socket is never a fallback write route.
 
-MCP/the review tool remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked and no organizational approval is claimed.
-
 ## Spec references
 
 - [Claude qualification facts](ADR-0051-claude-native-pre-id-qualification-facts.md)

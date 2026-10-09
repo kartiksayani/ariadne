@@ -61,9 +61,6 @@ stale same-item writes. Replays preserve the exact durable result despite later
 revisions. Ordinary save/path/validation errors retain typed failures, and invalid
 or future snapshots are never overwritten.
 
-MCP/the review tool remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no approval is claimed.
-
 ## Spec references
 
 - [DOMAIN: transaction algorithm](../planning/low-level/DOMAIN_AND_STORAGE.md#4-transaction-and-lock-algorithm)

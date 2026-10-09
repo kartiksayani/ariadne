@@ -61,9 +61,6 @@ checkpoint advance, host execution or resend. Default library doctests prove the
 fake is unavailable without that feature. Contract publication is implementation
 evidence; P0.5 completion retains P0.3 fixtures and all original acceptance.
 
-MCP/the review tool remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no approval is claimed.
-
 ## Spec references
 
 - [PROCESS: adapter contract](../planning/low-level/PROCESS_AND_PROTOCOLS.md#2-shared-adapter-contract)

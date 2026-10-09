@@ -62,9 +62,6 @@ Invalid/stale guards leave bytes unchanged; future or invalid snapshots remain
 read-only. No provider I/O, dispatch lease, formatter, recovery or lifecycle service
 is added. Shared CoreService and wire DTO signatures remain unchanged.
 
-MCP/the review tool remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no approval is claimed.
-
 ## Spec references
 
 - [API owner command inventory](../planning/low-level/API_AND_MCP.md#2-query-and-owner-command-inventory)

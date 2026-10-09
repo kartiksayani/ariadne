@@ -69,9 +69,6 @@ five-round fixture and canonical demo/source fixtures prove serialized retention
 not atomic file durability, provider delivery, paging or UI rendering; those remain
 with their declared roadmap tasks.
 
-MCP/the review tool remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no approval is claimed.
-
 ## Spec references
 
 - [DOMAIN: full messages, answers and rounds](../planning/low-level/DOMAIN_AND_STORAGE.md#full-messages-answers-and-rounds)

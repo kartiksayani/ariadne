@@ -54,6 +54,3 @@ Actions `quality` check (not strict) with no bypass actors, so admins also need 
 `quality` on the PR head. Independent agent review is still required by our workflow
 because agents share one GitHub identity. Only squash merge is enabled. Do not change
 visibility, billing, rulesets or other remote settings without owner authorization.
-
-MCP/the review tool remain disabled under the owner's explicit current-session waiver.
-Organization security guidance was not checked; no organizational approval is claimed.

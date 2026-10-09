@@ -57,7 +57,7 @@ A wrong nonce was rejected without changing the receipt; the process exited and
 the loopback driver port became free. The tested binary SHA-256 was
 `198024c6c1f840373570fcb1e50374a8dbf11042dd56e74a93037b0765e15ea9`.
 Sources/locks and redacted evidence are preserved at
-`/Users/owner/Library/Caches/ariadne-devtools/native-preflight`;
+`~/Library/Caches/ariadne-devtools/native-preflight`;
 the temporary run was `/private/tmp/ariadne-native-preflight-ombw74k7`.
 The retained `README.md` explains reproduction in a fresh temporary root;
 `manifest.json` hashes the retained artifacts. Binaries, `.app`, build outputs
@@ -128,7 +128,7 @@ required permission manually; report denied/missing permission as a blocker.
 Do not run TCC bypasses or change macOS security settings automatically.
 
 Appium 3.8.0 and `appium-mac2-driver@4.3.6` are installed in the dedicated npm
-tooling project `/Users/owner/Library/Caches/ariadne-devtools/macos-ui`.
+tooling project `~/Library/Caches/ariadne-devtools/macos-ui`.
 Its safe entry point is `appium-local`, which selects the installed Node, enters
 the tooling project and unsets `APPIUM_HOME` so Appium discovers its driver
 dependency. This installation does not use global Appium state. On another
@@ -199,5 +199,3 @@ check nor a disposable probe proves notification routing, tray behavior, install
 release packaging or other [release acceptance](../planning/low-level/VERIFICATION.md).
 
 See [ADR-0002](../adr/ADR-0002-test-webview-and-macos-surfaces.md) for this decision.
-Organization security guidance was not fetched under the owner's explicit MCP
-waiver; no the review tool approval or organization-compliance claim is made.

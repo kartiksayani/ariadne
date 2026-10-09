@@ -172,9 +172,6 @@ saved receipt/on-disk correlation, scripted real-provider queue/completion and
 explicit agent CLI Apply, plus native quit/inflight-connect/wake race tests and
 packaged isolation in CI. No task-completion status changes accompany this draft.
 
-MCP/the review tool remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no organizational approval is claimed.
-
 ## References
 
 - [Native provider activation](ADR-0056-native-provider-activation.md)

@@ -161,5 +161,3 @@ recall. Production domain results, storage, native packaging and recovery are
 specified below but unimplemented. No architecture decision depends on a future
 choice between unresearched transports. Compatibility tests have fixed inputs,
 expected outcomes and failure policy in [VERIFICATION](low-level/VERIFICATION.md).
-
-Organization security guidance was not checked under the owner's the review tool waiver.

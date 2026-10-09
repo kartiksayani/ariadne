@@ -89,7 +89,7 @@ For a development checkout, the POC sequence is `/plugin marketplace add <path>`
 plugin identity and path. Production install never depends on a checkout or
 `--plugin-dir`. Preserve Claude's trust prompts and host permission UI. See
 [Claude plugin loading](https://code.claude.com/docs/en/plugins/loading#plugins-shared-through-a-repository)
-and [Claude Mod POC](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/claude-mods/README.md).
+and [Claude Mod POC](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/claude-mods/README.md).
 
 ### Codex
 
@@ -117,7 +117,7 @@ configured.
 
 Codex approval requests stay in Codex's host UI. Ariadne does not send approval
 responses, change sandbox policy, or infer permission from an owner item answer.
-See the [Codex queue POC](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/README.md).
+See the [Codex queue POC](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/README.md).
 
 ## Bindings, routing, and domain operations
 
@@ -173,19 +173,19 @@ These versions passed the following transport exercises; production domain
 storage, automatic discovery/liveness, binding UI, explicit input results, and
 recovery remain implementation gates.
 
-- [Claude Mod results](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/claude-mods/RESULTS.md): a user-installed Mod
+- [Claude Mod results](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/claude-mods/RESULTS.md): a user-installed Mod
 connected to an existing interactive session; three real turns preserved
 context, queued while busy, and captured matching `turn.start`/`turn.complete`
 replies. Submission-result and turn-start events arrived in either order, so the
 adapter must reconcile by IDs rather than assume callback order. The exercise
 did not prove reload/recovery, interruption, concurrent terminals, or switching
-sessions ([proof limits](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/claude-mods/RESULTS.md)).
-- [Codex queue results](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/RESULTS.md): `codex queue` submitted
+sessions ([proof limits](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/claude-mods/RESULTS.md)).
+- [Codex queue results](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/RESULTS.md): `codex queue` submitted
 three turns to a known open thread; same-socket Unix WebSocket history returned
 full user/assistant items, preserved context, and showed busy FIFO turns. It did
 not prove caller-supplied client IDs, direct queue RPC, terminal closure/daemon
 restart, approvals, retries, deduplication, mixed terminal/app input, discovery,
-or production mutations ([proof limits](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/RESULTS.md)).
+or production mutations ([proof limits](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/RESULTS.md)).
 
 V1 discovery uses only known-provider session metadata.
 Claude announces session ID, cwd, and version at startup and every 30 seconds;

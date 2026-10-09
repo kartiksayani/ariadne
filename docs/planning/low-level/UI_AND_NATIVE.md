@@ -368,6 +368,6 @@ Use one production webview named `main` and an explicit capability allowlist for
 
 Rust validates every renderer command and enforces project/session/item membership, input kind, revision, request size, and allowed state transition. Scope every read/write to a registered project and bound session. Reject path traversal and symlink escapes at project registration/binding boundaries. Durable owner input is never removed by a renderer crash. Store/backend outage displays last-known data, disables mutations, retains draft, and offers recovery. Diagnostics redact known credential values/fields and auth-looking strings; default logs do not include owner text, raw provider activity, tool input/result, environment, or headers. Visible agent-authored sentences can contain project information; keep them local and do not promise arbitrary text redaction.
 
-## 10. Security guidance provenance
+## 10. Security boundaries
 
-The owner explicitly waived the review tool organizational guidance for this task. It was not checked. The renderer and storage constraints above are design requirements, not a claim that the guidance was reviewed.
+The renderer and storage constraints above are design requirements.

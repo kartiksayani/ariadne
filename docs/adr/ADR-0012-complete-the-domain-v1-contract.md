@@ -65,9 +65,6 @@ wrappers and maps. Rust/Clippy warnings remain denied. Only exact declaration-on
 model files receive coverage exclusions; executable map/checkpoint/configuration
 validation stays measured. No generic delivery or validation framework is added.
 
-MCP/the review tool remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no approval is claimed.
-
 ## Spec references
 
 - [DOMAIN: conventions and stored records](../planning/low-level/DOMAIN_AND_STORAGE.md#1-primitive-conventions)

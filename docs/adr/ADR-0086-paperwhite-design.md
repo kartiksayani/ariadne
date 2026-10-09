@@ -9,7 +9,7 @@ Superseded by: none
 P8.3 asked for a UX review and theme refresh. The owner then supplied a complete v2
 design handoff (`designs/Ariadne-UI-mockups-v2.zip`): a written spec (`README.md`), a
 running prototype (`Ariadne.dc.html`), component pages and rendered frames 1a-1ad. It
-replaces the Nocturne look and the earlier per-screen restyling. Restyling the old
+replaces the previous look and the earlier per-screen restyling. Restyling the old
 components could not reach the handoff's layout, states and keyboard model. Reviews
 by eye also missed the drift between the app and the frames.
 
@@ -22,7 +22,7 @@ by eye also missed the drift between the app and the frames.
   are still needed (bindings, history actions, recovery) are kept and restyled.
 - **Paperwhite tokens verbatim.** Dark is the default and light the alternative. The
   status colours come from the prototype's `THEMES`, and `--a-danger` is used only
-  for Remove. Every Nocturne value is gone.
+  for Remove. The previous design values are replaced.
 - **One font and one icon set.** JetBrains Mono 400/500 for all text, bundled locally.
   Phosphor regular and fill icons, as before.
 - **The handoff's numbers.** Rows are 48/38/1fr/30. Columns are `300px |

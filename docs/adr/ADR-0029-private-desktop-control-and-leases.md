@@ -69,9 +69,6 @@ Its original durable acceptance remains joined with P2.2, P1.4 registered native
 composition and P3.2 runtime wiring. No new CoreService method, DTO signature,
 TCP transport, provider lifecycle or alternate persistence engine is introduced.
 
-MCP/the review tool remain disabled under the owner’s current-session waiver. Organization
-security guidance was not checked; no organizational approval is claimed.
-
 ## Spec references
 
 - [PROCESS: ownership and app control](../planning/low-level/PROCESS_AND_PROTOCOLS.md#1-ownership-leases-and-app-control)

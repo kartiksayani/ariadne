@@ -58,8 +58,7 @@ and final Codex/MCP/discovery/graph/Continue/native scope.
 The repository loses machinery rather than gaining a policy framework. Independent
 review must check exclusion honesty and acceptance. Historical ADR prose and
 .delivery records remain preserved; their old procedures are superseded here.
-MCP/the review tool remain disabled under the current-session waiver; organization guidance
-was not checked. No live host call or remote-setting change is authorized here.
+No live host call or remote-setting change is authorized here.
 
 ## Spec references
 

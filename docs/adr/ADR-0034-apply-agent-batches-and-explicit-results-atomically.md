@@ -63,9 +63,6 @@ replay and separate-process item concurrency. Transport/CoreService composition,
 formatting and durable adapter reports remain their owning tasks. No shared wire
 signature or canonical schema change is needed.
 
-MCP/the review tool remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no approval is claimed.
-
 ## Spec references
 
 - [Agent API](../planning/low-level/API_AND_MCP.md#3-agent-api-explicit-results-and-tree-operations)

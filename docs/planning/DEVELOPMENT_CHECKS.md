@@ -128,5 +128,3 @@ permissions and frontend modules out of production. See
 [Native E2E](low-level/NATIVE_E2E.md) and [Mac setup](../development/MACOS_TEST_SETUP.md).
 
 Main requires the `quality` check with no bypass (details in CONTRIBUTING).
-Organization security guidance was not checked under the
-owner's current-session MCP/the review tool waiver.
