@@ -708,6 +708,8 @@ fn the_skill_routes_finishing_a_parent_for_ack_to_the_file_that_teaches_it() {
 fn the_core_marks_topic_optional_and_explains_its_defaults() {
     for directory in SKILL_DIRECTORIES {
         let files = generated(directory);
+        assert!(files[0].1.contains("One per concern, not per step."));
+        assert!(files[0].1.contains("Keep this tree for later writes."));
         let row = files[0]
             .1
             .lines()
@@ -720,7 +722,7 @@ fn the_core_marks_topic_optional_and_explains_its_defaults() {
         assert!(columns[3].contains("children inherit their parent's topic"));
         assert!(files[0]
             .1
-            .contains("Set `topic` explicitly if neither default applies."));
+            .contains("Set `topic` if neither default applies."));
     }
     // The opening example omits topic on both the parent and its child. The
     // real CLI wires both to the sole topic.add, as the core table promises.
@@ -1272,19 +1274,23 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
     assert!(ERRORS.contains("Resend the identical request"));
     assert!(ERRORS.contains("the CLI derives the same `op_id`"));
     assert!(ERRORS.contains("A retry of the identical request is safe"));
+    assert!(ERRORS.contains("resending declared removed targets prunes them"));
     assert!(RULES.contains("An unexpected `\"replayed\":true` files nothing new"));
     assert!(
         RULES.contains("a fresh explicit `op_id` to deliberately file the identical request again")
     );
     assert!(RULES.contains("independent of generation"));
-    for needle in ["`short` label", "at most 40 characters"] {
+    for needle in [
+        "New topics/items need stable `short`",
+        "at most 40 characters",
+    ] {
         assert!(RULES.contains(needle), "{needle}");
     }
     for needle in [
         "Set `related` for useful dependencies, duplicates or consequences",
         "otherwise omit it",
-        "In prose use `[label](item:3.2)`, never bare",
-        "clickable prose links do not create `related` connections",
+        "Use `[label](item:3.2)` in prose, never bare",
+        "links do not create `related` connections",
     ] {
         assert!(RULES.contains(needle), "{needle}");
     }

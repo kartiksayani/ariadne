@@ -90,6 +90,26 @@ fn resolve(
         .0
         .get(&params.input_id)
         .ok_or_else(|| core(CoreErrorCode::NotFound, "Recovery input is missing"))?;
+    if matches!(
+        params.decision,
+        ResolutionKind::Resend | ResolutionKind::RetryUnexecuted
+    ) && (session
+        .topics
+        .0
+        .get(&input.target.topic_id)
+        .is_some_and(|topic| ariadne_domain::visibility::topic_is_removed(session, topic))
+        || input
+            .target
+            .item_id
+            .as_ref()
+            .and_then(|id| session.items.0.get(id))
+            .is_some_and(|item| ariadne_domain::visibility::item_is_removed(session, item)))
+    {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "This work is in the bin. Restore it first, or mark the message done.",
+        ));
+    }
     let binding = session.bindings.0.get(&input.binding_id).ok_or_else(|| {
         core(
             CoreErrorCode::BindingMismatch,

@@ -63,6 +63,24 @@ pub(super) fn apply(
             if old.removed_at.is_none() {
                 return Err(core(CoreErrorCode::InvalidTransition, "This item has no bin entry of its own. Restore its removed parent or topic instead."));
             }
+            if session
+                .topics
+                .0
+                .get(&old.topic_id)
+                .is_some_and(|topic| ariadne_domain::visibility::topic_is_removed(session, topic))
+                || old
+                    .parent
+                    .as_ref()
+                    .and_then(|id| session.items.0.get(id))
+                    .is_some_and(|parent| {
+                        ariadne_domain::visibility::item_is_removed(session, parent)
+                    })
+            {
+                return Err(core(
+                    CoreErrorCode::InvalidTransition,
+                    "Restore the parent work or topic from the bin first.",
+                ));
+            }
             let item = session.items.0.get_mut(&params.item_id).unwrap();
             item.revision = increment(item.revision)?;
             item.removed_at = None;

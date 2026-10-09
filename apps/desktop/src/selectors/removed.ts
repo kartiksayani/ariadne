@@ -1,4 +1,4 @@
-import type { Item, Session, Topic } from '../generated/domain/models';
+import type { Input, InputTarget, Item, Session, Topic } from '../generated/domain/models';
 import type { Immutable } from '../data/session-store';
 
 const removedBySession = new WeakMap<Immutable<Session>, ReadonlySet<string>>();
@@ -22,6 +22,27 @@ export function removedItems(session: Immutable<Session>): ReadonlySet<string> {
   return removed;
 }
 export const itemRemoved = (session: Immutable<Session>, id: string): boolean => removedItems(session).has(id);
+export const targetRemoved = (session: Immutable<Session>, target: Immutable<InputTarget>): boolean =>
+  !!session.topics[target.topic_id]?.removed_at || !!target.item_id && itemRemoved(session, target.item_id);
+
+/** Result-only repairs and removal notices can still settle work in the bin. */
+export function heldInputs(session: Immutable<Session>): readonly Immutable<Input>[] {
+  return Object.values(session.inputs).filter((input): input is Immutable<Input> => {
+    if (!input || input.state !== 'queued' || input.kind === 'removed' || !targetRemoved(session, input.target)) return false;
+    const attempt = input.attempts.at(-1);
+    const resolution = [...input.resolution_history].reverse().find(entry => entry.attempt_id === attempt?.id
+      && ['retry_unexecuted', 'resend', 'request_result_repair'].includes(entry.kind));
+    return !resolution || resolution.kind !== 'request_result_repair' && attempt?.purpose !== 'result_repair';
+  });
+}
+
+/** Clear only the chosen marker: nested removals keep their queued messages held. */
+export function heldInputsRestored(session: Immutable<Session>, topicId: string, itemId: string | null): readonly Immutable<Input>[] {
+  const restored: Immutable<Session> = itemId
+    ? { ...session, items: { ...session.items, [itemId]: { ...session.items[itemId]!, removed_at: null } } }
+    : { ...session, topics: { ...session.topics, [topicId]: { ...session.topics[topicId]!, removed_at: null } } };
+  return heldInputs(session).filter(input => !targetRemoved(restored, input.target));
+}
 export const activeItems = (session: Immutable<Session>): readonly Immutable<Item>[] =>
   Object.values(session.items).filter((item): item is Immutable<Item> => !!item && !itemRemoved(session, item.id));
 export const activeTopics = (session: Immutable<Session>): readonly Immutable<Topic>[] =>

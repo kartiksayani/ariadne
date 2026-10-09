@@ -63,7 +63,7 @@ Reuse receipt revisions/numbers as `{"id":...}`.
 
 Set `related` for useful dependencies, duplicates or consequences, once on either
 item in this session; otherwise omit it.
-In prose use `[label](item:3.2)`, never bare numbers: clickable prose links do not create `related` connections.
+Use `[label](item:3.2)` in prose, never bare numbers; links do not create `related` connections.
 
 | `op` | Required | Optional |
 |---|---|---|
@@ -78,13 +78,13 @@ In prose use `[label](item:3.2)`, never bare numbers: clickable prose links do n
 | `reply` | `item`, `text` | `ref`, `round_id` |
 | `round.close` | `round_id` | |
 
-Set `topic` explicitly if neither default applies.
+Set `topic` if neither default applies.
 Defaults, children, refs, transitions, limits: `errors.md`.
 
 Delete accepts number/UUID strings, `{id}`, earlier batch refs or `{ref}`.
 Guard the existing root item/topic; history stays.
 
-Give new topics/items a stable `short` label: 2-4 words, at most 40 characters.
+New topics/items need stable `short`: 2-4 words, at most 40 characters.
 
 Markdown text; plain topic names, `short`, option labels.
 
@@ -96,9 +96,9 @@ When connected or told "use Ariadne", file there.
   in place. Finish `open` with `ack_to`, result/evidence; never repeat a report.
 - **Route.** File findings and multi-point results. Chat: 1-3 lines pointing
   at the topic. Owner instructions win.
-- **Topic.** One per concern.
+- **Topic.** One per concern, not per step.
 - **Tree.** Summary first: result and what waits on the owner, then decisions/sections
-  in reading order. Points are children, each once with its ask. Keep this tree.
+  in reading order. Points are children, each once with its ask. Keep this tree for later writes.
 - **Type and status.** Never create `decided`, `done`, `dropped` or `replaced`
   items; results start `open` for Ack.
 

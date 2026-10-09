@@ -15,6 +15,7 @@ import { ActionFailure } from '../edge-states/EdgeState';
 import { SessionActions, useSessionActions } from '../bindings/actions';
 import { qualifiedPresence } from '../bindings/presence';
 import { inputAbout, recoveryProblem, stoppedAttempt } from '../../selectors/waiting/stuck';
+import { targetRemoved } from '../../selectors/removed';
 import '../bindings/controls.css';
 
 export function resolveCommand(params: { input_id: string; attempt_id: string; expected_revision: number; decision: ResolutionKind;
@@ -24,6 +25,7 @@ export function resolveCommand(params: { input_id: string; attempt_id: string; e
 
 const labels: Record<ResolutionKind, string> = { retry_unexecuted: 'Prepare retry', resend: 'Send again',
   request_result_repair: 'Request missing result', skip: 'Mark as done', confirm_evidence: 'Confirm evidence', accept_result: 'Mark as handled' };
+const binnedMessage = 'This work is in the bin. Restore it first, or mark the message done.';
 export function recoveryTargets(session: Immutable<Session>) {
   const targets: { input: Immutable<Input>; attempt: Immutable<Attempt> }[] = [];
   Object.values(session.inputs).forEach(input => {
@@ -45,11 +47,12 @@ export function recoveryTargets(session: Immutable<Session>) {
 }
 function choices(input: Immutable<Input>, attempt: Immutable<Attempt>, session: Immutable<Session>) {
   if (input.active_attempt_id !== attempt.id || attempt.sealed_at !== null) return ['confirm_evidence'] as const;
-  const result: ResolutionKind[] = ['resend', 'skip', 'confirm_evidence'];
+  const binned = targetRemoved(session, input.target);
+  const result: ResolutionKind[] = binned ? ['skip', 'confirm_evidence'] : ['resend', 'skip', 'confirm_evidence'];
   const conflict = Object.values(session.operation_receipts).some(bucket => bucket?.some(receipt =>
     receipt.actor_scope.kind === 'adapter' && receipt.actor_scope.binding_id === input.binding_id
     && receipt.result.data.kind === 'event_conflict' && receipt.result.data.input_id === input.id && receipt.result.data.attempt_id === attempt.id));
-  if (!conflict && attempt.acceptance === 'rejected' && !attempt.acceptance_receipt && !attempt.host_turn_id
+  if (!binned && !conflict && attempt.acceptance === 'rejected' && !attempt.acceptance_receipt && !attempt.host_turn_id
       && attempt.turn_state === 'unknown' && !attempt.domain_result) result.unshift('retry_unexecuted');
   if (attempt.turn_state === 'completed' && !attempt.domain_result && attempt.result_state !== 'committed') result.unshift('request_result_repair');
   return result;
@@ -85,7 +88,7 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
   const disabled = state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
   /** Mark as handled / Send again / Mark as done: reason may be empty; evidence only when liveness is unknown. */
   const quick = (input: Immutable<Input>, attempt: Immutable<Attempt>, kind: 'accept_result' | 'resend' | 'skip') => {
-    if (disabled) return;
+    if (disabled || kind === 'resend' && targetRemoved(snapshot, input.target)) return;
     const evidence = kind === 'accept_result' || presence?.idle ? null : attestIdle();
     void actions.execute(resolveCommand({ input_id: input.id, attempt_id: attempt.id, expected_revision: snapshot.revision,
       decision: kind, reason: '', evidence }), snapshot.revision);
@@ -97,12 +100,14 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
     {targets.map(({ input, attempt }) => {
       const current = input.active_attempt_id === attempt.id && attempt.sealed_at === null && input.state === 'needs_attention';
       const committed = current && attempt.result_state === 'committed';
+      const binned = targetRemoved(snapshot, input.target);
       // Without machine evidence that the agent is idle, Send again / Mark as done need the owner's word.
       const needsCheck = current && !committed && !presence?.idle;
       const ready = !disabled && !(current && !committed && presence?.busy) && (!needsCheck || checked === input.id);
       return <article className="lifecycle-recovery-row" key={`${input.id}/${attempt.id}`} data-input-id={input.id} data-attempt-id={attempt.id}>
         <div className="recovery-text"><strong>Your message on “{about(input)}”</strong>
-          <p>{recoveryProblem(attempt, agent)}{current && !committed ? ' Send it again, or mark it done?' : ''}</p>
+          <p>{recoveryProblem(attempt, agent)}{current && !committed && !binned ? ' Send it again, or mark it done?' : ''}</p>
+          {binned && <p>{binnedMessage}</p>}
           {current && !committed && presence?.busy && <p role="alert">{agent} is still working. Wait, or stop it in the terminal first.</p>}
           {needsCheck && !presence?.busy && <label className="recovery-check"><input type="checkbox" disabled={disabled} checked={checked === input.id}
             onChange={event => setChecked(event.target.checked ? input.id : null)} />I checked: {agent} isn’t working on this now.</label>}</div>
@@ -110,8 +115,8 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
           {committed && <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => quick(input, attempt, 'accept_result')}>
             Mark as handled — the agent saved its answer</button>}
           {current && !committed && <>
-            <button type="button" className="btn btn-primary" disabled={!ready} title="Sending again may repeat work the agent already did."
-              onClick={() => quick(input, attempt, 'resend')}>Send again</button>
+            {!binned && <button type="button" className="btn btn-primary" disabled={!ready} title="Sending again may repeat work the agent already did."
+              onClick={() => quick(input, attempt, 'resend')}>Send again</button>}
             <button type="button" className="btn btn-secondary" disabled={!ready} onClick={() => quick(input, attempt, 'skip')}>Mark as done</button></>}
           <details className="recovery-advanced"><summary>Advanced</summary>
             <button type="button" className="btn btn-ghost" disabled={disabled}
@@ -151,9 +156,11 @@ export function RecoveryReview({ actions, inputId, attemptId, onClose }: Recover
   const presence = binding ? qualifiedPresence(binding, state.presence[binding.id]) : null;
   const disabled = state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
   const changed = revision !== snapshot.revision || !target;
+  const available = target ? choices(target.input, target.attempt, snapshot) : [];
+  const allowed = !!decision && available.some(choice => choice === decision);
   const close = () => { if (!operation.writing) onClose(); };
   const submit = async () => {
-    if (!target || !decision || changed || !reason.trim() || presence?.busy
+    if (!target || !decision || !allowed || changed || !reason.trim() || presence?.busy
         || !presence?.idle && !idle || decision === 'resend' && !duplicate) return;
     const evidence = decision === 'confirm_evidence' || idle ? { ...attestIdle(idle), turn_state: turn, host_turn_id: hostTurn || null } : null;
     if (await actions.execute(resolveCommand({ input_id: target.input.id, attempt_id: target.attempt.id, expected_revision: revision,
@@ -170,6 +177,7 @@ export function RecoveryReview({ actions, inputId, attemptId, onClose }: Recover
             setRevision(snapshot.revision); setDecision(''); setIdle(false); setDuplicate(false);
           }}>Review current snapshot</button>}</div>}
         {target && <><p><strong>Your message on “{about(target.input)}”</strong></p>
+          {targetRemoved(snapshot, target.input.target) && <p>{binnedMessage}</p>}
           <p className="lifecycle-preserve">{target.input.payload.text}</p>
           {target.input.payload.selected_option_id && <p>Saved choice: {target.input.payload.target_snapshot.options.find(option => option.id === target.input.payload.selected_option_id)?.label ?? 'an option that no longer exists'}</p>}
           <p>Delivery {target.attempt.acceptance} · turn {target.attempt.turn_state} · result {target.attempt.result_state}</p>
@@ -183,7 +191,7 @@ export function RecoveryReview({ actions, inputId, attemptId, onClose }: Recover
           </div>)}</details>
           {target.input.resolution_history.map(entry => <p key={entry.op_id}>{labels[entry.kind]} · {entry.reason || 'no reason given'} · {entry.at}</p>)}
           <label>Recovery choice<select tabIndex={0} value={decision} disabled={operation.writing || !!operation.pending} onChange={event => { setDecision(event.target.value as ResolutionKind | ''); setDuplicate(false); }}>
-            <option value="">Choose deliberately</option>{choices(target.input, target.attempt, snapshot).map(choice => <option key={choice} value={choice}>{labels[choice]}</option>)}
+            <option value="">Choose deliberately</option>{available.map(choice => <option key={choice} value={choice}>{labels[choice]}</option>)}
           </select></label>
           <label>Reason<input value={reason} required disabled={operation.writing || !!operation.pending} onChange={event => setReason(event.target.value)} /></label>
           {decision === 'request_result_repair' && <p>Request a new result-only model turn that inspects completed work. It can still make mistakes. Review prior effects before resuming.</p>}
@@ -201,7 +209,7 @@ export function RecoveryReview({ actions, inputId, attemptId, onClose }: Recover
       </div>
       <div className="dialog-actions">
         <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onClose}>Cancel</button>
-        <button type="button" className="btn btn-primary" disabled={disabled || changed || !decision || !reason.trim()
+        <button type="button" className="btn btn-primary" disabled={disabled || changed || !allowed || !reason.trim()
           || !!presence?.busy || !presence?.idle && !idle || decision === 'resend' && !duplicate}
           onClick={() => { void submit(); }}>Save recovery decision</button>
       </div></Dialog>;

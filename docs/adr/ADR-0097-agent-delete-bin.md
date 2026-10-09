@@ -36,7 +36,7 @@ end-to-end contract-generation and agent-skill pattern.
   tree, graph, search and menu counts exclude effectively removed work. Agent
   reads report omitted work in plain words. Other writes to removed work refuse
   with an instruction to ask the owner to restore it. Owner snapshots and direct
-  conversation reads retain the bin and cancelled message text.
+  conversation reads retain the bin and cancelled or held message text.
 - Deletion cancels only queued, undelivered owner inputs for removed work and
   clears their delivery barriers; their text stays visible as cancelled. Removed
   notices and already claimed or received inputs, including the deleting request's
@@ -51,8 +51,12 @@ end-to-end contract-generation and agent-skill pattern.
   removed topics under the session's row. Rows are dimmed. Restore and Delete
   forever wait for current agent writes through the existing lifecycle readiness
   checks. Restore is revision guarded and clears only the selected marker;
-  nested removal markers stay removed until separately restored. Cancelled
-  messages stay cancelled. Restore sends no agent input, matching topic Restore.
+  nested removal markers stay removed until separately restored after their
+  parent work or topic. Cancelled
+  messages stay cancelled. Queued messages with earlier accepted attempts remain
+  held and appear as "Held — sends if you restore". Restore states how many held
+  messages it makes eligible to send before the owner confirms; it creates no
+  new agent input. Recovery refuses Send again for binned work until restored.
 - Delete forever uses the existing confirmed permanent owner remove, including
   its backup, cross-reference guards and topic continuation-family semantics.
   Agent topic deletion itself never deletes continuation copies in other sessions.
@@ -71,7 +75,8 @@ end-to-end contract-generation and agent-skill pattern.
 
 ## Consequences
 
-Owner restoration recovers the prior work without resending messages. Saved
+Owner restoration recovers the prior work and explicitly warns when held messages
+will become eligible to send. Cancelled messages stay cancelled. Saved
 operation receipts provide durable notice counts, and full owner snapshots keep
 removed content available for review. No new trash store, host operation or
 permanent agent-delete privilege is introduced.

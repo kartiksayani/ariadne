@@ -9,7 +9,7 @@ import { createDesktopService, useSession } from '../../../src/data';
 import { indexSession, revealAncestors } from '../../../src/data/selectors';
 import { OpenSessions, type Immutable } from '../../../src/data/session-store';
 import { SessionActionControllers, type SessionActions } from '../../../src/components/bindings/actions';
-import { activeItems, activeTopics, itemRemoved, removedRoots, removedSubtree } from '../../../src/selectors/removed';
+import { activeItems, activeTopics, heldInputs, itemRemoved, removedRoots, removedSubtree } from '../../../src/selectors/removed';
 import { ackTarget } from '../../../src/selectors/ack';
 import { sentenceRows } from '../../../src/selectors/tree/rows';
 import { relatedItems } from '../../../src/selectors/related';
@@ -44,6 +44,14 @@ function cancelledInput(session: Session, itemId = '1.1.1'): Input {
   input.state = 'cancelled'; input.cancel_cause = 'agent_removed'; input.answer_id = null;
   input.target = { topic_id: session.items[itemId]!.topic_id, item_id: itemId };
   input.payload.text = 'Please keep my original delivery notes.';
+  return input;
+}
+let queuedSequence = 0;
+function queuedInput(session: Session, id: string, itemId: string | null, topicId = topicA): Input {
+  const input = cancelledInput(session, itemId ?? '1');
+  input.id = `00000000-0000-4000-8000-${String(++queuedSequence).padStart(12, '0')}`; input.state = 'queued'; delete input.cancel_cause;
+  input.kind = 'note'; input.resolution_history = []; input.active_attempt_id = null;
+  input.target = { topic_id: topicId, item_id: itemId }; input.payload.text = `Retained words for ${id}.`;
   return input;
 }
 const ids = (items: readonly { readonly id: string }[]) => items.map(item => item.id);
@@ -134,7 +142,7 @@ async function staleRefresh(value: Awaited<ReturnType<typeof setup>>) {
 describe('removed work projections', () => {
   it.each(['open', 'in_progress', 'done', 'decided', 'dropped'] as const)('preserves Ack to %s across direct, ancestor and topic removal and restoration', async choice => {
     for (const removal of ['item', 'ancestor', 'topic'] as const) {
-      const session = graphSession(), view = preferences(), item = session.items['1.1']!;
+      const session = graphSession(), view = preferences(), item = session.items['1.1']!; session.inputs = {};
       for (const candidate of Object.values(session.items)) if (candidate) candidate.ack_to = null;
       item.ack_to = choice; item.ask = null; item.options = [];
       session.items['2']!.ack_to = 'done'; session.items['2']!.ask = null;
@@ -277,6 +285,97 @@ describe('agent removal notices', () => {
 });
 
 describe('agent removal bin', () => {
+  it('matches result-repair queue eligibility from the latest attempt resolution', () => {
+    const session = removedSession(), input = queuedInput(session, 'repair-retry', '1'), attempt = input.attempts.at(-1)!;
+    attempt.purpose = 'result_repair'; session.inputs = { [input.id]: input };
+    // Without a queue resolution even a result-repair attempt is held, as in Core.
+    expect(heldInputs(session).map(value => value.id)).toEqual([input.id]);
+    input.resolution_history = [{ op_id: '00000000-0000-4000-8000-000000000092', attempt_id: attempt.id,
+      kind: 'retry_unexecuted', reason: '', at: session.updated_at, evidence: null }];
+    expect(heldInputs(session)).toEqual([]);
+    attempt.purpose = 'work';
+    expect(heldInputs(session).map(value => value.id)).toEqual([input.id]);
+    input.resolution_history[0].attempt_id = '00000000-0000-4000-8000-000000000093';
+    input.resolution_history[0].kind = 'request_result_repair';
+    expect(heldInputs(session).map(value => value.id)).toEqual([input.id]);
+  });
+
+  it('cancels a pending confirmation when the session actions change', async () => {
+    const session = removedSession(), input = queuedInput(session, 'held-before-navigation', '1'); session.inputs = { [input.id]: input };
+    const previous = await setup(session), next = await setup();
+    const view = render(<LiveBin actions={previous.actions} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await screen.findByRole('dialog', { name: 'Restore work' });
+    view.rerender(<LiveBin actions={next.actions} />);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(previous.transport.mutations).toEqual([]); expect(session.items['1']!.removed_at).toBeTruthy();
+  });
+
+  it('shows held queued messages and counts only the messages released by restoring the selected marker', async () => {
+    const session = removedSession();
+    const inputs = [queuedInput(session, 'root-message', '1'), queuedInput(session, 'visible-child-message', '1.2'),
+      queuedInput(session, 'nested-message', '1.1.1')];
+    session.inputs = Object.fromEntries(inputs.map(input => [input.id, input]));
+    const value = await setup(session); render(<LiveBin actions={value.actions} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
+    for (const input of inputs) expect(screen.getByText(`Held — sends if you restore: ${input.payload.text}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    const confirm = within(await screen.findByRole('dialog', { name: 'Restore work' }));
+    expect(confirm.getByText('Restoring this work makes 2 held messages visible again. They will send when sending can resume.')).toBeTruthy();
+    expect(value.transport.mutations).toEqual([]);
+    fireEvent.click(confirm.getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(value.transport.mutations).toHaveLength(1));
+    await screen.findByRole('button', { name: 'Removed by agent · 2' });
+    expect(screen.queryByText(`Held — sends if you restore: ${inputs[0].payload.text}`)).toBeNull();
+    expect(screen.getByText(`Held — sends if you restore: ${inputs[2].payload.text}`)).toBeTruthy();
+    expect(inputs.every(input => session.inputs[input.id]!.state === 'queued')).toBe(true);
+  });
+
+  it('counts a topic message and visible item message while excluding nested markers, notices and result repairs', async () => {
+    const session = removedSession(); session.items['8']!.removed_at = session.updated_at;
+    const topic = queuedInput(session, 'topic-message', null, topicB), nested = queuedInput(session, 'nested-message', '8', topicB);
+    const notification = queuedInput(session, 'notice-message', null, topicB); notification.kind = 'removed';
+    const repair = queuedInput(session, 'repair-message', null, topicB), attempt = repair.attempts.at(-1)!;
+    repair.resolution_history = [{ op_id: '00000000-0000-4000-8000-000000000092', attempt_id: attempt.id, kind: 'request_result_repair', reason: '', at: session.updated_at, evidence: null }];
+    session.inputs = Object.fromEntries([topic, nested, notification, repair].map(input => [input.id, input]));
+    const value = await setup(session); render(<LiveBin actions={value.actions} topicId={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 1' }));
+    expect(screen.getByText(`Held — sends if you restore: ${topic.payload.text}`)).toBeTruthy();
+    expect(screen.getByText(`Held — sends if you restore: ${nested.payload.text}`)).toBeTruthy();
+    expect(screen.queryByText(`Held — sends if you restore: ${repair.payload.text}`)).toBeNull();
+    expect(screen.queryByText(`Held — sends if you restore: ${notification.payload.text}`)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    const confirm = within(await screen.findByRole('dialog', { name: 'Restore work' }));
+    expect(confirm.getByText('Restoring this work makes 1 held message visible again. It will send when sending can resume.')).toBeTruthy();
+    fireEvent.click(confirm.getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(value.transport.mutations).toHaveLength(1));
+    expect(itemRemoved(value.store.getSnapshot().snapshot!.session, '8')).toBe(true);
+  });
+
+  it('rechecks held counts after the session changes while Restore confirmation is open', async () => {
+    const session = removedSession(), input = queuedInput(session, 'first-message', '1'); session.inputs = { [input.id]: input };
+    const value = await setup(session); render(<LiveBin actions={value.actions} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await screen.findByRole('dialog', { name: 'Restore work' });
+    const second = queuedInput(session, 'second-message', '1.2'); session.inputs[second.id] = second;
+    ++session.revision; await act(async () => { await value.store.refresh(); });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Restore' }));
+    expect(await screen.findByText('Restoring this work makes 2 held messages visible again. They will send when sending can resume.')).toBeTruthy();
+    expect(value.transport.mutations).toEqual([]);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(session.items['1']!.removed_at).toBeTruthy(); expect(value.transport.mutations).toEqual([]);
+  });
+
+  it('does not restore held messages without the UI confirmation callback', async () => {
+    const session = removedSession(), input = queuedInput(session, 'held-message', '1'); session.inputs = { [input.id]: input };
+    const value = await setup(session);
+    expect(await restoreRemoved(value.actions, topicA, '1')).toBe('Restoring this work makes 1 held message visible again. View the bin to confirm Restore.');
+    expect(value.transport.mutations).toEqual([]);
+  });
+
   it('only labels owner messages cancelled by agent removal as cancelled bin messages', async () => {
     const session = removedSession(), removed = cancelledInput(session), other = structuredClone(removed), notification = structuredClone(removed);
     other.id = '00000000-0000-4000-8000-000000000097'; other.cancel_cause = 'owner';
@@ -463,6 +562,22 @@ describe('agent removal bin', () => {
 });
 
 describe('agent removal receipts in the composed app', () => {
+  it('confirms held messages from notice Restore and preserves the notice when confirmation is cancelled', async () => {
+    const session = receiptSession(), input = queuedInput(session, 'notice-held-message', '1'); session.inputs = { [input.id]: input };
+    const transport = new BinTransport(session), text = removalNotice(session, notice()); await openApp(transport);
+    const removal = within((await screen.findByText(text)).closest<HTMLElement>('.pw-note')!);
+    fireEvent.click(removal.getByRole('button', { name: 'Restore' }));
+    const confirm = within(await screen.findByRole('dialog', { name: 'Restore work' }));
+    expect(confirm.getByText('Restoring this work makes 1 held message visible again. It will send when sending can resume.')).toBeTruthy();
+    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByText(text)).toBeTruthy(); expect(transport.mutations.filter(request => request.command.command === 'item_restore')).toEqual([]);
+    fireEvent.click(removal.getByRole('button', { name: 'Restore' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Restore work' })).getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(screen.queryByText(text)).toBeNull());
+    expect(transport.mutations.filter(request => request.command.command === 'item_restore')).toHaveLength(1);
+  });
+
   it('keeps the live empty-topic connection frame and reveals an empty removed topic in the session bin', async () => {
     const session = graphSession(); session.items = {}; session.inputs = {}; session.rounds = {}; session.answers = []; session.messages = [];
     session.topics = { [topicA]: session.topics[topicA]! }; session.topics[topicA]!.origin = null;

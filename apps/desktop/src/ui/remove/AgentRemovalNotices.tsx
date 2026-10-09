@@ -7,7 +7,7 @@ import type { NavigationStore } from '../../state/navigation/store';
 import type { WaitingStore } from '../../selectors/waiting/store';
 import { waitForLifecycleReady } from '../shared/lifecycleReady';
 import { notices } from '../pages/notices';
-import { binView, removalNotice, restoreRemoved } from './AgentBin';
+import { binView, removalNotice, useRestoreConfirmation } from './AgentBin';
 
 interface Props {
   readonly waiting: WaitingStore;
@@ -21,6 +21,7 @@ const sameSession = (a: SessionRef, b: SessionRef) => a.project_id === b.project
 export function AgentRemovalNotices({ waiting, controllers, navigation, selectedSession, onTree }: Props) {
   const waitingState = useSyncExternalStore(waiting.subscribe, waiting.getSnapshot);
   const seenRemovals = useRef(new Set<string>());
+  const restoreConfirmation = useRestoreConfirmation();
   useEffect(() => {
     const sessions = new Map<string, typeof waitingState.sessions[number]['session']>();
     for (const session of [...waitingState.sessions.map(value => value.session), ...(selectedSession ? [selectedSession] : [])]) {
@@ -40,9 +41,9 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
         notices.push({ id, icon: 'ph ph-trash', text: removalNotice(session, removal), dismissible: true, actions: [
           { label: 'Restore', run: () => {
             const actions = controllers.forSession(navigation.opened.open(route));
-            void restoreRemoved(actions, removal.topic_id, removal.item_id).then(error => {
+            void restoreConfirmation.restore(actions, removal.topic_id, removal.item_id).then(({ error, restored }) => {
               if (error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: error, dismissible: true });
-              else notices.dismiss(id);
+              else if (restored) notices.dismiss(id);
             });
           } },
           { label: 'View', run: () => {
@@ -74,5 +75,5 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
     }
   }, [controllers, navigation, waitingState.sessions, selectedSession, onTree]);
 
-  return null;
+  return restoreConfirmation.dialog;
 }

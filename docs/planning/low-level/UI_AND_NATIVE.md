@@ -389,6 +389,11 @@ Delete forever. Restore uses the current store and the lifecycle action's write
 barrier before its revision-guarded command. Delete forever uses the existing
 permanent Remove confirmation. Restoring brings back positions, descendants and
 statuses; cancelled messages stay cancelled.
+Queued messages held because their work is removed appear in its bin entry as
+`Held — sends if you restore`. Restore states how many held messages will send
+before confirmation, counting only messages made visible by that restoration;
+nested removal markers keep their messages held. Recovery shows that the work is
+in the bin and offers Mark done rather than Send again until it is restored.
 
 Every new agent removal produces a plain notice naming the topic and removed
 item count, with Restore and View. If questions waited on the owner or unsent

@@ -889,6 +889,10 @@ or topic receives the marker; descendants inherit removal through their parent
 chain and topic. Markers do not change statuses, acknowledgments, owner text,
 questions, answers, rounds, ordering or provenance. Restore clears the marker,
 keeping the entire prior state and leaving cancelled inputs cancelled.
+Queued inputs with earlier accepted attempts remain held while their work is
+removed. The bin retains their text and warns that they send if restored; Restore
+states how many become eligible to send. Recovery refuses resend and retry on
+removed work until it is restored.
 
 Effective removal excludes work from ordinary counts, Waiting, acknowledgments,
 Sent, tree, graph and search. Raw owner session snapshots retain every record for

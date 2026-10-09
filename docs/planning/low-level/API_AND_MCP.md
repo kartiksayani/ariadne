@@ -941,6 +941,11 @@ resends cancelled messages.
 Owner `item_restore` uses `{item_id,expected_revision}`; `topic_removed_restore`
 uses `{topic_id,expected_revision}`. Both return a `bin_restore` receipt with
 `topic_id` and nullable `item_id`. Restore clears only the selected removal marker
-and advances its revision. It queues no agent input. The existing `item_remove`
+and advances its revision. It queues no new agent input, but existing held queued
+messages become eligible to send when their work becomes visible. The desktop
+states that count before Restore. Restoring a nested item refuses until its
+parent work and topic are out of the bin. `input_resolve` refuses `resend` and
+`retry_unexecuted` for removed work with an instruction to restore it first or mark
+the message done. The existing `item_remove`
 and `topic_remove` commands perform Delete forever, retaining backup, integrity
 checks and permanent-removal notification semantics (ADR-0083, ADR-0088).

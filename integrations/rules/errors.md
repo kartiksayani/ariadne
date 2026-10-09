@@ -18,7 +18,7 @@
   Later/nested refs work; links cross topics and show at both ends.
   Omit/null keeps them; `[]` clears them.
   Self/duplicate/new missing refs fail. Reads omit Bin or removed targets;
-  Resending declared removed targets prunes them (`pruned_related`: source → targets).
+  resending declared removed targets prunes them (`pruned_related`: source → targets).
 - Limits: `question`, `ask`, `note`, `outcome`, `why` 4096 bytes each, `reply`
   64 KiB, 100 expanded ops, 12 options, 32 links and 32 related items per item.
 - `item.add` is nonterminal. Choose `ack_to` (`SKILL.md`); keep outcome/why.

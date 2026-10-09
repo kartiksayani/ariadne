@@ -219,6 +219,77 @@ fn agent_bin_preserves_every_ack_choice_until_the_owner_restores_and_acknowledge
 }
 
 #[test]
+fn nested_bin_restore_refuses_until_the_parent_work_or_topic_is_restored() {
+    for topic in [false, true] {
+        let setup = Setup::new(&seed());
+        let mut create = guarded(1710, "1", 1);
+        create
+            .operations
+            .push(add("child", uuid(5), Some(existing("1")), false));
+        setup.execute(&create).unwrap();
+        let before = setup.saved();
+        let mut child = guarded(1711, "1.1", before.items.0[&item("1.1")].revision.value());
+        child.operations.push(Operation::ItemDelete {
+            item: existing("1.1"),
+        });
+        setup.execute(&child).unwrap();
+        let before = setup.saved();
+        let mut parent = request(1712);
+        if topic {
+            parent
+                .expected_topic_revisions
+                .0
+                .insert(id(5), before.topics.0[&id(5)].revision);
+            parent
+                .operations
+                .push(Operation::TopicDelete { topic: uuid(5) });
+        } else {
+            parent
+                .expected_item_revisions
+                .0
+                .insert(item("1"), before.items.0[&item("1")].revision);
+            parent.operations.push(Operation::ItemDelete {
+                item: existing("1"),
+            });
+        }
+        setup.execute(&parent).unwrap();
+        let saved = setup.saved();
+        let bytes = setup.bytes();
+        let error =
+            restore_item(&setup, "1.1", saved.items.0[&item("1.1")].revision, 1713).unwrap_err();
+        assert!(matches!(error,
+            ariadne_core::history_actions::HistoryActionError::Core(error)
+            if error.code == CoreErrorCode::InvalidTransition
+                && error.message == "Restore the parent work or topic from the bin first."));
+        assert_eq!(setup.bytes(), bytes);
+        if topic {
+            HistoryActionService::new(&setup.registry)
+                .execute(
+                    &owner_route(),
+                    &OwnerCommand::TopicRemovedRestore {
+                        api_version: SchemaVersion::new(1).unwrap(),
+                        op_id: id(1714),
+                        params: TopicLifecycleParams {
+                            topic_id: id(5),
+                            expected_revision: saved.topics.0[&id(5)].revision,
+                        },
+                    },
+                    at(),
+                )
+                .unwrap();
+        } else {
+            restore_item(&setup, "1", saved.items.0[&item("1")].revision, 1714).unwrap();
+        }
+        assert!(setup.saved().items.0[&item("1.1")].removed_at.is_some());
+        restore_item(&setup, "1.1", saved.items.0[&item("1.1")].revision, 1713).unwrap();
+        assert!(!ariadne_domain::visibility::item_is_removed(
+            &setup.saved(),
+            &setup.saved().items.0[&item("1.1")]
+        ));
+    }
+}
+
+#[test]
 fn agent_delete_preserves_subtree_and_redelete_and_restore_exact_marker() {
     let setup = Setup::new(&seed());
     let mut children = guarded(
