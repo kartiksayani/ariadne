@@ -23,22 +23,33 @@ describe('hidden item tree projection', () => {
     expect(model().rows.filter(row => row.kind === 'item').map(row => row.key)).toContain('1.1');
   });
 
-  it('places one group at the first hidden sibling and counts roots separately from child siblings', () => {
+  it.each([false, true])('groups hidden siblings after visible siblings at every level (expanded: %s)', expanded => {
     const { session, view, input } = fixture(['2', '4', '1.1', '1.3']);
     session.items['1.2'] = { ...session.items['1.1']!, id: '1.2', ordinal: 2 };
     session.items['1.3'] = { ...session.items['1.1']!, id: '1.3', ordinal: 3 };
-    const model = treeModel({ ...input, session: immutable(session), view });
+    session.items['1.1.1'] = { ...session.items['1.1']!, id: '1.1.1', parent: '1.1', ordinal: 1 };
+    session.items['1.3.1'] = { ...session.items['1.1']!, id: '1.3.1', parent: '1.3', ordinal: 1 };
+    view.expanded_item_ids.push('1.1', '1.3');
+    const topic = session.items['1']!.topic_id, nestedKey = hiddenGroupKey(topic, '1'), rootKey = hiddenGroupKey(topic, null);
+    const model = treeModel({ ...input, session: immutable(session), view, expandedHiddenGroups: new Set(expanded ? [nestedKey, rootKey] : []) });
     const groups = model.rows.filter(row => row.kind === 'hidden');
     expect(groups.map(row => [row.parent, row.count, row.depth])).toEqual([['1', 2, 2], [null, 2, 1]]);
-    const topic = session.items['1']!.topic_id;
-    expect(model.rows.slice(0, 7).map(row => row.key)).toEqual([topic, '1', hiddenGroupKey(topic, '1'), '1.2', hiddenGroupKey(topic, null), '3', '5']);
+    expect(groups.every(row => row.expanded === expanded)).toBe(true);
+    expect(model.rows.filter(row => row.kind === 'topic' ? row.key === topic : row.kind === 'hidden' ? row.topicId === topic : row.item.topic_id === topic)
+      .map(row => row.key)).toEqual([topic, '1', '1.2', nestedKey, ...(expanded ? ['1.1', '1.1.1', '1.3', '1.3.1'] : []),
+      '3', '5', '6', '7', rootKey, ...(expanded ? ['2', '4'] : [])]);
+    if (expanded) {
+      expect(model.rows.find(row => row.key === '1.1')).toMatchObject({ depth: 2, hidden: true });
+      expect(model.rows.find(row => row.key === '1.3.1')).toMatchObject({ depth: 3, hidden: true });
+      expect(model.rows.find(row => row.key === '2')).toMatchObject({ depth: 1, hidden: true });
+    }
     expect(model.rows.find(row => row.key === '1' && row.kind === 'item')).toMatchObject({ hidden: false });
   });
 
-  it('opens hidden siblings in their original places and dims inherited descendants', () => {
+  it('opens hidden siblings together with their subtrees and dims inherited descendants', () => {
     const { session, model } = fixture(['1', '3']), key = hiddenGroupKey(session.items['1']!.topic_id, null);
     const opened = model({ expandedHiddenGroups: new Set([key]) });
-    expect(opened.rows.filter(row => row.kind === 'item').map(row => row.key).slice(0, 4)).toEqual(['1', '1.1', '2', '3']);
+    expect(opened.rows.slice(0, 10).map(row => row.key)).toEqual([session.items['1']!.topic_id, '2', '4', '5', '6', '7', key, '1', '1.1', '3']);
     for (const id of ['1', '1.1', '3']) expect(opened.rows.find(row => row.key === id)).toMatchObject({ hidden: true });
     expect(opened.rows.find(row => row.key === '2')).toMatchObject({ hidden: false });
     expect(model().rows.some(row => row.key === '1.1')).toBe(false);
@@ -64,9 +75,12 @@ describe('hidden item tree projection', () => {
   });
 
   it('reveals nested hidden groups from outside the tree without removing hidden preferences', () => {
-    const { view, model } = fixture(['1', '1.1']);
+    const { session, view, model } = fixture(['1', '1.1']);
     const revealed = model({ revealId: '1.1', temporaryExpanded: [] });
     expect(revealed.rows.filter(row => row.kind === 'hidden').every(row => row.expanded)).toBe(true);
+    const topic = session.items['1']!.topic_id;
+    expect(revealed.rows.slice(0, 11).map(row => row.key)).toEqual([topic, '2', '3', '4', '5', '6', '7', hiddenGroupKey(topic, null),
+      '1', hiddenGroupKey(topic, '1'), '1.1']);
     expect(revealed.rows.find(row => row.key === '1.1')).toMatchObject({ hidden: true });
     expect(view.hidden_item_ids).toEqual(['1', '1.1']);
   });
