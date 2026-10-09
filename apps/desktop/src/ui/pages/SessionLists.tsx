@@ -51,8 +51,8 @@ export interface SessionListsProps {
 type Dialog = { kind: 'dispatch' | 'close' | 'archive'; store: SessionStore; agent: string; when: string; name: string | null; summary?: Immutable<SessionSummary>; onSaved?: () => void }
   | { kind: 'remove'; subject: RemoveSubject; target: RemoveTarget };
 
-const failed = (error: unknown) => notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
-  text: plainFailure(error, 'The session could not be changed. Try again.') });
+const failed = (error: unknown, fallback = 'The session could not be changed. Try again.') => notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+  text: plainFailure(error, fallback) });
 
 export function Chip({ chip }: { readonly chip: TopicChip }) {
   return <span className="pw-topic-chip" title={chip.full} style={{ color: chip.color }}><i className={chip.icon} aria-hidden="true" />{chip.name}
@@ -104,7 +104,7 @@ export function SessionLists(props: SessionListsProps) {
     const cancelled = data?.kind === 'session_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0;
     const name = ownerName(summary), subject = name ? `“${name}”` : 'the session';
     let used = false;
-    const id = notices.push({ icon: 'ph ph-archive', text: `Archived${wasActive ? ' and closed' : ''} ${subject}.${cancelled ? ` ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.` : ''}`, dismissible: true,
+    const id = notices.push({ icon: 'ph ph-archive', text: `Archived${wasActive ? ' and closed' : ''} ${subject}.${cancelled ? ` ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.${wasActive ? ' Undo resumes sending, even if you paused it.' : ''} Cancelled messages stay cancelled.` : ''}`, dismissible: true,
       actions: [{ label: 'Undo', run: () => {
         if (used) return;
         used = true;
@@ -115,7 +115,12 @@ export function SessionLists(props: SessionListsProps) {
   };
   const lifecycle = async (summary: Immutable<SessionSummary>, kind: 'session_close' | 'session_reopen' | 'session_archive' | 'session_restore', reopen = false, expectedRevision?: number): Promise<boolean> => {
     const route = routeOf(summary), key = sessionKey(summary);
-    if (lifecycleBusy.current || disabled) return false;
+    if (lifecycleBusy.current || disabled) {
+      failed(null, kind === 'session_restore'
+        ? `The session could not be restored while another change is finishing. Find it under Archived and try Restore again.${reopen ? ' Then reopen it to resume sending.' : ''}`
+        : 'Ariadne is finishing another change. Try again.');
+      return false;
+    }
     lifecycleBusy.current = true;
     setBusy(key);
     try {

@@ -18,13 +18,16 @@ path as Close, then records `archived_at` in the same transaction. A result alre
 committed stays handled. Restore clears the archive marker and leaves the session
 Closed. Undo of an active session requests `reopen: true` on `session_restore`:
 restore and the existing Reopen behavior run in one transaction with one expected
-revision and one receipt. Undo of a closed session leaves it Closed. Cancelled
-messages remain cancelled in both cases.
+revision and one receipt. This resumes sending even if the owner had paused it
+before archiving. Undo of a closed session leaves it Closed. Cancelled messages
+remain cancelled in both cases.
 
 Session cards offer Archive, with a plain confirmation whenever the session is
 Active, a question waits on the owner, or a message is pending. The confirmation
 reuses Close's counts; committed results are not counted as cancellations. The
-notice reports closing and receipt cancellation counts. Its Undo action is
+notice reports closing and receipt cancellation counts. When messages were
+cancelled, it says they stay cancelled and, for an active session, that Undo
+resumes sending even if the owner had paused it. Its Undo action is
 consumed on the first click. Archived cards live in a bottom `Archived · N` group,
 folded by default. The existing preference store remembers expansion per project.
 Restore, reading, and Remove remain available there.

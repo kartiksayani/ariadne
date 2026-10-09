@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { blockedDraft } from '../../../src/state/drafts/store';
@@ -21,7 +21,7 @@ import type { DesktopDiscoveryCandidate, OwnerDraft, OwnerMutationRequest, Owner
 import { closeImpact } from '../../../src/components/history-actions/selectors';
 import type { ProjectSummary, Session, SessionSummary } from '../../../src/generated/domain/models';
 
-afterEach(() => { cleanup(); notices.clear(); });
+afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
 const card = () => document.querySelector<HTMLElement>(`[data-session-card="${route.session_id}"]`)!;
 const commands = (transport: AppTransport) => transport.mutations.filter(request => request.command.command !== 'preferences_patch').map(request => request.command.command);
 async function setup(pending = false, all = false, transport = new AppTransport()) {
@@ -79,8 +79,11 @@ describe('Session archive cards', () => {
     expect(commands(transport)).toEqual(['session_archive', 'session_restore', 'session_reopen']);
   }, 15000);
 
-  it('confirms cancellation in plain words; Cancel preserves messages, then Archive offers Undo', async () => {
-    const transport = await setup(true), session = transport.sessions.get(route.session_id)!;
+  it.each([false, true])('confirms cancellation in plain words; Cancel preserves messages, then Undo resumes sending with owner paused=%s', async paused => {
+    const fixture = new AppTransport(), session = fixture.sessions.get(route.session_id)!;
+    session.bindings[session.active_binding_id!]!.owner_paused = paused;
+    session.bindings[session.active_binding_id!]!.dispatch_state = paused ? 'paused' : 'enabled';
+    const transport = await setup(true, false, fixture);
     // Use exactly two pending messages, regardless of the broader demo queue.
     const pending = Object.values(session.inputs).filter(input => input && ['queued', 'in_flight', 'needs_attention'].includes(input.state)).slice(0, 2);
     session.inputs = Object.fromEntries(pending.map(input => [input!.id, input!]));
@@ -92,7 +95,7 @@ describe('Session archive cards', () => {
     await archive();
     await screen.findByRole('button', { name: 'Archived · 1' });
     expect(Object.values(session.inputs).every(input => input?.state === 'cancelled')).toBe(true);
-    expect(screen.getByText('Archived and closed “Review notes”. 2 unsent messages were cancelled.')).toBeTruthy();
+    expect(screen.getByText('Archived and closed “Review notes”. 2 unsent messages were cancelled. Undo resumes sending, even if you paused it. Cancelled messages stay cancelled.')).toBeTruthy();
     const undo = screen.getByRole('button', { name: 'Undo' });
     const staleUndo = notices.getSnapshot().find(notice => notice.actions?.[0]?.label === 'Undo')!.actions![0].run;
     await act(async () => { fireEvent.click(undo); staleUndo(); });
@@ -103,6 +106,34 @@ describe('Session archive cards', () => {
     expect(session.bindings[session.active_binding_id!]!).toMatchObject({ owner_paused: false, dispatch_state: 'enabled' });
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
     expect(Object.values(session.inputs).every(input => input?.state === 'cancelled')).toBe(true);
+  });
+
+  it('shows a plain error for a quick Undo while the archive navigation refresh is still running', async () => {
+    const fixture = new AppTransport(), session = fixture.sessions.get(route.session_id)!;
+    session.state = 'closed'; session.closed_at = session.updated_at;
+    for (const item of Object.values(session.items)) if (item?.status === 'waiting_on_me') item.status = 'open';
+    const transport = await setup(false, false, fixture);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'project_list') await gate;
+      return invoke(name, args);
+    });
+    try {
+      await archive();
+      await screen.findByText('Archived “Review notes”.');
+      const undo = notices.getSnapshot().find(notice => notice.actions?.[0]?.label === 'Undo')!.actions![0].run;
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); undo(); });
+      expect(screen.getByText('The session could not be restored while another change is finishing. Find it under Archived and try Restore again.')).toBeTruthy();
+      expect(commands(transport)).toEqual(['session_archive']);
+      expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+      expect(session.archived_at).toBeTruthy();
+    } finally { await act(async () => { release(); }); }
+    await unfold();
+    await act(async () => { fireEvent.click(within(card()).getByRole('button', { name: 'Restore' })); });
+    await waitFor(() => expect(session.archived_at).toBeUndefined());
+    expect(commands(transport)).toEqual(['session_archive', 'session_restore']);
   });
 
   it('keeps an archived session readable, blocks owner input, offers Restore before Reopen, and retains Remove', async () => {
