@@ -10,26 +10,27 @@
 - Refs: `{"ref":"a"}` names an earlier request ref (letter first, then letters,
   digits or `_`, at most 32); `{"id":"1.2"}` names an item, UUID for topic/message.
   `item.edit` short/note: omit to keep, string to replace, null to clear.
+- Delete moves a subtree/topic to Bin, preserving history. Guard the root item
+  or topic. Reply before deleting. Owner text, unanswered asks and Ack targets
+  are eligible; archived work refuses. `agent_removals` lists items, waiting
+  questions and cancelled inputs. Reads omit Bin work and its links.
 - Connections: `item.add.related` or `item.edit.patch.related` takes item numbers
   or batch refs: `["3.2","notes"]` or `[{"id":"3.2"},{"ref":"notes"}]`.
-  Adds accept later refs and nested children. Connections cross topics in this
-  session and show at both ends. Omit/null keeps them; `[]` clears them.
-  Self/duplicate/new missing targets fail. Reads omit removed targets;
-  resending declared removed targets prunes them (`pruned_related`: source → targets).
+  Later/nested refs work; connections cross topics and show at both ends.
+  Omit/null keeps them; `[]` clears them.
+  Self/duplicate/new missing targets fail. Reads omit Bin targets;
+  resending declared missing targets prunes them (`pruned_related`: source → targets).
 - Limits: `question`, `ask`, `note`, `outcome`, `why` at most 4096 bytes, `reply`
   64 KiB, 100 expanded operations, 12 options, 32 links and 32 related items per item.
-- `item.add` never creates terminal items. Results start `open` with `ack_to`:
-  `decided`, `done` or `dropped`, never `replaced`; retain outcome/why.
-  Strict creation rejects terminal statuses; lenient creation repairs those three
-  to Open with that target. `ack_to` requires nonterminal status; it can coexist
-  with an ask, but Ack requires Open/InProgress with no unanswered ask.
-  `item.status` Open/InProgress can set a target. Existing Ack items refuse
-  strict terminal status; lenient filing keeps Open with the requested target.
-  An Answer, Reply or Drop input directing completion on that same item permits
-  terminal status with `source_input_id`, clearing `ack_to`. Items without
-  targets retain terminal transitions. Keep unanswered asks `waiting_on_me`;
-  explain withdrawal in a new `ack_to: "dropped"` item, or supersede with
-  `item.replace`, clearing the target.
+- Results start `open` with `ack_to`: `decided`, `done` or `dropped`, never
+  `replaced`; keep outcome/why. Strict creation rejects terminal status;
+  lenient creation repairs it to Open with that target. Ack requires
+  Open/InProgress with no unanswered ask. `item.status` Open/InProgress can set
+  a target. Strict terminal writes refuse existing Ack items; lenient writes
+  keep Open with the target. An Answer/Reply/Drop input directing completion on
+  that item permits terminal status with `source_input_id`, clearing `ack_to`.
+  Items without targets close normally. Keep unanswered asks `waiting_on_me`;
+  withdraw in a new `ack_to: "dropped"` item or use `item.replace`.
 - Types: question, decision, finding, task, explanation. `item.status` needs
   `reason` for `open`/`in_progress`, outcome/why for `decided`/`done`/`dropped`;
   `replaced` requires `item.replace`, `waiting_on_me` an ask.
@@ -42,11 +43,10 @@ Link sync to [cache choice](item:1) and notes.
 
 ## Failed commands
 
-Exit 2 (`invalid_argument`, `invalid_ref`): fix the named field, resend without
-`op_id` or with a new one. Exit 3 (`revision_conflict`, `invalid_transition`,
-`binding_mismatch`, `operation_reused`): reread items, rebuild with current
-revisions and no `op_id`, except as below. `ariadne apply --dry-run` validates
-without committing. Never repair failures by editing `.ariadne/` files.
+Exit 2 (`invalid_argument`, `invalid_ref`): fix the field; omit `op_id` or use a
+new one. Exit 3 (`revision_conflict`, `invalid_transition`, `binding_mismatch`,
+`operation_reused`): reread; use current revisions and no `op_id`, except below.
+`--dry-run` validates without committing. Never edit `.ariadne/` to repair failures.
 
 | Code | Exit | Do |
 |---|---|---|
@@ -59,8 +59,8 @@ without committing. Never repair failures by editing `.ariadne/` files.
 | any other exit 4 (e.g. `capacity_exceeded`, `host_unreachable`) | 4 | Stop and tell the owner; do not retry in a loop. |
 | `unsupported`, `future_schema` | 5 | Stop and tell the owner. |
 
-Replays write once. Never resend owner messages, repeat finished work or scrape
-transcripts. Missing output, presence, timeout or failed receipt do not prove non-delivery.
+Replays write once. Never resend owner messages or repeat finished work.
+Missing output or timeouts do not prove non-delivery.
 
 ## Result-only repair
 

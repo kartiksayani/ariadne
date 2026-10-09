@@ -197,6 +197,26 @@ impl Expander {
                 }
             }
             Some("item.add") => return self.item_add(object, path, None, out),
+            Some("item.delete") => {
+                if let Some(Value::String(target)) = object.get("item").cloned() {
+                    *object.get_mut("item").expect("present target") =
+                        if ItemRef::new(target.as_str()).is_ok() {
+                            json!({"id": target})
+                        } else {
+                            json!({"ref": target})
+                        };
+                }
+            }
+            Some("topic.delete") => {
+                if let Some(Value::String(target)) = object.get("topic").cloned() {
+                    *object.get_mut("topic").expect("present target") =
+                        if UuidV4::new(target.as_str()).is_ok() {
+                            json!({"id": target})
+                        } else {
+                            json!({"ref": target})
+                        };
+                }
+            }
             Some("item.ask") => {
                 object
                     .entry("recipient_binding_id")
@@ -543,6 +563,55 @@ impl<'de> Visitor<'de> for StrictVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delete_strings_expand_to_the_same_strict_refs_and_operation_id() {
+        let binding = UuidV4::new(BINDING).unwrap();
+        for (op, field, target, reference) in [
+            ("item.delete", "item", "3.2", json!({"id":"3.2"})),
+            (
+                "item.delete",
+                "item",
+                "duplicate",
+                json!({"ref":"duplicate"}),
+            ),
+            ("topic.delete", "topic", BINDING, json!({"id":BINDING})),
+            (
+                "topic.delete",
+                "topic",
+                "duplicate",
+                json!({"ref":"duplicate"}),
+            ),
+        ] {
+            let string = json!({"operations":[{"op":op, (field):target}]});
+            let object = json!({"operations":[{"op":op, (field):reference}]});
+            let string = expand(&serde_json::to_vec(&string).unwrap(), &binding).unwrap();
+            let object = expand(&serde_json::to_vec(&object).unwrap(), &binding).unwrap();
+            assert_eq!(string.request, object.request);
+            assert_eq!(string.generated_op_id, object.generated_op_id);
+            assert!(string.repairs.is_empty());
+        }
+    }
+
+    #[test]
+    fn delete_rejects_missing_malformed_and_extra_fields_with_its_position() {
+        let binding = UuidV4::new(BINDING).unwrap();
+        for operation in [
+            json!({"op":"item.delete"}),
+            json!({"op":"item.delete","item":3}),
+            json!({"op":"topic.delete","topic":{"id":"3.2"}}),
+            json!({"op":"topic.delete","topic":{"ref":"duplicate"},"reason":"wrong"}),
+        ] {
+            let error = expand(
+                &serde_json::to_vec(&json!({"operations":[operation]})).unwrap(),
+                &binding,
+            )
+            .err()
+            .unwrap();
+            assert!(error.message.contains("operations[0]"), "{error:?}");
+            assert!(error.message.contains("delete"), "{error:?}");
+        }
+    }
 
     const BINDING: &str = "00000000-0000-4000-8000-000000000003";
     const TOPIC: &str = "00000000-0000-4000-8000-000000000005";

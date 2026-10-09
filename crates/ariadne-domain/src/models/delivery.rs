@@ -184,6 +184,8 @@ pub struct Input {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum CancelCause {
+    /// An agent moved the work into the recoverable bin.
+    AgentRemoved,
     /// The owner deleted it.
     Owner,
     /// The owner took it back to edit: its words go back to the owner's editor.

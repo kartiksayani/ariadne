@@ -1,6 +1,7 @@
 import type { Item, ItemOwner, Session } from '../../generated/domain/models';
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
+import { itemRemoved } from '../removed';
 
 export interface SentenceRow {
   readonly item: Immutable<Item>;
@@ -29,7 +30,7 @@ const searchTextBySession = new WeakMap<Immutable<Session>, Map<string, string>>
 // choices are never recomputed when a live snapshot changes.
 export function initialExpansion(session: Immutable<Session>): readonly string[] {
   const indexes = indexSession(session);
-  return Object.freeze(Object.values(session.items).filter((item): item is Immutable<Item> => !!item)
+  return Object.freeze(Object.values(session.items).filter((item): item is Immutable<Item> => !!item && !itemRemoved(session, item.id))
     .filter(item => (indexes.childrenByParent.get(item.id)?.length ?? 0) > 0
       && ((indexes.activeDescendants.get(item.id) ?? 0) > 0 || ['open', 'waiting_on_me', 'in_progress'].includes(item.status)))
     .map(item => item.id));
@@ -44,7 +45,7 @@ export function sentenceRows(session: Immutable<Session>, view: Immutable<Sessio
   const indexes = indexSession(session), filters = view.filters;
   const tokens = normalizeSearch(filters.search).split(/\s+/u).filter(Boolean);
   const filtering = tokens.length > 0 || filters.statuses.length > 0 || filters.owners.length > 0 || filters.hide_later;
-  const inScope = new Set(Object.values(session.items).filter((item): item is Immutable<Item> => !!item)
+  const inScope = new Set(Object.values(session.items).filter((item): item is Immutable<Item> => !!item && !itemRemoved(session, item.id))
     .filter(item => {
       const topic = session.topics[item.topic_id];
       return !!topic && (filters.topic_id === null || item.topic_id === filters.topic_id)
@@ -78,7 +79,7 @@ export function sentenceRows(session: Immutable<Session>, view: Immutable<Sessio
     while (parent) { included.add(parent); if (open) expanded.add(parent); parent = session.items[parent]?.parent; }
   };
   matching.forEach(id => addAncestors(id, filtering));
-  if (revealedItemId && session.items[revealedItemId]) {
+  if (revealedItemId && session.items[revealedItemId] && !itemRemoved(session, revealedItemId)) {
     included.add(revealedItemId); addAncestors(revealedItemId, true);
   }
   const topicOrder = new Map(Object.values(session.topics).filter(topic => !!topic).map(topic => [topic.id, topic.order]));
@@ -91,7 +92,7 @@ export function sentenceRows(session: Immutable<Session>, view: Immutable<Sessio
     const children = indexes.childrenByParent.get(item.id) ?? [], open = expanded.has(item.id);
     rows.push(Object.freeze({ item, depth, context: !matching.has(item.id), outsideFilters: item.id === revealedItemId && !matching.has(item.id),
       expanded: open, childCount: children.length, activeDescendants: indexes.activeDescendants.get(item.id) ?? 0,
-      replacement: item.replaced_by ? session.items[item.replaced_by] ?? null : null }));
+      replacement: item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] ?? null : null }));
     if (open) for (let i = children.length - 1; i >= 0; i--) pending.push({ item: children[i], depth: depth + 1 });
   }
   const value = Object.freeze({ rows: Object.freeze(rows), matchingTotal: matching.size, scopeTotal: inScope.size });

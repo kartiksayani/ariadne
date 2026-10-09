@@ -14,6 +14,10 @@ pub fn open_ask_round(
         .0
         .get(&asked_item.id)
         .ok_or(HistoryError::MissingReference)?;
+    require(
+        !crate::visibility::item_is_removed(session, old),
+        HistoryError::RemovedWork,
+    )?;
     let id = asked_item
         .current_round_id
         .as_ref()
@@ -129,6 +133,16 @@ pub fn close_round(
     round_id: &UuidV4,
     at: UtcMillis,
 ) -> Result<Session, HistoryError> {
+    let item = session
+        .rounds
+        .0
+        .get(round_id)
+        .and_then(|round| session.items.0.get(&round.item_id))
+        .ok_or(HistoryError::MissingReference)?;
+    require(
+        !crate::visibility::item_is_removed(session, item),
+        HistoryError::RemovedWork,
+    )?;
     let mut candidate = session.clone();
     close(&mut candidate, round_id, &at)?;
     Ok(candidate)

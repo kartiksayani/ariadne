@@ -30,6 +30,7 @@ pub enum HistoryError {
     CounterOverflow,
     ClosedSession,
     ArchivedTopic,
+    RemovedWork,
     BindingMismatch,
     StaleGeneration,
     AttemptSealed,
@@ -117,6 +118,10 @@ pub fn append_reply(
         .0
         .get(&draft.item_id)
         .ok_or(HistoryError::MissingReference)?;
+    require(
+        !crate::visibility::item_is_removed(session, item),
+        HistoryError::RemovedWork,
+    )?;
     let round_id = draft.round_id.or_else(|| item.current_round_id.clone());
     if let Some(id) = &round_id {
         require(

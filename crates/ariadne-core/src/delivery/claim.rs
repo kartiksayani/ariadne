@@ -135,6 +135,11 @@ impl DeliveryService<'_> {
                                 .0
                                 .get(&i.target.topic_id)
                                 .is_none_or(|topic| topic.archived_at.is_none())
+                            && (i.kind == InputKind::Removed || (
+                                session.topics.0.get(&i.target.topic_id).is_none_or(|topic|
+                                    !ariadne_domain::visibility::topic_is_removed(session, topic))
+                                && i.target.item_id.as_ref().and_then(|id| session.items.0.get(id)).is_none_or(|item|
+                                    !ariadne_domain::visibility::item_is_removed(session, item))))
                     })
                     .min_by_key(|i| i.seq)
                     .cloned()

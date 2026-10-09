@@ -63,7 +63,7 @@ export interface NotSent {
   /** The owner already sent these same words again to the same item or topic, so "Put back in reply box" has nothing left to do. */
   readonly again: boolean;
 }
-const notSentLine = { owner_edit: 'Taken back to edit', topic_archived: 'Not sent: cancelled when you archived this topic',
+const notSentLine = { owner_edit: 'Taken back to edit', agent_removed: 'Not sent: cancelled when the agent removed this work', topic_archived: 'Not sent: cancelled when you archived this topic',
   session_closed: 'Not sent: cancelled when you closed this session' } as const;
 /** A later message of the owner's to the same item or topic carries the same words and is not itself cancelled: it was put back and sent. */
 function sentAgain(session: Immutable<Session>, input: Immutable<Input>): boolean {

@@ -53,6 +53,7 @@ pub(super) fn execute(
         topics: BTreeSet::new(),
         activity: None,
         pruned_related: UniqueMap(Default::default()),
+        agent_removals: vec![],
     };
     if !request.summary.trim().is_empty()
         || !request.operations.is_empty()
@@ -71,6 +72,7 @@ pub(super) fn execute(
     if request.input_result.is_some() {
         super::result::commit(session, &batch)?;
     }
+    batch.cancel_removed_inputs(session);
     // Batch activity is shared provenance, never a targeted conversation reply.
     if let Some(id) = &batch.activity {
         session
@@ -104,6 +106,10 @@ pub(super) fn execute(
         .filter(|m| {
             batch.activity.as_ref() == Some(&m.id)
                 || batch
+                    .agent_removals
+                    .iter()
+                    .any(|removal| removal.message_id == m.id)
+                || batch
                     .refs
                     .0
                     .values()
@@ -123,6 +129,7 @@ pub(super) fn execute(
         .as_ref()
         .map(|id| session.inputs.0[id].state.clone());
     Ok(SavedReceiptData::Apply {
+        agent_removals: batch.agent_removals,
         allocated_refs: batch.refs,
         messages,
         item_revisions: UniqueMap(
@@ -157,18 +164,19 @@ pub(super) struct Batch<'a, F> {
     repairs: Option<&'a mut Vec<String>>,
     allocate: &'a mut F,
     pub at: &'a UtcMillis,
-    original_items: BTreeSet<ItemRef>,
+    pub(super) original_items: BTreeSet<ItemRef>,
     occupied: BTreeSet<UuidV4>,
     pub refs: UniqueMap<RequestRef, AllocatedRef>,
-    touched: BTreeSet<ItemRef>,
-    topics: BTreeSet<UuidV4>,
+    pub(super) touched: BTreeSet<ItemRef>,
+    pub(super) topics: BTreeSet<UuidV4>,
     activity: Option<UuidV4>,
     pruned_related: UniqueMap<ItemRef, Vec<ItemRef>>,
+    pub(super) agent_removals: Vec<AgentRemoval>,
 }
 impl<F: FnMut() -> UuidV4> Batch<'_, F> {
     /// Agent writes to an archived topic refuse with the stable reason
     /// `topic_archived`; the owner restores the topic to reopen it.
-    fn archived(&self, message: &str) -> CoreError {
+    pub(super) fn archived(&self, message: &str) -> CoreError {
         let mut error = core(CoreErrorCode::InvalidTransition, message);
         error.details = Some(scope::reason(self.context, BarrierReason::TopicArchived));
         error
@@ -300,6 +308,12 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 "The owner archived this item's topic; leave it as it is unless they restore it",
             ));
         }
+        if ariadne_domain::visibility::item_is_removed(session, item) {
+            return Err(core(
+                CoreErrorCode::InvalidTransition,
+                "This item is in the bin. Ask the owner to restore it before changing it.",
+            ));
+        }
         if self.original_items.contains(id)
             && !self.request.expected_item_revisions.0.contains_key(id)
         {
@@ -311,7 +325,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
         self.touched.insert(id.clone());
         Ok(())
     }
-    fn message(
+    pub(super) fn message(
         &mut self,
         session: &mut Session,
         kind: MessageKind,
@@ -522,6 +536,8 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                         revision: one(),
                         created_at: self.at.clone(),
                         archived_at: None,
+                        removed_at: None,
+                        removed_by: None,
                         origin: None,
                     },
                 );
@@ -529,6 +545,8 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 self.save_ref(r#ref, AllocatedRef::Topic { id })?;
             }
             Operation::ItemAdd(draft) => self.add(session, draft)?,
+            Operation::ItemDelete { item } => self.delete_item(session, item)?,
+            Operation::TopicDelete { topic } => self.delete_topic(session, topic)?,
             Operation::ItemEdit { item, patch } => {
                 let id = self.item_ref(item)?;
                 let related = self.related(session, &id, patch.related.as_deref(), "item.edit")?;
@@ -659,6 +677,12 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 "The owner archived this topic; add the item to an active topic instead",
             ));
         }
+        if ariadne_domain::visibility::topic_is_removed(session, topic) {
+            return Err(core(
+                CoreErrorCode::InvalidTransition,
+                "This topic is in the bin. Ask the owner to restore it before adding work.",
+            ));
+        }
         let parent = draft
             .parent
             .as_ref()
@@ -777,6 +801,8 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             current_round_id: round_id.clone(),
             source_round_id: source_round.clone(),
             origin: None,
+            removed_at: None,
+            removed_by: None,
         };
         if let Some(round_id) = round_id {
             session.rounds.0.insert(

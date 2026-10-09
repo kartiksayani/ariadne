@@ -192,6 +192,13 @@ fn help_has_executable_examples_and_invalid_routing_is_rejected_without_filesyst
     assert!(text.contains("--json-stdin"));
     assert!(text.contains("Invalid:"));
     assert!(text.contains("ARIADNE_HOME"));
+    for text in [ariadne_cli::agent::HELP, ariadne_cli::owner::HELP] {
+        assert!(text.contains("Bin"));
+    }
+    assert!(ariadne_cli::agent::HELP.contains("item.delete"));
+    assert!(ariadne_cli::agent::HELP.contains("topic.delete"));
+    assert!(ariadne_cli::agent::HELP.contains("removed items not shown"));
+    assert!(ariadne_cli::owner::HELP.contains("topic restore-removed"));
     let setup = Setup::new(&seed());
     for args in [
         vec!["read", "--json"],
@@ -217,6 +224,115 @@ fn help_has_executable_examples_and_invalid_routing_is_rejected_without_filesyst
             "invalid_argument"
         );
     }
+}
+
+#[test]
+fn delete_root_hides_inherited_children_and_read_reports_counts_without_removed_content() {
+    let setup = Setup::new(&seed());
+    let created = envelope(&setup.apply(&json!({"operations":[
+        {"op":"topic.add","name":"Duplicate findings","ref":"duplicates"},
+        {"op":"item.add","ref":"duplicate","question":"Accidental duplicate root","type":"finding",
+         "children":[{"question":"Accidental duplicate child","type":"question","ask":"Keep this duplicate?"}]}
+    ]})), 0);
+    let topic = created["data"]["topics"][0]["id"].as_str().unwrap();
+    let item = created["data"]["items"][0]["id"].as_str().unwrap();
+    let child = created["data"]["items"][1]["id"].as_str().unwrap();
+    let revision = created["data"]["items"][0]["revision"].clone();
+    let mut guards = serde_json::Map::new();
+    guards.insert(item.to_string(), revision);
+    let request = json!({"expected_item_revisions":guards,"operations":[
+        {"op":"reply","item":{"id":item},"text":"Deleted this accidental duplicate and its child; the real finding is already filed."},
+        {"op":"item.delete","item":item}
+    ]});
+    let deleted = envelope(&setup.apply(&request), 0);
+    assert_eq!(
+        deleted["data"]["agent_removals"][0]["item_ids"],
+        json!([item, child])
+    );
+    assert_eq!(deleted["data"]["agent_removals"][0]["waiting_questions"], 1);
+    let saved = setup.store().read(&id(2)).unwrap();
+    assert!(saved.items.0[&ItemRef::new(item).unwrap()]
+        .removed_at
+        .is_some());
+    assert!(saved.items.0[&ItemRef::new(child).unwrap()]
+        .removed_at
+        .is_none());
+    assert_eq!(
+        saved.items.0[&ItemRef::new(child).unwrap()].status,
+        ItemStatus::WaitingOnMe
+    );
+    assert!(saved
+        .messages
+        .iter()
+        .any(|m| m.body.starts_with("Deleted this accidental duplicate")));
+    let before = setup.bytes();
+    let read = envelope(
+        &setup.agent(
+            &["read"],
+            &["--view", "items", "--topic", topic, "--json"],
+            None,
+        ),
+        0,
+    );
+    assert_eq!(
+        read["data"]["notices"],
+        json!(["2 removed items not shown"])
+    );
+    let serialized = serde_json::to_string(&read).unwrap();
+    assert!(!serialized.contains("Accidental duplicate"));
+    assert!(!serialized.contains("Keep this duplicate?"));
+    assert_eq!(setup.bytes(), before);
+    let replay = envelope(&setup.apply(&request), 0);
+    assert_eq!(replay["data"]["replayed"], true);
+    assert_eq!(
+        replay["data"]["agent_removals"],
+        deleted["data"]["agent_removals"]
+    );
+    assert_eq!(setup.bytes(), before);
+}
+
+#[test]
+fn topic_delete_uses_topic_guard_and_read_reports_removed_topics_and_items() {
+    let setup = Setup::new(&seed());
+    let created = envelope(
+        &setup.apply(&json!({"operations":[
+            {"op":"topic.add","name":"Wrong topic","ref":"wrong"},
+            {"op":"item.add","question":"Wrong topic contents","type":"finding"}
+        ]})),
+        0,
+    );
+    let topic = created["data"]["topics"][0]["id"].as_str().unwrap();
+    let mut guards = serde_json::Map::new();
+    guards.insert(
+        topic.into(),
+        created["data"]["topics"][0]["revision"].clone(),
+    );
+    let deletion = json!({"expected_topic_revisions":guards,"operations":[{"op":"topic.delete","topic":topic}]});
+    let deleted = envelope(&setup.apply(&deletion), 0);
+    assert_eq!(deleted["data"]["agent_removals"][0]["topic_id"], topic);
+    assert_eq!(deleted["data"]["agent_removals"][0]["item_id"], Value::Null);
+    let topics = envelope(
+        &setup.agent(&["read"], &["--view", "topics", "--json"], None),
+        0,
+    );
+    assert_eq!(
+        topics["data"]["notices"],
+        json!(["1 removed topics not shown"])
+    );
+    assert!(!serde_json::to_string(&topics)
+        .unwrap()
+        .contains("Wrong topic"));
+    let items = envelope(
+        &setup.agent(&["read"], &["--view", "items", "--json"], None),
+        0,
+    );
+    assert_eq!(
+        items["data"]["notices"],
+        json!(["1 removed items not shown", "1 removed topics not shown"])
+    );
+    assert!(!serde_json::to_string(&items)
+        .unwrap()
+        .contains("Wrong topic contents"));
 }
 #[test]
 fn query_text_and_single_json_envelope_keep_complete_content_and_do_not_write_snapshots() {

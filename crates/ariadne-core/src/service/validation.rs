@@ -277,7 +277,9 @@ impl ApplyRequest {
                     text(why, 4096, true)?;
                 }
                 Operation::Reply { text: value, .. } => text(value, 64 * 1024, true)?,
-                Operation::RoundClose { .. } => {}
+                Operation::RoundClose { .. }
+                | Operation::ItemDelete { .. }
+                | Operation::TopicDelete { .. } => {}
             }
         }
         if let Some(result) = &self.input_result {
@@ -308,6 +310,8 @@ impl OwnerCommand {
             | Self::InputResolve { op_id, .. }
             | Self::TopicArchive { op_id, .. }
             | Self::TopicRestore { op_id, .. }
+            | Self::TopicRemovedRestore { op_id, .. }
+            | Self::ItemRestore { op_id, .. }
             | Self::SessionClose { op_id, .. }
             | Self::SessionReopen { op_id, .. }
             | Self::SessionArchive { op_id, .. }
@@ -1080,6 +1084,14 @@ pub fn validate_owner_receipt(
                 }
                 && match (&request.command, &receipt.data) {
                     (
+                        OwnerCommand::ItemRestore { params, .. },
+                        SavedReceiptData::BinRestore { item_id, .. },
+                    ) => item_id.as_ref() == Some(&params.item_id),
+                    (
+                        OwnerCommand::TopicRemovedRestore { params, .. },
+                        SavedReceiptData::BinRestore { topic_id, item_id },
+                    ) => topic_id == &params.topic_id && item_id.is_none(),
+                    (
                         OwnerCommand::Ack { params, .. },
                         SavedReceiptData::ItemAck {
                             item_id,
@@ -1122,6 +1134,11 @@ pub fn validate_owner_receipt(
                             | OwnerCommand::SessionRestore { .. },
                         SavedReceiptData::SessionLifecycle { .. }
                     ) | (OwnerCommand::Ack { .. }, SavedReceiptData::ItemAck { .. })
+                        | (
+                            OwnerCommand::ItemRestore { .. }
+                                | OwnerCommand::TopicRemovedRestore { .. },
+                            SavedReceiptData::BinRestore { .. }
+                        )
                         | (
                             OwnerCommand::SessionLabelSet { .. },
                             SavedReceiptData::SessionLabel { .. }

@@ -1,3 +1,4 @@
+import { itemRemoved } from '../../selectors/removed';
 // The item detail panel's view model (handoff README §5, Ariadne.dc.html
 // lines 324-464 and 1953-2079), built from the session snapshot the store
 // already holds. A single transcript keeps messages and delivery actions together.
@@ -191,7 +192,7 @@ const kid = (item: Immutable<Item>): Kid => ({ id: item.id, question: item.quest
 /** The breadcrumb above an item: its topic, then each ancestor, by short label. */
 export function detailPath(session: Immutable<Session>, itemId: string): Crumb[] {
   const item = session.items[itemId];
-  if (!item) return [];
+  if (!item || itemRemoved(session, item.id)) return [];
   const topic = session.topics[item.topic_id], ancestors: Immutable<Item>[] = [];
   for (let parent = item.parent ? session.items[item.parent] : undefined; parent; parent = parent.parent ? session.items[parent.parent] : undefined) ancestors.unshift(parent);
   return [...(topic ? [{ label: shortLabel(topic), itemId: null }] : []), ...ancestors.map(value => ({ label: shortLabel(value), itemId: value.id }))];
@@ -200,8 +201,8 @@ export function detailPath(session: Immutable<Session>, itemId: string): Crumb[]
 /** The detail panel for one item, or null when the item is not in the snapshot. */
 export function detailModel({ session, itemId, now, mode, later, saving, presence = null, health = null, earlierAgent = null, replyDraft = false, hiddenItemIds = [] }: DetailInput): DetailModel | null {
   const item = session.items[itemId];
-  if (!item) return null;
-  const items = Object.values(session.items).filter((value): value is Immutable<Item> => !!value);
+  if (!item || itemRemoved(session, item.id)) return null;
+  const items = Object.values(session.items).filter((value): value is Immutable<Item> => !!value && !itemRemoved(session, value.id));
   const topic = session.topics[item.topic_id];
   const status = statusKey[item.status], isClosed = closedStatus.has(status);
   const path = detailPath(session, itemId);
@@ -355,7 +356,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     if (anchor) entries.set(anchor.id, { ...anchor, asks: [...anchor.asks, { text: matched || ask.trim() === item.question.trim() ? '' : ask, now: waiting, ordinal: round.ordinal }] });
     round.fork_item_ids.forEach(id => {
       const fork = session.items[id];
-      if (!fork) return;
+      if (!fork || itemRemoved(session, fork.id)) return;
       const at = entries.get(fork.created_message_id) ?? ordered().filter(entry => round.agent_message_ids.includes(entry.id)).at(-1) ?? anchor;
       if (at) { const current = entries.get(at.id)!; entries.set(at.id, { ...current, forks: [...current.forks, kid(fork)] }); }
     });
@@ -367,7 +368,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   }
   const chat = ordered();
   const reopened = isClosed ? undefined : [...item.status_history].reverse().find(entry => closedStatus.has(statusKey[entry.old_status]) && !closedStatus.has(statusKey[entry.new_status]));
-  const replacement = item.replaced_by ? session.items[item.replaced_by] : undefined;
+  const replacement = item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] : undefined;
   const kids = items.filter(value => value.parent === item.id).sort((a, b) => a.ordinal - b.ordinal);
   const hidden = hiddenItems(session, new Set(hiddenItemIds));
 

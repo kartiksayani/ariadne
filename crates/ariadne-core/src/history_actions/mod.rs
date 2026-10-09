@@ -74,6 +74,8 @@ impl<'a> HistoryActionService<'a> {
         let version = match command {
             OwnerCommand::TopicArchive { api_version, .. }
             | OwnerCommand::TopicRestore { api_version, .. }
+            | OwnerCommand::TopicRemovedRestore { api_version, .. }
+            | OwnerCommand::ItemRestore { api_version, .. }
             | OwnerCommand::SessionClose { api_version, .. }
             | OwnerCommand::SessionReopen { api_version, .. }
             | OwnerCommand::SessionArchive { api_version, .. }
@@ -99,6 +101,12 @@ impl<'a> HistoryActionService<'a> {
             }
             OwnerCommand::TopicRestore { params, .. } => {
                 crate::receipts::normalized("topic_restore", params)?
+            }
+            OwnerCommand::TopicRemovedRestore { params, .. } => {
+                crate::receipts::normalized("topic_removed_restore", params)?
+            }
+            OwnerCommand::ItemRestore { params, .. } => {
+                crate::receipts::normalized("item_restore", params)?
             }
             OwnerCommand::SessionClose { params, .. } => {
                 crate::receipts::normalized("session_close", params)?

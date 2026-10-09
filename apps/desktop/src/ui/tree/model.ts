@@ -1,3 +1,4 @@
+import { activeItems, activeTopics, itemRemoved } from '../../selectors/removed';
 // The session tree column as data: rows with their guides and thread, the
 // status chips and their counts, the session bar and the supporting line of
 // every item. A port of the handoff's buildRows/includeSets and the guide
@@ -24,8 +25,8 @@ export const visual = (status: DisplayStatus): StatusKey => statusKey[status];
 const CLOSED: ReadonlySet<ItemStatus> = new Set(['decided', 'done', 'dropped', 'replaced']);
 export const closed = (status: ItemStatus) => CLOSED.has(status);
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
-const items = (session: Immutable<Session>) => Object.values(session.items).filter((item): item is Immutable<Item> => !!item);
-const topicList = (session: Immutable<Session>) => Object.values(session.topics).filter((topic): topic is Immutable<Topic> => !!topic)
+const items = (session: Immutable<Session>) => activeItems(session);
+const topicList = (session: Immutable<Session>) => [...activeTopics(session)]
   .sort((a, b) => a.order - b.order);
 
 // ---------------------------------------------------------------- chips
@@ -322,7 +323,7 @@ export function treeModel(input: TreeInput): TreeModel {
   const matched = new Set<string>(), forced = new Set<string>(), include = new Set<string>();
   const ancestors = (id: string) => { const out: string[] = []; for (let parent = session.items[id]?.parent; parent; parent = session.items[parent]?.parent) out.push(parent); return out; };
   if (filtering) {
-    for (const id of [revealId, selectedId]) if (id && session.items[id]) forced.add(id);
+    for (const id of [revealId, selectedId]) if (id && session.items[id] && !itemRemoved(session, id)) forced.add(id);
     for (const item of live) {
       const match = base(item) && statusMatch(item);
       if (match) matched.add(item.id);
@@ -379,7 +380,7 @@ export function treeModel(input: TreeInput): TreeModel {
         const parked = item.status === 'open' && later.has(item.id);
         built.push({ kind: 'item', key: item.id, item, status: display(item), depth, hasKids: children.length > 0, expanded: open,
           hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked, segments: segments(item.question, input.search),
-          replacedBy: item.replaced_by ? session.items[item.replaced_by] ?? null : null, rounds: indexes.roundsByItem.get(item.id)?.length ?? 0,
+          replacedBy: item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] ?? null : null, rounds: indexes.roundsByItem.get(item.id)?.length ?? 0,
           relatedCount: relatedItems(session, item.id).length,
           collapsed, delivery: deliveryLine(session, { topicId: item.topic_id, itemId: item.id }, input.presence, input.health), badge: badgeLabel(item, parked, display(item)) });
         if (open) walk(children, depth + 1);
@@ -418,7 +419,7 @@ export function treeModel(input: TreeInput): TreeModel {
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.
   const outside = filtering && rows.length > 0 && !!revealId && forced.has(revealId) && !matched.has(revealId);
-  return { rows, filtering, searchCount: scoped.filter(item => !hidden.has(item.id) && statusMatch(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && statusMatch(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: all.length === 0, chips, counts,
+  return { rows, filtering, searchCount: scoped.filter(item => !hidden.has(item.id) && statusMatch(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && statusMatch(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at), chips, counts,
     topics: topics.map(topic => ({ id: topic.id, name: topic.name })) };
 }
 

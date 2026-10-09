@@ -1,3 +1,6 @@
+import { waitForLifecycleReady } from './ui/shared/lifecycleReady';
+import { itemRemoved } from './selectors/removed';
+import { AgentRemovalNotices } from './ui/remove/AgentRemovalNotices';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
@@ -197,12 +200,14 @@ function Workspace({ application }: { application: Application }) {
   const draftState = useOwnerDrafts(application.drafts);
   const ownerReady = draftState.ready && sessionState?.status === 'ready' && !sessionState.error && !!sessionState.snapshot;
   const route = sessionState?.route, key = route ? routeKey(route) : '';
+
   const earlier = route ? earlierAgent(route, state.sessions?.sessions.items ?? []) : null;
   const preferences = state.preferences, view = preferences?.sessions.find(value => route && routeKey(value.session) === key);
   const shortcutSequence = useRef(0), bringing = useRef(new Set<string>());
   const quickRequests = useRef(new Map<string, number>());
   const [ownerFocus, setOwnerFocus] = useState<(OwnerFocusRequest & { route: string; itemId: string }) | null>(null);
   const [graphModes, setGraphModes] = useState<Readonly<Record<string, boolean>>>({});
+  const showBinTree = useCallback((route: SessionRef) => setGraphModes(previous => ({ ...previous, [routeKey(route)]: false })), []);
   const [detailOpen, setDetailOpen] = useState(true);
   const detailDismissedAt = useRef<number | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
@@ -222,7 +227,8 @@ function Workspace({ application }: { application: Application }) {
   const graph = graphModes[key] ?? false;
   const currentReveal = localReveal?.store === store ? localReveal : state.reveal?.store === store ? state.reveal : null;
   const treeReveal = currentReveal === dismissedReveal ? null : currentReveal;
-  const selectedId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
+  const candidateId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
+  const selectedId = candidateId && sessionState?.snapshot?.session.items[candidateId] && !itemRemoved(sessionState.snapshot.session, candidateId) ? candidateId : null;
   const ackRequest = useRef(0);
   const ackActions = store ? application.actions.forSession(store) : null;
   const ackState = useSyncExternalStore(ackActions?.subscribe ?? noSubscription, ackActions?.getSnapshot ?? noSession, ackActions?.getSnapshot ?? noSession);
@@ -240,11 +246,12 @@ function Workspace({ application }: { application: Application }) {
   }, [ackState?.receipt]);
   const historyReveal = useRef<RevealedItem | null>(null);
   const historySession = sessionState?.snapshot?.session;
-  const existsInHistory = useCallback((id: string) => !!route && !!historySession?.items[id] && !hidden.item(route, historySession, id),
+  const existsInHistory = useCallback((id: string) => !!route && !!historySession?.items[id] && !itemRemoved(historySession, id) && !hidden.item(route, historySession, id),
     [route, historySession, hidden]);
   const itemHistory = useItemHistory(key, selectedId, existsInHistory);
   // The tree stops forcing a dismissed reveal's row into the filtered view ("Resume filtered view"); the detail keeps it.
-  const treeSelectedId = treeReveal?.kind === 'item' ? treeReveal.route.item_id : view?.selected_item_id ?? null;
+  const treeCandidateId = treeReveal?.kind === 'item' ? treeReveal.route.item_id : view?.selected_item_id ?? null;
+  const treeSelectedId = treeCandidateId && sessionState?.snapshot?.session.items[treeCandidateId] && !itemRemoved(sessionState.snapshot.session, treeCandidateId) ? treeCandidateId : null;
   const theme = preferences?.global.theme ?? 'system';
   const query = searchEdit?.route === key ? searchEdit.text : view?.filters.search ?? '';
   // Saved selection is authoritative, but its late receipt is not a newer
@@ -365,7 +372,7 @@ function Workspace({ application }: { application: Application }) {
     }
     notices.dismiss('quick-answer-not-ready');
     if (!session || !item || current?.status !== 'ready' || current.error || session.state !== 'active'
-      || session.topics[item.topic_id]?.archived_at !== null || displayStatus(session, item) !== 'waiting_on_me'
+      || itemRemoved(session, item.id) || session.topics[item.topic_id]?.archived_at !== null || displayStatus(session, item) !== 'waiting_on_me'
       || state.writing || state.pendingOperationId !== null || !draftState.ready || draftState.preferenceUncertain
       || quickRequests.current.has(JSON.stringify(target))
       || Object.values(draftState.entries).some(value => sameSession(value.draft.session, target) && value.draft.target.item_id === item.id && (value.saving || value.uncertain))
@@ -556,11 +563,11 @@ function Workspace({ application }: { application: Application }) {
       if (card) {
         const target = { project_id: card.dataset.projectId!, session_id: card.dataset.sessionId!, item_id: card.dataset.waitingItem! };
         const session = application.waiting.sessionState(target)?.snapshot?.session, item = session?.items[target.item_id];
-        return session && item && !hidden.item(target, session, item.id) ? { item, target } : null;
+        return session && item && !itemRemoved(session, item.id) && !hidden.item(target, session, item.id) ? { item, target } : null;
       }
       const focusedId = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-item-id]')?.dataset.itemId : undefined;
       const session = sessionState?.snapshot?.session, item = session?.items[focusedId ?? selectedId ?? ''];
-      return route && session && item && !hidden.item(route, session, item.id) ? { item, target: { ...route, item_id: item.id } } : null;
+      return route && session && item && !itemRemoved(session, item.id) && !hidden.item(route, session, item.id) ? { item, target: { ...route, item_id: item.id } } : null;
     },
     askRemove,
     oldestWaiting: () => application.waiting.getSnapshot().waiting[0]?.route,
@@ -572,6 +579,8 @@ function Workspace({ application }: { application: Application }) {
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
   return <ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
+    <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
+      selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget}
       session={store ? sessionFacts(sessionState, projectName) : undefined}
@@ -633,14 +642,13 @@ function Workspace({ application }: { application: Application }) {
 export function DesktopApp({ service }: { service: RendererService }) {
   const [application, setApplication] = useState<Application | null>(null);
   useEffect(() => {
-    const navigation = new NavigationStore(service), waiting = new WaitingStore(service, navigation.opened);
+    const navigation = new NavigationStore(service), waiting = new WaitingStore(service, navigation.opened), actions = new SessionActionControllers(service);
     const removals = new RemovalQueue({ service, notices,
       read: async route => {
         const store = navigation.opened.open(route);
-        await store.refresh();
-        const current = store.getSnapshot();
-        if (!current.snapshot && current.error) throw current.error;
-        return current.snapshot?.session ?? null;
+        const ready = await waitForLifecycleReady(actions.forSession(store), undefined, true);
+        if (!ready.ok) throw new Error(ready.error ?? 'The latest changes could not be loaded.');
+        return ready.session;
       },
       // After the command: the tree drops the rows, removed sessions lose their tabs, the pages recount.
       removed: async target => {
@@ -654,7 +662,7 @@ export function DesktopApp({ service }: { service: RendererService }) {
         void waiting.refresh();
       } });
     const next: Application = { service, navigation, waiting, removals,
-      drafts: new OwnerDraftStore(service), actions: new SessionActionControllers(service), discovery: new DiscoveryController(service) };
+      drafts: new OwnerDraftStore(service), actions, discovery: new DiscoveryController(service) };
     const detach = removals.attach();
     const detachLinkFailures = listenForLinkFailures(service);
     setApplication(next);

@@ -1,9 +1,7 @@
 ## Commands
 
-`ariadne` means the exact connect/setup command: keep its `ARIADNE_HOME=...`
-prefix and absolute path; your shell may lack them. Use only the CLI for Ariadne
-state. Never open, edit or create `.ariadne/` or `~/.ariadne` files: bypassing
-revisions and validation can make the session unreadable.
+`ariadne` means the exact setup command, including `ARIADNE_HOME=...` and its
+absolute path. Use only the CLI; never access `.ariadne/` files directly.
 
 - `ariadne read --binding B --generation G --view items|topics|messages|inputs --json`:
   20 entries a page, `--limit N` up to 100. `--view items --topic <id|number>`
@@ -16,8 +14,6 @@ revisions and validation can make the session unreadable.
   new `revision` and `created` flag (topics also have a `number`).
 
 An unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to deliberately file the identical request again.
-
-Read topics/items; no context is pushed. Reuse what fits.
 
 ## Request
 
@@ -32,10 +28,9 @@ One JSON object on stdin. Only `operations` is required.
 
 Reuse receipt revisions and item numbers as `{"id":...}`. Omit optional fields.
 
-Set `related` only when a connection helps the owner: a point depends on,
-duplicates or follows from another. Omit it by default; declare it once on either
-item, across topics in this session. In prose use `[label](item:3.2)`, never bare
-item numbers: clickable prose links do not create `related` connections.
+Set `related` only when a connection helps the owner: dependencies, duplicates or
+consequences. Omit it by default; declare once on either item in this session.
+In prose use `[label](item:3.2)`, never bare numbers: clickable prose links do not create `related` connections.
 
 | `op` | Required | Optional |
 |---|---|---|
@@ -45,11 +40,16 @@ item numbers: clickable prose links do not create `related` connections.
 | `item.ask` | `item`, `ask` | `options` |
 | `item.status` | `item`, `status` | `ack_to`, `outcome`, `why`, `reason` |
 | `item.replace` | `item`, `replacement`, `outcome`, `why` | |
+| `item.delete` | `item` | |
+| `topic.delete` | `topic` | |
 | `reply` | `item`, `text` | `ref`, `round_id` |
 | `round.close` | `round_id` | |
 
 Set `topic` explicitly if neither default applies.
 Read `errors.md` for unfamiliar defaults, children, refs, transitions or limits.
+
+Delete refs accept number/UUID strings or `{id}` and earlier batch refs or `{ref}`.
+Guard only the existing root item or topic you delete. History stays in Bin.
 
 Give new topics/items a stable `short` label: a 2-4 word tree title,
 at most 40 characters ("Notes sync review").
@@ -60,17 +60,14 @@ Text is markdown; topic names, `short` and option labels are plain text.
 
 When connected or told "use Ariadne", organise the work there yourself.
 
-- **File as you go.** Start with a topic and an `in_progress` summary. Update
-  items in place (`item.edit` note, `item.status`, `reply`). Finish the summary
-  with `item.status` `open` and `ack_to`, result and evidence. Never wait until
-  the end or post the same report twice.
+- **File as you go.** Start a topic with an `in_progress` summary; update items
+  in place. Finish `open` with `ack_to`, result and evidence. Never repeat a report.
 - **Route.** File results over a few lines or with multiple points, including
   findings. Chat is 1-3 lines pointing at the topic. Owner instructions win.
 - **Topic.** One per concern (PR, test run, incident, plan), not per step.
-- **Tree.** Summary first: result and what waits on the owner; then whole-work
-  decisions and sections in reading order. Points are children; sub-points nest.
-  Each point the owner may decide, comment on or track appears once, with its
-  ask. Keep this shape for later writes.
+- **Tree.** Summary first: result and what waits on the owner. Then decisions
+  and sections in reading order, with points as children. Each point appears
+  once with its ask. Keep this tree for later writes.
 - **Type and status** say what the owner has to do. Never create an item
   `decided`, `done`, `dropped` or `replaced`; new results start `open` for Ack.
 
@@ -85,38 +82,33 @@ When connected or told "use Ariadne", organise the work there yourself.
 | Work for later or someone else | task | `open`, owner `other` |
 | Something you will not do | any | `open`, `ack_to: "dropped"` |
 
-- **Ack.** New reading material starts `open` with `ack_to`: usually `done`,
-  recorded decisions `decided`, ruled-out points `dropped`. Ack moves it there
-  without agent delivery. An ask may coexist; Ack waits for the owner reply.
-  Keep `ack_to` work open unless an Answer, Reply or Drop input targets that
-  item and directs completion: terminal `item.status` with `source_input_id`
-  clears the target. Existing work without
-  `ack_to` can close normally. Use `item.replace` for superseded work.
-  Keep unanswered asks `waiting_on_me`; explain withdrawal with a new
-  `ack_to: "dropped"` item. Permission to act needs a real question and a
-  "Got it, go ahead" option. Progress tasks finish `open` with `ack_to` too.
-- **Fields.** `question`: one-sentence heading; `ask` and `options`: answer box;
-  `outcome` and `why`: result and evidence; `note`: progress line;
-  `links`: `pr`, `file` or `doc` targets; `reply`: owner answer or long detail.
-  Do not repeat text.
-- **Ask.** One decision per item: set `ask` (and `options`) on the `item.add`; it
-  starts `waiting_on_me`, owned by the owner, with one round. Give options with a
-  `label` and a `consequence` each and at most one `recommended`; no `options`
-  leaves a free-text answer. A question you would write in prose is an ask, never
-  a sentence in chat. `item.ask` asks on an item that already exists, and
-  another question on the same decision is a new ask round on that item.
+- **Ack.** Finish results and progress tasks `open` with `ack_to`. Owner Ack
+  needs no delivery and waits for any owner answer. Keep the target unless an
+  Answer, Reply or Drop input on that item directs completion; terminal
+  `item.status` with `source_input_id` then clears it. Other existing work closes
+  normally; superseded work uses `item.replace`. Keep unanswered asks
+  `waiting_on_me`; explain withdrawal with a new `ack_to: "dropped"` item.
+  Permission needs an ask and a "Got it, go ahead" option.
+- **Fields.** `question`: heading; `ask`/`options`: answer box; `outcome`/`why`:
+  result/evidence; `note`: progress; `links`: `pr`, `file`, `doc`; `reply`: detail.
+- **Ask.** One decision per item: `item.add` with `ask` starts `waiting_on_me`,
+  owned by the owner. Each option needs `label` and `consequence`; at most one
+  is `recommended`. Without options the answer is free text. Ask questions
+  there, not in chat. `item.ask` starts another round on an existing item.
 - **Proposals** (comments to post, fixes to apply): one child each with its own
   `ask` and options. The parent is a summary with no ask. Never file them `done`
   under one blanket ask on the parent.
 - **Choice notes.** Free text overrides the option's consequence; ask there if
   ambiguous and reflect the note in the input result (`inputs.md`).
-- **Ripple updates.** After an owner answer or reply, check other items across
-  topics for wrong outcomes, moot questions or needed follow-ups. Update affected
-  items together where possible, naming each in the input result as
-  `[label](item:<id>)`. Never silently reverse an owner decision on another item:
-  raise a new ask on that item instead. Leave unrelated items alone.
+- **Ripple updates.** After an owner answer/reply, update affected items across
+  topics together, naming each as `[label](item:<id>)` in the input result.
+  Ask before reversing an owner decision elsewhere. Leave unrelated work alone.
 - **Spend few tokens.** One request per result, nested `children`. Data nobody
   discusses row by row is one item with a table.
+- **Delete.** Delete clearly wrong, duplicate or obsolete work you created, or
+  work the owner asks to delete. Prefer Drop/Replace for real work no longer
+  needed. Always `reply` before deletion, briefly saying what and why. Reads
+  omit Bin work with a notice; the owner can restore it (`errors.md`).
 
 ## Examples
 
@@ -132,4 +124,10 @@ Finish [review summary](item:1) for Ack, using receipt revision 3:
 
 ```json
 {"expected_item_revisions":{"1":3},"operations":[{"op":"item.status","item":{"id":"1"},"status":"open","ack_to":"done","reason":"Review ready to read","outcome":"Notes sync needs one fix","why":"See [no jitter](item:1.1)."}]}
+```
+
+Delete an accidental duplicate, explaining why first:
+
+```json
+{"operations":[{"op":"topic.add","name":"Duplicate review","short":"Duplicate review","ref":"t"},{"op":"item.add","ref":"i","short":"Duplicate item","question":"Duplicate review summary","type":"finding"},{"op":"reply","item":{"ref":"i"},"text":"Deleted duplicate work; the original review is filed."},{"op":"item.delete","item":"i"},{"op":"topic.delete","topic":"t"}]}
 ```

@@ -110,3 +110,6 @@ bidirectional detail references and dashed links for the selected graph item.
 [ADR-0095](ADR-0095-session-archive.md) puts finished sessions in a remembered,
 folded Archived group, closes them safely, and restores them as Closed while
 keeping their history readable.
+
+[ADR-0097](ADR-0097-agent-delete-bin.md) lets agents remove items, subtrees and
+whole topics into a recoverable bin, with visible owner notices and exact Restore.

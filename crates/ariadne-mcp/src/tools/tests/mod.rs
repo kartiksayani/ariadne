@@ -108,6 +108,7 @@ async fn apply_preserves_canonical_request_and_checked_saved_receipt() {
         session_id: id(2),
         revision: PositiveSafeInteger::new(2).unwrap(),
         data: SavedReceiptData::Apply {
+            agent_removals: vec![],
             allocated_refs: UniqueMap(Default::default()),
             messages: vec![],
             item_revisions: UniqueMap(Default::default()),

@@ -52,6 +52,7 @@ pub(super) fn history(error: HistoryError) -> CoreError {
         HistoryError::StaleGeneration => CoreErrorCode::StaleGeneration,
         HistoryError::AttemptSealed => CoreErrorCode::AttemptSealed,
         HistoryError::ResultAlreadyCommitted => CoreErrorCode::ResultAlreadyCommitted,
+        HistoryError::RemovedWork => CoreErrorCode::InvalidTransition,
         HistoryError::CounterOverflow => CoreErrorCode::CapacityExceeded,
         _ => CoreErrorCode::InvalidArgument,
     };

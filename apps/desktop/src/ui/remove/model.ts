@@ -1,3 +1,4 @@
+import { removedSubtree, itemRemoved } from '../../selectors/removed';
 // Remove (handoff README "Remove", Ariadne.dc.html:1255-1368) as data: what a
 // pending removal hides, the dialog subject of an item or topic, the note's
 // label and the row selected after an item goes. Nothing here touches React.
@@ -56,10 +57,7 @@ export function visibleSession(session: Immutable<Session>, route: SessionRef, h
 const itemList = (session: Immutable<Session>) => Object.values(session.items).filter((item): item is Immutable<Item> => !!item);
 /** The item and every item below it. */
 export function subtree(session: Immutable<Session>, itemId: string): readonly Immutable<Item>[] {
-  const { childrenByParent } = indexSession(session), out: Immutable<Item>[] = [];
-  const walk = (id: string) => { const item = session.items[id]; if (!item) return; out.push(item); (childrenByParent.get(id) ?? []).forEach(child => walk(child.id)); };
-  walk(itemId);
-  return out;
+  return removedSubtree(session, itemId);
 }
 
 /** How the session's agent learns about an item or topic removal (Ariadne.dc.html:1276 rmTell). */
@@ -91,13 +89,13 @@ export function removeSubject(session: Immutable<Session>, target: Extract<Remov
     const item = session.items[target.item.item_id];
     if (!item) return null;
     const items = subtree(session, item.id), ids = new Set(items.map(value => value.id));
-    return { kind: 'item', short: shortLabel(item), items: items.length, waiting: waitingCount(items), tell: tellOf(session),
+    return { kind: 'item', short: shortLabel(item), items: items.length, waiting: waitingCount(items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session),
       unsent: unsentOf([session], input => !!input.target.item_id && ids.has(input.target.item_id)) };
   }
   const topic = session.topics[target.topic_id];
   if (!topic) return null;
   const items = itemList(session).filter(item => item.topic_id === topic.id);
-  return { kind: 'topic', name: topicName(topic), items: items.length, waiting: waitingCount(items), tell: tellOf(session),
+  return { kind: 'topic', name: topicName(topic), items: items.length, waiting: waitingCount(items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session),
     unsent: unsentOf([session], input => input.target.topic_id === topic.id) };
 }
 

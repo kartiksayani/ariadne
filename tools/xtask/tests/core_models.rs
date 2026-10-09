@@ -211,3 +211,38 @@ fn independent_typescript_consumer_accepts_all_shared_cases_and_rejects_local_fo
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[test]
+fn delete_operations_and_restore_commands_share_strict_generated_contracts() {
+    let files = artifacts().unwrap();
+    let topic = "00000000-0000-4000-8000-000000000001";
+    for operation in [
+        serde_json::json!({"op":"item.delete","item":{"id":"1.2"}}),
+        serde_json::json!({"op":"topic.delete","topic":{"id":topic}}),
+        serde_json::json!({"op":"item.delete","item":{"ref":"duplicate"}}),
+        serde_json::json!({"op":"topic.delete","topic":{"ref":"obsolete"}}),
+    ] {
+        validate(&files, "Operation", &operation);
+        let typed: Operation = serde_json::from_value(operation.clone()).unwrap();
+        assert_eq!(serde_json::to_value(typed).unwrap(), operation);
+        let mut invalid = operation;
+        invalid["permanent"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<Operation>(invalid).is_err());
+    }
+    for (command, params) in [
+        (
+            "item_restore",
+            serde_json::json!({"item_id":"1.2","expected_revision":2}),
+        ),
+        (
+            "topic_removed_restore",
+            serde_json::json!({"topic_id":topic,"expected_revision":2}),
+        ),
+    ] {
+        let value =
+            serde_json::json!({"command":command,"api_version":1,"op_id":topic,"params":params});
+        validate(&files, "OwnerCommand", &value);
+        let typed: OwnerCommand = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(typed).unwrap(), value);
+    }
+}

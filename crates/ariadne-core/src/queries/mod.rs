@@ -8,6 +8,7 @@ mod page;
 mod visibility;
 use crate::*;
 use ariadne_domain::models::*;
+use ariadne_domain::visibility::{item_is_removed, topic_is_removed};
 use ariadne_store::{
     registry::{Registry, RegistryCatalogue},
     session::Store,
@@ -360,7 +361,10 @@ fn session_query(
             freshness: Freshness::Fresh,
         })),
         QueryRequest::RevealItem { item_id } => {
-            item(session, item_id)?;
+            let selected = item(session, item_id)?;
+            if item_is_removed(session, selected) {
+                return Err(not_found("Item is removed"));
+            }
             Ok(QueryResult::RevealItem(ItemRoute {
                 project_id: session.project_id.clone(),
                 session_id: session.id.clone(),
@@ -370,6 +374,11 @@ fn session_query(
         QueryRequest::SessionRead(request) => read(session, context, request),
         QueryRequest::ItemMessages(request) => {
             let item = item(session, &request.item_id)?;
+            if matches!(context.visibility(), QueryVisibility::Agent(_))
+                && item_is_removed(session, item)
+            {
+                return Err(not_found("Item is removed"));
+            }
             let scope = Scope {
                 view: QueryView::ItemMessages,
                 digest: visibility::scope(context, json!(["item_messages", request.item_id]))?,
@@ -414,7 +423,12 @@ fn session_query(
             )))
         }
         QueryRequest::ItemRounds(request) => {
-            item(session, &request.item_id)?;
+            let selected = item(session, &request.item_id)?;
+            if matches!(context.visibility(), QueryVisibility::Agent(_))
+                && item_is_removed(session, selected)
+            {
+                return Err(not_found("Item is removed"));
+            }
             let scope = Scope {
                 view: QueryView::ItemRounds,
                 digest: visibility::scope(context, json!(["item_rounds", request.item_id]))?,
@@ -475,6 +489,7 @@ fn read(
                 .topics
                 .0
                 .values()
+                .filter(|topic| !topic_is_removed(session, topic))
                 .filter(|topic| archived.is_none_or(|value| value == topic.archived_at.is_some()))
                 .map(|topic| {
                     (
@@ -504,7 +519,8 @@ fn read(
                 .0
                 .values()
                 .filter(|item| {
-                    topic_id.as_ref().is_none_or(|id| id == &item.topic_id)
+                    !item_is_removed(session, item)
+                        && topic_id.as_ref().is_none_or(|id| id == &item.topic_id)
                         && item_id.as_ref().is_none_or(|id| id == &item.id)
                         && parent_item_id
                             .as_ref()

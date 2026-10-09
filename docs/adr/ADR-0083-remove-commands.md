@@ -32,10 +32,12 @@ sends the command.
   receipts for removed inputs are pruned by the store. The candidate is validated
   before commit; a removal that would break history is refused with
   `invalid_transition`.
-- **Guards.** Items and topics refuse while an input on them is in flight or needs
-  attention, or while a remaining item is `replaced_by` a removed one. Sessions and
-  projects reuse the session-close in-flight blocker (`session_not_closable` with
-  `blocking_input_ids`).
+- **Guards (amended by ADR-0088).** Pending inputs never block removal:
+  removal takes them with it and clears the active input and delivery barrier.
+  Integrity refusals remain: a stale revision, a remaining item whose
+  `replaced_by` points at removed work, a remaining item depending on a removed
+  message, capacity limits and partial family removal. Sessions and projects
+  also take pending inputs; no preliminary Close or Pause is required.
 - **Backup first, path returned.** Each changed session is copied to
   `<store>/backups/pre-remove-<stamp>-<op>-<session>.json` before the write, where
   `<store>` is `<data root>/projects/<project-id>` (ADR-0082). A project is copied
@@ -63,8 +65,8 @@ sends the command.
 - Removal cannot be reversed in the app. Recovery means restoring a backup file
   by hand.
 - Backups are never pruned automatically. They grow with each removal.
-- A queued removal notice still targets its topic, so it can block archiving that
-  topic until the agent acknowledges it.
+- A queued removal notice still names its topic. Archiving takes pending notices
+  with it through the ordinary cancellation path (ADR-0090).
 - Topic family members after the route session commit one by one under the same
   op_id. A crash or a failing member in between leaves some copies; the error
   names the sessions that still hold one. An exact retry finishes them.

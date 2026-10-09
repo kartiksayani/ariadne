@@ -247,6 +247,70 @@ fn bound_agent_item_flags_keep_the_original_agent_route() {
 }
 
 #[test]
+fn bin_restore_routes_distinguish_item_topic_and_archive_restore() {
+    for item in [true, false] {
+        let command = if item {
+            OwnerCommand::ItemRestore {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(30),
+                params: ItemRemoveParams {
+                    item_id: ItemRef::new("1").unwrap(),
+                    expected_revision: PositiveSafeInteger::new(7).unwrap(),
+                },
+            }
+        } else {
+            OwnerCommand::TopicRemovedRestore {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(30),
+                params: TopicLifecycleParams {
+                    topic_id: id(5),
+                    expected_revision: PositiveSafeInteger::new(7).unwrap(),
+                },
+            }
+        };
+        let recorded = RecordedRequest::Owner(
+            OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+                RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+            )),
+            Box::new(command.clone()),
+        );
+        let receipt = MutationReceipt::Session(Box::new(SavedReceipt {
+            operation_id: id(30),
+            session_id: id(2),
+            revision: PositiveSafeInteger::new(8).unwrap(),
+            data: SavedReceiptData::BinRestore {
+                topic_id: id(5),
+                item_id: item.then(|| ItemRef::new("1").unwrap()),
+            },
+        }));
+        let core = ScriptedCoreService::new([ScriptStep {
+            request: recorded.clone(),
+            response: ScriptedResponse::Owner(Box::new(Ok(receipt.clone()))),
+        }]);
+        let wrapper = OwnerMutationRequest {
+            session: Some(SessionRef {
+                project_id: id(1),
+                session_id: id(2),
+            }),
+            command,
+        };
+        let bytes = serde_json::to_vec(&wrapper).unwrap();
+        let args = if item {
+            ["item", "restore", "--json-stdin"]
+        } else {
+            ["topic", "restore-removed", "--json-stdin"]
+        };
+        let (exit, result) = call(&core, &args, &bytes);
+        assert_eq!(exit, 0);
+        assert_eq!(result["data"], serde_json::to_value(receipt).unwrap());
+        assert_eq!(core.history().unwrap(), vec![recorded]);
+        let (exit, _) = call(&core, &["topic", "restore", "--json-stdin"], &bytes);
+        assert_eq!(exit, 2, "archive restore must not accept Bin restore");
+        assert_eq!(core.history().unwrap().len(), 1);
+    }
+}
+
+#[test]
 fn remove_nouns_map_to_their_own_command_tags_only() {
     let core = ScriptedCoreService::new([]);
     let item = json!({"session":{"project_id":id(1),"session_id":id(2)},

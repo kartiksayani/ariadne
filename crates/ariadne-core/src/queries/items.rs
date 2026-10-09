@@ -1,6 +1,7 @@
 use super::{page::*, visibility};
 use crate::*;
 use ariadne_domain::models::*;
+use ariadne_domain::visibility::item_is_removed;
 use serde_json::json;
 
 pub(super) fn position(session: &Session, item: &Item) -> Result<CursorPosition, CoreError> {
@@ -248,6 +249,7 @@ pub(super) fn round(
         .fork_item_ids
         .iter()
         .filter_map(|id| session.items.0.get(id))
+        .filter(|item| !item_is_removed(session, item))
         .map(|item| Ok((position(session, item)?, link(session, item))))
         .collect::<Result<_, CoreError>>()?;
     let mut selected = [None; 5];
@@ -362,13 +364,29 @@ fn snapshot(session: &Session, item: &Item) -> ItemSnapshot {
         related: item.related.as_ref().map(|targets| {
             targets
                 .iter()
-                .filter(|id| session.items.0.contains_key(id))
+                .filter(|id| {
+                    session
+                        .items
+                        .0
+                        .get(id)
+                        .is_some_and(|target| !item_is_removed(session, target))
+                })
                 .cloned()
                 .collect()
         }),
         outcome: item.outcome.clone(),
         why: item.why.clone(),
-        replaced_by: item.replaced_by.clone(),
+        replaced_by: item
+            .replaced_by
+            .as_ref()
+            .filter(|id| {
+                session
+                    .items
+                    .0
+                    .get(id)
+                    .is_some_and(|target| !item_is_removed(session, target))
+            })
+            .cloned(),
         created_at: item.created_at.clone(),
         updated_at: item.updated_at.clone(),
         created_message_id: item.created_message_id.clone(),

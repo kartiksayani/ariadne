@@ -52,7 +52,7 @@ export function definitiveRejection(failure: CoreFailure | ServiceFailure, comma
   // Generic routing/store/host failures can precede replay of an earlier save;
   // their error codes cannot establish that the original operation was unsaved.
   const lifecycle = command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect';
-  const history = command.command === 'topic_archive' || command.command === 'topic_restore'
+  const history = command.command === 'item_restore' || command.command === 'topic_removed_restore' || command.command === 'topic_archive' || command.command === 'topic_restore'
     || command.command === 'session_close' || command.command === 'session_reopen'
     || command.command === 'session_archive' || command.command === 'session_restore';
   // History lifecycle guards and Continue's freshness/copy guards execute
@@ -114,7 +114,12 @@ export class SessionActions {
         throw new ServiceFailure('invalid_response');
       }
       const command = request.command, data = receipt.data;
-      const matches = command.command === 'topic_archive' || command.command === 'topic_restore'
+      const matches = command.command === 'item_restore'
+        ? data.kind === 'bin_restore' && data.item_id === command.params.item_id
+          && data.topic_id === this.session.getSnapshot().snapshot?.session.items[command.params.item_id]?.topic_id
+        : command.command === 'topic_removed_restore'
+          ? data.kind === 'bin_restore' && data.topic_id === command.params.topic_id && data.item_id === null
+        : command.command === 'topic_archive' || command.command === 'topic_restore'
         ? data.kind === 'topic_lifecycle' && data.topic_id === command.params.topic_id
           && data.topic_revision === command.params.expected_revision + 1
           && (command.command === 'topic_archive' ? timestamp(data.archived_at) : data.archived_at === null)

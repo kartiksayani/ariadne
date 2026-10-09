@@ -1,3 +1,4 @@
+import { activeItems } from '../../selectors/removed';
 // Graph view model: one graph per topic, laid out left to right exactly as
 // Ariadne.dc.html `buildGraph` (with `only` set) does. Rows, filters and
 // expansion come from the tree's selector, so the graph follows the tree's
@@ -155,7 +156,7 @@ export function sessionGraph(input: GraphInput): SessionGraph {
   const byTopic = new Map<string, SentenceRow[]>();
   for (const row of rows) if (row.depth === 0) byTopic.set(row.item.topic_id, [...byTopic.get(row.item.topic_id) ?? [], row]);
   const allByTopic = new Map<string, Immutable<Item>[]>();
-  for (const item of Object.values(session.items)) if (item) allByTopic.set(item.topic_id, [...allByTopic.get(item.topic_id) ?? [], item]);
+  for (const item of activeItems(session)) allByTopic.set(item.topic_id, [...allByTopic.get(item.topic_id) ?? [], item]);
   const topics = Object.values(session.topics).filter((topic): topic is Immutable<Topic> => !!topic && byTopic.has(topic.id))
     .sort((a, b) => a.order - b.order);
   const order: string[] = [], nodes = new Map<string, GraphNode>();

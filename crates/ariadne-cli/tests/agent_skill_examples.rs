@@ -556,7 +556,14 @@ fn every_skill_example_passes_the_real_cli_and_together_they_cover_the_surface()
             }
         }
     }
-    for op in ["topic.add", "item.add", "item.status", "reply"] {
+    for op in [
+        "topic.add",
+        "item.add",
+        "item.status",
+        "reply",
+        "item.delete",
+        "topic.delete",
+    ] {
         assert!(ops.contains(op), "no example for {op}");
     }
     // The core table names every operation the request type has.
@@ -567,6 +574,8 @@ fn every_skill_example_passes_the_real_cli_and_together_they_cover_the_surface()
         "item.ask",
         "item.status",
         "item.replace",
+        "item.delete",
+        "topic.delete",
         "reply",
         "round.close",
     ] {
@@ -718,13 +727,17 @@ fn assert_compact(data: &Value) {
 
 #[test]
 fn every_terminal_example_commits_on_a_seeded_session() {
-    // The core's two examples and every kind-of-work example that does not
+    // The core's three examples and every kind-of-work example that does not
     // answer a dispatched input.
     let blocks: Vec<String> = [RULES, ERRORS, REPORT, REVIEW, CHECKLIST]
         .into_iter()
         .flat_map(examples)
         .collect();
-    assert_eq!(blocks.len(), 6, "expected six terminal examples");
+    assert_eq!(
+        blocks.len(),
+        7,
+        "expected seven terminal examples including deletion"
+    );
     for block in &blocks {
         let (seeded, request, data) = Seeded::committed(block);
         assert!(request["source_input_id"].is_null());
