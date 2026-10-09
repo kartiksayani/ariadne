@@ -1486,14 +1486,14 @@ fn session_summary_carries_the_owner_name_and_description_only_when_set() {
         )
     };
     let mut named = seed();
-    named.name = Some("Billing fixes".into());
-    named.description = Some("Sorting out the refund rules".into());
+    named.name = Some("Sync fixes".into());
+    named.description = Some("Sorting out the undo rules".into());
     let named_list = list(&named);
     let summary = &named_list.sessions.items[0];
-    assert_eq!(summary.name.as_deref(), Some("Billing fixes"));
+    assert_eq!(summary.name.as_deref(), Some("Sync fixes"));
     assert_eq!(
         summary.description.as_deref(),
-        Some("Sorting out the refund rules")
+        Some("Sorting out the undo rules")
     );
     let plain = list(&seed());
     let summary = &plain.sessions.items[0];

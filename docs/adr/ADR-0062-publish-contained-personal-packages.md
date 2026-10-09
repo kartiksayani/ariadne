@@ -53,6 +53,3 @@ Release CI reuses its already-built production app, builds matching release
 helpers and validates install/repeat/doctor/uninstall in an isolated home. The
 existing native WebView and packaged isolation checks remain required. Neither
 fixtures nor an unrun CI command claim packaged or live-host acceptance.
-
-MCP/Seezo remain disabled under the current-session owner waiver. Organization
-security guidance was not checked; no organizational approval is claimed.

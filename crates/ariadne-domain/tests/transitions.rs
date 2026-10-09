@@ -1544,8 +1544,8 @@ fn owner_labels_are_trimmed_one_line_bounded_and_blank_clears() {
         );
     }
     assert_eq!(
-        normalize_owner_label(Some("  Billing fixes "), "name", SESSION_NAME_MAX_CHARS).unwrap(),
-        Some("Billing fixes".into())
+        normalize_owner_label(Some("  Sync fixes "), "name", SESSION_NAME_MAX_CHARS).unwrap(),
+        Some("Sync fixes".into())
     );
     let sixty = "é".repeat(SESSION_NAME_MAX_CHARS);
     assert_eq!(
@@ -1580,8 +1580,8 @@ fn owner_labels_are_trimmed_one_line_bounded_and_blank_clears() {
     s.description = Some(" padded".into());
     invalid(&s, ValidationErrorKind::InvalidState);
     let mut s = session();
-    s.name = Some("Billing".into());
-    s.description = Some("Refunds".into());
+    s.name = Some("Sync".into());
+    s.description = Some("Undo".into());
     validate_session_items(&s).unwrap();
 }
 
@@ -1593,9 +1593,9 @@ fn stored_sessions_without_a_name_load_and_serialize_unchanged() {
     assert!(parsed.name.is_none() && parsed.description.is_none());
     assert_eq!(serde_json::to_value(&parsed).unwrap(), plain);
     let mut named = parsed;
-    named.name = Some("Billing".into());
+    named.name = Some("Sync".into());
     let value = serde_json::to_value(&named).unwrap();
-    assert_eq!(value["name"], "Billing");
+    assert_eq!(value["name"], "Sync");
     assert!(value.get("description").is_none());
 }
 

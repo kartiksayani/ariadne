@@ -826,7 +826,7 @@ fn the_report_example_files_the_tree_report_md_teaches() {
     assert_eq!(first.ack_to, Some(AckTarget::Done));
     assert_eq!(
         first.outcome.as_deref(),
-        Some("Notes sync holds 500 rps with p99 under 200 ms")
+        Some("The service holds 500 rps with p99 under 200 ms")
     );
     assert!(first.why.as_deref().unwrap().contains("11 scenarios"));
     let waiting = items
@@ -851,7 +851,7 @@ fn the_report_example_files_the_tree_report_md_teaches() {
     let setup = by_short(&items, "Setup");
     assert_eq!(setup.status, ItemStatus::Open);
     assert_eq!(setup.ack_to, Some(AckTarget::Done));
-    assert!(setup.outcome.as_deref().unwrap().contains("test host"));
+    assert!(setup.outcome.as_deref().unwrap().contains("staging-2"));
     let recorded_decision = by_short(&items, "Virtual users");
     assert_eq!(recorded_decision.status, ItemStatus::Open);
     assert_eq!(recorded_decision.ack_to, Some(AckTarget::Decided));

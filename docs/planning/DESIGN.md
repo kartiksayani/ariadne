@@ -4,9 +4,9 @@
 
 ## Reference package
 
-The immutable source is [`designs/Ariadne-UI-mockups-v2.zip`](../../designs/Ariadne-UI-mockups-v2.zip) (the v2 "Paperwhite" handoff; the v1 "Nocturne" zip stays in `designs/` as history only). It contains the handoff README, main prototype, board, component sheets, status diagram, scenario pages, Paperwhite stylesheet, and its prototype-only runtime. The source inventory, SHA-256 digests, and member sizes are in [`assets/design-manifest.json`](assets/design-manifest.json); frame-to-acceptance mapping is in [`DESIGN_TRACEABILITY.md`](DESIGN_TRACEABILITY.md).
+The immutable source is [`designs/Ariadne-UI-mockups-v2.zip`](../../designs/Ariadne-UI-mockups-v2.zip) (the v2 "Paperwhite" handoff). It contains the handoff README, main prototype, board, component sheets, status diagram, scenario pages, Paperwhite stylesheet, and its prototype-only runtime. The source inventory, SHA-256 digests, and member sizes are in [`assets/design-manifest.json`](assets/design-manifest.json); bundled font/icon sources, licences and file hashes are in [`assets/offline-design-assets.json`](assets/offline-design-assets.json); frame-to-acceptance mapping is in [`DESIGN_TRACEABILITY.md`](DESIGN_TRACEABILITY.md).
 
-`assets/paperwhite-tree.png`, `assets/paperwhite-graph.png` and `assets/paperwhite-detail.png` are the app's own renders of frames 1a, 1d and 1b from the design harness (`npm run test:design`, ADR-0086); the old Nocturne mockup renders are removed. Port markup, dimensions, tokens, and SVG treatment. Do not ship `support.js`, its custom compiler, remote font/icon imports, fixture timers, or scripted agent behavior. Bundle required fonts and icons locally with their licenses.
+Previous committed screenshots were removed for privacy. The current design harness (`npm run test:design`, [ADR-0086](../adr/ADR-0086-paperwhite-design.md)) renders the supplied frames and application states from local fixtures. Port markup, dimensions, tokens, and SVG treatment. Do not ship `support.js`, its custom compiler, remote font/icon imports, fixture timers, or scripted agent behavior. Bundle required fonts and icons locally with their licenses.
 
 ## Product shape shown by the UI
 
@@ -35,6 +35,8 @@ The complete source ramps and Paperwhite variables are documented in the zipped 
 | Status | Open neutral-400; Waiting accent-400; In progress `oklch(0.82 0.09 78)`; Decided `oklch(0.8 0.075 178)`; Done `oklch(0.8 0.085 148)`; Dropped/Replaced neutral-500 | Open neutral-600; Waiting accent-600; In progress `oklch(0.55 0.11 68)`; Decided `oklch(0.52 0.08 185)`; Done `oklch(0.52 0.1 148)`; Dropped/Replaced neutral-700 |
 
 Use the entire neutral/accent ramps from the stylesheet. Use JetBrains Mono 400/500 for all text, with `ui-monospace`/Menlo as fallback. Bundle Phosphor regular and fill icons, the spiral mark, and fonts so the application works offline. Themes are Dark and Light, toggled by a two-state control; a stored legacy `system` preference resolves through `prefers-color-scheme`. Status has a distinct shape and a text label, never color alone. Preserve the source's accent-outline primary buttons, readable dimmed terminal rows, visible focus, and icon-plus-text states.
+
+The bundled WOFF2 files are the complete, unmodified Phosphor fonts; `phosphor.css` maps the glyphs the app draws. Beyond the handoff's 62 glyphs, `assets/offline-design-assets.json` records additional app glyphs under `app_glyphs`, using codepoints from `@phosphor-icons/web@2.1.1` `src/regular/style.css`. `apps/desktop/tests/ui/shared/icons.test.ts` checks that every `ph-*` class the app uses has a CSS mapping.
 
 | Component | Source sizing and treatment |
 | --- | --- |
@@ -90,6 +92,6 @@ Capture at 1600 × 960 in both themes: Projects, project page, All sessions, ses
 
 Use deterministic clocks and the canonical fixture from `DESIGN_PROMPT.md`. Compare layout, text wrapping, indentation, icons, colors, focus, selected ancestry, rail interactions, and responsive overflow to the supplied references. Raster antialiasing differences are acceptable. Missing states, lost history, clipped controls, inaccurate status/delivery claims, and spacing drift are not. Trace each board frame and requirement to an acceptance ID in `DESIGN_TRACEABILITY.md`.
 
-## Security guidance provenance
+## Security boundaries
 
-The owner explicitly waived Seezo organizational guidance for this task. It was not checked. Security boundaries in these documents are grounded in the approved local-only architecture and user-provided decisions; this note does not claim organizational guidance review.
+Security boundaries in these documents are grounded in the approved local-only architecture and user-provided decisions.

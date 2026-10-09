@@ -392,8 +392,8 @@ truncation label; no private reasoning/raw tool args/env/auth payloads.
 
 ## 3. Claude Code 2.1.287 adapter
 
-Live starting point: [archived Mod implementation](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/claude-mods/plugin/hooks/register.js)
-and [its tests](https://github.com/kartiksayani/ariadne/tree/a5e306f/poc/claude-mods).
+Live starting point: [archived Mod implementation](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/claude-mods/plugin/hooks/register.js)
+and [its tests](https://github.com/kartiksayani/ariadne/tree/reference/planning-and-pocs/poc/claude-mods).
 Ship JavaScript Mod + shared rule skill with the plugin; replace Python/SQLite
 broker calls with the installed version-matched Rust CLI. No Node daemon or
 Python runtime dependency. Use `$.process.run([absolute_helper,"bridge",...],
@@ -548,7 +548,7 @@ Do not read auth files, reset config home or spawn an unrelated app-server.
 
 Open WebSocket over Unix with standard HTTP Upgrade, validated accept response,
 masked client frames, ping/pong and bounded fragmented-text handling. Use Rust
-tungstenite on UnixStream; the [archived Python framing reference](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/unix_websocket.py)
+tungstenite on UnixStream; the [archived Python framing reference](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/unix_websocket.py)
 is transport evidence. This endpoint is NOT JSONL. Application requests inside WS messages
 are JSON-RPC-shaped without a `jsonrpc` member.
 

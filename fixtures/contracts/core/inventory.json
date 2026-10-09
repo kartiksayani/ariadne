@@ -286,7 +286,7 @@
       "command": "session_label_set",
       "params": {
         "name": "Sync fixes",
-        "description": "Sorting out the note sync rules"
+        "description": "Sorting out the undo rules"
       }
     },
     {

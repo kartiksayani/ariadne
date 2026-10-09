@@ -118,9 +118,6 @@ It does not prove live original-session acceptance; M7 requires owner approval.
 Private generated schemas and preserved POC evidence remain unchanged. All
 handwritten worker/process/observation logic stays in measured source paths.
 
-MCP/Seezo remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no organizational approval is claimed.
-
 ## Spec references
 
 - [PROCESS: adapter deadlines and normalized events](../planning/low-level/PROCESS_AND_PROTOCOLS.md#2-shared-adapter-contract)

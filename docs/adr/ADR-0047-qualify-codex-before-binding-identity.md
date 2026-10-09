@@ -60,8 +60,7 @@ relay nor its Core replay helper, and introduces no serialized authority file.
 Tests use an owned fake daemon and real temporary project directories to prove
 canonical aliases, wrong/missing roots, exact thread ownership, final root
 recheck, full wire requirements and absolute deadline rejection. No live provider
-is launched. MCP/Seezo remain disabled under the owner's current-session waiver;
-organization security guidance was not checked.
+is launched.
 
 ## Spec references
 

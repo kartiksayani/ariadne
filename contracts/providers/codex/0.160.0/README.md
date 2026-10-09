@@ -19,7 +19,7 @@ checked-in files. An ordinary xtask unit test runs the same check in CI.
 Application builds use checked-in Rust and do not require Codex to be installed.
 
 `fixtures/poc-live-exercise.json` is the unchanged, previously redacted retained
-[POC evidence at a5e306f](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/evidence/live-exercise.json).
+[POC evidence (source revision a5e306f)](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/evidence/live-exercise.json).
 The other fixtures are **schema-valid reconstructed examples, not raw RPC
 captures**. Initialization adds synthetic `/redacted/codex-home` because the
 retained evidence omits required `codexHome`. Turn pages preserve the observed
@@ -36,6 +36,3 @@ metadata. Typify represents it as `Option`; Serde also accepts its omission as
 every JSON Schema keyword; the adapter must validate the identity, path and
 capability fields it actually uses. No consumed request has a required nullable
 field that could be lost during serialization.
-
-Organization security guidance was not checked under the owner's explicit
-MCP/Seezo waiver; no approval is claimed.
