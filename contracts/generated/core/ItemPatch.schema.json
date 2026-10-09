@@ -3,6 +3,16 @@
   "title": "ItemPatch",
   "type": "object",
   "properties": {
+    "ack_to": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AckTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "links": {
       "type": [
         "array",
@@ -59,6 +69,17 @@
     "links"
   ],
   "$defs": {
+    "AckTarget": {
+      "description": "State the agent proposes for an explicit owner acknowledgment.",
+      "type": "string",
+      "enum": [
+        "open",
+        "in_progress",
+        "decided",
+        "done",
+        "dropped"
+      ]
+    },
     "EntityRef": {
       "anyOf": [
         {

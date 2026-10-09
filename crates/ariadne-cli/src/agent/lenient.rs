@@ -308,6 +308,19 @@ impl Expander {
             )));
         }
         self.repair_completion(&mut object, &path)?;
+        let read_only = matches!(
+            object.get("type").and_then(Value::as_str),
+            Some("finding" | "explanation")
+        ) && object
+            .get("ask")
+            .and_then(Value::as_str)
+            .is_none_or(|ask| ask.trim().is_empty());
+        if read_only && object.get("ack_to").is_none_or(Value::is_null) {
+            object.insert("ack_to".into(), json!("open"));
+            self.repairs.push(format!(
+                "{path}: missing ack_to repaired to `open`; choose ack_to: open, in_progress, decided, done or dropped."
+            ));
+        }
         if asking
             && matches!(
                 object.get("status").and_then(Value::as_str),
@@ -677,6 +690,56 @@ mod tests {
         assert_eq!(asked["options"][0]["recommended"], false);
         assert_eq!(asked["options"][1]["id"], "z");
         assert_eq!(asked["options"][1]["recommended"], true);
+    }
+
+    #[test]
+    fn missing_read_only_ack_is_repaired_to_open_without_finishing_the_work() {
+        for item_type in ["finding", "explanation"] {
+            for status in ["open", "in_progress"] {
+                for supplied in [None, Some(Value::Null)] {
+                    let mut item = json!({"op": "item.add", "topic": {"id": TOPIC},
+                        "question": "Read the report.", "type": item_type, "status": status,
+                        "children": [{"type": item_type, "question": "Read the detail."}]});
+                    if let Some(supplied) = supplied {
+                        item["ack_to"] = supplied;
+                    }
+                    let expanded = run(&json!({"operations": [item]})).unwrap();
+                    let value = wire(&expanded.request);
+                    assert_eq!(value["operations"][0]["status"], status);
+                    for operation in value["operations"].as_array().unwrap() {
+                        assert_eq!(operation["ack_to"], "open");
+                    }
+                    assert_eq!(expanded.repairs.len(), 2);
+                    assert!(expanded.repairs[0]
+                        .contains("choose ack_to: open, in_progress, decided, done or dropped"));
+                    let mut explicit = value;
+                    explicit.as_object_mut().unwrap().remove("op_id");
+                    assert_eq!(
+                        run(&explicit).unwrap().generated_op_id,
+                        expanded.generated_op_id
+                    );
+                }
+            }
+        }
+        for item_type in ["task", "decision", "question"] {
+            let expanded = run(&json!({"operations": [{"op": "item.add",
+                "topic": {"id": TOPIC}, "question": "Work remains.", "type": item_type}]}))
+            .unwrap();
+            assert!(wire(&expanded.request)["operations"][0]["ack_to"].is_null());
+            assert!(expanded.repairs.is_empty());
+        }
+    }
+
+    #[test]
+    fn all_five_explicit_ack_choices_are_preserved() {
+        for target in ["open", "in_progress", "decided", "done", "dropped"] {
+            let expanded = run(&json!({"operations": [{"op": "item.add",
+                "topic": {"id": TOPIC}, "question": "Read this.", "type": "finding",
+                "ack_to": target}]}))
+            .unwrap();
+            assert_eq!(wire(&expanded.request)["operations"][0]["ack_to"], target);
+            assert!(expanded.repairs.is_empty());
+        }
     }
 
     #[test]

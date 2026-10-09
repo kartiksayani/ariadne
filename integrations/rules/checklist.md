@@ -27,15 +27,17 @@ its result `open` with `ack_to` in the same request, but only if all of these ho
   has no ask of its own still waiting.
 - Nothing else on it is open: no unanswered owner message, no follow-up you owe.
 
-Use `ack_to: "decided"` when its type is `decision` or `question`, and
-`ack_to: "done"` when it is a `finding`, `explanation` or `task`. Its `outcome` is
+Choose the parent's target from its actual remaining work: `open` or
+`in_progress` if reading leaves more work; `decided` for a finished choice,
+`done` for finished work. Its `outcome` is
 one line summing up the children's results; its `why` says why it is finished.
 Guard both items with their revisions. If the owner's answers reopen work on
 the parent, keep its progress current instead.
 
 ## Live work
 
-- Each new confirmed lead is a child `finding`, `open` with `ack_to: "done"`;
+- Each new confirmed lead is a child `finding`, `open` with `ack_to: "open"`
+  while the investigation continues;
   a newly ruled-out lead uses `ack_to: "dropped"` with why.
   The root cause is a `finding`; follow-ups are tasks.
 - When the work ends, finish the task `open` with `ack_to: "done"`, what happened
@@ -43,8 +45,7 @@ the parent, keep its progress current instead.
 
 ## Example
 
-A plan whose first step has started, a consent ask on the second and a step for
-someone else (`owner` `other`, status `open`).
+A started step, a consent ask, and work for someone else (`owner` `other`).
 
 ```json
 {"summary":"Planned the notes sync migration","operations":[{"op":"topic.add","name":"Migrate notes sync to v2","short":"Notes sync migration"},{"op":"item.add","question":"Backfill v2 from v1","short":"Backfill v2","type":"task","status":"in_progress","note":"Backfilling: 1.2M of 4M rows"},{"op":"item.add","question":"Switch reads to v2","short":"Switch reads","type":"task","ask":"Switch reads to v2 after the backfill?","options":[{"label":"Switch after backfill","consequence":"Readers use v2; rollback needs a redeploy","recommended":true},{"label":"Wait","consequence":"Both tables stay in sync longer"}]},{"op":"item.add","question":"Drop the v1 table","short":"Drop v1","type":"task","owner":{"kind":"other","name":"Sync maintainer"}}]}

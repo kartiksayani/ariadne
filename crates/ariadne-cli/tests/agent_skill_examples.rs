@@ -125,6 +125,14 @@ fn checked(block: &str) -> Value {
                 ),
                 "example creates a terminal item: {block}"
             );
+            if matches!(operation["type"].as_str(), Some("finding" | "explanation"))
+                && operation.get("ask").is_none()
+            {
+                assert!(
+                    operation.get("ack_to").is_some(),
+                    "read-only example must deliberately choose ack_to: {block}"
+                );
+            }
             if let Some(target) = operation.get("ack_to") {
                 assert!(matches!(
                     operation["status"].as_str(),
@@ -132,7 +140,7 @@ fn checked(block: &str) -> Value {
                 ));
                 assert!(matches!(
                     target.as_str(),
-                    Some("decided" | "done" | "dropped")
+                    Some("open" | "in_progress" | "decided" | "done" | "dropped")
                 ));
             }
         }
@@ -577,7 +585,13 @@ fn every_skill_example_passes_the_real_cli_and_together_they_cover_the_surface()
     assert!(child && local_ref);
     assert_eq!(
         ack_targets,
-        BTreeSet::from(["decided".into(), "done".into(), "dropped".into()])
+        BTreeSet::from([
+            "open".into(),
+            "in_progress".into(),
+            "decided".into(),
+            "done".into(),
+            "dropped".into(),
+        ])
     );
 }
 
@@ -756,7 +770,7 @@ fn the_cli_help_example_creates_reading_items_open_for_ack_without_repairs() {
     for label in ["Review result", "Fill race"] {
         let item = by_short(&items, label);
         assert_eq!(item.status, ItemStatus::Open);
-        assert_eq!(item.ack_to, Some(AckTarget::Done));
+        assert_eq!(item.ack_to, Some(AckTarget::Open));
         assert!(item.outcome.is_some() && item.why.is_some());
     }
     let decision = by_short(&items, "Fallback merge");
@@ -827,7 +841,7 @@ fn the_connection_example_links_only_the_declaring_item() {
     }
 }
 
-/// The report keeps completed reading material Open with explicit Ack targets,
+/// The report chooses each Ack target from the work remaining after reading,
 /// retains its evidence, and asks separately for permission to change fixtures.
 #[test]
 fn the_report_example_files_the_tree_report_md_teaches() {
@@ -841,7 +855,7 @@ fn the_report_example_files_the_tree_report_md_teaches() {
         .unwrap();
     assert_eq!(first.short.as_deref(), Some("Result summary"));
     assert_eq!(first.status, ItemStatus::Open);
-    assert_eq!(first.ack_to, Some(AckTarget::Done));
+    assert_eq!(first.ack_to, Some(AckTarget::Open));
     assert_eq!(
         first.outcome.as_deref(),
         Some("The service holds 500 rps with p99 under 200 ms")
@@ -901,7 +915,7 @@ fn the_review_and_checklist_examples_default_owner_and_status_as_the_rules_say()
     // The parent is a summary with no blanket ask; each decision is its own child.
     let summary = by_short(&items, "Notes sync review");
     assert_eq!(summary.status, ItemStatus::Open);
-    assert_eq!(summary.ack_to, Some(AckTarget::Done));
+    assert_eq!(summary.ack_to, Some(AckTarget::Open));
     assert_eq!(summary.item_type, ItemType::Explanation);
     assert_eq!(summary.owner, ItemOwner::Agent { binding_id: id(3) });
     assert!(summary.ask.is_none() && summary.options.is_empty());
@@ -971,7 +985,7 @@ fn the_opening_example_files_a_summary_and_the_second_leaves_it_open_for_ack() {
     let finding = by_short(&items, "No jitter");
     assert_eq!(finding.parent.as_ref(), Some(&summary.id));
     assert_eq!(finding.status, ItemStatus::Open);
-    assert_eq!(finding.ack_to, Some(AckTarget::Done));
+    assert_eq!(finding.ack_to, Some(AckTarget::Open));
     assert_eq!(
         finding.outcome.as_deref(),
         Some("Clients retry in lockstep")
@@ -986,7 +1000,7 @@ fn the_opening_example_files_a_summary_and_the_second_leaves_it_open_for_ack() {
     seeded.succeeds(&[], &completion);
     let item = seeded.session().items.0[&summary.id].clone();
     assert_eq!(item.status, ItemStatus::Open);
-    assert_eq!(item.ack_to, Some(AckTarget::Done));
+    assert_eq!(item.ack_to, Some(AckTarget::Open));
     assert_eq!(item.outcome.as_deref(), Some("Notes sync needs one fix"));
 }
 
@@ -1036,7 +1050,7 @@ fn the_inputs_example_replies_decides_and_commits_its_result() {
     assert_eq!(cap.parent.as_ref(), Some(&item.id));
     assert_eq!(cap.topic_id, item.topic_id);
     assert_eq!(cap.status, ItemStatus::Open);
-    assert_eq!(cap.ack_to, Some(AckTarget::Done));
+    assert_eq!(cap.ack_to, Some(AckTarget::Open));
     assert_eq!(cap.outcome.as_deref(), Some("Three attempts"));
     let budget = &session.items.0[&ItemRef::new("3").unwrap()];
     assert!(budget.parent.is_none());
@@ -1099,10 +1113,11 @@ fn the_followup_example_files_two_children_for_a_delivered_reply() {
     assert_eq!(q10.outcome.as_deref(), Some("Yes, after five attempts."));
     let q11 = by_short(&children, "Q11 jitter");
     assert_eq!(q11.outcome.as_deref(), Some("No, it is a fixed 2s."));
+    assert_eq!(q10.ack_to, Some(AckTarget::Done));
+    assert_eq!(q11.ack_to, Some(AckTarget::InProgress));
     for child in &children {
         assert_eq!(child.item_type, ItemType::Explanation);
         assert_eq!(child.status, ItemStatus::Open);
-        assert_eq!(child.ack_to, Some(AckTarget::Done));
         assert!(child.outcome.is_some() && child.why.is_some());
     }
     let input = UuidV4::new(request["source_input_id"].as_str().unwrap()).unwrap();

@@ -165,7 +165,9 @@ pub(super) fn validate_candidate_indexed(
         )?;
     } else {
         require(
-            (item.ack_to.is_some() || (item.outcome.is_none() && item.why.is_none()))
+            (matches!(item.status, ItemStatus::Open | ItemStatus::InProgress)
+                || item.ack_to.is_some()
+                || (item.outcome.is_none() && item.why.is_none()))
                 && item.replaced_by.is_none(),
             format!("{path}.outcome/why/replaced_by"),
             ValidationErrorKind::InvalidState,

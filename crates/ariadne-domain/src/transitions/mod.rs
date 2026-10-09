@@ -8,6 +8,7 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemChange {
     Edit {
+        ack_to: Option<AckTarget>,
         question: Option<String>,
         item_type: Option<ItemType>,
         note: Option<Option<String>>,
@@ -97,6 +98,7 @@ pub fn transition_item(
     let mut fresh_round = false;
     match change {
         ItemChange::Edit {
+            ack_to,
             question,
             item_type,
             note,
@@ -104,6 +106,14 @@ pub fn transition_item(
             related,
             short,
         } => {
+            if let Some(target) = ack_to {
+                if old.ack_to.is_none()
+                    || !matches!(old.status, ItemStatus::Open | ItemStatus::InProgress)
+                {
+                    return Err(TransitionError::InvalidTransition);
+                }
+                item.ack_to = Some(*target);
+            }
             if let Some(short) = short {
                 item.short = short
                     .as_deref()

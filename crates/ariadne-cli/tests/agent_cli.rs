@@ -1155,7 +1155,7 @@ fn strict_creation_rejects_every_terminal_status_including_nested_item_operation
         let mut strict = request(650);
         strict["operations"] = json!([
             {"op": "item.add", "ref": "parent", "topic": {"id": id(5)},
-             "type": "finding", "question": "Parent", "status": "open",
+             "type": "finding", "question": "Parent", "status": "open", "ack_to": "open",
              "owner": {"kind": "agent", "binding_id": id(3)}},
             {"op": "item.add", "ref": "child", "topic": {"id": id(5)},
              "parent": {"ref": "parent"}, "type": "finding", "question": "Child",
@@ -1173,7 +1173,7 @@ fn strict_creation_rejects_every_terminal_status_including_nested_item_operation
 #[test]
 fn explicit_ack_creation_is_accepted_and_conflicts_or_replaced_are_atomic_failures() {
     let setup = Setup::new(&seed());
-    for target in ["decided", "done", "dropped"] {
+    for target in ["open", "in_progress", "decided", "done", "dropped"] {
         let value = envelope(
             &setup.apply(&json!({"operations": [{
                 "op": "item.add", "topic": {"id": id(5)}, "type": "finding",
@@ -1620,9 +1620,9 @@ fn the_help_example_uses_explicit_ack_targets_for_the_lenient_fixture() {
         .0;
     let mut expected: Value = serde_json::from_str(LENIENT).unwrap();
     expected["operations"][1]["status"] = json!("open");
-    expected["operations"][1]["ack_to"] = json!("done");
+    expected["operations"][1]["ack_to"] = json!("open");
     expected["operations"][1]["children"][0]["status"] = json!("open");
-    expected["operations"][1]["children"][0]["ack_to"] = json!("done");
+    expected["operations"][1]["children"][0]["ack_to"] = json!("open");
     assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
     for word in [
         "--dry-run",

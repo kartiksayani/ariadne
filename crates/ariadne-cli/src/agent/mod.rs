@@ -63,18 +63,26 @@ validates it exactly as before):
   win. Item ids are their display numbers; read --view items shows related ids.
   Owner Ack: new items stay nonterminal. Creation status decided/done/dropped
   becomes open with ack_to = that status; outcome and why are preserved. An
-  explicit open with ack_to is accepted. Conflicting status and ack_to are refused;
+  explicit open with ack_to is accepted. Choose each target deliberately:
+  open if the owner just reads and work continues, in_progress if underway,
+  decided/done only when truly finished once read, dropped for ruled-out work.
+  There is no implicit done. New finding/explanation items without ask require
+  ack_to: strict filing says "choose ack_to ..." when missing; this CLI repairs
+  omission to open and reports it. Conflicting status and ack_to are refused;
   replaced creation is refused. item.status open/in_progress can set ack_to;
-  finish summaries open with ack_to. Never close or replace an item with ack_to:
-  only the owner can Ack it. An ask can coexist, but Ack waits until no owner
-  question is pending. Legacy terminal status updates stay open for owner Ack.
+  item.edit patch.ack_to can change an open/in_progress Ack item's target, retaining status
+  and prose. Owner Ack clears the target, preserves prose and sets that status;
+  it sends no agent input. An ask can coexist, but Ack waits until no owner
+  question is pending. Existing Ack terminal updates stay open for owner Ack,
+  except owner-directed completion with source_input_id on that same item.
+  Existing work without ack_to can close normally; item.replace clears ack_to.
   An item.add with an ask stays waiting_on_me even if open/in_progress was given;
   it may retain ack_to. item.ask also keeps an existing Ack target.
   Still required: type and question on item.add; outcome and why when changing
   an existing item to done/decided/dropped; expected_item_revisions for every
   existing item you touch.
 Example (a topic, a summary item with one child, one ask with two options):
-  printf '%s' '{"operations":[{"op":"topic.add","name":"Cache PR review","short":"Cache PR"},{"op":"item.add","short":"Review result","type":"finding","question":"Review finished: one race, one choice","status":"open","ack_to":"done","outcome":"Reviewed","why":"Read every changed file","children":[{"short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"open","ack_to":"done","outcome":"Confirmed","why":"Reproduced locally"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Merge the fallback path now?","ask":"Merge now or wait?","options":[{"label":"Merge now","consequence":"Ships today"},{"label":"Wait","consequence":"Ships next week"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
+  printf '%s' '{"operations":[{"op":"topic.add","name":"Cache PR review","short":"Cache PR"},{"op":"item.add","short":"Review result","type":"finding","question":"Review finished: one race, one choice","status":"open","ack_to":"open","outcome":"Reviewed","why":"Read every changed file","children":[{"short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"open","ack_to":"open","outcome":"Confirmed","why":"Reproduced locally"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Merge the fallback path now?","ask":"Merge now or wait?","options":[{"label":"Merge now","consequence":"Ships today"},{"label":"Wait","consequence":"Ships next week"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
 Receipt (default, compact; data of the --json envelope):
   {"op_id":"...","session_revision":3,"topics":[{"id":"UUID","number":2,"short":"Cache PR","revision":1,"created":true}],"items":[{"id":"4","short":"Review result","revision":1,"created":true},{"id":"4.1","short":"Fill race","revision":1,"created":true}]}
   An item id is its number (1.2). revision is the value to send as the next

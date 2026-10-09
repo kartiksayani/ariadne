@@ -1530,8 +1530,10 @@
       "inputSchema": {
         "$defs": {
           "AckTarget": {
-            "description": "Terminal state the agent proposes for an explicit owner acknowledgment.",
+            "description": "State the agent proposes for an explicit owner acknowledgment.",
             "enum": [
+              "open",
+              "in_progress",
               "decided",
               "done",
               "dropped"
@@ -1734,6 +1736,16 @@
           "ItemPatch": {
             "additionalProperties": false,
             "properties": {
+              "ack_to": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/AckTarget"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "links": {
                 "items": {
                   "$ref": "#/$defs/ItemLinkTarget"

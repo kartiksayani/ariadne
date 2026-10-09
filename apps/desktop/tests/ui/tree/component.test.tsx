@@ -215,7 +215,7 @@ describe('session tree rows', () => {
     const value = await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['1.1']!.ack_to = 'done'; } });
     const execute = vi.spyOn(value.actions, 'execute').mockResolvedValue(true);
     const { release, session } = await staleTree(value);
-    const ack = within(row('1.1')).getByRole('button', { name: 'Ack: mark Done' });
+    const ack = within(row('1.1')).getByRole('button', { name: 'Ack → Done' });
     expect(ack.hasAttribute('disabled')).toBe(false);
     if (method === 'click') fireEvent.click(ack);
     else { row('1.1').focus(); fireEvent.keyDown(row('1.1'), { key: 'a' }); }
@@ -468,7 +468,7 @@ describe('session tree filters', () => {
       session.items['1.1']!.ack_to = 'done';
       session.state = 'closed'; session.archived_at = session.updated_at;
     } });
-    expect(screen.queryByRole('button', { name: 'Ack: mark Done' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ack → Done' })).toBeNull();
     expect(screen.queryByText(/to ack/)).toBeNull();
   });
   it('counts only items in the current archive mode', async () => {

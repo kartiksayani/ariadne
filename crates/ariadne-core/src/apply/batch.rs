@@ -412,6 +412,8 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                         "item {}: kept open with ack_to `{}`; owner Ack is required to finish.",
                         id.as_str(),
                         match target {
+                            AckTarget::Open => "open",
+                            AckTarget::InProgress => "in_progress",
                             AckTarget::Decided => "decided",
                             AckTarget::Done => "done",
                             AckTarget::Dropped => "dropped",
@@ -536,6 +538,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                     session,
                     &id,
                     ItemChange::Edit {
+                        ack_to: patch.ack_to,
                         question: patch.question.clone(),
                         item_type: patch.item_type.clone(),
                         note: patch.note.clone(),

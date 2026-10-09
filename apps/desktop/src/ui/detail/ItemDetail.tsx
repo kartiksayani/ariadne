@@ -470,7 +470,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo)} aria-label={ackTitle(ackTo)}
         disabled={ack.busy} onClick={() => { void ack.run(item.id); }}>
         <i className="ph ph-check" aria-hidden="true" />Ack<span className="detail-key" aria-hidden="true">a</span>
-      </button><span className="detail-hint">Mark {STATUS[ackTo].label}</span>
+      </button><span className="detail-hint">{ackTitle(ackTo)}</span>
     </section>}
     {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
     {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)

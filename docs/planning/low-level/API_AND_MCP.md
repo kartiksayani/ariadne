@@ -527,16 +527,21 @@ input_result: ResultDraft|null
 |---|---|
 | `topic.add` | `ref,name`; optional `short` |
 | `item.add` | `ref,topic,parent?,question,type,status,owner`; optional short/ack_to/ask/options/note/links/related/outcome/why/replaced_by/source_round_id; strict core rejects terminal creation |
-| `item.edit` | `item,patch` restricted to question/type/note/links/related/short; expected revision |
+| `item.edit` | `item,patch` restricted to question/type/note/links/related/short/ack_to; expected revision; ack_to changes an existing Open/InProgress Ack choice only |
 | `item.ask` | `item,ask,options,recipient_binding_id`; opens new round + waiting episode, owner=me |
 | `item.status` | `item,status`; optional `ack_to` for open/in_progress with proposed outcome/why; `outcome,why` required for decided/done/dropped; `reason` required for other transitions; replaced uses item.replace; waiting uses item.ask |
 | `item.replace` | `item,replacement,outcome,why` |
 | `reply` | `ref,item,text,round_id?`; exactly one full item reply |
 | `round.close` | `round_id`; immutable history retained |
 
-`ack_to` is `decided`, `done` or `dropped`, never `replaced`. A read-only item is
-created Open with this target; its intended outcome and why may be supplied and
-are retained until Ack. Under ADR-0092 the CLI repairs Decided/Done/Dropped
+`ack_to` is `open`, `in_progress`, `decided`, `done` or `dropped`, never `replaced`.
+The agent chooses per item; there is no implicit Done. New Open/InProgress
+findings and explanations without an ask require an explicit choice in strict
+filing: "choose ack_to: open, in_progress, decided, done or dropped".
+Under ADR-0092 the lenient CLI repairs a missing choice to `open` and reports it;
+ordinary tasks, decisions and questions retain their existing creation behavior.
+Outcome and why may be supplied and remain visible after nonterminal Ack.
+The CLI still repairs Decided/Done/Dropped
 creation to Open with the requested `ack_to`, recursively for nested children,
 and reports the repair. Strict core rejects terminal creation. Replaced is never
 repaired because it requires replacement provenance. An unanswered ask blocks
@@ -550,7 +555,10 @@ other terminal status requests on existing Ack items to open + ack_to under the
 store lock after replay lookup, preserving text and the original request's retry
 identity. Existing items without ack_to retain normal terminal transitions.
 item.replace remains available for superseded work and clears ack_to. Omitting
-the status target keeps an existing proposal. Owner Ack clears the target. Continue
+the status target keeps an existing proposal. `item.edit.patch.ack_to` changes an
+existing Open/InProgress Ack choice only; omitting it or supplying null keeps the
+choice, and it cannot add Ack again after acknowledgment. Owner Ack uses the
+chosen status and clears the target. Continue
 is an owner action and keeps finished copies finished. Both agent item reads and
 owner session snapshots include the field.
 

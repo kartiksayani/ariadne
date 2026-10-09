@@ -10,7 +10,11 @@ An agent could file a new finding or explanation already Done, so the owner
 could miss it. Read-only work needs a small acknowledgment without creating a
 question or sending a message to the agent.
 
-## Decision
+## Original decision (alpha.11)
+
+The original decision is retained below as history. The alpha.12 revision
+supersedes its restriction to terminal Ack targets and its optional target on
+new read-only items; the other behavior remains in force.
 
 - New agent items must be nonterminal. The strict core rejects terminal creation,
   including Replaced. Following ADR-0092, the lenient CLI repairs Decided, Done
@@ -74,18 +78,52 @@ question or sending a message to the agent.
 - Ack means the owner read the item. Permission to act requires a real question
   with an explicit option, such as “Got it, go ahead”.
 
+## Revised (alpha.12)
+
+Ack records reading independently of completion. The agent deliberately chooses
+the item's status after reading from `open`, `in_progress`, `decided`, `done`
+or `dropped`; there is no implicit Done target. Use Open when the owner merely
+reads and work continues, InProgress when work is underway, and Done or Decided
+only when that item is truly finished once read. Item type alone cannot choose
+the target. Ruled-out work can target Dropped.
+
+New read-only Finding or Explanation items (without an ask) require an explicit
+`ack_to`. Strict filing refuses omission with guidance to “choose ack_to ...”;
+lenient filing supplies `ack_to: "open"` and reports the repair. Tasks, decisions,
+questions and items with asks do not acquire an implicit Ack target. Existing
+items without a target remain valid. Terminal creation repair still retains
+the explicitly requested Decided, Done or Dropped as its target, preserving
+outcome and why; it does not replace that intent with Open.
+
+The owner Ack command clears `ack_to` and applies exactly that recorded status,
+including Open or InProgress, under the writer lock with the expected revision.
+It records owner activity and status history and creates no input or delivery.
+Outcome and why survive nonterminal Ack just as they survive terminal Ack.
+Unanswered asks continue to block Ack.
+
+An agent may revise `ack_to` through `item.edit` on an Open/InProgress item that already
+has an Ack target. This changes only the target, retaining status and prose;
+it cannot remove the target, add it to an ordinary item, or bypass an unanswered
+ask. The existing owner-directed completion and replacement rules remain in
+force. Agent instructions and examples teach a separate, deliberate target for
+each item instead of treating every report, explanation or finding as Done.
+
 ## Consequences
 
-New reports remain visible as Open until read. Quiet Ack controls identify the
-target in the tree and detail panel; `a` acknowledges eligible items and keeps
+New reports remain visible as Open until read. After reading they may remain
+Open or become InProgress, rather than being marked finished automatically.
+Quiet Ack controls identify the target in the tree and detail panel;
+`a` acknowledges eligible items and keeps
 its existing answer meaning on questions. Topic counts and graph markers make
 unread acknowledgment work visible without inflating Waiting counts.
 
 The CLI's deterministic operation ID still follows the expanded request.
-Repairs change terminal-creation requests relative to versions before Ack, so
-those old requests do not share the same derived ID or strict request digest
-across an upgrade. Do not blindly resend an uncertain terminal-creation request
-from an older version: read the session and reconcile its original receipt first.
+Repairs change terminal-creation requests relative to versions before Ack.
+Alpha.12 also changes previously accepted Open/InProgress findings/explanations
+without an ask or `ack_to`, because CLI expansion now adds `ack_to: "open"`.
+Those old requests do not share the same derived ID or strict request digest
+across an upgrade. Before resending either kind of uncertain request from an
+older version, read the session and reconcile its original receipt first.
 Requests expanded by the current version retain exact replay behavior. Existing
 stored items and receipts remain readable and are never rewritten just by loading.
 

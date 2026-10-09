@@ -356,6 +356,7 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
         Operation::ItemEdit {
             item: existing("1"),
             patch: ItemPatch {
+                ack_to: None,
                 question: None,
                 item_type: None,
                 note: Some(Some("First".into())),
@@ -369,6 +370,7 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
         Operation::ItemEdit {
             item: existing("1"),
             patch: ItemPatch {
+                ack_to: None,
                 question: None,
                 item_type: None,
                 note: Some(None),
@@ -1273,6 +1275,7 @@ fn item_links_are_saved_by_add_and_patch_even_when_targets_are_missing() {
     edit.operations = vec![Operation::ItemEdit {
         item: existing("1"),
         patch: ItemPatch {
+            ack_to: None,
             question: None,
             item_type: None,
             note: None,
@@ -1305,6 +1308,7 @@ fn malformed_item_links_are_rejected_on_add_and_patch_without_saving_anything() 
         edit.operations = vec![Operation::ItemEdit {
             item: existing("1"),
             patch: ItemPatch {
+                ack_to: None,
                 question: None,
                 item_type: None,
                 note: None,
@@ -1329,6 +1333,7 @@ fn short_patch(short: Option<Option<&str>>) -> Operation {
     Operation::ItemEdit {
         item: existing("1"),
         patch: ItemPatch {
+            ack_to: None,
             question: None,
             item_type: None,
             note: None,
@@ -1427,6 +1432,7 @@ fn related_patch(target: EntityRef, related: Option<Vec<EntityRef>>) -> Operatio
     Operation::ItemEdit {
         item: target,
         patch: ItemPatch {
+            ack_to: None,
             question: None,
             item_type: None,
             note: None,
@@ -1775,6 +1781,102 @@ fn open_creation_with_ack_proposal_preserves_completion_prose() {
     assert_eq!(item.ack_to, Some(AckTarget::Done));
     assert_eq!(item.outcome.as_deref(), Some("Exact complete result."));
     assert_eq!(item.why.as_deref(), Some("Exact justification."));
+}
+
+#[test]
+fn strict_read_only_creation_requires_an_explicit_ack_choice() {
+    for item_type in [ItemType::Finding, ItemType::Explanation] {
+        for status in [ItemStatus::Open, ItemStatus::InProgress] {
+            let setup = Setup::new(&seed());
+            let mut r = request(990);
+            let mut op = add("report", uuid(5), None, false);
+            let Operation::ItemAdd(draft) = &mut op else {
+                unreachable!()
+            };
+            draft.item_type = item_type.clone();
+            draft.status = status.clone();
+            r.operations.push(op);
+            let before = setup.bytes();
+            let err = core_error(setup.execute(&r).unwrap_err());
+            assert_eq!(
+                err.message,
+                "choose ack_to: open, in_progress, decided, done or dropped"
+            );
+            assert_eq!(setup.bytes(), before);
+            let Operation::ItemAdd(draft) = &mut r.operations[0] else {
+                unreachable!()
+            };
+            draft.ack_to = Some(AckTarget::Open);
+            setup.execute(&r).unwrap();
+        }
+    }
+    for item_type in [ItemType::Question, ItemType::Decision, ItemType::Task] {
+        let setup = Setup::new(&seed());
+        let mut r = request(991);
+        let mut op = add("work", uuid(5), None, false);
+        let Operation::ItemAdd(draft) = &mut op else {
+            unreachable!()
+        };
+        draft.item_type = item_type;
+        r.operations.push(op);
+        setup.execute(&r).unwrap();
+    }
+}
+
+#[test]
+fn editing_an_ack_choice_preserves_state_and_cannot_reinstate_cleared_ack() {
+    for status in [ItemStatus::Open, ItemStatus::InProgress] {
+        for target in [
+            AckTarget::Open,
+            AckTarget::InProgress,
+            AckTarget::Decided,
+            AckTarget::Done,
+            AckTarget::Dropped,
+        ] {
+            let mut source = seed();
+            let proposal = source.items.0.get_mut(&item("1")).unwrap();
+            proposal.status = status.clone();
+            proposal.ask = None;
+            proposal.waiting_since = None;
+            proposal.ack_to = Some(AckTarget::Done);
+            proposal.outcome = Some("Exact report.".into());
+            proposal.why = Some("Verified locally.".into());
+            let setup = Setup::new(&source);
+            let mut r = guarded(992, "1", 1);
+            r.operations.push(Operation::ItemEdit {
+                item: existing("1"),
+                patch: ItemPatch {
+                    ack_to: Some(target),
+                    question: None,
+                    item_type: None,
+                    note: None,
+                    links: None,
+                    related: None,
+                    short: None,
+                },
+            });
+            setup.execute(&r).unwrap();
+            for (op, revision, patch_json) in [(993, 2, "{}"), (994, 3, r#"{"ack_to":null}"#)] {
+                let mut keep = guarded(op, "1", revision);
+                keep.operations.push(Operation::ItemEdit {
+                    item: existing("1"),
+                    patch: serde_json::from_str(patch_json).unwrap(),
+                });
+                setup.execute(&keep).unwrap();
+            }
+            let saved = setup.saved();
+            let kept = &saved.items.0[&item("1")];
+            assert_eq!(kept.status, status);
+            assert_eq!(kept.ack_to, Some(target));
+            assert_eq!(kept.outcome.as_deref(), Some("Exact report."));
+            assert_eq!(kept.why.as_deref(), Some("Verified locally."));
+            source.items.0.get_mut(&item("1")).unwrap().ack_to = None;
+            Setup::new(&source).rejected(&r, CoreErrorCode::InvalidTransition);
+            let terminal = source.items.0.get_mut(&item("1")).unwrap();
+            terminal.status = ItemStatus::Done;
+            Setup::new(&source).rejected(&r, CoreErrorCode::InvalidTransition);
+        }
+    }
 }
 
 #[test]
@@ -2407,6 +2509,7 @@ fn same_turn_bring_or_reopen_cannot_leave_an_open_ask_unanswered() {
                         Operation::ItemEdit {
                             item: existing("1"),
                             patch: ItemPatch {
+                                ack_to: None,
                                 question: None,
                                 item_type: None,
                                 short: None,
@@ -2476,6 +2579,7 @@ fn handled_reply_keeps_a_proposed_completion_ackable_and_new_questions_answerabl
     edit.operations.push(Operation::ItemEdit {
         item: existing("1"),
         patch: ItemPatch {
+            ack_to: None,
             question: Some("A new question?".into()),
             short: None,
             item_type: None,
