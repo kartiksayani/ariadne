@@ -329,6 +329,12 @@
             "$ref": "#/$defs/ItemRef"
           }
         },
+        "connected_session_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "dispatch_must_pause": {
           "type": "boolean"
         },

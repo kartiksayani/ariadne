@@ -470,6 +470,7 @@ fn details(
         blocking_input_ids,
         dispatch_must_pause: false,
         partial_removal: None,
+        connected_session_name: None,
     }))
 }
 

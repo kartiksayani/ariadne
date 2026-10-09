@@ -152,9 +152,9 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       let saved;
       try { saved = await owner($,'binding','connect',connectRequest,true); }
       catch (error) {
-        if (!changed) throw error;
-        // A removed session can fail lookup with io_error. Core fences fresh
-        // competing requests even when lookup fails or an old call commits late.
+        if (!changed || !(error instanceof ModError) || !['not_found','io_error'].includes(error.code)) throw error;
+        // A removed session can fail lookup with io_error. Connectivity failures
+        // retain the original request until the app can answer its lookup.
         connectRequest = null;
       }
       if (connectRequest && saved !== null) {

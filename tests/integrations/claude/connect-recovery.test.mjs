@@ -98,11 +98,10 @@ test('a removed session does not trap later connects behind its failed replay lo
   assert.equal(h.calls.find(call => call.argv.includes('--replay-only')).options.stdin,mutations(h)[0].options.stdin);
 });
 
-for (const lookupFailure of ['io_error','host_unreachable','SDK rejection']) {
+for (const lookupFailure of ['not_found','io_error']) {
   test(`failed replay lookup (${lookupFailure}) discards only a changed request`, async () => {
     const h = host({handler:(argv,options) => {
       if (argv.includes('--replay-only')) {
-        if (lookupFailure === 'SDK rejection') throw new Error('SDK rejection');
         return failure(lookupFailure);
       }
       if (argv[2] === 'connect' && !argv.includes('--replay-only')) {
@@ -118,6 +117,47 @@ for (const lookupFailure of ['io_error','host_unreachable','SDK rejection']) {
     assert.notEqual(mutations(h)[0].options.stdin,mutations(h)[1].options.stdin);
   });
 }
+
+for (const lookupFailure of ['host_unreachable','SDK rejection']) {
+  test(`failed replay lookup (${lookupFailure}) retains a changed request until reachable`, async () => {
+    let down = true;
+    const h = host({handler:(argv,options) => {
+      if (argv.includes('--replay-only')) {
+        if (!down) return success(null);
+        if (lookupFailure === 'SDK rejection') throw new Error('SDK rejection');
+        return failure(lookupFailure);
+      }
+      if (argv[2] === 'connect') {
+        if (mutations(h).length === 1) throw new Error('SDK timeout');
+        return receipt(JSON.parse(options.stdin),ids.input);
+      }
+    }});
+    const owner = setup(descriptor.helperPath);
+    await assert.rejects(owner.connect(h.$,ids.session));
+    await assert.rejects(owner.connect(h.$,ids.input));
+    await assert.rejects(owner.connect(h.$,ids.input));
+    assert.equal(mutations(h).length,1);
+    const lookups = h.calls.filter(call => call.argv.includes('--replay-only'));
+    assert.ok(lookups.every(call => call.options.stdin === mutations(h)[0].options.stdin));
+    down = false;
+    await owner.connect(h.$,ids.input);
+    assert.notEqual(mutations(h)[0].options.stdin,mutations(h)[1].options.stdin);
+  });
+}
+
+test('an unreachable replay lookup for a changed session uses plain app guidance and keeps the request', async () => {
+  const h = host({handler:argv => {
+    if (argv.includes('--replay-only')) return failure('host_unreachable');
+    if (argv[2] === 'connect') throw new Error('SDK timeout');
+  }});
+  const commands = hooks();
+  await commands.get('ariadne-connect')(h.$,{args:ids.session});
+  const result = await commands.get('ariadne-connect')(h.$,{args:ids.input});
+  assert.equal(result.text,'That did not complete. Open the Ariadne app, then run /ariadne-connect again.');
+  plain(result.text);
+  assert.equal(mutations(h).length,1);
+  assert.equal(h.calls.find(call => call.argv.includes('--replay-only')).options.stdin,mutations(h)[0].options.stdin);
+});
 
 test('retiring an unconfirmed fetch lets the heartbeat reconnect after a reachable app times out', async () => {
   let lost = false, connectFails = false, generation = ids.generation;
@@ -340,6 +380,50 @@ test('a previously saved conversation cannot move sessions silently and gets a w
   assert.equal(mutations(h).length,2);
   assert.notEqual(mutations(h)[0].options.stdin,mutations(h)[1].options.stdin);
   assert.deepEqual(h.prompts,[]);
+});
+
+test('an updated Claude conversation gets a plain named refusal when choosing another session', async () => {
+  let updated = false, missing = true;
+  const h = host({handler:(argv,options) => {
+    if (argv[2] === 'connect' && !argv.includes('--replay-only')) {
+      const request = JSON.parse(options.stdin);
+      if (updated && request.command.params.existing_session_id === ids.input) {
+        const response = failure('binding_conflict',{connected_session_name:'Planning'});
+        const value = JSON.parse(response.stdout);
+        value.error.message = `raw binding ${ids.binding} revision 3`;
+        response.stdout = JSON.stringify(value);
+        return response;
+      }
+      return receipt(request);
+    }
+    if (argv[2] === 'connection-status' && missing) return failure('not_found',{reason:'lease_invalid'});
+  }});
+  const commands = hooks();
+  await commands.get('ariadne-connect')(h.$,{args:ids.session});
+  updated = true;
+  missing = false;
+  const result = await commands.get('ariadne-connect')(h.$,{args:ids.input});
+  assert.equal(result.text,'That did not complete. This conversation is already connected to Planning. Reconnect to that session, or start another Claude conversation to use a different Ariadne session.');
+  plain(result.text);
+  assert.equal(mutations(h).length,2);
+  assert.deepEqual(h.prompts,[]);
+});
+
+test('malformed session names and old helpers fall back to a plain refusal without raw text', async () => {
+  for (const name of [undefined,null,42,'','x'.repeat(4097),'Planning\nraw diagnostics','Planning\u001b[31m']) {
+    const h = host({handler:argv => {
+      if (argv[2] !== 'connect') return;
+      const response = failure('binding_conflict',name === undefined ? undefined : {connected_session_name:name});
+      const value = JSON.parse(response.stdout);
+      value.error.message = `raw binding ${ids.binding} revision 3`;
+      response.stdout = JSON.stringify(value);
+      return response;
+    }});
+    const result = await hooks().get('ariadne-connect')(h.$,{args:ids.input});
+    assert.match(result.text,/Check this session in Ariadne/);
+    assert.doesNotMatch(result.text,/raw|diagnostics|Planning/);
+    plain(result.text);
+  }
 });
 
 test('a discarded request that commits late can be recovered by reconnecting the earlier session', async () => {

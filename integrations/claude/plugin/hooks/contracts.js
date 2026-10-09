@@ -56,6 +56,10 @@ const HELPER_FAILURES = Object.freeze({
 // A refusal of the app to take more work: the reason says what to do, not the code.
 export function plainFailure(code, details) {
   const own = (table, key) => typeof key === 'string' && Object.hasOwn(table,key) ? table[key] : undefined;
+  if (code === 'binding_conflict' && bounded(details?.connected_session_name,4096)
+    && !/\p{Cc}/u.test(details.connected_session_name)) {
+    return `This conversation is already connected to ${details.connected_session_name}. Reconnect to that session, or start another Claude conversation to use a different Ariadne session.`;
+  }
   if (code === 'invalid_transition') {
     return own(HELD_FAILURES,details?.reason) ?? 'Ariadne is holding messages for this session right now. Open Ariadne to see why.';
   }

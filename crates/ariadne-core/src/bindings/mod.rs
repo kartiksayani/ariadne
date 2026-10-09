@@ -119,24 +119,35 @@ impl<'a> BindingService<'a> {
                     .active_binding_id
                     .as_ref()
                     .is_some_and(|id| {
-                        located
-                            .session
-                            .bindings
-                            .0
-                            .get(id)
-                            .is_some_and(|binding| HostIdentity::of(binding) == identity)
+                        located.session.bindings.0.get(id).is_some_and(|binding| {
+                            HostIdentity::of(binding).same_conversation(&identity)
+                        })
                     })
             });
-            if selected.is_some_and(|located| {
+            if let Some(located) = selected.filter(|located| {
                 located.project.project_id != params.project_id
                     || params
                         .existing_session_id
                         .as_ref()
                         .is_some_and(|id| id != &located.session.id)
             }) {
-                return Err(conflict(
-                    "The selected host route belongs to another registered session",
-                ));
+                let mut error = CoreError::new(
+                    CoreErrorCode::BindingConflict,
+                    "This conversation is already connected to another Ariadne session",
+                    "Reconnect to that session, or start another conversation.",
+                );
+                error.details = Some(Box::new(ErrorDetails {
+                    connected_session_name: Some(located.session.title.clone()),
+                    reason: None,
+                    binding_id: None,
+                    input_id: None,
+                    attempt_id: None,
+                    blocking_item_ids: vec![],
+                    blocking_input_ids: vec![],
+                    dispatch_must_pause: false,
+                    partial_removal: None,
+                }));
+                return Err(error.into());
             }
             let target = match &params.existing_session_id {
                 Some(id) => Some(

@@ -349,6 +349,7 @@ fn barrier(
             .collect(),
         dispatch_must_pause: true,
         partial_removal: None,
+        connected_session_name: None,
     }));
     e
 }

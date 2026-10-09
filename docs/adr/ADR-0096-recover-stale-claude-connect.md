@@ -33,9 +33,10 @@ discards that obsolete connect request and begins a fresh operation. A not-found
 route alone may mean activation is still pending: an unchanged request keeps its
 exact body and operation ID and republishes the same saved scope. An unchanged
 request without a receipt also retains its exact body and operation ID. A failed
-receipt lookup also permits discarding a changed request: a removed session may
-produce a store I/O error, and Core fences competing requests regardless of the
-lookup outcome. An unchanged request retains recovery state on failed lookup.
+receipt lookup permits discarding a changed request only for not-found or store
+I/O errors indicating a removed session. An unreachable app or another lookup
+failure retains the exact request and operation ID until lookup can succeed.
+An unchanged request retains recovery state on every failed lookup.
 Invalid saved receipts still refuse connection.
 
 A missing receipt is only a snapshot: an earlier native call may commit after
@@ -58,8 +59,15 @@ even for a live announced conversation; it cannot establish permission to replac
 it. The old conversation must disconnect first. For this guard, the adapter and
 external conversation ID establish the same conversation; the endpoint fingerprint
 does not. Helper, plugin and Claude updates change that fingerprint without ending
-the conversation. Exact host identity still controls route reuse; a changed
-fingerprint uses the existing rebind transaction. Same-conversation reconnect
+the conversation. Claude session selection and registry route uniqueness use
+the adapter and external conversation ID, including when reading older saved
+full identities. A fingerprint change therefore reconnects the earlier Ariadne
+session on a plain connect and cannot move its conversation to another session.
+The fingerprint remains a qualification fact: a changed fingerprint uses the
+existing rebind transaction within that same session. No store migration or
+index schema change is needed. Other adapters retain full-identity selection and
+uniqueness because their external session IDs have no established guarantee of
+identifying a conversation independently of the endpoint. Same-conversation reconnect
 remains allowed; `/clear` reports the old conversation's end before connecting the
 new one. Other adapters keep their existing replacement rules.
 
@@ -77,6 +85,10 @@ requests; they are absent from owner output. Claude receives required routing
 through the existing internal conversation note rather than the command summary.
 Explicit connect notes describe the owner's request; automatic reconnect notes
 describe the plugin reconnecting by itself.
+Cross-session refusal carries the saved session title in the optional
+`connected_session_name` error detail. The plugin builds its plain refusal from
+that bounded name; older helpers and malformed names fall back to its generic
+plain refusal without displaying raw helper text.
 
 ## Validation
 
@@ -89,5 +101,9 @@ unsaved session-end and late terminal reports through recovery. Production CLI
 tests cover replay-only hits, misses and conflicts. Core tests prove atomic
 live-Claude refusal and preservation of queued
 messages and uncertain attempts after disconnect and rebind. Core tests also prove
-same-conversation reconnect after a fingerprint change and non-Claude live
+explicit and plain same-conversation reconnect after a fingerprint change,
+atomic cross-session refusal with a saved session name, and non-Claude live
 same-adapter replacement with pending work.
+Store tests cover Claude conversation uniqueness across fingerprints while other
+adapters retain full-identity uniqueness. Node tests cover the named refusal,
+older helpers, malformed names and pending requests retained on unreachable lookup.

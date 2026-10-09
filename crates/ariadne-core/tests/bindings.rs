@@ -1004,49 +1004,115 @@ fn a_different_conversation_cannot_take_a_claude_binding_without_disconnect() {
 
 #[test]
 fn claude_rebind_accepts_a_changed_fingerprint_in_the_same_conversation() {
-    for connection_state in [ConnectionState::Connected, ConnectionState::Unknown] {
-        let s = Setup::new(1);
-        let mut session = queued_input(seed());
-        let old = session.bindings.0.get_mut(&id(3)).unwrap();
-        old.adapter_id = "claude_code_mod".into();
-        old.connection_state = connection_state;
-        let fingerprint = EndpointFingerprint("updated-helper".into());
-        s.store(1).create(&session).unwrap();
-        let mut cmd = command(1, "existing-thread", 10, Some(id(2)));
+    for explicit in [false, true] {
+        for connection_state in [ConnectionState::Connected, ConnectionState::Unknown] {
+            let s = Setup::new(1);
+            let mut session = queued_input(seed());
+            let old = session.bindings.0.get_mut(&id(3)).unwrap();
+            old.adapter_id = "claude_code_mod".into();
+            old.connection_state = connection_state;
+            let fingerprint = EndpointFingerprint("updated-helper".into());
+            s.store(1).create(&session).unwrap();
+            // Keep the old full identity on disk to exercise lookup without migration.
+            s.registry.rebuild().unwrap();
+            let mut cmd = command(1, "existing-thread", 10, explicit.then(|| id(2)));
+            let OwnerCommand::BindingConnect { params, .. } = &mut cmd else {
+                panic!("connect command")
+            };
+            params.adapter_id = "claude_code_mod".into();
+            let saved = receipt(
+                s.service()
+                    .connect(
+                        &owner(),
+                        &cmd,
+                        |params| {
+                            let mut host = facts(params);
+                            host.endpoint_fingerprint = fingerprint.clone();
+                            Ok(host)
+                        },
+                        || s.allocate(),
+                        at(),
+                    )
+                    .unwrap(),
+            );
+            let (binding_id, generation) = handle(&saved);
+            assert_eq!(saved.session_id, id(2));
+            assert_eq!(s.store(1).sessions().unwrap().len(), 1);
+            let after = s.store(1).read(&id(2)).unwrap();
+            assert_eq!(after.active_binding_id, Some(binding_id.clone()));
+            let binding = &after.bindings.0[&binding_id];
+            assert_eq!(binding.endpoint_fingerprint, fingerprint);
+            assert_eq!(binding.external_session_id, "existing-thread");
+            assert_eq!(binding.generation, generation);
+            assert_ne!(generation, id(4));
+            assert_eq!(after.messages, session.messages);
+            assert_eq!(after.inputs.0[&id(400)].binding_id, binding_id);
+            assert_eq!(after.inputs.0[&id(400)].state, InputState::Queued);
+            assert_eq!(
+                after.inputs.0[&id(400)].payload,
+                session.inputs.0[&id(400)].payload
+            );
+        }
+    }
+}
+
+#[test]
+fn changed_claude_fingerprint_cannot_move_a_conversation_to_another_session() {
+    let s = Setup::new(2);
+    let mut original = queued_input(seed());
+    original.title = "Planning".into();
+    original.bindings.0.get_mut(&id(3)).unwrap().adapter_id = "claude_code_mod".into();
+    s.store(1).create(&original).unwrap();
+    let other = s.connect(&command(1, "other-thread", 9, None));
+    s.registry.rebuild().unwrap();
+    let index = s.home.path().join(".ariadne/bindings.json");
+    let index_before = fs::read(&index).unwrap();
+    let other_before = s.store(1).read(&other.session_id).unwrap();
+    for (project, session) in [(1, Some(other.session_id.clone())), (2, None)] {
+        let mut cmd = command(project, "existing-thread", 10, session);
         let OwnerCommand::BindingConnect { params, .. } = &mut cmd else {
             panic!("connect command")
         };
         params.adapter_id = "claude_code_mod".into();
-        let saved = receipt(
-            s.service()
-                .connect(
-                    &owner(),
-                    &cmd,
-                    |params| {
-                        let mut host = facts(params);
-                        host.endpoint_fingerprint = fingerprint.clone();
-                        Ok(host)
-                    },
-                    || s.allocate(),
-                    at(),
-                )
-                .unwrap(),
-        );
-        let (binding_id, generation) = handle(&saved);
-        let after = s.store(1).read(&id(2)).unwrap();
-        assert_eq!(after.active_binding_id, Some(binding_id.clone()));
-        let binding = &after.bindings.0[&binding_id];
-        assert_eq!(binding.endpoint_fingerprint, fingerprint);
-        assert_eq!(binding.external_session_id, "existing-thread");
-        assert_eq!(binding.generation, generation);
-        assert_ne!(generation, id(4));
-        assert_eq!(after.messages, session.messages);
-        assert_eq!(after.inputs.0[&id(400)].binding_id, binding_id);
-        assert_eq!(after.inputs.0[&id(400)].state, InputState::Queued);
+        let error = s
+            .service()
+            .connect(
+                &owner(),
+                &cmd,
+                |params| {
+                    let mut host = facts(params);
+                    host.endpoint_fingerprint = EndpointFingerprint("updated-helper".into());
+                    Ok(host)
+                },
+                || panic!("refusal before allocation"),
+                at(),
+            )
+            .unwrap_err();
+        let BindingError::Core(error) = error else {
+            panic!("expected a conversation conflict")
+        };
+        assert_eq!(error.code, CoreErrorCode::BindingConflict);
         assert_eq!(
-            after.inputs.0[&id(400)].payload,
-            session.inputs.0[&id(400)].payload
+            error
+                .details
+                .as_ref()
+                .unwrap()
+                .connected_session_name
+                .as_deref(),
+            Some("Planning")
         );
+        let mut legacy = serde_json::to_value(&error).unwrap();
+        legacy["details"]
+            .as_object_mut()
+            .unwrap()
+            .remove("connected_session_name");
+        let legacy: CoreError = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.details.unwrap().connected_session_name.is_none());
+        assert_eq!(s.store(1).read(&id(2)).unwrap(), original);
+        assert_eq!(s.store(1).read(&other.session_id).unwrap(), other_before);
+        assert_eq!(fs::read(&index).unwrap(), index_before);
+        assert_eq!(s.store(1).sessions().unwrap().len(), 2);
+        assert!(s.store(2).sessions().unwrap().is_empty());
     }
 }
 
