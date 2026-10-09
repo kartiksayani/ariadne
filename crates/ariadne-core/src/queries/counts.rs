@@ -45,6 +45,15 @@ pub fn waiting_unanswered(session: &Session, item: &Item) -> bool {
 
 /// Unanswered current question episode, independent of queue/status eligibility.
 pub(crate) fn question_unanswered(session: &Session, item: &Item) -> bool {
+    question_unanswered_with_handled_input(session, item, None)
+}
+
+/// Evaluate an agent batch's source as Handled before its result is committed.
+pub(crate) fn question_unanswered_with_handled_input(
+    session: &Session,
+    item: &Item,
+    handled_input_id: Option<&UuidV4>,
+) -> bool {
     // Leaving WaitingOnMe advances the optimistic question revision, but does
     // not open a new ask. Keep replies attached to that unchanged round episode.
     let retained_round = match &item.current_round_id {
@@ -75,6 +84,11 @@ pub(crate) fn question_unanswered(session: &Session, item: &Item) -> bool {
             || retained_round.is_some_and(|round| revision == round.question_revision)
     };
     !session.inputs.0.values().any(|input| {
+        let state = if handled_input_id == Some(&input.id) {
+            &InputState::Handled
+        } else {
+            &input.state
+        };
         input.target.item_id.as_ref() == Some(&item.id)
             && input
                 .payload
@@ -82,9 +96,9 @@ pub(crate) fn question_unanswered(session: &Session, item: &Item) -> bool {
                 .question_revision
                 .is_some_and(matches_question_revision)
             // Bring/Reopen asks the agent to raise a question, not answers it.
-            && (matches!(input.state, InputState::Queued | InputState::InFlight)
+            && (matches!(state, InputState::Queued | InputState::InFlight)
                 || matches!(item.status, ItemStatus::Open | ItemStatus::InProgress)
-                    && input.state == InputState::Handled
+                    && *state == InputState::Handled
                     && matches!(
                         input.kind,
                         InputKind::Answer

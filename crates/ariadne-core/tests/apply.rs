@@ -216,6 +216,8 @@ impl Setup {
         self.prepare_kind(turn, InputKind::Reply, "Original immutable owner message.")
     }
     fn prepare_kind(&self, turn: TurnState, kind: InputKind, text: &str) -> UuidV4 {
+        let expected_question_revision =
+            (kind == InputKind::Answer).then(|| self.saved().items.0[&item("1")].question_revision);
         let command = OwnerCommand::InputSubmit {
             api_version: SchemaVersion::new(1).unwrap(),
             op_id: id(700),
@@ -228,7 +230,7 @@ impl Setup {
                 kind,
                 text: text.into(),
                 selected_option_id: None,
-                expected_question_revision: None,
+                expected_question_revision,
                 supersedes_answer_id: None,
             },
         };
@@ -1901,6 +1903,166 @@ fn handled_clarification_cannot_abandon_an_unanswered_waiting_question() {
                     reason: Some("Finished explaining.".into()),
                 });
                 setup.rejected(&hide, CoreErrorCode::InvalidTransition);
+            }
+        }
+    }
+}
+
+#[test]
+fn same_turn_followup_cannot_abandon_an_unanswered_waiting_question() {
+    for kind in [InputKind::Followup, InputKind::Note] {
+        for status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for ack_to in [None, Some(AckTarget::Done)] {
+                for lenient in [false, true] {
+                    let setup = Setup::new(&seed());
+                    let mut ask = guarded(1019, "1", 1);
+                    ask.operations.push(Operation::ItemAsk {
+                        item: existing("1"),
+                        ask: "Choose A or B?".into(),
+                        options: vec![],
+                        recipient_binding_id: id(3),
+                    });
+                    setup.execute(&ask).unwrap();
+                    let source =
+                        setup.prepare_kind(TurnState::Completed, kind.clone(), "What does B mean?");
+                    let mut hide = setup.dispatched(1020, &source);
+                    hide.operations.push(Operation::ItemStatus {
+                        item: existing("1"),
+                        status: status.clone(),
+                        ack_to,
+                        outcome: ack_to.map(|_| "Explained B.".into()),
+                        why: ack_to.map(|_| "The follow-up was handled.".into()),
+                        reason: Some("Finished explaining.".into()),
+                    });
+                    let before = setup.bytes();
+                    let error = if lenient {
+                        ApplyService::new(&setup.registry)
+                            .execute_lenient(
+                                &setup.context(Some(&source)),
+                                &hide,
+                                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                                at(),
+                            )
+                            .unwrap_err()
+                    } else {
+                        setup.execute(&hide).unwrap_err()
+                    };
+                    let error = core_error(error);
+                    assert_eq!(error.code, CoreErrorCode::InvalidTransition);
+                    assert!(error.message.contains("question still waits"), "{error:?}");
+                    assert_eq!(setup.bytes(), before);
+                    let saved = setup.saved();
+                    assert_eq!(saved.items.0[&item("1")].status, ItemStatus::WaitingOnMe);
+                    assert_eq!(saved.inputs.0[&source].state, InputState::InFlight);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn same_turn_reply_answer_or_drop_can_leave_waiting_for_ack() {
+    for kind in [InputKind::Reply, InputKind::Answer, InputKind::Drop] {
+        for status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for lenient in [false, true] {
+                let setup = Setup::new(&seed());
+                let mut ask = guarded(1021, "1", 1);
+                ask.operations.push(Operation::ItemAsk {
+                    item: existing("1"),
+                    ask: "Choose A or B?".into(),
+                    options: vec![],
+                    recipient_binding_id: id(3),
+                });
+                setup.execute(&ask).unwrap();
+                let source = setup.prepare_kind(TurnState::Completed, kind.clone(), "Choose B.");
+                let mut finished = setup.dispatched(1022, &source);
+                finished.operations.push(Operation::ItemStatus {
+                    item: existing("1"),
+                    status: status.clone(),
+                    ack_to: Some(AckTarget::Done),
+                    outcome: Some("Ready.".into()),
+                    why: Some("Owner replied.".into()),
+                    reason: Some("Ready for Ack.".into()),
+                });
+                if lenient {
+                    let (_, replayed, repairs) = ApplyService::new(&setup.registry)
+                        .execute_lenient(
+                            &setup.context(Some(&source)),
+                            &finished,
+                            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                            at(),
+                        )
+                        .unwrap();
+                    assert!(!replayed && repairs.is_empty());
+                } else {
+                    setup.execute(&finished).unwrap();
+                }
+                let saved = setup.saved();
+                let question = &saved.items.0[&item("1")];
+                assert_eq!(question.status, status);
+                assert_eq!(question.ack_to, Some(AckTarget::Done));
+                assert_eq!(question.outcome.as_deref(), Some("Ready."));
+                assert_eq!(saved.inputs.0[&source].state, InputState::Handled);
+                assert!(!ariadne_core::queries::waiting_unanswered(&saved, question));
+            }
+        }
+    }
+}
+
+#[test]
+fn same_turn_bring_or_reopen_cannot_leave_an_open_ask_unanswered() {
+    for kind in [InputKind::Bring, InputKind::Reopen] {
+        for status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for edit in [false, true] {
+                for lenient in [false, true] {
+                    // Older stored items may already contain an Open ask.
+                    let mut session = seed();
+                    let question = session.items.0.get_mut(&item("1")).unwrap();
+                    question.status = status.clone();
+                    question.ask = Some("Choose A or B?".into());
+                    let setup = Setup::new(&session);
+                    let source =
+                        setup.prepare_kind(TurnState::Completed, kind.clone(), "Revisit this.");
+                    let mut change = setup.dispatched(1023, &source);
+                    change.operations.push(if edit {
+                        Operation::ItemEdit {
+                            item: existing("1"),
+                            patch: ItemPatch {
+                                question: None,
+                                item_type: None,
+                                short: None,
+                                note: Some(Some("Revisited.".into())),
+                                links: None,
+                            },
+                        }
+                    } else {
+                        Operation::ItemStatus {
+                            item: existing("1"),
+                            status: status.clone(),
+                            ack_to: Some(AckTarget::Done),
+                            outcome: Some("Revisited.".into()),
+                            why: None,
+                            reason: Some("Finished revisiting.".into()),
+                        }
+                    });
+                    let before = setup.bytes();
+                    let error = if lenient {
+                        ApplyService::new(&setup.registry)
+                            .execute_lenient(
+                                &setup.context(Some(&source)),
+                                &change,
+                                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                                at(),
+                            )
+                            .unwrap_err()
+                    } else {
+                        setup.execute(&change).unwrap_err()
+                    };
+                    let error = core_error(error);
+                    assert_eq!(error.code, CoreErrorCode::InvalidTransition);
+                    assert!(error.message.contains("question still waits"), "{error:?}");
+                    assert_eq!(setup.bytes(), before);
+                }
             }
         }
     }

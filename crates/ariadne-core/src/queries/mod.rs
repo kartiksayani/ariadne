@@ -1,7 +1,7 @@
 //! Native bounded reads of current registered authoritative snapshots.
 mod counts;
-pub(crate) use counts::question_unanswered;
 pub use counts::waiting_unanswered;
+pub(crate) use counts::{question_unanswered, question_unanswered_with_handled_input};
 mod error;
 mod items;
 mod page;

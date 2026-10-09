@@ -384,11 +384,24 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 .as_ref()
                 .is_some_and(|ask| !ask.trim().is_empty())
             && if old.status == ItemStatus::WaitingOnMe {
-                // A handled clarification leaves the question waiting. Judge it
-                // before leaving WaitingOnMe retains the round for Ack.
-                crate::queries::waiting_unanswered(session, old)
+                // Operations precede result commit: our own clarification must
+                // not count as an InFlight answer when leaving WaitingOnMe.
+                crate::queries::question_unanswered_with_handled_input(
+                    session,
+                    old,
+                    self.request
+                        .source_input_id
+                        .as_ref()
+                        .filter(|_| !answers_owner_input),
+                )
             } else {
-                crate::queries::question_unanswered(session, &candidate)
+                // Bring/Reopen likewise cannot answer an Open/InProgress ask
+                // merely because this batch has not committed its result yet.
+                crate::queries::question_unanswered_with_handled_input(
+                    session,
+                    &candidate,
+                    self.request.source_input_id.as_ref(),
+                )
             }
         {
             return Err(core(
